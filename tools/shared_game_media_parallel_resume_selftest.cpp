@@ -69,12 +69,13 @@ using namespace ymcc::media;
 using namespace ymcc::media::downloads;
 static size_t partialCount(const fs::path &root) {
   size_t count=0;std::error_code ec;
-  for(fs::directory_iterator it(root/L"cache"/L"jobs"/L"game-media",ec),end;!ec&&it!=end;it.increment(ec))
+  for(fs::directory_iterator it(custom_steam_library::ioPath(root/L"cache"/L"jobs"/L"game-media"),ec),end;!ec&&it!=end;it.increment(ec))
     if(it->path().extension()==L".part")++count;
   return count;
 }
 int wmain(int argc,wchar_t** argv) {
  try {
+  ymcc::powerSource::setExternalReader(+[]() noexcept {ymcc::powerSource::Snapshot v;v.readable=v.known=true;v.ac=1;v.status.ACLineStatus=1;v.revision=1;return v;});
   supervisedFixture=true;
   if(argc==5&&std::wstring_view(argv[1])==L"--media-background") {
     wchar_t port[16]{};GetEnvironmentVariableW(L"YMCC_WEAKNET_FIXTURE_PORT",port,16);
@@ -121,7 +122,7 @@ int wmain(int argc,wchar_t** argv) {
     if(!parallel||mode=="parallel-cancel") {
       if(mode=="resume-corrupt-meta"||mode=="resume-missing-part"||mode=="resume-416") {
         const auto folder=root/L"cache"/L"jobs"/L"game-media";std::error_code ec;
-        for(fs::directory_iterator it(folder,ec),end;!ec&&it!=end;it.increment(ec)) {
+        for(fs::directory_iterator it(custom_steam_library::ioPath(folder),ec),end;!ec&&it!=end;it.increment(ec)) {
           if(it->path().extension()!=L".part")continue;
           auto metadata=it->path();metadata.replace_extension(L".resume.json");
           if(mode=="resume-corrupt-meta"){std::ofstream file(metadata);file<<"{damaged";}

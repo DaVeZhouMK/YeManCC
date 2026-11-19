@@ -24,14 +24,15 @@ const vcvars = values.vcvars || 'C:/Program Files (x86)/Microsoft Visual Studio/
 const header = 'native/task_view_foreground_grant.h';
 const fixture = 'tools/task_view_foreground_grant_selftest.cpp';
 const inputs = [header, fixture, 'tools/task_view_foreground_grant_selftest.mjs', 'deps/json/json.hpp',
-  'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+  'tools/fixtures/hc_reviewed_calibration/toolchain.mjs', 'native/task_view_dispatch.h'];
 const apis = ['GetTickCount64','GetCurrentThreadId','GetCurrentProcessId','GetWindowThreadProcessId',
-  'GetForegroundWindow','GetLastError','SetLastError','AllowSetForegroundWindow','SendMessageTimeoutW'];
+  'GetForegroundWindow','GetLastError','SetLastError','AllowSetForegroundWindow','SendMessageTimeoutW',
+  'GetCurrentProcess','DuplicateHandle','GetProcessId','CloseHandle'];
 const bannedImports = ['user32.dll','win32u.dll','ole32.dll','oleaut32.dll','combase.dll','shell32.dll',
   'sendinput','keybd_event','mouse_event','setforegroundwindow','setfocus','attachthreadinput',
   'cocreateinstance','coinitialize','cogetclassobject','createprocessw','createprocessa','winexec','shellexecute'];
 const sha = data => createHash('sha256').update(data).digest('hex');
-const save = (name, data) => fs.writeFileSync(path.join(out,name), JSON.stringify(data,null,2) + '\n');
+const save = (name, data) => fs.writeFileSync(path.join(out,name), JSON.stringify(data,null,2) + '\n', {flag: 'wx'});
 const strip = text => text.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
   value => value.replace(/[^\n]/g,' '));
 function commandArg(value) {
@@ -87,6 +88,13 @@ function sourceAudit(sources) {
   for (const api of apis) assert(new RegExp(`^#define ${api} forbidden_os::\\w+$`,'m').test(before), `Missing unresolved tripwire: ${api}`);
   const forbidden = /\b(?:SendInput|keybd_event|mouse_event|SetForegroundWindow|SetFocus|AttachThreadInput|CoCreateInstance|CoInitializeEx|CreateProcessW|CreateThread|Sleep|while|for|INFINITE)\b/g;
   assert.deepEqual(code.match(forbidden) || [], [], 'Forbidden side effect/retry/polling in broker header');
+  assert(/const\s+std::shared_ptr<void>\s+identity/.test(code), 'Delivery must retain immutable exact identity');
+  assert(/const\s+DWORD\s+child/.test(code) && /const\s+ULONGLONG\s+deadline/.test(code), 'Delivery child/deadline must be immutable');
+  assert(!/\b(?:childPid_|owner_|deadline_|pending_)\b/.test(code), 'Mutable cross-request delivery metadata returned');
+  assert(!/\bOpenProcess\b/.test(code), 'Identity must duplicate original process handle');
+  assert(code.includes('DuplicateHandle(GetCurrentProcess(),process,GetCurrentProcess(),&copy,0,FALSE,DUPLICATE_SAME_ACCESS)'), 'Exact process duplication missing');
+  const dispatch = strip(sources['native/task_view_dispatch.h'].toString('utf8'));
+  assert(dispatch.includes('helperProcess=pi.hProcess') && dispatch.includes('foreground::request(foregroundOwner,pid,&foregroundReceipt,helperProcess)'), 'Original process handle not wired to wrapper');
   const cpp = strip(sources[fixture].toString('utf8'));
   assert(!/\bWindowsOps\s*[({]/.test(cpp), 'Fixture must not instantiate real adapter');
   assert.deepEqual(cpp.match(forbidden) || [], cpp.match(/\bfor\b/g) || [], 'Fixture has forbidden OS side effect');
@@ -104,12 +112,14 @@ function buildAndRun(name, flags, preamble) {
   const batchText = preamble + args.map(commandArg).join(' ') + '\r\nif errorlevel 1 exit /b 1\r\n' +
     `dumpbin /symbols ${commandArg(object)} > ${commandArg(path.join(out,`${name}-symbols.txt`))}\r\nif errorlevel 1 exit /b 1\r\n` +
     `dumpbin /imports ${commandArg(exe)} > ${commandArg(path.join(out,`${name}-imports.txt`))}\r\nexit /b %errorlevel%\r\n`;
-  fs.writeFileSync(batch,batchText);
+  fs.writeFileSync(batch,batchText,{flag: 'wx'});
   const env = {...process.env, TMP: path.join(out,'temp'), TEMP: path.join(out,'temp')};
+  const compileStarted = performance.now();
   const compile = spawnSync(process.env.ComSpec || 'cmd.exe',['/d','/c',batch],
     {cwd: out, env, encoding: 'utf8', windowsHide: true, timeout: 120000});
-  fs.writeFileSync(path.join(out,`${name}-compile.log`),(compile.stdout || '') + (compile.stderr || '') + (compile.error ? '\n'+compile.error.message : ''));
-  const profile = {profile: name, pass: false, compileExitCode: compile.status, executableRun: false};
+  fs.writeFileSync(path.join(out,`${name}-compile.log`),(compile.stdout || '') + (compile.stderr || '') + (compile.error ? '\n'+compile.error.message : ''),{flag: 'wx'});
+  const profile = {profile: name, pass: false, compileExitCode: compile.status, executableRun: false,
+    compileElapsedMs: Math.round(performance.now()-compileStarted), compileTimeoutMs: 120000};
   if (compile.status !== 0) { profile.error = 'Compilation/import dump failed; see compile log'; return profile; }
   const imports = fs.readFileSync(path.join(out,`${name}-imports.txt`),'utf8').toLowerCase();
   const symbols = fs.readFileSync(path.join(out,`${name}-symbols.txt`),'utf8').toLowerCase();
@@ -120,10 +130,12 @@ function buildAndRun(name, flags, preamble) {
     staticCrtKernel32ImportsAllowed: true};
   save(`${name}-import-audit.json`,audit); profile.importAudit = audit;
   if (!audit.pass) { profile.error = 'Forbidden import; executable was not run'; return profile; }
+  const runStarted = performance.now();
   const run = spawnSync(exe,[],{cwd: out, env, encoding: 'utf8', windowsHide: true, timeout: 30000});
-  fs.writeFileSync(path.join(out,`${name}-stdout.json`),run.stdout || '');
-  fs.writeFileSync(path.join(out,`${name}-stderr.txt`),(run.stderr || '') + (run.error ? '\n'+run.error.message : ''));
+  fs.writeFileSync(path.join(out,`${name}-stdout.json`),run.stdout || '',{flag: 'wx'});
+  fs.writeFileSync(path.join(out,`${name}-stderr.txt`),(run.stderr || '') + (run.error ? '\n'+run.error.message : ''),{flag: 'wx'});
   profile.executableRun = true; profile.exitCode = run.status;
+  profile.runElapsedMs = Math.round(performance.now()-runStarted); profile.runTimeoutMs = 30000;
   try {
     profile.test = JSON.parse(run.stdout);
     assert(profile.test.count > 0 && profile.test.count === profile.test.cases.length, 'Invalid case count');
@@ -132,7 +144,8 @@ function buildAndRun(name, flags, preamble) {
   } catch (error) { profile.error = 'Invalid fixture JSON: '+error.message; }
   return profile;
 }
-fs.mkdirSync(path.join(out,'temp'),{recursive: true});
+fs.mkdirSync(out);
+fs.mkdirSync(path.join(out,'temp'));
 const result = {schemaVersion: 1, pass: false, count: 0, cases: [], profiles: [],
   allOpsInMemory: true, productExecuted: false, actualHelperExecuted: false,
   windowsOpsInvoked: false, actualOSInput: false, comInvoked: false,
@@ -143,8 +156,16 @@ try {
   result.sourceHashes = Object.fromEntries(inputs.map(name => [name,sha(sources[name])]));
   for (const [name,bytes] of Object.entries(sources)) {
     const destination = path.join(out,'source',name);
-    fs.mkdirSync(path.dirname(destination),{recursive: true}); fs.writeFileSync(destination,bytes);
+    fs.mkdirSync(path.dirname(destination),{recursive: true}); fs.writeFileSync(destination,bytes,{flag: 'wx'});
   }
+  const mainBytes = fs.readFileSync(path.join(root,'native/main.cpp'));
+  const grantMessage = Number(sources[header].toString('utf8').match(/\bmessage\s*=\s*WM_APP\s*\+\s*(\d+)/)?.[1]);
+  const reservations = [...mainBytes.toString('utf8').matchAll(/\b(WM_[A-Z0-9_]+)\s*=\s*WM_APP\s*\+\s*(\d+)/g)]
+    .map(match => ({name: match[1], offset: Number(match[2])}));
+  result.messageReservations = {mainSha256: sha(mainBytes), grantOffset: grantMessage, reservations,
+    collisions: reservations.filter(row => row.offset === grantMessage),
+    pass: grantMessage === 831 && !reservations.some(row => row.offset === grantMessage)};
+  save('message-reservations.json',result.messageReservations);
   result.sourceAudit = sourceAudit(sources); save('source-audit.json',result.sourceAudit);
   const observed = fieldRecord(); save('field-record.json',observed);
   result.fieldRecord = {available: observed.available, counts: observed.counts,
@@ -163,7 +184,7 @@ try {
   result.passed = result.cases.filter(row => row.pass).length; result.failed = result.count - result.passed;
   result.changedInputs = inputs.filter(name => sha(fs.readFileSync(path.join(root,name))) !== result.sourceHashes[name]);
   result.testedInputsStable = result.changedInputs.length === 0;
-  result.pass = result.testedInputsStable && result.profiles.length === 2 && result.profiles.every(p => p.pass);
+  result.pass = result.messageReservations.pass && result.testedInputsStable && result.profiles.length === 2 && result.profiles.every(p => p.pass);
   if (!result.pass) result.error = result.changedInputs.length ? 'Tested source changed during run' :
     result.profiles.filter(p => !p.pass).map(p => `${p.profile}: ${p.error || 'fixture assertions failed'}`).join('; ');
   save('baseline-record.json',result.profiles[0]?.test?.records || []);

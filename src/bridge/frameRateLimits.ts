@@ -1,7 +1,7 @@
 import { powerLifecycle } from './api';
 import { isGameStatusCurrent, isCurrentGameTarget, type DetectedGame } from './gamedetect';
 import { powerSourceMode } from './powerSource';
-import { readSettingsSection,saveSettingsSection,getSettingsGeneration,assertSettingsGeneration } from './settingsRepository';
+import { readSettingsSection,saveSettingsSection,updateSettings,rememberOrdinaryPerformancePreferences,getSettingsGeneration,assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
 import { detectPerformanceTemplate, detectPowerModeReliable,readRtssLimit,setRtssLimit } from './yeman';
 import { getPolicyGame,gamePolicyKey,isPolicyGameInitialized } from './gamePolicyTarget';
 import { FRAME_RATE_DEFAULTS,frameRatePair,frameRateSetting,dedicatedFrameRatePair,type FrameRatePair,type FrameRateSide } from './frameRateModel';
@@ -14,8 +14,10 @@ let fallbackCache:FrameRatePair|null=null;
 let fallbackGeneration=-1;
 const frameTargetCurrent=(target:DetectedGame|null)=>isGameStatusCurrent() && (target ? isCurrentGameTarget(target) : getPolicyGame()===null);
 export function onFrameRatesChanged(listener:(pair:FrameRatePair)=>void):()=>void {listeners.add(listener);return ()=>listeners.delete(listener);}
-export async function loadGlobalFrameRates():Promise<FrameRatePair> {
-  const current=await readSettingsSection<any>('rtss');
+// A display transaction may supply its own current RTSS read. Ordinary callers
+// keep the original fresh reader; no resolved section is retained here.
+export async function loadGlobalFrameRates(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss')):Promise<FrameRatePair> {
+  const current=await readRtss();
   if(current.frameRates && current.frameRates.ac && current.frameRates.dc){
     if(current.templateDefaults===true && typeof detectPerformanceTemplate==='function')return frameRatePair(null,(await detectPerformanceTemplate())==='desktop'?200:120,60);
     return frameRatePair(current.frameRates);
@@ -37,7 +39,7 @@ export async function ensureGlobalFrameRates():Promise<FrameRatePair> {
     assertSettingsGeneration(generation);
     const current=await readSettingsSection<any>('rtss');
     const pair=await loadGlobalFrameRates();
-    if((!current.frameRates?.ac || !current.frameRates?.dc) && frameTargetCurrent(target))await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);
+    if((!current.frameRates?.ac || !current.frameRates?.dc) && frameTargetCurrent(target))await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation,{origin:'runtime'});
     return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
@@ -49,9 +51,16 @@ export async function saveGlobalFrameRate(side:FrameRateSide,value:unknown):Prom
   const requested=value && typeof value==='object'?{...value}:value;
   const run=writeQueue.then(async()=>{
     verify();
-    const pair=await loadGlobalFrameRates();pair[side]=frameRateSetting(requested,pair[side]);
+    const reference=await loadGlobalFrameRates();let pair!:FrameRatePair;
     verify();
-    await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);fallbackCache=frameRatePair(pair);
+    await updateSettings(settings=>{
+      verify();
+      const rates=settings.rtss.frameRates;
+      const before=settings.rtss.templateDefaults!==true && rates?.ac && rates?.dc ? frameRatePair(rates) : frameRatePair(reference);
+      pair=frameRatePair(before);pair[side]=frameRateSetting(requested,before[side]);
+      settings.rtss={...settings.rtss,frameRates:pair as any,templateDefaults:false};
+      if(settings.extensions?.bootModes!==undefined)rememberOrdinaryPerformancePreferences(settings,{frames:before},{frames:pair});
+    });fallbackCache=frameRatePair(pair);
     for(const listener of [...listeners]){try{listener(frameRatePair(pair));}catch{/* observer failure cannot turn durable save into failure */}}return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }

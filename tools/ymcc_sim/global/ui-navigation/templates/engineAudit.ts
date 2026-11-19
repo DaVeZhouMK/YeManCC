@@ -5,6 +5,7 @@ const auditOptions = {router: {currentRoute: {value: previewAuditRoute}, push: (
 function previewAuditRoute() { return {path: window.location.pathname}; }
 const auditRouter = { get value() { return {path: (window as any).__currentAuditRoute?.() || '/schedule'}; } };
 auditOptions.router.currentRoute = auditRouter;
+(window as any).__overlaySessionAudit=()=>({overlay:overlayPresentationActive,session:overlayPresentationSession,summon:summonActive,owner:inputOwnerRuntime.snapshot()});
 (window as any).__gamepadAudit = {
  focusables, moveFocus, rect: spatialNavigationRect,
  startNative:()=>startGamepad(auditOptions),

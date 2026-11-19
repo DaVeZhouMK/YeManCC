@@ -1,5 +1,6 @@
 #pragma once
 #include "json.hpp"
+#include "steam_diagnostic_read_views.h"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -13,7 +14,8 @@ namespace ymcc::steamappstate {
 using Json = nlohmann::json;
 using Read = std::function<bool(std::uint64_t, void*, std::size_t)>;
 using Stable = std::function<bool()>;
-enum class ProfileId { Legacy1791918634, Public1792618285 };
+using ReadViews = ymcc::steamdiagnostic::ReadViews;
+enum class ProfileId { Legacy1791918634, Public1792618285, OwnerScoped };
 struct Query {
     std::uint64_t moduleBase = 0, moduleSize = 0;
     std::uint32_t appid = 0;
@@ -23,6 +25,9 @@ struct Query {
 inline constexpr char kUiSha256[] = "1b9457943205dc3af0bd53463ba331cbd2a381388699705c02271aac7a2b1252";
 inline constexpr char kProfileVersion[] = "steamui-1b945794-app-state-v1";
 inline constexpr char kUiSha256Public1792618285[] = "cd9226db4e6c28942df70c22c0475d91fdd62cba5f100baae2d65af57cabb610";
+// Fixed sample label only. Common compatibility must explicitly select OwnerScoped;
+// its SHA does not qualify a module or grant mutation/admission.
+inline constexpr char kUiSha256OwnerScoped[] = "5fdf0f7972ed7f6acb3949ec6dcd8a424e607a044a3e992bd3ffe8ebcf4d96f7";
 inline std::optional<ProfileId> profileIdForSha256(std::string_view hash) noexcept {
     if (hash == kUiSha256) return ProfileId::Legacy1791918634;
     if (hash == kUiSha256Public1792618285) return ProfileId::Public1792618285;
@@ -32,6 +37,7 @@ inline const char* profileSha256(ProfileId id) noexcept {
     switch (id) {
     case ProfileId::Legacy1791918634: return kUiSha256;
     case ProfileId::Public1792618285: return kUiSha256Public1792618285;
+    case ProfileId::OwnerScoped: return kUiSha256OwnerScoped;
     }
     return nullptr;
 }
@@ -39,6 +45,7 @@ inline const char* profileVersion(ProfileId id) noexcept {
     switch (id) {
     case ProfileId::Legacy1791918634: return kProfileVersion;
     case ProfileId::Public1792618285: return "steamui-cd9226db-app-state-v1";
+    case ProfileId::OwnerScoped: return "steamui-5fdf0f79-owner-scoped-app-state-v1";
     }
     return "unqualified-profile";
 }
@@ -65,14 +72,26 @@ inline constexpr char kBitmapPublic1792618285Bytes[] =
     "750bff15cdd4b80084c07401cc837b040175064883c308eb04488b5b10488bc78bcf48c1f80583e11f8b04830fa3c8488b5c24"
     "300f92c04883c4205fc3";
 inline constexpr char kGlobalLeafPublic1792618285Bytes[] = "488b05c9cab500c3";
+inline constexpr char kLookupOwnerScopedBytes[] = "405355565741564883ec20837944004c8bf2488bf90f848b000000448b028b711041c1e810ffce4433028bde4169c06bcaeb85448bc041c1e80d4433c04169c035aeb2c28be8c1ed1033e823dd0f1f00488b074863cb8b048883f8ff74294c8b4730458b0e6666660f1f8400000000004863c8488d1449453b0cd0742e418b44d01083f8ff75e9d1fe3b77547c188bde23dd3b5f4c7c0f488d4f188bd3e84eccf3ff84c074aab8ffffffff4883c420415e5f5e5d5bc3";
+inline constexpr char kBitmapOwnerScopedBytes[] = "48895c2408574883ec204863fa488bd985d278043b397c284c8d0589a8bb00ba4a010000488d0de5a3bb00ff15271fbb0084c0750bff15151fbb0084c07401cc837b040175064883c308eb04488b5b10488bc78bcf48c1f80583e11f8b04830fa3c8488b5c24300f92c04883c4205fc3";
+inline constexpr char kGlobalLeafOwnerScopedBytes[] = "488b0569efb600c3";
+static_assert(sizeof(kLookupOwnerScopedBytes) == sizeof(kLookupBytes));
+static_assert(sizeof(kBitmapOwnerScopedBytes) == sizeof(kBitmapBytes));
+static_assert(sizeof(kGlobalLeafOwnerScopedBytes) == sizeof(kGlobalLeafBytes));
 struct ProfileAnchors {
     std::uint64_t appVptr, globalLeaf, controllerPrimary, controllerSecondary, callbackTable, callback;
+    // Appended defaults preserve both existing six-member aggregate profiles.
+    std::uint64_t globalRva = kGlobalRva, lookupRva = 0x17a0f0, bitmapRva = 0xbde90, getterRva = 0xec3c0;
+    std::uint64_t mapOffset = 0x350, ownerControllerOffset = 0xe58, controllerCallbackOffset = 0x20;
 };
 inline constexpr ProfileAnchors kLegacyAnchors{0xda91a8,0x639770,0xdb0888,0xdb08b8,0xdb02d0,0x627480};
 inline constexpr ProfileAnchors kPublic1792618285Anchors{0xda95c8,0x639890,0xdb0cd8,0xdb0d08,0xdb0720,0x6275a0};
+inline constexpr ProfileAnchors kOwnerScopedAnchors{0xdd4e88,0x65c6d0,0xddc5d8,0xddc608,0xddbff8,0x64a530,
+    0x11cb640,0x1817d0,0xbe4c0,0xf33e0,0x360,0xe58,0x20};
 inline const ProfileAnchors& anchors(const Query& query) {
-    // The caller's complete module hash selects the profile before any reads.
+    // Existing profiles retain their hash selector; common compatibility selects OwnerScoped.
     // Invalid enum values are rejected by observe/checkAnchors, never guessed.
+    if (query.profile == ProfileId::OwnerScoped) return kOwnerScopedAnchors;
     return query.profile == ProfileId::Public1792618285 ? kPublic1792618285Anchors : kLegacyAnchors;
 }
 
@@ -105,20 +124,45 @@ struct Field {
 };
 class Reader {
     const Read& callback_;
+    const Read* module_ = nullptr;
+    const ymcc::steamdiagnostic::ModulePointerNormalizer* normalize_ = nullptr;
 public:
     std::size_t calls = 0, bytes = 0;
     std::vector<Field> fields;
     explicit Reader(const Read& callback) : callback_(callback) {}
-    void read(std::uint64_t address, void* destination, std::size_t size) {
+    explicit Reader(const ReadViews& views) : callback_(views.rawObject), module_(&views.canonicalModule),
+        normalize_(&views.explicitModulePointerNormalizer) {}
+    Reader(ReadViews&&) = delete;
+    Reader(const ReadViews&&) = delete;
+    void readWith(const Read& callback, std::uint64_t address, void* destination, std::size_t size) {
         require(size != 0 && size <= kMaxSingleRead, "read-size-invalid");
         require(inRange(address, size), "address-out-of-range");
         require(calls < kMaxReadCalls && bytes <= kMaxReadBytes && size <= kMaxReadBytes - bytes, "read-budget-exceeded");
         ++calls;
         bytes += size;
         bool success = false;
-        try { success = callback_(address, destination, size); }
+        try { success = callback(address, destination, size); }
         catch (...) { throw Rejected{"memory-read-exception"}; }
         require(success, "memory-read-failed");
+    }
+    void read(std::uint64_t address, void* destination, std::size_t size) {
+        readWith(callback_, address, destination, size);
+    }
+    void moduleRead(std::uint64_t address, void* destination, std::size_t size) {
+        readWith(module_ && *module_ ? *module_ : callback_, address, destination, size);
+    }
+    std::uint64_t moduleU64(std::uint64_t address) {
+        std::array<unsigned char, 8> data{}; moduleRead(address, data.data(), data.size());
+        std::uint64_t value=0; for(std::size_t i=0;i<data.size();++i)value|=std::uint64_t(data[i])<<(8*i);
+        fields.push_back({address,value,8}); return value;
+    }
+    std::uint64_t modulePointer(std::uint64_t address) {
+        const auto value=u64(address);
+        if(!normalize_ || !*normalize_)return value;
+        std::uint64_t normalized=0; bool okay=false;
+        try { okay=(*normalize_)(value,normalized); }
+        catch(...) { throw Rejected{"module-pointer-normalization-exception"}; }
+        require(okay,"module-pointer-normalization-failed"); return normalized;
     }
     std::uint64_t integer(std::uint64_t address, std::size_t size) {
         require(size == 4 || size == 8, "integer-size-invalid");
@@ -143,7 +187,7 @@ inline void checkAnchor(Reader& reader, const Query& query, std::uint64_t rva, c
     std::array<unsigned char, kMaxSingleRead> data{};
     for (std::size_t begin = 0; begin < length; begin += kMaxSingleRead) {
         const auto count = (std::min)(kMaxSingleRead, length - begin);
-        reader.read(offset(address, begin), data.data(), count);
+        reader.moduleRead(offset(address, begin), data.data(), count);
         for (std::size_t index = 0; index < count; ++index) {
             const auto character = 2 * (begin + index);
             const auto wanted = static_cast<unsigned char>((hexDigit(expected[character]) << 4) | hexDigit(expected[character + 1]));
@@ -154,17 +198,24 @@ inline void checkAnchor(Reader& reader, const Query& query, std::uint64_t rva, c
 inline void checkAnchors(Reader& reader, const Query& query) {
     require(profileSha256(query.profile) != nullptr, "profile-unverified");
     const auto& profile = anchors(query);
-    checkAnchor(reader, query, 0x17a0f0, kLookupBytes);
-    if (query.profile == ProfileId::Public1792618285) {
-        checkAnchor(reader, query, 0xbde90, kBitmapPublic1792618285Bytes);
+    if (query.profile == ProfileId::OwnerScoped) {
+        checkAnchor(reader, query, profile.lookupRva, kLookupOwnerScopedBytes);
+    } else {
+        checkAnchor(reader, query, profile.lookupRva, kLookupBytes);
+    }
+    if (query.profile == ProfileId::OwnerScoped) {
+        checkAnchor(reader, query, profile.bitmapRva, kBitmapOwnerScopedBytes);
+        checkAnchor(reader, query, profile.globalLeaf, kGlobalLeafOwnerScopedBytes);
+    } else if (query.profile == ProfileId::Public1792618285) {
+        checkAnchor(reader, query, profile.bitmapRva, kBitmapPublic1792618285Bytes);
         checkAnchor(reader, query, profile.globalLeaf, kGlobalLeafPublic1792618285Bytes);
     } else {
-        checkAnchor(reader, query, 0xbde90, kBitmapBytes);
+        checkAnchor(reader, query, profile.bitmapRva, kBitmapBytes);
         checkAnchor(reader, query, profile.globalLeaf, kGlobalLeafBytes);
     }
-    checkAnchor(reader, query, 0xec3c0, kAppGetterBytes);
-    require(reader.u64(moduleAnchor(query, profile.callbackTable + 8, 8)) == moduleAnchor(query, profile.callback, 1), "callback-slot-mismatch");
-    require(reader.u64(moduleAnchor(query, profile.appVptr + 0x50, 8)) == moduleAnchor(query, 0xec3c0, 4), "app-getter-slot-mismatch");
+    checkAnchor(reader, query, profile.getterRva, kAppGetterBytes);
+    require(reader.moduleU64(moduleAnchor(query, profile.callbackTable + 8, 8)) == moduleAnchor(query, profile.callback, 1), "callback-slot-mismatch");
+    require(reader.moduleU64(moduleAnchor(query, profile.appVptr + 0x50, 8)) == moduleAnchor(query, profile.getterRva, 4), "app-getter-slot-mismatch");
 }
 inline std::uint32_t hashAppId(std::uint32_t key) {
     auto hash = static_cast<std::uint32_t>((key ^ (key >> 16)) * std::uint32_t{0x85ebca6b});
@@ -176,15 +227,16 @@ struct Header {
     std::uint32_t bucketCount = 0, gate = 0, bucketLower = 0, maskLower = 0;
 };
 inline Header readHeader(Reader& reader, const Query& query) {
-    const auto owner = reader.u64(moduleAnchor(query, kGlobalRva, 8));
+    const auto& profile = anchors(query);
+    const auto owner = reader.moduleU64(moduleAnchor(query, profile.globalRva, 8));
     pointer(owner, 8);
-    const auto controller = reader.u64(offset(owner, 0xe58));
+    const auto controller = reader.u64(offset(owner, profile.ownerControllerOffset));
     pointer(controller, 8);
-    require(reader.u64(controller) == moduleAnchor(query, anchors(query).controllerPrimary, 8), "controller-primary-type-mismatch");
-    require(reader.u64(offset(controller, 8)) == moduleAnchor(query, anchors(query).controllerSecondary, 8), "controller-secondary-type-mismatch");
-    require(reader.u64(offset(controller, 0x20)) == moduleAnchor(query, anchors(query).callbackTable, 16), "controller-callback-type-mismatch");
+    require(reader.modulePointer(controller) == moduleAnchor(query, anchors(query).controllerPrimary, 8), "controller-primary-type-mismatch");
+    require(reader.modulePointer(offset(controller, 8)) == moduleAnchor(query, anchors(query).controllerSecondary, 8), "controller-secondary-type-mismatch");
+    require(reader.modulePointer(offset(controller, profile.controllerCallbackOffset)) == moduleAnchor(query, anchors(query).callbackTable, 16), "controller-callback-type-mismatch");
     Header header;
-    header.address = offset(controller, 0x350);
+    header.address = offset(controller, profile.mapOffset);
     header.buckets = reader.u64(header.address);
     header.bucketCount = reader.u32(offset(header.address, 0x10));
     header.entries = reader.u64(offset(header.address, 0x30));
@@ -241,7 +293,7 @@ inline std::uint32_t readFlags(Reader& reader, const Query& query) {
             require(next == 0xffffffffU || next <= kMaxIndex, "node-next-invalid");
             if (key == query.appid) {
                 pointer(app, 8);
-                require(reader.u64(app) == moduleAnchor(query, anchors(query).appVptr, 8), "app-type-mismatch");
+                require(reader.modulePointer(app) == moduleAnchor(query, anchors(query).appVptr, 8), "app-type-mismatch");
                 require(reader.u32(offset(app, 0x18)) != 0, "app-hit-guard-empty");
                 return reader.u32(offset(app, 0x20));
             }
@@ -264,8 +316,9 @@ inline bool stable(const Stable& callback) {
 }
 }
 
-inline Json observe(const Query& query, const Read& read, const Stable& stable) {
+inline Json observeWithReadViews(const Query& query, const ReadViews& inputViews, const Stable& stable) {
     using namespace detail;
+    const ReadViews views = inputViews; // callbacks cannot retarget this reader mid-observation
     const Query input = query;
     Json result = {{"source", "steam-native-app-state-diagnostic"}, {"profileVersion", profileVersion(input.profile)},
         {"authority", "diagnostic-only-no-admission"}, {"status", "unavailable"}, {"available", false},
@@ -276,22 +329,23 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
         {"sameLiveCallbackObject", "unknown"}, {"registrationLiveness", "unknown"},
         {"objectConstructionComplete", "unknown"}, {"loadedImageFullyHashed", false},
         {"loginGenerationLease", "unknown"}, {"inputVerified", false}, {"continueVerified", false}};
-    Reader reader(read);
+    Reader reader(views);
     bool identityStarted = false;
     std::uint32_t flags = 0;
     const char* failure = nullptr;
     try {
         require(input.profileVerified && profileSha256(input.profile) != nullptr, "profile-unverified");
         require(input.appid != 0, "appid-missing");
-        require(static_cast<bool>(read), "reader-unavailable");
+        require(static_cast<bool>(views.rawObject), "reader-unavailable");
         require(static_cast<bool>(stable), "stability-check-unavailable");
         require(inRange(input.moduleBase, input.moduleSize), "module-range-invalid");
-        moduleAnchor(input, kGlobalRva, 8);
+        const auto& profile = anchors(input);
+        moduleAnchor(input, profile.globalRva, 8);
         moduleAnchor(input, anchors(input).appVptr, 8);
-        moduleAnchor(input, 0x17a0f0, (sizeof(kLookupBytes) - 1) / 2);
-        moduleAnchor(input, 0xbde90, (sizeof(kBitmapBytes) - 1) / 2);
+        moduleAnchor(input, profile.lookupRva, (sizeof(kLookupBytes) - 1) / 2);
+        moduleAnchor(input, profile.bitmapRva, (sizeof(kBitmapBytes) - 1) / 2);
         moduleAnchor(input, anchors(input).globalLeaf, (sizeof(kGlobalLeafBytes) - 1) / 2);
-        moduleAnchor(input, 0xec3c0, 4);
+        moduleAnchor(input, profile.getterRva, 4);
         moduleAnchor(input, anchors(input).callbackTable, 16);
         moduleAnchor(input, anchors(input).controllerPrimary, 8);
         moduleAnchor(input, anchors(input).controllerSecondary, 8);
@@ -326,5 +380,8 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
     result["nativeAppFlags"] = flags;
     result["runningBitSet"] = (flags & 0x2000U) != 0;
     return result;
+}
+inline Json observe(const Query& query, const Read& read, const Stable& stable) {
+    return observeWithReadViews(query, ReadViews{read, {}, {}}, stable);
 }
 }

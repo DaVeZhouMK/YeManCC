@@ -20,6 +20,10 @@ export async function verifyMouseBridge(root) {
  await bridge.setMouseModeEnabled(false);assert.equal(calls.at(-1).args.on,false);
  await bridge.toggleMouseMode();assert.equal(calls.at(-1).command,'mouseMode.toggle');
  for(const mode of ['auto','on','off']){await bridge.setMouseModePolicy(mode);assert.equal(calls.at(-1).command,'mouseMode.setPolicy');assert.equal(calls.at(-1).args.mode,mode);}
+ const bootContext={input:{revision:7,startupObservedBoot:'fixture-boot'},extensions:{bootModes:{schema:1,revision:3,current:'global'}}};
+ for(const action of [()=>bridge.setMouseModeEnabled(true,bootContext),()=>bridge.setMouseModePolicy('auto',bootContext)]){
+  await action();assert.deepEqual(calls.at(-1).args.bootContext,bootContext,'original bridge must carry exact native boot admission context');
+ }
  const real=await build({stdin:{contents:"import {setMouseBackend} from './src/bridge/gameproc';import {steamDeckMouseGet,steamDeckMouseSet} from './src/bridge/steamDeckMouse';globalThis.__timed={setMouseBackend,steamDeckMouseGet,steamDeckMouseSet};",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'browser',format:'iife'});
  let message,posted,timerId=0;const timers=new Map();
  const document=new EventTarget();Object.assign(document,{visibilityState:"visible",hidden:false});
@@ -32,5 +36,6 @@ export async function verifyMouseBridge(root) {
   await assert.rejects(pending,/timed out/);message({data:{id:expired,result:{ok:true,backend:'steam'}}});assert.equal(timers.size,0);
  }
  const retry=timedContext.__timed.setMouseBackend('joyxoff');message({data:{id:posted.id,result:{ok:true,backend:'joyxoff'}}});assert.equal((await retry).backend,'joyxoff');assert.equal(timers.size,0);
- return {status:'PASS',cases:14,statusHint:await verifyMouseStatusHint(root),consumer:'bundled-production-gameproc;native-IPC-only;system-boundary-rejects-all-calls'};
+ const scopedBackend=timedContext.__timed.setMouseBackend('gamebar',bootContext);assert.deepEqual(JSON.parse(JSON.stringify(posted.args.bootContext)),bootContext);message({data:{id:posted.id,result:{ok:false,reason:'boot_request_expired',superseded:true}}});assert.equal((await scopedBackend).ok,false);assert.equal(timers.size,0);
+ return {status:'PASS',cases:17,statusHint:await verifyMouseStatusHint(root),consumer:'bundled-production-gameproc;native-IPC-only;system-boundary-rejects-all-calls'};
 }

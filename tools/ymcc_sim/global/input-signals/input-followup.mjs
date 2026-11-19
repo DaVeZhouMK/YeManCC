@@ -16,7 +16,7 @@ const defaultRepo=path.resolve(here,'../../../..');
 const hash=data=>crypto.createHash('sha256').update(data).digest('hex');
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');}
-const relativeInputs=['native/keyboard_shortcut_sequence.h','native/keyboard_shortcut_sequence_runtime.h','src/bridge/controllerKeyboardSequence.ts','native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','src/bridge/controllerPersona.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/runner.mjs'];
+const relativeInputs=['native/desktop_function_shortcut.h','native/input_frame_submission.h','native/virtual_output_status.h','native/sleep_power_state.h','native/keyboard_shortcut_sequence.h','native/keyboard_shortcut_sequence_runtime.h','src/bridge/controllerKeyboardSequence.ts','native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','src/bridge/controllerPersona.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/runner.mjs'];
 const tools=['keyboard-contract.ts','source-extract.mjs','native-diagnostic-fixture.cpp','input-followup.mjs','input-followup.test.mjs'];
 export function followupSourceInputs(){return [...new Set([...relativeInputs,...tools.map(p=>'tools/ymcc_sim/global/input-signals/'+p),'tools/fixtures/hc_reviewed_calibration/toolchain.mjs',...FOLLOWUP_IDENTITY_SOURCES])];}
 /** Parent registers this descriptor; this module never edits the registry. */
@@ -44,7 +44,7 @@ async function bundleRun(scope,source,entryFile){
 function nativeIncludes(spans){
  const by=Object.fromEntries(spans.map(s=>[s.name,s]));
  const include=names=>names.map(name=>`#line ${by[name].startLine} "${by[name].path??"product-native-main.cpp"}"\n${by[name].text}\n`).join('\n');
- return {'current-native-types.inc':include(['producerEnum','producerCount','oemBits','familyEnum','producerTokens','ruleStruct']),
+ return {'current-native-types.inc':include(['producerEnum','producerCount','oemBits','familyEnum','virtualPressTypes','producerTokens','ruleStruct']),
   'current-native-dispatch.inc':include(['dispatch']),
   'current-native-mapping.inc':include(['desktopMapping','actionMapping','inputFlags']),
   'current-native-string.inc':include(['inputString']),
@@ -80,7 +80,7 @@ export async function runInputFollowupRegressions(options={}){
  const native=JSON.parse(stdout),after=sourceHashes(repoRoot);
  const scoped=finishFollowupScope(scope);
  const drift=before.filter(s=>after.find(a=>a.path===s.path)?.sha256!==s.sha256).map(s=>s.path);
- const passed=native.status==='PASS'&&contract.status==='PASS'&&!oldTest.failure&&!drift.length;
+ const passed=exitCode===0&&native.status==='PASS'&&contract.status==='PASS'&&!oldTest.failure&&!drift.length;
  return {schemaVersion:1,kind:'input-diagnostic-keyboard-followup',status:passed?'PASS':'FAIL',
   verdict:passed?'SOFTWARE_DIAGNOSTIC_AND_KEYBOARD_IDENTITIES_PASS':'CURRENT_PRODUCTION_OR_TEST_CONTRACT_FAILURE',
   summary:{diagnosticChecks:native.diagnostic?.checks??0,diagnosticFailures:native.diagnostic?.failures?.length??0,keyboardChecks:native.keyboard?.checks??0,keyboardFailures:native.keyboard?.failures?.length??0,keyboardOptions:fixture.mappings.length,legacySelftest:oldTest.failure?'FAIL':'PASS'},

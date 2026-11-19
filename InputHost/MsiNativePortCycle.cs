@@ -13,6 +13,9 @@ internal static class MsiNativePortCycle
 {
     internal const string Command = "--msi-native-cycle";
     internal const string GameXusbCycle = "--game-xusb-cycle";
+    // Only the fifteen-argument lifetime-bound cycle uses this result. Every
+    // corresponding rejection occurs before CyclePort; old generic 3 is unknown.
+    internal const int GameXusbCyclePreMutationRejected = 13;
     internal const string RogNativeRootCycle = "--rog-native-xusb-root-cycle";
     private const uint DnStarted = 0x00000008, DnHasProblem = 0x00000400;
     private const uint CycleWaitTimeout = 0x00000102;
@@ -162,6 +165,8 @@ internal static class MsiNativePortCycle
         public int Result=>6;
         public string Stage { get; set; }="admission";
         public bool Xusb { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? RootPortCycle { get; set; }
         public uint? PrepareLocateResult { get; set; }
         public uint? CurrentLocateResult { get; set; }
         public bool? SameNode { get; set; }
@@ -280,7 +285,7 @@ internal static class MsiNativePortCycle
             // when the parent cannot be opened; never close unrelated handles.
             using var cancellation=new SafeWaitHandle(unchecked((nint)cancelValue),ownsHandle:true);
             using var cycleLifetime=ParentProcessLifetime.TryOpen(parent);
-            if(cycleLifetime is null)return 3;
+            if(cycleLifetime is null)return GameXusbCyclePreMutationRejected;
             Func<bool> parentAlive=()=>cycleLifetime.IsAlive;
             Func<ulong> tick=()=>checked((ulong)Environment.TickCount64);
             Func<uint> cancelState=()=>WaitForCycleCancellation(cancellation,0);
@@ -292,14 +297,15 @@ internal static class MsiNativePortCycle
                     using var parentProcess=Process.GetProcessById(parent);
                     var birth=parentProcess.StartTime.ToUniversalTime().ToFileTimeUtc();
                     return birth>0?(ulong)birth:null;
-                },Allowed))return 3;
+                },Allowed))return GameXusbCyclePreMutationRejected;
             var cycleFacts=GameAuthorityFacts.TryCreate();
-            return ExecuteGameXusbCycle(root,args[8],location,Allowed,()=>CurrentBoardAllowed(root),CurrentLocations,
+            var cycleResult=ExecuteGameXusbCycle(root,args[8],location,Allowed,()=>CurrentBoardAllowed(root),CurrentLocations,
                 ()=>CurrentGameHid(args[8],root,true,cycleFacts),id=>{
                     uint node=0;var result=Locate(ref node,id,0);return new CycleNodeLocation(result,node);
                 },node=>{
                     var result=DevNodeStatus(out var status,out var problem,node,0);return new CycleNodeStatus(result,status,problem);
                 },PrepareDeviceCycle,cycleFacts);
+            return cycleResult==3?GameXusbCyclePreMutationRejected:cycleResult;
         }
         using var lifetime=ParentProcessLifetime.TryOpen(parent);
         if(lifetime is null)return 3;
@@ -317,6 +323,19 @@ internal static class MsiNativePortCycle
             // the unsafe ROGX HID stop/start. Recognition remains supported.
             if(!GameNodeRefreshMutationAllowed(root,target)){
                 facts?.MutationRejected(xusb);facts?.WriteFailure("first");return 8;
+            }
+            // Use the existing HC USB-port cycle only for an exact GPD XUSB root.
+            // Native parent/board/location/node authority and the sole writer stay
+            // unchanged; failures retain their real stage and never claim Disable.
+            if(xusb && ExactGpdXusbCycleRoot(root,target)){
+                var rootFacts=GameRefreshFacts.TryCreate(true);
+                if(rootFacts is not null)rootFacts.RootPortCycle=true;
+                return ExecuteGameXusbCycle(root,target,location,()=>lifetime.IsAlive,()=>CurrentBoardAllowed(root),CurrentLocations,
+                    ()=>CurrentGameHid(target,root,true,facts),id=>{
+                        uint node=0;var result=Locate(ref node,id,0);return new CycleNodeLocation(result,node);
+                    },node=>{
+                        var result=DevNodeStatus(out var status,out var problem,node,0);return new CycleNodeStatus(result,status,problem);
+                    },PrepareDeviceCycle,facts,rootFacts);
             }
             var refreshFacts=GameRefreshFacts.TryCreate(xusb);
             // Only the product with current failure evidence gains a new
@@ -380,6 +399,7 @@ internal static class MsiNativePortCycle
             if(!locations(root).Contains(location,StringComparer.OrdinalIgnoreCase))return 5;
             if(gameAuthority is not null && !gameAuthority()){gameFacts?.WriteFailure("after-prepare");return 8;}
             if(!alive())return 3;
+            if(refreshFacts?.RootPortCycle==true)refreshFacts.Stage="root-cycle";
             cycle(); // existing CyclePort; no retry, target, mode write or service
             return 0;
         }
@@ -393,7 +413,7 @@ internal static class MsiNativePortCycle
     // input-delivery or single-controller proof. No node-enable debt is created.
     private static int ExecuteGameXusbCycle(string root,string target,string location,Func<bool> alive,Func<bool> knownBoard,
         Func<string,string[]> locations,Func<bool> authority,Func<string,CycleNodeLocation> locate,
-        Func<uint,CycleNodeStatus> status,Func<string,Action?> prepare,GameAuthorityFacts? facts=null)
+        Func<uint,CycleNodeStatus> status,Func<string,Action?> prepare,GameAuthorityFacts? facts=null,GameRefreshFacts? refreshFacts=null)
     {
         if(!ExactGpdXusbCycleRoot(root,target))return 2;
         uint? selectedNode=null;
@@ -415,7 +435,7 @@ internal static class MsiNativePortCycle
             if(observed.Result!=0 || (observed.Status&DnStarted)==0 || (observed.Status&DnHasProblem)!=0 || observed.Problem!=0)return null;
             selectedNode=initial.Node;
             return prepare(id); // Production passes the unchanged PrepareDeviceCycle(root).
-        },CurrentAuthority,facts);
+        },CurrentAuthority,facts,refreshFacts);
     }
     // Keep SDK activation in a separate method. Tests never call this factory.
     private static Action? PrepareDeviceCycle(string root)

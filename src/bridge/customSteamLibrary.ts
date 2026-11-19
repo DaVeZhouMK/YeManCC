@@ -1,5 +1,5 @@
 import { app, fs, shell, windowApi } from '@/bridge/api';
-import { invoke } from '@/bridge/ipc';
+import { invoke, on } from '@/bridge/ipc';
 
 /**
  * Preparation gate for the Custom Steam Library integration.
@@ -42,14 +42,17 @@ export interface CustomSteamLibraryStatus {
   phase?: 'disabled' | 'launching' | 'active';
 }
 
-const SESSION_POLL_MS = 250;
+const SESSION_STARTUP_POLL_MS = 250;
 const SESSION_STARTUP_GRACE_MS = 10000;
+const SESSION_AUDIT_MS = 2000;
+const SESSION_RETURN_SETTLE_MS = 125;
 interface SessionWatch {
   generation: number;
-  timer: ReturnType<typeof setInterval> | null;
+  timer: ReturnType<typeof setTimeout> | null;
   deadline: number;
   observedPresent: boolean;
   read: AbortController | null;
+  detachHints: (() => void) | null;
 }
 let sessionGeneration = 0;
 let sessionWatch: SessionWatch | null = null;
@@ -256,8 +259,10 @@ function clearSessionWatch(): void {
   const watch = sessionWatch;
   sessionWatch = null;
   if (!watch) return;
-  if (watch.timer !== null) clearInterval(watch.timer);
+  if (watch.timer !== null) clearTimeout(watch.timer);
   watch.timer = null;
+  watch.detachHints?.();
+  watch.detachHints = null;
   watch.read?.abort(); // Forget only the read's local IPC wait, not native work.
   watch.read = null;
 }
@@ -274,9 +279,33 @@ function beginSessionWatch(generation: number): void {
   if (generation !== sessionGeneration) return;
   clearSessionWatch();
   const watch: SessionWatch = { generation, timer: null, deadline: Date.now() + SESSION_STARTUP_GRACE_MS,
-    observedPresent: false, read: null };
+    observedPresent: false, read: null, detachHints: null };
   sessionWatch = watch;
   const current = () => sessionWatch === watch && generation === sessionGeneration;
+  let readStartedAt = 0;
+  let timerDue = 0;
+  let returnCheckAt: number | null = null;
+  const queueRead = (delay: number) => {
+    if (!current() || watch.read) return;
+    const wait = Math.max(0, delay);
+    const due = Date.now() + wait;
+    if (watch.timer !== null && timerDue <= due) return;
+    if (watch.timer !== null) clearTimeout(watch.timer);
+    timerDue = due;
+    watch.timer = setTimeout(() => {
+      watch.timer = null;
+      void poll();
+    }, wait);
+  };
+  const returnDelay = () => Math.max(returnCheckAt ?? 0, readStartedAt + SESSION_STARTUP_POLL_MS) - Date.now();
+  const hintReturn = () => {
+    if (!current() || !watch.observedPresent || returnCheckAt !== null) return;
+    // The host can restore the parent just before it destroys its own window.
+    // Coalesce focus, visibility and input-owner hints into one fresh read.
+    returnCheckAt = Date.now() + SESSION_RETURN_SETTLE_MS;
+    queueRead(returnDelay());
+  };
+  const visibilityChanged = () => { if (document.visibilityState === 'visible') hintReturn(); };
   const close = async (event: 'closed' | 'conflict', detail?: { inputOwner: string; pid?: number }) => {
     if (!current()) return;
     // Retire synchronously. A late disable receipt must never clear a newer
@@ -289,6 +318,8 @@ function beginSessionWatch(generation: number): void {
   };
   const poll = async () => {
     if (!current() || watch.read) return;
+    returnCheckAt = null;
+    readStartedAt = Date.now();
     const read = new AbortController();
     watch.read = read;
     try {
@@ -309,12 +340,24 @@ function beginSessionWatch(generation: number): void {
     } catch {
       if (current() && Date.now() >= watch.deadline) await close('closed');
     } finally {
-      if (watch.read === read) watch.read = null;
+      if (current() && watch.read === read) {
+        watch.read = null;
+        if (returnCheckAt !== null) queueRead(returnDelay());
+        else if (watch.observedPresent) queueRead(SESSION_AUDIT_MS);
+        else queueRead(Math.min(readStartedAt + SESSION_STARTUP_POLL_MS, watch.deadline) - Date.now());
+      }
     }
   };
-  // Keep the original cadence even with the parent hidden. A busy tick skips
-  // IO rather than starting another request or moving the next deadline.
-  watch.timer = setInterval(() => { void poll(); }, SESSION_POLL_MS);
+  window.addEventListener('focus', hintReturn);
+  document.addEventListener('visibilitychange', visibilityChanged);
+  const removeOwnerHint = on<{ owner?: string }>('gamepad.input-owner', (data) => {
+    if (data?.owner === 'yemancc') hintReturn();
+  });
+  watch.detachHints = () => {
+    window.removeEventListener('focus', hintReturn);
+    document.removeEventListener('visibilitychange', visibilityChanged);
+    removeOwnerHint();
+  };
   void poll();
 }
 

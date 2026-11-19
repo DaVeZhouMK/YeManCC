@@ -1,5 +1,6 @@
 import { FRAME_RATE_CEILINGS } from './frameRateModel';
 import { onUiVisibilityChange } from './uiLifecycle';
+import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle } from './powerLifecycleState';
 import { registerScheduledTask } from '../scheduler';
 import { TdpRequestSupersededError } from '../robust/repairModel';
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
@@ -12,7 +13,8 @@ import { TdpRequestSupersededError } from '../robust/repairModel';
 import { fs, shell, registry, proc, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type RtssReloadResult, type HibernateState, type PowerLifecycleState } from './api';
 import { invoke, on } from './ipc';
 import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
-import { getSettingsGeneration, assertSettingsGeneration, getSettingsRecoveryState, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
+import { getSettingsGeneration, assertSettingsGeneration, getSettingsRecoveryState, readSettingsSection, saveSettingsSection, setSettingsDirectory, updateSettings, loadSettings, cachedSleepPowerPlanOptimizationEnabled } from './settingsRepository';
+import { captureBootPreferenceWrite, assertBootPreferenceOwner, type BootPreferenceContext, type BootPreferenceWrite } from './bootModeGlobalPreferences';
 import { runTdpHardwareWrite, reconcileTdpPowerReady, reconcileTdpCapabilityReady, getTdpCapabilityState, resetTdpCapabilityState } from './tdpCircuitBreaker';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { readPowerSourceMode, powerSourceBatteryPresent, refreshPowerSourceSnapshot } from './powerSource';
@@ -272,7 +274,7 @@ export function reconcileRememberedPowerScheme(): Promise<'yeman' | 'auto' | 'ma
 
 // A reset only needs an existing scheme while the fixed YMCC scheme is absent.
 // Try each available candidate and confirm activation before deleting YMCC.
-async function activateExistingYemanFallback(): Promise<void> {
+async function activateExistingYemanFallback(submitted: SleepPowerWrite): Promise<void> {
   const overlays = new Set<string>([
     PW.OV_EFF, PW.OV_PERF, PW.OV_NONE,
     '6fecc5ae-f350-48a5-b669-b472cb895ccf',
@@ -296,13 +298,14 @@ async function activateExistingYemanFallback(): Promise<void> {
   for (const guid of candidates) {
     try {
       if (!(await schemeExists(guid))) continue;
-      await setActiveScheme(guid);
+      await setActiveScheme(guid, undefined, submitted);
       if (await getActiveScheme() !== guid) {
         lastFailure = '临时电源方案切换未生效';
         continue;
       }
       return;
     } catch (error) {
+      await assertPowerWriteOwner(submitted);
       lastFailure = error instanceof Error ? error.message : String(error);
     }
   }
@@ -310,7 +313,9 @@ async function activateExistingYemanFallback(): Promise<void> {
 }
 
 export async function rebuildYemanScheme(mode: 'yeman' | 'auto' = 'yeman'): Promise<void> {
+  const submitted = captureSleepPowerWrite();
   const run = powerSchemeEnsureQueue.then(async () => {
+    await assertPowerWriteOwner(submitted);
     // powercfg broadcasts every intermediate scheme change. Keep the guard
     // quiet until the old scheme is deleted and the new YM.pow is active.
     schemeProtectionSuspendMode = mode;
@@ -319,16 +324,18 @@ export async function rebuildYemanScheme(mode: 'yeman' | 'auto' = 'yeman'): Prom
       const pow = join(PC_DIR, 'YM.pow');
       if (!(await fs.exists(pow))) throw new Error('YM.pow 电源方案文件不存在');
       if (await schemeExists(PW.YEMAN)) {
-        await activateExistingYemanFallback();
-        const deleted = await shell.run('powercfg', ['/delete', PW.YEMAN]);
+        await activateExistingYemanFallback(submitted);
+        const deleted = await runSleepPowerCommand(['/delete', PW.YEMAN], 30000, submitted);
+        await assertPowerWriteOwner(submitted);
         if (await schemeExists(PW.YEMAN)) {
           throw new Error(`删除旧野蛮电源失败：${(deleted.stderr || deleted.stdout).trim() || (deleted.exitCode === 0 ? '命令返回成功，但旧方案仍然存在' : `exit ${deleted.exitCode}`)}`);
         }
       }
       // Missing-scheme recovery and reset import the same fixed GUID.
-      await ensureYemanScheme();
-      await setActiveScheme(PW.YEMAN);
+      await ensureYemanScheme(async () => { await assertPowerWriteOwner(submitted); return true; }, submitted);
+      await setActiveScheme(PW.YEMAN, undefined, submitted);
       if (await getActiveScheme() !== PW.YEMAN) throw new Error('野蛮电源方案激活未生效');
+      await assertPowerWriteOwner(submitted);
       await rememberYemanScheme(mode);
       try { await savePower('scheme', 'YeMan'); } catch { /* scheme is already active */ }
     } finally {
@@ -368,10 +375,11 @@ export async function taskExists(name: string): Promise<boolean> {
   }
   return false;
 }
-export async function deleteTask(name: string): Promise<boolean> {
+export async function deleteTask(name: string, beforeDelete?: () => Promise<unknown>): Promise<boolean> {
   let failed = false;
   for (const path of taskPathCandidates(name)) {
     if (!(await taskDefinedAtPath(path))) continue;
+    if (beforeDelete) await beforeDelete();
     try {
       const r = await shell.run('schtasks', ['/Delete', '/TN', path, '/F']);
       if (r.exitCode !== 0) failed = true;
@@ -497,7 +505,7 @@ export function readGamingHomeConfiguration(): Promise<GamingHomeState> {
 export async function readGamingHomeStartup(): Promise<boolean> {
   return (await readGamingHomeConfiguration()).startupEnabled;
 }
-async function retireLegacyGamingTask(): Promise<void> {
+async function retireLegacyGamingTask(requireOwner?: () => Promise<unknown>): Promise<void> {
   const originals = new Map<string, string>();
   for (const task of taskPathCandidates('Xbox大屏游戏模式')) {
     if (!await taskDefinedAtPath(task)) continue;
@@ -505,6 +513,7 @@ async function retireLegacyGamingTask(): Promise<void> {
     if (backup.exitCode !== 0 || !backup.stdout.trim()) {
       throw new Error('新配置已保存，但旧 physpanel 任务备份失败，未删除该任务。');
     }
+    if (requireOwner) await requireOwner();
     await saveGamingBackup('.task.xml', backup.stdout);
     originals.set(task, backup.stdout);
   }
@@ -516,17 +525,27 @@ async function retireLegacyGamingTask(): Promise<void> {
       throw new Error('旧任务在备份后发生变化，已保留备份且未授权删除。');
     }
   }
-  if (!await deleteTask('Xbox大屏游戏模式')) {
+  if (!await deleteTask('Xbox大屏游戏模式', requireOwner)) {
     throw new Error('新配置已保存，但旧 physpanel 任务清理失败，请检查管理员权限。');
   }
 }
 let gamingHomeWriteTail: Promise<void> = Promise.resolve();
-export function writeGamingHomeStartup(on: boolean, repairHandheld = on, selection?: GamingHomeSelection): Promise<boolean> {
+export function writeGamingHomeStartup(on: boolean, repairHandheld = on, selection?: GamingHomeSelection,
+  requireOwner?: () => Promise<BootPreferenceContext>): Promise<boolean> {
   // Fixed modes commit BOTH the Windows home selection and sign-in flag now.
   // An omitted selection preserves the standalone toggle's existing home app.
   const action = gamingHomeWriteTail.then(async () => {
-    await setGamingHomeStartup(gamingHomeRegistry, on, repairHandheld, selection);
-    await retireLegacyGamingTask();
+    if (requireOwner) await requireOwner();
+    const port: GamingHomeRegistryPort = !requireOwner ? gamingHomeRegistry : {
+      ...gamingHomeRegistry,
+      saveBackup: async state => { await requireOwner(); await gamingHomeRegistry.saveBackup(state); },
+      write: async (root, path, name, value) => invoke<boolean>('bootMode.gamingHome.write', { root, path, name, value, bootContext: await requireOwner() }),
+      remove: async (root, path, name) => invoke<boolean>('bootMode.gamingHome.delete', { root, path, name, bootContext: await requireOwner() }),
+    };
+    await setGamingHomeStartup(port, on, repairHandheld, selection);
+    if (requireOwner) await requireOwner();
+    await retireLegacyGamingTask(requireOwner);
+    if (requireOwner) await requireOwner();
     return true;
   });
   gamingHomeWriteTail = action.then(() => {}, () => {});
@@ -572,7 +591,7 @@ export interface GamepadSettings {
   startDoubleF7: boolean;    // 旧双击 Start → F7 兼容字段（默认预设已移除）
   tdpShortcut: boolean;      // Start + 上/下 调节 TDP ±1W
   fpsShortcut: boolean;      // Start + 左右 调节野蛮系统电源亮度 ±5，AC/DC 跟随当前供电
-  killGame: boolean;         // 选择 + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
+  killGame: boolean;         // 选择 + B 长按 0.5s → 精确关闭实际识别的游戏进程
   openKeyboard: boolean;      // 选择 + X 长按 0.5s → 打开 Windows 触摸键盘
   returnDesktop: boolean;     // 选择 + A 组合按下瞬间 → 返回桌面
   mouseToggle: boolean;       // 选择 + Y 长按 0.5s → 模拟鼠标开/关
@@ -880,24 +899,32 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-// ── 厂商识别（AMD/Intel），沿用 PowerControl\AMD.txt|intel.txt 优先，否则注册表 ──
+// ── 当前 CPU 身份优先；旧安装标记仅作旧壳无法读身份时的兼容 ──
 export type Vendor = 'amd' | 'intel' | 'unknown';
+function cpuVendorIdentity(value: unknown): Vendor {
+  if (typeof value !== 'string') return 'unknown';
+  const identity = value.replace(/\0+$/, '').toUpperCase();
+  return identity === 'AUTHENTICAMD' ? 'amd' : identity === 'GENUINEINTEL' ? 'intel' : 'unknown';
+}
 export async function detectVendor(): Promise<Vendor> {
-  if (await fs.exists(join(PC_DIR, 'AMD.txt'))) return 'amd';
-  if (await fs.exists(join(PC_DIR, 'intel.txt'))) return 'intel';
   try {
     const v = await registry.read(
       'HKLM',
       'HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0',
       'VendorIdentifier'
     );
-    const s = String(v ?? '').toUpperCase();
-    if (s.includes('AUTHENTICAMD')) return 'amd';
-    if (s.includes('GENUINEINTEL')) return 'intel';
+    const vendor = cpuVendorIdentity(v);
+    if (vendor !== 'unknown') return vendor;
+    if (v !== null && v !== undefined && v !== '') return 'unknown';
   } catch {
     /* 忽略 */
   }
-  return 'unknown';
+  const [amd, intel] = await Promise.all([
+    fs.exists(join(PC_DIR, 'AMD.txt')), fs.exists(join(PC_DIR, 'intel.txt')),
+  ]);
+  // A copied installation can contain both markers. It has no authoritative
+  // vendor; do not silently choose AMD because its file happened to be first.
+  return amd !== intel ? amd ? 'amd' : 'intel' : 'unknown';
 }
 
 // ── PawnIO 驱动自检 ──
@@ -950,9 +977,9 @@ export async function detectPerformanceTemplate(): Promise<'portable' | 'desktop
   return powerSourceBatteryPresent.value === false ? 'desktop' : 'portable';
 }
 // proc.running：原生唯一进程列表（支持 "RTSS*" 前缀通配），失败或缺字段返回 null
-async function nativeProcRunning(names: string[]): Promise<Record<string, boolean> | null> {
+async function nativeProcRunning(names: string[], maxAgeMs?: 250): Promise<Record<string, boolean> | null> {
   try {
-    const r = await invoke<Record<string, boolean>>('proc.running', { names });
+    const r = await invoke<Record<string, boolean>>('proc.running', { names, ...(maxAgeMs === 250 ? { maxAgeMs } : {}) });
     if (!r || typeof r !== 'object' || Array.isArray(r) || names.some(name => typeof r[name] !== 'boolean')) return null;
     return r;
   } catch {
@@ -1030,6 +1057,8 @@ export interface SetTdpOpts {
   /** Optional cached controller envelope, checked against the resolved command. */
   minWatts?: number;
   maxWatts?: number;
+  /** Current saved bank's scalar ceiling; memory-only, rechecked at dispatch. */
+  currentMaxWatts?: () => number | null;
   source?: TdpRequestSource; // diagnostic provenance only; never a control selector
   retryMsi?: boolean; // explicit manual retry after a terminal OEM partial/unknown result
   isCurrent?: () => boolean; // existing controller lease, memory only; never an AC/DC probe
@@ -1041,6 +1070,7 @@ export interface SetTdpOpts {
 // CPU-first descriptor; OEM transport selection is independent of CPU/brand recognition.
 export interface TdpExecutionCapability {
   provider: 'default' | 'msi-g3e-wmi';
+  cpuVendorIdentity?: string;
   capabilityCatalog?: { libraryId: string; version: string; policySha256: string; modelId: string; modelRegistered: boolean; sourceLimitsApplied: false; hardwareAcceptance: false };
   cpuFamily?: 'intel-arc-g3-extreme' | 'other-or-unverified';
   selected: boolean;
@@ -1080,6 +1110,7 @@ export async function getTdpExecutionCapability(refresh = false): Promise<TdpExe
   const pending = (async () => {
     const value = await invoke<TdpExecutionCapability>('tdp.capability', {}, { timeoutMs: 3000 });
     if (!value || !['default', 'msi-g3e-wmi'].includes(value.provider) ||
+        (value.cpuVendorIdentity !== undefined && cpuVendorIdentity(value.cpuVendorIdentity) === 'unknown') ||
         typeof value.selected !== 'boolean' || typeof value.ready !== 'boolean' ||
         !Number.isFinite(value.minPL1) || !Number.isFinite(value.maxPL1) ||
         value.minPL1 < 2 || value.maxPL1 > 200 || value.minPL1 > value.maxPL1 ||
@@ -1152,6 +1183,7 @@ const TDPCTL_EXE = (): string => join(PC_DIR, 'pawnio', 'YeManTdpCtl.exe');
 // Do not probe files or ping again before every already-owned write.
 let tdpDaemonUp = false;
 let tdpDaemonStart: Promise<boolean> | null = null;
+let tdpDaemonStop: Promise<void> | null = null;
 let tdpDaemonEpoch = 0;
 
 async function tdpDaemonAlive(): Promise<boolean> {
@@ -1166,7 +1198,12 @@ async function tdpDaemonAlive(): Promise<boolean> {
 // 确保 daemon 常驻：安全管道 ping 成功则复用；否则由 native 固定可信路径拉起并等待最多 2s。
 // 拉起失败返回 false → 调用方走一次性 CLI 直连。
 export async function ensureTdpDaemon(observation?: TdpObservationContext): Promise<boolean> {
+  const epoch = tdpDaemonEpoch;
+  // A new owner waits for the prior quit receipt before reusing/starting a helper.
+  if (tdpDaemonStop) await tdpDaemonStop;
+  if (epoch !== tdpDaemonEpoch) return false;
   const capability = await getTdpExecutionCapability();
+  if (epoch !== tdpDaemonEpoch) return false;
   if (capability.selected) {
     if (!capability.ready) throw new Error(capability.error || 'MSI TDP 身份/CPU 验证失败');
     return true; // Native OEM path: do not start/install a PawnIO daemon.
@@ -1174,7 +1211,6 @@ export async function ensureTdpDaemon(observation?: TdpObservationContext): Prom
   if (tdpDaemonUp && tdpDaemonNeedsResume) throw new Error('TDP 会话等待当前电源代次恢复');
   if (tdpDaemonUp) return true;
   if (tdpDaemonStart) return tdpDaemonStart;
-  const epoch = tdpDaemonEpoch;
   const start = (async () => {
     if (await tdpDaemonAlive()) {
       if (epoch !== tdpDaemonEpoch) return false;
@@ -1220,18 +1256,27 @@ let tdpBlockedPhase: string | null = null;
 let tdpDaemonNeedsResume = false;
 let tdpResumePending: { epoch: number; session: number; required: boolean; task: Promise<boolean> } | null = null;
 let tdpPowerGeneration = 0, tdpCommittedGeneration = 0;
+function tdpLifecycleKnown(state: PowerLifecycleState | null): boolean {
+  return !!state && (state as { known?: boolean }).known !== false;
+}
 
 // Startup and power edges own validation. The steady-state floating path only
 // reads this immutable snapshot; native still enforces its current write lease.
-export function invalidateTdpPowerSession(phase: 'suspending' | 'resuming' | 'ready', generation?: number): void {
+export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'resuming' | 'ready' | 'unknown', generation?: number, authoritative = false): void {
+  const needsResume = !authoritative || phase !== 'unknown' && phase !== 'ready' ||
+    Number.isSafeInteger(generation) && generation! > tdpPowerGeneration ||
+    !!tdpBlockedPhase && tdpBlockedPhase !== 'unknown';
   if (Number.isSafeInteger(generation) && generation! > 0) {
-    if (generation! < tdpPowerGeneration || phase !== 'ready' && generation! <= tdpCommittedGeneration) return;
-    if (phase === 'ready' && tdpLifecycleSnapshot?.generation === generation && tdpLifecycleSnapshot.phase === 'ready') return;
+    if (generation! < tdpPowerGeneration || !authoritative && phase !== 'ready' && generation! <= tdpCommittedGeneration) return;
+    if (phase === 'ready' && !tdpBlockedPhase && !tdpDaemonNeedsResume && tdpLifecycleKnown(tdpLifecycleSnapshot) &&
+      tdpLifecycleSnapshot?.generation === generation && tdpLifecycleSnapshot.phase === 'ready' && tdpLifecycleSnapshot.hardwareWritesAllowed) return;
     tdpPowerGeneration = generation!;
   }
   ++tdpLifecycleEpoch; tdpLifecycleSnapshot = null; tdpLifecycleRead = null;
   tdpBlockedPhase = phase === 'ready' ? null : phase;
-  if (tdpDaemonUp) tdpDaemonNeedsResume = true;
+  // Context contention closes write admission; it is not itself a new sleep
+  // requiring owned helper handles to be rebuilt on every unknown/Ready pair.
+  if (tdpDaemonUp && needsResume) tdpDaemonNeedsResume = true;
   if (phase !== 'ready') queueTdpRecovery();
 }
 async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | null> {
@@ -1249,8 +1294,8 @@ async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | 
         if (tdpDaemonUp) tdpDaemonNeedsResume = true;
       }
       tdpLifecycleSnapshot = state; tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation);
-      if (state.phase === 'ready' && state.hardwareWritesAllowed) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
-      tdpBlockedPhase = state.phase === 'ready' && state.hardwareWritesAllowed ? null : state.phase;
+      if (tdpLifecycleKnown(state) && state.phase === 'ready' && state.hardwareWritesAllowed) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
+      tdpBlockedPhase = !tdpLifecycleKnown(state) ? 'unknown' : state.phase === 'ready' && state.hardwareWritesAllowed ? null : state.phase;
     }
     return state;
   });
@@ -1263,7 +1308,7 @@ async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | 
 export async function reconcileTdpPowerSession(retryUnsupported = false): Promise<boolean> {
   const session = tdpDaemonEpoch;
   const state = await readTdpLifecycle(true);
-  if (session !== tdpDaemonEpoch || !state || state !== tdpLifecycleSnapshot || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (session !== tdpDaemonEpoch || !tdpLifecycleKnown(state) || state !== tdpLifecycleSnapshot || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
   const epoch = tdpLifecycleEpoch;
   const unsupported = getTdpCapabilityState() === 'unsupported';
   if (tdpExecutionCapabilityError || tdpExecutionCapability?.ready === false || retryUnsupported && unsupported) {
@@ -1282,13 +1327,17 @@ export async function reconcileTdpPowerSession(retryUnsupported = false): Promis
   return true;
 }
 export async function primeTdpSession(initial?: Promise<PowerLifecycleState | null>): Promise<boolean> {
-  const epoch = tdpLifecycleEpoch;
+  const epoch = tdpLifecycleEpoch, session = tdpDaemonEpoch;
+  const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch;
   const state = initial ? await initial : await readTdpLifecycle();
-  if (epoch !== tdpLifecycleEpoch || !state || state.generation < tdpPowerGeneration || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (tdpDaemonStop) await tdpDaemonStop;
+  if (!current() || !tdpLifecycleKnown(state) || state.generation < tdpPowerGeneration || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
   tdpLifecycleSnapshot = state; tdpBlockedPhase = null;
   tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation); tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
   const capability = await getTdpExecutionCapability();
-  return capability.ready && (capability.selected || await ensureTdpDaemon());
+  if (!current() || !capability.ready) return false;
+  const ready = capability.selected || await ensureTdpDaemon();
+  return ready && current();
 }
 if (typeof window !== 'undefined') {
   const recoverIfNeeded = () => {
@@ -1302,16 +1351,23 @@ if (typeof window !== 'undefined') {
     else if (state.visible) recoverIfNeeded();
   });
   on('window.focus', recoverIfNeeded);
-  on<{ generation?: number }>('power.suspending', data => invalidateTdpPowerSession('suspending', data.generation));
-  on<{ generation?: number }>('power.resuming', data => invalidateTdpPowerSession('resuming', data.generation));
-  on<{ generation?: number }>('power.resumed', data => { invalidateTdpPowerSession('ready', data.generation); if (tdpRecoveryStop || !tdpLifecycleSnapshot) void reconcileTdpPowerSession().catch(() => { queueTdpRecovery(); }); });
+  let sharedPowerKey = '';
+  onSharedPowerLifecycle(state => {
+    const key = `${state.generation}:${state.phase}:${state.known}:${state.hardwareWritesAllowed}`;
+    if (key === sharedPowerKey) return;
+    sharedPowerKey = key;
+    // This is a current native fact, not another independently ordered power edge.
+    invalidateTdpPowerSession(state.known === false ? 'unknown' : state.phase, state.generation, true);
+    if (state.known !== false && state.phase === 'ready' && (tdpRecoveryStop || tdpBlockedPhase || !tdpLifecycleSnapshot))
+      void reconcileTdpPowerSession().catch(() => { queueTdpRecovery(); });
+  });
 }
 async function assertHardwareWriteAllowed(trace?: ReturnType<typeof beginTdpObservation>) {
   if (tdpBlockedPhase) throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${tdpBlockedPhase}）`);
   const state = await readTdpLifecycle();
   trace?.emit('tdp.lifecycle', state ? { phase: state.phase, generation: state.generation, hardwareWritesAllowed: state.hardwareWritesAllowed } : { phase: 'not-observed' });
-  if (state && (!state.hardwareWritesAllowed || state.phase !== 'ready')) {
-    throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${state.phase}）`);
+  if (!isSharedPowerLifecycleAdmitted(state)) {
+    throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${state?.phase ?? 'unknown'}）`);
   }
   return state;
 }
@@ -1342,7 +1398,7 @@ async function resumeTdpDaemonObservedCore(required: boolean, trace: ReturnType<
   // snapshot instead of making a second IPC query on the recovery edge.
   const state = observed && current() && observed.state === tdpLifecycleSnapshot
     ? observed.state : await readTdpLifecycle(true);
-  if (!current() || !state || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (!current() || !tdpLifecycleKnown(state) || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
   const generation = state.generation;
   const alive = await tdpDaemonAlive();
   if (!current()) return false;
@@ -1402,12 +1458,21 @@ async function setTdpObservedCore(
     throw new Error('TDP 调度上下限无效，已拒绝发送');
   const admitted = () => session === tdpDaemonEpoch && (!opts.isCurrent || opts.isCurrent());
   if (!admitted()) { trace.emit('tdp.skipped', { reason: 'superseded-before-validation' }); return false; }
+  if (opts.apply && tdpDaemonStop) await tdpDaemonStop;
+  if (!admitted()) { trace.emit('tdp.skipped', { reason: 'superseded-before-validation' }); return false; }
   const capability = await getTdpExecutionCapability();
   if (!admitted()) { trace.emit('tdp.skipped', { reason: 'superseded-before-save' }); return false; }
   if (!capability.ready) throw new Error(capability.error || 'TDP 执行能力尚未就绪，已拒绝保存和写入');
   const target = resolveTdpTarget(watts, capability);
   const w = target.effectiveW;
   if (opts.apply && (w < minWatts || w > maxWatts)) throw new Error('TDP 最终指令超出当前调度区间，已拒绝发送');
+  const assertCachedCeiling = () => {
+    if (!opts.currentMaxWatts) return;
+    const maximum = opts.currentMaxWatts();
+    if (maximum === null || !Number.isFinite(maximum) || maximum < TDP_MIN || maximum > TDP_MAX || w > maximum)
+      throw new TdpRequestSupersededError();
+  };
+  if (opts.apply) assertCachedCeiling();
   trace.context.clampedW = w;
   trace.context.policy = target.rangeLimited ? 'device-range-effective-target-saved-intent-preserved' : 'existing-target-in-device-range';
   trace.emit('tdp.target-resolved', { intentW: target.intentW, effectiveW: w, rangeLimited: target.rangeLimited,
@@ -1421,6 +1486,7 @@ async function setTdpObservedCore(
   const receipt = tdpRuntimeStore.begin(mode, w);
   const assertCurrent = () => {
     if (!admitted() || !tdpRuntimeStore.isCurrent(receipt)) throw new TdpRequestSupersededError();
+    assertCachedCeiling();
   };
   let acceptedW = w, acknowledged = true;
   try {
@@ -1479,7 +1545,9 @@ async function setTdpObservedCore(
           throw error;
         }
       } else {
-        const vendor = capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' :
+        const nativeVendor = cpuVendorIdentity(capability.cpuVendorIdentity);
+        const vendor = nativeVendor !== 'unknown' ? nativeVendor :
+          capability.cpuFamily === 'intel-arc-g3-extreme' ? 'intel' :
           opts.vendor && opts.vendor !== 'unknown' ? opts.vendor : await detectVendor();
         // vendor 检测失败（AMD.txt/intel.txt 缺失且注册表读不到）时不能静默跳过：
         // 用户以为 TDP 已下发实际没动，且 YeManTdpCtl 也需要 vendor 才能选对 SMU 通道。
@@ -1520,43 +1588,42 @@ async function setTdpObservedCore(
 }
 
 export async function stopTdpDaemon(): Promise<void> {
-  const owned = tdpDaemonUp;
-  ++tdpDaemonEpoch;
+  if (tdpDaemonStop) return tdpDaemonStop;
+  const owned = tdpDaemonUp, starting = tdpDaemonStart, epoch = ++tdpDaemonEpoch;
   stopTdpRecovery();
   tdpDaemonUp = false; tdpDaemonStart = null; tdpDaemonNeedsResume = false;
-  try {
-    const capability = await getTdpExecutionCapability().catch(() => null);
-    if (capability?.selected || !capability && !owned) return;
-    if (await tdpDaemonAlive().catch(() => false))
-      await tdpDaemon.request('quit', {}, 2000).catch(() => {});
-  } finally { stopTdpRecovery(); } // Explicit OFF cannot leave a recovery task armed.
+  const stop = (async () => {
+    try {
+      // A submitted start can finish after OFF; retire that owned helper too.
+      if (starting) await starting.catch(() => false);
+      if (epoch !== tdpDaemonEpoch) return;
+      const capability = await getTdpExecutionCapability().catch(() => null);
+      if (epoch !== tdpDaemonEpoch || capability?.selected || !capability && !owned) return;
+      const alive = await tdpDaemonAlive().catch(() => false);
+      if (epoch === tdpDaemonEpoch && alive)
+        await tdpDaemon.request('quit', {}, 2000).catch(() => {});
+    } finally {
+      if (epoch === tdpDaemonEpoch) stopTdpRecovery();
+    }
+  })();
+  tdpDaemonStop = stop;
+  try { await stop; } finally { if (tdpDaemonStop === stop) tdpDaemonStop = null; }
 }
 
 // 手柄快捷：按当前 AC/DC 电源模式，将 TDP 增减 delta 并立即应用
 export async function adjustTdp(delta: number): Promise<number | null> {
-  const mode = await detectPowerModeReliable();
-  if (!mode) return null;
-  const cur = await readTdp(mode);
-  if (cur === null) return null;
-  const capability = await getTdpExecutionCapability();
-  const current = getTdpAdjustmentBase(cur, capability);
-  const next = resolveTdpTarget(clampTdp(current + delta), capability).effectiveW;
-  if (next === current) return current;
-  let accepted = next;
-  const applied = await setTdp(mode, next, { apply: true, save: false, source: 'hotkey', onAccepted: w => { accepted = w; } });
-  return applied ? accepted : null;
+  const { adjustContinuousPerformanceTdp } = await import('./performanceSchedule');
+  const result = await adjustContinuousPerformanceTdp(delta);
+  return result.applied ? result.tdp ?? null : null;
 }
 
 // 手柄快捷：按当前 AC/DC 电源模式，将 TDP 目标值设为指定值并立即应用
 export async function setTdpCurrentMode(watts: number): Promise<number | null> {
   // Validate the original command before target resolution can clamp it.
   assertTdpCommandWatts(watts);
-  const mode = await detectPowerModeReliable();
-  if (!mode) return null;
-  const next = resolveTdpTarget(watts, await getTdpExecutionCapability()).effectiveW;
-  let accepted = next;
-  const applied = await setTdp(mode, next, { apply: true, save: false, source: 'hotkey', onAccepted: w => { accepted = w; } });
-  return applied ? accepted : null;
+  const { setContinuousPerformanceTdp } = await import('./performanceSchedule');
+  const result = await setContinuousPerformanceTdp(watts);
+  return result.applied ? result.tdp ?? null : null;
 }
 
 /* =========================================================================
@@ -1651,32 +1718,61 @@ export function windowsValueToSliderAggr(value: number): number {
 // Reapply every submitted CPU policy, including the same GUID. Use the native
 // Power API so frequent changes never create powercfg processes. Older shells
 // retain the CLI path only for an explicit unknown-command response.
-export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () => Promise<boolean>): Promise<void> {
+export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () => Promise<boolean>, submitted?: SleepPowerWrite): Promise<void> {
   await assertPowerSchemeSelectionCurrent(isCurrent);
-  try {
-    const result=await invoke<{ ok: boolean; code: number }>('power.setActiveScheme', { scheme: guid }, { timeoutMs: 5000 });
-    if (!result || typeof result.ok !== 'boolean' || !Number.isInteger(result.code)) throw new Error('电源方案激活回执无效');
-    if (!result.ok || result.code !== 0) throw new Error(`电源方案激活失败：${result.code}`);
-    return;
-  } catch (error) {
-    const message=error instanceof Error ? error.message : String(error);
-    if (!/^unknown(?::| command:)\s*power\.setActiveScheme$/i.test(message.trim())) throw error;
+  if (!submitted) {
+    try {
+      const result=await invoke<{ ok: boolean; code: number }>('power.setActiveScheme', { scheme: guid }, { timeoutMs: 5000 });
+      if (!result || typeof result.ok !== 'boolean' || !Number.isInteger(result.code)) throw new Error('电源方案激活回执无效');
+      if (!result.ok || result.code !== 0) throw new Error(`电源方案激活失败：${result.code}`);
+      return;
+    } catch (error) {
+      const message=error instanceof Error ? error.message : String(error);
+      if (!/^unknown(?::| command:)\s*power\.setActiveScheme$/i.test(message.trim())) throw error;
+    }
+    await assertPowerSchemeSelectionCurrent(isCurrent);
   }
-  await assertPowerSchemeSelectionCurrent(isCurrent);
-  const result = await shell.run('powercfg', ['/setactive', guid], 5000);
+  const args = ['/setactive', guid];
+  const result = submitted ? await runSleepPowerCommand(args, 5000, submitted) : await shell.run('powercfg', args, 5000);
+  if (submitted) await assertPowerWriteOwner(submitted);
   if (result.exitCode !== 0) throw new Error(`powercfg /setactive ${guid} 失败：${(result.stderr || result.stdout).trim() || 'exit ' + result.exitCode}`);
 }
+export interface SleepPowerWrite extends BootPreferenceWrite {
+  powerAdmission?: StaticWakeAdmission | null;
+}
+export function captureSleepPowerWrite(options: SleepPowerWrite = {}): SleepPowerWrite {
+  const supplied = options.powerAdmission;
+  const original = supplied === undefined ? captureStaticWakeAdmission() : supplied;
+  return { ...captureBootPreferenceWrite(options), powerAdmission: original && { ...original } };
+}
+function requireSleepPowerAdmission(options: SleepPowerWrite): StaticWakeAdmission {
+  const original = options.powerAdmission, current = captureStaticWakeAdmission();
+  if (!original || !current || original.expectedPowerGeneration !== current.expectedPowerGeneration ||
+      original.expectedPowerNotificationSequence !== current.expectedPowerNotificationSequence)
+    throw new Error('电源状态未确认或已变化，请在唤醒后重试');
+  return original;
+}
+async function assertPowerWriteOwner(options: SleepPowerWrite): Promise<void> {
+  if (options.bootContext) assertBootPreferenceOwner(await loadSettings(), options);
+  requireSleepPowerAdmission(options);
+}
+function runSleepPowerCommand(args: string[], timeoutMs: number, submitted: SleepPowerWrite): Promise<RunResult> {
+  return shell.run('powercfg', args, timeoutMs, undefined, requireSleepPowerAdmission(submitted), submitted.bootContext);
+}
 // 重新激活"当前活动方案"（电源按钮等修改跟随当前方案生效，不强制切回 YEMAN）
-export async function reactivateCurrentScheme(): Promise<void> {
+export async function reactivateCurrentScheme(options: SleepPowerWrite = {}): Promise<void> {
+  const submitted = captureSleepPowerWrite(options);
   // SCHEME_CURRENT is resolved by Windows at execution time: never restore a
   // captured GUID over a power-plan change made while the request was pending.
-  const result = await shell.run('powercfg', ['/setactive', 'SCHEME_CURRENT'], 5000);
+  const result = await runSleepPowerCommand(['/setactive', 'SCHEME_CURRENT'], 5000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (result.exitCode !== 0) {
     throw new Error(`电源方案刷新失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
   }
 }
-export async function importScheme(file: string): Promise<void> {
-  const r = await shell.run('powercfg', ['/import', file, PW.YEMAN]);
+export async function importScheme(file: string, submitted = captureSleepPowerWrite()): Promise<void> {
+  const r = await runSleepPowerCommand(['/import', file, PW.YEMAN], 30000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (r.exitCode !== 0) {
     // GUID 已存在属于良性情况（方案本来就在，无需重复导入）——只要方案确实在就不算失败；
     // 否则（文件损坏/无权限）才真正抛错，避免静默失败后 setactive 报“找不到方案”。
@@ -1756,13 +1852,13 @@ async function ensureYemanSchemePersonality(isCurrent?: () => Promise<boolean>):
 }
 
 // 方案缺失时先恢复；确认存在后尽力修正 AC/DC 电源计划类型，失败仅记日志。
-export async function ensureYemanScheme(isCurrent?: () => Promise<boolean>): Promise<void> {
+export async function ensureYemanScheme(isCurrent?: () => Promise<boolean>, submitted = captureSleepPowerWrite()): Promise<void> {
   await assertPowerSchemeSelectionCurrent(isCurrent);
   if (!(await schemeExists(PW.YEMAN))) {
     const pow = join(PC_DIR, 'YM.pow');
     if (!(await fs.exists(pow))) throw new Error('YM.pow 电源方案文件不存在，无法恢复野蛮系统电源');
     await assertPowerSchemeSelectionCurrent(isCurrent);
-    await importScheme(pow);
+    await importScheme(pow, submitted);
     if (!(await schemeExists(PW.YEMAN))) {
       throw new Error('野蛮系统电源方案恢复失败：导入后仍未在系统电源列表中找到该方案');
     }
@@ -1776,20 +1872,18 @@ export async function setOverlay(guid: string): Promise<void> {
     throw new Error(`powercfg /overlaysetactive ${guid} 失败：${(r.stderr || r.stdout).trim() || 'exit ' + r.exitCode}`);
   }
 }
-export async function setAcValueIndex(subGroup: string, setting: string, value: string, scheme?: string): Promise<RunResult> {
-  return await shell.run('powercfg', ['/setacvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value]);
+export async function setAcValueIndex(subGroup: string, setting: string, value: string, scheme?: string,options:BootPreferenceWrite={}): Promise<RunResult> {
+  return await shell.run('powercfg', ['/setacvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value],30000,undefined,undefined,options.bootContext);
 }
-export async function setDcValueIndex(subGroup: string, setting: string, value: string, scheme?: string): Promise<RunResult> {
-  return await shell.run('powercfg', ['/setdcvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value]);
+export async function setDcValueIndex(subGroup: string, setting: string, value: string, scheme?: string,options:BootPreferenceWrite={}): Promise<RunResult> {
+  return await shell.run('powercfg', ['/setdcvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value],30000,undefined,undefined,options.bootContext);
 }
 async function hasBatteryDevice(): Promise<boolean> {
   if (powerSourceBatteryPresent.value === null) await refreshPowerSourceSnapshot();
   return powerSourceBatteryPresent.value === true;
 }
-async function setPowerValueIndex(ac: boolean, subGroup: string, setting: string, value: string): Promise<void> {
-  const result = ac
-    ? await setAcValueIndex(subGroup, setting, value)
-    : await setDcValueIndex(subGroup, setting, value);
+async function setPowerValueIndex(ac: boolean, subGroup: string, setting: string, value: string, submitted: SleepPowerWrite): Promise<void> {
+  const result = await runSleepPowerCommand([ac ? '/setacvalueindex' : '/setdcvalueindex', PW.YEMAN, subGroup, setting, value], 30000, submitted);
   if (result.exitCode !== 0) {
     throw new Error(`powercfg ${ac ? '/setacvalueindex' : '/setdcvalueindex'} 失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
   }
@@ -1927,7 +2021,7 @@ async function applyPowerValueBatchStrict(ac: boolean, entries: Array<[string, n
     entries.map(([setting, value]) => ({ setting, value: Math.trunc(value) })),
   );
   const requiredFailures = (result.failed || []).filter(
-    (failure) => !OPTIONAL_CPU_PROFILE_SETTINGS.has(failure.setting),
+    (failure) => !OPTIONAL_CPU_PROFILE_SETTINGS.has(failure.setting) || ![2, 50, 1168].includes(failure.code),
   );
   if (!result.ok && (result.failed || []).length === 0) {
     throw new Error(`CPU 挡位参数写入失败（${ac ? 'AC' : 'DC'}）：native 未返回失败项`);
@@ -2092,26 +2186,45 @@ export async function applyPowerParams(p: PowerParams): Promise<boolean> {
 //   0–5000：线性 freq/100（100→1, 1000→10, 3000→30, 4900→49），下限 1
 // Manual CPU controls and CPU floating share the native batch path. It performs
 // the same per-setting writes while also unlocking hidden processor settings.
-export function applyManualPowerParams(p: PowerParams): Promise<boolean> {
-  return applyCpuPowerParams(p, false);
+export interface CpuPowerAdmission {
+  /** Synchronous cached ownership, not a filesystem/device verification. */
+  isCurrent?: () => boolean;
+  /** Zero explicitly permits unlimited; a finite selection cannot send zero. */
+  maxMHz?: number;
 }
-async function applyCpuPowerParams(p: PowerParams, strict: boolean): Promise<boolean> {
+export function applyManualPowerParams(p: PowerParams, admission?: CpuPowerAdmission): Promise<boolean> {
+  return applyCpuPowerParams(p, admission);
+}
+async function applyCpuPowerParams(p: PowerParams, admission: CpuPowerAdmission = {}): Promise<boolean> {
+  p = { ...p, ...(p.sides ? { sides: [...p.sides] } : {}) };
+  const sides = p.sides ?? ['ac', 'dc'];
+  if (!sides.length || sides.some(side => side !== 'ac' && side !== 'dc') || new Set(sides).size !== sides.length)
+    throw new Error('CPU 供电侧无效');
+  if (admission.maxMHz !== undefined && (!Number.isFinite(admission.maxMHz) || admission.maxMHz < 0))
+    throw new Error('CPU 上限无效');
+  for (const side of sides) {
+    const freq = side === 'ac' ? p.acFreq : p.dcFreq, aggr = side === 'ac' ? p.acAggr : p.dcAggr;
+    const min = side === 'ac' ? p.acMinState : p.dcMinState, turbo = side === 'ac' ? p.acTurbo : p.dcTurbo;
+    if (!Number.isInteger(freq) || freq < 0 || freq > 10000 || !Number.isFinite(aggr) || aggr < 0 || aggr > 100 || typeof turbo !== 'boolean' ||
+        min !== undefined && (!Number.isFinite(min) || min < 0 || min > 100) ||
+        admission.maxMHz && (freq === 0 || freq > admission.maxMHz)) throw new Error('CPU 参数无效或超过用户选择的上限');
+  }
+  if (admission.isCurrent?.() === false) return false;
   const applyAc = !p.sides || p.sides.includes('ac');
   const applyDc = !p.sides || p.sides.includes('dc');
   const acThrot = p.acThrottle ?? throttleForFrequency(p.acFreq);
   const dcThrot = p.dcThrottle ?? throttleForFrequency(p.dcFreq);
   const acSched = sliderAggrToWindowsValue(p.acAggr);
   const dcSched = sliderAggrToWindowsValue(p.dcAggr);
-  const acTurbo = p.acTurbo ? 2 : 0;
-  const dcTurbo = p.dcTurbo ? 2 : 0;
+  const acTurbo = p.acFreq > 0 && p.acFreq <= 2000 ? 0 : p.acTurbo ? 2 : 0;
+  const dcTurbo = p.dcFreq > 0 && p.dcFreq <= 2000 ? 0 : p.dcTurbo ? 2 : 0;
   const acMinState = p.acMinState ?? Math.max(0, Math.min(100, Math.round(p.acAggr)));
   const dcMinState = p.dcMinState ?? Math.max(0, Math.min(100, Math.round(p.dcAggr)));
   const minStates = [PW.G_MIN1, PW.G_MIN2, PW.G_MIN3];
   const schedulers = [PW.G_SCHED1, PW.G_SCHED2, PW.G_SCHED3];
 
   async function writeSide(ac: boolean, entries: Array<[string, number]>): Promise<void> {
-    if (strict) await applyPowerValueBatchStrict(ac, entries);
-    else await applyPowerValueBatch(ac, entries);
+    await applyPowerValueBatchStrict(ac, entries);
   }
 
   if (applyAc) {
@@ -2126,6 +2239,7 @@ async function applyCpuPowerParams(p: PowerParams, strict: boolean): Promise<boo
     ]);
   }
   if (applyDc) {
+    if (admission.isCurrent?.() === false) return false;
     // A desktop may have no DC policy. Still attempt every DC write, but do
     // not turn a valid AC update into a failed manual operation.
     await writeSide(false, [
@@ -2138,14 +2252,14 @@ async function applyCpuPowerParams(p: PowerParams, strict: boolean): Promise<boo
       ...minStates.map((setting) => [setting, dcMinState] as [string, number]),
     ]);
   }
-  return applyAc || applyDc;
+  return admission.isCurrent?.() !== false && (applyAc || applyDc);
 }
 
 // Floating uses the same full per-setting packet. A required write/lease failure
 // must reach its existing backoff instead of marking a failed CPU trial applied.
 // Unsupported secondary classes and throttle keep their original optional status.
-export function applyFloatPowerParams(p: PowerParams): Promise<boolean> {
-  return applyCpuPowerParams(p, true);
+export function applyFloatPowerParams(p: PowerParams, admission?: CpuPowerAdmission): Promise<boolean> {
+  return applyCpuPowerParams(p, admission);
 }
 
 export function freqToMinState(freqMhz: number): number {
@@ -2454,8 +2568,8 @@ export const FPS_CEILINGS = FRAME_RATE_CEILINGS;
 export const FPS_MIN = 15;
 export const FPS_MAX_DEFAULT = 300;
 
-export async function rtssRunning(): Promise<boolean> {
-  const p = await nativeProcRunning(['RTSS']);
+export async function rtssRunning(maxAgeMs?: 250): Promise<boolean> {
+  const p = await nativeProcRunning(['RTSS'], maxAgeMs);
   if (!p) throw new Error('RTSS 运行状态待确认，请稍后重试');
   return p['RTSS'];
 }
@@ -2478,9 +2592,16 @@ export async function readRtssLimit(): Promise<number> {
   return 0;
 }
 let rtssConfigWriteQueue: Promise<void> = Promise.resolve();
+type RtssOutputCurrent = (() => Promise<boolean>) & { readonly bootContext?: import('./bootModeGlobalPreferences').BootPreferenceContext };
+const rtssOutputOptions=(current?:RtssOutputCurrent):BootPreferenceWrite=>current?.bootContext?{origin:'boot-mode',bootContext:current.bootContext}:{};
+async function requireRtssOutputCurrent(current:RtssOutputCurrent):Promise<void>{
+  if(!await current())throw Error('RTSS_OUTPUT_REQUEST_EXPIRED');
+}
 
-async function reloadRtssProfiles(dir: string): Promise<void> {
-  const result = await rtss.reloadProfiles(`${dir}\\RTSSHooks64.dll`);
+async function reloadRtssProfiles(dir: string,current?:RtssOutputCurrent): Promise<void> {
+  if(current)await requireRtssOutputCurrent(current);
+  const result = await rtss.reloadProfiles(`${dir}\\RTSSHooks64.dll`,rtssOutputOptions(current));
+  if(current)await requireRtssOutputCurrent(current);
   if (!result?.ok) {
     const detail = result?.error || (result?.win32Error ? `Win32 ${result.win32Error}` : '未知错误');
     throw new Error(`RTSS 配置重载失败：${detail}`);
@@ -2554,22 +2675,27 @@ export async function readRtssZoom(): Promise<number> {
   const raw = rtssIniValue(text, 'OSD', 'ZoomRatio');
   return raw !== null && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 5;
 }
-async function writeRtssZoom(dir: string, ratio: number, skipMatching = false): Promise<void> {
+async function writeRtssZoom(dir: string, ratio: number, skipMatching = false,current?:RtssOutputCurrent): Promise<void> {
   const global = `${dir}\\Profiles\\Global`;
   const raw = Number(ratio);
   const zoom = Number.isFinite(raw) ? Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(raw))) : 5;
-  if (!(await fs.exists(global))) throw new Error('RTSS Global 配置不存在');
+  if(current)await requireRtssOutputCurrent(current);
+  const exists=await fs.exists(global);if(current)await requireRtssOutputCurrent(current);
+  if (!exists) throw new Error('RTSS Global 配置不存在');
   const original = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  if(current)await requireRtssOutputCurrent(current);
   if (!skipMatching || rtssIniValue(original, 'OSD', 'ZoomRatio') !== String(zoom)) {
     const updated = setRtssIniValue(original, 'OSD', 'ZoomRatio', String(zoom));
-    await fs.writeTextFileAtomic(global, updated, undefined, { expectedContent: original });
+    await fs.writeTextFileAtomic(global, updated, undefined, { expectedContent: original,...rtssOutputOptions(current) });
+    if(current)await requireRtssOutputCurrent(current);
   }
   // A matching file may follow an earlier failed reload. Confirm the SDK
   // on every explicit apply, even when no durable write was needed.
   // Reload only after durable write succeeds. Never use SaveProfile here:
   // it would overwrite the selected disk values with stale in-memory state.
-  await reloadRtssProfiles(dir);
+  await reloadRtssProfiles(dir,current);
   const persisted = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  if(current)await requireRtssOutputCurrent(current);
   // The public display reader defaults to 100% for a missing key. A write
   // confirmation must instead witness the exact stored target explicitly.
   if (rtssIniValue(persisted, 'OSD', 'ZoomRatio') !== String(zoom))
@@ -2581,25 +2707,53 @@ export function setRtssZoom(ratio: number): Promise<void> {
   return run;
 }
 
-export async function toggleRtss(on: boolean): Promise<void> {
+export async function toggleRtss(on: boolean,current?:RtssOutputCurrent,requireNoGame = false): Promise<void> {
+  if(current)await requireRtssOutputCurrent(current);
   if (on) {
     const dir = await resolveRtssDir();
-    await prepareRtssOverlay(dir);
-    await shell.hidden('powershell.exe', [
+    if(current)await requireRtssOutputCurrent(current);
+    await prepareRtssOverlay(dir,current);
+    const arguments_=[
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       `${PC_DIR}\\RTSS-start.ps1`,
-    ]);
+      '-RtssDirectory', dir,
+    ];
+    if(current?.bootContext){
+      const launched=await shell.run('powershell.exe',arguments_,10000,undefined,undefined,current.bootContext);
+      if(launched.exitCode!==0)throw Error('RTSS_START_REQUEST_FAILED');
+    }else await shell.hidden('powershell.exe',arguments_);
+    if(current)await requireRtssOutputCurrent(current);
     for (let i = 0; i < 80; i++) {
-      if (await rtssRunning()) return;
+      const running=await rtssRunning(250);if(current)await requireRtssOutputCurrent(current);
+      if (running) {
+        const confirmed=await rtssRunning();if(current)await requireRtssOutputCurrent(current);
+        if (confirmed) return;
+      }
       await new Promise<void>((r) => setTimeout(r, 100));
+      if(current)await requireRtssOutputCurrent(current);
     }
     throw new Error(`RTSS 启动失败：${dir}\\RTSS.exe 未运行`);
+  } else if (requireNoGame) {
+    const result = await rtss.stopIfNoGame();
+    if(current)await requireRtssOutputCurrent(current);
+    if (result?.ok !== true ||
+        ![result.attempted, result.stopped, result.pending, result.error].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        result.pending !== 0 || result.error !== 0) {
+      const reason = result?.reason === 'no-game-unavailable' ? '游戏状态待确认'
+        : result?.reason === 'access-denied' ? '无法关闭部分监控进程'
+        : result?.reason === 'partial' ? '部分监控进程尚未退出'
+        : '状态或关闭结果待确认';
+      const stopped = Number.isSafeInteger(result?.stopped) && result.stopped >= 0 ? result.stopped : '未知';
+      const pending = Number.isSafeInteger(result?.pending) && result.pending >= 0 ? result.pending : '未知';
+      throw new Error(`RTSS 关闭未完整确认（${reason}）；已停止 ${stopped}，待确认 ${pending}。请确认游戏状态后重试。`);
+    }
   } else {
     // 关监控 = 结束整个 RTSS 家族（主程序 + 钩子加载器 64/32 + 编码服务），避免 RTSSHooksLoader64.exe 残留
     await shell.run('cmd', [
       '/c',
       'taskkill /F /IM RTSS.exe /IM RTSSHooksLoader64.exe /IM RTSSHooksLoader32.exe /IM EncoderServer64.exe /IM EncoderServer.exe',
-    ]);
+    ],30000,undefined,undefined,current?.bootContext);
+    if(current)await requireRtssOutputCurrent(current);
   }
 }
 export type OverlayLayout = 'W' | 'L' | 'J' | 'off';
@@ -2619,8 +2773,10 @@ function rtssFailureDetail(result: RtssReloadResult | undefined, fallback: strin
   if (result?.path) detail += `；文件：${result.path}`;
   return detail;
 }
-async function prepareRtssOverlay(dir: string): Promise<void> {
-  const result = await rtss.prepareOverlay(dir, PC_DIR);
+async function prepareRtssOverlay(dir: string,current?:RtssOutputCurrent): Promise<void> {
+  if(current)await requireRtssOutputCurrent(current);
+  const result = await rtss.prepareOverlay(dir, PC_DIR,rtssOutputOptions(current));
+  if(current)await requireRtssOutputCurrent(current);
   if (!result?.ok) {
     throw new Error(rtssFailureDetail(result, 'RTSS 模板桥准备失败'));
   }
@@ -2650,27 +2806,35 @@ export async function readOverlayLayout(): Promise<string> {
   if (!(await fs.exists(cfg))) return '';
   return rtssIniValue(await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }), 'Settings', 'Layout') ?? '';
 }
-export function setOverlayLayout(layout: OverlayLayout, zoom?: number): Promise<OverlaySwitchResult> {
+export function setOverlayLayout(layout: OverlayLayout, zoom?: number,current?:RtssOutputCurrent): Promise<OverlaySwitchResult> {
   const run = rtssConfigWriteQueue.then(async (): Promise<OverlaySwitchResult> => {
+    if(current)await requireRtssOutputCurrent(current);
     const dir = await resolveRtssDir();
-    await prepareRtssOverlay(dir);
+    if(current)await requireRtssOutputCurrent(current);
+    await prepareRtssOverlay(dir,current);
     const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
     const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
-    if (!(await rtssRunning())) {
-      const original = await fs.exists(cfg) ? await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }) : null;
-      await fs.writeTextFileAtomic(cfg, setRtssIniValue(original ?? '', 'Settings', 'Layout', target), undefined, { expectedContent: original });
-      if (await readOverlayLayout() !== target) throw new Error('RTSS 模板保存读回未确认；未将请求当作保存成功。');
+    const running=await rtssRunning();if(current)await requireRtssOutputCurrent(current);
+    if (!running) {
+      const exists=await fs.exists(cfg);if(current)await requireRtssOutputCurrent(current);
+      const original = exists ? await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }) : null;
+      if(current)await requireRtssOutputCurrent(current);
+      await fs.writeTextFileAtomic(cfg, setRtssIniValue(original ?? '', 'Settings', 'Layout', target), undefined, { expectedContent: original,...rtssOutputOptions(current) });
+      if(current)await requireRtssOutputCurrent(current);
+      const saved=await readOverlayLayout();if(current)await requireRtssOutputCurrent(current);
+      if (saved !== target) throw new Error('RTSS 模板保存读回未确认；未将请求当作保存成功。');
       return { mode: 'saved' };
     }
     // The RTSS-owned plugin invokes the official Load message and only ACKs
     // AFTER OverlayEditor has recreated layers, polled sources, rebuilt the
     // full hypertext/embedded objects and reset its timer. No synthetic keys,
     // no partial shared-memory rewrites and no in-process hook DLL in YMCC.
-    const result = await rtss.loadOverlay(dir, target);
+    const result = await rtss.loadOverlay(dir, target,rtssOutputOptions(current));
+    if(current)await requireRtssOutputCurrent(current);
     if (!result?.ok) throw new Error(rtssFailureDetail(result, 'RTSS 未确认模板完整加载'));
     // Apply the saved display size in this same configuration queue. OFF
     // leaves zoom intact; a matching explicit OSD key needs no disk write.
-    if (layout !== 'off' && zoom !== undefined) await writeRtssZoom(dir, zoom, true);
+    if (layout !== 'off' && zoom !== undefined) await writeRtssZoom(dir, zoom, true,current);
     // The plugin persists Layout only after completion, so failure does not
     // turn a merely requested template into a falsely successful UI state.
     return { mode: 'live' };
@@ -2712,7 +2876,7 @@ async function restartRtss(): Promise<void> {
   await shell.hidden(exe);
   // 3. 轮询确认主程序已拉起（最多 ~8 秒）
   for (let i = 0; i < 80; i++) {
-    if (await rtssRunning()) break;
+    if (await rtssRunning(250) && await rtssRunning()) break;
     await new Promise<void>((r) => setTimeout(r, 100));
   }
   // 4. 设 CPU 亲和性 0xA0（核心 5/7），与 BAT 一致，稳定 overlay 渲染
@@ -2768,12 +2932,10 @@ export async function sleepGuardGet(): Promise<SleepGuardStatus> {
     joyXoffAutoClose: true,
   };
 }
-export async function sleepGuardSet(on: boolean): Promise<void> {
-  await invoke('sleepGuard.set', { on });
-}
-export async function sleepGuardSetConfig(cfg: Partial<SleepGuardStatus>): Promise<void> {
+export async function sleepGuardSetConfig(cfg: Partial<SleepGuardStatus>, options: BootPreferenceWrite = {}): Promise<void> {
   if ('steamOverlayOffFix' in cfg) throw new Error('旧 Steam 叠加关闭方案已弃用，不再提供设置入口。');
-  await invoke('sleepGuard.setConfig', cfg); // non-Steam sleep settings keep their original route
+  const submitted=captureBootPreferenceWrite(options);
+  await invoke('sleepGuard.setConfig', { ...cfg, ...(submitted.origin ? { origin: submitted.origin } : {}), ...(submitted.bootContext ? { bootContext:submitted.bootContext } : {}) });
 }
 export interface SleepFactEvent {
   time: string;
@@ -2811,12 +2973,6 @@ export interface SleepFactExportResult {
   reason?: string;
 }
 export const sleepFactsExportLog = () => invoke<SleepFactExportResult>('sleepFacts.exportLog');
-export async function sleepGuardRecoverAll(): Promise<{ resumed: number }> {
-  return await invoke<{ resumed: number }>('sleepGuard.recoverAll');
-}
-export async function sleepGuardSuspendCurrent(): Promise<{ paused: boolean; pid?: number }> {
-  return await invoke<{ paused: boolean; pid?: number }>('sleepGuard.suspendCurrent');
-}
 
 // Static wake hardening is independent of the existing power-plan repair preference.
 // Reads never scan; scan/restore are explicit, bounded user actions owned by native.
@@ -2865,9 +3021,21 @@ function checkedStaticWakeStatus(status: StaticWakeStatus): StaticWakeStatus {
 export async function getStaticWakeStatus(requestId?: string): Promise<StaticWakeStatus> {
   return checkedStaticWakeStatus(await invoke<StaticWakeStatus>('sleep.staticWake.get', requestId ? { requestId } : {}, { timeoutMs: 10000 }));
 }
-async function staticWakeAction(command: 'sleep.staticWake.scan' | 'sleep.staticWake.restore', requestId: string): Promise<StaticWakeResult> {
+export interface StaticWakeAdmission {
+  expectedPowerGeneration: number;
+  expectedPowerNotificationSequence: number;
+}
+export function captureStaticWakeAdmission(): StaticWakeAdmission | null {
+  const state = getSharedPowerLifecycle();
+  if (!state || !isSharedPowerLifecycleAdmitted(state)) return null;
+  const sequence = state.observedNotificationSequence;
+  if (!Number.isSafeInteger(state.generation) || state.generation <= 0 ||
+      typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 0) return null;
+  return { expectedPowerGeneration: state.generation, expectedPowerNotificationSequence: sequence };
+}
+async function staticWakeAction(command: 'sleep.staticWake.scan' | 'sleep.staticWake.restore', requestId: string, admission: StaticWakeAdmission): Promise<StaticWakeResult> {
   if (!/^[A-Za-z0-9_-]{1,96}$/.test(requestId)) throw new Error('静态屏蔽请求标识无效');
-  const result = await invoke<StaticWakeResult>(command, { requestId }, { timeoutMs: 180000 });
+  const result = await invoke<StaticWakeResult>(command, { ...admission, requestId }, { timeoutMs: 180000 });
   if (typeof result?.ok !== 'boolean') throw new Error('静态屏蔽操作回执无效');
   const status = checkedStaticWakeStatus(result.status), operation = status.operation;
   const action = command === 'sleep.staticWake.scan' ? 'scan' : 'restore';
@@ -2875,11 +3043,12 @@ async function staticWakeAction(command: 'sleep.staticWake.scan' | 'sleep.static
     throw new Error('静态屏蔽操作完成尚未确认');
   return { ok: result.ok, status };
 }
-export const scanStaticWakeSources = (requestId: string): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.scan', requestId);
-export const restoreStaticWakeSources = (requestId: string): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.restore', requestId);
+export const scanStaticWakeSources = (requestId: string, admission: StaticWakeAdmission): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.scan', requestId, admission);
+export const restoreStaticWakeSources = (requestId: string, admission: StaticWakeAdmission): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.restore', requestId, admission);
 
 export interface SleepPowerPlanOptimizationResult {
   ok: boolean;
+  stopped?: 'preference-disabled-or-unknown';
   activeGuid: string;
   activePreserved: boolean;
   processed: Array<{ guid: string; name: string }>;
@@ -2895,8 +3064,8 @@ export async function getStaticWakeAutoScanEnabled(): Promise<boolean> {
     ? sleep.staticWakeAutoScanEnabled : sleep.sleepPowerPlanOptimizationEnabled !== false;
 }
 
-export async function setStaticWakeAutoScanEnabled(enabled: boolean): Promise<void> {
-  await saveSettingsSection('sleep', { staticWakeAutoScanEnabled: Boolean(enabled) });
+export async function setStaticWakeAutoScanEnabled(enabled: boolean, options: BootPreferenceWrite = {}): Promise<void> {
+  await saveSettingsSection('sleep', { staticWakeAutoScanEnabled: Boolean(enabled) }, undefined, options);
 }
 
 export async function getSleepPowerPlanOptimizationEnabled(): Promise<boolean> {
@@ -2904,8 +3073,8 @@ export async function getSleepPowerPlanOptimizationEnabled(): Promise<boolean> {
   return sleep.sleepPowerPlanOptimizationEnabled === true;
 }
 
-export async function setSleepPowerPlanOptimizationEnabled(enabled: boolean): Promise<void> {
-  await saveSettingsSection('sleep', { sleepPowerPlanOptimizationEnabled: Boolean(enabled) });
+export async function setSleepPowerPlanOptimizationEnabled(enabled: boolean, options: import('./bootModeGlobalPreferences').BootPreferenceWrite = {}): Promise<void> {
+  await saveSettingsSection('sleep', { sleepPowerPlanOptimizationEnabled: Boolean(enabled) }, undefined, options);
 }
 
 async function readPlanPowerIndex(
@@ -2917,9 +3086,9 @@ async function readPlanPowerIndex(
   const path = `SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\${plan}\\${subGroup}\\${setting}`;
   try {
     const value = await registry.read('HKLM', path, ac ? 'ACSettingIndex' : 'DCSettingIndex');
-    if (value === null || value === undefined) return null;
+    if (typeof value !== 'number' && !(typeof value === 'string' && value.trim() !== '')) return null;
     const number = Number(value);
-    return Number.isFinite(number) ? number : null;
+    return Number.isInteger(number) && number >= 0 && number <= 0xffffffff ? number : null;
   } catch {
     return null;
   }
@@ -2977,36 +3146,84 @@ export async function readSleepTimeouts(): Promise<SleepTimeoutSettings> {
   };
 }
 
+export interface SleepTimeoutWriteResult {
+  saved: true;
+  applied: boolean;
+  preferenceSaved?: boolean;
+  preferenceReason?: string;
+}
+
+async function rememberSleepPreference(patch: Record<string, unknown>, label = '睡眠'): Promise<Pick<SleepTimeoutWriteResult, 'preferenceSaved' | 'preferenceReason'>> {
+  const unchanged = new Error('No ordinary sleep preference delta');
+  const record = (value: any) => !!value && typeof value === 'object' && !Array.isArray(value);
+  try {
+    await updateSettings(settings => {
+      const mode = settings.extensions?.bootModes as any;
+      if (mode === undefined) throw unchanged;
+      if (!record(mode) || mode.schema !== 1 || !record(mode.global)) throw new Error('开机模式配置无法确认，原值已保留');
+      const sleep = mode.global.sleep === undefined ? {} : mode.global.sleep;
+      if (!record(sleep)) throw new Error('开机全局睡眠配置无效，原值已保留');
+      const timeouts = sleep.timeouts === undefined ? {} : sleep.timeouts;
+      if (patch.timeouts !== undefined && (!record(timeouts) || !record(patch.timeouts)))
+        throw new Error('开机全局睡眠配置无效，原值已保留');
+      if (Object.entries(patch).every(([key, value]) => key === 'timeouts'
+        ? Object.entries(value as Record<string, unknown>).every(([field, minutes]) => timeouts[field] === minutes)
+        : sleep[key] === value)) throw unchanged;
+      if (!Number.isSafeInteger(mode.revision) || mode.revision < 0 || !Number.isSafeInteger(mode.revision + 1))
+        throw new Error('开机模式版本号无效，原值已保留');
+      mode.global = { ...mode.global, sleep: { ...sleep, ...patch,
+        ...(patch.timeouts === undefined ? {} : { timeouts: { ...timeouts, ...(patch.timeouts as Record<string, unknown>) } }) } };
+      mode.revision++;
+    }, { origin: 'runtime' });
+    return { preferenceSaved: true };
+  } catch (error) {
+    return error === unchanged ? { preferenceSaved: true }
+      : { preferenceSaved: false, preferenceReason: `开机全局${label}偏好未保存：` + (error instanceof Error ? error.message : String(error)) };
+  }
+}
+
 /** 写入固定野蛮电源方案中的单个 Windows 11 超时（单位：分钟）。 */
-export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, minutes: number): Promise<void> {
+export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, minutes: number, options: SleepPowerWrite = {}): Promise<SleepTimeoutWriteResult> {
+  const origin = options.origin === undefined ? 'ordinary' : options.origin;
+  if (!['ordinary', 'boot-mode', 'runtime'].includes(origin)) throw new Error('电源超时写入来源无效');
+  const submitted = captureSleepPowerWrite(options);
   const spec = SLEEP_TIMEOUT_FIELDS[field];
-  if (!spec || !Number.isFinite(Number(minutes))) throw new Error('电源超时参数无效');
+  if (!spec || typeof ac !== 'boolean' || !Number.isFinite(Number(minutes))) throw new Error('电源超时参数无效');
   const safeMinutes = Math.max(0, Math.min(10080, Math.round(Number(minutes))));
   const seconds = safeMinutes * 60;
   const verb = ac ? '/setacvalueindex' : '/setdcvalueindex';
-  const result = await shell.run(
-    'powercfg',
-    [verb, PW.YEMAN, spec.subGroup, spec.setting, String(seconds)],
-    5000,
-  );
+  const result = await runSleepPowerCommand([verb, PW.YEMAN, spec.subGroup, spec.setting, String(seconds)], 5000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (result.exitCode !== 0) {
     throw new Error(`电源超时写入失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
   }
   const after = await readPlanPowerIndex(PW.YEMAN, spec.subGroup, spec.setting, ac);
+  await assertPowerWriteOwner(submitted);
   if (after !== seconds) {
     throw new Error(`电源超时回读不一致：期望 ${seconds} 秒，实际 ${after === null ? '无法读取' : `${after} 秒`}`);
   }
+  const preference = origin === 'ordinary'
+    ? await rememberSleepPreference({ timeouts: { [`${ac ? 'ac' : 'dc'}${field[0].toUpperCase()}${field.slice(1)}`]: safeMinutes } }, '超时') : {};
   // A saved plan index is not the live Windows timeout until the active plan
   // is refreshed. All six AC/DC fields share this user-action-only commit.
+  let applied = false;
   try {
     const active = await getActiveScheme();
+    await assertPowerWriteOwner(submitted);
     if (!active) throw new Error('无法确认当前活动电源方案');
-    if (active.toLowerCase() === PW.YEMAN.toLowerCase()) await reactivateCurrentScheme();
+    if (active.toLowerCase() === PW.YEMAN.toLowerCase()) {
+      await reactivateCurrentScheme(submitted);
+      const current = await getActiveScheme();
+      await assertPowerWriteOwner(submitted);
+      if (!current) throw new Error('无法确认刷新后的活动电源方案');
+      applied = current.toLowerCase() === PW.YEMAN.toLowerCase();
+    }
     // Inactive YeMan settings are saved for its next activation. Never switch
     // plans, or overwrite the timeout of another similarly named scheme.
   } catch (error) {
-    throw new Error(`电源超时已保存，但生效刷新未完成：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`电源超时已保存，但生效刷新未完成：${error instanceof Error ? error.message : String(error)}${preference.preferenceSaved === false ? '；' + preference.preferenceReason : ''}`);
   }
+  return { saved: true, applied, ...preference };
 }
 
 async function readPowerPolicyIndex(setting: string, ac: boolean): Promise<number | null> {
@@ -3021,11 +3238,24 @@ async function readPowerPolicyIndex(setting: string, ac: boolean): Promise<numbe
   }
 }
 
-export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizationResult> {
+export async function optimizeSleepPowerPlans(admission: StaticWakeAdmission & { isCurrent: () => boolean }): Promise<SleepPowerPlanOptimizationResult> {
+  if (!admission || typeof admission.isCurrent !== 'function')
+    throw new Error('睡眠电源计划优化缺少公共任务准入');
+  const { expectedPowerGeneration, expectedPowerNotificationSequence, isCurrent } = admission;
+  const submitted = { expectedPowerGeneration, expectedPowerNotificationSequence, requireSleepPowerPlanEnabled: true } as const;
+  const assertCurrent = () => {
+    const current = captureStaticWakeAdmission();
+    if (!isCurrent() || !current || current.expectedPowerGeneration !== expectedPowerGeneration ||
+        current.expectedPowerNotificationSequence !== expectedPowerNotificationSequence)
+      throw new Error('睡眠电源计划优化的公共准入已失效');
+  };
+  assertCurrent();
   const active = await getActiveScheme();
+  assertCurrent();
   if (!active) throw new Error('无法读取当前活动电源计划');
 
   const listed = await shell.run('powercfg', ['/list'], 10000);
+  assertCurrent();
   if (listed.exitCode !== 0) {
     throw new Error(`无法读取电源计划列表：${(listed.stderr || listed.stdout).trim() || `exit ${listed.exitCode}`}`);
   }
@@ -3057,6 +3287,7 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
 
   const skipped: SleepPowerPlanOptimizationResult['skipped'] = [];
   const failed: SleepPowerPlanOptimizationResult['failed'] = [];
+  const processed: SleepPowerPlanOptimizationResult['processed'] = [];
   const writes = [
     { sub: '238c9fa8-0aad-41ed-83f4-97be242c8f20', setting: 'bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d', ac: 0, dc: 0, operation: '允许使用唤醒定时器' },
     { sub: '238c9fa8-0aad-41ed-83f4-97be242c8f20', setting: 'd4c1d4c8-d5cc-43d3-b83e-fc51215cb04d', ac: 1, dc: 1, operation: '允许远程打开文件时睡眠' },
@@ -3071,7 +3302,9 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
         const ac = verb === '/setacvalueindex';
         const expected = ac ? write.ac : write.dc;
         const policy = await readPowerPolicyIndex(write.setting, ac);
+        assertCurrent();
         const planCurrent = await readPlanPowerIndex(target.guid, write.sub, write.setting, ac);
+        assertCurrent();
         const current = planCurrent ?? policy;
         const operation = `${verb} ${write.operation}`;
         if (current === expected) {
@@ -3084,14 +3317,21 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
           continue;
         }
 
-        const r = await shell.run('powercfg', [verb, target.guid, write.sub, write.setting, String(expected)], 5000);
+        if (!cachedSleepPowerPlanOptimizationEnabled()) {
+          return { ok: false, stopped: 'preference-disabled-or-unknown', activeGuid: active, activePreserved: false,
+            processed, skippedOverlay, skipped, failed };
+        }
+        const r = await shell.run('powercfg', [verb, target.guid, write.sub, write.setting, String(expected)], 5000, undefined, submitted);
+        assertCurrent();
         if (r.exitCode !== 0) {
           failed.push({ guid: target.guid, name: target.name, operation, exitCode: r.exitCode, detail: (r.stderr || r.stdout).trim() });
           continue;
         }
 
         const afterPlan = await readPlanPowerIndex(target.guid, write.sub, write.setting, ac);
+        assertCurrent();
         const afterPolicy = await readPowerPolicyIndex(write.setting, ac);
+        assertCurrent();
         const after = afterPlan ?? afterPolicy;
         if (after !== expected) {
           failed.push({
@@ -3104,6 +3344,7 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
         }
       }
     }
+    processed.push(target);
   }
   // setacvalueindex/setdcvalueindex write the target plan directly. Do not
   // call /setactive here: sleep optimization must never refresh or switch the
@@ -3111,6 +3352,7 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
   let activePreserved = false;
   try {
     const activeAfter = await getActiveScheme();
+    assertCurrent();
     activePreserved = activeAfter.toLowerCase() === active.toLowerCase();
     if (!activePreserved) {
       failed.push({
@@ -3130,7 +3372,8 @@ export async function optimizeSleepPowerPlans(): Promise<SleepPowerPlanOptimizat
       detail: e instanceof Error ? e.message : '无法读取活动计划',
     });
   }
-  return { ok: failed.length === 0, activeGuid: active, activePreserved, processed: targets, skippedOverlay, skipped, failed };
+  assertCurrent();
+  return { ok: failed.length === 0, activeGuid: active, activePreserved, processed, skippedOverlay, skipped, failed };
 }
 
 /* =========================================================================
@@ -3158,27 +3401,36 @@ export function powerBtnName(idx: PowerBtnIdx): string {
 const PW_BTN_SUB = '4f971e89-eebd-4455-a8de-9e59040e7347';
 const PW_BTN_ITEM = '7648efa3-dd9c-4e3e-b566-50f929386280';
 
-export async function getPowerBtnIdx(isAC: boolean): Promise<PowerBtnIdx> {
+export async function getPowerBtnIdx(isAC: boolean): Promise<PowerBtnIdx | null> {
   try {
     // 电源按钮在 PW_BTN_SUB（按钮和盖子）下，不是 PW.SUB（CPU 调度）
-    const v = await readSchemeIndex(PW_BTN_ITEM, '', isAC, PW_BTN_SUB);
-    if (v === null) return 2;
+    const v = await readPlanPowerIndex(PW.YEMAN, PW_BTN_SUB, PW_BTN_ITEM, isAC);
+    if (v === null) return null;
     const found = POWER_BTN_QUEUE.findIndex((q) => q.val === String(v));
-    return (found >= 0 ? found : 2) as PowerBtnIdx;
+    return found >= 0 ? found as PowerBtnIdx : null;
   } catch {
-    return 2;
+    return null;
   }
 }
-export async function setPowerBtnIdx(isAC: boolean, idx: PowerBtnIdx): Promise<void> {
-  if (!isAC && !(await hasBatteryDevice())) return;
-  try {
-    await setPowerValueIndex(isAC, PW_BTN_SUB, PW_BTN_ITEM, POWER_BTN_QUEUE[idx].val);
-  } catch (e) {
-    // 台式机无电池 → DC 电源按钮写入失败，静默忽略（不影响 AC）
-    throw e;
+export async function setPowerBtnIdx(isAC: boolean, idx: PowerBtnIdx, options: SleepPowerWrite = {}): Promise<SleepTimeoutWriteResult> {
+  const origin = options.origin === undefined ? 'ordinary' : options.origin;
+  if (!['ordinary', 'boot-mode', 'runtime'].includes(origin)) throw new Error('电源按钮写入来源无效');
+  const submitted = captureSleepPowerWrite(options);
+  if (typeof isAC !== 'boolean' || !Number.isInteger(idx) || !POWER_BTN_QUEUE[idx]) throw new Error('电源按钮参数无效');
+  if (!isAC) {
+    const battery = await hasBatteryDevice();
+    await assertPowerWriteOwner(submitted);
+    if (!battery) throw new Error('此设备未确认有电池，未写入电池电源按钮');
   }
+  await setPowerValueIndex(isAC, PW_BTN_SUB, PW_BTN_ITEM, POWER_BTN_QUEUE[idx].val, submitted);
+  await assertPowerWriteOwner(submitted);
+  const confirmed = await getPowerBtnIdx(isAC);
+  await assertPowerWriteOwner(submitted);
+  if (confirmed !== idx) throw new Error('电源按钮回读不一致，未记录开机全局偏好');
+  const preference = origin === 'ordinary' ? await rememberSleepPreference({ [isAC ? 'acButton' : 'dcButton']: idx }) : {};
   // 注意：不再此处立即激活——由前端做 2 秒防抖重新激活（与 CPU 调度调节器一致），
   // 避免快速多次切换电源按钮时反复激活导致闪烁/卡顿。
+  return { saved: true, applied: false, ...preference };
 }
 
 // 系统休眠状态：由 native 使用 GetPwrCapabilities + Windows Power 注册表直读，
@@ -3197,40 +3449,65 @@ export async function isHibernateOff(): Promise<boolean | null> {
   }
   return null;
 }
-export async function setHibernate(on: boolean): Promise<RunResult> {
-  const r1 = await shell.run('powercfg', on ? ['/hibernate', 'on'] : ['/hibernate', 'off'], 10000);
+export async function setHibernate(on: boolean, options: SleepPowerWrite = {}): Promise<RunResult & SleepTimeoutWriteResult> {
+  const origin = options.origin === undefined ? 'ordinary' : options.origin;
+  if (!['ordinary', 'boot-mode', 'runtime'].includes(origin)) throw new Error('系统休眠写入来源无效');
+  const submitted = captureSleepPowerWrite(options);
+  if (typeof on !== 'boolean') throw new Error('系统休眠参数无效');
+  const r1 = await runSleepPowerCommand(['/hibernate', on ? 'on' : 'off'], 10000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (r1.exitCode !== 0) {
     throw new Error(`powercfg /hibernate ${on ? 'on' : 'off'} 失败：${(r1.stderr || r1.stdout).trim() || `exit ${r1.exitCode}`}`);
   }
+  let result = r1;
   if (on) {
     // “系统休眠”必须使用完整 S4 休眠文件，不能降级为 reduced 类型。
-    const r2 = await shell.run('powercfg', ['/hibernate', '/type', 'full'], 10000);
+    const r2 = await runSleepPowerCommand(['/hibernate', '/type', 'full'], 10000, submitted);
+    await assertPowerWriteOwner(submitted);
     if (r2.exitCode !== 0) {
       throw new Error(`powercfg /hibernate /type full 失败：${(r2.stderr || r2.stdout).trim() || `exit ${r2.exitCode}`}`);
     }
-    return r2;
+    result = r2;
   }
-  return r1;
+  const confirmed = await readHibernateState();
+  await assertPowerWriteOwner(submitted);
+  if (confirmed.enabledKnown !== true || confirmed.enabled !== on) throw new Error('系统休眠回读未确认，未记录开机全局偏好');
+  const preference = origin === 'ordinary' ? await rememberSleepPreference({ hibernate: on }) : {};
+  return { ...result, saved: true, applied: true, ...preference };
 }
-export async function readHibernateSize(): Promise<number> {
+export async function readHibernateSize(): Promise<number | null> {
   try {
     const v = await registry.read('HKLM', 'SYSTEM\\CurrentControlSet\\Control\\Power', 'HiberFileSizePercent');
     const n = Number(v);
-    if (Number.isFinite(n) && n >= 30 && n <= 100) return n;
+    if ((typeof v === 'number' || typeof v === 'string' && v.trim() !== '') && Number.isInteger(n) && n >= 30 && n <= 100) return n;
   } catch {
     /* 忽略 */
   }
-  return 50;
+  return null;
 }
-export async function setHibernateSize(pct: number): Promise<void> {
-  const typeResult = await shell.run('powercfg', ['/hibernate', '/type', 'full'], 10000);
+export async function setHibernateSize(pct: number, options: SleepPowerWrite = {}): Promise<SleepTimeoutWriteResult> {
+  const origin = options.origin === undefined ? 'ordinary' : options.origin;
+  if (!['ordinary', 'boot-mode', 'runtime'].includes(origin)) throw new Error('休眠文件大小写入来源无效');
+  const submitted = captureSleepPowerWrite(options);
+  if (!Number.isFinite(pct)) throw new Error('休眠文件大小参数无效');
+  const size = Math.max(30, Math.min(100, Math.round(pct)));
+  const typeResult = await runSleepPowerCommand(['/hibernate', '/type', 'full'], 10000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (typeResult.exitCode !== 0) {
     throw new Error(`powercfg /hibernate /type full 失败：${(typeResult.stderr || typeResult.stdout).trim() || `exit ${typeResult.exitCode}`}`);
   }
-  const sizeResult = await shell.run('powercfg', ['/hibernate', '/size', String(Math.max(30, Math.min(100, pct)))], 10000);
+  const sizeResult = await runSleepPowerCommand(['/hibernate', '/size', String(size)], 10000, submitted);
+  await assertPowerWriteOwner(submitted);
   if (sizeResult.exitCode !== 0) {
     throw new Error(`powercfg /hibernate /size 失败：${(sizeResult.stderr || sizeResult.stdout).trim() || `exit ${sizeResult.exitCode}`}`);
   }
+  const confirmed = await readHibernateState();
+  await assertPowerWriteOwner(submitted);
+  if (confirmed.enabledKnown !== true || !confirmed.enabled || await readHibernateSize() !== size)
+    throw new Error('休眠文件大小回读不一致，未记录开机全局偏好');
+  await assertPowerWriteOwner(submitted);
+  const preference = origin === 'ordinary' ? await rememberSleepPreference({ hibernateSize: size }) : {};
+  return { saved: true, applied: true, ...preference };
 }
 
 // 物理内存总量（GB，浮点）。用于"休眠文件大小预估 = 内存 × 休眠文件百分比"。
@@ -3258,7 +3535,7 @@ export async function readTotalMemoryGB(): Promise<number | null> {
 // FxSound：AllUsers 启动文件夹快捷方式
 const FX_LINK = 'C:\\Program Files\\FxSound LLC\\FxSound\\FxSound.exe';
 // 公共启动目录：优先 native SHGetKnownFolderPath；兜底 PowerShell（旧 exe 兼容）
-async function commonStartupDir(): Promise<string> {
+async function commonStartupDir(options: { strict?: boolean } = {}): Promise<string> {
   const si = await nativeSysInfo();
   if (si && si.commonStartup) return si.commonStartup;
   const r = await shell.run('powershell', [
@@ -3266,14 +3543,19 @@ async function commonStartupDir(): Promise<string> {
     '-Command',
     '[Environment]::GetFolderPath("CommonStartup")',
   ]);
+  if (options.strict && r.exitCode !== 0) throw new Error('公共启动目录读取失败，未确认开机入口状态');
   return (r.stdout || '').trim();
 }
-export async function fxExists(): Promise<boolean> {
+export async function fxExists(options: { strict?: boolean } = {}): Promise<boolean> {
   try {
-    const dir = await commonStartupDir();
-    if (!dir) return false;
+    const dir = await commonStartupDir(options);
+    if (!dir) {
+      if (options.strict) throw new Error('公共启动目录未确认');
+      return false;
+    }
     return fs.exists(`${dir}\\FxSound.lnk`);
-  } catch {
+  } catch (error) {
+    if (options.strict) throw error;
     return false;
   }
 }
@@ -3488,8 +3770,9 @@ export async function steamMasterOn(): Promise<boolean> {
   if (state.conflict) throw new Error('.earlystart 中有其他自定义命令，已保留');
   return state.enabled === true;
 }
-export async function steamMasterSet(on: boolean, repairCommand = false): Promise<void> {
-  const result = await invoke<{ok:boolean;enabled:boolean;service?:{ok?:boolean;known:boolean;installed:boolean;automatic:boolean;running:boolean;reason?:string;win32Error?:number}}>('steam.startup.set', { enabled: on, ...(repairCommand ? { repairCommand: true } : {}) }, { timeoutMs: 6000 });
+export async function steamMasterSet(on: boolean, repairCommand = false, options: BootPreferenceWrite = {}): Promise<void> {
+  const submitted = captureBootPreferenceWrite(options);
+  const result = await invoke<{ok:boolean;enabled:boolean;service?:{ok?:boolean;known:boolean;installed:boolean;automatic:boolean;running:boolean;reason?:string;win32Error?:number}}>('steam.startup.set', { enabled: on, ...(repairCommand ? { repairCommand: true } : {}), ...(submitted.origin ? { origin: submitted.origin } : {}), ...(submitted.bootContext ? { bootContext: submitted.bootContext } : {}) }, { timeoutMs: 6000 });
   if (result?.ok !== true || result.enabled !== on) throw new Error('Steam 开机启动设置未确认');
   if (on && (!result.service || result.service.ok !== true)) {
     const state=result.service;
@@ -3498,18 +3781,35 @@ export async function steamMasterSet(on: boolean, repairCommand = false): Promis
   }
 }
 export async function steamRunning(): Promise<boolean> {
+  // Presence is a Steam fact, even when an older host cannot report UI mode.
+  const mask = 4;
+  try {
+    const facts = await invoke<{ available: boolean; version: number; requested: number; presence: number }>(
+      'steamInformation.get', { mask }, { timeoutMs: 5000 });
+    if (facts?.available === true && facts.version === 1 && facts.requested === mask &&
+        (facts.presence === 0 || facts.presence === 1)) return facts.presence === 1;
+    throw new Error('Steam 运行状态验证失败，请稍后重试');
+  } catch (error) {
+    if (!/^(?:unknown|unknown ipc cmd): steamInformation\.get$/i.test(String((error as Error)?.message))) throw error;
+  }
   const p = await nativeProcRunning(['steam']);
   if (!p) throw new Error('Steam 运行状态验证失败，请稍后重试');
   return p['steam'];
 }
-export async function steamStop(): Promise<void> {
-  await shell.run('taskkill', ['/F', '/IM', 'Steam.exe']);
+export async function steamStop(state: import('./steamUi').SteamUiState, intent: { userInitiated: true }): Promise<void> {
+  // Compatibility export delegates to the existing exact-client owner. The
+  // lazy import keeps yeman/steamUi module initialization independent.
+  const { steamUi } = await import('./steamUi');
+  await steamUi.shutdown(state, intent);
 }
 let steamLaunchInFlight = false;
 /** Only an actual in-flight command blocks another explicit launch. No time-based cooldown. */
 export function steamLaunchPending(): boolean { return steamLaunchInFlight; }
-export async function launchSteam(options?: { userInitiated: true; isCurrent?:()=>boolean }): Promise<void> {
+export async function launchSteam(options?: { userInitiated: true; isCurrent?:()=>boolean; selectedExecutable?:string }): Promise<void> {
   if (options?.userInitiated !== true) throw new Error('Steam 只允许手动启动，不恢复上次启动操作');
+  const selectedExecutable = options.selectedExecutable;
+  if (selectedExecutable !== undefined && (typeof selectedExecutable !== 'string' || !/(?:^|[\\/])steam\.exe$/i.test(selectedExecutable)))
+    throw new Error('Steam 启动路径无效');
   const checkpoint = () => { if (options.isCurrent && !options.isCurrent()) throw new Error('Steam 启动请求已取消或过期'); };
   checkpoint();
   if (steamLaunchInFlight) throw new Error('上一轮 Steam 启动请求尚未结束，请稍后确认');
@@ -3518,7 +3818,19 @@ export async function launchSteam(options?: { userInitiated: true; isCurrent?:()
     // Native rechecks presence under the shared transaction lock. A separate
     // frontend process/CDP read only delays the user's explicit cold start.
     checkpoint();
-    const result = await invoke<{ok:boolean;reason?:string}>('steam.ui.launch', { userInitiated: true }, { timeoutMs: 10000 });
+    const result = await invoke<{ok:boolean;reason?:string}>('steam.ui.launch', selectedExecutable === undefined ? { userInitiated: true } : { userInitiated: true, selectedExecutable }, { timeoutMs: 10000 });
     if (result?.ok !== true) throw new Error('Steam 启动未发出：' + (result?.reason || '原生组件未确认，请更新 YMCC'));
   } finally { steamLaunchInFlight = false; }
+}
+
+/** Explicit linked-program action. Only a literal Steam executable joins the Steam owner. */
+export async function launchSteamAddon(executable:string, options?:{userInitiated:true;isCurrent?:()=>boolean}):Promise<boolean> {
+  if (options?.userInitiated !== true) throw new Error('联动程序只允许手动启动');
+  if (options.isCurrent && !options.isCurrent()) throw new Error('启动请求已取消或过期');
+  if (/(?:^|[\\/])steam\.exe$/i.test(executable)) {
+    await launchSteam({ ...options, selectedExecutable:executable });
+    return true;
+  } else {
+    return await shell.execute(executable, []);
+  }
 }

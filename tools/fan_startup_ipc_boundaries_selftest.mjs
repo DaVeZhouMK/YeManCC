@@ -5,11 +5,23 @@ import vm from 'node:vm';
 import {webcrypto,createHash} from 'node:crypto';
 import {build} from 'esbuild';
 const project=path.resolve(import.meta.dirname,'..'),out=process.argv[2];
+if(process.argv.length>6)throw Error('Unexpected Fan startup arguments');
 if(!out)throw new Error('Evidence directory required');
 fs.mkdirSync(out,{recursive:true});
-const bundle=await build({stdin:{contents:"export {fs,shell,app} from './src/bridge/api';export {setLogSink} from './src/bridge/ipc';export {NativeFanHostLauncher,resolveFanHostConfig,fanStartupIpcForSelfTest} from './src/bridge/fanHost';",resolveDir:project,sourcefile:'fan-startup-ipc-fixture-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanBoundary',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:[{name:'expose-private-startup-facade-only-in-test',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:fanHost|api)\.ts$/},args=>{const base=process.argv[3];const source=base?path.join(base,path.basename(args.path)):args.path;let contents=fs.readFileSync(source,'utf8');if(path.basename(args.path)==='fanHost.ts')contents+='\nexport const fanStartupIpcForSelfTest={fs,app,shell,proc};\n';return {contents,loader:'ts',resolveDir:path.dirname(args.path)};});}}]});
+const bundle=await build({stdin:{contents:"export {fs,shell,app} from './src/bridge/api';export {setLogSink} from './src/bridge/ipc';export {NativeFanHostLauncher,resolveFanHostConfig,fanStartupIpcForSelfTest} from './src/bridge/fanHost';",resolveDir:project,sourcefile:'fan-startup-ipc-fixture-entry.ts'},bundle:true,metafile:true,write:false,format:'iife',globalName:'FanBoundary',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:[{name:'expose-private-startup-facade-only-in-test',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:fanHost|api)\.ts$/},args=>{const base=process.argv[3];const source=base?path.join(base,path.basename(args.path)):args.path;let contents=fs.readFileSync(source,'utf8');if(path.basename(args.path)==='fanHost.ts')contents+='\nexport const fanStartupIpcForSelfTest={fs,app,shell,proc};\n';return {contents,loader:'ts',resolveDir:path.dirname(args.path)};});}}]});
 const code=bundle.outputFiles[0].text;
 const TOKEN='0123456789abcdef'.repeat(4),EXE='C:\\fixture\\fan-host\\YeManFanHost.exe',PID=10571;
+const sharedProfileAiOnly=process.argv[4]==='--shared-profile-ai-only';
+const sharedProfileOnly=process.argv[4]==='--shared-profile-only'||sharedProfileAiOnly;
+if(process.argv[4]!==undefined&&!sharedProfileOnly)throw Error('Unknown exact startup selection');
+// Optional actual Native self-query receipt for the same existing profile cases.
+// The independent Win32 reference supplies health's expected parent; Native's
+// original IPC result supplies the queried parent, including a real rejection.
+const nativeSelfPath=process.argv[5];
+if(nativeSelfPath&&process.argv[4]!=='--shared-profile-only')throw Error('Native self receipt requires exact shared-profile selection');
+const nativeSelf=nativeSelfPath?JSON.parse(fs.readFileSync(nativeSelfPath,'utf8').replace(/^\uFEFF/,'')):null;
+if(nativeSelf){assert.equal(nativeSelf.kind,'fan-native-self-identity-v1');assert.equal(nativeSelf.expectedSelf?.valid,true);assert(Number.isSafeInteger(nativeSelf.expectedSelf.pid)&&nativeSelf.expectedSelf.pid>4);assert.equal(nativeSelf.self?.pid,nativeSelf.expectedSelf.pid);assert.equal(typeof nativeSelf.self.valid,'boolean');}
+const PARENT=nativeSelf?.expectedSelf??{valid:true,pid:1,path:'C:\\fixture\\YeManCC.exe',processCreated:'133001111111111110'};
 function fixture(options={}){
  let now=0,id=0,listener;const timers=new Map(),calls=[],logs=[];let drop=options.drop??null;let dropsRemaining=options.dropCount??Infinity,dropSeen=0;let authStatus=options.authStatus??200;let resident=options.resident!==false;
  const timer=(fn,delay)=>{const key=++id;timers.set(key,{fn,at:now+Math.max(0,Number(delay))});return key;};
@@ -23,17 +35,18 @@ function fixture(options={}){
   let result;
   if(cmd==='app.aiFanMockSession')result={schemaVersion:1,enabled:false};
   else if(cmd==='app.fanStateDir'||cmd==='app.dataDir')result='C:\\fixture-state';
-  else if(cmd==='app.pid')result=1;
-  else if(cmd==='fs.exists')result=String(args.path).toLowerCase().endsWith('yemanfanhost.exe')||args.path==='fixture';
+  else if(cmd==='app.pid')result=options.parentPid??PARENT.pid;
+  else if(cmd==='fs.exists')result=(String(args.path).toLowerCase().endsWith('yemanfanhost.exe')||String(args.path).endsWith('YeManFanHost.payload.json'))||args.path==='fixture'||(String(args.path).endsWith('YeManFanHost.session')&&content.length>0);
   else if(cmd==='fs.mkdir'||cmd==='fs.writeTextFileAtomic')result=options.atomicFalse?false:true;
-  else if(cmd==='fs.readTextFile')result=content; // exact current native semantics: ignores maxBytes.
-  else if(cmd==='fs.readTextRange')result=options.rangeReply??{content:Buffer.from(content).subarray(0,args.maxBytes).toString('utf8'),offset:0,size:Buffer.byteLength(content)};
+  else if(cmd==='fs.readTextFile')result=String(args.path).endsWith('YeManFanHost.payload.json')?(options.manifestContent??JSON.stringify({files:[{path:'YeManFanHost.dll',sha256:'a'.repeat(64)}]})):content;
+  else if(cmd==='fs.readTextRange'){const raw=String(args.path).endsWith('YeManFanHost.payload.json')?(options.manifestContent??JSON.stringify({files:[{path:'YeManFanHost.dll',sha256:'a'.repeat(64)}]})):content;result=options.rangeReply??{content:Buffer.from(raw).subarray(0,args.maxBytes).toString('utf8'),offset:0,size:Buffer.byteLength(raw)};}
   else if(cmd==='proc.findExact')result={found:resident,pid:resident?PID:0};
-  else if(cmd==='process.identity')result={valid:true,pid:PID,path:options.foreign?'C:\\\\foreign\\\\Other.exe':EXE,processCreated:'133001111111111111'};
+  else if(cmd==='process.identity')result=args.pid===PARENT.pid?(nativeSelf?.self??PARENT):{valid:true,pid:PID,path:options.foreign?'C:\\\\foreign\\\\Other.exe':EXE,processCreated:'133001111111111111'};
   else if(cmd==='http.request'&&!resident){deliver(message,null,'connect ECONNREFUSED');return;}
-  else if(cmd==='http.request')result={status:authStatus,body:JSON.stringify({ok:true,state:{state:'Ready'}}),headers:''};
+  else if(cmd==='http.request')result={status:authStatus,body:JSON.stringify({ok:true,host:'YeManFanHost',protocolVersion:2,
+    sharedPowerBusiness:options.noProfile?undefined:{profile:'native-f5-deadline-v1',hostPid:PID,hostProcessCreated:'133001111111111111',hostPath:EXE,hostAssemblySha256:'a'.repeat(64),hostAssemblyMvid:'00112233-4455-6677-8899-aabbccddeeff',parentPid:PARENT.pid,parentProcessCreated:PARENT.processCreated,parentPath:PARENT.path,...options.profileOverride},state:{state:'Ready'}}),headers:''};
   else if(cmd==='shell.run')result={exitCode:0,stdout:' TCP 127.0.0.1:8765 0.0.0.0:0 LISTENING '+PID,stderr:''};
-  else if(cmd==='shell.hidden')result={ok:true,pid:PID};
+  else if(cmd==='shell.hidden'){resident=true;result={ok:true,pid:PID};}
   else if(cmd==='app.fanActivity'||cmd==='app.fanLifecycleEvidence')result=null;
   else{deliver(message,null,'unexpected command: '+cmd);return;}
   deliver(message,result);
@@ -47,7 +60,7 @@ function fixture(options={}){
  return {api,calls,logs,timers,advance,flush,observe,setDrop:value=>drop=value,setResident:value=>resident=value};
 }
 const results=[];
-async function check(name,run){try{await run();results.push({name,ok:true});console.log('PASS '+name)}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error)}}
+async function check(name,run){if((sharedProfileAiOnly&&!name.startsWith('shared-profile-ai:'))||(sharedProfileOnly&&!sharedProfileAiOnly&&!name.startsWith('shared-profile:')))return;try{await run();results.push({name,ok:true});console.log('PASS '+name)}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error)}}
 for(const [command,deadline] of [['fs.exists',5000],['fs.mkdir',15000]])await check('actual launcher retires missing '+command+' reply and next authenticated resident retry succeeds',async()=>{
  const f=fixture({drop:command,resident:false});const launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');config.hostExecutable=EXE;config.hostDirectory='C:\\fixture\\fan-host';config.sessionToken=TOKEN;
  const pending=f.observe(launcher.start(config));await f.flush();assert(f.calls.some(c=>c.cmd===command),'fault injection reached actual launcher');await f.advance(deadline+1);assert.equal(pending.status,'rejected','startup remained pending after its deadline');assert.match(pending.error,/IPC command timed out/);assert.equal(f.timers.size,0);assert(!f.calls.some(c=>c.cmd==='shell.hidden'),'missing prerequisite cannot launch');
@@ -117,7 +130,7 @@ for(const options of [{authStatus:401},{foreign:true,authStatus:503,authStatusAf
 await check('unknown second resident query cannot rotate a previously missing credential',async()=>{
  const f=fixture({drop:'proc.findExact',dropAfter:1,resident:false,content:''}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');config.hostExecutable=EXE;config.hostDirectory='C:\\fixture\\fan-host';config.sessionToken=undefined;
  let deployment=0;launcher.ensureFanHostDeployment=async()=>{deployment++};const p=f.observe(launcher.start(config));await reachProcessLookup(f,2);await f.advance(5001);for(let n=0;n<200&&p.status==='pending';n++)await f.flush();
- assert.equal(p.status,'rejected');assert.equal(deployment,1,'first explicit absent reply may enter deployment');assert.equal(f.calls.filter(c=>c.cmd==='proc.findExact').length,2);assert.equal(typeof config.sessionToken,'undefined','unknown process query minted a new token');assert(!f.calls.some(c=>c.cmd==='fs.writeTextFileAtomic'||c.cmd==='shell.hidden'||c.cmd.startsWith('process.terminate')));assert.equal(f.timers.size,0);
+ assert.equal(p.status,'rejected');assert.equal(deployment,1,'first explicit absent reply may enter deployment');assert.equal(f.calls.filter(c=>c.cmd==='proc.findExact').length,2);assert.equal(config.sessionToken??'','','unknown process query minted a new token');assert(!f.calls.some(c=>c.cmd==='fs.writeTextFileAtomic'||c.cmd==='shell.hidden'||c.cmd.startsWith('process.terminate')));assert.equal(f.timers.size,0);
 });
 await check('explicit process-query error stays unknown rather than absent and never deploys',async()=>{
  const f=fixture({rejectCommand:'proc.findExact',nativeError:'inert-process-query-access-denied',authStatus:503}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');config.hostExecutable=EXE;config.hostDirectory='C:\\fixture\\fan-host';config.sessionToken=TOKEN;
@@ -125,6 +138,63 @@ await check('explicit process-query error stays unknown rather than absent and n
 });
 await check('atomic false acknowledgement still rejects and is never accepted as a completed write',async()=>{const f=fixture({atomicFalse:true});const p=f.observe(f.api.fanStartupIpcForSelfTest.fs.writeTextFileAtomic('fixture',TOKEN,15000));await f.flush();assert.equal(p.status,'rejected');assert.match(p.error,/原子写入失败/);});
 await check('unrelated callers keep the existing default wait and whole-file command',async()=>{const f=fixture({drop:'fs.exists'});const p=f.observe(f.api.fs.exists('fixture'));await f.advance(50001);assert.equal(p.status,'pending');assert.equal(f.timers.size,0);const other=fixture({content:'abc'}),q=other.observe(other.api.fs.readTextFile('fixture',4096));await other.flush();assert.equal(q.status,'fulfilled');assert.equal(other.calls[0].cmd,'fs.readTextFile');});
+
+// The original startup consumer and native port; only this exact new boundary selection.
+async function sharedStart(options={},cold=false){
+ const f=fixture({...options,resident:cold?false:options.resident}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');
+ config.hostExecutable=EXE;config.hostDirectory='C:\\fixture\\fan-host';config.sessionToken=TOKEN;
+ let deployments=0;launcher.ensureFanHostDeployment=async()=>{deployments++};
+ const p=f.observe(launcher.start(config));for(let n=0;n<220&&p.status==='pending';n++)await f.flush();
+ // A real self-query refusal reaches the launcher's existing exact-child cleanup.
+ // Settle its original 4s observation window before checking the startup result.
+ if(nativeSelf&&cold&&p.status==='pending')await f.advance(4001);
+ return {f,p,deployments};
+}
+await check('shared-profile: cold launch fixes profile and real PID in original hidden argv',async()=>{
+ const {f,p}=await sharedStart({},true);assert.equal(p.status,'fulfilled',p.error??'cold start pending');
+ const launches=f.calls.filter(x=>x.cmd==='shell.hidden');assert.equal(launches.length,1);
+ const argv=launches[0].args.args;assert(Array.isArray(argv),'original shell args missing');
+ assert.equal(argv[argv.indexOf('--parent-pid')+1],String(PARENT.pid));
+ assert.equal(argv[argv.indexOf('--shared-power-business-profile')+1],'native-f5-deadline-v1');
+ assert(!argv.includes('--parent-process'));assert.equal(f.timers.size,0);
+});
+await check('shared-profile: valid warm exact package reattaches without deployment or launch',async()=>{
+ const {f,p,deployments}=await sharedStart();assert.equal(p.status,'fulfilled',p.error??'warm pending');
+ assert.equal(p.value.adopted,true);assert.equal(deployments,0);
+ assert(!f.calls.some(x=>x.cmd==='shell.hidden'||x.cmd.startsWith('process.terminate')||x.args.url?.endsWith('/api/close')));
+});
+for(const [label,options] of [
+ ['old Host no profile',{noProfile:true}],
+ ['different parent birth',{profileOverride:{parentProcessCreated:'133001111111111109'}}],
+ ['different Host birth',{profileOverride:{hostProcessCreated:'133001111111111112'}}],
+ ['different loaded package',{profileOverride:{hostAssemblySha256:'b'.repeat(64)}}],
+ ['different parent PID',{profileOverride:{parentPid:7}}],
+ ['missing package declaration',{manifestContent:'{"files":[]}'}],
+])await check('shared-profile: '+label+' rejects without closing old owner',async()=>{
+ const {f,p,deployments}=await sharedStart(options);assert.equal(p.status,'rejected');
+ assert.match(p.error,/FAN_SHARED_POWER_PAIR_REQUIRED/);assert.equal(deployments,0);
+ assert(!f.calls.some(x=>x.cmd==='shell.hidden'||x.cmd.startsWith('process.terminate')||/\/api\/(?:close|shutdown|parent-exit)$/.test(x.args.url??'')));
+});
+await check('shared-profile: missing Native PID never guesses a named parent or launches',async()=>{
+ const {f,p}=await sharedStart({parentPid:0},true);assert.equal(p.status,'rejected');assert.match(p.error,/FAN_SHARED_POWER_PARENT_PID_REQUIRED/);
+ assert(!f.calls.some(x=>x.cmd==='shell.hidden'||x.cmd.startsWith('process.terminate')));
+});
+
+await check('shared-profile-ai: native mock readiness keeps its existing nonproduction contract',async()=>{
+ const f=fixture({noProfile:true}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');
+ config.sessionToken=TOKEN;config.aiMockSession={};const p=f.observe(launcher.waitForReady(config));await f.flush();
+ assert.equal(p.status,'fulfilled',p.error??'mock readiness stalled');
+ assert.equal(f.calls.filter(x=>x.cmd==='http.request').length,1);
+ assert(!f.calls.some(x=>x.cmd==='app.pid'||x.cmd==='shell.hidden'||x.cmd==='process.identity'));
+});
+await check('shared-profile-ai: missing real launch owner cannot borrow mock readiness',async()=>{
+ const f=fixture(),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');
+ config.sessionToken=TOKEN;const p=f.observe(launcher.waitForReady(config));await f.flush();
+ assert.equal(p.status,'rejected');assert.match(p.error,/FAN_SHARED_POWER_PAIR_REQUIRED/);
+ assert(!f.calls.some(x=>x.cmd==='shell.hidden'||x.cmd.startsWith('process.terminate')));
+});
 const hash=file=>createHash('sha256').update(fs.readFileSync(process.argv[3]&&/\/(api|fanHost)\.ts$/.test(file)?path.join(process.argv[3],path.basename(file)):path.join(project,file))).digest('hex');
-const report={ok:results.every(r=>r.ok),checks:results.length,failed:results.filter(r=>!r.ok).length,results,source:{api:hash('src/bridge/api.ts'),fanHost:hash('src/bridge/fanHost.ts'),ipc:hash('src/bridge/ipc.ts')},scope:'Actual bundled API/native launcher/IPC, scratch-only exposure of private Fan facade, virtual timer and selective missing native replies; native port is replaced; the lost-launch case substitutes only deployment metadata; no real file/process/device writes or CPU timing',hardwareCalls:0,cpuBenchmark:false};
+const virtualInputs=Object.keys(bundle.metafile.inputs).filter(f=>f==='fan-startup-ipc-fixture-entry.ts'||f==='<define:import.meta.env>');
+const actualInputs=Object.keys(bundle.metafile.inputs).filter(f=>!virtualInputs.includes(f)).map(f=>({path:f,sha256:hash(f)}));
+const report={actualInputs,virtualInputs,nativeSelfIdentityInput:nativeSelfPath?{path:path.resolve(nativeSelfPath),sha256:createHash('sha256').update(fs.readFileSync(nativeSelfPath)).digest('hex'),self:nativeSelf.self,reference:nativeSelf.expectedSelf}:null,ok:results.every(r=>r.ok),checks:results.length,failed:results.filter(r=>!r.ok).length,results,source:{api:hash('src/bridge/api.ts'),fanHost:hash('src/bridge/fanHost.ts'),ipc:hash('src/bridge/ipc.ts')},scope:'Actual bundled API/native launcher/IPC, scratch-only exposure of private Fan facade, virtual timer and selective missing native replies; native port is replaced, except optional self-query facts consumed from a separately compiled original Native handler receipt; that reference is not a live parent/Host composition; the lost-launch case substitutes only deployment metadata; no real file/process/device writes or CPU timing',hardwareCalls:0,cpuBenchmark:false};
 fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({ok:report.ok,checks:report.checks,failed:report.failed}));if(!report.ok)process.exitCode=1;

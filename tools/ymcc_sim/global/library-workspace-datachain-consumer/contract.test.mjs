@@ -64,7 +64,13 @@ test('missing newly produced output is control failure',()=>{
   const reevaluated=evaluateCase(plan,receipt.child);assert.equal(reevaluated.semanticDetected,false);assert.ok(reevaluated.controlFailures.includes('FRESH_REPORT_OR_TRACE_MISSING'));assert.equal(verifyReceipt(receipt),false);
 });
 test('output tamper invalidates the receipt even if stdout is also forged',()=>{
-  const plan=next(),receipt=executeCase(plan);assert.equal(receipt.accepted,true);fs.appendFileSync(plan.report,' ');fs.appendFileSync(path.join(plan.caseDir,'stdout.txt'),' ');assert.equal(verifyReceipt(receipt),false);
+  const plan=next(),receipt=executeCase(plan);assert.equal(verifyReceipt(receipt),true);
+  assert.equal(verifyReceipt({accepted:true,sourceBefore:[],vmInputBefore:[],toolBefore:[],outputAfter:[]}),false);
+  assert.equal(verifyReceipt({...receipt,outputAfter:receipt.outputAfter.filter(row=>path.basename(row.path)!=='trace.json')}),false);
+  assert.equal(verifyReceipt({...receipt,outputAfter:[...receipt.outputAfter.slice(1),receipt.outputAfter[1]]}),false);
+  assert.equal(verifyReceipt({...receipt,vmInputAfter:[]}),false);
+  assert.equal(verifyReceipt({...receipt,controlStatus:'FAIL'}),false);
+  fs.appendFileSync(plan.report,' ');fs.appendFileSync(path.join(plan.caseDir,'stdout.txt'),' ');assert.equal(verifyReceipt(receipt),false);
 });
 test('incomplete VM and non-assertion failures cannot count as detection',()=>{
   const receipt=baseline.receipts[1],report=json(path.join(receipt.caseDir,'Build/CustomSteamLibrary/ui-datachain-summary.json')),trace=json(path.join(receipt.caseDir,'trace.json'));
@@ -80,6 +86,9 @@ test('forwarded output ancestor is rejected before producer execution',()=>{
 });
 test('timeout cannot count as the expected named assertion failure',()=>{
   const plan=next(spec.faults[0].id),receipt=executeCase(plan);assert.equal(receipt.semanticDetected,true);
+  assert.equal(verifyReceipt(receipt),true);
+  assert.equal(verifyReceipt({...receipt,child:{...receipt.child,exitCode:0}}),false);
+  assert.equal(verifyReceipt({...receipt,originalResult:{allPassed:true,caseCount:spec.caseNames.length,failed:[]}}),false);
   const reevaluated=evaluateCase(plan,{...receipt.child,exitCode:null,signal:'SIGTERM',error:{code:'ETIMEDOUT'}});assert.equal(reevaluated.semanticDetected,false);assert.ok(reevaluated.controlFailures.includes('CHILD_EXECUTION_INCOMPLETE'));
 });
 test('VM source changes after execution invalidate saved receipts',()=>{

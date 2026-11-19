@@ -45,7 +45,7 @@ try{
   await fresh(family);await page.evaluate(()=>window.__fanRemount());await page.waitForTimeout(30);
   const pending=await snap();assert.match(pending.button,/开启中|正在开启|取消开启/,'new page must display the existing ON request rather than offer a second ON');
   assert.equal(pending.active,false,'pending intent is not physical/live control');
-  await page.evaluate(()=>window.__chain.releaseGate());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启',null,{timeout:1500});
+  await page.evaluate(()=>window.__chain.releaseGate());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭',null,{timeout:1500});
   const s=await snap();for(const op of ['launch','Open','OpenEvents','acquire','enable'])assert.equal(s.trace.filter(r=>r.op===op).length,1,'exactly one '+op);
  });
  await check('latest curve edited in the remounted view is used by the one pending owner',async()=>{
@@ -53,7 +53,7 @@ try{
   const legacy=page.locator('.node-card input');
   if(await legacy.count()){const duty=legacy.nth(1);await duty.fill('80');await duty.dispatchEvent('change');}
   else {await page.getByRole('button',{name:'节点 1 转速',exact:true}).click();await page.getByRole('option',{name:'80 %',exact:true}).click();}
-  await page.evaluate(()=>window.__chain.releaseGate());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启',null,{timeout:1500});
+  await page.evaluate(()=>window.__chain.releaseGate());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭',null,{timeout:1500});
   const writes=(await snap()).trace.filter(r=>r.op==='enable');assert.equal(writes.length,1);assert.equal(writes[0].nodes[0].dutyPercent,80);
  });
  await check('external OFF can cancel a remounted pending ON and later manual start remains reachable',async()=>{
@@ -61,16 +61,16 @@ try{
   assert.match((await snap()).button,/开启中|正在开启|取消开启/);
   assert.equal(await page.locator('.fan-toggle').isDisabled(),true);
   await page.evaluate(()=>{window.__pendingOff=window.__chain.lifecycle.disable();window.__chain.releaseGate();});await page.evaluate(()=>window.__pendingOff);
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控'&&!document.querySelector('.fan-toggle').disabled);
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用'&&!document.querySelector('.fan-toggle').disabled);
   assert.equal((await snap()).trace.filter(r=>r.op==='enable').length,0,'cancelled old request cannot write');
-  await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   assert.equal((await snap()).trace.filter(r=>r.op==='enable').length,1);
  });
  await check('failed original ON retires shared admission and next manual ON remains reachable',async()=>{
   await fresh('ClawCG3EM');await page.evaluate(()=>window.__fanRemount());await page.waitForTimeout(30);
   await page.evaluate(()=>{window.__chain.fault=true;window.__chain.releaseGate();});
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控'&&!document.querySelector('.fan-toggle').disabled);
-  await page.evaluate(()=>{window.__chain.fault=false;});await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用'&&!document.querySelector('.fan-toggle').disabled);
+  await page.evaluate(()=>{window.__chain.fault=false;});await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   assert.equal((await snap()).trace.filter(r=>r.op==='enable').length,1);
  });
  assert.deepEqual(errors,[]);

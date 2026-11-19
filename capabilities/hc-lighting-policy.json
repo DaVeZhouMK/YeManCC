@@ -210,7 +210,7 @@
         {
           "role": "entry",
           "path": "FanLab/LightSetter/Program.cs",
-          "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+          "sha256": "d662e3ba94a09a71221b9c918a6acf1cca065261e72d9c2fd758eab17ee84876"
         },
         {
           "role": "owner",
@@ -526,5 +526,44 @@
       "source": "native/main.cpp",
       "reason": "Retain the reviewed in-process MSI command-interface HID writer; exact model registration replaces family-only dispatch"
     }
-  ]
+  ],
+  "ayaOemOwnership": {
+    "schemaVersion": 1,
+    "family": "AYANEO",
+    "releaseMethod": "CEcControl_RgbReleaseControl",
+    "holdMethod": "CEcControl_RgbHoldControl",
+    "protocolOwners": [
+      {
+        "name": "AYANEODeviceCEc",
+        "protocol": "legacy-cec",
+        "runtimeType": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+        "sourceFile": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEc.cs",
+        "sourceSha256": "616524c9faa5ba662790a99a71014bc9eeca0c9cdb73f95d95ab3c9c2c759cd7",
+        "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a",
+        "holdMethodSha256": "82234ef04e32d52d85f3514fa184c3ae107a76cc87cb43c1aa9ecef502af0f32"
+      },
+      {
+        "name": "AYANEODeviceCEii",
+        "protocol": "ceii-ram",
+        "runtimeType": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+        "sourceFile": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEii.cs",
+        "sourceSha256": "feb01143a9c1cf31ffd7f39dbba083e01086b5703d42028e49dd1dbbfa24b95d",
+        "releaseMethodSha256": "8fac56a1154b1c7e598910b09e8e1395c1c98d95c0d81efcf9c9e8d511e3ce3d",
+        "holdMethodSha256": "29177149ee6f4281eec4edb83b71549854fdc28a78c077b3540e0d2c60002d32"
+      }
+    ],
+    "sharedChargeTopology": [
+      {
+        "device": "AYANEOAIR",
+        "source": "https://cdn.ayaneo.com/ayaneo%2Fdownloads%2FAYANEO%20AIR%20%E8%AF%B4%E6%98%8E%E4%B9%A6%E6%8C%87%E5%BC%95_20220808.pdf",
+        "scope": "AIR manual page 6; shared joystick charging display, not family-wide firmware acceptance"
+      },
+      {
+        "device": "AYANEOSlide",
+        "source": "https://www.ayaneo.com/product/AYANEO-SLIDE.html",
+        "scope": "SLIDE official product description; shared joystick charging display"
+      }
+    ],
+    "physicalEffectVerified": false
+  }
 }

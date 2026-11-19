@@ -22,9 +22,31 @@
 
 `-Tier minimal` 为默认；`-Tier module` 选择这个模块原登记的全部用例，应先生成计划。`-Tests` 和模块最小集合可以共同选择，重复ID按原定义合并，定义冲突会拒绝。未知ID、模块、空profile交集或证据目录越出G核心层不能悄悄变成通过。 明确指定的`-Tests`中任一ID不受当前profile支持，也会在加载工厂前拒绝并列出原ID；不把混合列表静默裁成子集，不自动切到full或扩大执行范围。模块选择继续沿原profile交集规则。
 
+### 手柄唤醒的原定向入口
+
+原 `controller.unified-standard-input` 可显式选择已存在的 `resume-only` 消费者，
+不启动整套输入父门，也不改变模块 minimum 或普通发布。核心入口原 `ExtraArgs` 直接转发：
+
+```powershell
+& G:\YeManCC-Work\Testing\YMCC\Run.ps1 -Optimized -Mode plan `
+  -Tests controller.unified-standard-input `
+  -ExtraArgs @('--input-resume-only','--input-resume-case','keep-resubscription')
+```
+
+`keep-resubscription` 复用原场景集合：保留 writer 的注册、取消与去重边界，
+以及原 normal/注册失败控制。不是实际 Host、设备或完整睡眠验收。
+需要读取引用时使用 `-Mode run -ReferenceOnly`；缺失或未获缓存资格时只报 NOT_RUN，
+不回落执行。该新选择不因此自动获得通用缓存资格；只有明确需要重现时才加 `-Rerun`
+执行原消费者。默认不带这些参数的行为保持。
+
+固定候选可追加 `--MainFile <绝对路径> --expected-main-sha256 <64位小写SHA> `
+及 `--HeaderRoot <绝对目录>`；该目录必须包含三个原头文件：`sleep_power_dispatch.h`、
+`sleep_power_state.h` 和 `sleep_wake_admission.h`。三者均纳入选中用例的来源身份，缺项在准备阶段拒绝。
+未知选择、额外模块/ID、混用其它候选、Full 或缺源 pin 均拒绝。
+
 `modules.json` 登记18个模块的最小入口，每个通常一至两个原ID。它是快速定位的局部集合，不是该模块完整能力、native生命周期、真实睡眠或设备验收。完整验收保留原始要求，不能用最小集替代。
 
-身份包括真实文件及工具SHA256、执行参数、配置、实际bundle依赖、工具图和解析目录成员。TypeScript复用原登记审过的依赖图，并消费原执行器采集的完整工具/实际导入闭包；纯Node仅三个已审查的源码合同允许缓存。其余动态Node/PowerShell/外部工具链保持 `NOT_RUN_UNPROVEN_CLOSURE`，需补齐闭包或明确 `-Rerun` 才执行该项，不自动触发大门。可缓存范围是明确限制，不冒称所有legacy夹具已经完成增量化。
+身份包括真实文件及工具SHA256、执行参数、配置、实际bundle依赖、工具图和解析目录成员。TypeScript复用原登记审过的依赖图，并消费原执行器采集的完整工具/实际导入闭包；纯Node源码合同仅三个已审查入口允许缓存，另有原wire、PreHost和下述Host protocol的独立限域消费合同。其余动态Node/PowerShell/外部工具链保持 `NOT_RUN_UNPROVEN_CLOSURE`，需补齐闭包或明确 `-Rerun` 才执行该项，不自动触发大门。可缓存范围是明确限制，不冒称所有legacy夹具已经完成增量化。
 
 索引在核心层 `State/ExecutionCache/<原ID>.json`，同ID每次更新同一索引；日志/实际回执继续写核心证据层。索引只引用原result、stdout/stderr、结构化回执和产物的路径/SHA。丢失、坏证据或身份漂移使引用失效；并发同ID持有锁时写NOT_RUN_BUSY，不重复开进程。遗留锁不自动按PID猜测删除。
 
@@ -38,11 +60,23 @@
 | `NOT_RUN_*` | 没有执行，原因保留 |
 | `INCOMPLETE_IDENTITY_DRIFT` | 运行中身份变了；旧原件保留，不能计通过 |
 
-`selectionMs` 是选择成本，`identityMs` 是初始身份/引用检查；每行 `durationMs` 是原adapter总成本（可能包含编译、执行和原证据校验），`wallMs` 是整轮总时间。父耗时包括子耗时，不能重复加总；当前原工具没有拆开的编译段继续记未知，不编造分段收益。
+`selectionMs` 是选择成本。显式 `plan` 的 `identityMs` 包括工具准备与身份/引用预查；普通 `run` 的 `identityMs` 只包括工具准备与计划行生成，`lockedIdentityMs` 单列原缓存锁内的执行前身份和引用核验。普通运行的计划标记 `CHECK_REFERENCE_UNDER_LOCK`，不提前宣称命中；最终以 `result.json` 为准。每行 `durationMs` 是原 adapter 总成本（可能包含编译、执行和原证据校验），`wallMs` 是整轮总时间。父耗时包括子耗时，不能重复加总；没有单列的编译段或执行后身份校验不冒充分段测量。
+
+### 原 Host 生命周期的增量引用
+
+`controller.host-lifecycle-protocol` 与 `controller.host-parent-lifetime` 分别沿原ID、原登记和原生产者消费证据，没有新增默认门。只加载显式选择的原描述符；protocol保留Release/Debug各19项及Dispose必要负例，parent保留各10项及取消缺失必要负例。两者身份、原件及发布前缓存收录分别核对；已结束且同源的原核心回执可沿只读消费者准入，无需为建索引重编译或重跑。protocol原legacy已知失败继续记录，不能把这些软件范围当成真实Host、SDK、设备或完整生命周期验收。
+
+缓存同时核源码/工具身份、嵌套输出、实际Csc输入、固定托管环境与SDK选择，以及原执行前后的resolver/自动response查找记录。parent另核其原双组查找记录、完整取消反例及-noAutoResponse构建参数。父Job自然归零后才写索引；旧记录缺启动前证明时不追认。`-ReferenceOnly` 缺证或漂移停在NOT_RUN，绝不回落启动生产者；有效引用写CACHED_REFERENCE，本轮执行/实际通过均为0。两ID不能相互借用通过。普通导出仍默认NOT_RUN。
 
 后续新增规则见同层上级 `FIXTURE-POLICY.md` 和 `AGENTS.md`。本轮没有运行完整验收或修改产品代码。
 
 <!-- PORTABLE-BUDGET-CONTROLS -->
+### 监控通知 Vue 分臂实跑引用
+
+仅在 `Run.ps1 -Optimized -ReferenceOnly -Mode run -Tests lifecycle.monitor-notice-real-renderer` 下，显式同时提供 `-MonitorRendererReferenceIntake <CLOSING-VUE-SPLIT.json>` 和 `-MonitorRendererReferenceIntakeSha256 <SHA-256>`。可先加 `-Route` 核对参数，不运行读者。
+
+引用分别核原正例 36 项和原负例 4 项的批准、冻结源码、构建身份、原始结果及内外层资源归还。结果 `FROZEN_ORIGINAL_REFERENCE` 仅证明这两份原始执行，不生成共同 `PREPARED`，不算当前主线、通用缓存、外层 Host 或父门通过。缺证或错配时拒绝引用，不回落到启动 EXE。当前执行与实际通过计数均为零；默认计划、业务执行及发布门不变。
+
 ## 预算执行器的定向维护入口
 
 源身份pre/post按64KiB原字节读取，在每文件／块前后检查同一截止。pre耗尽不启动worker；post耗尽保留内部真实结果，外层TIMEOUT且不报本轮通过。release共享额度在结束阶段超额时，外层返回124，内部Job成功与原receipt保持其真实值。单次同步文件操作、JSON解析／最终写入及锁释放仍不可抢占，不能把下列小组通过写成完整30分钟已经证明。

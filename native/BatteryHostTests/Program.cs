@@ -24,8 +24,9 @@ internal sealed class Ports(ushort expected,byte initial) : IEcAccess
 {
     public byte Value=initial;
     public int Writes;
+    public bool IgnoreWrite;
     public byte Read(ushort register){if(register!=expected)throw new Exception("wrong EC address space");return Value;}
-    public void Write(ushort register,byte value){if(register!=expected)throw new Exception("write outside reviewed EC address");Writes++;Value=value;}
+    public void Write(ushort register,byte value){if(register!=expected)throw new Exception("write outside reviewed EC address");Writes++;if(!IgnoreWrite)Value=value;}
     public void Dispose(){}
 }
 internal sealed class Oxp3WmiFixture : IOxp3WmiEc
@@ -108,17 +109,21 @@ internal sealed class Rig
     public Rig(string routeId="oxp-x1-amd-ec")
     {
         Route=Policy.Routes.First(r=>r.RouteId==routeId);
-        Id=new(Route.Identity.Manufacturers[0],Route.Identity.Field=="boardProduct"?Route.Identity.Values[0]:"board",Route.Identity.Field=="systemProduct"?Route.Identity.Values[0]:"system","AMD Ryzen HX 370","2.10",2,80);
+        Id=Route.RouteId==EcProvider.X2MiniProRouteId?X2MiniProFieldIdentity():
+            new(Route.Identity.Manufacturers[0],Route.Identity.Field=="boardProduct"?Route.Identity.Values[0]:"board",Route.Identity.Field=="systemProduct"?Route.Identity.Values[0]:"system","AMD Ryzen HX 370","2.10",2,80);
         Device=new(Route);Controller=New();
     }
     public Controller New()=>new(Id,Store,_=>{Opens++;return Device;},()=> (Present,Ac,Percent));
     public Snapshot Apply(int target)=>Controller.Apply(Controller.Read().Fence,target);
+    public static Identity X2MiniProFieldIdentity()=>new("ONE-NETBOOK","ONEXPLAYER X2Mini PRO","ONEXPLAYER X2Mini PRO","AMD RYZEN AI MAX+ 395 w/ Radeon 8060S","0.22",0,12);
 }
 internal static class Program
 {
     static int count,assertions;
     static string? selectedCase;
     static string? selectedPart;
+    static string? selectedResultPath;
+    static readonly List<object> msiAdmissionResults=[];
     static void Check(bool value,string reason="assertion failed"){assertions++;if(!value)throw new Exception(reason);}
     static void Test(string name,Action test)
     {
@@ -143,7 +148,7 @@ internal static class Program
     sealed class PowerToken(Action? dispose=null) : IDisposable
     {public void Dispose()=>dispose?.Invoke();}
     static JsonElement PowerEnvelope(object? pointer)=>JsonSerializer.SerializeToElement(new {nativePowerReader=pointer},Policy.Json);
-    static JsonElement PowerCall(InProcessRuntime runtime,string op,object? pointer=null,bool includePointer=false,string? fence=null,int? target=null)
+    static JsonElement PowerCall(InProcessRuntime runtime,string op,object? pointer=null,bool includePointer=false,string? fence=null,int? target=null,object? systemPointer=null)
     {
         var envelope=new Dictionary<string,object?>
         {
@@ -151,21 +156,251 @@ internal static class Program
             ["request"]=new {op,fence,target,protocol=RuntimeContract.Protocol,sourceId=RuntimeContract.SourceId}
         };
         if(includePointer)envelope["nativePowerReader"]=pointer;
+        if(systemPointer is not null)envelope["nativeSystemPowerReader"]=systemPointer;
         using var result=JsonDocument.Parse(runtime.Invoke(JsonSerializer.SerializeToUtf8Bytes(envelope,Policy.Json)));
         return result.RootElement.Clone();
     }
+
+    sealed class SystemPowerBoundaryProvider(Fake inner) : IChargeProvider
+    {
+        internal Action? AfterRead;
+        public bool CanReadLimit=>inner.CanReadLimit;
+        public Reading Read(){var value=inner.Read();var action=AfterRead;AfterRead=null;action?.Invoke();return value;}
+        public void Write(int value,Reading before)=>inner.Write(value,before);
+        public void Dispose(){}
+    }
+    static void SharedSystemPowerBoundaries()
+    {
+        Check(System.Runtime.InteropServices.Marshal.SizeOf<SharedSystemPowerV1>()==48,"shared power ABI size");
+        Check(System.Runtime.InteropServices.Marshal.OffsetOf<SharedSystemPowerV1>(nameof(SharedSystemPowerV1.SuspendSerial)).ToInt32()==40,"shared power serial offset");
+        var native=new PackedFacts{Value=PackedFacts.Pack()};
+        var current=new SharedSystemPowerV1{Size=48,Version=1,Generation=10,PublicationRevision=1,Flags=3};
+        int reads=0,owners=0,ownerCloses=0,timerCloses=0,eventCloses=0;bool coherent=true;
+        NativeSystemPowerReader.Callback reader=(ref SharedSystemPowerV1 value,uint bytes)=>{reads++;Check(bytes==48);value=current;return coherent?1:0;};
+        var address=((ulong)System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(reader)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var pending=new Queue<Action>();Action? tick=null;int rejectQueues=0;
+        var rig=new Rig("ayaneo-cec-bypass");var provider=new SystemPowerBoundaryProvider(rig.Device);
+        var runtime=new InProcessRuntime(useSharedSystemPower:true,queueSystemPower:work=>{if(rejectQueues>0){rejectQueues--;throw new IOException("fixture queue unavailable");}pending.Enqueue(work);},
+            acquireOwner:()=>{owners++;return new PowerToken(()=>ownerCloses++);},
+            schedule:(work,_)=>{tick=work;return new PowerToken(()=>timerCloses++);},
+            subscribe:(_,_)=>new PowerToken(()=>eventCloses++),
+            createPowerDomains:(_,_,ready,power)=>new HostDomainRouter(
+                ()=>new Controller(rig.Id,rig.Store,_=>provider,power,ready),_=>throw new Exception("unexpected display"),ready));
+        void Drain(){while(pending.Count!=0)pending.Dequeue()();}
+        try
+        {
+            runtime.NotifySystemPower();Check(pending.Count==0&&reads==0&&owners==0,"notification initialized an idle component");
+            _=PowerCall(runtime,"hello",native.Address.ToString(),true,systemPointer:address);
+            Check(reads==0&&owners==0,"hello read system power or acquired owner");
+            Check(PowerCall(runtime,"get",native.Address.ToString(),true).TryGetProperty("error",out _));
+            Check(owners==0,"missing authority opened owner");
+            var first=PowerCall(runtime,"get",systemPointer:address);Check(first.GetProperty("ok").GetBoolean());Drain();
+            Check(PowerCall(runtime,"set",fence:first.GetProperty("fence").GetString(),target:80).GetProperty("ok").GetBoolean());
+            int writes=rig.Device.Writes;Check(rig.Device.Raw==0x55);
+            // Both notifications collapse before the worker runs; serial still requires return before restart.
+            current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;runtime.NotifySystemPower();
+            current.Phase=0;current.Flags=3;current.PublicationRevision++;runtime.NotifySystemPower();
+            Check(pending.Count==1&&rig.Device.Writes==writes,"native notification blocked or ran device work inline");Drain();
+            Check(rig.Device.Writes==writes+2&&rig.Device.Raw==0x55,"coalesced pause was lost or restart duplicated");
+            writes=rig.Device.Writes;runtime.NotifySystemPower();runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Writes==writes,"same serial Ready replayed saved policy");
+            // Same diagnostic Ready, but the original native ingress still owns
+            // an undelivered notification. No new writes until it is consumed.
+            writes=rig.Device.Writes;current.Flags=5;current.ObservedNotificationSequence++;
+            runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Raw==0xaa&&rig.Device.Writes==writes+1,"pending native notification failed to return software ownership");
+            writes=rig.Device.Writes;runtime.NotifySystemPower();runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Raw==0xaa&&rig.Device.Writes==writes,"duplicate pending notification replayed cleanup");
+            current.Flags=3;runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Raw==0x55&&rig.Device.Writes==writes+1,"same-revision Ready failed to release pending hold");
+            // The Ready edge can disappear while the original queued worker is
+            // delayed. Its next read must reconcile the changed suspend serial.
+            for(int cycle=0;cycle<20;cycle++)
+            {
+                writes=rig.Device.Writes;
+                current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;runtime.NotifySystemPower();
+                current.Phase=0;current.Flags=3;current.PublicationRevision++;
+                Check(pending.Count==1,"one sleep cycle accumulated work items");Drain();
+                Check(rig.Device.Raw==0x55&&rig.Device.Writes==writes+2,"missing Ready notification stranded or replayed policy");
+                runtime.NotifySystemPower();Drain();
+                Check(rig.Device.Writes==writes+2,"late Ready duplicated already reconciled cycle");
+            }
+
+            // A zero return must deny admission even if the callback leaves Ready bytes in the buffer.
+            coherent=false;current.PublicationRevision++;runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Raw==0xaa,"zero Reader return was interpreted as success");
+            coherent=true;current.Flags=0;current.PublicationRevision++;runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Raw==0xaa,"unknown public power did not return owned pause");
+            writes=rig.Device.Writes;runtime.PowerChanged(Microsoft.Win32.PowerModes.Resume);Drain();
+            Check(rig.Device.Writes==writes,"raw OS Resume granted permission");
+            var revision=current.PublicationRevision;current.Flags=3;current.PublicationRevision=1;runtime.NotifySystemPower();Drain();
+            Check(rig.Device.Writes==writes,"stale Ready resumed policy");
+            current.PublicationRevision=revision+1;runtime.NotifySystemPower();Drain();Check(rig.Device.Raw==0x55);
+            var before=PowerCall(runtime,"get");writes=rig.Device.Writes;
+            var savedSettings=rig.Store.Data[Controller.SettingsFile];
+            var savedJournal=rig.Store.Data[Controller.RecoveryFile];
+            provider.AfterRead=()=>{current.Generation++;current.SuspendSerial++;current.PublicationRevision++;runtime.NotifySystemPower();};
+            var expired=PowerCall(runtime,"set",fence:before.GetProperty("fence").GetString(),target:70);
+            Check(expired.TryGetProperty("error",out _)||!expired.GetProperty("ok").GetBoolean(),"old operation published success in new Ready");
+            Check(rig.Device.Writes==writes,"old request wrote across public generation");
+            Check(rig.Store.Data[Controller.SettingsFile]==savedSettings,"expired pre-read changed saved target");
+            Check(rig.Store.Data[Controller.RecoveryFile]==savedJournal,"expired pre-read changed recovery ownership");
+            Drain();
+            // Queue failure cannot strand the coalescing latch; stop may precede a queued no-op.
+            rejectQueues=2;int readsBeforeFailure=reads;
+            runtime.NotifySystemPower();Check(!runtime.SystemPowerWorkPending&&pending.Count==0);
+            runtime.NotifySystemPower();Check(!runtime.SystemPowerWorkPending&&pending.Count==0&&reads==readsBeforeFailure);
+            runtime.NotifySystemPower();Check(runtime.SystemPowerWorkPending&&pending.Count==1);
+            var stopped=PowerCall(runtime,"shutdown");Check(stopped.GetProperty("cleanupPending").GetBoolean()&&!stopped.GetProperty("cleanupCompleted").GetBoolean(),"queued callback must retain pending until it returns");
+            reads=0;runtime.NotifySystemPower();runtime.PowerChanged(Microsoft.Win32.PowerModes.Resume);tick!();Drain();
+            Check(reads==0&&owners==ownerCloses&&timerCloses==1&&eventCloses==1&&!runtime.SystemPowerWorkPending&&pending.Count==0,"late authority call, queued work or resource debt after shutdown");
+            Check(PowerCall(runtime,"shutdown").GetProperty("cleanupCompleted").GetBoolean(),"returned callback did not complete shutdown");
+            Console.WriteLine("COMMON_POWER_BOUNDARIES prepared-original-case: abi48, idle, missing-reader, coalesced-suspend, duplicate-ready, zero-return-unknown, unknown, raw-resume, stale-ready, generation-expiry, unchanged-persistence, repeated-queue-failure, stopped-queue-drained");
+        }
+        finally{_=runtime.Shutdown();Drain();GC.KeepAlive(reader);GC.KeepAlive(native.Callback);}
+    }
+
+    static void MsiFinalWriteAdmission(string routeId,string edge)
+    {
+        foreach(var change in edge=="submitted"?new[]{"ready"}:new[]{"ready","batteryAbsent","suspend","shutdown","stable"})
+        {
+            var rig=new Rig(routeId);bool ready=true,present=true,fired=false,preparingSet=false;
+            int opens=0;
+            var legacy=routeId=="msi-claw-wmi"?new MsiFixture(edge=="template"?"missing-data":"direct"):null;
+            var ap=routeId=="msi-claw-cg3em-ap"?new MsiApFixture():null;
+            int Writes()=>legacy?.Writes??ap!.Writes;
+            int Reads()=>legacy?.Reads??ap!.Reads;
+            int Closes()=>legacy?.DisposeCalls??ap!.DisposeCalls;
+            int Raw()=>legacy?.Raw??ap!.Packet[5];
+            var setMethod=legacy is null?"Set_AP":"Set_Data";
+            IChargeProvider Open(){opens++;return legacy is null?new MsiApProvider(ap!):new MsiProvider(legacy);}
+            var controller=new Controller(rig.Id,rig.Store,_=>Open(),()=> (present,true,75),()=>ready);
+            var before=controller.Read();Check(before.Ok&&Writes()==0,"MSI preflight failed");
+            void AtReturn(string phase)
+            {
+                if(phase=="parameters/"+setMethod)preparingSet=true;
+                bool atEdge=edge switch {
+                    "read"=>phase=="read"&&Reads()==3,
+                    "parameters"=>phase=="parameters/"+setMethod,
+                    "template"=>phase=="template"&&preparingSet,
+                    "submitted"=>phase=="write",
+                    _=>false};
+                if(fired||!atEdge)return;
+                fired=true;
+                if(change=="ready")ready=false;
+                else if(change=="batteryAbsent")present=false;
+                else if(change=="suspend")controller.Suspend();
+                else if(change=="shutdown")controller.Shutdown();
+            }
+            if(legacy is not null)legacy.BeforeReturn=AtReturn;else ap!.BeforeReturn=AtReturn;
+            var after=controller.Apply(before.Fence,60);
+            var debt=rig.Store.Load<Recovery>(Controller.RecoveryFile);
+            bool submitted=edge=="submitted",allowed=change=="stable"||submitted;
+            var row=new {routeId,edge,change,fired,writes=Writes(),reads=Reads(),raw=Raw(),after.Ok,after.Verification,after.Reason,
+                firmwareDebt=debt is {Software:false,OwnedRaw:null},opens,closes=Closes(),realHardwareCalls=0};
+            Console.WriteLine(JsonSerializer.Serialize(row,Policy.Json));
+            try
+            {
+                Check(fired,"MSI final edge not reached: "+edge);
+                Check(Writes()==(allowed?1:0),"MSI expired pre-dispatch write reached firmware: "+routeId+"/"+edge+"/"+change);
+                Check(after.Ok==allowed,"MSI admission result inconsistent");
+                Check(allowed?debt is null:debt is {Software:false,OwnedRaw:null},"MSI firmware debt incorrectly cleared/created");
+                Check(Raw()==(allowed?0xbc:legacy is null?0xe4:0xd0),"MSI admission changed an unexpected byte");
+                int writes=Writes();ready=true;present=true;controller.Resume();
+                if(!allowed)controller.StartSaved();
+                Check(Writes()==writes,"MSI rejected or submitted write replayed after Ready");
+                Check(opens==Closes(),"MSI endpoints not returned");
+                if(legacy is not null)Check(legacy.Bags.All(b=>b.Disposed),"MSI WMI objects leaked");
+            }
+            finally{controller.Shutdown();}
+            Check(opens==Closes(),"MSI shutdown leaked endpoints");
+            msiAdmissionResults.Add(new {routeId,edge,change,fired,writes=Writes(),raw=Raw(),opens,closes=Closes(),
+                allOwnedEndpointsReturned=opens==Closes(),noReplayAfterReady=true,realHardwareCalls=0});
+        }
+    }
+
+
+    static void SharedNotificationSequenceBoundaries(bool missingOnly=false)
+    {
+        foreach(var change in missingOnly?new[]{"missing"}:new[]{"sequence","coalesced","revision"})
+        {
+            var native=new PackedFacts{Value=PackedFacts.Pack()};
+            var current=new SharedSystemPowerV1{Size=48,Version=1,Generation=10,PublicationRevision=1,ObservedNotificationSequence=9,SuspendSerial=1,Flags=3};
+            NativeSystemPowerReader.Callback reader=(ref SharedSystemPowerV1 value,uint bytes)=>{Check(bytes==48);value=current;return 1;};
+            var address=((ulong)System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(reader)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var pending=new Queue<Action>();int ownerStops=0,timerStops=0,eventStops=0;Action? tick=null;
+            var rig=new Rig("ayaneo-cec-bypass");var provider=new SystemPowerBoundaryProvider(rig.Device);
+            var runtime=new InProcessRuntime(useSharedSystemPower:true,queueSystemPower:pending.Enqueue,
+                acquireOwner:()=>new PowerToken(()=>ownerStops++),schedule:(work,_)=>{tick=work;return new PowerToken(()=>timerStops++);},
+                subscribe:(_,_)=>new PowerToken(()=>eventStops++),
+                createPowerDomains:(_,_,ready,power)=>new HostDomainRouter(()=>new Controller(rig.Id,rig.Store,_=>provider,power,ready),_=>throw new Exception("unexpected display"),ready));
+            void Drain(){while(pending.Count!=0)pending.Dequeue()();}
+            try
+            {
+                var first=PowerCall(runtime,"get",native.Address.ToString(),true,systemPointer:address);Drain();
+                Check(first.GetProperty("ok").GetBoolean(),"sequence initial get failed");
+                Check(PowerCall(runtime,"set",fence:first.GetProperty("fence").GetString(),target:80).GetProperty("ok").GetBoolean(),"sequence initial set failed");
+                var before=PowerCall(runtime,"get");int writes=rig.Device.Writes;
+                var settings=rig.Store.Data[Controller.SettingsFile];var journal=rig.Store.Data[Controller.RecoveryFile];
+                provider.AfterRead=()=>{
+                    current.PublicationRevision++;
+                    if(change!="revision")current.ObservedNotificationSequence++;
+                    if(change=="coalesced"){current.Flags=5;runtime.NotifySystemPower();current.Flags=3;}
+                    if(change!="missing")runtime.NotifySystemPower();
+                };
+                var result=PowerCall(runtime,"set",fence:before.GetProperty("fence").GetString(),target:95);
+                bool accepted=result.TryGetProperty("ok",out var ok)&&ok.GetBoolean();
+                Check(accepted==(change=="revision"),"in-flight request accepted a new public notification sequence");
+                Check(rig.Device.Writes==writes+(change=="revision"?1:0),"old request wrote across public notification sequence");
+                if(change!="revision"){
+                    Check(rig.Store.Data[Controller.SettingsFile]==settings&&rig.Store.Data[Controller.RecoveryFile]==journal,"sequence expiry changed saved policy or journal");
+                    if(change=="missing"){Check(pending.Count==0,"missing notification queued work");tick!();}
+                    else Drain();
+                    Check(rig.Device.Writes==writes,"sequence-only Ready replayed healthy software policy");
+                    var fresh=PowerCall(runtime,"get");Check(fresh.GetProperty("ok").GetBoolean(),"current Ready did not rebind sequence");
+                    Check(PowerCall(runtime,"set",fence:fresh.GetProperty("fence").GetString(),target:95).GetProperty("ok").GetBoolean(),"new current request remained locked after sequence change");
+                    Check(rig.Device.Writes==writes+1,"new exact request duplicated or lost its write");
+                }else{Drain();Check(rig.Device.Writes==writes+1,"revision-only change replayed policy");}
+                Console.WriteLine("NOTIFICATION_SEQUENCE "+JsonSerializer.Serialize(new{change,accepted,finalSequence=current.ObservedNotificationSequence,writesBefore=writes,writesAfter=rig.Device.Writes,realHardwareCalls=0},Policy.Json));
+            }
+            finally
+            {
+                _=runtime.Shutdown();Drain();var closed=PowerCall(runtime,"shutdown");
+                Check(closed.GetProperty("cleanupCompleted").GetBoolean()&&!runtime.SystemPowerWorkPending&&runtime.SystemPowerWorkOutstanding==0&&runtime.SystemPowerWorkRunning==0,"sequence worker cleanup incomplete");
+                Check(ownerStops==1&&timerStops==1&&eventStops==1&&pending.Count==0,"sequence owned resources not returned");
+                tick?.Invoke();runtime.NotifySystemPower();Check(pending.Count==0,"sequence stopped runtime revived");
+                GC.KeepAlive(reader);GC.KeepAlive(native.Callback);
+            }
+        }
+    }
+
     static void Main(string[] args)
     {
+        if(args.Length==4&&args[0]=="--case"&&args[1]=="in process controller uses shared native power and seals callback on shutdown"&&args[2]=="--part"&&(args[3]=="notification-sequence"||args[3]=="notification-sequence-missing")){
+            bool onlyMissing=args[3]=="notification-sequence-missing";Test(args[1],()=>SharedNotificationSequenceBoundaries(onlyMissing));
+            Console.WriteLine($"Selected case count={count}.");Console.WriteLine($"Selected case assertions={assertions}.");
+            Console.WriteLine("NOTIFICATION_SEQUENCE_SUMMARY "+JsonSerializer.Serialize(new{groups=count,assertions,scenarios=onlyMissing?1:3,realHardwareCalls=0,oldSharedBoundaryGroupsExecuted=0},Policy.Json));return;
+        }
+
+        if(args.Length==5&&args[0]=="--case"&&args[1]=="in process controller uses shared native power and seals callback on shutdown"&&args[2]=="--part"&&args[3]=="hardening"){ChargeHardeningFixture.Run(args[4]);return;}
+        if(args.Length==3&&args[0]=="--software-policy-starvation")
+        {
+            if(!SoftwarePolicyStarvationFixture.Names.Contains(args[1],StringComparer.Ordinal))
+            {Console.Error.WriteLine("FAIL unknown software policy starvation scenario; executed=0");Environment.ExitCode=2;return;}
+            SoftwarePolicyStarvationFixture.Run(args[1],args[2]);return;
+        }
         if(args.Length==1&&args[0]=="--in-process"){InProcessFixture.Run();return;}
         if(args.Length!=0)
         {
             bool lifecyclePart=args.Length==4&&args[0]=="--case"&&args[1]=="Super X checked dual transport and cleanup ownership"&&args[2]=="--part"&&args[3]=="lifecycle";
-            if((args.Length!=2&&!lifecyclePart)||args[0]!="--case"||string.IsNullOrWhiteSpace(args[1]))
+            bool msiResult=args.Length==4&&args[0]=="--case"&&args[1].StartsWith("MSI final write admission: ",StringComparison.Ordinal)&&args[2]=="--result";
+            if((args.Length!=2&&!lifecyclePart&&!msiResult)||args[0]!="--case"||string.IsNullOrWhiteSpace(args[1]))
             {
                 Console.Error.WriteLine("FAIL invalid arguments; use no arguments, --in-process or --case <exact existing Test name>; count=0.");
                 Environment.ExitCode=1;return;
             }
             selectedCase=args[1];selectedPart=lifecyclePart?"lifecycle":null;
+            selectedResultPath=msiResult?Path.GetFullPath(args[3]):null;
         }
         Test("native shared power packed facts preserve unknown battery and AC DC",()=>{
             var source=new PackedFacts();var reader=new NativePowerReader();
@@ -273,6 +508,7 @@ internal static class Program
             var production=new InProcessRuntime(acquireOwner:()=>throw new Exception("missing reader acquired owner"));
             try{Check(PowerCall(production,"get").GetProperty("error").GetString()!.Contains("nativePowerReader"));}
             finally{_=production.Shutdown();}
+            SharedSystemPowerBoundaries();
         });
         Test("standalone power fallback caches no battery until power events",()=>{
             int collects=0;
@@ -311,10 +547,54 @@ internal static class Program
         Test("OneX firmware rejection records observed facts without opening providers",()=>{
             _=OneXFieldFeedbackFixture.Run();
         });
+        Test("OneX X2 Mini Pro exact field route and EC threshold readback",()=>{
+            var id=Rig.X2MiniProFieldIdentity();
+            var binding=Policy.ResolveCapability(id);
+            Check(binding?.Descriptor.DeviceId=="ymcc.device.OneXPlayerX2MiniPro"&&binding.Consumer.RouteId==EcProvider.X2MiniProRouteId);
+            var route=binding!.Consumer;
+            Check(route.Choices.SequenceEqual(Enumerable.Range(10,11).Select(n=>n*5))&&!route.Software);
+            using(var production=Providers.Open(route,"unused"))Check(production is EcProvider&&production.CanReadLimit);
+            var io=new Ports(0x04e5,80);
+            var opens=0;
+            var store=new MemoryStore();
+            EcProvider Provider(Route r)=>new(r,direct=>{Check(direct,"X2 Mini Pro must not use the ACPI/X2 WMI transport");opens++;return io;});
+            Controller New(Identity candidate,MemoryStore memory)=>new(candidate,memory,r=>Provider(r),()=> (true,true,70));
+            var controller=New(id,store);
+            var first=controller.Read();
+            Check(first.Ok&&first.Supported&&first.CurrentLimit==80&&opens==1&&io.Writes==0);
+            foreach(var value in new[]{1,45,83,105})Check(!controller.Apply(first.Fence,value).Ok&&io.Writes==0);
+            var result=controller.Apply(first.Fence,85);
+            Check(result.Ok&&result.CurrentLimit==85&&result.Verification=="readback"&&io.Value==85&&io.Writes==1);
+            io.IgnoreWrite=true;
+            var unchanged=controller.Apply(result.Fence,90);
+            Check(!unchanged.Ok&&io.Value==85&&io.Writes==2,"unconfirmed EC write reported success");
+            controller.Shutdown();
+
+            var countBefore=opens;
+            foreach(var wrong in new[]{id with {Bios="0.23"},id with {EcMajor=255},id with {EcMinor=13},
+                id with {BoardProduct="ONEXPLAYER X2Mini"},id with {SystemProduct="ONEXPLAYER 3"},
+                id with {SystemProduct=""},id with {Manufacturer="Other"},id with {BoardProduct="ONEXPLAYER APEX",SystemProduct="ONEXPLAYER APEX"}}){
+                var rejected=New(wrong,new());
+                var read=rejected.Read();
+                Check(!read.Ok&&!read.Supported&&!rejected.Apply(read.Fence,80).Ok);
+                rejected.Shutdown();
+            }
+            Check(opens==countBefore&&io.Writes==2);
+            io.IgnoreWrite=false;
+            using var provider=Provider(route);
+            void Denied(Action action){try{action();throw new Exception("unconfirmed write admitted");}catch(IOException){}}
+            var before=provider.Read();
+            Denied(()=>provider.Write(90,before,()=>throw new IOException("power revoked")));
+            io.Value=95;
+            Denied(()=>provider.Write(90,before));
+            io.Value=255;
+            Denied(()=>{_=provider.Read();});
+            Check(io.Writes==2);
+        });
         Test("unified catalog selects every exact actual battery rule and trusted receipt",()=>{
-            Check(Policy.Routes.Length==42);
+            Check(Policy.Routes.Length==43);
             foreach(var route in Policy.Routes)foreach(var value in route.Identity.Values){
-                var id=new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?value:"board",route.Identity.Field=="systemProduct"?value:"system","HX 370","2.10",2,route.RouteId=="gpd-win-mini-2025"?7:80);
+                var id=route.RouteId==EcProvider.X2MiniProRouteId?Rig.X2MiniProFieldIdentity():new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?value:"board",route.Identity.Field=="systemProduct"?value:"system","HX 370","2.10",2,route.RouteId=="gpd-win-mini-2025"?7:80);
                 var binding=Policy.ResolveCapability(id);Check(binding is not null&&ReferenceEquals(binding.Consumer,route));
                 Check(binding!.Descriptor.Provider==route.RouteId&&binding.Descriptor.DeviceClass==route.Identity.DeviceClass);
                 var isFrozen=YeManFanBackend.Capabilities.HcDeviceCapabilityCatalog.Devices.Any(d=>d.ConsumerClass=="HandheldCompanion.Devices."+route.Identity.DeviceClass);
@@ -350,18 +630,18 @@ internal static class Program
             }
             var identity=JsonSerializer.SerializeToElement(RuntimeContract.Identity(),Policy.Json);
             Check(identity.GetProperty("sourceId").GetString()==RuntimeContract.SourceId);
-            Check(identity.GetProperty("implementation").GetString()=="msi-cg3em-ap-unknown-v2");
+            Check(identity.GetProperty("implementation").GetString()=="in-process-60s-msi-cg3em-ap-v1");
         });
         Test("exact family identity, no brand fallback",()=>{
             foreach(var route in Policy.Routes)foreach(var name in route.Identity.Values){var id=new Identity(route.Identity.Manufacturers[0],route.Identity.Field=="boardProduct"?name:"",route.Identity.Field=="systemProduct"?name:"","HX 370","2.10",2,7);Check(Policy.Resolve(id)?.RouteId==route.RouteId);}
-            foreach(var name in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini PRO","ONEXPLAYER 3","unknown"})Check(Policy.Resolve(new("ONE-NETBOOK",name,"","","",1,80)) is null);
+            foreach(var name in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini","ONEXPLAYER 3","unknown"})Check(Policy.Resolve(new("ONE-NETBOOK",name,"","","",1,80)) is null);
             Check(Policy.Resolve(new("AOKZOE","AOKZOE A1X","","","",1,80)) is null);
             // Fixed newer X2 returns IsBatteryProtectionSupported=false. Exercise the
             // actual controller, not just the route table: neither identity field may
             // borrow X1/OXP3 charging, even when a battery and AC are present.
             var inert=new Rig();
             foreach(var manufacturer in new[]{"ONE-NETBOOK","ONE-NETBOOK TECHNOLOGY CO., LTD."})
-            foreach(var product in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini PRO"})
+            foreach(var product in new[]{"ONEXPLAYER X2","ONEXPLAYER X2Mini"})
             foreach(var fields in new[]{(Board:product,System:product),(Board:product,System:""),(Board:"",System:product)}){
                 var opens=0;
                 var identity=new Identity(manufacturer,fields.Board,fields.System,"AMD Ryzen AI MAX+ 395","2.10",2,80);
@@ -465,6 +745,10 @@ internal static class Program
             using var absent=new AsusProvider((_,_)=>0);try{absent.Read();throw new Exception("absence accepted");}catch(IOException){}
             using var rejected=new AsusProvider((_,_)=>0);try{rejected.Write(80,new(null,null));throw new Exception("rejection ignored");}catch(IOException){}
         });
+        if(selectedCase is not null)
+            foreach(var routeId in new[]{"msi-claw-wmi","msi-claw-cg3em-ap"})
+                foreach(var edge in new[]{"read","parameters","template","submitted"})
+                    Test("MSI final write admission: "+routeId+"/"+edge,()=>MsiFinalWriteAdmission(routeId,edge));
         Test("MSI real adapter read-modify-write preserves bits and requires a successful read",()=>{
             byte raw=0xd0;var writes=0;var fail=false;
             using var p=new MsiProvider((method,packet)=>{
@@ -867,5 +1151,12 @@ internal static class Program
             Console.WriteLine($"Selected case assertions={assertions}.");
         }
         Console.WriteLine($"{count} groups passed; fake providers only, no hardware writes.");
+        if(selectedResultPath is not null)
+        {
+            using var resultFile=new FileStream(selectedResultPath,FileMode.CreateNew,FileAccess.Write,FileShare.None);
+            JsonSerializer.Serialize(resultFile,new {status="PASS_SELECTED",selection="msi-final-write-admission",executedCases=new[]{selectedCase},
+                scenarios=msiAdmissionResults,groups=count,assertions,realHardwareCalls=0,realCpuPressure=false},Policy.Json);
+            resultFile.Flush(true);
+        }
     }
 }

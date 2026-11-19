@@ -7,6 +7,7 @@ EXTRA=r'''
 #include <cstring>
 #include "log_frequency_policy.h"
 #include "tdp_static_observation.h"
+#include "sleep_fact_log_record.h"
 static std::wstring fixtureRoot;
 static std::wstring webview_data_dir(){return (fspath::path(fixtureRoot)/L"front").wstring();}
 static std::atomic<unsigned long long> g_frontendDiagnosticsFailures{0},g_frontendTraceDetailSuppressed{0},g_powerGeneration{1},g_webviewGeneration{1};
@@ -20,6 +21,38 @@ TEST=r'''
 int wmain(int argc,wchar_t** argv){
  if(argc!=2)return 2;fixtureRoot=argv[1];const fspath::path root(fixtureRoot);fspath::create_directories(root);
  using namespace ymcc::logexport;
+ const auto counterAbsent=rendererExportCounterEvidence(json::object());
+ const auto counterNull=rendererExportCounterEvidence({{"frontendDiagnosticDeliveryFailures",nullptr}});
+ const auto counterZero=rendererExportCounterEvidence({{"frontendDiagnosticDeliveryFailures",0}});
+ check("export-counter-missing-null-and-measured-zero-stay-distinct",counterAbsent["frontendDiagnosticDeliveryFailures"]["state"]=="not-reported"&&counterNull["frontendDiagnosticDeliveryFailures"]["state"]=="reported-null"&&counterZero["frontendDiagnosticDeliveryFailures"]["state"]=="reported"&&counterZero["frontendDiagnosticDeliveryFailures"]["value"]==0&&counterAbsent["frontendDiagnosticDeliveryFailures"]["value"].is_null());
+ bool invalidCounters=true;
+ for(const auto& value:json::array({true,false,-1,0.0,1.75,"4",json::array(),json::object(),9007199254740992ULL,18446744073709551615ULL})){
+     const auto projectedCounter=rendererExportCounterEvidence({{"frontendDiagnosticDeliveryFailures",value},{"tdpDiagnosticDeliveryFailures",value}});
+     invalidCounters=invalidCounters&&!projectedCounter["frontendDiagnosticDeliveryFailures"]["known"].get<bool>()&&projectedCounter["frontendDiagnosticDeliveryFailures"]["value"].is_null()&&projectedCounter["tdpDiagnosticDeliveryFailures"]["value"].is_null();
+ }
+ check("export-counter-invalid-type-negative-float-and-overflow-remain-unknown",invalidCounters);
+ const auto counterMaximum=rendererExportCounterEvidence({{"frontendDiagnosticDeliveryFailures",9007199254740991ULL}});
+ check("export-counter-JS-safe-integer-limit-is-exact",counterMaximum["frontendDiagnosticDeliveryFailures"]["known"]==true&&counterMaximum["frontendDiagnosticDeliveryFailures"]["value"]==9007199254740991ULL&&rendererExportCounterText(counterMaximum["frontendDiagnosticDeliveryFailures"])=="9007199254740991");
+ const auto partialCounts=rendererDeliveryEvidence({{"schema",1},{"channels",json::array({{{"channel","frontend-error"},{"counts",{{"native-not-ok",0},{"response-timeout",2},{"invoke-rejected",3}}}}})}});
+ check("export-partial-channel-is-not-known-even-with-counts-object",partialCounts["channels"][0]["known"]==false&&partialCounts["channels"][0]["countsObjectPresent"]==true&&partialCounts["channels"][0]["counterFieldsKnown"]==3&&partialCounts["channels"][0]["counts"]["native-not-ok"]==0&&partialCounts["channels"][0]["counts"]["sender-exception"].is_null());
+ const auto allCounters=rendererDeliveryEvidence({{"schema",1},{"channels",json::array({{{"channel","frontend-error"},{"counts",{{"native-not-ok",0},{"response-timeout",0},{"invoke-rejected",0},{"sender-exception",0}}}}})}});
+ check("export-complete-channel-zero-counters-remain-known",allCounters["channels"][0]["known"]==true&&allCounters["channels"][0]["counterFieldsKnown"]==4&&allCounters["channels"][0]["counts"]["sender-exception"]==0);
+ check("export-counter-scope-never-claims-Native-write-or-atomicity",counterMaximum["nativeWriteOutcome"]=="UNKNOWN"&&counterMaximum["snapshotAtomicWithNative"]==false&&rendererExportCounterText(counterAbsent["tdpDiagnosticDeliveryFailures"])=="not-observed");
+ const auto admissionMissing=rendererDeliveryEvidence({{"schema",1}});
+ check("renderer-admission-old-missing-stays-unknown",admissionMissing["senderAdmission"]["status"]=="missing-or-unsupported"&&admissionMissing["senderAdmission"]["reported"]["inFlightRequests"].is_null()&&admissionMissing["channels"][0]["capacityRejectedRequests"].is_null());
+ const auto admissionGood=rendererDeliveryEvidence({{"schema",1},{"senderAdmission",{{"schema",1},{"maxInFlightRequests",32},{"inFlightRequests",0},{"offeredRequests",51},{"admittedRequests",32},{"settledRequests",32},{"capacityRejectedRequests",19},{"highWaterRequests",32}}},
+     {"channels",json::array({{{"channel","frontend-error"},{"capacityRejectedRequests",0},{"counts",{{"native-not-ok",0},{"response-timeout",0},{"invoke-rejected",0},{"sender-exception",0}}}}})}});
+ check("renderer-admission-zero-and-fixed-counter-values-retained",admissionGood["senderAdmission"]["status"]=="projected"&&admissionGood["senderAdmission"]["reported"]["maxInFlightRequests"]==32&&admissionGood["senderAdmission"]["reported"]["inFlightRequests"]==0&&admissionGood["channels"][0]["capacityRejectedRequests"]==0&&admissionGood["channels"][0]["known"]==true);
+ bool invalidAdmission=true;
+ for(const auto& bad:json::array({true,-1,1.0,"4",json::array(),json::object(),9007199254740992ULL})){
+     const auto view=rendererDeliveryEvidence({{"schema",1},{"senderAdmission",{{"schema",1},{"inFlightRequests",bad}}},
+         {"channels",json::array({{{"channel","frontend-error"},{"capacityRejectedRequests",bad}}})}});
+     invalidAdmission=invalidAdmission&&view["senderAdmission"]["reported"]["inFlightRequests"].is_null()&&view["channels"][0]["capacityRejectedRequests"].is_null();
+ }
+ check("renderer-admission-malformed-numbers-never-become-zero",invalidAdmission);
+ const auto duplicateCapacity=rendererDeliveryEvidence({{"schema",1},{"senderAdmission",{{"schema",true},{"inFlightRequests",0}}},
+     {"channels",json::array({{{"channel","frontend-error"},{"capacityRejectedRequests",1}},{{"channel","frontend-error"},{"capacityRejectedRequests",2}}})}});
+ check("renderer-admission-unsupported-schema-and-duplicate-channel-unknown",duplicateCapacity["senderAdmission"]["status"]=="missing-or-unsupported"&&duplicateCapacity["channels"][0]["capacityRejectedRequests"].is_null());
  check("missing-file-not-a-filesystem-fault",missingFileReason(std::make_error_code(std::errc::no_such_file_or_directory))=="not-created-or-not-retained");
  check("access-denied-is-still-a-real-status-error",missingFileReason(std::make_error_code(std::errc::permission_denied))=="file-status-error");
  put(root/L"partial"/L"input-capture.jsonl","{\"kind\":\"sample\",\"time\":\"2026-10-11T19:00:00+08:00\"}\n{\"kind\":\"sample\",\"imu\":");
@@ -264,8 +297,151 @@ def runtime_identity_state_main(a):
  (run/'RESULT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps({k:report.get(k)for k in ['status','passed','failed','failedCases','sourceOrToolDrift']},ensure_ascii=False,indent=2));return 0 if report['status']=='PASS'else 1
 
 
+def frontend_boundary_fixture(source):
+ template=(ROOT/'tools/fixtures/logging_frontend_boundary.cpp').read_text(encoding='utf-8-sig')
+ parts={'IDENTITY':extract(source,'static void decorateFrontendLogWriter(json& entry) {'),
+  'ROTATE':extract(source,'static void rotateOneLogFile(const std::wstring& path, unsigned long long maxBytes) {'),
+  'BOUNDED':extract(source,'static std::string boundedJsonString(const json& value, const char* key, size_t limit) {'),
+  'TRACE':extract(source,'static bool appendFrontendTrace(const json& input) noexcept {'),
+  'ERROR':extract(source,'static bool appendFrontendDiagnostic(const json& input) noexcept {'),
+  'WEBVIEW':extract(source,'static void appendWebViewDiagnostic(json entry) {')}
+ for key,value in parts.items():
+  marker='// ACTUAL_'+key
+  assert template.count(marker)==1
+  template=template.replace(marker,value,1)
+ return template
+
+def frontend_boundary_main(a):
+ import shutil,time
+ source_path=ROOT/'native/main.cpp';before=source_path.read_bytes()
+ source=before.decode('utf-8-sig').replace('\r\n','\n')
+ run=a.output_dir;run.mkdir(parents=True,exist_ok=False)
+ def put(name,data):
+  with (run/name).open('xb') as stream:stream.write(data)
+ def save(name,value):put(name,(json.dumps(value,ensure_ascii=False,indent=2)+'\n').encode())
+ cpp=run/'frontend-boundary.cpp';exe=run/'frontend-boundary.exe';put(cpp.name,frontend_boundary_fixture(source).encode())
+ compiler=shutil.which('cl.exe');assert compiler,'Reviewed compiler must be supplied in PATH'
+ args=[compiler,'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/W4','/WX','/showIncludes',str(cpp),
+  '/I'+str(ROOT/'native'),'/I'+str(ROOT/'deps/json'),'/Fo'+str(run/'fixture.obj'),'/Fe'+str(exe),'/link','/verbose:lib']
+ tick=time.monotonic();result=subprocess.run(args,cwd=run,capture_output=True,timeout=120)
+ put('compile.stdout.raw',result.stdout);put('compile.stderr.raw',result.stderr)
+ save('COMPILE.json',{'exitCode':result.returncode,'arguments':args,'elapsedMs':(time.monotonic()-tick)*1000})
+ if result.returncode:return result.returncode
+ selections=('exec-guard',) if a.frontend_exec_guard else ('owner-phase',) if a.frontend_owner_phase else ('identity-known','identity-unknown') if a.frontend_writer_identity else ('trace','error','webview','budgets')
+ for selection in selections:
+  native_args=[str(exe),str(run/selection),selection]
+  if a.frontend_exec_guard:native_args.append(str(a.frontend_guard_input))
+  result=subprocess.run(native_args,cwd=run,capture_output=True,timeout=45)
+  put(selection+'.stdout.raw',result.stdout);put(selection+'.stderr.raw',result.stderr);report=json.loads(result.stdout)
+  save(selection+'.json',{'exitCode':result.returncode,'report':report})
+  if result.returncode or report['failures']:return result.returncode or 3
+ assert source_path.read_bytes()==before,'Bound frontend writers changed during selected execution'
+ print(json.dumps({'selectedCase':'frontend-boundary','runDirectory':str(run),'failures':0}))
+ return 0
+
+
+def domain_writer_fixture(source):
+    signatures=[('IDENTITY','static void decorateDomainLogWriter(json& line) {'),
+        ('GATE','static bool domainLogEnabled(const char* domain) {'),
+        ('PATH','static std::wstring domainLogPath(const char* domain) {'),
+        ('INDEX','static int domainLogStreamIndex(const char* domain) {'),
+        ('FLUSH','static void flushDomainLogs(bool closeStreams) {'),
+        ('APPEND','static void appendDomainLog(const char* domain, const char* event, const json& detail) {')]
+    template=(ROOT/'tools/fixtures/logging_domain_writer.cpp.in').read_text('utf-8-sig')
+    for key,signature in signatures:
+        marker='// ACTUAL_'+key
+        if template.count(marker)!=1:raise ValueError('Domain fixture marker changed:'+key)
+        template=template.replace(marker,extract(source,signature),1)
+    return template
+
+
+def domain_writer_main(args):
+    run=args.output_dir;run.mkdir(parents=True,exist_ok=False)
+    source=(ROOT/'native/main.cpp').read_text('utf-8-sig')
+    cpp=run/'domain-writer.cpp';cpp.write_text(domain_writer_fixture(source),encoding='utf-8')
+    compiler=__import__('shutil').which('cl.exe')
+    if not compiler:raise RuntimeError('reviewed compiler required')
+    exe=run/'domain-writer.exe'
+    command=[compiler,'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/W4','/WX','/wd4505','/showIncludes',str(cpp),'/I'+str(ROOT/'native'),'/I'+str(ROOT/'deps/json'),'/I'+str(ROOT/'tools'),'/Fo'+str(run/'fixture.obj'),'/Fe'+str(exe),'/link','/VERBOSE:LIB']
+    built=subprocess.run(command,cwd=run,capture_output=True,timeout=180)
+    (run/'compile.stdout.raw').write_bytes(built.stdout);(run/'compile.stderr.raw').write_bytes(built.stderr)
+    if built.returncode:return built.returncode
+    for mode in ('known','unknown'):
+        tested=subprocess.run([str(exe),str(run/mode),mode],cwd=run,capture_output=True,timeout=45)
+        (run/(mode+'.stdout.raw')).write_bytes(tested.stdout);(run/(mode+'.stderr.raw')).write_bytes(tested.stderr)
+        if tested.returncode:return tested.returncode
+    return 0
+
+
+def ui_gate_fixture(source):
+    process=extract(source,'static void gamepadProcessUiInput(WORD w, ULONGLONG now) {')
+    reference=process.replace('if(radialHasInputOwner()){gamepadObserveUiGate(ymcc::logging::UiInputGate::RadialOwner,w);return;}','if(radialHasInputOwner())return;',1)
+    reference=reference.replace('        gamepadObserveUiGate(ymcc::logging::UiInputGate::UiIneligible,w);\n','',1)
+    reference=reference.replace('    gamepadObserveUiGate(ymcc::logging::UiInputGate::UiEligible,w);\n','',1)
+    begin=source.index('static WORD g_uiShoulderPending = 0;');end=source.index('// GP-UIINPUT-2:',begin)
+    body=(ROOT/'tools/fixtures/logging_ui_gate_body.inc').read_text('utf-8-sig')
+    values={'DECLARATIONS':source[begin:end].rstrip(),'OBSERVE':extract(source,'static void gamepadObserveUiGate(ymcc::logging::UiInputGate gate, WORD w) noexcept {'),
+        'EXPORT':extract(source,'static json gamepadUiGateEvidenceForExport() noexcept {'),'ELIGIBLE':extract(source,'static bool gamepadUiInputEligible() {')}
+    for key,value in values.items():
+        marker='// ACTUAL_'+key
+        if body.count(marker)!=1:raise ValueError('UI gate fixture marker changed:'+key)
+        body=body.replace(marker,value,1)
+    template=(ROOT/'tools/fixtures/logging_ui_gate.cpp.in').read_text('utf-8-sig')
+    return template.replace('// CURRENT_BODY',body.replace('// ACTUAL_PROCESS',process,1),1).replace('// REFERENCE_BODY',body.replace('// ACTUAL_PROCESS',reference,1),1)
+
+
+def ui_gate_main(args):
+    run=args.output_dir;run.mkdir(parents=True,exist_ok=False)
+    source=(ROOT/'native/main.cpp').read_text('utf-8-sig');cpp=run/'ui-gate.cpp';cpp.write_text(ui_gate_fixture(source),encoding='utf-8')
+    compiler=__import__('shutil').which('cl.exe')
+    if not compiler:raise RuntimeError('reviewed compiler required')
+    exe=run/'ui-gate.exe';command=[compiler,'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/W4','/WX','/wd4505','/showIncludes',str(cpp),'/I'+str(ROOT/'native'),'/I'+str(ROOT/'deps/json'),'/I'+str(ROOT/'tools'),'/Fo'+str(run/'fixture.obj'),'/Fe'+str(exe),'/link','/VERBOSE:LIB']
+    built=subprocess.run(command,cwd=run,capture_output=True,timeout=180)
+    (run/'compile.stdout.raw').write_bytes(built.stdout);(run/'compile.stderr.raw').write_bytes(built.stderr)
+    if built.returncode:return built.returncode
+    tested=subprocess.run([str(exe)],cwd=run,capture_output=True,timeout=45)
+    (run/'native.stdout.raw').write_bytes(tested.stdout);(run/'native.stderr.raw').write_bytes(tested.stderr)
+    return tested.returncode
+
+
+def overlay_entry_fixture(reference_header):
+ """Prepare the complete original Native projector control;never execute it."""
+ source=reference_header.read_text(encoding='utf-8-sig')
+ original=extract(source,'inline EvidenceJson rendererDeliveryEvidence(const EvidenceJson& source) {')
+ if '"overlaySessionEntry"' in original:raise ValueError('reference must precede overlay session entry projection')
+ template=(ROOT/'tools/fixtures/logging_overlay_entry.cpp').read_text(encoding='utf-8-sig')
+ marker='// ACTUAL_REFERENCE_DELIVERY'
+ if template.count(marker)!=1:raise ValueError('expected one original Native projector marker')
+ return template.replace(marker,original,1)
+
+def overlay_entry_prepare_main(a):
+ cpp=overlay_entry_fixture(a.overlay_entry_reference_header)
+ a.output_dir.mkdir(parents=True,exist_ok=False)
+ with (a.output_dir/'overlay-entry.cpp').open('x',encoding='utf-8',newline='\n') as f:f.write(cpp)
+ report=dict(status='PREPARED_ONLY',referenceHeader=str(a.overlay_entry_reference_header),nativeExecution=False,productExecution=False,defaultFixtureSetExpanded=False)
+ with (a.output_dir/'PREPARED.json').open('x',encoding='utf-8') as f:json.dump(report,f,indent=2);f.write('\n')
+ print(json.dumps(report));return 0
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--sample-zip',type=pathlib.Path);p.add_argument('--output-dir',type=pathlib.Path,required=True);p.add_argument('--runtime-identity-state',action='store_true');p.add_argument('--identity-case');p.add_argument('--identity-source',type=pathlib.Path);p.add_argument('--identity-header',type=pathlib.Path);p.add_argument('--compiler-environment',type=pathlib.Path);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--sample-zip',type=pathlib.Path);p.add_argument('--output-dir',type=pathlib.Path,required=True);p.add_argument('--runtime-identity-state',action='store_true');p.add_argument('--identity-case');p.add_argument('--identity-source',type=pathlib.Path);p.add_argument('--identity-header',type=pathlib.Path);p.add_argument('--compiler-environment',type=pathlib.Path);p.add_argument('--frontend-boundary',action='store_true');p.add_argument('--frontend-writer-identity',action='store_true');p.add_argument('--frontend-owner-phase',action='store_true');p.add_argument('--frontend-exec-guard',action='store_true');p.add_argument('--frontend-guard-input',type=pathlib.Path);p.add_argument('--domain-writer-identity',action='store_true');p.add_argument('--ui-gate-evidence',action='store_true');p.add_argument('--overlay-entry-prepare',action='store_true');p.add_argument('--overlay-entry-reference-header',type=pathlib.Path);a=p.parse_args()
+ if a.frontend_exec_guard:
+  if not a.frontend_boundary or a.frontend_writer_identity or a.frontend_owner_phase or a.runtime_identity_state or a.domain_writer_identity or a.ui_gate_evidence or a.overlay_entry_prepare or a.overlay_entry_reference_header is not None or a.sample_zip is not None or a.identity_case or a.identity_source or a.identity_header or a.compiler_environment:p.error('Execution guard requires exclusive --frontend-boundary --frontend-exec-guard')
+  if a.frontend_guard_input is None or not a.frontend_guard_input.is_file():p.error('--frontend-guard-input must be an existing selected frontend report')
+ elif a.frontend_guard_input is not None:p.error('--frontend-guard-input requires --frontend-exec-guard')
+ if a.overlay_entry_prepare:
+  if a.frontend_boundary or a.frontend_writer_identity or a.frontend_owner_phase or a.runtime_identity_state or a.domain_writer_identity or a.ui_gate_evidence or a.sample_zip is not None or a.identity_case or a.identity_source or a.identity_header or a.compiler_environment:p.error('Overlay entry preparation requires an exclusive exact scope')
+  if a.overlay_entry_reference_header is None:p.error('--overlay-entry-reference-header is required')
+  try:return overlay_entry_prepare_main(a)
+  except (OSError,ValueError) as error:p.error(str(error))
+ if a.overlay_entry_reference_header is not None:p.error('--overlay-entry-reference-header requires --overlay-entry-prepare')
+ if a.frontend_owner_phase and (not a.frontend_boundary or a.frontend_writer_identity or a.runtime_identity_state or a.domain_writer_identity or a.ui_gate_evidence or a.sample_zip is not None or a.identity_case or a.identity_source or a.identity_header or a.compiler_environment):p.error('Frontend owner phases require exclusive --frontend-boundary --frontend-owner-phase')
+ if a.ui_gate_evidence and (a.domain_writer_identity or a.frontend_boundary or a.frontend_writer_identity or a.runtime_identity_state or a.sample_zip is not None or a.identity_case or a.identity_source or a.identity_header or a.compiler_environment):p.error('UI gate evidence requires its exclusive exact scope')
+ if a.ui_gate_evidence:return ui_gate_main(a)
+ if a.domain_writer_identity and (a.frontend_boundary or a.frontend_writer_identity or a.runtime_identity_state or a.sample_zip is not None or a.identity_case or a.identity_source or a.identity_header or a.compiler_environment):p.error('Domain writer identity requires its exclusive exact scope')
+ if a.domain_writer_identity:return domain_writer_main(a)
+ if a.frontend_writer_identity and not a.frontend_boundary:p.error('--frontend-writer-identity requires --frontend-boundary')
+ if a.frontend_boundary and a.runtime_identity_state:p.error('select either frontend-boundary or runtime-identity-state')
+ if a.frontend_boundary:return frontend_boundary_main(a)
  if a.runtime_identity_state:return runtime_identity_state_main(a)
  if a.sample_zip is None:p.error('--sample-zip is required for the original export consumer')
  import time
@@ -273,7 +449,7 @@ def main():
  run=a.output_dir/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'));run.mkdir(parents=True);fixture=run/'fixtures';sample=fixture/'sample';sample.mkdir(parents=True)
  with zipfile.ZipFile(a.sample_zip)as z:
   for name in ['input-capture.jsonl','native-lifecycle.log','frontend-errors.log']:(sample/name).write_bytes(z.read(name))
- source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig');signatures=['static void rotateOneLogFile(const std::wstring& path, unsigned long long maxBytes) {','static std::string boundedJsonString(const json& value, const char* key, size_t limit) {','static bool appendFrontendTrace(const json& input) noexcept {','static bool appendFrontendDiagnostic(const json& input) noexcept {','static bool nativeLifecycleRecordIsStreaming(const char* event, const json& detail) {']
+ source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig');signatures=['static void decorateFrontendLogWriter(json& entry) {','static void rotateOneLogFile(const std::wstring& path, unsigned long long maxBytes) {','static std::string boundedJsonString(const json& value, const char* key, size_t limit) {','static bool appendFrontendTrace(const json& input) noexcept {','static bool appendFrontendDiagnostic(const json& input) noexcept {','static bool nativeLifecycleRecordIsStreaming(const char* event, const json& detail) {']
  funcs='\n'.join(extract(source,s)for s in signatures);start=source.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS');helper=source[start:source.index('// 进程内实时检测 SMT',start)]
  cpp=run/'fixture.cpp';cpp.write_text(PRELUDE+'\n'+EXTRA+'\n'+funcs+'\n'+helper+'\n'+TEST,encoding='utf-8');exe=run/'fixture.exe';vc=r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat';batch=run/'build.cmd';batch.write_text(f'@echo off\ncall "{vc}" >nul && cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "{cpp}" /I"{ROOT/"deps/json"}" /I"{ROOT/"native"}" /Fo"{run/"fixture.obj"}" /Fe"{exe}" /link advapi32.lib user32.lib\n')
  build=run_sample_owned_child('compile',['cmd.exe','/d','/c',str(batch)],run,sampleDeadline);(run/'compile.log').write_text(build['stdout']+build['stderr'],encoding='utf-8')

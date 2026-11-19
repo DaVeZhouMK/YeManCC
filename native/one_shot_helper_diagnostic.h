@@ -166,8 +166,8 @@ public:
                 const auto hardware = record.find("HardwareSuccessProven");
                 if (!exactInteger("Result", 6) ||
                     (stage != "admission" && stage != "prepare" && stage != "prepare-locate" && stage != "revalidate" &&
-                     stage != "current-locate" && stage != "current-authority" && stage != "disable" && stage != "enable") ||
-                    !optionalBool("Xusb") || !optionalBool("SameNode", true) ||
+                     stage != "current-locate" && stage != "current-authority" && stage != "disable" && stage != "enable" && stage != "root-cycle") ||
+                    !optionalBool("Xusb") || !optionalBool("RootPortCycle") || !optionalBool("SameNode", true) ||
                     !optionalBool("DisableCallEntered") || !optionalBool("EnableCallEntered") ||
                     !optionalUint32("PrepareLocateResult") || !optionalUint32("CurrentLocateResult") ||
                     !optionalUint32("DisableResult") || !optionalUint32("EnableResult") ||

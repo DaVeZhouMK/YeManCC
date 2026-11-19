@@ -38,7 +38,7 @@ static std::atomic<unsigned long long> g_powerGeneration{1};
 static std::atomic<int> g_powerLifecycle{0};
 static const char* powerLifecycleName(int){return "fixture-ready";}
 static unsigned timestampCalls=0;static std::string nativeLifecycleTimestamp(){++timestampCalls;return "2026-10-11T16:00:00.000";}
-static std::atomic<bool> g_domainLogEnabled[2]={false,false},g_poolCancel{false};
+static std::atomic<bool> g_domainLogEnabled[2]={false,false},g_poolCancel{false},g_exitRequested{false},g_tdpDaemonStopSent{false};
 static unsigned long long kLogMaxBytes=5ull*1024*1024;
 static std::mutex g_tdpObservationMx;
 static ymcc::logging::BufferedDomainLog g_tdpObservationStreams[2];
@@ -47,13 +47,19 @@ static unsigned hardwareLeaseCalls=0;static bool allowMockHardwareLease=false;
 struct MachineIdentity{std::string deviceClass,product,processor;}; static MachineIdentity g_machineIdentity;
 struct HardwareWriteLease{explicit HardwareWriteLease(const char*){++hardwareLeaseCalls;if(!allowMockHardwareLease)throw std::runtime_error("fixture forbids ALL hardware writes");}};
 static bool hardwareWriteAllowed(){return false;}
+// This parent fixture owns no Decky mirror peer. Keep its new shell guard
+// fail-closed while compiling the unchanged real shell/daemon consumers.
+struct ParentFixtureMirrorBroker {
+    bool acceptsRequest(const std::string&,const std::string&,unsigned long long)const{return false;}
+};
+static ParentFixtureMirrorBroker g_deckyMirrorBroker;
 static bool sameFinalPath(const std::wstring& a,const std::wstring& b){return _wcsicmp(a.c_str(),b.c_str())==0;}
 static std::string nextTdpRequestId(){return "fixture-request";}
 """
 DAEMON_FIXTURE=r"""
 static unsigned pipeCalls=0;static bool pipeThrows=false,pipeStale=false;static json mockPipeResult;
 static void settleTdpDaemonBootstrap(bool = false){}
-static json tdpDaemonPipeRequest(const json& req,DWORD){++pipeCalls;if(pipeThrows)throw std::runtime_error("fixture-pipe-first-error Authorization: Bearer fixture-secret");if(pipeStale)++g_powerGeneration;json out=mockPipeResult;out["version"]=1;out["requestId"]=req["requestId"];return out;}
+static json tdpDaemonPipeRequest(const json& req,DWORD,ULONGLONG=0,unsigned long long=0){++pipeCalls;if(pipeThrows)throw std::runtime_error("fixture-pipe-first-error Authorization: Bearer fixture-secret");if(pipeStale)++g_powerGeneration;json out=mockPipeResult;out["version"]=1;out["requestId"]=req["requestId"];return out;}
 """
 TESTS=r"""
 __declspec(noinline) static void overwriteFixtureStack(){volatile unsigned long long bytes[512];for(size_t i=0;i<512;++i)bytes[i]=0xababababababababULL+i;}
@@ -83,6 +89,17 @@ int wmain(int argc,wchar_t** argv){
  check("missing-base-library-parent-static-identity",runtimeMissing);
  check("detail-off-failure-is-still-durable-base-evidence",!g_domainLogEnabled[1]&&!rows.empty());
  check("no-hardware-write-or-driver-lease-entered",hardwareLeaseCalls==0);
+ // Final application stop never permits a CLI budget fallback. These calls
+ // reject before the fixture's hardware lease, process or driver boundary.
+ g_exitRequested=true;bool cliExit=false;
+ try{shellHandler({{"program",W2U(kTdpDaemonExe)},{"args",{"set","15","--vendor","amd"}}});}
+ catch(const std::exception& e){cliExit=std::string(e.what()).find("TDP CLI budget request retired")!=std::string::npos;}
+ check("actual-cli-budget-after-exit-rejects-before-hardware-lease",cliExit&&hardwareLeaseCalls==0);g_exitRequested=false;
+ g_tdpDaemonStopSent=true;bool cliRetired=false;
+ try{shellHandler({{"program",W2U(kTdpDaemonExe)},{"args",{"set","15","--vendor","amd"}}});}
+ catch(const std::exception& e){cliRetired=std::string(e.what()).find("TDP CLI budget request retired")!=std::string::npos;}
+ check("actual-cli-budget-after-final-stop-rejects-before-hardware-lease",cliRetired&&hardwareLeaseCalls==0);g_tdpDaemonStopSent=false;
+
  check("parent-output-bounded-and-user-directory-redacted",ymcc::tdpdiag::boundedText(std::string(10000,'x')).size()==4096&&ymcc::tdpdiag::boundedText("C:\\Users\\PrivateUser\\secret-file").find("PrivateUser")==std::string::npos);
  check("usage-2-is-not-classified-from-rc-alone",ymcc::tdpdiag::bootstrapKind("usage: set W",true)=="not-observed");
  const auto zipGood=ymcc::tdpdiag::encodingsZip(root/L"zip-good.zip");const auto zipBad=ymcc::tdpdiag::encodingsZip(root/L"zip-bad.zip");
@@ -218,7 +235,7 @@ def main():
  storage=[]
  if 'static bool publishTdpRuntimeIdentitySnapshot(' in text:
   storage=[extract(text,s) for s in ['bool sgWriteFileAtomicFlags(', 'static bool sgWriteFileAtomic(', 'static bool startupParseJson(', 'static bool startupReadJsonFile(', 'static bool tdpRuntimeIdentityDocumentValid(', 'static bool publishTdpRuntimeIdentitySnapshot(']]
- funcs=storage+[extract(text,s) for s in signatures];daemon=extract(text,'ipc_on("tdpDaemon.request", [](const json& a) -> json {');observe=extract(text,'ipc_on("tdp.observe",[](const json& a)->json {');handler=extract(text,'ipc_on("shell.run", [](const json& a) -> json {');body=handler[handler.index('{'):];archive=text[text.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'):text.index('// 进程内实时检测 SMT',text.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'))]; archive=archive.replace('#include "sleep_export_diagnostics_native.inc"','// Unrelated sleep IPC is outside this archive consumer.'); archive_prelude=ARCHIVE_PRELUDE[ARCHIVE_PRELUDE.index('struct RunOut'):ARCHIVE_PRELUDE.index('static json checks=')]; code=PRELUDE+'\n'+archive_prelude+'\n'+'\n'.join(funcs)+'\n'+archive+'\nstatic json shellHandler(const json& a) '+body+'\n'+DAEMON_FIXTURE+'\nstatic json daemonHandler(const json& a) '+daemon[daemon.index('{'):]+'\nstatic json observeHandler(const json& a) '+observe[observe.index('{'):]+'\n'+TESTS
+ funcs=storage+[extract(text,s) for s in signatures];daemon=extract(text,'ipc_on("tdpDaemon.request", [](const json& a) -> json {');observe=extract(text,'ipc_on("tdp.observe",[](const json& a)->json {');handler=extract(text,'ipc_on("shell.run", [](const json& a) -> json {');body=handler[handler.index('{'):];archive=text[text.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'):text.index('// 进程内实时检测 SMT',text.index('static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS'))]; archive=archive.replace('#include "sleep_export_diagnostics_native.inc"','// Unrelated sleep IPC is outside this archive consumer.'); archive_prelude=ARCHIVE_PRELUDE[ARCHIVE_PRELUDE.index('struct RunOut'):ARCHIVE_PRELUDE.index('static json checks=')]; code=PRELUDE+'\n'+archive_prelude+'\n'+'\n'.join(funcs)+'\n'+archive+'\nstatic json shellHandler(const json& a) '+body+'\n'+DAEMON_FIXTURE+'\n'+extract(text,'static void requireTdpRequestAdmission(')+'\nstatic json actualDaemonHandler(const json& a) '+daemon[daemon.index('{'):]+'''\n// The parent fixture replaces IPC/pipe leaves. Model the real receiver's native\n// admission here; actual pool/lock/deadline behavior is tested separately.\nstatic json daemonHandler(json a){\n const auto op=a.value("op",std::string{});\n if(op=="set"||op=="resume"){a["_nativeTdpDeadlineTick"]=GetTickCount64()+std::clamp(a.value("timeoutMs",3000u),100u,10000u);a["_nativeTdpPowerGeneration"]=g_powerGeneration.load();}\n return actualDaemonHandler(a);\n}\n'''+'\nstatic json observeHandler(const json& a) '+observe[observe.index('{'):]+'\n'+TESTS
  cpp=run/'harness.cpp';cpp.write_text(code,encoding='utf-8');exe=run/'harness.exe';vcvars=pathlib.Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
  command=f'call "{vcvars}" >nul && cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "{cpp}" /I"{ROOT/"deps/json"}" /I"{ROOT/"native"}" /Fo"{run/"harness.obj"}" /Fe"{exe}" /link advapi32.lib user32.lib'
  batch=run/'build.cmd';batch.write_text('@echo off\n'+command+'\n',encoding='utf-8');compiled=subprocess.run(['cmd.exe','/d','/c',str(batch)],cwd=run,capture_output=True,text=True,errors='replace');(run/'compile.log').write_text(compiled.stdout+compiled.stderr,encoding='utf-8')

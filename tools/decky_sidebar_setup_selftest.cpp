@@ -5,9 +5,19 @@
 #include <iostream>
 using namespace ymcc::deckysetup;
 static unsigned cases=0;
+static Json isolatedMarkerMeasurements=Json::array();
 static void check(bool v,const char* s){if(!v)throw std::runtime_error(s);cases++;}
 static void file(const std::filesystem::path& p,const char* s="fixture"){std::filesystem::create_directories(p.parent_path());std::ofstream(p)<<s;}
+// The original setup consumer can also execute the exact main Environment
+// function with declared inert registry/observer ports. Ordinary/default setup
+// keeps every existing assertion and requires no generated include.
+#ifdef YMCC_DECKY_ENVIRONMENT_SOURCE
+#include YMCC_DECKY_ENVIRONMENT_SOURCE
+#endif
 int wmain(int argc,wchar_t** argv){try{
+#ifdef YMCC_DECKY_ENVIRONMENT_SOURCE
+ if(argc==3&&std::wstring(argv[2])==L"--environment-source")return environmentSourceCases(std::filesystem::absolute(argv[1]).lexically_normal());
+#endif
  if(argc!=2)throw std::runtime_error("Expected Setup19 task directory");
  const auto allowed=std::filesystem::path(LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Sidebar\Build\Setup19)").lexically_normal();
  const auto base=std::filesystem::absolute(argv[1]).lexically_normal();if(base!=allowed && base.filename()!=L"setup-fixture"){std::wcerr<<L"actual="<<base.native()<<L" expected="<<allowed.native()<<std::endl;throw std::runtime_error("Fixture scope rejected");}
@@ -87,6 +97,30 @@ int wmain(int argc,wchar_t** argv){try{
  broken=manifest;broken["loaderVersion"]="v99.0.0";std::ofstream(bundled,std::ios::binary)<<broken.dump();check(inspect(steam,home,managedDigest,bundled)["reason"]=="resource-upgrade-required","first upgrade still binds current native official version");
  std::ofstream(bundled,std::ios::binary)<<manifest.dump();std::filesystem::remove(marker);result=prepare(steam,home,managedDigest,false,{},bundled);
  check(result["ready"]==true&&result["managedPackageVerified"]==true&&result["managedPackageSource"]=="package","marker preparation retains first-upgrade verification on its final read");
+ // Extend this original marker-final-read consumer. The isolated IO port uses
+ // the real inspect/contract reader and fixture files; parent Digest is a
+ // distinct forbidden route, not an alternative implementation of prepare.
+ for(const auto* variant:{"stopped","running","canceled","invalid","existing"}){
+  const auto isolatedSteam=root/(std::string("Isolated-")+variant);file(isolatedSteam/L"steam.exe");
+  const auto isolatedMarker=isolatedSteam/L".cef-enable-remote-debugging";
+  const std::string mode=variant;bool allowed=true;unsigned reads=0,parentDigests=0;
+  if(mode=="existing")file(isolatedMarker,"KEEP-ISOLATED-TEXT");
+  ymcc::deckyresources::Options isolated;isolated.enabled=false;
+  isolated.isolatedPreparation=[&]{
+   ++reads;auto observed=inspect(isolatedSteam,home,managedDigest,bundled);
+   if(reads==2&&mode=="canceled")allowed=false;
+   if(reads==2&&mode=="invalid"){observed["ready"]=false;observed["reason"]="resource-package-mismatch";}
+   return observed;
+  };
+  const Digest noParentHash=[&](const std::wstring&)->std::string{++parentDigests;throw std::runtime_error("isolated-marker-parent-digest");};
+  const auto observed=prepare(isolatedSteam,home,noParentHash,mode=="running",[&]{return allowed;},bundled,isolated);
+  const auto expected=mode=="running"?"steam-restart-required":mode=="canceled"?"preparation-cancelled":mode=="invalid"?"resource-package-mismatch":"ready";
+  const auto reason=observed.value("reason",std::string{});const bool created=observed.value("createdSteamDebugMarker",false);
+  isolatedMarkerMeasurements.push_back({{"variant",mode},{"isolatedReads",reads},{"parentDigestCalls",parentDigests},{"reason",reason},{"ready",observed.value("ready",false)},{"createdMarker",created}});
+  check(parentDigests==0&&reads==(mode=="existing"?1u:2u)&&reason==expected&&observed.value("ready",false)==(mode=="stopped"||mode=="existing")&&created==(mode!="existing"),"isolated marker final read escaped its owner or changed readiness");
+  if(mode=="existing"){std::ifstream saved(isolatedMarker);std::string content;saved>>content;check(content=="KEEP-ISOLATED-TEXT","isolated repeat overwrote user marker content");}
+ }
+
  // Reproduce the real Windows collision before testing the bounded startup migration.
  const auto legacy=home/L".ymcc-managed.json",moved=home/L"settings"/L".ymcc-managed.json";
  file(legacy,manifest.dump().c_str());file(moved,"older-settings-receipt-preserved");
@@ -105,5 +139,5 @@ int wmain(int argc,wchar_t** argv){try{
  std::filesystem::remove(legacy);file(legacy,"{broken");
  check(prepare(steam,home,managedDigest,false,{},bundled)["reason"]=="resource-package-invalid"&&std::filesystem::exists(legacy),"invalid old JSON cannot be silently erased for a successful launch");
  std::filesystem::remove(legacy);
- std::cout<<Json({{"cases",cases},{"status","passed"},{"fakeSteamDirectory",true},{"testDigestInjected",true},{"realSteamWrites",0},{"hardwareWrites",0},{"externalPython",false},{"externalNode",false}}).dump()<<std::endl;return 0;
+ std::cout<<Json({{"cases",cases},{"status","passed"},{"isolatedMarkerMeasurements",isolatedMarkerMeasurements},{"fakeSteamDirectory",true},{"testDigestInjected",true},{"realSteamWrites",0},{"hardwareWrites",0},{"externalPython",false},{"externalNode",false}}).dump()<<std::endl;return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}}

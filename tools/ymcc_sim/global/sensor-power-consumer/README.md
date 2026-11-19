@@ -1,5 +1,16 @@
 # Gyro sensor power and virtual-link consumer
 
+The 2026-11-17 public-sleep consumer integration is described in
+`docs/gyro-shared-power-lifecycle.md`. `power-wake` now has 80 definitions:
+69 retained original cases and 11 public-observation cases. This is a definition
+count, not a complete-parent PASS. Select the additions with the original
+`--variants power-wake --case from:public-late-optional-enable-after-resume`
+entry and a fresh evidence directory. The exact old init ordering remains
+extractable for the late-enable regression. The public reader is an explicit
+fact port; the real public observation/cancellation headers execute. Its
+Lifecycle scope is always combined with the explicit sensor Ready/Resuming
+policy, without requiring general hardware-write permission.
+
 Canonical ID remains `sleep.gyro-power`. Run only this registered consumer:
 
 ```powershell
@@ -57,3 +68,14 @@ Memory terminals own the clock, sensor callbacks, machine-family observation and
 One private fixed-120Hz-cap fault must fail the exact 500Hz assertion. Optional `YMCC_GYRO_BEFORE_HEADER` compiles the supplied original shortcut header and must fail the exact first-enable assertion, without copying old files into the product tree. All sensor/device/process operations are memory ports; no installed YMCC, PnP node, Steam, game or physical controller is started or changed.
 
 The ROG-only policy and the distinction between source cadence and effective output are recorded in `docs/rog-gyro-recovery.md`. Later brand adaptation requires player evidence; it cannot be enabled merely by lowering a frequency threshold.
+
+
+## Provider resource return and Start ACK, 2026-11-13
+
+The existing `sleep.gyro-power` runner accepts an exclusive explicit `--variants provider-stop`, a fresh output directory, and optional `--case exact-name` or `--case from:exact-name`. The variant is outside the default suite and module minimum. It has 12 case definitions; the independent `power-wake` variant now has 68. Case definitions do not assert a complete parent execution. Unknown or empty selections are rejected before native compilation.
+
+`provider-stop.mjs` compiles the complete production `msi_legacy_sensor.h` Provider and extracts complete native unsubscribe, Stop, cold Start, resubscribe and power predicates. The existing SDK test COM transport supplies the sensor interfaces; only its test class name is adapted to avoid a Windows SDK declaration collision. Real private MTA threads, COM lifetimes, events, waits, closes and cancellation requests run. The WinRT discovery/subscription and machine/Host leaves are inert; unexpected physical SDK discovery is blocked. This proves resource ownership with the fake SDK transport, not physical cancellation or full OEM/Host compatibility.
+
+The cases cover busy provider lifecycle locks, pending GetData, unknown waits, partial event/thread close failures, late cancelled samples, independent MSI/HC provider slots, power rejection, separate apartment-token and provider resource debt, diagnostic exceptions during cleanup, and cold Start before old resources return. Start acknowledgement runs separately through the complete original STA with a controlled deferred-Start leaf: deferred resource admission is Failed, while already paused and sleep-interrupted Start preserve restricted capture ownership. The two executions do not constitute an integrated full Provider+STA+Host qualification.
+
+Evidence is kept in the existing shared sleep project at `Testing/YMCC/Evidence/SharedSleepLifecycle-20261112/all-consumers/provider-stop`. The 12 provider cases were executed as 8/54, 3/14 and 1/5 at their respective source epochs. The four final Start cases executed 16 assertions; the deferred-ACK case had an earlier 1/4 execution and was necessarily checked again after its decision changed. Six semantic controls are qualified; the early absent-port control and two compilation failures remain preserved and excluded from semantic acceptance. No default provider12/power68 parent or prior power/virtual/cadence groups were rerun for sealing.

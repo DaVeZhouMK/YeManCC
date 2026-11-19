@@ -4,6 +4,8 @@
 #endif
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -24,6 +26,24 @@ using Close=int32_t(__cdecl*)(void*);
 using LoadAssembly=int(__stdcall*)(const wchar_t*,const wchar_t*,const wchar_t*,const wchar_t*,void*,void**);
 using Invoke=int(__cdecl*)(const unsigned char*,int,unsigned char**,int*);
 using Free=void(__cdecl*)(unsigned char*);
+using PowerNotify=void(__cdecl*)();
+inline std::mutex systemPowerNotificationGate;
+inline PowerNotify systemPowerNotification=nullptr;
+inline bool systemPowerNotificationsSealed=false;
+inline void publishSystemPowerNotification(PowerNotify notify) noexcept {
+    std::lock_guard<std::mutex> admission(systemPowerNotificationGate);
+    if(systemPowerNotificationsSealed)return;
+    systemPowerNotification=notify;
+}
+inline void notifySystemPower() noexcept {
+    // The managed export only registers coalesced work; it takes no operation/device lock.
+    std::lock_guard<std::mutex> admission(systemPowerNotificationGate);
+    if(!systemPowerNotificationsSealed&&systemPowerNotification)systemPowerNotification();
+}
+inline void sealSystemPowerNotifications() noexcept {
+    std::lock_guard<std::mutex> admission(systemPowerNotificationGate);
+    systemPowerNotificationsSealed=true;systemPowerNotification=nullptr;
+}
 inline std::wstring registryDotnetRoot(){
     HKEY key=nullptr;
     if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\dotnet\\Setup\\InstalledVersions\\x64",0,KEY_READ|KEY_WOW64_64KEY,&key)!=ERROR_SUCCESS)return {};
@@ -80,11 +100,13 @@ public:
         if(delegated<0||!loader)throw std::runtime_error("内置充电组件加载接口不可用");
         const auto loadAssembly=reinterpret_cast<LoadAssembly>(loader);
         const auto unmanaged=reinterpret_cast<const wchar_t*>(static_cast<intptr_t>(-1));
-        void *invoke=nullptr,*release=nullptr;
+        void *invoke=nullptr,*release=nullptr,*notify=nullptr;
         if(loadAssembly(assembly.c_str(),L"YeManBatteryHost.InProcessEntry, YeManBatteryHost",L"Invoke",unmanaged,nullptr,&invoke)!=0||!invoke||
-           loadAssembly(assembly.c_str(),L"YeManBatteryHost.InProcessEntry, YeManBatteryHost",L"Free",unmanaged,nullptr,&release)!=0||!release)
+           loadAssembly(assembly.c_str(),L"YeManBatteryHost.InProcessEntry, YeManBatteryHost",L"Free",unmanaged,nullptr,&release)!=0||!release||
+           loadAssembly(assembly.c_str(),L"YeManBatteryHost.InProcessEntry, YeManBatteryHost",L"NotifySystemPower",unmanaged,nullptr,&notify)!=0||!notify)
             throw std::runtime_error("内置充电组件与主程序接口不匹配，请更新完整程序包");
         assembly_=assembly;free_=reinterpret_cast<Free>(release);invoke_=reinterpret_cast<Invoke>(invoke);
+        publishSystemPowerNotification(reinterpret_cast<PowerNotify>(notify));
     }
     bool loaded()const noexcept{return invoke_!=nullptr;}
     Json call(const Json& envelope){

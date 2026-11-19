@@ -29,7 +29,11 @@ internal static partial class Program
         public void BeginRead() => ManagedObserve("pipe-read-begin");
         public void EndRead(int length) => ManagedObserve("pipe-read-end", new { length });
         public void BeginHandle() => ManagedObserve("handle-begin");
-        public void EndHandle() => ManagedObserve("handle-end");
+        public void EndHandle()
+        {
+            if (_managedFault == "prepare-create-exception-once") Fixture.CreateThrows = false;
+            ManagedObserve("handle-end");
+        }
         public void BeginWrite() => ManagedObserve("pipe-write-begin");
         public void EndWrite() => ManagedObserve("pipe-write-end");
     }
@@ -82,6 +86,11 @@ internal static partial class Program
     private static void ManagedDecode(string requestId, ulong sequence, string runId,
         ulong epoch, ulong powerGeneration, string command)
     {
+        if (_managedFault == "prepare-create-exception-once" && !_managedFaultConsumed && command == "PREPARE_TARGET")
+        {
+            Fixture.CreateThrows = true;
+            _managedFaultConsumed = true;
+        }
         if (command == "RECREATE_TARGET" && _managedFault is ("recreate-owned-ids-rotate" or "recreate-owned-ids-foreign" or "recreate-owned-ids-unbound-ack"))
         {
             Fixture.NextRoot = _managedFault != "recreate-owned-ids-foreign"
@@ -248,7 +257,7 @@ internal static partial class Program
             !receipt.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
             File.Exists(receipt) || Directory.Exists(receipt)) return false;
         var fault = values.GetValueOrDefault("--fault", "none");
-        if (fault is not ("none" or "output-stop-once" or "controller-dispose-once" or "context-dispose-once" or "recreate-owned-ids-rotate" or "recreate-owned-ids-foreign" or "recreate-owned-ids-unbound-ack" or "ps-same-instance-ids" or "ps-late-ownership-read" or "recreate-output-stop-twice" or "recreate-output-stop-always" or "prepare-ack-loss-held-exit")) return false;
+        if (fault is not ("none" or "output-stop-once" or "controller-dispose-once" or "context-dispose-once" or "recreate-owned-ids-rotate" or "recreate-owned-ids-foreign" or "recreate-owned-ids-unbound-ack" or "ps-same-instance-ids" or "ps-late-ownership-read" or "recreate-output-stop-twice" or "recreate-output-stop-always" or "prepare-ack-loss-held-exit" or "prepare-create-exception-once")) return false;
         var nonce=values.GetValueOrDefault("--nonce","fake-nonce");
         if(string.IsNullOrWhiteSpace(nonce)||nonce.Length>160)return false;
         options = new(pipe, parentPid, Path.GetFullPath(receipt), fault, nonce);

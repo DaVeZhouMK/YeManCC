@@ -5,6 +5,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+namespace ymcc::inputHost::sharedPower { class Scope; }
 namespace ymcc::sensors {
 enum class ThreadRequest : uint32_t { None=0, Start, Stop, Suspended, Resume, Resubscribe, Rebind, Shutdown };
 // One acknowledgement belongs to one request, never to the most recent poster.
@@ -12,7 +13,14 @@ enum class ThreadRequest : uint32_t { None=0, Start, Stop, Suspended, Resume, Re
 class ThreadMailbox {
 public:
     enum class Result { Pending, Completed, Failed, Exited, TimedOut, Unavailable };
-    struct Ticket { uint64_t id; ThreadRequest request; Result result=Result::Pending; };
+    struct Scope {
+        uint64_t serial=0,capture=0,power=0,sequence=0,retryOf=0;
+        // The original public observation/cancellation survives queued retries.
+        std::shared_ptr<ymcc::inputHost::sharedPower::Scope> publicPower;
+        // Borrow the repair admission; sensor ownership must not cancel it.
+        std::shared_ptr<ymcc::inputHost::sharedPower::Scope> sleepRepairPower{};
+    };
+    struct Ticket { uint64_t id; ThreadRequest request; Result result=Result::Pending; const ThreadMailbox* owner=nullptr; const Scope scope{}; };
     using Handle=std::shared_ptr<Ticket>;
 private:
     mutable std::mutex mx_;
@@ -28,15 +36,17 @@ public:
         open_=true;closing_=false;return true;
     }
     bool acceptsWork() const {std::lock_guard<std::mutex> lock(mx_);return open_ && !closing_;}
-    Handle submit(ThreadRequest request) {
+    Handle submit(ThreadRequest request) {return submitIfLatest(request,Scope{},0);}
+    Handle submitIfLatest(ThreadRequest request,const Scope& scope,uint64_t predecessor) {
         std::lock_guard<std::mutex> lock(mx_);
-        if(!open_ || request==ThreadRequest::None ||
+        if(!open_ || request==ThreadRequest::None || (predecessor && predecessor!=next_) ||
             (closing_ && request!=ThreadRequest::Stop && request!=ThreadRequest::Shutdown)) return {};
-        auto ticket=std::make_shared<Ticket>(Ticket{++next_,request});
+        auto ticket=std::make_shared<Ticket>(Ticket{++next_,request,Result::Pending,this,scope});
         queued_.push_back(ticket);
         if(request==ThreadRequest::Shutdown) closing_=true;
         return ticket;
     }
+    uint64_t latestTicketId() const {std::lock_guard<std::mutex> lock(mx_);return next_;}
     Handle take() {
         std::lock_guard<std::mutex> lock(mx_);
         if(active_ || queued_.empty()) return {};
@@ -50,6 +60,12 @@ public:
             active_.reset();
         }
         cv_.notify_all();
+    }
+    // Read-only transport progress; unlike wait(0), this never closes admission.
+    Result inspect(const Handle& ticket) const {
+        if(!ticket || ticket->owner!=this) return Result::Unavailable;
+        std::lock_guard<std::mutex> lock(mx_);
+        return ticket->result;
     }
     bool hasQueuedWork() const {std::lock_guard<std::mutex> lock(mx_);return !queued_.empty();}
     bool stopRequested() const {

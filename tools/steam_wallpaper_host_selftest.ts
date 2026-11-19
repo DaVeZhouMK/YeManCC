@@ -3,6 +3,10 @@ import {resolve} from 'node:path';
 import {strict as assert} from 'node:assert';
 import {startSteamWallpaperHost,resolveWallpaperTarget,steamWallpaperForegroundAllowed} from '../src/bridge/steamWallpaperHost';
 import type {GameMediaEntry} from '../src/bridge/sharedGameMedia';
+import {subscribeGameMediaResume} from '../src/bridge/gameMediaPreparationPolicy';
+const caseArgs=process.argv.filter(arg=>arg.startsWith('--case='));
+assert.ok(caseArgs.length<=1&&(!caseArgs.length||caseArgs[0].length>7&&!process.argv.includes('--stability-recovery')),'one nonempty exact case without recovery mode');
+const exactCase=caseArgs.length?caseArgs[0].slice(7):null;
 const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');const stabilityRecoveryRows:Array<{name:string;ok:boolean;error?:string}>=[];
 let cases=0,checks=0;const same=(a:unknown,b:unknown,label:string)=>{checks++;assert.deepEqual(a,b,label);};
 const settle=()=>new Promise<void>(resolve=>setImmediate(resolve));
@@ -17,7 +21,7 @@ function fixture(options:{foreground?:unknown;foregroundRead?:()=>Promise<unknow
  if(options.startReady!==false)host.ready();extension.connected(peer);
  return {host,frames,calls,failures,context,peer,timers,foreground:(value:unknown)=>foregroundChanged(value),fire:async()=>{const next=[...timers][0];assert.ok(next,'missing wallpaper delivery recovery timer');timers.delete(next[0]);next[1].fn();await settle();},resume:(generation:number)=>resumed({generation}),status:(args:any)=>extension.request({...peer,request:{command:'wallpaper.status',runId:peer.runId,...args}}),change:(reason='asset',key?:string)=>changed(reason,key),connect:(value=peer)=>extension.connected(value),enable:(value:boolean)=>{enabled=value;},appearance:(value:number)=>{opacity=value;},setEntry:(value:GameMediaEntry)=>{current=value;},output:()=>frames.filter(f=>f.type==='wallpaper'&&f.contextSeq>0)};
 }
-async function run(name:string,fn:()=>Promise<void>){if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;if(!stabilityRecoveryOnly){await fn();cases++;console.log('PASS '+name);return;}try{await fn();stabilityRecoveryRows.push({name,ok:true});console.log('PASS '+name);}catch(error){stabilityRecoveryRows.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
+async function run(name:string,fn:()=>Promise<void>){if(exactCase!==null&&name!==exactCase)return;if(stabilityRecoveryOnly&&!name.startsWith('R18 recovery:'))return;if(!stabilityRecoveryOnly){await fn();cases++;console.log('PASS '+name);return;}try{await fn();stabilityRecoveryRows.push({name,ok:true});console.log('PASS '+name);}catch(error){stabilityRecoveryRows.push({name,ok:false,error:String(error instanceof Error?error.message:error)});console.log('FAIL '+name);}cases++;}
 // These cases exercise native foreground admission, separately from the old
 // player DOM-focus checks. No native reader defaults to an affirmative proof.
 await run('native foreground unknown/minimized/overlay/desktop never starts media queries',async()=>{
@@ -60,11 +64,78 @@ await run('hidden route clears media without identity or preparation work',async
 await run('old context or another connection cannot replace selected output',async()=>{const f=fixture();f.context('570',3);await settle();const count=f.calls.length;f.context('1091500',2);f.context('1091500',4,true,{connection:'999'});f.context('1091500',4,true,{runId:'b'.repeat(32)});await settle();same(f.calls.length,count,'stale and foreign requests ignored');f.host.stop();});
 await run('changing game fences an earlier asynchronous lookup',async()=>{let resolve!:(entry:GameMediaEntry)=>void;const pending=new Promise<GameMediaEntry>(yes=>resolve=yes);const f=fixture({lookup:async target=>target.appId===570?pending:entry(1091500),ensure:async target=>entry(target.appId)});f.context('570',1);await settle();f.context('1091500',2);await settle();resolve(entry());await settle();same(f.output().some(frame=>frame.appId==='570'),false,'no late old-game output');same(f.output().at(-1).appId,'1091500','new game remains selected');f.host.stop();});
 await run('YMCC switch off clears media and prevents preparation',async()=>{const f=fixture();f.context();await settle();f.enable(false);f.change('settings');await settle();const count=f.calls.filter(c=>c.command==='ensure').length;same(f.output().at(-1).entry,null,'off releases frame');f.context('1091500',2);await settle();same(f.calls.filter(c=>c.command==='ensure').length,count,'off never prepares');same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,false,'switch signal delivered');f.host.stop();});
-await run('playback failure requires the exact delivered revision and selection',async()=>{const f=fixture();f.context();await settle();const valid={contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'};f.status({...valid,bindingRevision:0});f.status({...valid,appId:'99'});same(f.failures.length,0,'stale failure ignored');f.status(valid);f.status(valid);await settle();same(f.failures.length,1,'one exact failure accepted');f.host.stop();});
+await run('playback failure requires the exact delivered revision and selection',async()=>{
+ const valid={contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'};
+ const video=fixture();try{
+  video.context();await settle();video.status({...valid,bindingRevision:0});video.status({...valid,appId:'99'});same(video.failures.length,0,'stale failure ignored');
+  video.status(valid);video.status(valid);await settle();same(video.failures.length,1,'one exact failure accepted');
+ }finally{video.host.stop();}
+ const image=fixture({playbackFailed:async()=>{throw Error('unexpected image mutation');}});try{
+  const base=entry();image.setEntry({...base,staticReady:true,dynamicReady:true,asset:{...base.asset!,kind:'image',extension:'jpg',mime:'image/jpeg'}});
+  image.context();await settle();same(image.output().at(-1).entry.kind,'image','legacy report is for a delivered image');
+  const calls=image.calls.length,frames=image.output().length;
+  image.status(valid);image.status({...valid,kind:'video'});await settle();
+  same(image.failures.length,0,'legacy image failure must not invalidate shared media');
+  same(image.output().length,frames,'image failure does not clear or republish the frame');
+  same(image.calls.length,calls,'image failure starts no cache or preparation work');
+  same(image.timers.size,0,'image failure starts no retry');
+ }finally{image.host.stop();}
+});
 await run('appearance changes update same asset without duplicate ready announcement',async()=>{const f=fixture();f.context();await settle();const ready=f.frames.filter(m=>m.type==='wallpaper-ready').length;f.appearance(.4);f.change('settings');await settle();same(f.output().at(-1).opacity,.4,'appearance republished');same(f.frames.filter(m=>m.type==='wallpaper-ready').length,ready,'ready only sent on transition');f.host.stop();});
-await run('shortcut IDs and unavailable mapping never fall back to title guesses',async()=>{const calls:any[]=[];const call=(async(command:string,args:any)=>{calls.push({command,args});return {};}) as any;same(await resolveWallpaperTarget('0','game',call),null,'zero rejected');same(await resolveWallpaperTarget('18446744073709551616','game',call),null,'overflow rejected');same(await resolveWallpaperTarget('4131894616','game',call),null,'unknown shortcut unresolved');same(calls.length,1,'only real VDF lookup');});
+await run('shortcut IDs and unavailable mapping never fall back to title guesses',async()=>{const calls:any[]=[];const call=(async(command:string,args:any)=>{calls.push({command,args});return {};}) as any;same(await resolveWallpaperTarget('0','game',call),null,'zero rejected');same(await resolveWallpaperTarget('18446744073709551616','game',call),null,'overflow rejected');same(await resolveWallpaperTarget('4131894616','game',call),null,'unknown shortcut unresolved');same(calls.length,1,'only real VDF lookup');
+ let mapping:any={};const f=fixture({shortcutRead:async()=>mapping});
+ try{
+  f.context('4131894616');await settle();await settle();
+  same(f.output().at(-1).entry,null,'unavailable shortcut remains unguessed');
+  same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'one initial real mapping lookup');
+  same(f.timers.size,0,'missing mapping adds no polling');
+  mapping={executable:'G:/Games/local.exe',name:'Local Game',shortcutAppId:'4131894616',steamAccount:'17'};
+  f.change('asset');await settle();await settle();
+  same(f.output().at(-1)?.entry?.assetId,'asset-570','existing media notification recovers the same selected shortcut');
+  same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,2,'one fresh mapping after observed source change');
+  for(let n=0;n<1000;n++)f.change('asset');await settle();await settle();
+  same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,2,'successful mapping stays cached through 1000 notifications');
+  same(f.timers.size,0,'recovered mapping has no polling');
+ }finally{f.host.stop();}
+});
 await run('card selection does not rescan inventory; return from hidden or reconnect does',async()=>{const f=fixture();f.context('570',1);await settle();const initial=f.calls.filter(call=>call.command==='inventory').length;f.context('1091500',2);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial,'card changes do not enumerate the library');f.context('1091500',3,false);f.context('1091500',4,true);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+1,'visible return refreshes known shortcuts');f.connect();await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+1,'reconnect without a visible context does no scan');f.context('1091500',1);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+2,'new visible peer context rechecks current inventory');f.host.stop();});
 await run('unrelated UI settings do not query selected media',async()=>{const f=fixture();f.context();await settle();const count=f.calls.length;f.change('settings');f.change('settings');await settle();same(f.calls.length,count,'unchanged wallpaper settings do no native reads');f.host.stop();});
+
+await run('selected shortcut reads existing launcher wallpaper without preparing it',async()=>{
+ const id='4131894616',exe='G:/Games/local.exe';
+ const video={...entry(106),currentGameWallpaperFallback:true as const,dynamicReady:true};
+ const missing={key:'exe-fixture',bindingRevision:0,status:'missing',ready:false};
+ let failures=0;
+ const f=fixture({lookup:async target=>target.currentGameWallpaper===true&&target.executable===exe&&!("appId" in target)?video:
+  missing,ensure:async()=>missing,playbackFailed:async()=>{if(++failures===1)throw Error('fixture failure transport');return video;}});
+ try{
+  f.context(id);await settle();
+  same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'the selected shortcut must be read through the current Steam account');
+  same(f.output().at(-1)?.entry?.assetId,video.asset!.id,'selected shortcut must reuse the existing launcher video');
+  same(f.output().at(-1).appId,id,'the Decky frame keeps the selected shortcut ID');
+  same(f.calls.filter(c=>c.command==='ensure').length,0,'a read-only display fallback cannot prepare more media');
+  same(f.calls.filter(c=>c.command==='lookup').length,1,'the fallback does not need a second resolve call');
+  same(f.calls.filter(c=>c.command==='selectSteamTarget').at(-1).target.appId,0,'display reuse never promotes the unresolved shortcut');
+  const demand=f.calls.find(c=>c.command==='lookup').demand;
+  same([demand.demandConsumer,demand.current()],['steam',true],'the fallback still needs native foreground demand');
+  f.status({contextSeq:1,appId:id,assetId:video.asset!.id,bindingRevision:video.bindingRevision,status:'playback-failed'});await settle();
+  same(f.timers.size,1,'unacknowledged decoder failure schedules one recheck');await f.fire();
+  same(f.failures.map(v=>[v.key,v.assetId,v.bindingRevision]),[[video.key,video.asset!.id,video.bindingRevision],[video.key,video.asset!.id,video.bindingRevision]],'retry checks and reports the same canonical asset revision');
+  f.context(id,2,false);await settle();const reads=f.calls.filter(c=>c.command==='lookup').length;
+  f.change('asset','steam-106');await settle();
+  same(demand.current(),false,'hiding revokes the original foreground demand');
+  same(f.calls.filter(c=>c.command==='lookup').length,reads,'hidden shortcut cannot use the fallback');
+ }finally{f.host.stop();}
+ const known=fixture({shortcut:{executable:exe,appId:106,verified:true},lookup:async()=>({...entry(106),staticReady:true,dynamicReady:true})});
+ try{known.context(id);await settle();const target=known.calls.find(c=>c.command==='lookup').target;
+  same([target.appId,target.currentGameWallpaper],[106,undefined],'verified shortcut keeps its explicit AppID');
+  same(known.output().at(-1)?.entry?.assetId,'asset-106','verified shortcut still returns normal media');
+ }finally{known.host.stop();}
+ const absent=fixture({lookup:async()=>missing,ensure:async()=>missing});
+ try{absent.context(id);await settle();const prepared=absent.calls.filter(c=>c.command==='ensure');
+  same(prepared.map(c=>[c.target.appId,c.target.executable,c.target.currentGameWallpaper]),[[0,exe,undefined]],'missing video retains original serial admission using the real shortcut target');
+ }finally{absent.host.stop();}
+});
 
 await run('new selection and hidden route withdraw the previous interactive preparation priority',async()=>{
  const f=fixture();f.context('570',1);await settle();same(f.calls.filter(c=>c.command==='selectSteamTarget').at(-1).target.appId,570,'confirmed current target owns foreground quota');f.context('1091500',2);same(f.calls.filter(c=>c.command==='selectSteamTarget').at(-1).target,null,'old target is downgraded before asynchronous identity');await settle();same(f.calls.filter(c=>c.command==='selectSteamTarget').at(-1).target.appId,1091500,'new confirmed target promoted');f.context('1091500',3,false);await settle();same(f.calls.filter(c=>c.command==='selectSteamTarget').at(-1).target,null,'hidden route relinquishes foreground quota');f.host.stop();
@@ -85,26 +156,95 @@ await run('resume fences pre-sleep asynchronous completion and new connection st
 
 await run('actual IPC committed power event reaches production host and is detached on teardown',async()=>{
  const previous=(globalThis as any).window;(globalThis as any).window=new EventTarget();
- try{const f=fixture({nativePower:true});f.context();await settle();window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:4}}));await settle();same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).resumeGeneration,4,'real IPC event subscription reaches host');f.host.stop();const count=f.calls.length;window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:5}}));await settle();same(f.calls.length,count,'native listener detached on stop');}finally{(globalThis as any).window=previous;}
+ const fact=(generation:number,publicationRevision:number,extra:any={})=>({phase:'ready',generation,known:true,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:publicationRevision,publicationRevision,...extra});
+ const emit=(state:any)=>{(globalThis as any).__F2_SHARED_POWER_CURRENT__=state;window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:state}));};
+ const f=fixture({nativePower:true});
+ try{
+  f.context();same(f.calls.filter(c=>c.command==='lookup').length,0,'default host cannot play before a complete shared Ready');
+  emit(fact(4,1));await settle();same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,true,'actual public Ready reaches default host');
+  same(f.output().at(-1).entry,null,'Ready alone requires a fresh page context');
+  f.context('570',2,true);await settle();same(f.output().at(-1).entry.assetId,'asset-570','actual shared admission permits fresh page demand');
+  const before=f.calls.length;
+  emit(fact(4,2));emit(fact(4,2));await settle();same(f.calls.length,before,'healthy duplicate and metadata-only Ready are idle');
+  f.host.stop();const count=f.calls.length;emit(fact(5,3));await settle();same(f.calls.length,count,'public listener detached on stop');
+ }finally{f.host.stop();(globalThis as any).window=previous;}
 });
 
 await run('actual S0 IPC Ready restores wallpaper only after fresh visibility and current generation',async()=>{
  const previous=(globalThis as any).window;(globalThis as any).window=new EventTarget();
- const receipt=process.env.YMCC_MEDIA_READY_NATIVE_RECEIPT?JSON.parse(readFileSync(process.env.YMCC_MEDIA_READY_NATIVE_RECEIPT,'utf8')):null;
- const ready=receipt?.nativeReady||{event:'gameMedia.resume-ready',data:{generation:2,source:'sleep-intent-canceled'}};
  const emit=(name:string,data:any)=>window.dispatchEvent(new CustomEvent('ipc:'+name,{detail:data}));
- const f=fixture({nativePower:true});
- try{f.context();await settle();const reads=f.calls.filter(c=>c.command==='lookup').length;
-  emit('power.suspending',{generation:2});emit(ready.event,ready.data);await settle();
-  same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).resumeGeneration,2,'actual media S0 event reaches the default host subscription');
-  same(f.output().at(-1).entry,null,'S0 Ready invalidates pre-sleep visibility');same(f.calls.filter(c=>c.command==='lookup').length,reads,'Ready alone does not perform media/account IO');
-  f.context('570',2,true);await settle();same(f.output().at(-1).entry.assetId,'asset-570','fresh visibility restores the cached wallpaper');
-  const count=f.calls.length;emit('power.resumed',{generation:2});emit(ready.event,ready.data);await settle();same(f.calls.length,count,'two Ready paths produce one recovery per generation');
-  emit('power.suspending',{generation:3});emit(ready.event,ready.data);await settle();same(f.calls.length,count,'old S0 Ready cannot reset current output');
-  f.enable(false);f.change('settings');await settle();const off=f.calls.length;emit('gameMedia.resume-ready',{generation:3});await settle();same(f.calls.length,off,'S0 event preserves explicit wallpaper OFF');
-  f.host.stop();const stopped=f.calls.length;emit('gameMedia.resume-ready',{generation:4});emit('power.resumed',{generation:4});await settle();same(f.calls.length,stopped,'all Ready listeners are detached after stop');
- }finally{f.host.stop();(globalThis as any).window=previous;}
+ let revision=0,holdLookup=false,releaseLookup!:(v:GameMediaEntry)=>void,holdReply=false,releaseReply!:(v:boolean)=>void;
+ const fact=(generation:number,extra:any={})=>({phase:'ready',generation,known:true,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:++revision,publicationRevision:revision,...extra});
+ const publish=(state:any)=>{(globalThis as any).__F2_SHARED_POWER_CURRENT__=state;emit('power.lifecycleChanged',state);};
+ const f=fixture({nativePower:true,lookup:async()=>holdLookup?new Promise(r=>releaseLookup=r):entry(),reply:async message=>holdReply&&message.type==='wallpaper'&&message.entry?new Promise(r=>releaseReply=r):true});
+ const resumes:number[]=[];const offResume=subscribeGameMediaResume(event=>resumes.push(event.generation!));
+ try{
+  publish(fact(1));await settle();f.context();await settle();
+  same(f.output().at(-1).entry.assetId,'asset-570','initial complete shared Ready is required');
+  const firstDemand=f.calls.find(c=>c.command==='lookup').demand;
+  const reads=f.calls.filter(c=>c.command==='lookup').length;
+  emit('power.suspending',{generation:2});publish(fact(2,{phase:'suspending',hardwareWritesAllowed:false}));
+  same(firstDemand.current(),false,'public nonadmitted fact synchronously revokes captured demand');
+  await settle();same(f.output().at(-1).entry,null,'suspend delivers decoder revocation');
+  same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,false,'effective playback Ready is disabled while saved setting remains ON');
+  const receipt=process.env.YMCC_MEDIA_READY_NATIVE_RECEIPT?JSON.parse(readFileSync(process.env.YMCC_MEDIA_READY_NATIVE_RECEIPT,'utf8')):null;
+  const ready=receipt?.nativeReady||{event:'gameMedia.resume-ready',data:{generation:2,source:'sleep-intent-canceled'}};
+  emit(ready.event,ready.data);publish(fact(2));await settle();
+  same(f.output().at(-1).entry,null,'S0 Ready invalidates pre-sleep visibility');
+  same(f.calls.filter(c=>c.command==='lookup').length,reads,'Ready alone performs no media/account IO');
+  same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).resumeGeneration,undefined,'public recovery uses ordinary Ready, not a synthetic generation');
+  f.context('570',2,true);await settle();same(f.output().at(-1).entry.assetId,'asset-570','fresh visibility restores cached wallpaper');
+  let count=f.calls.length;emit('power.resumed',{generation:2});emit(ready.event,ready.data);publish(fact(2));await settle();
+  same(f.calls.length,count,'two Ready paths and healthy same-generation publication stay idle');
+  const pending=fact(2,{hardwareWritesAllowed:false,notificationPending:true});
+  const demand=f.calls.filter(c=>c.command==='lookup').at(-1).demand;
+  publish(pending);same(demand.current(),false,'same-generation pending synchronously clears native ticket');
+  const beforeRevoke=f.frames.length;await settle();
+  same(f.frames.slice(beforeRevoke).some(x=>x.type==='wallpaper'&&x.entry===null&&x.foreground===false),true,'pending delivers a decoder revoke');
+  count=f.calls.filter(c=>['foreground-read','lookup','ensure'].includes(c.command)).length;
+  f.foreground(nativeProof());f.change('retry');f.context('570',3,true);await settle();
+  same(f.calls.filter(c=>['foreground-read','lookup','ensure'].includes(c.command)).length,count,'old proof retry and page request cannot override pending');
+  const resumesBefore=resumes.length;publish(fact(2));await settle();
+  same(resumes.length,resumesBefore+1,'media Ready adapter recognizes same-generation admitted correction');
+  same(f.calls.filter(c=>['foreground-read','lookup','ensure'].includes(c.command)).length,count,'same-generation recovery waits for new visible context');
+  same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,true,'same-generation Ready requests page visibility by restoring effective admission');
+  same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).requestContext,true,'same-generation recovery explicitly requests visibility when OFF was not delivered');
+  f.context('570',4,true);await settle();same(f.output().at(-1).entry.assetId,'asset-570','same-generation recovery accepts only new page visibility');
+  for(const extra of [{known:false},{hardwareWritesAllowed:undefined},{hardwareWritesAllowed:false}]){
+    const captured=f.calls.filter(c=>c.command==='lookup').at(-1).demand;
+    publish(fact(2,extra));same(captured.current(),false,'unknown or missing/false hardware admission never grants current');
+    await settle();count=f.calls.filter(c=>c.command==='lookup').length;
+    publish(fact(2));await settle();same(f.calls.filter(c=>c.command==='lookup').length,count,'each admitted correction waits for page proof');
+    f.context('570',5+revision,true);await settle();
+  }
+  holdLookup=true;f.context('570',100,true);await settle();
+  const priorEnsures=f.calls.filter(c=>c.command==='ensure').length;
+  publish(fact(2,{notificationPending:true,hardwareWritesAllowed:false}));await settle();const frameCount=f.frames.length;
+  releaseLookup(entry(570,99));await settle();
+  same(f.frames.slice(frameCount).some(x=>x.entry),false,'pre-pending asynchronous lookup cannot revive a frame');
+  same(f.calls.filter(c=>c.command==='ensure').length,priorEnsures,'pre-pending lookup cannot enter preparation');
+  holdLookup=false;publish(fact(2));await settle();holdReply=true;f.context('570',101,true);await settle();
+  assert.equal(typeof releaseReply,'function','a real delivery promise is held');
+  publish(fact(2,{notificationPending:true,hardwareWritesAllowed:false}));await settle();
+  same(f.output().at(-1).entry,null,'revoke bypasses the old hung delivery slot');
+  const afterRevoke=f.frames.length;releaseReply(false);await settle();
+  same(f.frames.slice(afterRevoke).some(x=>x.entry),false,'old delivery refusal cannot resurrect its frame');
+  same(f.timers.size,0,'retired delivery cannot arm retry after pending');
+  holdReply=false;publish(fact(2));await settle();f.context('570',102,true);await settle();
+  const stableCalls=f.calls.length,stableResumes=resumes.length;
+  for(let n=0;n<20;n++)publish(fact(2));await settle();
+  same(f.calls.length,stableCalls,'metadata-only publication storm stays idle');
+  same(resumes.length,stableResumes,'media adapter does not replay healthy Ready');
+  emit('power.suspending',{generation:3});publish(fact(3,{phase:'suspending',hardwareWritesAllowed:false}));await settle();
+  const suspended=f.calls.length;emit(ready.event,ready.data);publish({...fact(2),publicationRevision:1});await settle();
+  same(f.calls.length,suspended,'old S0 Ready cannot reset current output');
+  f.enable(false);f.change('settings');const off=f.calls.length;emit('gameMedia.resume-ready',{generation:3});publish(fact(3));await settle();
+  same(f.calls.length,off,'S0 event preserves explicit wallpaper OFF');
+  offResume();f.host.stop();const stopped=f.calls.length;emit('gameMedia.resume-ready',{generation:4});publish(fact(4));await settle();
+  same(f.calls.length,stopped,'all Ready listeners detached after stop');
+ }finally{offResume();f.host.stop();(globalThis as any).window=previous;}
 });
+
 
 await run('rejected native wallpaper frame retries without reading media again',async()=>{
  let rejected=false;const f=fixture({reply:async msg=>{if(msg.type==='wallpaper'&&msg.entry&&!rejected){rejected=true;return false;}return true;}});try{f.context();await settle();const reads=f.calls.filter(c=>c.command==='lookup'||c.command==='ensure').length;same(f.timers.size,1,'native false receipt retains one bounded delivery retry');same([...f.timers.values()][0].ms,250,'transient refused delivery gets one short recovery before gradual backoff');await f.fire();same(f.output().filter(x=>x.entry?.assetId==='asset-570').length,2,'unchanged frame is retried after explicit refusal');same(f.calls.filter(c=>c.command==='lookup'||c.command==='ensure').length,reads,'retry reuses the outgoing frame, no media or inventory refresh');same(f.timers.size,0,'successful recovery is dormant');same(f.calls.filter(c=>c.command==='deckySidebar.mirrorReply').every(c=>c.options?.timeoutMs===5000),true,'delivery IPC has a bounded wait');}finally{f.host.stop();}
@@ -246,6 +386,31 @@ await run('unavailable cache rechecks never authorize failure writes',async()=>{
 // Hold real Promises across normal event-loop turns. These tests never replay
 // a cancelled timer; f.fire() consumes only the currently owned one-shot timer.
 const pairedEntry=(id=570,revision=1):GameMediaEntry=>({...entry(id,revision),staticReady:true,dynamicReady:true});
+await run('unexposed wallpaper clears the old frame and cannot own playback failure',async()=>{
+ for(const source of ['lookup','ensure']){
+  const pending=deferred();let cached=source==='lookup'?pairedEntry():entry();
+  const f=fixture({lookup:async()=>cached,ensure:async()=>pending.promise as Promise<GameMediaEntry>});
+  try{
+   f.context();await settle();same(f.output().at(-1).entry.revision,'1',source+' initially shows valid wallpaper');
+   const refused={...pairedEntry(570,2),url:''};
+   if(source==='lookup'){cached=refused;f.change('asset','steam-570');}else pending.resolve(refused);
+   await settle();const cleared=f.output().at(-1);
+   same([cleared.enabled,cleared.foreground,cleared.contextSeq,cleared.appId],[true,true,1,'570'],'clearing frame retains current presentation owner');
+   same(cleared.entry,null,source+' uses a clearing frame, not invalid media');
+   same(cleared.status,'media-url-unavailable','delivery refusal is not a playback failure');
+   for(const bindingRevision of [1,2])f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision,status:'playback-failed'});
+   await settle();same(f.failures.length,0,'neither previous nor unexposed binding admits failure');
+   same(f.timers.size,0,'no retry timer for missing URL');
+   const previousLookups=f.calls.filter(c=>c.command==='lookup').length;
+   cached=pairedEntry(570,3);f.change('asset','steam-570');await settle();
+   same(f.calls.filter(c=>c.command==='lookup').length,previousLookups+1,'real publication performs exactly one lookup');
+   same(f.output().at(-1).entry.bindingRevision,3,'fresh publication restores playback');
+   f.status({contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:3,status:'playback-failed'});await settle();
+   same(f.failures.map(v=>v.bindingRevision),[3],'fresh exposed binding still owns playback failure');
+   same(f.calls.filter(c=>c.command==='ensure').length,source==='ensure'?1:0,'no new preparation for already paired media');
+  }finally{f.host.stop();pending.resolve(pairedEntry());await settle();}
+ }
+});
 await run('32 cross-task same-key changes coalesce into one fresh trailing lookup',async()=>{
  const head=deferred();let reads=0,pending=0,peakPending=0,latest=pairedEntry();
  const f=fixture({lookup:async()=>{++reads;++pending;peakPending=Math.max(peakPending,pending);try{return await(reads===1?head.promise as Promise<GameMediaEntry>:Promise.resolve(latest));}finally{--pending;}}});
@@ -327,5 +492,6 @@ for(const cause of ['off','hidden','peer','power','stop'] as const)await run('R1
 await run('R18 recovery: a new context owns recovery and a queued old context stays inert',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first context fails');return nativeProof();}});try{f.context();await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'old context owns one timer');f.context('730',2,true);await settle();same(f.output().at(-1).appId,'730','new visible selection can recheck proof');const count=f.calls.length;late();await settle();same(f.calls.length,count,'old selection repair cannot replace current output');same(f.timers.size,0,'new success cancels old selection work');}finally{f.host.stop();}});
 await run('R18 recovery: late repaired proof cannot grant playback after native blur',async()=>{let reads=0,release!:(v:any)=>void;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first read failed');return new Promise(r=>release=r);}});try{f.context();await settle();await f.fire();f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur-new',revision:2}));release(nativeProof());await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'old positive transport receipt cannot override new native blur');same(f.timers.size,0,'native veto cancels repair work');}finally{f.host.stop();}});
 await run('R18 recovery: retry notifications route only current native-ticket Steam selection',async()=>{const f=fixture();try{f.context();await settle();const before=f.calls.filter(c=>c.command==='ensure').length;f.change('retry');await settle();same(f.calls.filter(c=>c.command==='ensure').length,before+1,'current owner receives one retry');const attempt=f.calls.filter(c=>c.command==='ensure').at(-1);same(attempt.target.appId,570,'retry uses selected game');same([attempt.demand.demandConsumer,attempt.demand.demandEpoch,attempt.demand.demandRevision],['steam','focus-1',1],'retry retains actual current native proof');f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur',revision:2}));const queries=()=>f.calls.filter(c=>['lookup','ensure','foreground-read'].includes(c.command)).length;const count=queries();f.change('retry');await settle();same(queries(),count,'blurred selection cannot retry');f.enable(false);f.change('settings');const off=queries();f.change('retry');await settle();same(queries(),off,'OFF cannot retry');}finally{f.host.stop();}});
+if(exactCase!==null)assert.equal(cases,1,'exact case must select one original case');
 const stabilityOk=!stabilityRecoveryOnly||stabilityRecoveryRows.length>0&&stabilityRecoveryRows.every(x=>x.ok);if(!stabilityOk)process.exitCode=1;
-console.log(JSON.stringify({ok:stabilityOk,selection:stabilityRecoveryOnly?'stability-recovery':'default',stabilityRecoveryRows,cases,checks,scope:'production Steam wallpaper host; injected IPC/media ports, no installed Steam mutation'}));
+console.log(JSON.stringify({ok:stabilityOk,selection:exactCase??(stabilityRecoveryOnly?'stability-recovery':'default'),stabilityRecoveryRows,cases,checks,scope:'production Steam wallpaper host; injected IPC/media ports, no installed Steam mutation'}));

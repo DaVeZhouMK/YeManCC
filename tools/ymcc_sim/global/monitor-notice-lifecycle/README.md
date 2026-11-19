@@ -125,3 +125,8 @@ real-renderer-negative-selftest.mjs仅在构建中将产品frame准入guard增�
 主代理在本任务既有授权内复核源码和原始回执后，包装器仅把 ignore-destroy 的精确完整遮罩改为上述两项 ID/error 对。任何第三项失败、缺失其中一项、错误 reason、case 名/数量变化或非自然退出仍拒绝；不是按“出现了目标失败”放行。新一轮结果必须来自新建输出下的实际编译/执行，不回写或重判旧全局 FAIL。纠正依据与新执行见核心 Evidence/MonitorNativeIntegration-20261023/MaskCorrection-20261023。
 
 原生lease组件现明确绑定真实产品源码、驻留窗口/周期timer/COM引用资源类别和case-local结果文件，同时绑定公共生命周期门源文件。分类属于持续的 monitor.notice-host；组件PASS只反映该原生退出范围。父级需在合同中明确接入并完成原有全部退出、健康恢复与限制观测，缺失项继续INCOMPLETE。
+
+
+<!-- CURRENT-EXPLICIT-RUNTIME-20261113 -->
+2026-11-13 当前入口后继：真实 WebView/Vue 沿原 prepare/run 显式绑定本机运行库与完整文件清单；历史155/916只描述旧证据。两个原真实 runtime 角色组合容量4096，普通/native仍3072，原场景/负例/时限和逐文件身份保持。当前软件Host23、native10及独立真实WebView19/负例8、Vue36/负例4分别有原件；不是同一global整父或实机通过。详见 `G:/YeManCC-Work/Testing/YMCC/Evidence/MonitorJointRenderer-20261023/RuntimeCurrent-20261113/SOURCE_READY.json` 和同目录报告；普通导出不因此增加默认夹具。
+<!-- /CURRENT-EXPLICIT-RUNTIME-20261113 -->

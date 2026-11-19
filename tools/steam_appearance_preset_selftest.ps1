@@ -1,8 +1,9 @@
-﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\preset-v2')
-$ErrorActionPreference='Stop';$source=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\steam-appearance.ps1';# Offline fixtures must not query live Steam/CSS ownership.
+﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\preset-v2',[string]$ComponentRoot='',[ValidateSet('All','DirectoryPathGuards')][string]$Case='All')
+$ErrorActionPreference='Stop';if(!$ComponentRoot){$ComponentRoot=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl'};$source=Join-Path $ComponentRoot 'steam-appearance.ps1';# Offline fixtures must not query live Steam/CSS ownership.
 function Get-Process {param($Name,$Id) @()}
 function Get-NetTCPConnection {param($State,$LocalPort) @()}
-. $source -Action Library
+if($Case -eq 'DirectoryPathGuards'){. (Join-Path $PSScriptRoot 'ymcc_sim\global\decky-update-recovery\appearance-library-fixture.ps1') -ComponentRoot $ComponentRoot -EvidenceRoot $Out}else{. $source -Action Library}
+function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $script:ThemeRoot=Join-Path $Out ('other-user-'+[guid]::NewGuid().ToString('N'));$script:PresetStateBase=Join-Path $Out 'states'
 New-Item -ItemType Directory -Path $script:ThemeRoot -Force|Out-Null
@@ -10,6 +11,7 @@ function Get-BackendProcesses {@()};function Test-BackendOwner {$false}
 $cases=New-Object Collections.Generic.List[string]
 function Assert($value,[string]$message){if(!$value){throw $message};$cases.Add($message)}
 function FixtureTheme([string]$Folder,[string]$Name,[string]$Config){$dir=Join-Path $script:ThemeRoot $Folder;New-Item -ItemType Directory -Path $dir -Force|Out-Null;[IO.File]::WriteAllText((Join-Path $dir 'theme.json'),(@{name=$Name;manifest_version=1;inject=@{}}|ConvertTo-Json -Compress));[IO.File]::WriteAllText((Join-Path $dir 'config_USER.json'),$Config);$dir}
+if($Case -eq 'All'){
 $foreign=FixtureTheme 'Other User Theme' 'Other User Theme' '{"active":true,"Tone":"custom","nested":{"keep":23}}'
 $duplicate=FixtureTheme 'Another Art Hero' 'Art Hero' '{"active":true,"Custom":"original"}'
 $broken=FixtureTheme 'Broken Config' 'Broken Config' '{broken json'
@@ -57,3 +59,65 @@ Assert $failed 'Injected disk failure is reported rather than optimistic success
 foreach($entry in $baseline.GetEnumerator()){Assert ((Get-ConfigHash $entry.Key) -eq $entry.Value) ('Transaction rollback preserved: '+[IO.Path]::GetFileName([IO.Path]::GetDirectoryName($entry.Key))+'/'+[IO.Path]::GetFileName($entry.Key))}
 [pscustomobject]@{ok=$true;scope='Isolated second-user profile; packaged source themes; no production config changes';cases=@($cases)}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'preset-result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) bundled preset / other-user / reset / restore checks"
+}
+
+if($Case -eq 'DirectoryPathGuards'){
+ $guardLinks=New-Object Collections.Generic.List[object]
+ $guardTarget=Join-Path $Out 'guard-link-target';New-Item -ItemType Directory -Path $guardTarget -Force|Out-Null
+ $guardTargetFile=Join-Path $guardTarget 'kept.txt';[IO.File]::WriteAllText($guardTargetFile,'owned-target-must-survive')
+ $guardTargetHash=Get-ConfigHash $guardTargetFile
+ $themeFile=Join-Path $script:ThemeRoot 'Round\normal.css';New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($themeFile)) -Force|Out-Null;[IO.File]::WriteAllText($themeFile,'normal')
+ $stateRoot=Get-PresetStateDir;$stateFile=Join-Path $stateRoot 'backups\owned\files\0001.bin';New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($stateFile)) -Force|Out-Null;[IO.File]::WriteAllText($stateFile,'state')
+ function GuardReject([scriptblock]$Work){try{&$Work|Out-Null;return $false}catch{return $true}}
+ function GuardTheme([string]$Path){(Assert-ThemeTarget $Path) -ceq [IO.Path]::GetFullPath($Path)}
+ function GuardState([string]$Path){(Assert-PresetStateTarget $Path) -ceq [IO.Path]::GetFullPath($Path)}
+ function GuardLink([string]$Path,[string]$Target,[string]$Kind){
+  $null=New-Item -ItemType $Kind -Path $Path -Target $Target -ErrorAction Stop
+  if(!([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::ReparsePoint)){throw 'OWNED_REPARSE_LINK_NOT_CREATED'}
+  $guardLinks.Add([pscustomobject]@{path=$Path;directory=([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::Directory) -ne 0})
+ }
+ try {
+  Assert (GuardTheme $themeFile) 'PathGuards existing theme file is accepted'
+  Assert (GuardTheme (Join-Path $script:ThemeRoot 'Round\missing.css')) 'PathGuards absent theme leaf remains accepted'
+  Assert (GuardTheme (Join-Path $script:ThemeRoot 'new folder\nested\missing.css')) 'PathGuards absent theme ancestry remains accepted'
+  Assert (GuardState $stateFile) 'PathGuards existing state file is accepted'
+  Assert (GuardState (Join-Path $stateRoot 'not-yet\journal.json')) 'PathGuards absent state ancestry remains accepted'
+  $literal=Join-Path $script:ThemeRoot 'Round\literal[1]-空间.css';[IO.File]::WriteAllText($literal,'literal')
+  Assert (GuardTheme $literal) 'PathGuards literal brackets and Unicode path are accepted'
+  Assert (GuardTheme $themeFile.ToUpperInvariant()) 'PathGuards Windows path casing keeps original full-path return'
+  Assert (GuardReject {Assert-ThemeTarget $guardTargetFile}) 'PathGuards theme root escape is rejected'
+  Assert (GuardReject {Assert-PresetStateTarget $themeFile}) 'PathGuards state root escape is rejected'
+  foreach($attribute in @([IO.FileAttributes]::Hidden,[IO.FileAttributes]::ReadOnly)){
+   $prior=[IO.File]::GetAttributes($literal);try{[IO.File]::SetAttributes($literal,$prior -bor $attribute);Assert (GuardTheme $literal) ('PathGuards ordinary file attribute is accepted: '+$attribute)}finally{[IO.File]::SetAttributes($literal,$prior)}
+  }
+  $script:GuardRemovePath=''
+  function Test-Path {param([string]$LiteralPath)
+   if($script:GuardRemovePath -and [string]::Equals($LiteralPath,$script:GuardRemovePath,[StringComparison]::OrdinalIgnoreCase)){
+    $script:GuardRemovePath='';[IO.File]::Delete($LiteralPath);return $true
+   }
+   Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath
+  }
+  try{
+   $raceTheme=Join-Path $script:ThemeRoot 'Round\race.css';[IO.File]::WriteAllText($raceTheme,'race');$script:GuardRemovePath=$raceTheme
+   Assert (GuardReject {Assert-ThemeTarget $raceTheme}) 'PathGuards vanished theme leaf after existence stays rejected'
+   $raceState=Join-Path $stateRoot 'race.bin';[IO.File]::WriteAllText($raceState,'race');$script:GuardRemovePath=$raceState
+   Assert (GuardReject {Assert-PresetStateTarget $raceState}) 'PathGuards vanished state leaf after existence stays rejected'
+  }finally{Remove-Item -LiteralPath Function:\Test-Path -ErrorAction Stop;$script:GuardRemovePath=''}
+  $themeJunction=Join-Path $script:ThemeRoot 'linked-theme';GuardLink $themeJunction $guardTarget 'Junction'
+  Assert (GuardReject {Assert-ThemeTarget (Join-Path $themeJunction 'kept.txt')}) 'PathGuards theme parent reparse is rejected'
+  Assert (GuardReject {Assert-ThemeTarget $themeJunction}) 'PathGuards theme directory leaf reparse is rejected'
+  $stateJunction=Join-Path $stateRoot 'linked-state';GuardLink $stateJunction $guardTarget 'Junction'
+  Assert (GuardReject {Assert-PresetStateTarget (Join-Path $stateJunction 'kept.txt')}) 'PathGuards state parent reparse is rejected'
+  Assert (GuardReject {Assert-PresetStateTarget $stateJunction}) 'PathGuards state directory leaf reparse is rejected'
+ }finally{
+  foreach($link in $guardLinks){
+   $fullLink=[IO.Path]::GetFullPath($link.path);$fullOut=[IO.Path]::GetFullPath($Out).TrimEnd('\')+'\'
+   if(!$fullLink.StartsWith($fullOut,[StringComparison]::OrdinalIgnoreCase) -or !([IO.File]::GetAttributes($fullLink) -band [IO.FileAttributes]::ReparsePoint)){throw 'OWNED_LINK_CLEANUP_BOUNDARY'}
+   if($link.directory){[IO.Directory]::Delete($fullLink,$false)}else{[IO.File]::Delete($fullLink)}
+  }
+ }
+ Assert ((Get-ConfigHash $guardTargetFile) -ceq $guardTargetHash) 'PathGuards link targets retain exact bytes after link disposal'
+ Assert (@($guardLinks|Where-Object{Microsoft.PowerShell.Management\Test-Path -LiteralPath $_.path}).Count -eq 0) ('PathGuards owned reparse links are disposed: '+$guardLinks.Count)
+ [pscustomobject]@{ok=$true;scope='Exact isolated theme/state path guards; original root containment and fresh existence checks; no installed process IO';selectedCase=$Case;cases=@($cases);ownedLinksDisposed=$true;realSteamOperations=0;realCssLaunches=0;realUserConfigWrites=0}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'preset-result.json') -Encoding UTF8
+ Write-Output ('PASS: '+$cases.Count+' preset PathGuards checks')
+}

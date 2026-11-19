@@ -6,6 +6,17 @@ internal sealed partial class RealHcBackend
 {
     private object? legacyCallbackFanReturnOwner;
     private bool legacyCallbackFanReturnOwed;
+    // Capture before Close clears profiles/debt; cleanup cannot manufacture this.
+    private bool legacyCallbackNoReturnAtRetirement;
+    private bool HasBoundLegacyCallbackNoReturnObligation =>
+        UsesLegacyCallbackAppliedFanGuard && !legacyCallbackFanReturnOwed &&
+        legacyCallbackFanReturnOwner is null && activeCurveDuties is null && activeFanProfile is null &&
+        device is not null && ReferenceEquals(device, sessionDeviceReference) &&
+        BaselineBindingStillValid(out _) && oemRestoreVerified &&
+        FanHostEngine.ParseReleaseAction(oemReleaseActionKind) == OemReleaseAction.NotApplicable;
+    internal bool ClosedLegacyCallbackWithoutReturnObligation =>
+        legacyCallbackNoReturnAtRetirement && retiredControlCycleId == ControlCycleId &&
+        HasVerifiedRetiredDeviceWithoutNewOpen;
     private bool UsesLegacyCallbackAppliedFanGuard => Route is
     {
         Evidence: FanEvidenceMode.CompatCallbackNoScope,

@@ -9,7 +9,7 @@ import {generateTouchExcerpts} from './source-excerpts.mjs';
 import {digest} from './native-toolchain.mjs';
 import {validateAdapters} from '../runner.mjs';
 const repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
-let current;const result=()=>current??=runTouchSurfaceRegressions({repoRoot,workDir:process.env.YMCC_TOUCH_WORK_DIR??path.join(process.cwd(),'work/touch-surface')});
+let current;const result=()=>current??=runTouchSurfaceRegressions({repoRoot,workDir:process.env.YMCC_TOUCH_WORK_DIR});
 test('original assertions and formal native/bridge suites pass',async()=>{const r=await result();assert.equal(r.status,'PASS',JSON.stringify(r.summary));assert.equal(r.summary.suites,6);assert.deepEqual(r.sourceDrift,[]);assert(r.suites.every(s=>s.status==='PASS'));});
 test('required lifecycle and output paths have four-stage evidence',async()=>{const r=await result();for(const term of ['disable','close','removal','cancel','reorder','lease','timer','resume'])assert(r.inputConsumerStateFeedback.some(e=>e.id.includes(term)),term);for(const e of r.inputConsumerStateFeedback){assert.equal(e.status,'PASS',e.id);for(const field of ['input','consumer','state','feedback'])assert(Object.hasOwn(e,field));assert.equal(e.feedback.physicalOutputVerified,false);}});
 test('all native executables reject actual input/device/hook imports',async()=>{const r=await result();for(const s of r.suites.filter(s=>s.importAudit)){assert.equal(s.importAudit.status,'PASS');assert.deepEqual(s.importAudit.forbidden,[]);}assert.equal(r.boundaries.actualWindowsOrHooks,false);assert.equal(r.boundaries.userSettingsReadOrWritten,false);});

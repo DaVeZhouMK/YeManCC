@@ -1,5 +1,5 @@
 // INERT metadata controls only: never import or run a business producer.
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,13 +8,24 @@ import {spawnSync} from 'node:child_process';
 import {verifyParentBaselineReference,releaseJavascriptNames,releaseJavascriptEnvironmentKeys} from './release-baseline-reference.mjs';
 import {baselineEnvironment} from '../global/decky-persistent-lifecycle/baseline-environment.mjs';
 import {PARENT_ID} from '../global/decky-persistent-lifecycle/current-parent-global.mjs';
-const root=process.env.YMCC_JAVASCRIPT_REFERENCE_UNIT_ROOT;
+const requestedRoot=process.env.YMCC_JAVASCRIPT_REFERENCE_UNIT_ROOT;
+const defaultWorkspace=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
+if(requestedRoot===undefined){assert(!fs.lstatSync(defaultWorkspace).isSymbolicLink());assert.equal(fs.realpathSync(defaultWorkspace).toLowerCase(),defaultWorkspace.toLowerCase());}
+const root=requestedRoot===undefined?fs.mkdtempSync(path.join(defaultWorkspace,'javascript-reference-controls-')):requestedRoot;
 assert(typeof root==='string'&&path.isAbsolute(root)&&fs.statSync(root).isDirectory(),'Explicit owned INERT evidence directory required');
+after(()=>{
+  if(requestedRoot!==undefined)return; // An explicit caller owns its root and retained diagnostic inputs.
+  const owned=path.resolve(root);assert.equal(path.dirname(owned),defaultWorkspace);assert(path.basename(owned).startsWith('javascript-reference-controls-'));
+  assert(!fs.lstatSync(owned).isSymbolicLink());assert.equal(fs.realpathSync(owned).toLowerCase(),owned.toLowerCase());
+  fs.rmSync(owned,{recursive:true,force:false});
+});
 const repo=path.resolve(import.meta.dirname,'../../..'),names=releaseJavascriptNames(),envKeys=releaseJavascriptEnvironmentKeys();
 const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 // Match current-parent-global's real two-field pin schema throughout parent metadata.
 const pin=file=>({path:path.resolve(file),sha256:sha(file)});
 const requestPin=file=>({...pin(file),bytes:fs.statSync(file).size});
+// Share only the inert fixture seed; the verifier still reads the actual program.
+let nodeSeed;
 const put=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);};
 const write=(file,value)=>put(file,JSON.stringify(value,null,2)+'\n');
 const clone=structuredClone;
@@ -28,7 +39,8 @@ function fixture(){
  const compilerEntry=path.join(project,'node_modules/esbuild/lib/main.js'),compilerBinary=path.join(project,'node_modules/@esbuild/win32-x64/esbuild.exe'),pkg=path.join(project,'node_modules/esbuild/package.json');
  put(compilerEntry,'INERT esbuild entry; never loaded.\n');put(compilerBinary,'INERT backend; never executed.\n');write(pkg,{name:'esbuild',main:'lib/main.js'});
  const sources=[alias,entry,negative,...names.map(name=>'tools/'+name+'.mjs'),'src/override.js'].sort().map(relative=>({path:relative,sha256:sha(path.join(project,relative))}));
- const tools=[pin(process.execPath),pin(compilerEntry),pin(compilerBinary),pin(pkg)];
+ const {bytes:nodeBytes,...nodeProgram}=nodeSeed??=Object.freeze(requestPin(process.execPath));
+ const tools=[nodeProgram,pin(compilerEntry),pin(compilerBinary),pin(pkg)];
  const authority={schemaVersion:1,repoRoot:project,compilerEntry,compilerBinary,tools:tools.slice(1)};
  const start=Date.parse('2026-11-04T00:00:00.000Z'),at=offset=>new Date(start+offset).toISOString();
  const stamp=file=>fs.utimesSync(file,new Date(start+2000),new Date(start+2000));
@@ -37,7 +49,7 @@ function fixture(){
  const baseStdout=path.join(out,'processes',baseId+'.stdout.bin'),baseStderr=path.join(out,'processes',baseId+'.stderr.bin');put(baseStdout,'INERT');put(baseStderr,'');
  const baseline={id:baseId,pid:101,startedAt:at(100),finishedAt:at(200),program:tools[0],arguments:[path.join(project,entry),'--evidence-dir',path.dirname(raw)],cwd:project,originalBudgetMs:240000,timeoutMs:240000,elapsedMs:100,exitCode:0,signal:null,error:null,timedOut:false,outputTruncated:false,stdout:pin(baseStdout),stderr:pin(baseStderr),boundSourceInputs:sources,toolArtifacts:tools,baselineEnvironment:baselineEnvironment(),originalResult:pin(raw)};
  const environment=Object.fromEntries(envKeys.map(name=>[name,null]));environment.PATH='INERT_PATH';environment.YMCC_DECKY_ARTIFACT_ROOT=path.join(own,'release/Build/Validation/DeckyUpdate/scenarios');environment.YEMAN_WORKSPACE_ROOT=path.join(own,'outer-output');
- const request={schemaVersion:1,kind:'ymcc-release-javascript-reference-request',program:requestPin(process.execPath),cwd:project,environment,steps:[...names]};
+ const request={schemaVersion:1,kind:'ymcc-release-javascript-reference-request',program:{...nodeProgram,bytes:nodeBytes},cwd:project,environment,steps:[...names]};
  const values=[{status:'passed',cases:2,results:[{name:'ordinary',passed:true},{name:'negative rejects failed input',passed:true}]},{passed:true,cases:2,results:['ordinary','failed state is correctly rejected']},{productionClientSource:true,cases:2,results:[{name:'ordinary',status:'passed'},{name:'negative protocol',status:'passed'}]},{status:'passed',cases:['ordinary','failed command correctly rejected']},{status:'passed',cases:2,passed:2,failed:0,results:[{group:'ordinary',name:'ordinary',status:'passed'},{group:'negative',name:'rejected command',status:'passed'}]}];
  const parent={id:PARENT_ID,status:'PASS',passed:true,fullPersistentAcceptance:true,sourceUnchanged:true,toolsUnchanged:true,metadataIntegrity:true,startedAt:at(0),finishedAt:at(10000),work,sourceInputs:sources,toolArtifacts:tools,processes:[baseline],rawEvidence:[pin(raw)],cases:[{id:baseId,passed:true}],originalUpdateRecovery:{raw:pin(raw),process:baseline,sourceVerified:true,reused:false},legacyTypedMigration:{status:'INERT_METADATA_TEST_ONLY'}};
  const js=[],rawFiles=[];
@@ -63,10 +75,10 @@ function fixture(){
  }
  const options=()=>({repoRoot:project,coreRoot:core,globalResult:globalFile,globalSha256:sha(globalFile),parentResult:parentFile,parentSha256:sha(parentFile),declaration:{evidenceInputs:sources.map(row=>row.path),artifactInputs:tools.map(row=>row.path),baselineRequiredSources:[entry,negative],authority},requireJavascript:true,javascriptRequest:request});
  const rebindRaw=index=>{const file=rawFiles[index];write(file,values[index]);stamp(file);const p=pin(file);if(index===3)js[index].stdout=p;else parent.rawEvidence[parent.rawEvidence.findIndex(row=>row.path===file)]=p;};
- refresh();return {own,project,core,out,work,parent,global,js,rawFiles,values,tools,sources,request,authority,baseFile,parentFile,globalFile,refresh,options,rebindRaw,verify:()=>verifyParentBaselineReference(options())};
+ return {own,project,core,out,work,parent,global,js,rawFiles,values,tools,sources,request,authority,baseFile,parentFile,globalFile,refresh,options,rebindRaw,verify:()=>verifyParentBaselineReference(options())};
 }
 test('INERT full five references preserve string cases, output roles and false runtime flags',()=>{
- const f=fixture();
+ const f=fixture();f.refresh();
  for(const p of f.js)for(const row of [p.program,p.stdout,p.stderr,p.javascriptInputs.before.program,p.javascriptInputs.before.entry])assert.deepEqual(Object.keys(row).filter(key=>key!=='parentSourceOrToolBound').sort(),['path','sha256']);
  for(const row of [...f.parent.rawEvidence,...f.parent.cases.filter(row=>row.process).map(row=>row.process),...JSON.parse(fs.readFileSync(path.join(f.out,'RAW-EVIDENCE.json'),'utf8')).processes])assert.deepEqual(Object.keys(row).sort(),['path','sha256']);
  assert(Number.isSafeInteger(f.request.program.bytes));
@@ -78,7 +90,7 @@ test('INERT full five references preserve string cases, output roles and false r
  const legacy=verifyParentBaselineReference({...f.options(),requireJavascript:false,javascriptRequest:undefined});assert(!('javascript' in legacy));
 });
 const rejected=[
- ['missing producer',f=>f.parent.processes.pop(),/PROCESS_NOT_UNIQUE/],
+ ['missing producer',f=>{f.refresh();f.parent.processes.pop();},/PROCESS_NOT_UNIQUE/],
  ['duplicate producer',f=>f.parent.processes.push(clone(f.js[0])),/PROCESS_NOT_UNIQUE/],
  ['duplicate request step',f=>f.request.steps[4]=f.request.steps[0],/STEPS/],
  ['different inherited environment',f=>{f.js[0].javascriptInputs.before.environment.PATH='OTHER';f.js[0].javascriptInputs.after=clone(f.js[0].javascriptInputs.before);},/ENVIRONMENT_CHANGED/],
@@ -102,7 +114,7 @@ test('INERT bound source and esbuild overrides qualify by actual pins, not obser
  f.refresh();assert.equal(f.verify().javascript.length,5);
 });
 test('INERT independent process JSON cannot disagree with the parent row',()=>{
- const f=fixture();write(path.join(f.out,'processes',f.js[0].id+'.json'),{...f.js[0],exitCode:7});
+ const f=fixture();f.refresh();write(path.join(f.out,'processes',f.js[0].id+'.json'),{...f.js[0],exitCode:7});
  const file=path.join(f.out,'processes',f.js[0].id+'.json');fs.utimesSync(file,new Date(f.js[0].finishedAt),new Date(f.js[0].finishedAt));
  const metadata=path.join(f.out,'RAW-EVIDENCE.json'),value=JSON.parse(fs.readFileSync(metadata,'utf8'));value.processes[1]=pin(path.join(f.out,'processes',f.js[0].id+'.json'));write(metadata,value);
  assert.throws(f.verify,/PROCESS_FILE_MISMATCH/);

@@ -49,6 +49,9 @@ internal sealed partial class RealHcBackend
         if(!SourceControlConnected||Volatile.Read(ref closeWriteBlocked)!=0||
             Volatile.Read(ref suspendGateEpoch)!=epoch||Volatile.Read(ref hcFactoryDisposed)!=0)
             return false;
+        // Keep public cancellation outside the legacy authorization catch:
+        // Session.Open retains returned transport debt before its next Guard.
+        RequireCurrentPublicPower();
         try{return CanWrite&&(sourceFanOpening||IsOpen);}catch{return false;}
     }
     private void OpenPinnedSourceCore()
@@ -118,9 +121,10 @@ internal sealed partial class RealHcBackend
     }
     private void WritePinnedSourceDuty(double duty,long? admittedEpoch=null)
     {
+        RequireCurrentPublicPower();
         var owner=sourceFanSession??throw new InvalidOperationException("SOURCE_FAN_OWNER_MISSING");
         var operation=CaptureFanDispatchOwner(admittedEpoch);
-        var receipt=owner.ApplyPercent(duty,()=>SourcePermit(sourceFanAdmissionEpoch)&&
+        var receipt=owner.ApplyPercent(duty,()=>RequireCurrentPublicPower()&&SourcePermit(sourceFanAdmissionEpoch)&&
             IsFanDispatchOwnerCurrent(operation)&&!operationTimedOut&&
             (admittedEpoch==sourceFanAdmissionEpoch||!AreTemperatureWritesBlocked()));
         lastControlWriteEvidence="source-transport-returned-physical-effect-not-observed";

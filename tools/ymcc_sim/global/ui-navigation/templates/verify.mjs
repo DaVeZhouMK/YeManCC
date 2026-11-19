@@ -1,3 +1,5 @@
+import {overlayPresentationCases} from './overlayPresentationCases.mjs';
+import {customTouchCases} from './customTouchCases.mjs';
 import {controllerPageCases} from './controllerPageCases.mjs';
 import {fxSoundRecoveryCases} from './fxSoundRecoveryCases.mjs';
 import {backgroundPreviewCases} from './backgroundPreviewCases.mjs';
@@ -11,7 +13,7 @@ import {monitorEditorCases} from './monitorEditorCases.mjs';
 import {naturalNavigationCases} from './naturalNavigationCases.mjs';
 import {scrollStabilityCases} from './scrollStabilityCases.mjs';
 import {gyroPageNavigationCases,gyroControlCases,gyroFullscreenCases,gyroPowerRecoveryCases,gyroPresetSwitchCases} from './gyroNavigationCases.mjs';
-import {virtualStartProtectionCases} from './virtualStartProtectionCases.mjs';
+import {virtualStartProtectionCases,virtualClickStartCases,virtualClickStartNames,virtualClickWriteFailureCase,virtualClickWriteFailureName,readVirtualStartFailedCommit} from './virtualStartProtectionCases.mjs';
 import os from 'node:os';import {createHash} from 'node:crypto';import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const uiGuarded=Boolean(process.env.YMCC_UI_TOOL_HELPER_URL||process.env.YMCC_SIM_GLOBAL_RUN==='1');
 if(uiGuarded&&(!process.env.YMCC_UI_TOOL_HELPER_URL||!process.env.YMCC_UI_TOOL_MANIFEST||!process.env.YMCC_UI_SOURCE_ROOT))throw Error('UI_TOOL_STAGE_CONTEXT_REQUIRED');
@@ -22,10 +24,18 @@ if(uiTools)uiGuard.verifyUiNodeAndCjs(uiTools,req.cache);
 
 const task=import.meta.dirname;
 const uiScope=process.env.YMCC_UI_SCOPE||'all';
-assert.ok(['all','sleep','lossless','gyro-control'].includes(uiScope),'Unsupported UI scope');
-const proofInputs=['backgroundPreviewCases.mjs','site/settings-preview/SteamDeck.mp4','controllerPageCases.mjs','fxSoundRecoveryCases.mjs','batterySettingsCases.mjs','steamDesktopMouseCases.mjs','steamDiagnosticsCases.mjs','trainerMenuCases.mjs','radialUtilitiesFixture.ts','radialUtilityCases.mjs','radialInputFixture.ts','radialInputCases.mjs','radialFanCases.mjs','fanStatusCases.mjs','fanStatusAudit-hook.inc.ts','radialTouchCases.mjs','radialGestureCases.mjs','radialCases.mjs','monitorEditorCases.mjs','virtualStartProtectionCases.mjs','performanceCombinedNavigation.mjs','naturalNavigationCases.mjs','scrollStabilityCases.mjs','gyroNavigationCases.mjs','build-result.json','site/index.html','site/product.html','site/product.js','site/product.css','verify.mjs','engineAudit.ts','entry.ts','memoryIpc.ts','scheduleFixture.ts','policyFixture.ts','monitorFixture.ts','sleepPageFixture.ts','sleepRecoveryFixture.ts','Shell.vue','app-shell.css'];
-proofInputs.push(...fs.readdirSync(path.join(task,'site/gyro-simulation'),{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>path.relative(task,path.join(e.parentPath||e.path,e.name))));
+assert.ok(['all','sleep','lossless','trainer','gyro-control','overlay','custom-touch','virtual-click-start'].includes(uiScope),'Unsupported UI scope');
+const proofInputs=['overlayPresentationCases.mjs','backgroundPreviewCases.mjs','site/settings-preview/SteamDeck.mp4','controllerPageCases.mjs','fxSoundRecoveryCases.mjs','batterySettingsCases.mjs','steamDesktopMouseCases.mjs','steamDiagnosticsCases.mjs','trainerMenuCases.mjs','radialUtilitiesFixture.ts','radialUtilityCases.mjs','radialInputFixture.ts','radialInputCases.mjs','radialFanCases.mjs','fanStatusCases.mjs','fanStatusAudit-hook.inc.ts','radialTouchCases.mjs','radialGestureCases.mjs','radialCases.mjs','monitorEditorCases.mjs','virtualStartProtectionCases.mjs','performanceCombinedNavigation.mjs','naturalNavigationCases.mjs','scrollStabilityCases.mjs','gyroNavigationCases.mjs','build-result.json','site/index.html','site/product.html','site/product.js','site/product.css','verify.mjs','engineAudit.ts','entry.ts','memoryIpc.ts','scheduleFixture.ts','policyFixture.ts','monitorFixture.ts','sleepPageFixture.ts','sleepRecoveryFixture.ts','Shell.vue','app-shell.css'];
+proofInputs.push('customTouchCases.mjs',...fs.readdirSync(path.join(task,'site/gyro-simulation'),{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>path.relative(task,path.join(e.parentPath||e.path,e.name))));
 const hash=file=>createHash('sha256').update(fs.readFileSync(path.join(task,file))).digest('hex');
+const replaySha=process.env.YMCC_UI_VIRTUAL_START_REPLAY_SHA256;
+let nativeFailedCommit=null;
+if(replaySha){
+ const file='virtual-start-native-receipt.json';
+ assert(uiScope==='virtual-click-start','Native failed commit replay scope');
+ nativeFailedCommit=readVirtualStartFailedCommit(path.join(task,file),replaySha);
+ proofInputs.push(file);
+}
 const testedInputs=Object.fromEntries(proofInputs.map(file=>[file,hash(file)]));
 const {url}=JSON.parse(fs.readFileSync(path.join(task,'server.json')));
 const uiBrowserServer=await chromium.launchServer(uiTools?{executablePath:uiTools.executables.edge,headless:true}:{channel:'msedge',headless:true});
@@ -43,16 +53,16 @@ async function runViewport(height){
  const viewportTimingStart=uiTimingEnabled?process.hrtime.bigint():0n;uiTiming('viewport-begin','full-suite',height);
  try{
 page.on('pageerror',error=>pageErrors.push(String(error)));
-async function open(route,height,extra={}){const timingStart=uiTimingEnabled?process.hrtime.bigint():0n;uiTiming('open-begin',route,height);await page.goto(url+'?'+new URLSearchParams({route,height,theme:'blue-black',...extra}));const f=await(await page.$('#product')).contentFrame();if(extra.controllerScope||extra.shortcutSeed||extra.virtualStartSeed||extra.keepAlive||extra.nativeWidth||extra.trainerMenu||extra.steamMouseSeed){const seededUrl=new URL(f.url());for(const key of ['controllerScope','steamMouseSeed','trainerMenu','shortcutSeed','virtualStartSeed','keepAlive','radialRecorder','nativeWidth','widthHold'])if(extra[key])seededUrl.searchParams.set(key,extra[key]);await f.goto(seededUrl.href);}try{await f.waitForFunction(()=>window.__previewReady&&window.__gamepadAudit,null,{timeout:10000});}catch(error){fs.writeFileSync(path.join(task,'load-failure.json'),JSON.stringify({route,height,url:f.url(),state:await f.evaluate(()=>({ready:window.__previewReady,errors:window.__previewErrors,calls:window.__previewCalls?.slice(-12),html:document.body.innerHTML.slice(0,1000)}))},null,2));throw error;}await page.waitForTimeout(140);uiTiming('open-end',route,height,timingStart);return f;}
+async function open(route,height,extra={}){const timingStart=uiTimingEnabled?process.hrtime.bigint():0n;uiTiming('open-begin',route,height);await page.goto(url+'?'+new URLSearchParams({route,height,theme:'blue-black',...extra}));const f=await(await page.$('#product')).contentFrame();if(extra.controllerScope||extra.shortcutSeed||extra.virtualStartSeed||extra.keepAlive||extra.nativeWidth||extra.trainerMenu||extra.steamMouseSeed){const seededUrl=new URL(f.url());for(const key of ['controllerScope','steamMouseSeed','trainerMenu','shortcutSeed','virtualStartSeed','virtualStartInitialFeed','keepAlive','radialRecorder','nativeWidth','widthHold'])if(extra[key])seededUrl.searchParams.set(key,extra[key]);await f.goto(seededUrl.href);}try{await f.waitForFunction(()=>window.__previewReady&&window.__gamepadAudit,null,{timeout:10000});}catch(error){fs.writeFileSync(path.join(task,'load-failure.json'),JSON.stringify({route,height,url:f.url(),state:await f.evaluate(()=>({ready:window.__previewReady,errors:window.__previewErrors,calls:window.__previewCalls?.slice(-12),html:document.body.innerHTML.slice(0,1000)}))},null,2));throw error;}await page.waitForTimeout(140);uiTiming('open-end',route,height,timingStart);return f;}
 async function command(f,action){await f.evaluate(action=>window.__gamepadAudit.command(action),action);await page.waitForTimeout(50);}
 async function press(f,locator){await locator.evaluate(el=>{if(!window.__gamepadAudit.focusables().includes(el))throw Error('Setup target outside current gamepad ownership: '+el.textContent);window.__gamepadAudit.focus(el);});await command(f,'confirm');}
 async function state(f,name,height,root='.route-view'){
  const timingStart=uiTimingEnabled?process.hrtime.bigint():0n;uiTiming('state-begin',name,height);
- const result=await f.evaluate(({root})=>{
+ const result=await f.evaluate(async({root})=>{
   const a=window.__gamepadAudit;a.reset();const all=a.focusables(),host=document.querySelector(root);if(!host)throw Error('Missing host '+root);const els=all.filter(el=>host.contains(el));
   const label=el=>el?.getAttribute('aria-label')||el?.innerText?.replace(/\s+/g,' ').trim().slice(0,80)||el?.getAttribute('type')||el?.tagName;const nodes=els.map(el=>({label:label(el),edges:[]})),issues=[];const dirs=['nav-left','nav-right','nav-up','nav-down'];
   for(let i=0;i<els.length;i++)for(let d=0;d<4;d++){
-   const el=els[i];el.focus({preventScroll:true});a.command(dirs[d]);const target=document.activeElement,to=els.indexOf(target);nodes[i].edges.push(to);
+   const el=els[i];el.focus({preventScroll:true});a.command(dirs[d]);if(el.closest('.keyboard-output-dialog'))await new Promise(resolve=>requestAnimationFrame(resolve));const target=document.activeElement,to=els.indexOf(target);nodes[i].edges.push(to);
    if(target?.closest('.navrail,[data-gp-ignore],[hidden],[inert],[aria-hidden="true"]'))issues.push({kind:'excluded-target',from:label(el),to:label(target),direction:dirs[d]});
    if(to<0||to===i)continue;const b=a.rect(el),r=a.rect(target),fanGraph=el.matches('.chart-node-hit')&&target.matches('.chart-node-hit');
    if(d<2&&!fanGraph&&Math.min(b.bottom,r.bottom)-Math.max(b.top,r.top)<.5)issues.push({kind:'horizontal-row',from:label(el),to:label(target),direction:dirs[d]});
@@ -67,7 +77,7 @@ async function state(f,name,height,root='.route-view'){
   const reverse=new Set([0]),rq=[0];while(rq.length){const j=rq.shift();for(let i=0;i<nodes.length;i++)if(nodes[i].edges.includes(j)&&!reverse.has(i)){reverse.add(i);rq.push(i);}}
   for(let i=0;i<els.length;i++){
    if(!seen.has(i)){issues.push({kind:'unreachable',to:nodes[i].label});continue;}if(!reverse.has(i))issues.push({kind:'no-return',from:nodes[i].label});
-   a.focus(els[0]);for(const action of seen.get(i))a.command(action);if(document.activeElement!==els[i])issues.push({kind:'walk-mismatch',to:nodes[i].label,actual:label(document.activeElement),path:seen.get(i)});
+   a.focus(els[0]);for(const action of seen.get(i)){a.command(action);if(els[i].closest('.keyboard-output-dialog'))await new Promise(resolve=>requestAnimationFrame(resolve));}if(document.activeElement!==els[i])issues.push({kind:'walk-mismatch',to:nodes[i].label,actual:label(document.activeElement),path:seen.get(i)});
    const b=els[i].getBoundingClientRect();let left=0,top=0,right=innerWidth,bottom=innerHeight;for(let p=els[i].parentElement;p;p=p.parentElement){const c=getComputedStyle(p),r=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(c.overflowY)){top=Math.max(top,r.top);bottom=Math.min(bottom,r.bottom);}if(/auto|scroll|hidden|clip/.test(c.overflowX)){left=Math.max(left,r.left);right=Math.min(right,r.right);}}
    if(b.left<left-2||b.right>right+2||b.top<top-2||b.bottom>bottom+2)issues.push({kind:'clipped-focus',to:nodes[i].label,box:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},clip:{left,right,top,bottom}});
   }
@@ -156,7 +166,15 @@ async function checkShortcutRetirement(height){
 
   let f;
   if(uiScope==='lossless'){await trainerMenuCases({height,open,command,press,actionCase,state,page,task,scope:'lossless'});return;}
+  if(uiScope==='trainer'){await trainerMenuCases({height,open,command,press,actionCase,state,page,task,scope:'trainer'});return;}
   if(uiScope==='gyro-control'){await gyroControlCases({height,open,command,press,actionCase,state,shot,page,task});await gyroPageNavigationCases({height,open,command,press,actionCase,state,shot,page,task});return;}
+  if(uiScope==='overlay'){await overlayPresentationCases({height,open,actionCase,state,page,task});return;}
+  if(uiScope==='custom-touch'){await customTouchCases({height,open,command,press,actionCase,state,shot});return;}
+  if(uiScope==='virtual-click-start'){
+   if(!nativeFailedCommit)await virtualClickStartCases({height,open,actionCase});
+   await virtualClickWriteFailureCase({height,open,actionCase,nativeFailedCommit});
+   return;
+  }
   if(uiScope==='all'){
   await controllerPageCases({height,open,command,press,actionCase,state,page,task});
   await naturalNavigationCases({page,height,open,command,press,actionCase,state,task,recordState:result=>{states.push(result);if(result.issues.length)failures.push({name:result.name,height,issues:result.issues});}});
@@ -238,6 +256,7 @@ async function checkShortcutRetirement(height){
   f=await open('/button-mapping',height,{shortcuts:'paged'});await press(f,f.getByRole('button',{name:'下一页 ›',exact:true}));await state(f,'controller/shortcuts-page2',height);await press(f,f.getByRole('button',{name:'打开编辑器',exact:true}));await f.locator('.editor-overlay').waitFor();await state(f,'controller/editor',height,'.editor-overlay');await shot('controller-editor-'+height);
   await actionCase('Controller editor B returns to original page',height,async()=>{await command(f,'back');assert.equal(await f.locator('.editor-overlay').count(),0);assert.ok(await f.locator('.controller-page').isVisible());});
   await checkShortcutRetirement(height);
+  await virtualClickStartCases({height,open,actionCase});
   await virtualStartProtectionCases({page,height,open,command,press,actionCase,state});
   }
   f=await open('/sleep',height);
@@ -538,12 +557,20 @@ try{
  for(const result of viewportResults)if(result.status==='rejected')throw result.reason;
 }catch(error){failures.push({kind:'runner',error:String(error),stack:error.stack});console.error(error);}finally{
  const inputsUnchanged=proofInputs.every(file=>testedInputs[file]===hash(file));
+ if(uiScope==='virtual-click-start'){
+  const names=nativeFailedCommit?[virtualClickWriteFailureName]:[...Object.values(virtualClickStartNames),virtualClickWriteFailureName];
+  const expected=[720,800].flatMap(height=>names.map(name=>`${height}:${name}`)).sort();
+  const actual=actions.map(({height,name})=>`${height}:${name}`).sort();
+  if(states.length!==0||JSON.stringify(actual)!==JSON.stringify(expected))failures.push({kind:'virtual-click-start-selection-mismatch',actual,expected});
+ }
  if(!inputsUnchanged)failures.push({kind:'test-inputs-changed'});
  const buildIdentity=JSON.parse(fs.readFileSync(path.join(task,'build-result.json'),'utf8'));
  const sourceRoot=process.env.YMCC_UI_SOURCE_ROOT;
  const changedSourceInputs=uiScope!=='all'?Object.entries(buildIdentity.sourceHashes).filter(([file,expected])=>{const absolute=path.isAbsolute(file)?file:path.resolve(sourceRoot,file);return !fs.existsSync(absolute)||createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')!==expected;}).map(([file])=>file):[];
  if(changedSourceInputs.length)failures.push({kind:'source-inputs-changed',files:changedSourceInputs});
- const report={scope:uiScope,fullUiAccepted:uiScope==='all'&&failures.length===0&&pageErrors.length===0,formalReleaseGate:'NOT_RUN',changedSourceInputs,pass:failures.length===0&&pageErrors.length===0,testedAt:new Date().toISOString(),testedInputs,inputsUnchanged,source:'Current mainline Vue and complete production gamepad engine; only memory IPC and test adapter',physicalController:false,viewportContracts:['1280x720 / YMCC 535x720','1280x800 / YMCC 595x800'],states:states.length,focusStops:states.reduce((n,s)=>n+s.count,0),directions:states.reduce((n,s)=>n+s.directions,0),actionCases:actions.length,failures,pageErrors,actions,shortcutRetirement,results:states};fs.writeFileSync(path.join(task,'navigation-gate.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,states:report.states,focusStops:report.focusStops,directions:report.directions,actions:report.actionCases,failures:failures.length}));await browser.close();await uiBrowserServer.close();const uiTerminal=await uiBrowserTerminal;
+ if(nativeFailedCommit&&testedInputs['virtual-start-native-receipt.json']!==replaySha)failures.push({kind:'native-failed-commit-identity-changed'});
+ const nativeReplay=nativeFailedCommit?{sha256:replaySha,requestId:nativeFailedCommit.state.requestId,mode:'recorded-native-ack-and-verification-feed',clockMapping:'rebase-expiresAtUnixMs-only',nativeExecutedThisRun:false}:undefined;
+ const report={scope:uiScope,nativeReplay,fullUiAccepted:uiScope==='all'&&failures.length===0&&pageErrors.length===0,formalReleaseGate:'NOT_RUN',changedSourceInputs,pass:failures.length===0&&pageErrors.length===0,testedAt:new Date().toISOString(),testedInputs,inputsUnchanged,source:'Current mainline Vue and complete production gamepad engine; only memory IPC and test adapter',physicalController:false,viewportContracts:['1280x720 / YMCC 535x720','1280x800 / YMCC 595x800'],states:states.length,focusStops:states.reduce((n,s)=>n+s.count,0),directions:states.reduce((n,s)=>n+s.directions,0),actionCases:actions.length,failures,pageErrors,actions,shortcutRetirement,results:states};fs.writeFileSync(path.join(task,'navigation-gate.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,states:report.states,focusStops:report.focusStops,directions:report.directions,actions:report.actionCases,failures:failures.length}));await browser.close();await uiBrowserServer.close();const uiTerminal=await uiBrowserTerminal;
  if(uiTools){
   const owned=uiGuard.checkUiBrowserTerminal(uiTools,uiBrowserProcess,uiTerminal);
   uiGuard.observeUiNodeStage({stage:'verify',requireCache:req.cache,sourceRoot:process.env.YMCC_UI_SOURCE_ROOT,evidenceRoot:task});

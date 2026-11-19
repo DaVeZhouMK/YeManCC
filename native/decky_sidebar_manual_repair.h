@@ -1,4 +1,5 @@
 #pragma once
+#include "steam_command_coordinator.h"
 // 2026-10-22 field: an old Steam document can outlive its owned Loader and a
 // YMCC package change. Automatic admission MUST keep rejecting reinjection.
 // Manual IPC remains separate from ordinary automatic transport recovery. The
@@ -12,6 +13,7 @@
 #include "decky_bigpicture_recovery.h"
 #include <functional>
 #include <array>
+#include <optional>
 namespace ymcc::deckyrepair {
 using Json=nlohmann::json;
 enum class Origin { Manual, Automatic, FinalCleanup, ReopenBigPicture };
@@ -97,9 +99,15 @@ inline Json target(const steamsession::Session& session,const Json& mode,const s
             mode.at("mode")!="bigpicture"||mode.at("deckyFrontendLoaded")!=true)return Json{};
         const auto empty=mode.value("deckyEmptyFrontend",Json());
         if(empty.is_object()&&empty.size()==3&&empty.value("protocol",0)==1&&
-            empty.value("frontendBuildId",std::string{})==installed&&manualLoaderContext(loader,empty.value("loaderVersion",std::string{})))
-            return {{"operation","decky.repairConnection"},{"userInitiated",true},{"expectedFrontendBuild",nullptr},
+            deckyupdate::fingerprint(empty.value("frontendBuildId",std::string{}))&&manualLoaderContext(loader,empty.value("loaderVersion",std::string{})))
+        {
+            Json action={{"operation","decky.repairConnection"},{"userInitiated",true},{"expectedFrontendBuild",nullptr},
                 {"installedFrontendBuild",installed},{"loaderVersion",empty.at("loaderVersion")}};
+            // An empty official Loader may retain the previous installed bridge.
+            // Pin that observed build separately; never relabel it as installed.
+            if(empty.at("frontendBuildId")!=installed)action["expectedEmptyBridgeBuild"]=empty.at("frontendBuildId");
+            return action;
+        }
         const auto prior=deckyupdate::residue(mode.at("deckyUpdateResidue"));
         if(prior.empty()||!manualLoaderContext(loader,prior.value("loaderVersion",std::string{})))return Json{};
         return {{"operation","decky.repairConnection"},{"userInitiated",true},{"expectedFrontendBuild",prior.at("frontendBuildId")},
@@ -108,22 +116,38 @@ inline Json target(const steamsession::Session& session,const Json& mode,const s
 }
 class AttemptBudget {
     struct Cooldown {bool spent=false;steamsession::Session session;unsigned long long last=0;};
+    struct PendingCooldown {size_t index;Cooldown value;};
     std::mutex mutex_;bool inFlight_=false;
     std::array<Cooldown,4> cooldowns_{};
+    std::optional<PendingCooldown> pending_;
 public:
     // All origins still share one in-flight operation. Each trusted origin has
     // its own cooldown: a refused document cleanup must not spend the next
     // Big Picture recovery step's opportunity. Switching origins never clears
     // another origin's cooldown. Durable UI reservations remain independent.
-    bool reserve(const steamsession::Session& session,unsigned long long now,Origin origin=Origin::Manual){
+    bool reserve(const steamsession::Session& session,unsigned long long now,Origin origin=Origin::Manual,bool provisional=false){
         std::lock_guard lock(mutex_);
         const auto index=static_cast<size_t>(origin);
         if(inFlight_||index>=cooldowns_.size())return false;
         auto& slot=cooldowns_[index];
         if(slot.spent&&session==slot.session&&(now<slot.last||now-slot.last<30000))return false;
-        inFlight_=true;slot.spent=true;slot.session=session;slot.last=now;return true;
+        if(provisional)pending_.emplace(PendingCooldown{index,{true,session,now}});
+        else slot=Cooldown{true,session,now};
+        inFlight_=true;return true;
     }
-    void finish(){std::lock_guard lock(mutex_);inFlight_=false;}
+    void finish(bool knownUnstarted=false){
+        std::lock_guard lock(mutex_);
+        if(pending_&&!knownUnstarted)cooldowns_[pending_->index]=std::move(pending_->value);
+        pending_.reset();inFlight_=false;
+    }
+};
+
+struct CleanupAdmission {
+    enum class State { denied, allowed, modePending };
+    State state;
+    CleanupAdmission(bool allowed):state(allowed?State::allowed:State::denied){}
+    CleanupAdmission(State state):state(state){}
+    explicit operator bool()const{return state==State::allowed;}
 };
 
 struct Dependencies {
@@ -142,7 +166,7 @@ struct Dependencies {
     // mode-cache entry from before official plugin startup. Auto never forces IO.
     std::function<Json(const steamsession::Session&)> freshMode;
     // Optional product policy; absent means the original manual-only UI boundary.
-    std::function<bool(const steamsession::Session&)> cleanupAllowed;
+    std::function<CleanupAdmission(const steamsession::Session&)> cleanupAllowed;
     std::function<bool(const steamsession::Session&)> reserveCleanup;
     std::function<void(const steamsession::Session&)> gentleRecovery;
     std::function<Json(const steamsession::Session&,const Json&,const std::function<bool()>&)> cleanupWorker;
@@ -152,6 +176,9 @@ struct Dependencies {
     std::function<unsigned long long()> manualGeneration;
     std::function<void(const steamsession::Session&,const Json&,unsigned long long,unsigned long long)> manualDispatched;
     std::function<Json(const std::function<bool()>&)> reopenBigPicture; // Private native child only; no UI-supplied mode/URL.
+    // Normal parent composition always supplies this. Legacy inert callers and
+    // the already-reserved authenticated child keep their original dependency shape.
+    std::function<std::shared_ptr<steamcommand::Reservation>(const steamsession::Session&,Origin)> reserveOperation;
 };
 class ManualRepair {
     AttemptBudget budget_;
@@ -178,14 +205,36 @@ public:
             const auto manualEpoch=origin==Origin::Manual&&deps.manualGeneration?deps.manualGeneration():0;
             if(!requestMatches(args,session,deps.runtime(),origin))return refuse("decky-repair-state-changed");
             const bool cleanup=origin==Origin::FinalCleanup||origin==Origin::ReopenBigPicture;
+            std::shared_ptr<steamcommand::Reservation> operation;
+            if(deps.reserveOperation){
+                operation=deps.reserveOperation(session,origin);
+                if(!operation)return refuse("steam-command-busy");
+            }
+            steamcommand::Use operationUse(operation?operation->ticket():steamcommand::Ticket{});
             if(cleanup&&deps.cleanupWorker){
-                if(!deps.cleanupAllowed||!deps.cleanupAllowed(session))return refuse("decky-cleanup-not-admitted");
-                if(!budget_.reserve(session,deps.now(),origin))return refuse("decky-repair-wait");
-                struct Finish{AttemptBudget& budget;~Finish(){budget.finish();}}finish{budget_};
+                if(!deps.cleanupAllowed)return refuse("decky-cleanup-not-admitted");
+                const auto admission=deps.cleanupAllowed(session);
+                if(!admission){
+                    if(admission.state==CleanupAdmission::State::modePending)
+                        return Json{{"ok",false},{"mutated",false},{"reason","decky-cleanup-account-unconfirmed"},
+                            {"awaitCurrentIdentity",true},{"cleanupNotStarted",true},{"sessionCheck","parent-account-source"}};
+                    return refuse("decky-cleanup-not-admitted");
+                }
+                if(!budget_.reserve(session,deps.now(),origin,true))return refuse("decky-repair-wait");
+                struct Finish{AttemptBudget& budget;bool knownUnstarted=false;~Finish(){budget.finish(knownUnstarted);}}finish{budget_};
                 const auto current=[&]{return !deps.exiting()&&(!deps.powerGeneration||deps.powerGeneration()==power)&&
                     deps.session()==session&&requestMatches(args,session,deps.runtime(),origin);};
                 if(!current()||!deps.consent(session))return refuse("decky-cleanup-state-changed");
-                cleanupNotStarted=false;dispatchEntered=true;return deps.cleanupWorker(session,args,current);
+                cleanupNotStarted=false;dispatchEntered=true;
+                auto result=deps.cleanupWorker(session,args,current);
+                // The Runtime already backs off this exact pre-child identity refusal.
+                // Keep the in-flight exclusion, but do not block that retry on a spent cooldown.
+                finish.knownUnstarted=result.contains("ok")&&result["ok"]==false&&result.contains("mutated")&&result["mutated"]==false&&
+                    (!result.contains("uncertain")||result["uncertain"]==false)&&
+                    result.contains("reason")&&result["reason"]=="decky-cleanup-account-unconfirmed"&&
+                    result.contains("awaitCurrentIdentity")&&result["awaitCurrentIdentity"]==true&&
+                    result.contains("cleanupNotStarted")&&result["cleanupNotStarted"]==true;
+                return result;
             }
             const auto installed=deps.installed();
             if(cleanup&&(!deps.cleanupAllowed||!deps.cleanupAllowed(session)||!deps.reserveCleanup||!deps.freshMode||
@@ -196,8 +245,15 @@ public:
             // available. No dispatched/uncertain result carries this authority.
             if(cleanup&&!cleanupAccountConfirmed(session,mode))return Json{{"ok",false},{"mutated",false},
                 {"reason","decky-cleanup-account-unconfirmed"},{"awaitCurrentIdentity",true}};
-            auto action=target(session,mode,installed,deps.loader);
-            if(action.is_null())return refuse("decky-repair-context-changed");
+            const bool reopen=origin==Origin::ReopenBigPicture;
+            // 2026-11-12 live: both higher tiers stopped at a missing plugin
+            // residue before any close command. Native BPM recovery owns its
+            // same-process/mode/account/epoch proof and durable reservation;
+            // it must not require a healthy old plugin to recover that plugin.
+            // JS context rebuild keeps the exact frontend/Loader target below.
+            auto action=reopen?Json::object():target(session,mode,installed,deps.loader);
+            if(reopen&&!deckysession::bigPicture(session,mode))return refuse("decky-bigpicture-state-changed");
+            if(!reopen&&action.is_null())return refuse("decky-repair-context-changed");
             if(cleanup){
                 const auto epoch=args.value("modeEpoch",std::string{});
                 if(epoch.empty()||mode.value("modeEpoch",std::string{})!=epoch)return refuse("decky-cleanup-context-changed");
@@ -232,6 +288,14 @@ public:
                 if(!admit())return refuse("decky-cleanup-state-changed");
                 result=deps.reopenBigPicture(current); // Hash/preflight once, not on every bounded mode wait.
             }else result=deps.dispatch(session,action,admit);
+            // Report the already validated pre-action read, not later reopen
+            // readbacks. This fact does not grant or veto recovery.
+            if(cleanup&&admitted&&result.is_object())try{
+                const auto socket=mode.find("deckyBackendState");
+                if(socket!=mode.end()&&socket->is_string()&&deckyfrontend::backendState(socket->get_ref<const std::string&>()))
+                    result["cleanupPreflightBackendState"]=*socket;
+                else result["cleanupPreflightBackendState"]="unconfirmed";
+            }catch(...){} // Best-effort diagnostics must not change the action receipt.
             if(origin==Origin::Manual&&admitted&&deps.manualDispatched&&result.value("ok",false)&&
                result.value("requestDispatched",false)&&result.value("mutated",false)&&!result.value("uncertain",false)&&
                !deps.exiting()&&(!deps.powerGeneration||deps.powerGeneration()==power)&&deps.session()==session){

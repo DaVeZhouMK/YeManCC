@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 export const CURRENT_GAME_FUNCTIONS=Object.freeze(['nativeGameFeedbackReadMatchesToken','nativeGameFeedbackFrameCurrent','nativeGameFeedbackCommandCurrent','gamepadSerialGameManualStarted','gamepadSerialGameOwnerFinished']);
 export function currentFeedbackHeaders(repo){
- const seen=new Set(),queue=['game_feedback_dispatch.h','game_feedback_diagnostics.h'];
+ const seen=new Set(),queue=['game_feedback_dispatch.h','game_feedback_diagnostics.h','log_snapshot_state.h'];
  while(queue.length){const name=queue.shift();if(seen.has(name))continue;
   if(!/^[A-Za-z0-9_.-]+\.h$/.test(name))throw Error('XINPUT_CONTEXT_HEADER_ESCAPE');seen.add(name);
   const file=path.join(repo,'native',name),text=fs.readFileSync(file,'utf8');
-  for(const match of text.matchAll(/^\s*#include\s+"([^"]+)"/gm))queue.push(match[1]);
+  // Both canonical callers bind the common deps/json/json.hpp input explicitly.
+  for(const match of text.matchAll(/^\s*#include\s+"([^"]+)"/gm))if(match[1]!=='json.hpp')queue.push(match[1]);
  }
  return [...seen].map(name=>'native/'+name);
 }

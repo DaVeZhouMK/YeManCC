@@ -4,12 +4,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {getInputHostProtocolAdapters,toolchainFiles,REPO,MODULE} from './adapter.mjs';
+import {getInputHostProtocolAdapters,toolchainFiles,relocatedToolchain,REPO,MODULE} from './adapter.mjs';
+import {createHash} from 'node:crypto';
 import {evidencePath,inside} from './provenance.mjs';
 import {parseArgs} from './run.mjs';
 import {extract,closeBlock} from './extract-parser.mjs';
 import {validateAdapters,fingerprintArtifacts} from '../runner.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
+
+test('explicit SDK relocation preserves external tools and rejects missing changed or undeclared bytes',()=>{
+ const workspace=path.resolve(REPO,'../../../Testing/YMCC/Workspace');fs.mkdirSync(workspace,{recursive:true});
+ const temp=fs.mkdtempSync(path.join(workspace,'inputhost-tool-root-'));
+ const repo=path.join(temp,'repo'),oldRoot=path.join(temp,'original-sdk'),newRoot=path.join(temp,'relocated-sdk'),external=path.join(temp,'original-sdk-other','external.exe');
+ const put=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);};
+ const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+ const within=(root,file)=>{const rel=path.relative(root,file);return rel===''||!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep);};
+ try{
+  const spec={dotnetRoot:oldRoot,sdkVersion:'fixture-sdk',runtimeVersion:'fixture-runtime',targetingPackVersion:'fixture-ref',expectedArtifactFiles:[external],msbuildRuntimeAssets:[],evaluatedSdkImports:[]};
+  const tools=toolchainFiles(repo,spec);
+  for(const file of tools)if(within(oldRoot,file)||file===external)put(file,'owned-'+path.basename(file));
+  spec.pinned=tools.map(file=>({path:file,sha256:sha(file)}));
+  put(path.join(repo,MODULE,'toolchain-inputs.json'),JSON.stringify(spec));
+  for(const file of tools)if(within(oldRoot,file))put(path.join(newRoot,path.relative(oldRoot,file)),fs.readFileSync(file));
+  const actual=relocatedToolchain(repo,newRoot);
+  assert.equal(actual.dotnetRoot,newRoot);assert(actual.pinned.some(row=>row.path===external));assert.deepEqual(actual.expectedArtifactFiles,[external]);
+  assert.equal(actual.pinned.length,spec.pinned.length);
+  assert.throws(()=>relocatedToolchain(repo,'relative-sdk'),/ABSOLUTE_REQUIRED/);
+  const host=path.join(newRoot,'dotnet.exe'),bytes=fs.readFileSync(host);put(host,'changed');assert.throws(()=>relocatedToolchain(repo,newRoot),/BYTES_CHANGED/);put(host,bytes);
+  const build=path.join(newRoot,'sdk','fixture-sdk','MSBuild.dll'),buildBytes=fs.readFileSync(build);fs.unlinkSync(build);assert.throws(()=>relocatedToolchain(repo,newRoot),/FILE_MISSING/);put(build,buildBytes);
+  const extra=path.join(newRoot,'shared','Microsoft.NETCore.App','fixture-runtime','undeclared.dll');put(extra,'not-reviewed');assert.throws(()=>relocatedToolchain(repo,newRoot),/UNDECLARED_MEMBER/);fs.unlinkSync(extra);
+  assert.equal(relocatedToolchain(repo,newRoot).pinned.length,spec.pinned.length);
+ }finally{assert(within(workspace,temp)&&path.basename(temp).startsWith('inputhost-tool-root-'));fs.rmSync(temp,{recursive:true});}
+});
 test('two existing actual-consumer fixtures retain their explicit source and tool inputs',()=>{const cases=getInputHostProtocolAdapters();assert.equal(cases.length,2);for(const c of cases){assert(c.evidenceInputs.includes('InputHost/Program.cs'));assert(c.artifactInputs.some(p=>path.basename(p)==='csc.dll'));assert(c.artifactInputs.some(p=>path.basename(p)==='System.Text.Json.dll'));assert.equal(c.scope,'behavioral-mock');}assert(cases[0].evidenceInputs.includes('tools/inputhost_cpu_cost_window_selftest.cs'));assert(cases[1].evidenceInputs.includes('tools/inputhost_optional_trigger_selftest.cs'));assert(cases[1].evidenceInputs.includes(MODULE+'/ProtocolEntry.cs'));assert(!cases[0].evidenceInputs.includes(MODULE+'/extract-parser.mjs'));assert(!cases[0].evidenceInputs.includes(MODULE+'/ProtocolEntry.cs'));});
 test('fresh output cannot be in repository or on the installed/system drive',()=>{assert.throws(()=>evidencePath(REPO),/REPO_BOUNDARY/);assert.throws(()=>evidencePath('C:/inputhost-fixture-must-not-be-created'),/SYSTEM_VOLUME/);assert.throws(()=>evidencePath('relative/path'),/ABSOLUTE/);});
 test('CLI cannot enter a benchmark or select an arbitrary script',()=>{assert.throws(()=>parseArgs(['--case','controller.inputhost-optional-trigger-protocol','--benchmark','anything']),/ARGUMENTS/);assert.throws(()=>parseArgs(['--case','arbitrary-script','--evidence-dir','D:/Codex/must-not-exist']),/CASE_UNKNOWN/);});

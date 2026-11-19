@@ -40,7 +40,7 @@ static LRESULT CALLBACK probeBridgeProc(HWND window, UINT message, WPARAM w, LPA
     }
     return CallWindowProcW(originalBridgeProc, window, message, w, l);
 }
-int wmain() {
+int wmain(int argc,wchar_t** argv) {
     // OverlayEditor normally reads its settings at startup. Prime the actual
     // profile API cache before the client normalizes the owned config file.
     wchar_t initialLayout[128]{};
@@ -51,7 +51,12 @@ int wmain() {
     if(!hooks||!editor||!bridge)return 20;
     auto startEditor=reinterpret_cast<BOOL(*)()>(GetProcAddress(editor,"Start"));
     auto startBridge=reinterpret_cast<BOOL(*)()>(GetProcAddress(bridge,"Start"));
-    if(!startEditor||!startBridge||!startEditor()||!startBridge())return 21;
+    if(!startEditor||!startBridge||!startEditor())return 21;
+    if(argc==2&&!std::wcscmp(argv[1],L"--delay-bridge-start")){
+        WritePrivateProfileStringW(L"Host",L"Starting",L"1",L".\\host-starting.ini");
+        Sleep(900); // Private fixture: process/editor exist before the bridge Start callback.
+    }
+    if(!startBridge())return 21;
     HWND bridgeWindow = nullptr;
     EnumWindows(findOwnBridge, reinterpret_cast<LPARAM>(&bridgeWindow));
     if (!bridgeWindow) return 22;

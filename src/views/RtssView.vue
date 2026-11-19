@@ -24,8 +24,8 @@ import {
   readBootRtssState,
   BOOT_MIRROR_CHANGED_EVENT,
 } from '@/bridge/yeman';
-import { detectGame, type DetectedGame, clearGameCache } from '@/bridge/gamedetect';
-import { onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { detectGame, getCurrentGame, isGameStatusCurrent, subscribeGameStatus, subscribeGameTargetReadiness, type DetectedGame } from '@/bridge/gamedetect';
+import { getUiVisibilityState, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 
 const rtssOn = ref(false);
 const monOn = ref(false);
@@ -40,55 +40,119 @@ const monitorHint = ref('');
 const zoomPct = ref(100); // OSD 缩放百分比（= ZoomRatio × 20），默认 100%
 const zoomHint = ref('');
 
-// ── 游戏运行中拦截：关闭 RTSS / 复位会卸载钩子，可能让游戏闪退。
-// 检测到游戏时延迟执行该操作，顶部条幅提示并轮询；游戏关闭后自动继续，用户可取消。
+// RTSS effects consume the unique game owner's current no-game result.
+// The original 2s wait belongs only to this explicit request.
 type PendingRtssAction = 'stopRtss' | 'reset';
-const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction; pendingArg?: 'W' | 'L' | 'J' | 'off' } | null>(null);
+interface PendingRtssRequest {
+  action: PendingRtssAction;
+  epoch: number;
+  noGameRevision: number | null;
+  effectsStarted: boolean;
+}
+const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction } | null>(null);
 let gameWatchTimer: number | null = null;
+let gameWatchRead: PendingRtssRequest | null = null;
 let stopUiVisibility: (() => void) | null = null;
+let rtssPageActive = false;
+let rtssPageDisposed = false;
+let rtssRequestEpoch = 0;
+let rtssGameRevision = 0;
+let pendingRtssRequest: PendingRtssRequest | null = null;
+let stopRtssObservations: Array<() => void> = [];
 
-async function guardGameRunning(action: PendingRtssAction, arg?: 'W' | 'L' | 'J' | 'off'): Promise<boolean> {
-  // 游戏运行中 → true（已挂起，调用方应直接 return）；未运行 → false（调用方继续）
-  const game = await detectGame();
-  if (!game) { clearGameCache(); return false; }
-  gameRunningWarn.value = { game, pending: action, pendingArg: arg };
-  startGameWatch();
-  return true;
+function rtssPageCurrent(epoch: number): boolean {
+  return !rtssPageDisposed && rtssPageActive && epoch === rtssRequestEpoch &&
+    getUiVisibilityState().visible;
 }
-
-function startGameWatch() {
-  stopGameWatch();
-  gameWatchTimer = window.setInterval(async () => {
-    const warn = gameRunningWarn.value;
-    if (!warn) { stopGameWatch(); return; }
-    clearGameCache();
-    const game = await detectGame(true); // 强制重跑，绕开 5 秒缓存
-    if (!game) {
-      const pending = warn.pending;
-      const arg = warn.pendingArg;
-      gameRunningWarn.value = null;
-      stopGameWatch();
-      if (pending === 'stopRtss') await doToggleRtssOff();
-      else if (pending === 'reset') { confirmingReset.value = true; await doReset(); }
-    } else {
-      // 仍在跑：刷新当前游戏信息
-      gameRunningWarn.value = { game, pending: warn.pending, pendingArg: warn.pendingArg };
-    }
-  }, 2000);
+function rtssRequestCurrent(request: PendingRtssRequest): boolean {
+  return pendingRtssRequest === request && rtssPageCurrent(request.epoch);
 }
-
+function rtssNoGameCurrent(request: PendingRtssRequest): boolean {
+  return rtssRequestCurrent(request) && request.noGameRevision !== null &&
+    request.noGameRevision === rtssGameRevision && isGameStatusCurrent() &&
+    getCurrentGame() === null;
+}
+function requireRtssNoGame(request: PendingRtssRequest): void {
+  if (!rtssNoGameCurrent(request)) throw Error('RTSS_NO_GAME_REQUEST_EXPIRED');
+}
 function stopGameWatch() {
   if (gameWatchTimer !== null) {
     window.clearInterval(gameWatchTimer);
     gameWatchTimer = null;
   }
 }
-
-function cancelGameWatch() {
+function finishRtssRequest(request: PendingRtssRequest): void {
+  if (pendingRtssRequest !== request) return;
+  pendingRtssRequest = null;
   gameRunningWarn.value = null;
+  confirmingReset.value = false;
   stopGameWatch();
+  for (const stop of stopRtssObservations) stop();
+  stopRtssObservations = [];
 }
-
+function cancelGameWatch(): void {
+  ++rtssRequestEpoch;
+  const request = pendingRtssRequest;
+  if (request) finishRtssRequest(request);
+  else {
+    gameRunningWarn.value = null;
+    confirmingReset.value = false;
+    stopGameWatch();
+  }
+}
+function beginRtssRequest(action: PendingRtssAction): PendingRtssRequest {
+  cancelGameWatch();
+  const request: PendingRtssRequest = {
+    action, epoch: rtssRequestEpoch, noGameRevision: null, effectsStarted: false,
+  };
+  pendingRtssRequest = request;
+  // Invalidation counters only: no independent facts, selector or timer.
+  stopRtssObservations = [
+    subscribeGameStatus(() => { ++rtssGameRevision; }),
+    subscribeGameTargetReadiness(() => { ++rtssGameRevision; }),
+  ];
+  return request;
+}
+async function guardGameRunning(request: PendingRtssRequest): Promise<boolean> {
+  if (!rtssRequestCurrent(request)) return true;
+  request.noGameRevision = null;
+  try {
+    const game = await detectGame(true);
+    if (!rtssRequestCurrent(request)) return true;
+    if (!isGameStatusCurrent()) throw Error('GAME_TARGET_OBSERVATION_UNAVAILABLE');
+    if (game) {
+      confirmingReset.value = false;
+      gameRunningWarn.value = { game, pending: request.action };
+      startGameWatch(request);
+      return true;
+    }
+    if (getCurrentGame() !== null) throw Error('GAME_TARGET_SELECTION_CHANGED');
+    request.noGameRevision = rtssGameRevision;
+    gameRunningWarn.value = null;
+    stopGameWatch();
+    return false;
+  } catch {
+    if (rtssRequestCurrent(request)) {
+      errMsg.value = '游戏状态待确认，未执行 RTSS 关闭或复位。';
+      // Waiting may reuse its original timer; initial unknown starts no retry.
+      if (!gameRunningWarn.value) finishRtssRequest(request);
+    }
+    return true;
+  }
+}
+function startGameWatch(request: PendingRtssRequest): void {
+  if (gameWatchTimer !== null || !rtssRequestCurrent(request)) return;
+  gameWatchTimer = window.setInterval(async () => {
+    if (!rtssRequestCurrent(request) || busy.value || gameWatchRead) return;
+    gameWatchRead = request;
+    try {
+      if (request.action === 'stopRtss') await doToggleRtssOff(request);
+      else await doReset();
+    } finally {
+      if (gameWatchRead === request) gameWatchRead = null;
+    }
+  }, 2000);
+}
 // DC 电池模式锁帧任务已移除（锁帧节能完全交给自动浮动优化），保留 FPS 上限档位常量不再需要 dcOpts
 
 async function refresh() {
@@ -112,37 +176,41 @@ async function refresh() {
 }
 
 async function toggleRtssOn() {
+  if (busy.value || !rtssPageCurrent(rtssRequestEpoch)) return;
   errMsg.value = '';
   if (rtssOn.value) {
-    // 关闭 RTSS：游戏在跑则延迟到游戏关闭后执行（避免闪退游戏）
-    if (await guardGameRunning('stopRtss')) return;
-    await doToggleRtssOff();
+    await doToggleRtssOff(beginRtssRequest('stopRtss'));
   } else {
-    // 启动 RTSS：与运行中的游戏无冲突，可直接执行
+    cancelGameWatch();
+    const epoch = rtssRequestEpoch;
     busy.value = true;
     try {
-      await toggleRtss(true);
-      rtssOn.value = true;
+      await toggleRtss(true, async () => rtssPageCurrent(epoch));
+      if (rtssPageCurrent(epoch)) rtssOn.value = true;
     } catch (e) {
-      errMsg.value = 'RTSS 启动失败：' + (e as Error).message;
+      if (rtssPageCurrent(epoch)) errMsg.value = 'RTSS 启动失败：' + (e as Error).message;
     } finally {
       busy.value = false;
     }
   }
 }
-
-async function doToggleRtssOff() {
+async function doToggleRtssOff(request: PendingRtssRequest) {
+  if (busy.value || !rtssRequestCurrent(request) || request.effectsStarted) return;
   busy.value = true;
   try {
-    await toggleRtss(false);
+    if (await guardGameRunning(request)) return;
+    requireRtssNoGame(request);
+    request.effectsStarted = true; // Never replay an uncertain dispatched effect.
+    await toggleRtss(false, async () => rtssNoGameCurrent(request), true);
+    requireRtssNoGame(request);
     rtssOn.value = false;
   } catch (e) {
-    errMsg.value = 'RTSS 关闭失败：' + (e as Error).message;
+    if (rtssRequestCurrent(request)) errMsg.value = 'RTSS 关闭失败：' + (e as Error).message;
   } finally {
+    if (request.effectsStarted) finishRtssRequest(request);
     busy.value = false;
   }
 }
-
 async function onOverlay(v: 'W' | 'L' | 'J') {
   if (busy.value) return;
   ++overlayRevision;
@@ -216,34 +284,53 @@ async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
 }
 
 async function resetAll() {
-  // 复位会关闭 RTSS：游戏在跑则延迟到游戏关闭后自动执行
-  if (await guardGameRunning('reset')) return;
-  // 两步内联确认：避免调用原生 dialog.confirm（会阻塞 WebView2 渲染线程）
-  confirmingReset.value = true;
-}
-
-async function doReset() {
-  confirmingReset.value = false;
+  if (busy.value || !rtssPageCurrent(rtssRequestEpoch)) return;
+  const request = beginRtssRequest('reset');
   errMsg.value = '';
   busy.value = true;
   try {
-    await toggleRtss(false);
-    rtssOn.value = false;
-    await setRtssLimit(0);
-    await saveFps('ac', 0);
-    await saveFps('dc', 0);
-    // 显式复位清除全局 AC/DC 帧率；专用游戏记录保持独立，不删除。
-    await toggleBootRtss(false);
-    tasks.bootRtss = false;
-    await setOverlayLayout('off');
-    monOn.value = false;
-  } catch (e) {
-    errMsg.value = '复位失败：' + (e as Error).message;
+    if (await guardGameRunning(request)) return;
+    if (rtssRequestCurrent(request)) confirmingReset.value = true;
   } finally {
     busy.value = false;
   }
 }
-
+async function doReset() {
+  const request = pendingRtssRequest;
+  if (busy.value || !request || request.action !== 'reset' ||
+      !rtssRequestCurrent(request) || request.effectsStarted) return;
+  errMsg.value = '';
+  busy.value = true;
+  try {
+    // Manual confirmation and automatic wait completion share this fresh gate.
+    if (await guardGameRunning(request)) return;
+    requireRtssNoGame(request);
+    confirmingReset.value = false;
+    request.effectsStarted = true;
+    const current = async () => rtssNoGameCurrent(request);
+    await toggleRtss(false, current, true);
+    requireRtssNoGame(request);
+    rtssOn.value = false;
+    await setRtssLimit(0, () => rtssNoGameCurrent(request));
+    requireRtssNoGame(request);
+    await saveFps('ac', 0);
+    requireRtssNoGame(request);
+    await saveFps('dc', 0);
+    requireRtssNoGame(request);
+    // Original global reset only; dedicated records remain independent.
+    await toggleBootRtss(false);
+    requireRtssNoGame(request);
+    tasks.bootRtss = false;
+    await setOverlayLayout('off', undefined, current);
+    requireRtssNoGame(request);
+    monOn.value = false;
+  } catch (e) {
+    if (rtssRequestCurrent(request)) errMsg.value = '复位失败：' + (e as Error).message;
+  } finally {
+    if (request.effectsStarted) finishRtssRequest(request);
+    busy.value = false;
+  }
+}
 // ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
@@ -262,25 +349,25 @@ async function onBootMirrorChanged() {
 onMounted(() => window.addEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
 onUnmounted(() => window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
 onMounted(() => {
+  rtssPageActive = true;
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
-    if (!visible) {
-      stopGameWatch();
-    } else if (gameRunningWarn.value) {
-      startGameWatch();
-    }
+    if (!visible) cancelGameWatch();
+    // Showing the page cannot revive a cancelled destructive request.
   });
 });
 onActivated(() => {
+  rtssPageActive = true;
   refresh().catch(() => {});
 });
-// KeepAlive 缓存下失活/卸载时清理轮询与防抖定时器，避免隐藏页继续每 2 秒
-// 跑 PowerShell 检测游戏、或卸载后回调访问已销毁组件（2026-08-05 修复）。
 onDeactivated(() => {
-  stopGameWatch();
+  rtssPageActive = false;
+  cancelGameWatch();
   if (zoomTimer !== null) { window.clearTimeout(zoomTimer); zoomTimer = null; }
 });
 onUnmounted(() => {
-  stopGameWatch();
+  rtssPageDisposed = true;
+  rtssPageActive = false;
+  cancelGameWatch();
   if (zoomTimer !== null) { window.clearTimeout(zoomTimer); zoomTimer = null; }
   stopUiVisibility?.();
   stopUiVisibility = null;
@@ -344,7 +431,7 @@ onUnmounted(() => {
         <span class="confirm-text">确认复位 RTSS 全部设置？将关闭 RTSS、清除锁帧与所有相关任务、关闭监控显示。</span>
         <div class="confirm-actions">
           <button class="action-btn" data-gp-row="7" data-gp-col="0" :disabled="busy" @click="doReset">确认复位</button>
-          <button class="action-btn ghost" data-gp-row="7" data-gp-col="1" @click="confirmingReset = false">取消</button>
+          <button class="action-btn ghost" data-gp-row="7" data-gp-col="1" @click="cancelGameWatch">取消</button>
         </div>
       </div>
       <button class="danger-btn" data-gp-row="7" data-gp-col="0" :disabled="busy || confirmingReset" @click="resetAll">复位 RTSS 全部设置</button>

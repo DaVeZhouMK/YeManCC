@@ -50,8 +50,13 @@ export function freezeMainHelpers(repo, out) {
   const entries = symbols.map(symbol => extract(text, symbol));
   const anchorSymbols = ['physicalHidCaptureRawInput', 'inputCaptureSuspendSensorsForPower', 'inputCaptureStop',
     'legionMotionSourceForSelectedLocked', 'inputCaptureLegionControllerMotionRoute'];
+  if (text.includes('static bool selectedIdentityMatchesCurrent(')) anchorSymbols.push('selectedIdentityMatchesCurrent');
   const anchorEntries = anchorSymbols.map(symbol => extract(text, symbol));
   const raw = anchorEntries[0].code, suspend = anchorEntries[1].code, stop = anchorEntries[2].code;
+  const selectedPredicate = anchorEntries.find(entry => entry.symbol === 'selectedIdentityMatchesCurrent');
+  const selectedCall = 'if (!selectedIdentityMatchesCurrent(resolved, resolvedGeneration)) return;';
+  if (selectedPredicate) assert.equal(raw.split(selectedCall).length - 1, 1, 'Exact selected-admission call required');
+  const rawAdmission = selectedPredicate ? raw.replace(selectedCall, selectedPredicate.code) : raw;
   const checks = [];
   const requireAnchor = (name, condition) => {
     assert(condition, 'Source anchor failed: ' + name);
@@ -66,9 +71,9 @@ export function freezeMainHelpers(repo, out) {
     'const auto motionPower = currentPowerGeneration();',
     'const auto motionEpoch = g_legionMotionCaptureEpoch.load(std::memory_order_acquire);',
     'hidHideResolveRawInputIdentity(', 'legionMotionPublish(sample,motionEpoch)']));
-  requireAnchor('selected-physical-source-rejection-before-motion-family', ordered(raw, [
+  requireAnchor('selected-physical-source-rejection-before-motion-family', ordered(rawAdmission, [
     'if (!selected.resolved)', 'if (!exactIdentity && !sameHardware)', 'if (inputCaptureLegionControllerMotionRoute()']));
-  requireAnchor('resolved-generation-current-before-model-decoder', ordered(raw, [
+  requireAnchor('resolved-generation-current-before-model-decoder', ordered(rawAdmission, [
     'resolvedGeneration == 0 || resolvedGeneration != g_hidResolveCacheGeneration', 'legionMotionDecodeReport(']));
   const model=anchorEntries[4].code;
   requireAnchor('exact-four-legion-models', ['LegionGoTablet','LegionGoTablet2','LegionGoSZ1','LegionGoSZ2'].every(name=>

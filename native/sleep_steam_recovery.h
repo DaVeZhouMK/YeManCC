@@ -1,6 +1,14 @@
 #pragma once
 #include "sleep_steam_tracking.h"
+#include "sleep_steam_command_attempt.h"
 #include "sleep_steam_capture.h"
+#include "steam_game_tracker_observation.h"
+#include "steam_game_request_cancellation.h"
+#include "game_original_rules_lease.h"
+// Implemented beside the existing TrackerOwner in main. No private reader here.
+static std::shared_ptr<const ymcc::steamgamefacts::SteamLogSourceView> nativeSteamLogSource(
+    const ymcc::steamgamefacts::SteamLogIdentity&,ymcc::steamgamefacts::SteamLogKind,
+    ymcc::steamgamefacts::SteamLogReadPolicy,const ymcc::steamgamefacts::SteamLogReadAdmission&);
 #include "sleep_steam_input_context.h"
 #include "sleep_steam_game_probe.h"
 #include "sleep_steam_settle.h"
@@ -48,10 +56,11 @@ static Session liveAccountSession;
 static bool sameClientProcess(const Session& a,const Session& b) {
     return a.pid&&a.created&&!a.root.empty()&&a.pid==b.pid&&a.created==b.created&&pathKey(W2U(a.root))==pathKey(W2U(b.root));
 }
-static json liveRequest(const Session& client,json request,const std::function<bool()>& admit={},ymcc::steamrecordidentity::Read* privateIdentity=nullptr) {
+static json liveRequest(const Session& client,json request,const std::function<bool()>& admit={},ymcc::steamrecordidentity::Read* privateIdentity=nullptr,ymcc::steamcommand::Disposition* disposition=nullptr,
+    const std::function<bool()>& ownerCurrent={}) {
     request["sleepSessionProcess"]={{"pid",client.pid},{"created",std::to_string(client.created)},{"root",W2U(client.root)}};
     if(privateIdentity)request["nativeRecordIdentityRead"]=true;
-    auto reply=steamLiveRequest(client.account,std::move(request),admit);
+    auto reply=steamLiveRequest(client.account,std::move(request),admit,ownerCurrent,disposition);
     auto observed=ymcc::steamrecordidentity::consume(reply); // strip complete account before any export
     if(privateIdentity)*privateIdentity=std::move(observed);
     return reply;
@@ -70,35 +79,60 @@ static bool verifiedClientProcess(DWORD pid,const std::wstring& root,ULONGLONG& 
 }
 static bool validSession(const Session& s){return s.account&&s.pid&&s.created&&!s.root.empty();}
 static Session session() {
-    Session s;DWORD registeredAccount=0;
-    sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"ActiveUser",&registeredAccount);
-    sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"pid",&s.registeredPid);
-    s.root=sofRegSZ(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath");
+    Session s;
+    const auto identity=g_steamSettingsObserver.identitySnapshot();
+    if(!identity||identity->rootReadError!=ERROR_SUCCESS){
+        g_steamSettingsObserver.requestIdentityRefresh();
+        s.reason=identity?"steam-install-root-unavailable":"steam-session-observer-not-ready";return s;
+    }
+    const auto& observed=identity->session;
+    const DWORD registeredAccount=identity->registryAccountCandidateKnown()?observed.account:0;
+    s.registeredPid=identity->registeredPidReadError==ERROR_SUCCESS?identity->registeredPid:0;
+    s.root=observed.root;
     while(!s.root.empty()&&(s.root.back()==L'\\'||s.root.back()==L'/'))s.root.pop_back();
-    const auto observed=g_steamSettingsObserver.sessionSnapshot();
-    // Reuse the event-driven verified process cache. A registry PID is merely
-    // discovery evidence; it may point at an exited/reused non-Steam process.
+    // The shared publication supplies candidates only. Keep the original
+    // independent OS validation and ambiguous-instance refusal at this consumer.
     const bool rootMatches=!s.root.empty()&&pathKey(W2U(s.root))==pathKey(W2U(observed.root));
     ULONGLONG registeredBirth=0,observedBirth=0;
     const bool registeredValid=verifiedClientProcess(s.registeredPid,s.root,registeredBirth);
-    // In this exact branch either outcome of a second query selects the same
-    // registered instance; a successful observation cannot make it ambiguous.
     const bool reuseRegistered=registeredValid&&rootMatches&&observed.pid==s.registeredPid&&observed.created==registeredBirth;
     if(reuseRegistered)observedBirth=registeredBirth;
     const bool observedValid=reuseRegistered||(rootMatches&&verifiedClientProcess(observed.pid,s.root,observedBirth)&&observedBirth==observed.created);
     if(registeredValid&&observedValid&&(s.registeredPid!=observed.pid||registeredBirth!=observedBirth)){
         s.reason="steam-process-ambiguous";return s;
     }
+    // A cached account must not be paired with an independently observed new
+    // process birth while the common producer has not published that instance.
+    if(registeredValid&&(!identity->registeredProcessMatches()||!reuseRegistered)){
+        g_steamSettingsObserver.requestIdentityRefresh();
+        s.reason="steam-observer-process-not-current";return s;
+    }
     if(registeredValid){s.pid=s.registeredPid;s.created=registeredBirth;s.source="verified-active-process";}
     else if(observedValid){s.pid=observed.pid;s.created=observedBirth;s.source="verified-session-observer";}
     if(registeredValid){s.account=registeredAccount;s.accountSource="verified-active-process";}
     else if(observedValid){
-        // The observer also samples ActiveUser. Neither its account nor the
-        // registry account can be paired with another verified steam.exe.
+        // Foreign registry-account noise cannot replace the original UI pin.
         s.foreignRegistryAccountIgnored=true;std::lock_guard<std::mutex> lock(liveAccountMx);
         if(sameClientProcess(s,liveAccountSession)&&validSession(liveAccountSession)&&liveAccountSession.accountPinned){
             s.account=liveAccountSession.account;s.accountPinned=true;s.liveAccountPinned=liveAccountSession.liveAccountPinned;s.accountSource=liveAccountSession.accountSource;
         }
+    }
+    // Re-read only shared memory after the local OS queries. A publication
+    // revision alone is not a new process/account or authority to rebind.
+    const auto current=g_steamSettingsObserver.identitySnapshot();
+    const bool samePublishedProcess=current&&current->processEpoch==identity->processEpoch&&
+        current->session.pid==observed.pid&&current->session.created==observed.created&&
+        pathKey(W2U(current->session.root))==pathKey(W2U(observed.root))&&current->presence==identity->presence;
+    if(!samePublishedProcess){
+        s.account=0;s.pid=0;s.created=0;s.accountPinned=false;s.liveAccountPinned=false;
+        s.source="unverified";s.accountSource="unverified";s.reason="steam-session-changed";return s;
+    }
+    // Registered-account use retains its observed account generation. The
+    // fallback UI pin keeps the existing foreign-registry exception; actual
+    // UI/CM identity and final OS lease are still checked by the shared request.
+    if(registeredValid&&!g_steamSettingsObserver.sameIdentityEpoch(identity)){
+        s.account=0;s.accountPinned=false;s.liveAccountPinned=false;s.accountSource="unverified";
+        s.reason="steam-account-changed";return s;
     }
     if(!s.pid)s.reason="steam-process-unverified";
     else if(!s.account)s.reason="steam-account-not-ready";
@@ -176,7 +210,97 @@ static bool sameClientEvidence(const json& a,const json& b) {
     }
     return true;
 }
-struct TargetSelection {Game game;Binding binding;json evidence;};
+struct OriginalGroupRoleObservation {
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group;
+    ymcc::steamrecordwin::TypedNativeRoleObservation native;
+    std::shared_ptr<ymcc::steamnative::ReadScope> readScope;
+    std::pair<DWORD,DWORD> tuple;
+};
+struct TargetSelection {Game game;Binding binding;json evidence;
+    std::shared_ptr<OriginalGroupRoleObservation> groupRole;
+    std::shared_ptr<const NativeOriginalGameRuleQualification> ruleQualification;
+};
+// This joins completed typed facts under the ORIGINAL caller scope. It does
+// not mint public leases, change primary equality or authorize publication.
+enum class OriginalGroupRoleDiagnosticStage {
+    NotInspected, CurrentOrGroupRejected, OriginalWitnessMismatch, BoundContextMismatch,
+    QueryMismatch, RecordCountNotOne, RolesUnavailable, SelectedNotInNativeRoles,
+    GroupRoleRejected, FinalCurrentRejected, Observed
+};
+static const char* originalGroupRoleDiagnosticLabel(OriginalGroupRoleDiagnosticStage stage) noexcept {
+    switch(stage){
+    case OriginalGroupRoleDiagnosticStage::NotInspected:return "not-inspected";
+    case OriginalGroupRoleDiagnosticStage::CurrentOrGroupRejected:return "current-or-group-rejected";
+    case OriginalGroupRoleDiagnosticStage::OriginalWitnessMismatch:return "original-witness-mismatch";
+    case OriginalGroupRoleDiagnosticStage::BoundContextMismatch:return "bound-context-mismatch";
+    case OriginalGroupRoleDiagnosticStage::QueryMismatch:return "query-mismatch";
+    case OriginalGroupRoleDiagnosticStage::RecordCountNotOne:return "record-count-not-one";
+    case OriginalGroupRoleDiagnosticStage::RolesUnavailable:return "roles-unavailable";
+    case OriginalGroupRoleDiagnosticStage::SelectedNotInNativeRoles:return "selected-not-in-native-roles";
+    case OriginalGroupRoleDiagnosticStage::GroupRoleRejected:return "group-role-rejected";
+    case OriginalGroupRoleDiagnosticStage::FinalCurrentRejected:return "final-current-rejected";
+    case OriginalGroupRoleDiagnosticStage::Observed:return "observed";
+    }
+    return "unknown";
+}
+static void appendOriginalGroupRoleDiagnostic(json& evidence,const char* field,
+    const NativeSteamOriginalRoleReadDiagnostic& read,OriginalGroupRoleDiagnosticStage tupleStage) noexcept {
+    try{
+        auto value=read.projection();
+        if(value.is_object())value["tupleStage"]=originalGroupRoleDiagnosticLabel(tupleStage);
+        evidence[field]=std::move(value);
+    }catch(...){}
+}
+static std::optional<std::pair<DWORD,DWORD>> inspectOriginalGroupRoles(
+    const Session& client,const Game& game,std::uint32_t appid,std::uint64_t fullGameId,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& group,
+    const ymcc::steamrecord::TypedNativeRoleObservation& record,const ymcc::steamrecordwin::Context& context,
+    const std::function<bool()>& current,OriginalGroupRoleDiagnosticStage* diagnostic=nullptr){
+    if(diagnostic)*diagnostic=OriginalGroupRoleDiagnosticStage::NotInspected;
+    const auto reject=[&](OriginalGroupRoleDiagnosticStage stage)->std::optional<std::pair<DWORD,DWORD>>{
+        if(diagnostic)*diagnostic=stage;return {};
+    };
+    if(!current||!current()||!group||!group->processCurrent()||group->graph().count!=2)
+        return reject(OriginalGroupRoleDiagnosticStage::CurrentOrGroupRejected);
+    const auto& source=group->source();const auto& selected=group->selectedGame();const auto& steam=group->steam();
+    if(source.fullGameId!=fullGameId||source.appid!=appid||source.selectedPid!=game.pid||
+        selected.pid!=game.pid||selected.created!=game.created||!ymcc::steamgamefacts::samePath(selected.image,game.path)||
+        steam.pid!=client.pid||steam.created!=client.created||!ymcc::steamgamefacts::samePath(steam.image,client.root+L"\\steam.exe"))
+        return reject(OriginalGroupRoleDiagnosticStage::OriginalWitnessMismatch);
+    const auto& query=record.query();const auto& roles=record.nativeRoles();
+    if(!context.sessionBound||context.steamPid!=client.pid||context.steamBirth!=client.created||
+        !ymcc::steamgamefacts::samePath(context.steamRoot,client.root)||context.gamePid!=game.pid||context.gameBirth!=game.created||
+        !ymcc::steamgamefacts::samePath(context.gamePath,game.path)||context.gameId64!=fullGameId||
+        context.account64!=76561197960265728ULL+client.account||!client.account||
+        context.windowsSession!=group->graph().members[0].session)
+        return reject(OriginalGroupRoleDiagnosticStage::BoundContextMismatch);
+    if(query.account64!=context.account64||query.gameId64!=fullGameId||query.expectedPid!=game.pid||!query.profileVerified)
+        return reject(OriginalGroupRoleDiagnosticStage::QueryMismatch);
+    if(record.matchingTargetRecordCount()!=1)return reject(OriginalGroupRoleDiagnosticStage::RecordCountNotOne);
+    if(!roles)return reject(OriginalGroupRoleDiagnosticStage::RolesUnavailable);
+    const auto primary=roles->primaryLivenessPid,foreground=roles->foregroundComparisonPid;
+    if(primary!=game.pid&&foreground!=game.pid)return reject(OriginalGroupRoleDiagnosticStage::SelectedNotInNativeRoles);
+    const auto inspected=group->inspectNativeRoles(primary,foreground);
+    if(!inspected||(inspected->state!=ymcc::steamgameroles::State::ExactSelected&&
+        inspected->state!=ymcc::steamgameroles::State::VerifiedGroupRoles))
+        return reject(OriginalGroupRoleDiagnosticStage::GroupRoleRejected);
+    if(!current()||!group->processCurrent())return reject(OriginalGroupRoleDiagnosticStage::FinalCurrentRejected);
+    if(diagnostic)*diagnostic=OriginalGroupRoleDiagnosticStage::Observed;
+    return std::pair<DWORD,DWORD>{primary,foreground};
+}
+static bool sameOriginalGroup(const ymcc::steamgamefacts::ProcessGroupLease& original,
+    const ymcc::steamgamefacts::ProcessGroupLease& fresh){
+    const auto& a=original.graph();const auto& b=fresh.graph();
+    if(a.count!=2||b.count!=a.count||a.selectedPid!=b.selectedPid||
+        original.source().fullGameId!=fresh.source().fullGameId||original.source().appid!=fresh.source().appid)return false;
+    for(std::uint32_t i=0;i<a.count;++i){
+        const auto& member=a.members[i];const auto* other=fresh.witness(member.pid);const auto* own=original.witness(member.pid);
+        const auto found=std::find_if(b.members.begin(),b.members.begin()+b.count,[&](const auto& m){return m.pid==member.pid;});
+        if(found==b.members.begin()+b.count||found->birth!=member.birth||found->session!=member.session||found->parentPid!=member.parentPid||
+            !own||!other||own->created!=other->created||!ymcc::steamgamefacts::samePath(own->image,other->image))return false;
+    }
+    return original.processCurrent()&&fresh.processCurrent();
+}
 // User-authorized grace for slow read-only capture; one cumulative budget.
 // It never extends the captured sleep boundary or permits a later-born target.
 static constexpr ULONGLONG captureReadBudgetMs=1000;
@@ -189,7 +313,10 @@ struct CaptureGameRules {
 static CaptureGameRules captureGameRules() {
     CaptureGameRules rules;std::lock_guard<std::mutex> lock(g_gameRulesMx);
     nativeRefreshGameRulesEpochFromDiskLocked();
-    rules.excludes=sgExcludes();rules.whitelist=sgGameWhitelist();rules.configured=nativeConfiguredGameExes();
+    if(!g_gameRulesSnapshot||!g_gameRulesSnapshot->known)
+        throw std::runtime_error("Original game rule image is unknown");
+    rules.excludes=g_gameRulesSnapshot->excludes;rules.whitelist=g_gameRulesSnapshot->whitelist;
+    rules.configured=g_gameRulesSnapshot->configured;
     rules.epoch=g_gameRulesEpoch.load(std::memory_order_acquire);return rules;
 }
 static bool sameGameIdentity(const Game& a,const Game& b) {
@@ -240,11 +367,27 @@ static json observeRejectedYmccGame(const Game& game,const CaptureGameRules& rul
     return finish("no-blocker-observed-in-followup");
 }
 struct NativePrimaryRead {NativePrimaryProcessInventory inventory;json log;};
-static NativePrimaryRead readNativePrimary(const Session& client,ULONGLONG boundary) {
-    NativePrimaryRead result;const auto tail=SleepRecoveryApi::readTail(client.root+L"\\logs\\console_log.txt");result.log=tail.meta;
-    if(!flag(tail.meta,"available")){result.inventory.reason="steam-native-primary-log-unavailable";return result;}
-    if(flag(tail.meta,"truncated")){result.inventory.complete=false;result.inventory.reason="steam-native-primary-log-truncated";return result;}
-    result.inventory=nativePrimaryProcessInventoryText(tail.bytes,localSecond(client.created),localSecond(boundary));return result;
+static NativePrimaryRead nativePrimaryFromSource(const Session& client,ULONGLONG boundary,
+    const std::shared_ptr<const ymcc::steamgamefacts::SteamLogSourceView>& source) {
+    NativePrimaryRead result;
+    if(!source||!source->observation.availableKnown||!source->observation.readAttempted||
+        source->observation.readReason==ymcc::steamgamefacts::TrackerSourceObservation::ReadReason::IdentityUnavailable||
+        source->observation.readReason==ymcc::steamgamefacts::TrackerSourceObservation::ReadReason::ContextChanged||
+        source->observation.readReason==ymcc::steamgamefacts::TrackerSourceObservation::ReadReason::InvalidRequest||
+        source->observation.readReason==ymcc::steamgamefacts::TrackerSourceObservation::ReadReason::SequenceExhausted||
+        source->observation.readReason==ymcc::steamgamefacts::TrackerSourceObservation::ReadReason::ReadException){result.inventory.complete=false;result.inventory.reason="steam-native-primary-source-unknown";
+        result.log={{"available",false},{"reason","steam-native-primary-source-unknown"}};return result;}
+    result.log=source->meta();
+    if(!flag(result.log,"available")){result.inventory.reason="steam-native-primary-log-unavailable";return result;}
+    if(flag(result.log,"truncated")){result.inventory.complete=false;result.inventory.reason="steam-native-primary-log-truncated";return result;}
+    if(!source->complete||source->diagnosticOnly||!source->observation.bytes){
+        result.inventory.complete=false;result.inventory.reason="steam-native-primary-source-unknown";return result;}
+    result.inventory=nativePrimaryProcessInventoryText(*source->observation.bytes,localSecond(client.created),localSecond(boundary));return result;
+}
+static NativePrimaryRead readNativePrimary(const Session& client,ULONGLONG boundary,
+    const ymcc::steamgamefacts::SteamLogReadAdmission& admit=[](){return true;}) {
+    return nativePrimaryFromSource(client,boundary,nativeSteamLogSource({client.pid,client.created,client.root},
+        ymcc::steamgamefacts::SteamLogKind::Console,ymcc::steamgamefacts::SteamLogReadPolicy::Raw,admit));
 }
 static json nativePrimaryJoin(const NativePrimaryRead& primary,const TrackedProcessInventory& tracker,std::uint32_t app,DWORD pid) {
     json result={{"source","steam-local-native-procid-diagnostic"},{"status","unknown"},{"originalAllowed",false},{"nativePrimaryVerified",false},{"expectedPid",pid},{"appid",app},{"log",primary.log}};
@@ -264,15 +407,28 @@ static json nativePrimaryJoin(const NativePrimaryRead& primary,const TrackedProc
     if(!row.local){result["status"]="non-local-record";return result;}
     result["nativePrimaryVerified"]=true;result["status"]=row.pid==pid?"matched":"different-instance";result["originalAllowed"]=row.pid==pid&&originalTracked;return result;
 }
-static bool nativePrimaryAllowsOriginal(const Session& client,const Game& game,std::uint32_t app,bool requireVerified=false) {
-    if(!app||!game.pid)return false;const auto tail=SleepRecoveryApi::readTail(client.root+L"\\logs\\gameprocess_log.txt");
-    if(!flag(tail.meta,"available")||flag(tail.meta,"truncated"))return false;
-    std::vector<std::string> lines;std::istringstream input(tail.bytes);std::string line;while(std::getline(input,line))lines.push_back(line);
-    const auto binding=track(lines,game.pid,W2U(game.path),localSecond(game.created>20000000ULL?game.created-20000000ULL:0),localSecond(game.created<=ULLONG_MAX-30000000ULL?game.created+30000000ULL:game.created));
-    const auto proof=nativePrimaryJoin(readNativePrimary(client,sgNowFileTime()),trackedProcessInventory(lines),app,game.pid);
+static bool nativePrimaryAllowsOriginal(const Session& client,const Game& game,std::uint32_t app,bool requireVerified=false,
+    const ymcc::steamgamefacts::SteamLogReadAdmission& admit=[](){return true;},
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessLease>& selectedProcess={}) {
+    if(!app||!game.pid)return false;
+    const auto held=selectedProcess&&selectedProcess->selectedGameWitness().pid==game.pid&&
+        selectedProcess->selectedGameWitness().created==game.created&&
+        ymcc::steamgamefacts::samePath(selectedProcess->selectedGameWitness().image,game.path)?selectedProcess:nullptr;
+    if(selectedProcess&&!held)return false; // Supplied scope cannot fall back to a different raw identity.
+    const auto observed=held?nativeSteamOriginalProcessGroup({client.pid,client.created,client.root},held,admit):std::nullopt;
+    const auto source=held?(observed?observed->gameSource():nullptr):nativeSteamLogSource({client.pid,client.created,client.root},
+        ymcc::steamgamefacts::SteamLogKind::GameProcess,ymcc::steamgamefacts::SteamLogReadPolicy::CompleteOnly,admit);
+    if(!source||!source->complete||source->diagnosticOnly||!flag(source->meta(),"available")||flag(source->meta(),"truncated"))return false;
+    const auto binding=source->binding(game.pid,W2U(game.path),localSecond(game.created>20000000ULL?game.created-20000000ULL:0),localSecond(game.created<=ULLONG_MAX-30000000ULL?game.created+30000000ULL:game.created));
+    // A second actual two-source observation is the original final freshness check.
+    // Do not recycle the first primary or reset the caller's cumulative budget.
+    const auto primary=held?nativePrimaryFromSource(client,observed->absoluteBoundary(),observed->consoleSource()):readNativePrimary(client,sgNowFileTime(),admit);
+    const auto proof=nativePrimaryJoin(primary,source->runningInventory,app,game.pid);
     return binding.status=="tracked"&&binding.appid==app&&flag(proof,"originalAllowed")&&(!requireVerified||flag(proof,"nativePrimaryVerified"));
 }
-static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG boundary,const Game& preferred) {
+static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG boundary,const Game& preferred,
+    const std::function<bool()>& requestCurrent={},
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessLease>& selectedProcess={}) {
     TargetSelection result;result.evidence={{"status","unbound"},{"reason","steam-original-target-not-bound"},
         {"source","none"},{"preferredPid",preferred.pid},{"preferredCreated",std::to_string(preferred.created)},
         {"preferredExe",W2U(sgBaseName(preferred.path))},{"selectedPid",0},{"selectedAppid",0},
@@ -280,28 +436,66 @@ static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG
         {"sharedCandidateMatched",false},{"sharedCandidateModified",false},{"sharedCandidateStatus",preferred.pid?"not-yet-joined":"not-available"},
         {"readOnly",true},{"postWakeRetargetAllowed",false},{"physicalPreSleepVerified",false}};
     if(!boundary||!validSession(client)||client.created>boundary||!sameSession(client)){result.evidence["reason"]="steam-capture-session-unavailable";return result;}
-    const auto started=GetTickCount64();auto checkpointTick=started;
+    // Budget only active system time. A suspend/hibernate pause is not parser
+    // work, and does not reset or enlarge the original cumulative allowance.
+    const auto captureGeneration=currentPowerGeneration(),captureEpoch=g_sleepRecoveryAutoConfigEpoch.load();
+    const auto captureLifecycle=g_powerLifecycle.load();const bool captureEnabled=g_sleepRecoveryAutoEnabled.load();
+    const auto startedBoot=GetTickCount64();ULONGLONG started=0;
+    const bool startedKnown=QueryUnbiasedInterruptTime(&started)!=FALSE;auto checkpoint=started;
+    const Game preferredAtStart=preferred;
+    const bool preferredWasCurrent=preferredAtStart.created&&preferredAtStart.created<=boundary&&sameGame(preferredAtStart);
+    bool suspendGapObserved=false;std::string captureFailure="steam-capture-read-budget-exceeded";
     const auto expired=[&](const char* stage=nullptr){
-        const auto now=GetTickCount64();auto& budget=result.evidence["captureReadBudget"];
-        if(!budget.is_object())budget={{"clock","GetTickCount64"},{"maximumMs",captureReadBudgetMs},{"stage","started"},{"checkpoints",json::array()}};
-        if(stage){budget["stage"]=stage;budget["stageElapsedMs"]=now>=checkpointTick?now-checkpointTick:0;
-            budget["checkpoints"].push_back({{"stage",stage},{"stageElapsedMs",budget["stageElapsedMs"]},{"elapsedMs",now>=started?now-started:0}});checkpointTick=now;}
-        budget["elapsedMs"]=now>=started?now-started:0;budget["clockRegressed"]=now<started;
-        return now<started||now-started>captureReadBudgetMs;
+        const auto nowBoot=GetTickCount64();ULONGLONG now=0;
+        const bool clockKnown=QueryUnbiasedInterruptTime(&now)!=FALSE&&startedKnown;
+        const bool regressed=clockKnown&&(now<started||now<checkpoint);
+        const auto elapsed100ns=clockKnown&&!regressed?now-started:0;
+        const auto elapsedMs=elapsed100ns/10000,bootElapsedMs=nowBoot>=startedBoot?nowBoot-startedBoot:0;
+        const auto excludedPauseMs=bootElapsedMs>elapsedMs?bootElapsedMs-elapsedMs:0;
+        // The two clocks have tick quantization. This is a conservative refusal
+        // to discover another target across a long pause, never wake authority
+        // or evidence that an individual instruction ran physically pre-sleep.
+        suspendGapObserved=suspendGapObserved||excludedPauseMs>32;
+        const bool contextCurrent=(!requestCurrent||requestCurrent())&&currentPowerGeneration()==captureGeneration&&g_sleepRecoveryAutoConfigEpoch.load()==captureEpoch&&
+            g_sleepRecoveryAutoEnabled.load()==captureEnabled&&!g_exitRequested.load()&&g_powerLifecycle.load()==captureLifecycle&&
+            (captureLifecycle==PowerLifecycle::Ready||captureLifecycle==PowerLifecycle::Suspending);
+        auto& budget=result.evidence["captureReadBudget"];
+        if(!budget.is_object())budget={{"clock","QueryUnbiasedInterruptTime"},{"unit","100ns"},{"suspensionAware",true},
+            {"maximumMs",captureReadBudgetMs},{"stage","started"},{"checkpoints",json::array()},
+            {"captureGeneration",captureGeneration},{"captureConfigEpoch",captureEpoch},{"physicalPreSleepVerified",false}};
+        if(stage){budget["stage"]=stage;budget["stageElapsedMs"]=clockKnown&&!regressed?(now-checkpoint)/10000:0;
+            budget["checkpoints"].push_back({{"stage",stage},{"stageElapsedMs",budget["stageElapsedMs"]},{"elapsedMs",elapsedMs},{"bootElapsedMs",bootElapsedMs}});checkpoint=now;}
+        budget["elapsedMs"]=elapsedMs;budget["elapsed100ns"]=elapsed100ns;budget["clockRegressed"]=regressed||nowBoot<startedBoot;
+        budget["clockAvailable"]=clockKnown;budget["bootElapsedMs"]=bootElapsedMs;budget["excludedPauseMs"]=excludedPauseMs;
+        budget["suspendGapObserved"]=suspendGapObserved;budget["suspendGapIsDiagnostic"]=true;budget["contextCurrent"]=contextCurrent;
+        budget["observedGeneration"]=currentPowerGeneration();budget["observedConfigEpoch"]=g_sleepRecoveryAutoConfigEpoch.load();
+        if(!clockKnown){captureFailure="steam-capture-activity-clock-unavailable";return true;}
+        if(!contextCurrent){captureFailure="steam-capture-context-changed";return true;}
+        captureFailure="steam-capture-read-budget-exceeded";
+        return regressed||nowBoot<startedBoot||elapsed100ns>captureReadBudgetMs*10000ULL;
     };
     const auto rules=captureGameRules();
-    if(expired("ymcc-rules-snapshot")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+    if(expired("ymcc-rules-snapshot")){result.evidence["reason"]=captureFailure;return result;}
     result.evidence["ymccRulesEpoch"]=std::to_string(rules.epoch);
-    const auto tail=SleepRecoveryApi::readTail(client.root+L"\\logs\\gameprocess_log.txt");
-    result.evidence["trackerLog"]=tail.meta;
-    if(expired("tracker-read")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
-    if(!flag(tail.meta,"available")||flag(tail.meta,"truncated")){result.evidence["reason"]="steam-capture-tracker-not-complete";return result;}
-    std::vector<std::string> lines;std::istringstream input(tail.bytes);std::string line;
-    while(std::getline(input,line))lines.push_back(line);
-    const auto inventory=trackedProcessInventory(lines);
-    if(expired("tracker-parse")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
-    const auto primary=readNativePrimary(client,boundary);result.evidence["nativePrimaryLog"]=primary.log;
-    if(expired("native-primary-read-and-parse")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+    const ymcc::steamgamefacts::SteamLogReadAdmission sourceAdmit=[&](){return !expired();};
+    const auto held=selectedProcess&&selectedProcess->selectedGameWitness().pid==preferred.pid&&
+        selectedProcess->selectedGameWitness().created==preferred.created&&
+        ymcc::steamgamefacts::samePath(selectedProcess->selectedGameWitness().image,preferred.path)?selectedProcess:nullptr;
+    if(selectedProcess&&!held){result.evidence["reason"]="steam-capture-held-original-mismatch";return result;}
+    // The public source owner chooses its actual read boundary. The consumer
+    // separately keeps the original pre-sleep boundary for historical primary.
+    const auto observed=held?nativeSteamOriginalProcessGroup({client.pid,client.created,client.root},held,sourceAdmit):std::nullopt;
+    const auto logSource=held?(observed?observed->gameSource():nullptr):nativeSteamLogSource({client.pid,client.created,client.root},
+        ymcc::steamgamefacts::SteamLogKind::GameProcess,ymcc::steamgamefacts::SteamLogReadPolicy::CompleteOnly,sourceAdmit);
+    result.evidence["trackerLog"]=logSource?logSource->meta():json{{"available",false},{"reason","steam-log-source-unknown"}};
+    if(expired("tracker-read")){result.evidence["reason"]=captureFailure;return result;}
+    if(!logSource){result.evidence["reason"]="steam-capture-tracker-source-unknown";return result;}
+    if(!logSource->complete||logSource->diagnosticOnly||!flag(logSource->meta(),"available")||flag(logSource->meta(),"truncated")){result.evidence["reason"]="steam-capture-tracker-not-complete";return result;}
+    const auto& lines=logSource->lines;
+    const auto& inventory=logSource->runningInventory;
+    if(expired("tracker-parse")){result.evidence["reason"]=captureFailure;return result;}
+    const auto primary=held?nativePrimaryFromSource(client,boundary,observed->consoleSource()):readNativePrimary(client,boundary,sourceAdmit);result.evidence["nativePrimaryLog"]=primary.log;
+    if(expired("native-primary-read-and-parse")){result.evidence["reason"]=captureFailure;return result;}
     if(!inventory.complete){result.evidence["reason"]=inventory.reason;return result;}
     const auto bound=[&](const Game& game){
         if(!game.created||game.created>boundary||!sameGame(game))return Binding{};
@@ -309,11 +503,17 @@ static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG
         return track(lines,game.pid,W2U(game.path),localSecond(game.created>20000000ULL?game.created-20000000ULL:0),
             localSecond(game.created<=ULLONG_MAX-30000000ULL?game.created+30000000ULL:game.created));
     };
+    std::shared_ptr<const NativeOriginalGameRuleQualification> qualifiedGame;
     const auto ymccValidated=[&](const Game& game,json& evidence){
         NativeDetectedGame detected;
         const auto verdict=nativeScanGameOnePid(game.pid,L"",rules.excludes,rules.whitelist,rules.configured,&detected);
         const Game identity{detected.pid,detected.processCreated,detected.path};
-        const bool exact=verdict==NativeOnePidResult::Ok&&sameGameIdentity(game,identity)&&sameGame(game);
+        bool exact=verdict==NativeOnePidResult::Ok&&sameGameIdentity(game,identity)&&sameGame(game);
+        if(exact){
+            DWORD ours=0,theirs=0;
+            exact=ProcessIdToSessionId(GetCurrentProcessId(),&ours)&&ProcessIdToSessionId(game.pid,&theirs)&&ours==theirs;
+            if(exact){qualifiedGame=nativeQualifyOriginalGameRules(detected,theirs,rules.epoch);exact=bool(qualifiedGame);}
+        }
         evidence={{"source","nativeScanGameOnePid"},{"pid",game.pid},{"created",std::to_string(game.created)},
             {"status",exact?"accepted":verdict==NativeOnePidResult::Ok?"identity-mismatch":verdict==NativeOnePidResult::NameUnavailable?"name-unavailable":"rejected"},
             {"exactProcessIdentity",exact},{"rulesEpoch",std::to_string(rules.epoch)}};
@@ -324,15 +524,35 @@ static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG
         else if(verdict!=NativeOnePidResult::Ok&&!expired())evidence["rejectionObservation"]=observeRejectedYmccGame(game,rules);
         return exact;
     };
-    if(expired()){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+    if(expired()){result.evidence["reason"]=captureFailure;return result;}
     const auto preferredBinding=bound(preferred);result.evidence["preferredTrackerStatus"]=preferredBinding.status;
     Game chosen;Binding binding;std::string source;json validation;
+    std::shared_ptr<OriginalGroupRoleObservation> groupRole;
     const auto preferredPrimary=nativePrimaryJoin(primary,inventory,preferredBinding.appid,preferred.pid);result.evidence["preferredNativePrimary"]=preferredPrimary;
     if(preferredBinding.status=="tracked"&&flag(preferredPrimary,"originalAllowed")){
         if(!ymccValidated(preferred,validation)){
             result.evidence["ymccPidValidation"]=validation;result.evidence["reason"]="steam-original-target-ymcc-pid-not-admitted";return result;
         }
         chosen=preferred;binding=preferredBinding;source="ymcc-candidate-exact-steam-binding";
+    } else if(held){
+        const auto capture=observed?observed->processCapture():nullptr;
+        const auto group=capture?capture->lease:nullptr;
+        const auto parsed=observed?observed->parsedSource():nullptr;
+        if(preferredBinding.status!="tracked"||!preferredBinding.exactPath||!group||group->graph().count!=2||
+            !parsed||!parsed->processLifetime.binding.fullGameIdKnown){result.evidence["reason"]="steam-capture-held-original-not-bound";return result;}
+        const auto full=parsed->processLifetime.binding.fullGameId;
+        if(!ymcc::steamappstatewin::gameIdMatches(full,preferredBinding.appid)||((full>>24)&255)!=2){result.evidence["reason"]="steam-capture-non-type2-group";return result;}
+        std::shared_ptr<ymcc::steamnative::ReadScope> roleScope;
+        NativeSteamOriginalRoleReadDiagnostic readDiagnostic;
+        const auto native=nativeSteamOriginalReadRoles({client.pid,client.created,client.root},held,client.account,full,sourceAdmit,&roleScope,&readDiagnostic);
+        const auto current=[&]{return sourceAdmit()&&roleScope&&roleScope->current();};
+        auto tupleDiagnostic=OriginalGroupRoleDiagnosticStage::NotInspected;
+        const auto tuple=native?inspectOriginalGroupRoles(client,preferred,preferredBinding.appid,full,group,native->record(),native->context(),current,&tupleDiagnostic):std::nullopt;
+        appendOriginalGroupRoleDiagnostic(result.evidence,"nativeGroupRoleRead",readDiagnostic,tupleDiagnostic);
+        if(!tuple){result.evidence["reason"]="steam-capture-native-group-role-unavailable";return result;}
+        if(!ymccValidated(preferred,validation)){result.evidence["ymccPidValidation"]=validation;result.evidence["reason"]="steam-original-target-ymcc-pid-not-admitted";return result;}
+        groupRole=std::make_shared<OriginalGroupRoleObservation>(OriginalGroupRoleObservation{group,*native,roleScope,*tuple});
+        chosen=preferred;binding=preferredBinding;source="ymcc-original-held-native-role-observation";
     } else {
         // Reverse join: Steam discovers candidate IDs, then YMCC's existing
         // full one-PID rules (including working-set/configuration exceptions)
@@ -340,7 +560,7 @@ static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG
         // row or shared YMCC current candidate alone never grants permission.
         unsigned eligible=0,unresolved=0,primaryRejected=0;json candidates=json::array(),rejected=json::array(),primaryRejections=json::array();
         for(const auto& row:inventory.rows){
-            if(expired()){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+            if(expired()){result.evidence["reason"]=captureFailure;return result;}
             const auto rowPrimary=nativePrimaryJoin(primary,inventory,row.appid,row.pid);
             if(!flag(rowPrimary,"originalAllowed")){++primaryRejected;if(primaryRejections.size()<16)primaryRejections.push_back(rowPrimary);continue;}
             const auto logged=pathKey(row.path);
@@ -371,17 +591,49 @@ static TargetSelection selectPreSleepSteamTarget(const Session& client,ULONGLONG
         if(eligible!=1){result.evidence["reason"]=eligible?"steam-original-target-ambiguous":primaryRejected?"steam-original-target-native-primary-unverifiable":"steam-original-target-not-bound";return result;}
         source="unique-exact-tracked-own-window-before-suspend";
     }
-    if(expired("candidate-identity-and-ymcc-validation")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+    if(expired("candidate-identity-and-ymcc-validation")){result.evidence["reason"]=captureFailure;return result;}
     if(g_gameRulesEpoch.load(std::memory_order_acquire)!=rules.epoch){result.evidence["reason"]="steam-capture-ymcc-rules-changed";return result;}
-    if(!sameSession(client)||!sameGame(chosen)||!nativePrimaryAllowsOriginal(client,chosen,binding.appid,flag(nativePrimaryJoin(primary,inventory,binding.appid,chosen.pid),"nativePrimaryVerified"))){result.evidence["reason"]="steam-capture-binding-changed";return result;}
-    if(expired("final-tracker-and-primary-validation")){result.evidence["reason"]="steam-capture-read-budget-exceeded";return result;}
+    if(suspendGapObserved&&(!preferredWasCurrent||!sameGameIdentity(chosen,preferredAtStart))){result.evidence["reason"]="steam-capture-paused-original-not-pinned";return result;}
+    if(!sameSession(client)||!sameGame(chosen)){result.evidence["reason"]="steam-capture-binding-changed";return result;}
+    if(groupRole){
+        const auto current=[&]{return sourceAdmit()&&groupRole->readScope&&groupRole->readScope->current()&&groupRole->group->processCurrent();};
+        const auto fresh=current()?nativeSteamOriginalProcessGroup({client.pid,client.created,client.root},held,current):std::nullopt;
+        const auto capture=fresh?fresh->processCapture():nullptr;const auto group=capture?capture->lease:nullptr;
+        const auto parsed=fresh?fresh->parsedSource():nullptr;
+        if(!fresh||!fresh->sourcesComplete()||!group||!parsed||!sameOriginalGroup(*groupRole->group,*group)||
+            !parsed->processLifetime.binding.fullGameIdKnown||parsed->processLifetime.binding.fullGameId!=groupRole->native.record().query().gameId64){
+            result.evidence["reason"]="steam-capture-group-changed-during-observation";return result;
+        }
+        std::shared_ptr<ymcc::steamnative::ReadScope> scope;
+        NativeSteamOriginalRoleReadDiagnostic readDiagnostic;
+        const auto native=nativeSteamOriginalReadRoles({client.pid,client.created,client.root},held,client.account,group->source().fullGameId,current,&scope,&readDiagnostic);
+        const auto freshCurrent=[&]{return current()&&scope&&scope->current();};
+        auto tupleDiagnostic=OriginalGroupRoleDiagnosticStage::NotInspected;
+        const auto tuple=native?inspectOriginalGroupRoles(client,chosen,binding.appid,group->source().fullGameId,group,native->record(),native->context(),freshCurrent,&tupleDiagnostic):std::nullopt;
+        appendOriginalGroupRoleDiagnostic(result.evidence,"nativeGroupRoleReadback",readDiagnostic,tupleDiagnostic);
+        if(!tuple||*tuple!=groupRole->tuple){result.evidence["reason"]="steam-capture-native-role-tuple-changed";return result;}
+    }else if(!nativePrimaryAllowsOriginal(client,chosen,binding.appid,flag(nativePrimaryJoin(primary,inventory,binding.appid,chosen.pid),"nativePrimaryVerified"),sourceAdmit,held)){
+        result.evidence["reason"]="steam-capture-binding-changed";return result;
+    }
+    if(expired("final-tracker-and-primary-validation")){result.evidence["reason"]=captureFailure;return result;}
+    // The last file read may also have spanned a pause. Recheck the pinned
+    // instance after it; never replace it with the then-current YMCC target.
+    if(suspendGapObserved&&(!preferredWasCurrent||!sameGameIdentity(chosen,preferredAtStart))){result.evidence["reason"]="steam-capture-paused-original-not-pinned";return result;}
+    if(g_gameRulesEpoch.load(std::memory_order_acquire)!=rules.epoch||!sameSession(client)||!sameGame(chosen)){result.evidence["reason"]="steam-capture-binding-changed";return result;}
+    if(expired()){result.evidence["reason"]=captureFailure;return result;}
     const bool agrees=sameGameIdentity(preferred,chosen);
-    result.game=chosen;result.binding=binding;
+    result.game=chosen;result.binding=binding;result.groupRole=groupRole;result.ruleQualification=qualifiedGame;
     result.evidence["status"]="bound";result.evidence["reason"]="steam-original-target-bound";result.evidence["source"]=source;
     result.evidence["selectedPid"]=chosen.pid;result.evidence["selectedCreated"]=std::to_string(chosen.created);
     result.evidence["selectedExe"]=W2U(sgBaseName(chosen.path));result.evidence["selectedAppid"]=binding.appid;
     const auto selectedPrimary=nativePrimaryJoin(primary,inventory,binding.appid,chosen.pid);
-    if(!flag(selectedPrimary,"originalAllowed")){result.evidence["reason"]="steam-capture-native-primary-unverifiable";return TargetSelection{Game{},result.evidence};}
+    if(!flag(selectedPrimary,"originalAllowed")&&!groupRole){result.evidence["reason"]="steam-capture-native-primary-unverifiable";result.game={};result.binding={};return result;}
+    if(groupRole){
+        result.evidence["nativeGroupRoleObservation"]={{"readOnly",true},{"actionAuthority",false},{"matchingTargetRecordCount",1},
+            {"primaryLivenessPid",groupRole->tuple.first},{"foregroundComparisonPid",groupRole->tuple.second},
+            {"nativePrimaryExact",groupRole->tuple.first==chosen.pid},{"nativeForegroundExact",groupRole->tuple.second==chosen.pid},
+            {"originalLogPrimaryAllowed",flag(selectedPrimary,"originalAllowed")},{"firstTuplePreserved",true}};
+    }
     result.evidence["nativePrimary"]=selectedPrimary;
     result.evidence["ymccPidValidation"]=validation;result.evidence["jointBindingVerified"]=true;
     result.evidence["sharedCandidateMatched"]=agrees;
@@ -396,15 +648,138 @@ struct NativeRecordBinding {
     bool bound=false;std::string reason="native-record-pre-capture-identity-unavailable";
     ymcc::shortcutmetadatawin::Witness shortcutMetadata; // private only; never JSON/logged
 };
+// Original sleep target request identity, not a second power or Steam authority.
+struct CaptureRequest {
+    const unsigned long long serial,configEpoch,rulesEpoch;
+    const std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> cancellation;
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> activeAction;
+    std::shared_ptr<NativeOriginalGameRulesLease> ruleLease;
+    bool revoked=false; // captureMx; the cancellation event is polled outside this lock.
+    unsigned long long boundaryGeneration=0,pendingCaptureGeneration=0;
+    CaptureRequest(unsigned long long s,unsigned long long e,unsigned long long r,
+        std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> c):serial(s),configEpoch(e),rulesEpoch(r),cancellation(std::move(c)){}
+};
 struct Captured {
     unsigned long long generation=0,configEpoch=0,boundaryGeneration=0;
     ULONGLONG at=0,powerBoundaryFileTime=0;Game game;Session client;json inputBefore,targetSelection;
+    std::shared_ptr<CaptureRequest> request;
+    std::shared_ptr<ymcc::steamgamefacts::ProcessLease> selectedProcess;
+    std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identitySnapshot;
+    std::shared_ptr<OriginalGroupRoleObservation> groupRole; // pre-sleep read evidence, never a wake/action lease
     NativeRecordBinding nativeRecord; // private in-memory identity, never serialized
     std::string boundary="queued-suspend";
 };
 static std::mutex captureMx;
 static Captured captured,prepared;
-static bool preparedPending=false;
+static bool preparedPending=false,capturePreparing=false;
+static unsigned long long captureRequestSerial=0;
+static std::shared_ptr<CaptureRequest> captureRequest;
+// All callers hold captureMx. No Current callback or IO is invoked under it.
+static void cancelCaptureRequestLocked(){
+    if(captureRequest){captureRequest->revoked=true;
+        if(captureRequest->ruleLease)captureRequest->ruleLease->revoke();
+        captureRequest->cancellation->cancel();
+        if(captureRequest->activeAction)captureRequest->activeAction->cancel();}
+    captureRequest.reset();capturePreparing=false;
+}
+static std::shared_ptr<CaptureRequest> beginCaptureRequestLocked(unsigned long long epoch){
+    cancelCaptureRequestLocked();
+    if(captureRequestSerial==ULLONG_MAX)return {};
+    const auto signal=ymcc::steamgamefacts::RequestCancellation::create();if(!signal)return {};
+    captureRequest=std::make_shared<CaptureRequest>(++captureRequestSerial,epoch,
+        g_gameRulesEpoch.load(std::memory_order_acquire),signal);
+    captureRequest->boundaryGeneration=currentPowerGeneration();
+    return captureRequest;
+}
+static bool captureRequestCurrentLocked(const std::shared_ptr<CaptureRequest>& request){
+    return request&&captureRequest==request&&request->serial==captureRequestSerial&&!request->revoked&&
+        request->configEpoch==g_sleepRecoveryAutoConfigEpoch.load(std::memory_order_acquire)&&
+        (request->ruleLease?request->ruleLease->authorizedAt(g_gameRulesEpoch.load(std::memory_order_acquire),request->serial):
+            request->rulesEpoch==g_gameRulesEpoch.load(std::memory_order_acquire))&&
+        g_sleepRecoveryAutoEnabled.load(std::memory_order_acquire)&&!g_exitRequested.load(std::memory_order_acquire);
+}
+static bool captureRequestCurrent(const std::shared_ptr<CaptureRequest>& request){
+    const bool signalCurrent=request&&request->cancellation->current();
+    std::lock_guard<std::mutex> lock(captureMx);
+    if(!signalCurrent){
+        if(captureRequest==request)cancelCaptureRequestLocked();
+        return false;
+    }
+    return captureRequestCurrentLocked(request);
+}
+// The shared game owner can bind only the actual capture qualification, while
+// its origin image is still current. Allocation and refresh precede captureMx.
+static bool bindOriginalRuleLease(const std::shared_ptr<CaptureRequest>& request,const TargetSelection& selected){
+    if(!request||!selected.ruleQualification||!selected.game.pid)return false;
+    const auto& proof=*selected.ruleQualification;
+    if(proof.pid!=selected.game.pid||proof.birth!=selected.game.created||proof.path!=selected.game.path||
+        proof.originEpoch!=request->rulesEpoch)return false;
+    std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+    nativeRefreshGameRulesEpochFromDiskLocked();
+    auto lease=nativeBindOriginalGameRulesLocked(selected.ruleQualification,request->serial);
+    std::lock_guard<std::mutex> lock(captureMx);
+    if(!lease||!captureRequestCurrentLocked(request)||request->ruleLease)return false;
+    request->ruleLease=std::move(lease);return true;
+}
+static bool originalRulesCurrentLocked(const Captured& value,unsigned long long originEpoch){
+    if(!captureRequestCurrentLocked(value.request)||!value.request->ruleLease||
+        value.request->rulesEpoch!=originEpoch)return false;
+    const auto& proof=*value.request->ruleLease->qualification;
+    return proof.originEpoch==originEpoch&&proof.pid==value.game.pid&&proof.birth==value.game.created&&
+        proof.path==value.game.path&&
+        ((captured.request==value.request&&captured.generation==value.generation)||
+         (preparedPending&&prepared.request==value.request&&prepared.generation==value.generation));
+}
+static bool originalRulesCurrent(const Captured& value,unsigned long long originEpoch){
+    if(!captureRequestCurrent(value.request))return false;
+    std::lock_guard<std::mutex> lock(captureMx);return originalRulesCurrentLocked(value,originEpoch);
+}
+static bool originalTargetCurrent(const Captured& value){
+    if(!value.request||!originalRulesCurrent(value,value.request->rulesEpoch))return false;
+    return value.selectedProcess&&value.selectedProcess->processCurrent()&&value.identitySnapshot&&
+        g_steamSettingsObserver.sameIdentityEpoch(value.identitySnapshot)&&value.request->cancellation->current();
+}
+// Invoked only by the shared rule owner with rulesMx held. The predicate uses
+// the already validated image and typed original; no IO or Current call here.
+static void originalRulesCommit(const NativeGameRulesSnapshot& next,unsigned long long previous,
+    unsigned long long following,const std::function<void(bool)>& publication){
+    std::lock_guard<std::mutex> lock(captureMx);
+    bool retained=false;
+    if(captureRequest&&!captureRequest->revoked&&captureRequest->ruleLease&&
+        captureRequest->serial==captureRequestSerial&&captureRequest->configEpoch==g_sleepRecoveryAutoConfigEpoch.load()&&
+        g_sleepRecoveryAutoEnabled.load()&&!g_exitRequested.load()){
+        retained=nativeContinueOriginalGameRulesLocked(*captureRequest->ruleLease,next,previous,following);
+    }
+    if(!retained)cancelCaptureRequestLocked();
+    publication(retained);
+}
+
+// The original writer's memory publication only. Lock order: captureMx -> runtime c->mx.
+static void originalTargetCommit(bool globalSelectionOnly,const std::function<void()>& publication){
+    if(globalSelectionOnly){publication();return;}
+    std::lock_guard<std::mutex> lock(captureMx);cancelCaptureRequestLocked();publication();
+}
+static bool withOriginalTarget(const Captured& value,
+    const std::shared_ptr<ymcc::steamgamefacts::RequestCancellation>& action,const std::function<void()>& publication){
+    if(!action||!action->current()||!originalTargetCurrent(value))return false;
+    std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+    nativeRefreshGameRulesEpochFromDiskLocked();
+    if(!action->current())return false;
+    std::lock_guard<std::mutex> lock(captureMx);
+    if(!originalRulesCurrentLocked(value,value.request->rulesEpoch))return false;
+    if(value.request->activeAction&&value.request->activeAction!=action)value.request->activeAction->cancel();
+    value.request->activeAction=action;publication();return true;
+}
+// Final host ownership publication uses the same version/revocation lock as
+// registration. All process/Steam/power/native Current calls finish beforehand.
+static bool withOriginalTargetPublication(const Captured& value,const std::function<void()>& publication){
+    if(!originalTargetCurrent(value))return false;
+    std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+    nativeRefreshGameRulesEpochFromDiskLocked();
+    std::lock_guard<std::mutex> lock(captureMx);
+    if(!originalRulesCurrentLocked(value,value.request->rulesEpoch))return false;
+    publication();return true;
+}
 // A repeated notification can advance the shared power generation while the
 // same suspend episode still owns its original. This Steam-only marker lets
 // captureSuspend retain that original without binding a new account or game.
@@ -416,7 +791,7 @@ static bool shortcutMetadataBaselineAllowed(unsigned long long generation) {
 }
 static Captured capturedFor(unsigned long long generation) {
     std::lock_guard<std::mutex> lock(captureMx);
-    return captured.generation==generation&&captured.configEpoch==g_sleepRecoveryAutoConfigEpoch.load()?captured:Captured{};
+    return captured.generation==generation&&captured.configEpoch==g_sleepRecoveryAutoConfigEpoch.load()&&captureRequestCurrentLocked(captured.request)?captured:Captured{};
 }
 static Captured wakeBoundaryFor(unsigned long long generation) {
     std::lock_guard<std::mutex> lock(captureMx);
@@ -424,9 +799,9 @@ static Captured wakeBoundaryFor(unsigned long long generation) {
     // the shared coalescer ignored its last duplicate notification.
     repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
     const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();
-    if(preparedPending&&prepared.configEpoch==epoch&&
+    if(preparedPending&&prepared.configEpoch==epoch&&captureRequestCurrentLocked(prepared.request)&&
         (prepared.generation==generation||(prepared.generation!=ULLONG_MAX&&prepared.generation+1==generation)))return prepared;
-    return captured.generation==generation&&captured.configEpoch==epoch?captured:Captured{};
+    return captured.generation==generation&&captured.configEpoch==epoch&&captureRequestCurrentLocked(captured.request)?captured:Captured{};
 }
 struct NativeRecordPrefetch {
     Session client;Game game;NativeRecordBinding identity;
@@ -639,15 +1014,17 @@ static void recordInspection(unsigned long long generation, const char* purpose,
 static json inspect(unsigned long long generation, const char* diagnosticPurpose = "observation") {
     const auto original=capturedFor(generation);
     // A captured original that exited is never substituted by a newly detected game.
-    const Game game=original.generation?original.game:currentGame();auto client=session();const auto filename=client.root+L"\\logs\\gameprocess_log.txt";
-    SleepRecoveryApi::Tail tail;
-    if(!client.root.empty()&&client.account&&client.pid&&client.created)tail=SleepRecoveryApi::readTail(filename);
-    else tail.meta={{"available",false},{"reason","steam-session-unavailable"}};std::vector<std::string> lines;std::istringstream stream(tail.bytes);std::string line;
-    if(ymcc::sleeprecovery::flag(tail.meta,"truncated"))std::getline(stream,line);
-    while(std::getline(stream,line))lines.push_back(line);
+    const Game game=original.generation?original.game:currentGame();auto client=session();
+    std::shared_ptr<const ymcc::steamgamefacts::SteamLogSourceView> source;json trackerLog;
+    if(!client.root.empty()&&client.account&&client.pid&&client.created){
+        source=nativeSteamLogSource({client.pid,client.created,client.root},
+            ymcc::steamgamefacts::SteamLogKind::GameProcess,ymcc::steamgamefacts::SteamLogReadPolicy::TruncatedDiagnostic,[](){return true;});
+        trackerLog=source?source->meta():json{{"available",false},{"reason","steam-log-source-unknown"}};
+    } else trackerLog={{"available",false},{"reason","steam-session-unavailable"}};
+    // TruncatedDiagnostic owns dropping the first partial line, exactly once.
     const auto earliest=localSecond(game.created>20000000ULL?game.created-20000000ULL:0);
     const auto latest=localSecond(game.created<=ULLONG_MAX-30000000ULL?game.created+30000000ULL:game.created);
-    const auto binding=track(lines,game.pid,W2U(game.path),earliest,latest);
+    const auto binding=source?source->binding(game.pid,W2U(game.path),earliest,latest):Binding{};
     json appids=json::array();if(binding.status=="tracked")appids.push_back(binding.appid);
     json sessionRetry={{"attempted",false},{"attempts",0},{"recovered",false},{"boundedReadOnly",true},{"maxAttempts",2}};
     ymcc::steamrecordidentity::Read privateRecordIdentity;
@@ -687,7 +1064,10 @@ static json inspect(unsigned long long generation, const char* diagnosticPurpose
     auto nativeRecord=nativeRecordDiagnostic(original,game,client,privateRecordIdentity,generation,stable);
     nativeRecord["uiReadStartedTick"]=uiReadStarted;nativeRecord["uiReadFinishedTick"]=uiReadFinished;
     nativeRecord["uiAndNativeAtomic"]=false; // separate observations; never an action proof
-    auto primary=nativePrimaryJoin(readNativePrimary(client,sgNowFileTime()),trackedProcessInventory(lines),binding.appid,game.pid);
+    auto inventory=source?source->runningInventory:TrackedProcessInventory{};
+    if(!source||!source->complete||source->diagnosticOnly){
+        inventory.complete=false;inventory.reason=!source?"steam-tracker-source-unknown":"steam-tracker-source-not-complete";}
+    auto primary=nativePrimaryJoin(readNativePrimary(client,sgNowFileTime()),inventory,binding.appid,game.pid);
     const bool primaryWasVerified=original.generation&&flag(original.targetSelection.value("nativePrimary",json::object()),"nativePrimaryVerified");
     if(primaryWasVerified&&!flag(primary,"nativePrimaryVerified")){primary["originalAllowed"]=false;primary["status"]="unverifiable";primary["reason"]="steam-native-primary-proof-lost";}
     const bool originalMatches=original.generation&&original.game.pid&&original.game.created&&!original.game.path.empty()&&processMatches&&original.game.pid==game.pid&&original.game.created==game.created&&pathKey(W2U(original.game.path))==pathKey(W2U(game.path));
@@ -714,7 +1094,7 @@ static json inspect(unsigned long long generation, const char* diagnosticPurpose
     }
     json report={{"scope","steam"},{"implementation","steam-wake-round50-native-record-diagnostic"},{"generation",generation},{"healthVerified",false},{"gameInput","not-tested"},
         {"game",{{"pid",game.pid},{"created",std::to_string(game.created)},{"exe",W2U(sgBaseName(game.path))},{"identityMatches",processMatches},{"powerGenerationMatches",powerMatches},{"recoveryBindingMatches",stable}}},
-        {"tracker",{{"status",binding.status},{"appid",binding.appid},{"at",binding.at},{"lineInTail",binding.line},{"exactPath",binding.exactPath},{"log",tail.meta}}},
+        {"tracker",{{"status",binding.status},{"appid",binding.appid},{"at",binding.at},{"lineInTail",binding.line},{"exactPath",binding.exactPath},{"log",trackerLog}}},
         {"nativePrimary",primary},{"nativeRecordDiagnostic",nativeRecord},{"steamClient",clientIdentity(client)},{"steamSessionState",clientState},{"steamSessionRetry",sessionRetry},{"steam",steam},{"steamRecovery",conclusion},{"steamInputRecovery",inputConclusion},{"continueRecovery",continueVerdict(steam,conclusion)},
         {"suspendCapture",{{"available",originalMatches},{"clientMatched",flag(clientState,"ready")},{"originalClient",clientIdentity(original.client)},{"boundary",original.boundary},{"physicalPreSleepVerified",false},{"atTick",original.at},{"boundaryGeneration",original.boundaryGeneration},{"powerBoundaryFileTime",std::to_string(original.powerBoundaryFileTime)},{"inputBefore",original.inputBefore},{"targetSelection",original.targetSelection}}},
         {"gameApiProbe",gameApiProbe},{"gamePause",pause},
@@ -739,78 +1119,129 @@ static json inspect(unsigned long long generation, const char* diagnosticPurpose
 // Capture BEFORE unrelated suspend handlers or a delayed Kernel-Power 506 can
 // run after wake. Only an unbound fallback account permits a fixed bounded
 // read from the verified Steam process; this never suspends or touches devices.
+static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected={});
 static void prepareSuspend() {
     if(!g_sleepRecoveryAutoEnabled.load()||g_exitRequested.load())return;
     const auto gen=currentPowerGeneration(),epoch=g_sleepRecoveryAutoConfigEpoch.load();
+    std::shared_ptr<CaptureRequest> request;
     {std::lock_guard<std::mutex> lock(captureMx);
         repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
-        if(preparedPending&&prepared.generation==gen&&prepared.configEpoch==epoch)return;
+        if((capturePreparing&&captureRequestCurrentLocked(captureRequest)&&
+            (captureRequest->boundaryGeneration==gen||(captureRequest->boundaryGeneration!=ULLONG_MAX&&captureRequest->boundaryGeneration+1==gen)))||
+            (preparedPending&&prepared.generation==gen&&prepared.configEpoch==epoch&&captureRequestCurrentLocked(prepared.request)))return;
         const auto lifecycle=g_powerLifecycle.load();
-        if(captured.generation==gen&&captured.configEpoch==epoch&&lifecycle!=PowerLifecycle::Ready){
-            if(lifecycle==PowerLifecycle::Suspending||lifecycle==PowerLifecycle::Suspended){
-                repeatedSuspendGeneration=gen;repeatedSuspendEpoch=epoch;
-            }
+        if(captured.generation==gen&&captured.configEpoch==epoch&&lifecycle!=PowerLifecycle::Ready&&captureRequestCurrentLocked(captured.request)){
+            if(lifecycle==PowerLifecycle::Suspending||lifecycle==PowerLifecycle::Suspended){repeatedSuspendGeneration=gen;repeatedSuspendEpoch=epoch;}
             return;
-        }}
-    Captured value;value.generation=gen;value.configEpoch=epoch;
-    value.boundaryGeneration=value.generation;value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();value.client=prepareSession();value.boundary="power-suspend-notification";
-    NativeDetectedGame target;Game preferred;if(nativeValveReadCurrentTarget(&target))preferred={target.pid,target.processCreated,target.path};
-    const auto selected=selectPreSleepSteamTarget(value.client,value.powerBoundaryFileTime,preferred);
-    value.game=selected.game;value.targetSelection=selected.evidence;
-    bindNativeRecordIdentity(value);
-    {
-        std::lock_guard<std::mutex> lock(captureMx);
-        // Duplicate suspend broadcasts must not replace an earlier original
-        // snapshot with a process first seen near/after the delayed wake.
-        if(preparedPending&&prepared.generation==value.generation&&prepared.configEpoch==value.configEpoch)return;
-        if(captured.generation==value.generation&&captured.configEpoch==value.configEpoch&&g_powerLifecycle.load()!=PowerLifecycle::Ready)return;
-        prepared=value;preparedPending=true;
+        }
+        request=beginCaptureRequestLocked(epoch);if(!request)return;capturePreparing=true;
     }
-    sgRecordFact("sleep-steam-boundary-prepared",{{"generation",value.generation},{"pid",value.game.pid},{"created",std::to_string(value.game.created)},
-        {"boundary",value.boundary},{"identityAvailable",value.game.pid!=0},{"steamClient",clientIdentity(value.client)},{"targetSelection",value.targetSelection},{"nativeRecordIdentityBound",value.nativeRecord.bound},{"nativeRecordIdentityReason",value.nativeRecord.reason},{"physicalPreSleepVerified",false}});
+    // Finish only our own in-flight preparation, including exceptional exits.
+    const auto finish=[&]{std::lock_guard<std::mutex> lock(captureMx);
+        if(captureRequest==request)capturePreparing=false;};
+    try{
+        Captured value;value.request=request;value.generation=gen;value.configEpoch=epoch;
+        value.boundaryGeneration=gen;value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();
+        value.client=prepareSession();value.boundary="power-suspend-notification";
+        if(!captureRequestCurrent(request)){finish();return;}
+        value.identitySnapshot=g_steamSettingsObserver.identitySnapshot();
+        NativeDetectedGame target;Game preferred;if(nativeValveReadCurrentTarget(&target))preferred={target.pid,target.processCreated,target.path};
+        if(preferred.pid)value.selectedProcess=ymcc::steamgamefacts::processOwner().acquire(g_steamSettingsObserver,value.identitySnapshot,
+            {preferred.pid,preferred.created,preferred.path});
+        const auto selected=selectPreSleepSteamTarget(value.client,value.powerBoundaryFileTime,preferred,[request]{return captureRequestCurrent(request);},value.selectedProcess);
+        value.game=selected.game;value.targetSelection=selected.evidence;value.groupRole=selected.groupRole;
+        if(value.game.pid&&(!value.selectedProcess||value.selectedProcess->selectedGameWitness().pid!=value.game.pid||
+            value.selectedProcess->selectedGameWitness().created!=value.game.created||
+            !ymcc::steamgamefacts::samePath(value.selectedProcess->selectedGameWitness().image,value.game.path)))
+            value.selectedProcess=ymcc::steamgamefacts::processOwner().acquire(g_steamSettingsObserver,value.identitySnapshot,
+                {value.game.pid,value.game.created,value.game.path});
+        if(!captureRequestCurrent(request)){finish();return;}
+        bindNativeRecordIdentity(value);
+        if(!bindOriginalRuleLease(request,selected)){finish();return;}
+        unsigned long long continuation=0;
+        {std::lock_guard<std::mutex> lock(captureMx);
+            if(!captureRequestCurrentLocked(request)){if(captureRequest==request)capturePreparing=false;return;}
+            prepared=value;preparedPending=true;capturePreparing=false;
+            continuation=request->pendingCaptureGeneration;request->pendingCaptureGeneration=0;
+        }
+        // Complete only this original request. Replacement between publication
+        // and continuation cannot turn the late call into a new target's capture.
+        if(continuation)captureSuspend(continuation,request);
+        sgRecordFact("sleep-steam-boundary-prepared",{{"generation",value.generation},{"pid",value.game.pid},{"created",std::to_string(value.game.created)},
+            {"boundary",value.boundary},{"identityAvailable",value.game.pid!=0},{"steamClient",clientIdentity(value.client)},{"targetSelection",value.targetSelection},
+            {"nativeRecordIdentityBound",value.nativeRecord.bound},{"nativeRecordIdentityReason",value.nativeRecord.reason},{"physicalPreSleepVerified",false}});
+    }catch(...){finish();throw;}
 }
 static void closeSuspendEpisode(){
-    std::lock_guard<std::mutex> lock(captureMx);
+    std::lock_guard<std::mutex> lock(captureMx);repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
+}
+static void cancelPreparedSuspend(){
+    std::lock_guard<std::mutex> lock(captureMx);cancelCaptureRequestLocked();preparedPending=false;prepared={};
     repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
 }
-static void cancelPreparedSuspend(){std::lock_guard<std::mutex> lock(captureMx);preparedPending=false;prepared={};repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;}
-static void captureSuspend(unsigned long long generation) {
+static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected) {
     const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();if(!sleepSteamRecoveryAllows(generation,epoch))return;
-    Captured value;value.generation=generation;value.configEpoch=epoch;value.boundaryGeneration=generation;value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();
+    Captured value;value.generation=generation;value.configEpoch=epoch;value.boundaryGeneration=generation;
+    value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();
     bool early=false,repeatedOriginal=false;
-    {
-        std::lock_guard<std::mutex> lock(captureMx);if(captured.generation==generation)return;
-        if(preparedPending&&prepared.configEpoch==epoch&&
+    {std::lock_guard<std::mutex> lock(captureMx);
+        if(expected&&(!captureRequestCurrentLocked(expected)||captureRequest!=expected))return;
+        if(captured.generation==generation&&captureRequestCurrentLocked(captured.request))return;
+        if(capturePreparing&&captureRequestCurrentLocked(captureRequest)&&
+            (captureRequest->boundaryGeneration==generation||
+             (captureRequest->boundaryGeneration!=ULLONG_MAX&&captureRequest->boundaryGeneration+1==generation))){
+            captureRequest->pendingCaptureGeneration=generation;return;
+        }
+        if(preparedPending&&prepared.configEpoch==epoch&&captureRequestCurrentLocked(prepared.request)&&
             (prepared.generation==generation||(prepared.generation!=ULLONG_MAX&&prepared.generation+1==generation))){
             value=prepared;value.generation=generation;early=true;
         }else if(repeatedSuspendGeneration&&repeatedSuspendEpoch==epoch&&
             (g_powerLifecycle.load()==PowerLifecycle::Suspending||g_powerLifecycle.load()==PowerLifecycle::Suspended)&&
-            captured.generation==repeatedSuspendGeneration&&captured.configEpoch==epoch&&
+            captured.generation==repeatedSuspendGeneration&&captured.configEpoch==epoch&&captureRequestCurrentLocked(captured.request)&&
             repeatedSuspendGeneration!=ULLONG_MAX&&repeatedSuspendGeneration+1==generation){
-            // Only the generation used to route this episode changes. Keep the
-            // original boundary, identity, time, metadata and any bound=false
-            // refusal exactly as captured; a wake read must never repair them.
             value=captured;value.generation=generation;early=true;repeatedOriginal=true;
-        }
+        }else{value.request=beginCaptureRequestLocked(epoch);if(!value.request)return;capturePreparing=true;}
         preparedPending=false;prepared={};repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
     }
-    if(!early){value.client=prepareSession();NativeDetectedGame target;Game preferred;if(nativeValveReadCurrentTarget(&target))preferred={target.pid,target.processCreated,target.path};
-        const auto selected=selectPreSleepSteamTarget(value.client,value.powerBoundaryFileTime,preferred);value.game=selected.game;value.targetSelection=selected.evidence;bindNativeRecordIdentity(value);}
-    {std::lock_guard<std::mutex> lock(captureMx);if(captured.generation==generation)return;captured=value;}
-    sgRecordFact("sleep-steam-original-captured",{{"generation",generation},{"pid",value.game.pid},{"created",std::to_string(value.game.created)},
-        {"identityAvailable",value.game.pid!=0},{"boundary",value.boundary},{"originalRetainedForRepeatedSuspend",repeatedOriginal},{"steamClient",clientIdentity(value.client)},{"targetSelection",value.targetSelection},{"nativeRecordIdentityBound",value.nativeRecord.bound},{"nativeRecordIdentityReason",value.nativeRecord.reason},{"healthVerified",false}});
-    if(value.game.pid&&!poolSubmit([value]{
-        if(!sleepSteamRecoveryAllows(value.generation,value.configEpoch)||g_powerLifecycle.load()!=PowerLifecycle::Suspending)return;
-        const auto before=inspect(value.generation,"suspend-baseline");
-        if(!sleepSteamRecoveryAllows(value.generation,value.configEpoch)||g_powerLifecycle.load()!=PowerLifecycle::Suspending||!sameGame(value.game)||!sameSession(value.client))return;
-        std::lock_guard<std::mutex> lock(captureMx);
-        if(captured.generation==value.generation&&captured.configEpoch==value.configEpoch){
-            const auto priorInput=captured.inputBefore.is_object()?captured.inputBefore:json::object();
-            const auto priorRecord=priorInput.value("nativeRecordPrefetchBefore",json::object()),priorWitness=priorInput.value("nativeRecordPrefetchWitness",json::object());
-            captured.inputBefore={{"steam",before.value("steam",json::object())},{"nativeRecordDiagnostic",before.value("nativeRecordDiagnostic",json::object())},{"nativeRecordPrefetchBefore",priorRecord},{"nativeRecordPrefetchWitness",priorWitness},
-                {"gameApiProbe",before.value("gameApiProbe",json::object())},{"recordEpoch",before.value("recordEpoch",0.0)},{"boundary","suspend-notification-read"},{"physicalPreSleepVerified",false}};
+    const auto request=value.request;
+    const auto finish=[&]{std::lock_guard<std::mutex> lock(captureMx);if(captureRequest==request)capturePreparing=false;};
+    try{
+        if(!early){
+            value.client=prepareSession();value.identitySnapshot=g_steamSettingsObserver.identitySnapshot();
+            NativeDetectedGame target;Game preferred;if(nativeValveReadCurrentTarget(&target))preferred={target.pid,target.processCreated,target.path};
+            if(preferred.pid)value.selectedProcess=ymcc::steamgamefacts::processOwner().acquire(g_steamSettingsObserver,value.identitySnapshot,
+            {preferred.pid,preferred.created,preferred.path});
+        const auto selected=selectPreSleepSteamTarget(value.client,value.powerBoundaryFileTime,preferred,[request]{return captureRequestCurrent(request);},value.selectedProcess);
+            value.game=selected.game;value.targetSelection=selected.evidence;value.groupRole=selected.groupRole;
+            if(value.game.pid&&(!value.selectedProcess||value.selectedProcess->selectedGameWitness().pid!=value.game.pid||
+                value.selectedProcess->selectedGameWitness().created!=value.game.created||
+                !ymcc::steamgamefacts::samePath(value.selectedProcess->selectedGameWitness().image,value.game.path)))
+                value.selectedProcess=ymcc::steamgamefacts::processOwner().acquire(g_steamSettingsObserver,value.identitySnapshot,
+                    {value.game.pid,value.game.created,value.game.path});
+            if(!captureRequestCurrent(request)){finish();return;}bindNativeRecordIdentity(value);
+            if(!bindOriginalRuleLease(request,selected)){finish();return;}
         }
-    }))sgRecordFact("sleep-steam-pre-input-capture-skipped",{{"generation",generation},{"reason","worker-queue-full"}});
+        {std::lock_guard<std::mutex> lock(captureMx);if(!captureRequestCurrentLocked(request))return;
+            if(captured.generation==generation&&captured.request==request)return;captured=value;capturePreparing=false;}
+        sgRecordFact("sleep-steam-original-captured",{{"generation",generation},{"pid",value.game.pid},{"created",std::to_string(value.game.created)},
+            {"identityAvailable",value.game.pid!=0},{"boundary",value.boundary},{"originalRetainedForRepeatedSuspend",repeatedOriginal},
+            {"steamClient",clientIdentity(value.client)},{"targetSelection",value.targetSelection},{"nativeRecordIdentityBound",value.nativeRecord.bound},
+            {"nativeRecordIdentityReason",value.nativeRecord.reason},{"healthVerified",false}});
+        if(value.game.pid&&!poolSubmit([value]{
+            if(!sleepSteamRecoveryAllows(value.generation,value.configEpoch)||g_powerLifecycle.load()!=PowerLifecycle::Suspending||!originalTargetCurrent(value))return;
+            const auto before=inspect(value.generation,"suspend-baseline");
+            if(!sleepSteamRecoveryAllows(value.generation,value.configEpoch)||g_powerLifecycle.load()!=PowerLifecycle::Suspending||
+                !sameGame(value.game)||!sameSession(value.client)||!originalTargetCurrent(value))return;
+            std::lock_guard<std::mutex> lock(captureMx);
+            if(captured.generation==value.generation&&captured.configEpoch==value.configEpoch&&captured.request==value.request&&captureRequestCurrentLocked(value.request)){
+                const auto priorInput=captured.inputBefore.is_object()?captured.inputBefore:json::object();
+                const auto priorRecord=priorInput.value("nativeRecordPrefetchBefore",json::object()),priorWitness=priorInput.value("nativeRecordPrefetchWitness",json::object());
+                captured.inputBefore={{"steam",before.value("steam",json::object())},{"nativeRecordDiagnostic",before.value("nativeRecordDiagnostic",json::object())},
+                    {"nativeRecordPrefetchBefore",priorRecord},{"nativeRecordPrefetchWitness",priorWitness},{"gameApiProbe",before.value("gameApiProbe",json::object())},
+                    {"recordEpoch",before.value("recordEpoch",0.0)},{"boundary","suspend-notification-read"},{"physicalPreSleepVerified",false}};
+            }
+        }))sgRecordFact("sleep-steam-pre-input-capture-skipped",{{"generation",generation},{"reason","worker-queue-full"}});
+    }catch(...){finish();throw;}
 }
 static std::vector<std::wstring> exportLogTails() {
     // Existing user-requested "export all logs" only: bounded raw evidence, not
@@ -845,7 +1276,7 @@ static std::vector<std::wstring> exportLogTails() {
 // Reuse the existing YMCC original-PID window helpers, not its input-device
 // admission/mailbox or process-thaw owner. At most one handoff in this RETURN
 // transaction; all later wake polls are read-only because inputAttempted stays set.
-static json returnOriginalPidWindow(const Captured& original,unsigned long long generation,const json& receipt,const Foreground& expectedForeground,const std::function<bool()>& stable) {
+static json returnOriginalPidWindow(const Captured& original,unsigned long long generation,const json& receipt,const Foreground& expectedForeground,const std::function<bool()>& stable,const std::function<bool()>& actionCurrent) {
     json result={{"attempted",false},{"apiAccepted",false},{"scope","original-pid-window"},{"gameInputVerified",false},{"reason","steam-return-not-acknowledged"}};
     if(!flag(receipt,"mutated")||!flag(receipt,"actionAcknowledged"))return result;
     auto oldForeground=foreground(original.game,original.client);
@@ -875,11 +1306,19 @@ static json returnOriginalPidWindow(const Captured& original,unsigned long long 
     if(!sameForeground(oldForeground,original.game,original.client)||!focusIsRestorableExactWindow(target,original.game.pid)||!stable()){
         result["reason"]="original-pid-return-foreground-or-window-changed";return result;
     }
-    result["attempted"]=true;result["apiAccepted"]=ymcc::requestWindowForegroundAsync(target);
-    result["reason"]=flag(result,"apiAccepted")?"original-pid-window-return-requested":"original-pid-window-return-not-accepted";
+    // Keep one bounded attempt even if it retires between two window calls.
+    // Do not repeat Steam inspection or bind a new wake while dispatching it.
+    bool dispatchRevoked=false;
+    result["attempted"]=true;result["apiAccepted"]=ymcc::requestWindowForegroundAsync(target,[&]{
+        dispatchRevoked=GetForegroundWindow()!=oldForeground.window||
+            !focusIsRestorableExactWindow(target,original.game.pid)||!actionCurrent();
+        return !dispatchRevoked;
+    });
+    result["reason"]=dispatchRevoked?"original-pid-window-return-dispatch-revoked":
+        flag(result,"apiAccepted")?"original-pid-window-return-requested":"original-pid-window-return-not-accepted";
     return result;
 }
-static json resumeInputContext(const json& inspected,unsigned long long generation,unsigned long long configEpoch,const std::function<bool()>& runStillCurrent={}) {
+static json resumeInputContext(const json& inspected,unsigned long long generation,unsigned long long configEpoch,const std::function<bool()>& runStillCurrent={},ymcc::sleepsteam::CommandAttempt* attempt=nullptr) {
     const auto reject=[](const char* reason){return json{{"ok",false},{"accepted",false},{"mutated",false},{"scope","steam-input"},{"reason",reason},{"healthVerified",false}};};
     if(!sleepSteamWakeOperationAllows(generation,configEpoch))return reject("steam-input-resume-cancelled");
     if(runStillCurrent&&!runStillCurrent())return reject("steam-input-worker-expired");
@@ -926,7 +1365,9 @@ static json resumeInputContext(const json& inspected,unsigned long long generati
         if(fg.role!="original-game"||fg.pid!=original.game.pid||fg.created!=original.game.created)return reject("steam-pre-controller-original-window-not-current");
         request["preControllerOriginalWindow"]=true;
     }
-    auto result=liveRequest(original.client,request,admit);
+    const auto dispatchAdmit=[&]{return admit()&&(!attempt||!attempt->admit||attempt->admit());};
+    const auto ownerCurrent=[&]{return (!runStillCurrent||runStillCurrent())&&sleepSteamWakeOperationAllows(generation,configEpoch);};
+    auto result=liveRequest(original.client,request,dispatchAdmit,nullptr,attempt?&attempt->disposition:nullptr,ownerCurrent);
     // Only the native transport's explicit BEFORE-send receipt plus our own
     // foreground-only veto can release a reservation. Never infer no-send
     // from a generic mutated=false result, timeout, or a Steam JS error.
@@ -939,8 +1380,8 @@ static json resumeInputContext(const json& inspected,unsigned long long generati
     // A cached Steam AppID can satisfy the JS focus readback before Windows has
     // actually activated the window. Wait at most 750ms (30 reads), with NO
     // action replay and immediate cancellation on identity/power/user changes.
-    const auto postStable=[&]{return (!runStillCurrent||runStillCurrent())&&sleepSteamRecoveryAllows(generation,configEpoch)&&
-        sleepSteamWakeOperationAllows(generation,configEpoch)&&sameGame(original.game)&&sameSession(original.client)&&gameNotPaused(original.game)&&nativePrimaryAllowsOriginal(original.client,original.game,originalAppid,flag(original.targetSelection.value("nativePrimary",json::object()),"nativePrimaryVerified"));};
+    const auto postCurrent=[&]{return (!runStillCurrent||runStillCurrent())&&sleepSteamWakeOperationAllows(generation,configEpoch);};
+    const auto postStable=[&]{return postCurrent()&&sameGame(original.game)&&sameSession(original.client)&&gameNotPaused(original.game)&&nativePrimaryAllowsOriginal(original.client,original.game,originalAppid,flag(original.targetSelection.value("nativePrimary",json::object()),"nativePrimaryVerified"));};
     auto actualForeground=foreground(original.game,original.client);
     const auto focused=[&]{return actualForeground.role=="original-game"&&actualForeground.pid==original.game.pid&&actualForeground.created==original.game.created;};
     const bool acknowledged=flag(result,"mutated")&&flag(result,"actionAcknowledged");
@@ -956,7 +1397,7 @@ static json resumeInputContext(const json& inspected,unsigned long long generati
     const auto valveWaitEnd=GetTickCount64();unsigned pidForegroundReads=0;ULONGLONG pidWaitStart=valveWaitEnd;
     json pidReturn={{"attempted",false},{"apiAccepted",false},{"reason",focused()?"original-window-already-current":"steam-return-not-eligible"},{"gameInputVerified",false}};
     if(!windowPreparation&&acknowledged&&((flag(result,"ok")&&flag(result,"runtimeAccepted"))||uiPending)&&!focused()&&allowedForeground(actualForeground)&&postStable()){
-        pidReturn=returnOriginalPidWindow(original,generation,result,fg,postStable);
+        pidReturn=returnOriginalPidWindow(original,generation,result,fg,postStable,postCurrent);
         actualForeground=foreground(original.game,original.client);pidWaitStart=GetTickCount64();
         while(flag(pidReturn,"attempted")&&!focused()&&allowedForeground(actualForeground)&&postStable()&&pidForegroundReads<30){
             const auto now=GetTickCount64();if(now<pidWaitStart||now-pidWaitStart>=750)break;
@@ -995,7 +1436,7 @@ static json resumeInputContext(const json& inspected,unsigned long long generati
         {"nativeReturn",result.value("nativeReturn",json::object())},{"nativeAdmissionReason",result["nativeAdmissionReason"]},{"nativePreDispatchCancelled",nativeForegroundCancelled},{"requestDispatched",result.value("requestDispatched",json())},{"preflightDeferred",result["preflightDeferred"]},{"gameInputVerified",false}});
     return result;
 }
-static json reconcile(const json& inspected,unsigned long long generation,unsigned long long configEpoch,const std::function<bool()>& runStillCurrent={}) {
+static json reconcile(const json& inspected,unsigned long long generation,unsigned long long configEpoch,const std::function<bool()>& runStillCurrent={},ymcc::sleepsteam::CommandAttempt* attempt=nullptr) {
     const auto reject=[](const char* reason){return json{{"ok",false},{"accepted",false},{"mutated",false},{"scope","steam"},{"reason",reason},{"healthVerified",false}};};
     if(!sleepSteamWakeOperationAllows(generation,configEpoch))return reject("steam-recovery-cancelled");
     if(runStillCurrent&&!runStillCurrent())return reject("steam-worker-expired");
@@ -1021,7 +1462,9 @@ static json reconcile(const json& inspected,unsigned long long generation,unsign
         !flag(contactProof,"jointBindingVerified")||!flag(contactProof,"sharedCandidateMatched")||!flag(contactProof,"steamSessionMatched")))return reject("steam-contact-proof-unavailable");
     json request={{"operation","sleep.reconcile"},{"appids",json::array({number(fresh["tracker"],"appid")})}};
     if(contactRecovery)request["contactRecovery"]=true,request["contactProof"]={{"connected",true},{"appid",number(fresh["tracker"],"appid")},{"pid",number(fresh["game"],"pid")},{"created",fresh["game"].value("created",std::string())}};
-    auto result=liveRequest(client,std::move(request),admit);
+    const auto dispatchAdmit=[&]{return admit()&&(!attempt||!attempt->admit||attempt->admit());};
+    const auto ownerCurrent=[&]{return (!runStillCurrent||runStillCurrent())&&sleepSteamWakeOperationAllows(generation,configEpoch);};
+    auto result=liveRequest(client,std::move(request),dispatchAdmit,nullptr,attempt?&attempt->disposition:nullptr,ownerCurrent);
     result["scope"]="steam";result["healthVerified"]=false;result["gameInput"]="not-tested";
     const auto contactReceipt=result.value("contactRecovery",json::object());
     const bool contactConfirmed=!contactRecovery||(contactReceipt.is_object()&&flag(contactReceipt,"requested")&&

@@ -8,67 +8,103 @@ function Get-PresetStateDir {
     try {$key=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($script:ThemeRoot).ToLowerInvariant())))).Replace('-','').Substring(0,16)}finally{$sha.Dispose()}
     Join-Path $script:PresetStateBase $key
 }
-function Assert-ThemeTarget([string]$Path) {
+function Assert-ThemeTarget([string]$Path,[ref]$ResourceItem) {
     $root=[IO.Path]::GetFullPath($script:ThemeRoot).TrimEnd('\');$full=[IO.Path]::GetFullPath($Path)
     if(!$full.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Preset target escaped theme root'}
     $parent=[IO.Path]::GetDirectoryName($full)
-    while($parent -and $parent.Length -ge $root.Length){if(Test-Path -LiteralPath $parent){if((Get-Item -LiteralPath $parent -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Theme directory links are not overwritten automatically'}};$parent=[IO.Path]::GetDirectoryName($parent)}
-    if(Test-Path -LiteralPath $full){if((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Theme file link is not overwritten'}}
+    while($parent -and $parent.Length -ge $root.Length){
+        $attributes=$null
+        if($ResourceItem){
+            # Installed-resource reads only need current filesystem attributes.
+            try{$attributes=[IO.File]::GetAttributes($parent)}catch [IO.FileNotFoundException],[IO.DirectoryNotFoundException]{}
+        }elseif(Test-Path -LiteralPath $parent){$attributes=[IO.File]::GetAttributes($parent)}
+        if($attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Theme directory links are not overwritten automatically'}
+        $parent=[IO.Path]::GetDirectoryName($parent)
+    }
+    if($ResourceItem){
+        $item=try{Get-Item -LiteralPath $full -Force -ErrorAction Stop}catch [Management.Automation.ItemNotFoundException]{$null}
+        if($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Theme file link is not overwritten'}
+        $ResourceItem.Value=$item
+    }elseif(Test-Path -LiteralPath $full){if((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Theme file link is not overwritten'}}
     $full
 }
 function Get-PresetRelative([string]$Relative) {
     $value=$Relative.Replace('/','\')
-    if([IO.Path]::IsPathRooted($value) -or $value.Contains(':') -or $value.IndexOf([char]0) -ge 0 -or @($value.Split('\')|Where-Object {$_ -eq '..' -or $_ -eq '.' -or $_ -eq ''}).Count){throw 'Invalid preset relative path'}
+    if([IO.Path]::IsPathRooted($value) -or $value.Contains(':') -or $value.IndexOf([char]0) -ge 0){throw 'Invalid preset relative path'}
+    foreach($part in $value.Split('\')){if($part -eq '..' -or $part -eq '.' -or $part -eq ''){throw 'Invalid preset relative path'}}
     $value
 }
-# Per-helper resource digests: repeated status/prepare/reload stages reuse a
-# validated digest only while file identity metadata stays unchanged. Configs
-# are always read live; a new helper has an empty cache. No background scanner.
-$script:PresetResourceHashes=@{}
-function Get-PresetResourceHash([string]$Path) {
-    if(!$script:PresetResourceHashes){$script:PresetResourceHashes=@{}}
-    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-    if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Preset resource link denied'}
-    $key=$item.FullName.ToLowerInvariant()
+function Get-PresetResourceHash([string]$Path,[string]$InvalidFileMessage='',[switch]$InstalledTarget,[ref]$Raw) {
+    if($InstalledTarget){
+        # Reuse the checked leaf metadata; a missing or ordinary directory is repairable drift.
+        $item=$null
+        $Path=Assert-ThemeTarget $Path -ResourceItem ([ref]$item)
+        if($item -isnot [IO.FileInfo]){return}
+    }else{
+        $item=try{Get-Item -LiteralPath $Path -Force -ErrorAction Stop}catch [Management.Automation.ItemNotFoundException]{if($InvalidFileMessage){throw $InvalidFileMessage};throw}
+    }
+    if($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){
+        if($InvalidFileMessage){throw $InvalidFileMessage}
+        throw 'Preset resource link or non-file denied'
+    }
+    # Oversized files cannot be backed up. Reject before hashing, and enforce
+    # the same limit on the opened handle in case the file has grown.
+    if($item.Length -gt 16777216){
+        if($InvalidFileMessage){throw $InvalidFileMessage}
+        throw 'Theme resource exceeds the 16 MiB safe backup limit; no theme files were changed'
+    }
     $stamp=[string]$item.Length+':'+$item.LastWriteTimeUtc.Ticks+':'+$item.CreationTimeUtc.Ticks+':'+[int]$item.Attributes
-    $cached=$script:PresetResourceHashes[$key]
-    if($cached -and $cached.stamp -eq $stamp){return $cached.hash}
-    $hash=Get-ConfigHash $Path
-    $after=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    # Metadata can detect ordinary races, but cannot authorize an old digest.
+    $hash=if($Raw){$snapshot=Read-AppearanceThemeConfig $Path;$snapshot.hash}else{
+        try{Get-ConfigHash $Path -MaximumBytes 16777216}
+        catch{if($InvalidFileMessage -and $_.Exception.Message -ceq 'Preset backup integrity check failed'){throw $InvalidFileMessage};throw}
+    }
+    $after=[IO.FileInfo]::new($Path)
+    $after.Refresh()
+    if(!$after.Exists -or ($after.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Preset resource changed during validation'}
     $afterStamp=[string]$after.Length+':'+$after.LastWriteTimeUtc.Ticks+':'+$after.CreationTimeUtc.Ticks+':'+[int]$after.Attributes
     if($afterStamp -ne $stamp){throw 'Preset resource changed during validation'}
-    if($script:PresetResourceHashes.Count -ge 512){$script:PresetResourceHashes.Clear()}
-    $script:PresetResourceHashes[$key]=@{stamp=$stamp;hash=$hash}
+    if($Raw){$Raw.Value=$snapshot.raw}
     return $hash
 }
 function Read-PresetManifest {
     $file=Join-Path $script:PackRoot 'manifest.json'
     if(!(Test-Path -LiteralPath $file -PathType Leaf)){throw 'YMCC 自带主题包缺失，请修复安装'}
-    $m=[IO.File]::ReadAllText($file,[Text.Encoding]::UTF8)|ConvertFrom-Json
+    # Parse and digest the same bounded bytes, then keep the final fresh check.
+    $snapshot=Read-AppearanceThemeConfig $file
+    $m=$snapshot.raw|ConvertFrom-Json
     if($m.id -ne 'ymcc-steam-appearance' -or $m.version -ne 1 -or @($m.themes).Count -ne $script:ThemeNames.Count -or @($m.files).Count -gt 256 -or @($m.files).Count -lt (2*$script:ThemeNames.Count)){throw 'Invalid bundled preset manifest'}
     foreach($name in $script:ThemeNames){if(@($m.themes|Where-Object name -eq $name).Count -ne 1){throw 'Bundled theme/name mismatch'}}
-    $seen=@{}
+    $seen=@{};$schemaInputs=@{};$sourceRoot=[IO.Path]::Combine($script:PackRoot,'themes')
     foreach($entry in $m.files){
-        $rel=Get-PresetRelative ([string]$entry.path)
-        if($rel.Split('\')[0] -notin $script:ThemeNames -or $seen.ContainsKey($rel)){throw 'Bundled preset path denied or duplicated'}
-        $seen[$rel]=$true;$source=Join-Path (Join-Path $script:PackRoot 'themes') $rel
-        if(!(Test-Path -LiteralPath $source -PathType Leaf) -or (Get-Item -LiteralPath $source -Force).Attributes -band [IO.FileAttributes]::ReparsePoint -or (Get-PresetResourceHash $source).ToLowerInvariant() -ne $entry.sha256){throw "Bundled preset checksum failed: $rel"}
+        $rel=Get-PresetRelative ([string]$entry.path);$parts=$rel.Split('\')
+        if($parts[0] -notin $script:ThemeNames -or $seen.ContainsKey($rel)){throw 'Bundled preset path denied or duplicated'}
+        $seen[$rel]=$true;$source=[IO.Path]::Combine($sourceRoot,$rel)
+        $invalidFileMessage="Bundled preset checksum failed: $rel"
+        $hash=if($parts.Count -eq 2 -and $parts[1] -in 'theme.json','config_USER.json'){
+            # The schema and checksum must describe the same bounded bytes.
+            $raw='';$value=Get-PresetResourceHash $source $invalidFileMessage -Raw ([ref]$raw)
+            $schemaInputs[$rel]=$raw
+            $value
+        }else{Get-PresetResourceHash $source $invalidFileMessage}
+        if($hash -ne $entry.sha256){throw $invalidFileMessage}
     }
     foreach($name in $script:ThemeNames){foreach($required in @('theme.json','config_USER.json')){if(!$seen.ContainsKey($name+'\'+$required)){throw 'Bundled preset incomplete'}}}
     foreach($name in $script:ThemeNames){
-        $dir=Join-Path (Join-Path $script:PackRoot 'themes') $name
-        $theme=[IO.File]::ReadAllText((Join-Path $dir 'theme.json'),[Text.Encoding]::UTF8)|ConvertFrom-Json
-        $config=[IO.File]::ReadAllText((Join-Path $dir 'config_USER.json'),[Text.Encoding]::UTF8)|ConvertFrom-Json
+        $theme=$schemaInputs[$name+'\theme.json']|ConvertFrom-Json
+        $config=$schemaInputs[$name+'\config_USER.json']|ConvertFrom-Json
         if($config.active -ne $true){throw "Bundled default must enable all managed themes: $name"}
         if($theme.name -ne $name -or $config.active -isnot [bool] -or !$theme.manifest_version){throw 'Bundled theme/config schema is invalid'}
     }
-    [pscustomobject]@{manifest=$m;digest=(Get-ConfigHash $file);files=@($m.files)}
+    $digest=Get-ConfigHash $file -MaximumBytes 262144
+    if($digest -cne $snapshot.hash){throw 'Bundled preset manifest changed during validation'}
+    [pscustomobject]@{manifest=$m;digest=$digest;files=@($m.files)}
 }
 function Assert-PresetStateTarget([string]$Path) {
     $root=[IO.Path]::GetFullPath((Get-PresetStateDir)).TrimEnd('\');$full=[IO.Path]::GetFullPath($Path)
     if(!$full.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Preset state path escaped current profile'}
     $current=$full
-    while($current -and $current.Length -ge $root.Length){if(Test-Path -LiteralPath $current){if((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Preset state links are not followed'}};$current=[IO.Path]::GetDirectoryName($current)}
+    while($current -and $current.Length -ge $root.Length){if(Test-Path -LiteralPath $current){$attributes=if($current -ceq $full){(Get-Item -LiteralPath $current -Force).Attributes}else{[IO.File]::GetAttributes($current)};if($attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Preset state links are not followed'}};$current=[IO.Path]::GetDirectoryName($current)}
     $full
 }
 function Get-PresetTargetHintPath {
@@ -159,7 +195,11 @@ function Get-PresetMetadata($Rows,$BackendThemes=@()) {
     $state=Read-PresetState;$available=$false;$digest='';$drift=0;$error=''
     try {
         $pack=Read-PresetManifest;$available=$true;$digest=$pack.digest
-        foreach($file in $pack.files){if([IO.Path]::GetFileName($file.path) -eq 'config_USER.json'){continue};$target=Assert-ThemeTarget (Join-Path $script:ThemeRoot (Get-PresetRelative $file.path));if(!(Test-Path -LiteralPath $target -PathType Leaf) -or (Get-PresetResourceHash $target).ToLowerInvariant() -ne $file.sha256){$drift++}}
+        foreach($file in $pack.files){
+            if([IO.Path]::GetFileName($file.path) -eq 'config_USER.json'){continue}
+            $target=[IO.Path]::Combine($script:ThemeRoot,(Get-PresetRelative $file.path))
+            if((Get-PresetResourceHash $target -InstalledTarget) -ne $file.sha256){$drift++}
+        }
     }catch{$error=$_.Exception.Message;$drift++}
     $foreign=@(Get-ForeignThemeRows $BackendThemes);$foreignCount=@($foreign|Where-Object {!$_.retired -and $_.needsDisable}).Count
     $retired=@(Get-RetiredPresetTargets $foreign)+@(Get-EmptyRetiredPresetDirectories $foreign)
@@ -195,24 +235,47 @@ function New-PresetBackup($Paths) {
     [IO.File]::WriteAllText((Join-Path $dir 'journal.json'),($journal|ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
     [pscustomobject]@{directory=$dir;journal=$journal}
 }
+function Assert-PresetBackupReadPath([string]$Root,[string]$Path,[string]$InvalidPath,[switch]$RequireFile) {
+    $full=[IO.Path]::GetFullPath($Path)
+    if(!$full.StartsWith($Root+'\',[StringComparison]::OrdinalIgnoreCase)){throw $InvalidPath}
+    # Existence, file type and reparse status come from one attribute query
+    # per component. Only a missing component is treated as absent.
+    for($current=$full;$current -and $current.Length -ge $Root.Length;$current=[IO.Path]::GetDirectoryName($current)){
+        $attributes=$null
+        try{$attributes=[IO.File]::GetAttributes($current)}
+        catch [IO.FileNotFoundException],[IO.DirectoryNotFoundException]{}
+        if($attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Preset backup path links are not followed'}
+        if($RequireFile -and $current -ceq $full -and ($null -eq $attributes -or ($attributes -band [IO.FileAttributes]::Directory))){throw $InvalidPath}
+    }
+    $full
+}
 function Read-PresetBackup([string]$Directory) {
-    $base=[IO.Path]::GetFullPath((Join-Path (Get-PresetStateDir) 'backups')).TrimEnd('\');$dir=[IO.Path]::GetFullPath($Directory)
+    $stateRoot=[IO.Path]::GetFullPath((Get-PresetStateDir)).TrimEnd('\')
+    $themeRoot=[IO.Path]::GetFullPath($script:ThemeRoot)
+    $base=[IO.Path]::GetFullPath((Join-Path $stateRoot 'backups')).TrimEnd('\');$dir=[IO.Path]::GetFullPath($Directory)
     if(!$dir.StartsWith($base+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Backup escaped current user state directory'}
-    $journalPath=Assert-PresetStateTarget (Join-Path $dir 'journal.json')
-    if(!(Test-Path -LiteralPath $journalPath -PathType Leaf) -or (Get-Item -LiteralPath $journalPath).Length -gt 1048576){throw 'Invalid preset backup journal file'}
-    $j=[IO.File]::ReadAllText($journalPath,[Text.Encoding]::UTF8)|ConvertFrom-Json
-    if($j.version -ne 1 -or $j.themeRoot -ne [IO.Path]::GetFullPath($script:ThemeRoot) -or $j.entries -isnot [array] -or @($j.entries).Count -gt 2048){throw 'Invalid preset backup'}
-    $seen=@{};$blobs=@{};$totalBytes=0
+    $journalPath=Assert-PresetBackupReadPath $stateRoot (Join-Path $dir 'journal.json') 'Invalid preset backup journal file' -RequireFile
+    # Check size on the same read handle that supplies the JSON bytes.
+    $stream=[IO.File]::OpenRead($journalPath)
+    try {
+        if($stream.Length -gt 1048576){throw 'Invalid preset backup journal file'}
+        $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true,4096,$true)
+        try{$raw=$reader.ReadToEnd()}finally{$reader.Dispose()}
+    }finally{$stream.Dispose()}
+    $j=$raw|ConvertFrom-Json
+    if($j.version -ne 1 -or $j.themeRoot -ne $themeRoot -or $j.entries -isnot [array] -or @($j.entries).Count -gt 2048){throw 'Invalid preset backup'}
+    $seen=@{};$blobs=@{};$totalBytes=0;$blobRoot=[IO.Path]::Combine($dir,'files');$themePathRoot=$themeRoot.TrimEnd('\')
     foreach($entry in $j.entries){
         if($entry.relative -isnot [string] -or $entry.existed -isnot [bool] -or $entry.blob -isnot [string] -or $entry.blob -notmatch '^\d{4}\.bin$' -or $entry.hash -isnot [string]){throw 'Invalid preset backup entry schema'}
         $rel=Get-PresetRelative $entry.relative
         if($seen.ContainsKey($rel) -or $blobs.ContainsKey($entry.blob)){throw 'Duplicate preset backup target/blob'}
         $seen[$rel]=$true;$blobs[$entry.blob]=$true
-        Assert-ThemeTarget (Join-Path $script:ThemeRoot $rel)|Out-Null
+        $null=Assert-PresetBackupReadPath $themePathRoot ([IO.Path]::Combine($themeRoot,$rel)) 'Preset target escaped theme root'
         if($entry.existed){
-            $blob=Assert-PresetStateTarget (Join-Path (Join-Path $dir 'files') $entry.blob)
-            if($entry.hash -notmatch '^[a-fA-F0-9]{64}$' -or !(Test-Path -LiteralPath $blob -PathType Leaf) -or (Get-Item -LiteralPath $blob).Length -gt 16777216 -or (Get-ConfigHash $blob) -ne $entry.hash){throw 'Preset backup integrity check failed'}
-            $totalBytes+=(Get-Item -LiteralPath $blob).Length;if($totalBytes -gt 134217728){throw 'Preset backup exceeds safe total size'}
+            $blob=Assert-PresetBackupReadPath $stateRoot ([IO.Path]::Combine($blobRoot,$entry.blob)) 'Preset backup integrity check failed' -RequireFile
+            $length=0
+            if($entry.hash -notmatch '^[a-fA-F0-9]{64}$' -or (Get-ConfigHash $blob 16777216 ([ref]$length)) -ne $entry.hash){throw 'Preset backup integrity check failed'}
+            $totalBytes+=$length;if($totalBytes -gt 134217728){throw 'Preset backup exceeds safe total size'}
         }elseif($entry.hash -ne ''){throw 'Unexpected hash for absent backup file'}
     }
     [pscustomobject]@{directory=$dir;journal=$j}
@@ -294,6 +357,7 @@ function Recover-PresetTransaction([switch]$Force) {
     if($script:PresetTransactionActive -and !$Force){return}
     $marker=Assert-PresetStateTarget (Join-Path (Get-PresetStateDir) 'transaction.json')
     if(!(Test-Path -LiteralPath $marker)){return}
+    Assert-CssDesktopNotEditing
     if(!(Test-Path -LiteralPath $marker -PathType Leaf) -or (Get-Item -LiteralPath $marker).Length -gt 524288){throw 'Invalid unfinished preset transaction'}
     try {
         $txn=[IO.File]::ReadAllText($marker,[Text.Encoding]::UTF8)|ConvertFrom-Json
@@ -303,6 +367,11 @@ function Recover-PresetTransaction([switch]$Force) {
         $rollback=Read-PresetBackup $txn.backup
         if(!$txn.recoveryBackup){
             $preimage=New-PresetBackup @($rollback.journal.entries|ForEach-Object {Join-Path $script:ThemeRoot (Get-PresetRelative $_.relative)})
+        }
+        # Backup reads can outlast an editor opening. Recheck before changing
+        # the journal or restoring any files, including forced rollback.
+        Assert-CssDesktopNotEditing
+        if(!$txn.recoveryBackup){
             $txn|Add-Member -NotePropertyName recoveryBackup -NotePropertyValue $preimage.directory -Force
             Write-ConfigAtomic $marker ($txn|ConvertTo-Json -Depth 4 -Compress)
         }
@@ -312,7 +381,7 @@ function Recover-PresetTransaction([switch]$Force) {
         Complete-PresetTransaction
     }catch{throw ('未完成的外观事务无法自动恢复；已停止新的写入并保留备份：'+$_.Exception.Message)}
 }
-function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[switch]$OwnedResourcesOnly) {
+function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[switch]$OwnedResourcesOnly,[switch]$ProtectEditor) {
     Recover-PresetTransaction
     $pack=Read-PresetManifest;$rows=@(Get-ThemeRows)
     if($ExpectedRevision -and (Get-ThemeRevision $rows) -ne $ExpectedRevision){throw 'Theme settings changed; reread before applying preset'}
@@ -331,8 +400,19 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
         # A package update replaces owned assets only, never a switch/parameter file.
         if($OwnedResourcesOnly -and $isConfig){continue}
         if($isConfig -and !$Reset -and !$first -and (Read-PresetUserConfig $target)){continue}
-        if((Test-Path -LiteralPath $target -PathType Leaf) -and (Get-ConfigHash $target).ToLowerInvariant() -eq $file.sha256){continue}
-        $writes.Add([pscustomobject]@{path=$target;bytes=[IO.File]::ReadAllBytes((Join-Path (Join-Path $script:PackRoot 'themes') $rel))})
+        if((Test-Path -LiteralPath $target -PathType Leaf) -and (Get-ConfigHash $target -MaximumBytes 16777216) -eq $file.sha256){continue}
+        # Validate the bytes to be committed, not the earlier read of this path.
+        $source=[IO.File]::OpenRead((Join-Path (Join-Path $script:PackRoot 'themes') $rel))
+        $reader=$null
+        try {
+            $length=$source.Length
+            if($length -gt 16777216){throw "Bundled preset changed before staging: $rel"}
+            $reader=[IO.BinaryReader]::new($source)
+            $bytes=$reader.ReadBytes([int]$length)
+            if($bytes.Length -ne $length){throw "Bundled preset changed before staging: $rel"}
+        }finally{if($reader){$reader.Dispose()};$source.Dispose()}
+        if((Get-PresetBytesHash $bytes) -ne $file.sha256){throw "Bundled preset changed before staging: $rel"}
+        $writes.Add([pscustomobject]@{path=$target;bytes=$bytes})
     }
     foreach($item in $foreign|Where-Object {!$OwnedResourcesOnly -and !$_.retired -and $_.needsDisable}){
         if($item.duplicate -or $item.manifestInvalid){
@@ -348,9 +428,20 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
     if($first){$backupPaths+=@($pack.files|ForEach-Object {Join-Path $script:ThemeRoot (Get-PresetRelative $_.path)})}
     $backup=New-PresetBackup $backupPaths
     if($OwnedResourcesOnly){Assert-CssDesktopNotEditing;if((Get-ThemeRevision @(Get-ThemeRows)) -ne $ExpectedRevision){throw 'Theme settings changed during owned resource update'}}
+    $original=$backup.directory
+    $mergeOriginal=!$first -and $state.originalBackup
+    if($ProtectEditor){
+        # Stage the backup before the last editor check. Deferral here must
+        # not open a rollback transaction over a new edit.
+        if($mergeOriginal){$original=Merge-PresetOriginalBackup ([string]$state.originalBackup) $backup}
+        if(!$OwnedResourcesOnly -and $ExpectedRevision -and (Get-ThemeRevision @(Get-ThemeRows -RevisionOnly)) -cne $ExpectedRevision){
+            throw 'Appearance changed during automatic preparation; no preset written'
+        }
+        Assert-CssDesktopNotEditing
+    }
     Begin-PresetTransaction $backup
     try{
-        $original=if(!$first -and $state.originalBackup){Merge-PresetOriginalBackup ([string]$state.originalBackup) $backup}else{$backup.directory}
+        if(!$ProtectEditor -and $mergeOriginal){$original=Merge-PresetOriginalBackup ([string]$state.originalBackup) $backup}
         foreach($write in $writes){Write-PresetBytes $write.path $write.bytes}
         foreach($target in $deletes){Assert-CssDesktopNotEditing;Remove-Item -LiteralPath (Assert-ThemeTarget $target) -Force -ErrorAction Stop}
         # Nonrecursive OS operation fails if a concurrent writer adds any child.

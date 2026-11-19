@@ -26,7 +26,52 @@ await check('invalid sequence/client identity fails closed',async()=>{const f=re
 await check('unknown packet fields and raw fan curve rejected before receipt storage',async()=>{const f=relayFixture();await f.open();for(const packet of [{extra:'ignored?'},{args:{enabled:true,nodes:[]}},{args:{preset:'soft',nodes:[]},command:'fan.setPreset'}])await f.relay.request(request(1,packet));assert.equal(f.effects.length,0);f.relay.dispose();});
 await check('oversize mutable request cannot amplify receipt memory',async()=>{const f=relayFixture();await f.open();await f.relay.request(request(1,{identity:'x'.repeat(3000)}));assert.equal(f.effects.length,0);assert.match(f.replies.filter(r=>r.type==='reply').at(-1).error,/请求过大/);f.relay.dispose();});
 await check('request argument value frozen before awaited source read',async()=>{const read=deferred();const f=relayFixture({read:()=>read.promise});f.relay.connected(peer);const packet=request();const task=f.relay.request(packet);packet.request.args.enabled=false;read.resolve({generation:1,ready:true,game:null,fan:{supported:true,enabled:false,preset:'balanced',canToggle:true,choices:[]},actions:{fan:true,game:false}});await task;assert.equal(f.effects[0][1].enabled,true);f.relay.dispose();});
-await check('peer detach during accepted action never publishes to new peer',async()=>{const pending=deferred();const f=relayFixture({execute:async(_c,_a,context)=>{await pending.promise;context.checkpoint();return {saved:false,applied:true,notice:'ack'};}});await f.open();const task=f.relay.request(request());await flush();f.relay.connected({...peer,connected:false});f.relay.connected({...peer,connection:'2'});pending.resolve();await task;assert.equal(f.replies.filter(r=>r.type==='reply').length,0);f.relay.dispose();});
+await check('peer detach during accepted action never publishes to new peer',async()=>{const pending=deferred();const f=relayFixture({execute:async(_c,_a,context)=>{await pending.promise;context.checkpoint();return {saved:false,applied:true,notice:'ack'};}});await f.open();const task=f.relay.request(request());await flush();f.relay.connected({...peer,connected:false});f.relay.connected({...peer,connection:'2'});pending.resolve();await task;assert.equal(f.replies.filter(r=>r.type==='reply').length,0);f.relay.dispose();
+ // The original action result is never delivered to a new peer. Its actual
+ // owner completion must still refresh that peer's requested current facts.
+ const {createMirrorHostFixture}=await import('./fixtures/decky_mirror_host_fixture.mjs');
+ const {load:loadActual}=await import('./fixtures/decky_game_memory_store.mjs');
+ const actualFlush=async()=>{for(let i=0;i<120;i++)await Promise.resolve();await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));};
+ const gate=deferred(),entered=deferred();const host=await createMirrorHostFixture();
+ try{
+  host.ready();host.emit('deckySidebar.mirrorPeer',peer);host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await actualFlush();
+  const initial=host.replies.filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;assert(initial?.ready);assert.equal(initial.audioOptimization.enabled,false);
+  host.state.fxSoundSetHook=async enabled=>{entered.resolve();await gate.promise;host.state.fxSound={...host.state.fxSound,running:enabled,enabled};return {ok:true,copied:false,reused:false,repaired:false,reason:'inert-original-audio-complete',state:structuredClone(host.state.fxSound)};};
+  host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'audioOptimization.setEnabled',runId,id:'audio:1',clientId:'audio',sequence:1,generation:initial.generation,revision:initial.revision,args:{enabled:true}}});await entered.promise;
+  const current={...peer,connection:'2'};host.emit('deckySidebar.mirrorPeer',{...peer,connected:false});host.emit('deckySidebar.mirrorPeer',current);
+  host.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId}});await actualFlush();
+  const before=host.replies.filter(row=>row.connection==='2'&&row.message.type==='snapshot').at(-1)?.message.snapshot;assert(before?.ready);assert.equal(before.audioOptimization.enabled,false);
+  gate.resolve();await actualFlush();
+  const latest=host.replies.filter(row=>row.connection==='2'&&row.message.type==='snapshot').at(-1)?.message.snapshot;
+  console.log(JSON.stringify({lateOwnerSettlement:{beforeEnabled:before.audioOptimization.enabled,afterEnabled:latest?.audioOptimization?.enabled,audioWrites:host.counts.fxSoundWrites,newPeerSnapshots:host.replies.filter(row=>row.connection==='2'&&row.message.type==='snapshot').length,oldReplies:host.replies.filter(row=>row.message.type==='reply').length}}));
+  assert.equal(host.state.fxSound.enabled,true);assert.equal(latest.audioOptimization.enabled,true,'A current requested display must refresh after retired action settlement');
+  assert.equal(host.counts.fxSoundWrites,1);assert.equal(host.replies.filter(row=>row.message.type==='reply').length,0,'Old action reply must never be delivered to replacement peer');
+ }finally{gate.resolve();await actualFlush();host.stop();await actualFlush();assert.equal(host.fxTimerCount(),0);assert.equal(host.controllerTimerCount(),0);assert.equal(host.sharedPowerTimerCount(),0);assert(Object.values(host.observerStats()).every(v=>v===0));}
+
+ const settlements=[];
+ for(const boundary of ['new-run','hidden','disposed','power-pending']){
+  const gate=deferred(),entered=deferred(),host=await createMirrorHostFixture();
+  try{
+   host.ready();host.emit('deckySidebar.mirrorPeer',peer);host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await actualFlush();
+   const initial=host.replies.filter(row=>row.message.type==='snapshot').at(-1).message.snapshot;
+   host.state.fxSoundSetHook=async enabled=>{entered.resolve();await gate.promise;host.state.fxSound={...host.state.fxSound,running:enabled,enabled};return {ok:true,copied:false,reused:false,repaired:false,reason:'inert-original-audio-complete',state:structuredClone(host.state.fxSound)};};
+   host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'audioOptimization.setEnabled',runId,id:'audio:1',clientId:'audio',sequence:1,generation:initial.generation,revision:initial.revision,args:{enabled:true}}});await entered.promise;
+   const current={...peer,connection:'2',runId:boundary==='new-run'?'b'.repeat(32):runId};host.emit('deckySidebar.mirrorPeer',{...peer,connected:false});host.emit('deckySidebar.mirrorPeer',current);
+   host.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId:current.runId}});await actualFlush();
+   if(boundary==='hidden')host.emit('deckySidebar.mirrorRequest',{...current,request:{command:'snapshot',runId:current.runId,subscribe:false}});
+   if(boundary==='disposed')host.stop();
+   if(boundary==='power-pending'){host.state.power={...host.state.power,generation:2,phase:'suspending',hardwareWritesAllowed:false,inputReady:false,resumeReady:false};host.powerChanged(true);await actualFlush();}
+   await actualFlush();const beforeReplies=host.replies.length,reads=host.counts.inputReads;gate.resolve();await actualFlush();
+   assert.equal(host.counts.fxSoundWrites,1);assert.equal(host.replies.filter(row=>row.message.type==='reply').length,0);
+   const snapshots=host.replies.slice(beforeReplies).filter(row=>row.message.type==='snapshot');
+   if(boundary==='hidden'||boundary==='disposed'){assert.equal(host.replies.length,beforeReplies);assert.equal(host.counts.inputReads,reads);}
+   else if(boundary==='new-run'){assert(snapshots.length>0);assert(snapshots.every(row=>row.connection===current.connection&&row.message.runId===current.runId));assert.equal(snapshots.at(-1).message.snapshot.audioOptimization.enabled,true);}
+   else {assert(snapshots.every(row=>!row.message.snapshot.ready&&!row.message.snapshot.actions?.audioOptimization));assert.equal(host.counts.inputReads,reads,'NonReady completion cannot read business owners');}
+   settlements.push({boundary,originalAudioWrites:1,oldReplies:0,postSettlementSnapshots:snapshots.length,postSettlementInputReads:host.counts.inputReads-reads});
+  }finally{gate.resolve();await actualFlush();host.stop();await actualFlush();assert.equal(host.fxTimerCount(),0);assert.equal(host.controllerTimerCount(),0);assert.equal(host.sharedPowerTimerCount(),0);assert(Object.values(host.observerStats()).every(v=>v===0));}
+ }
+ console.log(JSON.stringify({lateSettlementBoundaries:settlements}));
+});
 await check('failed action is cached and cannot retry its side effects',async()=>{let effects=0;const f=relayFixture({execute:async()=>{effects++;throw new Error('mock owner failed');}});await f.open();await f.relay.request(request());await f.relay.request(request());assert.equal(effects,1);assert.ok(f.replies.filter(r=>r.type==='reply').every(r=>r.ok===false));f.relay.dispose();});
 await check('old evicted request cannot replay due to sequence high-water mark',async()=>{const f=relayFixture();await f.open();for(let sequence=1;sequence<=35;sequence++){const snap=f.replies.filter(r=>r.type==='snapshot').at(-1).snapshot;await f.relay.request(request(sequence,{revision:snap.revision}));await flush();}const before=f.effects.length;await f.relay.request(request());assert.equal(f.effects.length,before);assert.match(f.replies.filter(r=>r.type==='reply').at(-1).error,/已处理或过期/);f.relay.dispose();});
 

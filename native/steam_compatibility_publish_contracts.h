@@ -1,5 +1,6 @@
 #pragma once
 #include "steam_compatibility_core.h"
+#include "steam_compatibility_owner_scoped_publication_graph.h"
 
 // Generated from independently qualified complete publisher-path functions.
 // This contract is structural: no whole-image hash or build number is consulted.
@@ -1364,6 +1365,7 @@ inline constexpr Range publicRanges[] {
 } // namespace publish_contract_detail
 inline Evidence checkPublishLayout(const Image& image, Layout layout) noexcept {
  if (!validLayout(layout)) return invalidLayout();
+ if (layout==Layout::OwnerScoped) return checkRanges(image,owner_scoped_publication::fixedRanges);
  // Absolute data bindings were qualified for this preferred PE placement.
  if (image.preferredBase != 0x138000000ULL)
   return {false, 0, 0, 0, "publish-preferred-base-incompatible"};

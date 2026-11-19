@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import {assembleExtraAdapters} from './extra-adapter-assembly.mjs';
 
@@ -25,6 +26,11 @@ for (const indexCurrent of [true, false]) {
  test(label + ': one selected ID materializes only its original group and filters siblings', () => {
   const selected = row('synthetic.selected', {sourceInputs: ['original-input'], guard: 'retained'});
   const scope = fixture([[selected, row('synthetic.sibling')], [row('synthetic.unrelated')]]);
+  const read = fs.readFileSync, factory = scope.factories[0];
+  scope.factories[0] = () => {
+   assert.equal(fs.readFileSync === read, !indexCurrent, 'only a cacheable factory needs I/O observations');
+   return factory();
+  };
   scope.factories[1] = forbidden;
   assert.deepEqual(assemble(scope, {indexCurrent, selectedIds: [selected.id]}), [selected]);
   assert.deepEqual(scope.calls, [1, 0]);

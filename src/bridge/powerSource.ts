@@ -3,13 +3,14 @@ import { readonly, ref } from 'vue';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { invoke, on } from './ipc';
 import { isUiVisible, onUiVisibilityChange } from './uiLifecycle';
+import { onSharedPowerLifecycle } from './powerLifecycleState';
 
 export type PowerSourceMode = 'ac' | 'dc';
 export interface PowerSourceSnapshot {
   known: boolean; acLine?: number; ac?: boolean;
   batteryKnown?: boolean; hasBattery?: boolean; revision?: number; generation?: number;
 }
-let sourceVersion = 0, generation = 0, nativeRevision = -1, committedGeneration = 0;
+let sourceVersion = 0, generation = 0, nativeRevision = -1;
 let nativeMode: PowerSourceMode | null | undefined, nativeBattery: boolean | null = null;
 let suspended = false, readEpoch = 0, attemptedVersion = -1;
 let readInFlight: { promise: Promise<boolean>; reconcile: boolean; epoch: number } | null = null;
@@ -148,40 +149,29 @@ export function startForegroundPowerSourceRefresh(onForegroundSnapshot: SourceHa
     if (kind) notify(kind, mode);
     if (repair && before !== mode && sourceTransition === transition && sourceMode.value === mode) callConsumer(onForegroundSnapshot, mode);
   };
-  const lifecycleGeneration = (state?: { generation?: number }): number | null | undefined => {
-    if (state == null) return generation === 0 ? undefined : null;
-    if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
-    if (!('generation' in state)) return generation === 0 ? undefined : null;
-    return validGeneration(state.generation) ? state.generation : null;
-  };
-  const suspend = (state?: { generation?: number }): void => {
-    const next = lifecycleGeneration(state);
-    if (next === null || (next !== undefined && (next < generation || next <= committedGeneration))) return;
-    if (suspended && (next === undefined || next === generation)) return;
-    if (next !== undefined && next > generation) { generation = next; nativeRevision = -1; nativeMode = undefined; nativeBattery = null; }
-    suspended = true; ++sourceVersion; attemptedVersion = -1; batteryPresent.value = null; setMode(null); fenceRead();
-  };
-  const resume = (state?: { generation?: number }): void => {
-    const next = lifecycleGeneration(state);
-    if (next === null || (next !== undefined && (next < generation || (!suspended && next <= committedGeneration)))) return;
-    if (next !== undefined) {
-      committedGeneration = Math.max(committedGeneration, next);
-      if (next > generation) { generation = next; nativeRevision = -1; nativeMode = undefined; nativeBattery = null; batteryPresent.value = null; setMode(null); }
+  let lifecycleKey = '';
+  const lifecycle = onSharedPowerLifecycle(state => {
+    if (!active || state.generation < generation) return;
+    const blocked = state.known === false || state.phase !== 'ready';
+    const key = `${state.generation}:${blocked}`;
+    if (key === lifecycleKey) return;
+    lifecycleKey = key;
+    if (state.generation > generation) {
+      generation = state.generation; nativeRevision = -1; nativeMode = undefined; nativeBattery = null;
+      batteryPresent.value = null; setMode(null);
     }
-    suspended = false; ++sourceVersion; attemptedVersion = -1; fenceRead(); request();
-  };
+    suspended = blocked; ++sourceVersion; attemptedVersion = -1; fenceRead();
+    if (blocked) { batteryPresent.value = null; setMode(null); }
+    else request(); // Same-generation shared Ready also releases a missed private hold.
+  });
   const stops = [
     on<PowerSourceSnapshot>('power.sourceChanged', state => observe(state, false, 'immediate')),
     on<PowerSourceSnapshot>('power.acChanged', state => observe(state, false, 'settled')),
     on<PowerSourceSnapshot>('power.sourceHeartbeat', state => observe(state, true)),
-    on<{ generation?: number }>('power.suspending', suspend),
-    on<{ generation?: number }>('power.resuming', suspend),
-    on<{ generation?: number }>('power.resumed', resume),
-    onUiVisibilityChange(({ visible, powerReady, powerGeneration }) => {
+    lifecycle,
+    onUiVisibilityChange(({ visible }) => {
       if (!visible) { fenceRead(); return; }
-      // The existing lifecycle reader can recover a missed committed resume event.
-      if (suspended && powerReady === true && validGeneration(powerGeneration) && powerGeneration >= generation) resume({ generation: powerGeneration });
-      else request();
+      request(); // Visibility requests AC/DC observation; it never releases power admission.
     }),
   ];
   const showEvents = ['ipc:window.shown', 'ipc:window.maximized', 'ipc:window.summoned'];

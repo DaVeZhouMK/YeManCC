@@ -22,6 +22,11 @@
 #pragma comment(lib, "ws2_32.lib")
 namespace ymcc::deckyresources {
 using Json=nlohmann::json;
+inline std::filesystem::path utf8Path(const std::string& value){
+    std::u8string encoded;encoded.reserve(value.size());
+    for(const unsigned char byte:value)encoded.push_back(static_cast<char8_t>(byte));
+    return std::filesystem::path(encoded);
+}
 using Digest=std::function<std::string(const std::wstring&)>;
 using SafePath=std::function<bool(const std::filesystem::path&)>;
 struct Options {
@@ -208,7 +213,7 @@ public:
     Cache(const std::filesystem::path& home,Json manifest,const Digest& digest,const SafePath& safe,const std::function<bool()>& current,Options options)
       :home_(home),root_(home/L".ymcc-resource-cache"),manifest_(std::move(manifest)),digest_(digest),safe_(safe),current_(current),options_(std::move(options)){
         require(home_.is_absolute()&&home_.root_name().native().size()==2&&home_.root_name().native()[1]==L':',"resource-cache-local-path-required");
-        for(const auto& entry:manifest_.at("files"))entries_.push_back({std::filesystem::u8path(entry.at("path").get<std::string>()),entry.at("bytes").get<std::uintmax_t>(),entry.at("sha256").get<std::string>()});
+        for(const auto& entry:manifest_.at("files"))entries_.push_back({utf8Path(entry.at("path").get<std::string>()),entry.at("bytes").get<std::uintmax_t>(),entry.at("sha256").get<std::string>()});
         require(entries_.size()==7,"resource-cache-contract-invalid");
     }
     Json run(){
@@ -252,7 +257,14 @@ public:
             require(selected!=nullptr,"resource-cache-unowned-slots");
             const Json metadata={{"schemaVersion",1},{"owner","YMCC"},{"complete",false},{"manifest",manifest_}};
             writeMetadata(selected->root,metadata);
-            for(std::size_t i=0;i<entries_.size();++i)copyAtomic(home_/entries_[i].relative,selected->root/(std::to_wstring(i)+L".bin"),entries_[i],false);
+            for(std::size_t i=0;i<entries_.size();++i){
+                const auto blob=selected->root/(std::to_wstring(i)+L".bin");
+                // A previous bounded preparation may have committed this blob
+                // before interruption. Rehash against the current contract;
+                // incomplete metadata alone never authorizes reuse or repair.
+                if(matches(blob,entries_[i]))continue;
+                copyAtomic(home_/entries_[i].relative,blob,entries_[i],false);
+            }
             auto completed=metadata;completed["complete"]=true;writeMetadata(selected->root,completed);
             result["resourceCacheAvailable"]=true;
         }catch(const std::exception& error){const std::string reason=error.what();result["resourceRepairReason"]=reason.starts_with("resource-cache-")&&reason.size()<=96?reason:"resource-cache-io-failed";}

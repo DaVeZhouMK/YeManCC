@@ -6,7 +6,6 @@
     <RestoreIgnoreFailedSources>false</RestoreIgnoreFailedSources>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Microsoft.Diagnostics.Tracing.TraceEvent"><HintPath>C:/Users/DaVe/.nuget/packages/microsoft.diagnostics.tracing.traceevent/3.2.3/lib/netstandard2.0/Microsoft.Diagnostics.Tracing.TraceEvent.dll</HintPath><Private>true</Private></Reference>
-    <Reference Include="Microsoft.Diagnostics.FastSerialization"><HintPath>C:/Users/DaVe/.nuget/packages/microsoft.diagnostics.tracing.traceevent/3.2.3/lib/netstandard2.0/Microsoft.Diagnostics.FastSerialization.dll</HintPath><Private>true</Private></Reference>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="[3.2.3]" />
   </ItemGroup>
 </Project>

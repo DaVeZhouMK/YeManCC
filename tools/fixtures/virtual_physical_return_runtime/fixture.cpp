@@ -262,6 +262,7 @@ static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& o
 #else
 static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out){if(!identityOk||fixtureSources.empty())return false;out=fixtureSources;return true;}
 #endif
+[[maybe_unused]] static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out,const char** selectionFailure){if(selectionFailure)*selectionFailure=nullptr;return hidHideGetPhysicalIdentities(out);}
 static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot& out){
 #ifdef YMCC_C01_SOURCE_HIDE
  auto sourceHook=std::move(fixtureSourceHideSnapshotHook);fixtureSourceHideSnapshotHook={};if(sourceHook)sourceHook();

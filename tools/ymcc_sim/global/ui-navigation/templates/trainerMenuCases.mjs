@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // Real Y menu + trainer component + production navigation; native actions stay
-// behind the memory IPC boundary. No trainer/manager/CE action is launched.
+// behind the memory IPC boundary. No real trainer/manager/CE is launched.
 export async function trainerMenuCases({height,open,command,press,actionCase,state,page,task,scope="all"}) {
-  assert.ok(["all","lossless"].includes(scope),"Unknown trainer case scope");
+  assert.ok(["all","lossless","trainer"].includes(scope),"Unknown trainer case scope");
   const geometry = f => f.evaluate(() => {
     const menu=document.querySelector('[data-trainer-menu]'),list=menu.querySelector('.trainer-menu-items'),anchor=document.querySelector('[data-gp-game-control="trainer-menu"]');
     const box=el=>{const r=el.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
@@ -14,6 +14,7 @@ export async function trainerMenuCases({height,open,command,press,actionCase,sta
   });
   function contained(g){assert.ok(g.menu.top>=23 && g.menu.bottom<=g.safeBottom+1,JSON.stringify(g));assert.ok(g.menu.left>=7 && g.menu.right<=g.viewport[0]-7,JSON.stringify(g));assert.ok(g.close.top>=g.menu.top && g.close.bottom<=g.menu.bottom-1,JSON.stringify(g));assert.ok(g.heading.top>=g.menu.top && g.heading.bottom<=g.menu.bottom,JSON.stringify(g));assert.ok(g.outerScroll<=1,JSON.stringify(g));}
   {
+    if(scope!=='trainer'){
     const f=await open('/settings',height,{trainerMenu:'lossless-xbox'});
     await command(f,'edit-game');await f.locator('[data-gp-game-quick-menu]').waitFor();
     const button=f.locator('[data-gp-game-control="lossless-scaling"]');
@@ -83,9 +84,10 @@ export async function trainerMenuCases({height,open,command,press,actionCase,sta
       await command(f,'back');assert.equal(await f.locator('[data-gp-game-quick-menu]').count(),0);
     });
   }
+    }
   if(scope==='lossless')return; // Optional exact original subgroup; default trainer coverage remains intact.
   for(const seed of ['no-scan','delayed-scan']){
-    const f=await open('/settings',height,{trainerMenu:seed});
+    const f=await open('/quick',height,{trainerMenu:seed});
     await command(f,'edit-game');await f.locator('[data-gp-game-quick-menu]').waitFor();
     const entry=f.locator('[data-gp-game-control="trainer-menu"]');
     await press(f,entry);const menu=f.locator('[data-trainer-menu]');await menu.waitFor();
@@ -133,4 +135,70 @@ export async function trainerMenuCases({height,open,command,press,actionCase,sta
     }
     await command(f,'back');await f.locator('[data-gp-game-quick-menu]').waitFor({state:'detached'});
   }
+  await actionCase('Trainer launch keeps failure and uncertain receipt visible in the submenu',height,async()=>{
+    for(const seed of ['launch-denied','launch-uncertain']){
+      const f=await open('/quick',height,{trainerMenu:seed});await command(f,'edit-game');
+      const entry=f.locator('[data-gp-game-control="trainer-menu"]');await entry.waitFor();
+      assert.doesNotMatch(await entry.innerText(),/等待游戏启动/);
+      await press(f,entry);const menu=f.locator('[data-trainer-menu]');await menu.waitFor();
+      await press(f,menu.locator('.trainer-menu-action').first());
+      const result=menu.locator('.trainer-menu-result');
+      await result.filter({hasText:seed==='launch-denied'?'系统拒绝启动':'启动请求已发送'}).waitFor();
+      assert.equal(await result.isVisible(),true);assert.equal(await result.evaluate(el=>el.classList.contains('trainer-menu-error')),seed==='launch-denied');
+      const calls=await f.evaluate(()=>window.__trainerLaunchUi.dispatches);assert.equal(calls.length,1);assert(calls[0].includes('-InteractiveShell'));assert.equal(calls[0][calls[0].indexOf('-GameProcessId')+1],'77');
+      contained(await geometry(f));await page.screenshot({path:path.join(task,'evidence','trainer-'+seed+'-'+height+'.png')});
+      await command(f,'back');await menu.waitFor({state:'detached'});assert.equal(await f.locator('[data-gp-game-quick-menu]').count(),1);assert.ok(await entry.evaluate(el=>document.activeElement===el));
+    }
+  });
+  for(const method of ['controller B','mouse close'])await actionCase('Scanner pending startup is cancelled by '+method+' without late launch',height,async()=>{
+    const f=await open('/quick',height,{trainerMenu:'scanner-close'});await command(f,'edit-game');
+    const entry=f.locator('[data-gp-game-control="trainer-menu"]');await press(f,entry);
+    const menu=f.locator('[data-trainer-menu]'),scan=menu.locator('[data-trainer-value-scan]');await scan.waitFor();await press(f,scan);
+    const panel=f.locator('[data-value-scan]');await panel.waitFor();await f.waitForFunction(()=>window.__trainerScanUi?.pending.length===1);
+    assert.match(await panel.innerText(),/正在连接当前游戏/);
+    if(method==='controller B')await command(f,'back');else await panel.locator('.value-close').click();
+    await panel.waitFor({state:'detached'});assert.equal(await menu.isVisible(),true);assert.equal(await f.locator('[data-gp-game-quick-menu]').count(),1);
+    assert.equal(await scan.evaluate(el=>document.activeElement===el),true);
+    await f.evaluate(()=>window.__trainerScanUi.pending.splice(0).forEach(resolve=>resolve()));
+    await f.waitForFunction(()=>window.__trainerScanUi.completions===1);await page.waitForTimeout(80);
+    assert.deepEqual(await f.evaluate(()=>window.__trainerScanUi.launches),[]);assert.equal(await panel.count(),0);
+    await command(f,'back');await menu.waitFor({state:'detached'});await command(f,'back');await f.locator('[data-gp-game-quick-menu]').waitFor({state:'detached'});
+
+    // Same original action: closing during restart must also retire the page.
+    {
+      const g=await open('/quick',height,{trainerMenu:'scanner-restart'});await command(g,'edit-game');
+      await press(g,g.locator('[data-gp-game-control="trainer-menu"]'));
+      const parent=g.locator('[data-trainer-menu]'),entry=parent.locator('[data-trainer-value-scan]');await entry.waitFor();await press(g,entry);
+      const owner=g.locator('[data-value-scan]');await owner.waitFor();const restart=owner.getByRole('button',{name:'重新开始'});await restart.waitFor();
+      await g.evaluate(()=>window.__trainerScanUi.holdStop=true);await press(g,restart);await g.waitForFunction(()=>window.__trainerScanUi.pending.length===1);
+      if(method==='controller B')await command(g,'back');else await owner.locator('.value-close').click();
+      await owner.waitFor({state:'detached'});await g.evaluate(()=>window.__trainerScanUi.pending.splice(0).forEach(resolve=>resolve()));await g.waitForFunction(()=>window.__trainerScanUi.completions===1);await page.waitForTimeout(100);
+      assert.equal(await g.evaluate(()=>window.__trainerScanUi.launches.length),1,'Closed restart page dispatched a replacement CE');assert.equal(await owner.count(),0);assert.equal(await entry.evaluate(el=>document.activeElement===el),true);
+      await command(g,'back');await parent.waitFor({state:'detached'});await command(g,'back');
+    }
+
+    // A missed power notification must not re-authorize a restart click made
+    // before the native ready generation changed while old CE was closing.
+    if(method==='controller B'){
+      const g=await open('/quick',height,{trainerMenu:'scanner-restart'});await command(g,'edit-game');await press(g,g.locator('[data-gp-game-control="trainer-menu"]'));
+      const parent=g.locator('[data-trainer-menu]'),entry=parent.locator('[data-trainer-value-scan]');await entry.waitFor();await press(g,entry);
+      const owner=g.locator('[data-value-scan]');await owner.waitFor();const restart=owner.getByRole('button',{name:'重新开始'});await restart.waitFor();
+      await g.evaluate(()=>window.__trainerScanUi.holdStop=true);await press(g,restart);await g.waitForFunction(()=>window.__trainerScanUi.pending.length===1);
+      await g.evaluate(()=>{window.__uiPowerFixture.state={...window.__uiPowerFixture.state,generation:2};window.__trainerScanUi.pending.splice(0).forEach(resolve=>resolve())});
+      await g.waitForFunction(()=>window.__trainerScanUi.completions===1);await page.waitForTimeout(120);
+      assert.equal(await g.evaluate(()=>window.__trainerScanUi.launches.length),1,'Old restart click adopted a new native power generation');
+      await restart.waitFor();await press(g,restart);await owner.locator('[data-value-first]').waitFor();assert.equal(await g.evaluate(()=>window.__trainerScanUi.launches.length),2,'Fresh explicit restart did not recover');
+      await command(g,'back');await owner.waitFor({state:'detached'});await command(g,'back');await parent.waitFor({state:'detached'});await command(g,'back');
+    }
+    // An explicit restart can reach the same authoritative release recovery.
+    {
+      const g=await open('/quick',height,{trainerMenu:'scanner-restart'});await command(g,'edit-game');await press(g,g.locator('[data-gp-game-control="trainer-menu"]'));
+      const parent=g.locator('[data-trainer-menu]'),entry=parent.locator('[data-trainer-value-scan]');await entry.waitFor();await press(g,entry);
+      const owner=g.locator('[data-value-scan]');await owner.waitFor();const restart=owner.getByRole('button',{name:'重新开始'});await restart.waitFor();
+      await g.evaluate(()=>window.__trainerScanUi.releaseRequired=true);await press(g,restart);
+      await owner.locator('[data-value-first]').waitFor();assert.equal(await g.evaluate(()=>window.__trainerScanUi.launches.length),2);assert.equal(await g.evaluate(()=>window.__trainerScanUi.releases),1);
+      await command(g,'back');await owner.waitFor({state:'detached'});await command(g,'back');await parent.waitFor({state:'detached'});await command(g,'back');
+    }
+
+  });
 }

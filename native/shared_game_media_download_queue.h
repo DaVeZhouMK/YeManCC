@@ -7,14 +7,62 @@ namespace ymcc::media::downloads {
 // download; the main program owns its process HANDLE and bounded restart
 // policy.
 inline constexpr uint64_t stallMs = 90000, taskMs = 240000, sessionMs = 900000;
+inline constexpr const char* sharedSleepPause="media-shared-power-paused";
 inline constexpr int maxRecoveryAttempts = 2, automaticAttemptLimit = 3, maximumParallel = 10;
 inline constexpr int64_t retryMs = 20000, automaticAttemptMs = 180000, automaticGameMs = 360000;
 // Explicit video choice may use the existing six-minute game budget in one
 // serial transfer; automatic attempts retain their original three-minute cap.
 inline constexpr int64_t manualVideoAttemptMs = automaticGameMs;
-inline bool itemStopped(const Json& job){return job.value("autoStopped",false)||job.value("retiredPopular",false);}
-inline void resetAutomaticBudget(Json& job){job["autoStopped"]=false;job["automaticElapsedMs"]=0;job["attempts"]=0;job["retryAt"]=0;job.erase("stopReason");if(job.value("state",std::string{})=="unavailable")job["state"]="pending";}
-inline bool sharedFailure(const std::string& reason){return reason.find("media-disk-")==0||reason.find("media-cache-")==0||reason.find("media-staging-")==0||reason=="media-storage-unavailable"||reason.find("upgrade-required")!=std::string::npos||reason.find("power-paused")!=std::string::npos||reason.find("cancelled")!=std::string::npos;}
+// Only the established, numeric built-in tool ID is excluded here. Preserve
+// historical records and any still-owned activity until its owner settles it.
+inline bool excludedQueueTool(const Json& job){const auto id=job.find("appId");return id!=job.end()&&id->is_number_integer()&&custom_steam_library::builtinExcludedSteamAppId(*id);}
+inline bool inactiveExcludedQueueTool(const Json& state,const std::string& key,const Json& job){
+  const auto active=state.find("active");return excludedQueueTool(job)&&(active==state.end()||(active->is_object()&&!active->contains(key)));
+}
+inline bool itemStopped(const Json& job){return excludedQueueTool(job)||job.value("autoStopped",false)||job.value("retiredPopular",false);}
+inline void resetAutomaticBudget(Json& job){job.erase("sharedSleepWindow");job.erase("lastTimeoutObservation");job["autoStopped"]=false;job["automaticElapsedMs"]=0;job["attempts"]=0;job["retryAt"]=0;job.erase("stopReason");if(job.value("state",std::string{})=="unavailable")job["state"]="pending";}
+
+// Durable continuation of an already admitted attempt,not a new allowance.
+// Identity is business provenance only;Native public current is still required.
+inline bool sameSleepWork(const Json& job,const Json& window){
+  if(!window.is_object()||window.value("version",0)!=1)return false;
+  for(const auto* f:{"requestBindingRevision","provenanceRevision","selectedVideo"})if(window.value(f,Json{})!=job.value(f,Json{}))return false;
+  return true;
+}
+inline void chargeSleepWall(Json& job,Json& window,int64_t time){
+  const auto issued=window.value("attemptIssuedAt",int64_t{0}),deadline=window.value("attemptDeadlineAt",int64_t{0}),charged=window.value("chargedAt",int64_t{0});
+  const auto sessionStart=window.value("sessionIssuedAt",int64_t{0}),sessionEnd=window.value("sessionDeadlineAt",int64_t{0});
+  if(issued<=0||deadline<issued||deadline-issued>manualVideoAttemptMs||charged<issued||charged>deadline||sessionStart<=0||sessionEnd<sessionStart||sessionEnd-sessionStart>int64_t(sessionMs)||time<charged)throw std::runtime_error("media-sleep-continuation-unconfirmed");
+  // A historical checkpoint may already carry a charge beyond the session end.
+  // Keep that debt, but never extend it beyond the earlier deadline.
+  const auto until=(std::max)(charged,(std::min)({time,deadline,sessionEnd})),elapsed=until-charged;
+  job["automaticElapsedMs"]=(std::min)(automaticGameMs,job.value("automaticElapsedMs",int64_t{0})+elapsed);window["chargedAt"]=until;
+}
+inline Json sleepWindowFor(const Json& state,const Json& active){
+  Json w=active.value("sharedSleepWindow",Json::object());
+  if(!sameSleepWork(active,w)){
+    const auto began=active.value("taskStartedAt",now());const auto budget=(std::clamp)(active.value("attemptBudgetMs",automaticAttemptMs),int64_t{1},manualVideoAttemptMs);
+    w={{"version",1},{"attemptIssuedAt",began},{"attemptDeadlineAt",began+budget},{"chargedAt",began},
+       {"sessionIssuedAt",active.value("sessionIssuedAt",state.value("sessionIssuedAt",began))},
+       {"sessionDeadlineAt",active.value("sessionDeadlineAt",state.value("sessionDeadlineAt",began+int64_t(sessionMs)))}};
+    for(const auto* f:{"requestBindingRevision","provenanceRevision","selectedVideo"})if(active.contains(f))w[f]=active[f];
+  }
+  return w;
+}
+
+
+inline void markSleepActive(Json& state,const std::string& token,int64_t time){
+  state["sharedSleepCancelledSession"]=token;
+  state["sharedSleepSession"]={{"version",1},{"sessionIssuedAt",state.value("sessionIssuedAt",time)},{"sessionDeadlineAt",state.value("sessionDeadlineAt",time+int64_t(sessionMs))},{"manualRequestId",state.value("manualRequestId",std::string{})},{"manualUntil",state.value("manualUntil",int64_t{0})}};
+  for(auto it=state["active"].begin();it!=state["active"].end();++it){
+    if(!state["jobs"].contains(it.key()))continue;auto& job=state["jobs"][it.key()];auto& active=it.value();
+    if(stringField(active,"session")!=token)continue;bool same=true;
+    for(const auto* field:{"requestBindingRevision","provenanceRevision","selectedVideo"})if(job.value(field,Json{})!=active.value(field,Json{}))same=false;
+    if(!same)continue;auto window=sleepWindowFor(state,active);chargeSleepWall(job,window,time);job["sharedSleepWindow"]=window;active["sharedSleepWindow"]=std::move(window);
+  }
+}
+
+inline bool sharedFailure(const std::string& reason){return reason=="media-shared-power-unavailable"||reason==sharedSleepPause||reason.find("media-disk-")==0||reason.find("media-cache-")==0||reason.find("media-staging-")==0||reason=="media-storage-unavailable"||reason=="media-identity-network-unavailable"||reason=="media-steam-facts-unavailable"||reason=="download-source-cleanup-incomplete"||reason.find("upgrade-required")!=std::string::npos||reason.find("power-paused")!=std::string::npos||reason.find("cancelled")!=std::string::npos;}
 struct Limits {
   uint64_t stall = stallMs, task = taskMs, session = sessionMs;
   DWORD monitor = 5000;
@@ -110,14 +158,14 @@ inline std::string nextQueueKey(const Json& j,int64_t time,const Json* active=nu
 }
 inline bool manualTargetsComplete(const Json& j){
  if(!scopedManual(j))return false;
- for(const auto& key:j["manualTargets"]){const auto job=j["jobs"].value(key.get<std::string>(),Json::object());const auto state=stringField(job,"state");if(state!="done"&&state!="unavailable")return false;}
+ for(const auto& key:j["manualTargets"]){const auto job=j["jobs"].value(key.get<std::string>(),Json::object());if(inactiveExcludedQueueTool(j,key.get<std::string>(),job))continue;const auto state=stringField(job,"state");if(state!="done"&&state!="unavailable")return false;}
  return true;
 }
 inline bool manualWorkComplete(const Json& j){
  if(!manualRun(j))return false;
  if(scopedManual(j))return manualTargetsComplete(j);
  if(j.value("catalogPending",false))return false;
- for(const auto& job:j["jobs"]){const auto state=stringField(job,"state");if(state!="done"&&state!="unavailable")return false;}
+ for(auto it=j["jobs"].begin();it!=j["jobs"].end();++it){if(inactiveExcludedQueueTool(j,it.key(),it.value()))continue;const auto state=stringField(it.value(),"state");if(state!="done"&&state!="unavailable")return false;}
  return true;
 }
 inline const char *expiry(uint64_t time, uint64_t started, uint64_t activity,
@@ -130,18 +178,41 @@ inline const char *expiry(uint64_t time, uint64_t started, uint64_t activity,
     return "worker-stalled";
   return "";
 }
+enum class TimeoutStage { unreported, metadata, transfer, assembly, validation, publication, supervisor };
+inline bool workerTaskTimeout(std::string_view reason) {
+  return reason=="media-task-time-budget" || reason=="media-task-timeout";
+}
+inline const char* timeoutStageName(TimeoutStage stage) {
+  switch (stage) {
+  case TimeoutStage::metadata: return "metadata";
+  case TimeoutStage::transfer: return "transfer";
+  case TimeoutStage::assembly: return "assembly";
+  case TimeoutStage::validation: return "validation";
+  case TimeoutStage::publication: return "publication";
+  default: return nullptr;
+  }
+}
 // These files are independent checkpoints. Never turn a failed read into
 // evidence that work completed or a failed replacement into a saved request.
 namespace checkpoint {
+// Keep the existing error text for queue consumers; resume owners also need
+// to distinguish a failed IO observation from readable malformed bytes.
+struct ReadUnavailable : std::runtime_error {explicit ReadUnavailable(const char* reason):std::runtime_error(reason){} };
 struct UpgradeRequired : std::runtime_error { UpgradeRequired():std::runtime_error("media-download-checkpoint-upgrade-required"){} };
 inline Json read(const fs::path& path,size_t limit=16*1024*1024,int version=1,const char* field="schemaVersion") {
-  std::error_code ec;const auto status=fs::symlink_status(path,ec);
+  const auto disk=custom_steam_library::ioPath(path);
+  std::error_code ec;const auto status=fs::symlink_status(disk,ec);
   if(status.type()==fs::file_type::not_found||ec==std::errc::no_such_file_or_directory)return Json::object();
-  if(ec||!fs::is_regular_file(status)||fs::is_symlink(status))throw std::runtime_error("media-cache-file-unsafe");
-  const auto size=fs::file_size(path,ec);if(ec||size>limit)throw std::runtime_error("media-checkpoint-size-invalid");
-  std::ifstream in(path,std::ios::binary);if(!in)throw std::runtime_error("media-checkpoint-unreadable");
+  if(ec)throw ReadUnavailable("media-cache-file-unsafe");
+  if(!fs::is_regular_file(status)||fs::is_symlink(status))throw std::runtime_error("media-cache-file-unsafe");
+  const auto size=fs::file_size(disk,ec);if(ec)throw ReadUnavailable("media-checkpoint-size-invalid");
+  if(size>limit)throw std::runtime_error("media-checkpoint-size-invalid");
+  std::ifstream in(disk,std::ios::binary);if(!in)throw ReadUnavailable("media-checkpoint-unreadable");
   std::string text(static_cast<size_t>(size),'\0');in.read(text.data(),text.size());
-  if(!in||in.peek()!=std::char_traits<char>::eof())throw std::runtime_error("media-checkpoint-unreadable");
+  if(!in||in.peek()!=std::char_traits<char>::eof()||in.bad())throw ReadUnavailable("media-checkpoint-unreadable");
+  // JSON text cannot contain literal NUL bytes. The vendored lexer treats
+  // NUL as EOF, which could otherwise hide trailing checkpoint contents.
+  if(text.find('\0')!=std::string::npos)throw std::runtime_error("media-checkpoint-content-invalid");
   auto j=Json::parse(text,[](int depth,Json::parse_event_t,Json&){if(depth>64)throw std::runtime_error("media-checkpoint-depth-invalid");return true;});
   if(!j.is_object())throw std::runtime_error("media-checkpoint-root-invalid");
   if(j.contains(field)) {
@@ -151,33 +222,35 @@ inline Json read(const fs::path& path,size_t limit=16*1024*1024,int version=1,co
   return j;
 }
 inline void preserve(const fs::path& path) {
-  std::error_code ec;if(!fs::exists(path,ec)&&!ec)return;
-  if(ec||!fs::is_regular_file(fs::symlink_status(path,ec))||ec||fs::is_symlink(fs::symlink_status(path,ec)))throw std::runtime_error("media-cache-file-unsafe");
+  const auto disk=custom_steam_library::ioPath(path);
+  std::error_code ec;if(!fs::exists(disk,ec)&&!ec)return;
+  if(ec||!fs::is_regular_file(fs::symlink_status(disk,ec))||ec||fs::is_symlink(fs::symlink_status(disk,ec)))throw std::runtime_error("media-cache-file-unsafe");
   auto backup=path;backup+=L".corrupt."+wide(randomId());
-  if(!CopyFileW(path.c_str(),backup.c_str(),TRUE))throw std::runtime_error("media-cache-checkpoint-preserve-failed");
+  if(!CopyFileW(disk.c_str(),custom_steam_library::ioPath(backup).c_str(),TRUE))throw std::runtime_error("media-cache-checkpoint-preserve-failed");
 }
 inline void write(const fs::path& path,const Json& j) {
-  fs::create_directories(path.parent_path());auto tmp=path;tmp+=L".tmp."+wide(randomId());
-  HANDLE h=CreateFileW(tmp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+  fs::create_directories(custom_steam_library::ioPath(path.parent_path()));auto tmp=path;tmp+=L".tmp."+wide(randomId());
+  const auto temporary=custom_steam_library::ioPath(tmp),disk=custom_steam_library::ioPath(path);
+  HANDLE h=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
   if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("media-cache-checkpoint-write-failed");
   try {
     const auto text=j.dump(2);DWORD count=0;
     if(text.size()>MAXDWORD||!WriteFile(h,text.data(),static_cast<DWORD>(text.size()),&count,nullptr)||count!=text.size()||!FlushFileBuffers(h))throw std::runtime_error("media-cache-checkpoint-write-failed");
     CloseHandle(h);h=INVALID_HANDLE_VALUE;
-    if(!MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("media-cache-checkpoint-replace-failed");
-  } catch(...) {if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);std::error_code ec;fs::remove(tmp,ec);throw;}
+    if(!MoveFileExW(temporary.c_str(),disk.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("media-cache-checkpoint-replace-failed");
+  } catch(...) {if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);std::error_code ec;fs::remove(temporary,ec);throw;}
 }
 inline void fields(const Json& j,bool row=false) {
   if(!j.is_object())throw std::runtime_error("media-queue-fields-invalid");
   const auto require=[&](const char* name,const std::function<bool(const Json&)>& valid){auto it=j.find(name);if(it!=j.end()&&!valid(*it))throw std::runtime_error(std::string("media-queue-field-invalid:")+name);};
   for(const auto* name:{"enabled","wallpaperPauseOnBattery","sessionClaimed","resourceChecked","catalogPending","identityPending","verified","retiredPopular","refreshRequested","recoveryRequired","recoveryUnconfirmed"})require(name,[](const Json& v){return v.is_boolean();});
   if(row)require("autoStopped",[](const Json& v){return v.is_boolean();});
-  for(const auto* name:{"wallpaperPowerCancelledSession","session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})require(name,[](const Json& v){return v.is_string();});
-  for(const auto* name:{"statusRevision","queueRevision","updatedAt","workerPid","ownerProtocol","maxParallel","parallelSlots","cpuThreshold","startupProtectionUntil","heartbeatAt","taskStartedAt","manualUntil","inventoryAwaitUntil","inventoryRequestedAt","cooldownUntil","catalogRetryAt","progressNotifiedAt","bytes","totalBytes","resumedBytes","sessionResumedBytes","activeCount","appId","addedAt","lastPlayed","attempts","automaticElapsedMs","retryAt","requestBindingRevision","provenanceRevision","admissionRevision","qualityUpgradeRevision","videoQualityPolicy","sourceTier","localSourceTier","chartRank","attemptBudgetMs","total","completed","remaining","failed","unavailable","manualTotal","manualCompleted","nextDueAt"})require(name,[&](const Json& v){return v.is_number_integer()&&(!v.is_number_unsigned()||v.get<uint64_t>()<=INT64_MAX)&&(v.get<int64_t>()>=0||(std::string_view(name)=="nextDueAt"&&v.get<int64_t>()==-1));});
+  for(const auto* name:{"sharedSleepCancelledSession","wallpaperPowerCancelledSession","session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","identityPrerequisiteStamp","identityRecoveryReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})require(name,[](const Json& v){return v.is_string();});
+  for(const auto* name:{"sessionIssuedAt","sessionDeadlineAt","statusRevision","queueRevision","updatedAt","workerPid","ownerProtocol","maxParallel","parallelSlots","cpuThreshold","startupProtectionUntil","heartbeatAt","taskStartedAt","manualUntil","inventoryAwaitUntil","inventoryRequestedAt","cooldownUntil","catalogRetryAt","progressNotifiedAt","bytes","totalBytes","resumedBytes","sessionResumedBytes","activeCount","appId","addedAt","lastPlayed","attempts","automaticElapsedMs","retryAt","requestBindingRevision","provenanceRevision","admissionRevision","qualityUpgradeRevision","videoQualityPolicy","sourceTier","localSourceTier","chartRank","attemptBudgetMs","total","completed","remaining","failed","unavailable","manualTotal","manualCompleted","nextDueAt"})require(name,[&](const Json& v){return v.is_number_integer()&&(!v.is_number_unsigned()||v.get<uint64_t>()<=INT64_MAX)&&(v.get<int64_t>()>=0||(std::string_view(name)=="nextDueAt"&&v.get<int64_t>()==-1));});
   for(const auto* name:{"attempts","maxParallel","parallelSlots","cpuThreshold","ownerProtocol","videoQualityPolicy","sourceTier","localSourceTier","chartRank"})require(name,[](const Json& v){return v.get<int64_t>()<=INT_MAX;});
   require("workerPid",[](const Json& v){return v.get<uint64_t>()<=MAXDWORD;});
   require("appId",[](const Json& v){return v.get<uint64_t>()<=2147483647;});
-  for(const auto* name:{"jobs","active","current","localShortcut","selectedVideo","manualTargetRevisions","sourceCounts"})require(name,[](const Json& v){return v.is_object();});
+  for(const auto* name:{"sharedSleepSession","sharedSleepWindow","jobs","active","current","localShortcut","selectedVideo","manualTargetRevisions","sourceCounts"})require(name,[](const Json& v){return v.is_object();});
   for(const auto* name:{"history","admissionHistory","manualTargets","recoveryBlockedKeys"})require(name,[](const Json& v){return v.is_array();});
   for(const auto* name:{"manualTargets","recoveryBlockedKeys"})if(j.contains(name))for(const auto& key:j[name])if(!key.is_string())throw std::runtime_error("media-queue-scope-invalid");
   if(j.value("workerPid",DWORD{0})) {
@@ -207,6 +280,38 @@ inline Json queue(const fs::path& path,bool status=false) {
 inline void guardQueue(const fs::path& path){try{queue(path);}catch(const UpgradeRequired&){throw;}catch(...){preserve(path);}}
 } // namespace checkpoint
 
+// Retry eligibility is based on a repaired file environment, never on an
+// application version, wall-clock expiry or a guessed Steam identity.
+inline std::string identityFileStamp(const fs::path& path) {
+  HANDLE file=CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+      nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+  if(file==INVALID_HANDLE_VALUE)return "unavailable";
+  BY_HANDLE_FILE_INFORMATION info{};
+  const bool known=GetFileInformationByHandle(file,&info)&&GetFileType(file)==FILE_TYPE_DISK&&
+      !(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT));
+  CloseHandle(file);if(!known)return "unavailable";
+  return normalized(utf8(path.wstring()))+":"+std::to_string(info.dwVolumeSerialNumber)+":"+
+      std::to_string(info.nFileIndexHigh)+":"+std::to_string(info.nFileIndexLow)+":"+
+      std::to_string(info.ftCreationTime.dwHighDateTime)+":"+std::to_string(info.ftCreationTime.dwLowDateTime)+":"+
+      std::to_string(info.ftLastWriteTime.dwHighDateTime)+":"+std::to_string(info.ftLastWriteTime.dwLowDateTime)+":"+
+      std::to_string(info.nFileSizeHigh)+":"+std::to_string(info.nFileSizeLow);
+}
+struct IdentityPrerequisites {
+  bool ready=false;
+  std::string stamp;
+};
+inline IdentityPrerequisites identityPrerequisites(const fs::path& helper,const std::string& executable) {
+  const auto tool=identityFileStamp(helper),target=identityFileStamp(fs::path(wide(executable)));
+  // This worker can now consume the helper's transient-network receipt. The
+  // existing one-shot prerequisite recovery must also recognize that repaired
+  // behavior when an older worker already exhausted an unconfirmed identity.
+  return {tool!="unavailable"&&target!="unavailable",digestKey("identity-worker-manifest-v2\n"+tool+"\n"+target)};
+}
+inline bool recoverableIdentityFailure(const std::string& reason) {
+  return reason=="media-identity-worker-unavailable"||reason=="media-identity-helper-unavailable"||
+      reason=="media-identity-target-unavailable"||reason=="media-identity-launch-failed"||
+      reason=="media-identity-timeout"||reason=="media-identity-unconfirmed";
+}
 class Queue {
   fs::path root_;
   static Json normalizedDocument(Json j, bool *invalidatesStatus = nullptr) {
@@ -266,9 +371,10 @@ class Queue {
     entry["time"]=now();history.push_back(std::move(entry));
     while(history.size()>12)history.erase(history.begin());
   }
-  Json storedQueue() const {
+  Json storedQueue(bool* readable=nullptr) const {
+    if(readable)*readable=false;
     const auto path=root_/L"config"/L"game-media-downloads.json";
-    try{return checkpoint::queue(path);}
+    try{auto state=checkpoint::queue(path);if(readable)*readable=true;return state;}
     catch(const checkpoint::UpgradeRequired&){throw;}
     catch(const std::exception& e){
       Json safe={{"enabled",false},{"recoveryRequired",true},{"recoveryReason",e.what()},{"phase","deferred"},{"reason","queue-recovery-required"},{"jobs",Json::object()},{"recoveryBlockedKeys",Json::array()}};
@@ -291,7 +397,7 @@ class Queue {
       return safe;
     }
   }
-  Json load(bool *invalidatesStatus = nullptr) const {return normalizedDocument(storedQueue(),invalidatesStatus);}
+  Json load(bool *invalidatesStatus = nullptr,bool* readable=nullptr) const {return normalizedDocument(storedQueue(readable),invalidatesStatus);}
   Json readStatus() const {
     try{return checkpoint::queue(statusPath(),true);}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){return Json::object();}
   }
@@ -307,11 +413,14 @@ class Queue {
       if(!progress.contains(it.key())||progress[it.key()].value("taskStartedAt",int64_t{0})!=it.value().value("taskStartedAt",int64_t{0}))return false;
     return true;
   }
+  static bool currentSummaryPolicy(const Json& status) {
+    return status.value("summaryPolicyVersion",Json{})==Json(1);
+  }
   Json liveStatus(const Json& durable, bool invalidated = false) const {
     const auto status=readStatus();
     if(!statusMatches(status,durable))return summary(durable);
-    if(!invalidated)return status;
-    // Normalization changes scheduling, not valid owned byte progress. Rebuild
+    if(!invalidated&&currentSummaryPolicy(status))return status;
+    // Normalization or summary policy changes scheduling, not owned progress. Rebuild
     // counts/deadlines from the current jobs while retaining only live fields.
     auto current=durable;
     for(const auto* field:{"active","current","bytes","totalBytes","resumedBytes",
@@ -367,11 +476,13 @@ class Queue {
     j["taskStartedAt"]=0;j["workerPid"]=0;j["workerBirth"]="";return true;
   }
   static Json summary(Json j) {
-    size_t done = 0, waiting = 0, failed = 0, unavailable = 0, stopped = 0;
+    j["summaryPolicyVersion"]=1;
+    size_t done = 0, waiting = 0, failed = 0, unavailable = 0, stopped = 0, excluded = 0;
     std::array<size_t,5> sources{};size_t identifying=0;std::string pendingReason;
     int64_t nextDue = -1;
     for (auto item=j["jobs"].begin();item!=j["jobs"].end();++item) {
       const auto& job=item.value();
+      if(inactiveExcludedQueueTool(j,item.key(),job)){++excluded;continue;}
       if(job.value("autoStopped",false))++stopped;
       ++sources[sourcePriority(job)];if(job.value("identityPending",false))++identifying;
       if (manualTarget(j,item.key()) && !itemStopped(job) && job.value("state", std::string{}) != "done" &&
@@ -399,7 +510,7 @@ class Queue {
     }
     if(nextDue>=0) nextDue=(std::max)(nextDue,j.value("cooldownUntil",int64_t{0}));
     size_t manualTotal=0,manualCompleted=0;
-    if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& value:j["manualTargets"]){++manualTotal;const auto state=stringField(j["jobs"].value(value.get<std::string>(),Json::object()),"state");if(state=="done"||state=="unavailable")++manualCompleted;}
+    if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& value:j["manualTargets"]){const auto job=j["jobs"].value(value.get<std::string>(),Json::object());if(inactiveExcludedQueueTool(j,value.get<std::string>(),job))continue;++manualTotal;const auto state=stringField(job,"state");if(state=="done"||state=="unavailable")++manualCompleted;}
     Json manualItems=Json::object();
     if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& key:j["manualTargets"]){
       if(manualItems.size()>=24)break;const auto job=j["jobs"].value(key.get<std::string>(),Json::object());Json item=Json::object();
@@ -413,7 +524,7 @@ class Queue {
     j["remaining"] = waiting;
     j["failed"] = failed;j["pendingReason"]=pendingReason;
     j["unavailable"] = unavailable;j["autoStopped"] = stopped;
-    j["total"] = j["jobs"].size();
+    j["total"] = j["jobs"].size()-excluded;
     j["sourceCounts"]={{"popular",sources[0]},{"steamNative",sources[1]},{"steamShortcuts",sources[2]},{"ymccConfirmed",sources[3]},{"other",sources[4]},{"identifying",identifying}};
     j.erase("jobs");
     return j;
@@ -476,12 +587,13 @@ public:
   Json snapshot() const {
     try {
       Lock lock(root_);
-      return liveStatus();
+      bool invalidated=false,readable=false;const auto durable=load(&invalidated,&readable);
+      auto status=liveStatus(durable,invalidated);status["checkpointReadable"]=readable;return status;
     } catch (const checkpoint::UpgradeRequired&) {
-      return {{"enabled",false},{"phase","deferred"},{"reason","media-download-checkpoint-upgrade-required"},{"workerPid",0}};
+      return {{"enabled",false},{"phase","deferred"},{"reason","media-download-checkpoint-upgrade-required"},{"workerPid",0},{"checkpointReadable",false}};
     } catch (...) {
       return {{"enabled",false},{"phase", "deferred"},
-              {"reason", "queue-unreadable"},
+              {"reason", "queue-unreadable"},{"checkpointReadable",false},
               {"workerPid", 0}};
     }
   }
@@ -522,7 +634,8 @@ public:
     // Only a proved-exited PID/birth lease may be reclaimed. No live worker,
     // completed job, retry deadline or saved user setting is changed.
     const bool reclaimed=reclaimExited(j);
-    if(!reclaimed&&j==stored&&statusMatches(readStatus(),j))return false;
+    const auto status=readStatus();
+    if(!reclaimed&&j==stored&&statusMatches(status,j)&&currentSummaryPolicy(status))return false;
     save(j);return true;
   }
   bool configureWallpaperPower(bool enabled){
@@ -535,7 +648,8 @@ public:
                  int cpuThreshold = 15) {
     Lock lock(root_);
     const auto stored=storedQueue();
-    auto j=normalizedDocument(stored);const bool migrated=j!=stored||!statusMatches(readStatus(),j);
+    auto j=normalizedDocument(stored);const auto status=readStatus();
+    const bool migrated=j!=stored||!statusMatches(status,j)||!currentSummaryPolicy(status);
     const bool reclaimed = reclaimExited(j);
     if (!reclaimed && !migrated && j.value("enabled", true) == enabled &&
         j.value("pauseReason", std::string{}) == pause &&
@@ -564,7 +678,7 @@ public:
     const auto status = previous.empty() ? summary(durable) : previous;
     // A fallback summary can describe the right resource state while the
     // published progress file is still missing/stale after a partial save.
-    if (!invalidated && !previous.empty() && status.value("resourcePauseReason", std::string{}) == reason &&
+    if (!invalidated && !previous.empty() && currentSummaryPolicy(previous) && status.value("resourcePauseReason", std::string{}) == reason &&
         status.value("resourceChecked", false) &&
         status.value("startupProtectionUntil", int64_t{0}) == startupUntil)
       return true;
@@ -582,9 +696,100 @@ public:
     save(j, false, &previous);
     return true;
   }
+  // Existing owner/inventory wakes only. No timer, hashing or game launch.
+  size_t recoverIdentityPrerequisites(const fs::path& helper,
+      const std::function<bool(const Json&)>& shortcutIsCurrent = {}, bool ownerMayCompleteBulk = false) {
+    bool beforeReadable=false;
+    const auto before=[&]{Lock lock(root_);return load(nullptr,&beforeReadable);}();
+    if(!downloadsEnabled(before)||policyBlocked(before)||powerPolicy::blocked()||before.value("workerPid",DWORD{0})>0)return 0;
+    const auto currentMembership=[&](const Json& job){
+      if(!shortcutIsCurrent)return false;
+      try{return shortcutIsCurrent(job);}catch(...){return false;}
+    };
+    Store store(root_);
+    const auto exactIdentity=[&](const Json& job){
+      if(job.value("identityPending",false)||!job.value("verified",false))return false;
+      const auto id=job.value("appId",int64_t{0});
+      if(id<=0||id>2147483647||identityFileStamp(fs::path(wide(stringField(job,"executable"))))=="unavailable")return false;
+      const auto identity=pendingShortcut(job)?store.shortcutWallpaperIdentity(stringField(job,"executable")):store.identity(stringField(job,"executable"));
+      return identity.value("verified",false)&&identity.value("appId",int64_t{0})==id;
+    };
+    const auto currentCachedAppId=[&](const Json& job)->int64_t{
+      const auto exe=stringField(job,"executable");
+      if(identityFileStamp(fs::path(wide(exe)))=="unavailable")return 0;
+      const auto identity=pendingShortcut(job)?store.shortcutWallpaperIdentity(exe):store.identity(exe);const auto id=identity.value("appId",int64_t{0});
+      return identity.value("verified",false)&&id>0&&id<=2147483647?id:0;
+    };
+    std::vector<std::pair<std::string,Json>> candidates;
+    for(auto it=before["jobs"].begin();it!=before["jobs"].end();++it) {
+      const auto& job=it.value();
+      if(!pendingShortcut(job)||!itemStopped(job))continue;
+      // Returning to the original account/shortcut is a real prerequisite
+      // repair even when the helper and EXE themselves have not changed.
+      // A removed/foreign/unreadable shortcut supplies no recovery authority.
+      const bool membershipRestored=stringField(job,"lastError")=="media-shortcut-no-longer-current";
+      const bool identityPending=job.value("identityPending",false);
+      if(membershipRestored?!currentMembership(job):!identityPending||!recoverableIdentityFailure(stringField(job,"lastError")))continue;
+      if(!identityPending){
+        // A canonical download already has its identity. Restored membership
+        // needs the same exact cached AppID, never an identity-helper launch.
+        if(membershipRestored&&it.key()==targetKey(job)&&exactIdentity(job))
+          candidates.emplace_back(it.key(),Json{{"before",job},{"membershipRestored",true},{"verifiedMembership",true}});
+        continue;
+      }
+      // identifyShortcut already consumes a current verified cache before it
+      // needs a helper. The same exact-file repair can revive this placeholder.
+      const auto cachedAppId=currentCachedAppId(job);
+      if(cachedAppId>0&&it.key()==targetKey(job)&&currentMembership(job)){
+        candidates.emplace_back(it.key(),Json{{"before",job},{"membershipRestored",true},{"cachedAppId",cachedAppId}});
+        continue;
+      }
+      const auto proof=identityPrerequisites(helper,stringField(job,"executable"));
+      if(proof.ready&&(membershipRestored||proof.stamp!=stringField(job,"identityPrerequisiteStamp"))&&
+         (membershipRestored||currentMembership(job)))
+        candidates.emplace_back(it.key(),Json{{"before",job},{"stamp",proof.stamp},{"membershipRestored",true}});
+    }
+    const auto bulkRequest=ownerMayCompleteBulk?stringField(before,"manualRequestId"):std::string{};
+    const auto acknowledgedEmptyBulk=[&](const Json& state){
+      const auto inventory=stringField(state,"inventoryRequestId");
+      return !bulkRequest.empty()&&stringField(state,"manualRequestId")==bulkRequest&&
+             manualRun(state)&&!scopedManual(state)&&stringField(state,"manualState")=="requested"&&
+             !inventory.empty()&&stringField(state,"inventoryReadyId")==inventory&&
+             stringField(state,"phase")!="starting"&&state.value("workerPid",DWORD{0})==0&&
+             state["active"].empty()&&!state.value("recoveryRequired",false)&&manualWorkComplete(state);
+    };
+    // A receipt that arrives during this pass has its own wake. Closing on
+    // it now could clear manual admission before restored membership is read.
+    const bool closeEmptyBulk=candidates.empty()&&beforeReadable&&acknowledgedEmptyBulk(before);
+    if(candidates.empty()&&!closeEmptyBulk)return 0;
+    Lock lock(root_);bool readable=false;auto j=load(nullptr,&readable);
+    if(!downloadsEnabled(j)||policyBlocked(j)||powerPolicy::blocked()||j.value("workerPid",DWORD{0})>0)return 0;
+    if(closeEmptyBulk&&readable&&acknowledgedEmptyBulk(j)){
+      j["manualUntil"]=0;j["manualState"]="completed";
+      save(j,false);
+      return 0;
+    }
+    size_t recovered=0;
+    for(const auto& [key,proof]:candidates) {
+      if(!j["jobs"].contains(key)||j["jobs"][key]!=proof["before"]||j["active"].contains(key))continue;
+      if(proof.value("membershipRestored",false)&&!currentMembership(j["jobs"][key]))continue;
+      if(proof.value("verifiedMembership",false)&&!exactIdentity(j["jobs"][key]))continue;
+      if(proof.contains("cachedAppId")&&currentCachedAppId(j["jobs"][key])!=proof.value("cachedAppId",int64_t{0}))continue;
+      auto& job=j["jobs"][key];
+      if(proof.contains("stamp")){
+        const auto current=identityPrerequisites(helper,stringField(job,"executable"));
+        if(!current.ready||current.stamp!=stringField(proof,"stamp"))continue;
+      }
+      job["identityRecoveryReason"]=stringField(job,"lastError");
+      if(proof.contains("stamp"))job["identityPrerequisiteStamp"]=proof["stamp"];
+      resetAutomaticBudget(job);job["lastError"]="";++recovered;
+    }
+    if(recovered)save(j);
+    return recovered;
+  }
   void requestSupplement(bool manual=false,const std::string& onlyKey={}){
     {Lock lock(root_);auto j=load();
-      if(!onlyKey.empty()&&(!manual||!j["jobs"].contains(onlyKey)))throw std::runtime_error("media-download-target-unavailable");
+      if(!onlyKey.empty()&&(!manual||!j["jobs"].contains(onlyKey)||excludedQueueTool(j["jobs"][onlyKey])))throw std::runtime_error("media-download-target-unavailable");
       if(manual){
         if(manualRun(j)){
           if(onlyKey.empty())return;
@@ -606,7 +811,21 @@ public:
         j["inventoryAwaitUntil"]=now()+10000;
         if(j.value("catalogPending",false))j["catalogRetryAt"]=0;
         // One explicit bulk retry; scoped choices never reset unrelated backoff.
-        for(auto& job:j["jobs"])if(job.value("state",std::string{})=="pending"||job.value("state",std::string{})=="unavailable"){job["state"]="pending";resetAutomaticBudget(job);}
+        for(auto& job:j["jobs"]){
+          const auto state=stringField(job,"state");
+          if(excludedQueueTool(job)||(state!="pending"&&state!="unavailable"))continue;
+          // A bulk retry cannot repair a shortcut that now points to another EXE.
+          // The existing wake can recover it once the exact membership returns.
+          if(state=="unavailable"&&job.value("identityPending",false)&&pendingShortcut(job)&&
+             stringField(job,"lastError")=="media-shortcut-no-longer-current"){
+            const auto observed=job.find("lastShortcutObservation");
+            if(observed!=job.end()&&observed->is_object()&&stringField(*observed,"reason")=="shortcut-target-changed"&&
+               stringField(*observed,"expectedAccount")==stringField(job,"steamAccount")&&
+               observed->contains("provenanceRevision")&&(*observed)["provenanceRevision"].is_number_integer()&&
+               (*observed)["provenanceRevision"]==job.value("provenanceRevision",uint64_t{0}))continue;
+          }
+          job["state"]="pending";resetAutomaticBudget(job);
+        }
       }
 
       j["inventoryRequestId"]=randomId();j["inventoryRequestedAt"]=now();save(j);
@@ -621,7 +840,7 @@ public:
   bool catalogDue(const std::string&) const {return false;}
   void catalogResult(const std::string&,bool,const std::string& = {},size_t = 0) {}
   void enqueueCatalog(const Json&) {}
-  void enqueue(const Json &targets,const std::string& requiredSession={},const Json& demand=Json::object()) {
+  void enqueue(const Json &targets,const std::string& requiredSession={},const Json& demand=Json::object(),const Json& replacementClaim=Json::object()) {
     if(!steamDemand::allowed(demand))return;
     if (!targets.is_array() || targets.size() > 10000)
       throw std::runtime_error("media-inventory-invalid");
@@ -652,10 +871,10 @@ public:
       return true;
     };
     for (auto target : targets) {
-      if(stringField(target,"catalogSource")=="popular")continue;
+      if(excludedQueueTool(target)||stringField(target,"catalogSource")=="popular")continue;
       const auto exe = target.value("executable", std::string{});
       if (!exe.empty()) {
-        auto identity = store.identity(exe);
+        auto identity = pendingShortcut(target)?store.shortcutWallpaperIdentity(exe):store.identity(exe);
         if (!identity.value("verified", false)) {
           if(!pendingShortcut(target))continue;
           target["appId"]=0;target["verified"]=false;target["identityPending"]=true;
@@ -683,6 +902,14 @@ public:
     for (auto& prepared : pending) {
       bool itemChanged=false;
       auto& target=prepared.target;
+      // The original queue wait can outlive a library relationship or exact
+      // cache edit. Keep this request's admitted AppID; a fresh inventory owns
+      // any replacement. No extra work is performed for completed/empty batches.
+      const auto executable=stringField(target,"executable");
+      if(!executable.empty()&&target.value("verified",false)){
+        const auto identity=pendingShortcut(target)?store.shortcutWallpaperIdentity(executable):store.identity(executable);
+        if(!identity.value("verified",false)||identity.value("appId",int64_t{0})!=target.value("appId",int64_t{0}))continue;
+      }
       auto key = targetKey(target);
       const auto current=currentEntries.value(key,Json::object());
       if(current.value("bindingRevision",uint64_t{0})!=prepared.revision){
@@ -692,8 +919,23 @@ public:
       }
       if(j.contains("recoveryBlockedKeys")&&std::find(j["recoveryBlockedKeys"].begin(),j["recoveryBlockedKeys"].end(),key)!=j["recoveryBlockedKeys"].end())continue;
       if (!j["jobs"].contains(key)) {
-        if (j["jobs"].size() >= 10000)
-          continue;
+        if (j["jobs"].size() >= 10000){
+          // Identity promotion replaces its own exact current placeholder.
+          // Make room and accept its canonical successor in the same write;
+          // the cap must not silently drop the successfully identified game.
+          const auto retiring=stringField(replacementClaim,"key");
+          if(requiredSession.empty()||!allowed(j,requiredSession)||retiring.empty()||retiring==key||
+              !j["jobs"].contains(retiring)||!j["active"].contains(retiring))continue;
+          const auto& source=j["jobs"][retiring];const auto& active=j["active"][retiring];
+          const auto revision=replacementClaim.value("provenanceRevision",uint64_t{0});
+          if(!source.value("identityPending",false)||!active.value("identityPending",false)||
+              source.value("provenanceRevision",uint64_t{0})!=revision||active.value("provenanceRevision",uint64_t{0})!=revision||
+              stringField(active,"session")!=requiredSession||stringField(active,"key")!=retiring||
+              active.value("taskStartedAt",int64_t{0})!=replacementClaim.value("taskStartedAt",int64_t{0})||
+              normalized(stringField(source,"executable"))!=normalized(stringField(target,"executable")))continue;
+          j["jobs"].erase(retiring);j["active"].erase(retiring);
+          if(stringField(j["current"],"key")==retiring)j["current"]=Json::object();
+        }
         target["state"] = "pending";
         target["addedAt"] = now();
         target["attempts"] = 0;
@@ -770,22 +1012,25 @@ public:
     if(!marker.contains("files")&&marker.contains("name")&&!marker["name"].is_string())throw std::runtime_error("media-temporary-invalid");
     return marker;
   }
-  Json temporaryRecords() const {
-    Json marker;try{marker=temporaryDocument();}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){return Json::object();}
+  Json temporaryRecords(bool* readable=nullptr,bool* storageUnavailable=nullptr) const {
+    if(readable)*readable=false;if(storageUnavailable)*storageUnavailable=false;
+    Json marker;try{marker=temporaryDocument();}catch(const checkpoint::UpgradeRequired&){throw;}catch(const checkpoint::ReadUnavailable&){if(storageUnavailable)*storageUnavailable=true;return Json::object();}catch(...){return Json::object();}
+    if(readable)*readable=true;
     if(marker.contains("files"))return marker["files"];
     const auto name=stringField(marker,"name");return name.empty()?Json::object():Json{{name,marker}};
   }
   void storeTemporaryRecords(const Json &files) const {
     Json old=Json::object();
-    try{old=temporaryDocument();}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){checkpoint::preserve(temporaryRecordPath());}
-    if(files.empty()){std::error_code ec;fs::remove(temporaryRecordPath(),ec);if(ec)throw std::runtime_error("media-cache-temporary-remove-failed");}
+    try{old=temporaryDocument();}catch(const checkpoint::UpgradeRequired&){throw;}catch(const checkpoint::ReadUnavailable&){throw std::runtime_error("media-storage-unavailable");}catch(...){checkpoint::preserve(temporaryRecordPath());}
+    if(files.empty()){std::error_code ec;fs::remove(custom_steam_library::ioPath(temporaryRecordPath()),ec);if(ec)throw std::runtime_error("media-cache-temporary-remove-failed");}
     else {old["schemaVersion"]=2;old["files"]=files;old.erase("name");checkpoint::write(temporaryRecordPath(),old);}
   }
 
   void trackTemporary(const std::string &token,const std::string &name,bool resumable=false) {
     Lock lock(root_);
     if (token.empty()||liveStatus().value("session",std::string{})!=token) throw std::runtime_error("media-download-cancelled");
-    auto files=temporaryRecords();
+    bool storageUnavailable=false;auto files=temporaryRecords(nullptr,&storageUnavailable);
+    if(storageUnavailable)throw std::runtime_error("media-storage-unavailable");
     if (!files.contains(name) && files.size()>=32) throw std::runtime_error("media-temporary-limit");
     files[name]={{"session",token},{"name",name},{"workerPid",GetCurrentProcessId()},
       {"workerBirth",processBirthToken(GetCurrentProcessId())},{"resumable",resumable}};
@@ -799,8 +1044,11 @@ public:
     Lock lock(root_);auto files=temporaryRecords();bool changed=false;
     const auto folder=root_/L"cache"/L"jobs"/L"game-media";
     std::error_code ec;const auto ordinary=fs::absolute(folder).lexically_normal();
-    const auto canonical=fs::weakly_canonical(folder,ec);
-    if (ec||normalized(utf8(ordinary.wstring()))!=normalized(utf8(canonical.wstring()))) return;
+    auto canonical=fs::weakly_canonical(custom_steam_library::ioPath(folder),ec).wstring();
+    // Compare logical ownership without leaking the extended IO spelling.
+    if(canonical.starts_with(LR"(\\?\UNC\)"))canonical=LR"(\\)"+canonical.substr(8);
+    else if(canonical.starts_with(LR"(\\?\)"))canonical=canonical.substr(4);
+    if (ec||normalized(utf8(ordinary.wstring()))!=normalized(utf8(canonical))) return;
     for (auto it=files.begin();it!=files.end();) {
       const auto name=it.key();const auto marker=it.value();
       if (name.size()!=37||name.substr(32)!=".part"||name.substr(0,32).find_first_not_of("0123456789abcdef")!=std::string::npos) {++it;continue;}
@@ -812,16 +1060,16 @@ public:
       if(birth.empty()||birth.size()>20||birth.find_first_not_of("0123456789")!=std::string::npos){++it;continue;}
       if (!value||value>MAXDWORD||!leaseOwnerGone({{"leasePid",static_cast<DWORD>(value)},
           {"leaseBirth",stringField(marker,"workerBirth")}})) {++it;continue;}
-      const auto file=folder/wide(name);ec.clear();const auto status=fs::symlink_status(file,ec);
+      const auto file=folder/wide(name);ec.clear();const auto status=fs::symlink_status(custom_steam_library::ioPath(file),ec);
       if (ec&&ec!=std::errc::no_such_file_or_directory) {++it;continue;}
       if (!ec&&status.type()!=fs::file_type::not_found&&(fs::is_symlink(status)||!fs::is_regular_file(status))) {++it;continue;}
       bool retain=false;
       if (marker.contains("resumable")&&marker["resumable"].is_boolean()&&marker["resumable"].get<bool>()) try {
         // A sidecar is unconfirmed evidence until Worker validates it. Cleanup
         // may release a proved-exited writer, but cannot erase that evidence.
-        ec.clear();retain=fs::exists(folder/wide(name.substr(0,32)+".resume.json"),ec)||bool(ec);
+        ec.clear();retain=fs::exists(custom_steam_library::ioPath(folder/wide(name.substr(0,32)+".resume.json")),ec)||bool(ec);
       } catch (...) {retain=true;}
-      if (!retain) {ec.clear();fs::remove(file,ec);if(ec){++it;continue;}}
+      if (!retain) {ec.clear();fs::remove(custom_steam_library::ioPath(file),ec);if(ec){++it;continue;}}
       it=files.erase(it);changed=true;
     }
     if(changed) storeTemporaryRecords(files);
@@ -847,6 +1095,7 @@ public:
     j["sessionResumedBytes"]=0;j["resumedBytes"]=0;
     j["launchTarget"] = nextQueueKey(j, now());
     j["sessionClaimed"] = false;
+    j["sessionIssuedAt"]=now();j["sessionDeadlineAt"]=now()+int64_t(sessionMs);
     j["phase"] = "starting";
     j["taskStartedAt"] = 0;
     j["workerPid"] = 0;
@@ -859,6 +1108,8 @@ public:
     save(j, false);
     return token;
   }
+  bool markSharedSleep(const std::string& token){return update(token,[&](Json& state){markSleepActive(state,token,now());});}
+  bool beginWorkerSession(const std::string& token,uint64_t budget){return update(token,[&](Json& state){const auto time=now();const auto prior=state.value("sharedSleepSession",Json::object());const auto issued=prior.value("sessionIssuedAt",int64_t{0}),deadline=prior.value("sessionDeadlineAt",int64_t{0});const bool same=prior.value("version",0)==1&&prior.value("manualRequestId",std::string{})==state.value("manualRequestId",std::string{})&&prior.value("manualUntil",int64_t{0})==state.value("manualUntil",int64_t{0});if(same&&issued>0&&time>=issued&&deadline>time&&deadline-issued<=int64_t(sessionMs)){state["sessionIssuedAt"]=issued;state["sessionDeadlineAt"]=deadline;}else{state["sessionIssuedAt"]=time;state["sessionDeadlineAt"]=time+static_cast<int64_t>((std::min)(budget,sessionMs));}state.erase("sharedSleepSession");});}
   bool update(const std::string &token,
               const std::function<void(Json &)> &edit) {
     Lock lock(root_);
@@ -898,6 +1149,7 @@ public:
   static bool policyAllowed(const Json &j, const std::string &token) {
     return !token.empty() && j.value("session", std::string{}) == token &&
            j.value("wallpaperPowerCancelledSession",std::string{}) != token &&
+           j.value("sharedSleepCancelledSession",std::string{}) != token &&
            downloadsEnabled(j) && !policyBlocked(j);
   }
   static bool allowed(const Json &j, const std::string &token) {
@@ -907,27 +1159,134 @@ public:
   bool allowed(const std::string &token) const {
     return allowed(snapshot(), token);
   }
+  // Every owned publication advances the same request, not its retry allowance.
+  // Only its current owned Store receipt may update this claimed queue binding.
+  bool advancePublishedBinding(const std::string& token,const std::string& key,
+                               const Json& previous,const Json& published) {
+    const auto from=previous.value("bindingRevision",uint64_t{0}),to=published.value("bindingRevision",uint64_t{0});
+    const auto task=stringField(previous,"taskId");
+    const bool partial=published.value("refreshRequested",false);
+    const auto selected=previous.value("selectedVideo",Json::object());
+    // Final acknowledgement belongs only to the current explicit selection.
+    // Ordinary automatic completions retain their original write behavior.
+    if(!partial&&(stringField(selected,"selectionToken").empty()||
+       selected!=published.value("selectedVideo",Json::object())))return false;
+    if(!from||from>=INT64_MAX||to!=from+1||task.empty()||
+       stringField(previous,"key")!=key||stringField(published,"key")!=key||stringField(published,"taskId")!=task||
+       previous.value("leasePid",DWORD{0})!=GetCurrentProcessId()||published.value("leasePid",DWORD{0})!=GetCurrentProcessId()||
+       stringField(previous,"leaseBirth").empty()||stringField(previous,"leaseBirth")!=stringField(published,"leaseBirth"))return false;
+    Lock lock(root_);auto j=load();
+    if(!allowed(j,token)||j.value("workerPid",DWORD{0})!=GetCurrentProcessId()||
+       stringField(j,"workerBirth")!=stringField(published,"leaseBirth")||!j["jobs"].contains(key)||!j["active"].contains(key))return false;
+    auto& job=j["jobs"][key];auto& active=j["active"][key];
+    if(stringField(active,"key")!=key||stringField(active,"session")!=token||
+       stringField(job,"state")!="running"||active.value("identityPending",false)||
+       active.value("requestBindingRevision",uint64_t{0})!=from||job.value("requestBindingRevision",uint64_t{0})!=from||
+       active.value("provenanceRevision",uint64_t{0})!=job.value("provenanceRevision",uint64_t{0}))return false;
+    if(!partial&&(!manualRun(j)||!manualTarget(j,key)||
+       j.value("manualTargetRevisions",Json::object()).value(key,uint64_t{0})!=from||
+       job.value("selectedVideo",Json::object())!=selected))return false;
+    const auto entries=std::move(Store(root_).snapshot()["entries"]);const auto current=entries.value(key,Json::object());
+    for(const auto* field:{"key","taskId","bindingRevision","leasePid","leaseBirth","assets"})
+      if(current.value(field,Json{})!=published.value(field,Json{}))return false;
+    if(!workDemand::allowed(current))return false;
+    job["requestBindingRevision"]=to;active["requestBindingRevision"]=to;
+    // This owned publication continues the same accepted selection.
+    // It advances its receipt, never its request ID, deadline or retry budget.
+    if(manualRun(j)&&manualTarget(j,key)&&
+       j.value("manualTargetRevisions",Json::object()).value(key,uint64_t{0})==from&&
+       !stringField(current.value("selectedVideo",Json::object()),"selectionToken").empty()&&
+       current.value("selectedVideo",Json::object())==job.value("selectedVideo",Json::object()))
+      j["manualTargetRevisions"][key]=to;
+    if(stringField(j["current"],"key")==key)j["current"]["requestBindingRevision"]=to;
+    save(j,false);return true;
+  }
+  // A current official video selection owns only its accepted manual claim.
+  // Retained shortcut provenance continues to govern ordinary automatic work.
+  bool currentManualVideoSelection(const std::string& token,const Json& target) const {
+    const auto key=stringField(target,"key");const auto id=target.value("appId",int64_t{0});
+    const auto revision=target.value("requestBindingRevision",uint64_t{0});
+    const auto selected=target.value("selectedVideo",Json::object());
+    if(target.value("identityPending",false)||!target.value("verified",false)||id<=0||id>2147483647||
+        key!="steam-"+std::to_string(id)||!revision||selected.empty()||
+        selected.value("appId",int64_t{0})!=id||stringField(selected,"selectionToken").empty())return false;
+    Lock lock(root_);const auto j=load();
+    if(!policyAllowed(j,token)||!manualRun(j)||!manualTarget(j,key)||
+        j.value("workerPid",DWORD{0})!=GetCurrentProcessId()||
+        j.value("manualTargetRevisions",Json::object()).value(key,uint64_t{0})!=revision||
+        !j["jobs"].contains(key)||!j["active"].contains(key))return false;
+    const auto& job=j["jobs"][key];const auto& active=j["active"][key];
+    if(stringField(active,"session")!=token||stringField(active,"key")!=key||
+        active.value("taskStartedAt",int64_t{0})!=target.value("taskStartedAt",int64_t{0})||
+        job.value("provenanceRevision",uint64_t{0})!=target.value("provenanceRevision",uint64_t{0})||
+        job.value("requestBindingRevision",uint64_t{0})!=revision||
+        job.value("selectedVideo",Json::object())!=selected||active.value("selectedVideo",Json::object())!=selected)return false;
+    const auto entry=Store(root_).resolve({{"key",key}});
+    return entry.value("identityVerified",false)&&entry.value("appId",int64_t{0})==id&&
+        entry.value("bindingRevision",uint64_t{0})==revision&&pendingMediaRefresh(entry,"dynamic")&&
+        entry.value("selectedVideo",Json::object())==selected;
+  }
   Json claim(const std::string &token) {
     Lock lock(root_);auto j=load();
     if (!policyAllowed(j,token) || !j.value("resourcePauseReason",std::string{}).empty() ||
         j["active"].size()>=size_t(j.value("maxParallel",maximumParallel))) return nullptr;
-    const auto key=nextQueueKey(j,now(),&j["active"]);if (key.empty()) return nullptr;
-    auto target=j["jobs"][key];target["key"]=key;target["session"]=token;target["state"]="running";target["taskStartedAt"]=now();
+    const auto time=now();
+    const auto key=nextQueueKey(j,time,&j["active"]);if (key.empty()) return nullptr;
+    auto& queued=j["jobs"][key];
+    int64_t continuationDeadline=0;
+    if(queued.contains("sharedSleepWindow")){
+      auto window=queued["sharedSleepWindow"];
+      if(!sameSleepWork(queued,window))queued.erase("sharedSleepWindow");
+      else{
+        chargeSleepWall(queued,window,time);
+        const auto attemptEnd=window.value("attemptDeadlineAt",int64_t{0});
+        const auto sessionEnd=window.value("sessionDeadlineAt",int64_t{0});
+        continuationDeadline=(std::min)(attemptEnd,sessionEnd);
+        const bool exhausted=queued.value("automaticElapsedMs",int64_t{0})>=automaticGameMs;
+        if(time>=continuationDeadline||exhausted){
+          const auto attempts=(std::min)(automaticAttemptLimit,queued.value("attempts",0)+1);
+          queued["attempts"]=attempts;
+          queued["retryAt"]=time+retryMs;
+          queued["lastError"]="media-task-time-budget";
+          queued["lastTimeoutObservation"]={{"source","continuation"},
+            {"elapsedMs",(std::max)(int64_t{0},(std::min)(time,continuationDeadline)-window.value("attemptIssuedAt",time))},
+            {"continuationLimit",time<continuationDeadline?"game":sessionEnd<=attemptEnd?"session":"attempt"}};
+          queued.erase("sharedSleepWindow");
+          if(attempts>=automaticAttemptLimit||exhausted){
+            queued["state"]="unavailable";queued["autoStopped"]=true;queued["retryAt"]=0;
+            queued["stopReason"]=exhausted?"automatic-time-budget-exhausted":"automatic-attempt-budget-exhausted";
+          }
+          save(j,false);return nullptr;
+        }
+        queued["sharedSleepWindow"]=std::move(window);
+      }
+    }
+    auto target=queued;target.erase("lastTimeoutObservation");target["key"]=key;target["session"]=token;target["state"]="running";target["taskStartedAt"]=time;
     const auto attemptLimit=manualRun(j)&&manualTarget(j,key)&&!target.value("selectedVideo",Json::object()).empty()?manualVideoAttemptMs:automaticAttemptMs;
     target["attemptBudgetMs"]=(std::max)(int64_t{1},(std::min)(attemptLimit,automaticGameMs-target.value("automaticElapsedMs",int64_t{0})));
+    target["sessionIssuedAt"]=j.value("sessionIssuedAt",now());target["sessionDeadlineAt"]=j.value("sessionDeadlineAt",now()+int64_t(sessionMs));
+    if(continuationDeadline){const auto& w=target["sharedSleepWindow"];target["attemptBudgetMs"]=(std::min)(target.value("attemptBudgetMs",automaticAttemptMs),continuationDeadline-time);target["sessionIssuedAt"]=w["sessionIssuedAt"];target["sessionDeadlineAt"]=w["sessionDeadlineAt"];}
     target["heartbeatAt"]=now();target["bytes"]=0;target["totalBytes"]=0;target["phase"]="resolving";
     j["jobs"][key]["state"]="running";j["active"][key]=target;
     j["current"]=target;j["sessionClaimed"]=true;j["phase"]="resolving";
     j["heartbeatAt"]=now();save(j,false);return target;
   }
   void result(const std::string &token, const std::string &key, bool ok,
-              const std::string &reason = {}, int64_t retryAt = 0) {
+              const std::string &reason = {}, int64_t retryAt = 0, const std::string& identityStamp = {}, const Json& shortcutObservation = Json{}, const Json& identityObservation = Json{}, TimeoutStage timeoutStage = TimeoutStage::unreported, const Json* expiredClaim = nullptr) {
     update(token, [&](Json &j) {
-      if (powerPolicy::blocked()||j.value("wallpaperPowerCancelledSession",std::string{})==token)return;
+      if (powerPolicy::blocked()||j.value("wallpaperPowerCancelledSession",std::string{})==token||j.value("sharedSleepCancelledSession",std::string{})==token)return;
       if (!j["jobs"].contains(key))
         return;
       auto &job = j["jobs"][key];
       const auto current = j.value("active",Json::object()).value(key,j.value("current", Json::object()));
+      const auto sameClaim=[&](const Json& observed){
+        return stringField(current,"session")==token && stringField(current,"key")==key &&
+            stringField(observed,"session")==token && stringField(observed,"key")==key &&
+            observed.value("taskStartedAt",int64_t{0})==current.value("taskStartedAt",int64_t{0}) &&
+            observed.value("provenanceRevision",uint64_t{0})==current.value("provenanceRevision",uint64_t{0}) &&
+            observed.value("requestBindingRevision",uint64_t{0})==current.value("requestBindingRevision",uint64_t{0});
+      };
+      if(expiredClaim&&(!j["active"].contains(key)||!sameClaim(*expiredClaim)))return;
       if (current.value("key", std::string{}) == key &&
           (current.value("requestBindingRevision", uint64_t{0}) <
               job.value("requestBindingRevision", uint64_t{0}) ||
@@ -940,8 +1299,65 @@ public:
         j["taskStartedAt"] = 0;
         return;
       }
+      if(!identityStamp.empty()&&current.value("identityPending",false))job["identityPrerequisiteStamp"]=identityStamp;
       job["state"]=ok?(unavailableResult(reason)?"unavailable":"done"):"pending";
       job["lastError"]=reason.substr(0,120);
+      job.erase("lastTimeoutObservation");
+      const auto started=current.value("taskStartedAt",int64_t{0});
+      if (!ok && started>0 && j["active"].contains(key) && stringField(current,"session")==token && stringField(current,"key")==key &&
+          (workerTaskTimeout(reason) ||
+           reason=="task-timeout" || reason=="session-timeout" || reason=="worker-stalled")) {
+        Json observation={{"source",timeoutStage==TimeoutStage::supervisor?"supervisor":"worker"},
+                          {"elapsedMs",(std::max)(int64_t{0},now()-started)}};
+        if(const auto* stage=timeoutStageName(timeoutStage))observation["workerStage"]=stage;
+        // Read only on settlement. A default claim is not a report from the lane.
+        const auto status=readStatus();
+        if(statusMatches(status,j)) {
+          const auto& report=status["active"][key];
+          const auto heartbeat=report.value("heartbeatAt",int64_t{0});
+          const auto bytes=report.value("bytes",uint64_t{0});
+          const auto phase=stringField(report,"phase");
+          if(sameClaim(report) &&
+             heartbeat>=started && (heartbeat>started || phase!="resolving" || bytes>0) &&
+             (phase=="resolving" || phase=="identifying" || phase=="downloading" || phase=="retrying" || phase=="publishing")) {
+            observation["lastReportedPhase"]=phase;
+            observation["lastReportedAt"]=heartbeat;
+            observation["lastReportedBytes"]=bytes;
+            observation["lastReportedTotalBytes"]=report.value("totalBytes",uint64_t{0});
+          }
+        }
+        job["lastTimeoutObservation"]=std::move(observation);
+      }
+      if(reason=="media-shortcut-no-longer-current"&&shortcutObservation.is_object()&&!shortcutObservation.empty()){
+        Json detail={{"reason",stringField(shortcutObservation,"reason").substr(0,64)},
+          {"observedAt",shortcutObservation.value("observedAt",int64_t{0})},
+          {"expectedAccount",stringField(job,"steamAccount")},{"provenanceRevision",job.value("provenanceRevision",uint64_t{0})}};
+        if(shortcutObservation.contains("activeAccountKnown")&&shortcutObservation["activeAccountKnown"].is_boolean())detail["activeAccountKnown"]=shortcutObservation["activeAccountKnown"];
+        for(const auto* field:{"activeAccount","activeAccountAfter","win32Error"})
+          if(shortcutObservation.contains(field)&&shortcutObservation[field].is_number_integer()&&shortcutObservation[field].get<int64_t>()>=0&&shortcutObservation[field].get<uint64_t>()<=UINT32_MAX)detail[field]=shortcutObservation[field];
+        job["lastShortcutObservation"]=std::move(detail);
+      }else job.erase("lastShortcutObservation");
+      // Passive summary of this exited helper only, committed with the original
+      // result after its session/provenance fence. Never persist raw provider data.
+      job.erase("lastIdentityObservation");
+      if(current.value("identityPending",false)&&identityObservation.is_object()&&!identityObservation.empty()){
+        Json detail={{"provenanceRevision",job.value("provenanceRevision",uint64_t{0})}};
+        for(const auto* field:{"observedAt","helperExitCode","successfulResponses","retryableFailures","nonRetryableResponses","examinedEntries","manifestCandidates"}){
+          const auto it=identityObservation.find(field);
+          if(it!=identityObservation.end()&&it->is_number_integer()&&(!it->is_number_unsigned()||it->get<uint64_t>()<=INT64_MAX)&&it->get<int64_t>()>=0&&
+              (std::string_view(field)=="observedAt"||it->get<uint64_t>()<=UINT32_MAX)&&
+              ((std::string_view(field)!="examinedEntries"&&std::string_view(field)!="manifestCandidates")||it->get<uint64_t>()<=64))detail[field]=*it;
+        }
+        for(const auto* value:{"missing","oversized","invalid-json","unknown-schema","target-mismatch","matching-target","storage-unavailable","invalid-fields","manifest-missing","manifest-unconfirmed"})
+          if(stringField(identityObservation,"receiptStatus")==value)detail["receiptStatus"]=value;
+        for(const auto* value:{"network-unavailable","unrecognized","manual-id-rejected"})
+          if(stringField(identityObservation,"failureKind")==value)detail["failureKind"]=value;
+        if(stringField(detail,"receiptStatus")=="matching-target"&&stringField(detail,"failureKind")=="unrecognized")
+          custom_steam_library::identity_cache::copySteamLookupStage(identityObservation,detail);
+        if(identityObservation.contains("retryWhenNetworkReturns")&&identityObservation["retryWhenNetworkReturns"].is_boolean())detail["retryWhenNetworkReturns"]=identityObservation["retryWhenNetworkReturns"];
+        job["lastIdentityObservation"]=std::move(detail);
+      }
+      if(reason!=sharedSleepPause)job.erase("sharedSleepWindow");
       if(ok){
         job["attempts"]=0;job["retryAt"]=0;job["automaticElapsedMs"]=0;
         job["autoStopped"]=unavailableResult(reason);
@@ -956,7 +1372,15 @@ public:
         const auto elapsed=(std::clamp)(now()-current.value("taskStartedAt",now()),int64_t{0},chargedLimit);
         const auto spent=(std::min)(automaticGameMs,job.value("automaticElapsedMs",int64_t{0})+elapsed);
         job["attempts"]=attempt;job["automaticElapsedMs"]=spent;
-        if(attempt>=automaticAttemptLimit||spent>=automaticGameMs){job["state"]="unavailable";job["autoStopped"]=true;job["stopReason"]=spent>=automaticGameMs?"automatic-time-budget-exhausted":"automatic-attempt-budget-exhausted";job["retryAt"]=0;}
+        // Retrying a confirmed absent prerequisite cannot produce a different
+        // result. The existing recovery path checks the repaired files and membership.
+        const bool missingPrerequisite=current.value("identityPending",false)&&
+          (reason=="media-identity-target-unavailable"||reason=="media-identity-helper-unavailable");
+        // An exact different target is not a transient account or storage failure.
+        const bool changedTarget=current.value("identityPending",false)&&
+          reason=="media-shortcut-no-longer-current"&&j["active"].contains(key)&&sameClaim(current)&&
+          stringField(shortcutObservation,"reason")=="shortcut-target-changed";
+        if(missingPrerequisite||changedTarget||attempt>=automaticAttemptLimit||spent>=automaticGameMs){job["state"]="unavailable";job["autoStopped"]=true;job["stopReason"]=(missingPrerequisite||changedTarget)?reason:spent>=automaticGameMs?"automatic-time-budget-exhausted":"automatic-attempt-budget-exhausted";job["retryAt"]=0;}
         else job["retryAt"]=(std::max)(retryAt,now()+retryMs);
       }
       j["active"].erase(key);
@@ -976,7 +1400,7 @@ public:
         source.value("provenanceRevision",uint64_t{0})!=revision||active.value("provenanceRevision",uint64_t{0})!=revision||
         stringField(active,"key")!=key||stringField(active,"session")!=token||
         active.value("taskStartedAt",int64_t{0})!=target.value("taskStartedAt",int64_t{0}))return false;
-    Store store(root_);const auto identity=store.identity(stringField(source,"executable"));
+    Store store(root_);const auto identity=pendingShortcut(source)?store.shortcutWallpaperIdentity(stringField(source,"executable")):store.identity(stringField(source,"executable"));
     if(!identity.value("verified",false))return false;
     auto resolved=source;resolved["appId"]=identity["appId"];resolved["verified"]=true;resolved.erase("identityPending");resolved.erase("key");
     const auto destination=state["jobs"].value(targetKey(resolved),Json::object());
@@ -985,9 +1409,15 @@ public:
     store.registerEntry(resolved);
     // A late lookup supplies identity, not a newer play/provenance observation.
     // Retain a newer canonical admission (or an unversioned legacy destination).
-    enqueue(Json::array({retainDestination?destination:resolved}),token);
+    enqueue(Json::array({retainDestination?destination:resolved}),token,Json::object(),target);
+    const auto accepted=load();
+    if(!accepted["jobs"].contains(targetKey(resolved))){
+      const auto media=store.resolve(resolved);
+      if(!media.value("deleted",false)&&!(complete(media,now())&&!media.value("refreshRequested",false)&&!needsVideoQualityUpgrade(media,now())))return false;
+    }
     bool promoted=false;const bool applied=update(token,[&](Json& j){if(!downloadsEnabled(j)||policyBlocked(j)||!j.value("resourcePauseReason",std::string{}).empty())return;
-      if(j["jobs"].contains(key)&&j["jobs"][key].value("identityPending",false)&&j["jobs"][key].value("provenanceRevision",uint64_t{0})==revision){j["jobs"].erase(key);j["active"].erase(key);j["current"]=Json::object();j["heartbeatAt"]=now();promoted=true;}
+      if(!j["jobs"].contains(key)){promoted=j["jobs"].contains(targetKey(resolved));return;}
+      if(j["jobs"][key].value("identityPending",false)&&j["jobs"][key].value("provenanceRevision",uint64_t{0})==revision){j["jobs"].erase(key);j["active"].erase(key);j["current"]=Json::object();j["heartbeatAt"]=now();promoted=true;}
     });return applied&&promoted;
   }
   void deferUnsupportedQuality(const std::string& token){update(token,[](Json& j){for(auto& job:j["jobs"])if(job.value("qualityUpgradeRevision",uint64_t{0})>0){job["retryAt"]=now()+3600000;job["lastError"]="download-quality-worker-upgrade-required";}});}
@@ -996,12 +1426,42 @@ public:
            const std::string &reason = {}, bool invalidatePowerSession = false) {
     update(token, [&](Json &j) {
       if(phase=="paused"&&reason=="download-paused"&&(invalidatePowerSession||powerPolicy::blocked()))j["wallpaperPowerCancelledSession"]=token;
+      if(phase=="paused"&&reason==sharedSleepPause)markSleepActive(j,token,now());
       for (auto &job:j["jobs"]) if (job.value("state",std::string{})=="running") job["state"]="pending";
       j["active"]=Json::object();j["activeCount"]=0;
       if(reason.find("media-disk-")==0||reason.find("media-cache-")==0||
           reason.find("media-staging-")==0||reason=="media-storage-unavailable")
         j["cooldownUntil"]=now()+retryMs;
-      if(j.value("manualUntil",int64_t{0})>0&&j.value("manualSession",std::string{})==token&&
+      bool keepManualRetry=phase=="paused"&&reason==sharedSleepPause&&manualRun(j)&&!policyBlocked(j)&&!manualWorkComplete(j)&&stringField(j,"manualSession")==token&&stringField(j,"manualSessionRequest")==stringField(j,"manualRequestId");
+      if(phase=="deferred"&&reason.empty()&&scopedManual(j)&&!policyBlocked(j)&&
+         j.value("resourcePauseReason",std::string{}).empty()&&stringField(j,"manualSession")==token&&
+         stringField(j,"manualSessionRequest")==stringField(j,"manualRequestId")){
+        std::vector<std::string> retryKeys;const auto time=now(),until=j.value("manualUntil",int64_t{0});
+        for(const auto& value:j["manualTargets"]){const auto key=value.get<std::string>();
+          if(!j["jobs"].contains(key))continue;const auto& job=j["jobs"][key];
+          const auto error=stringField(job,"lastError");
+          const bool transient=error.rfind("media-network-",0)==0||error=="media-download-truncated"||
+              error=="media-http-408"||error=="media-http-429"||
+              (error.size()==14&&error.rfind("media-http-5",0)==0&&error[12]>='0'&&error[12]<='9'&&error[13]>='0'&&error[13]<='9');
+          const auto revision=job.value("requestBindingRevision",uint64_t{0});const auto due=job.value("retryAt",int64_t{0});
+          const auto selected=job.value("selectedVideo",Json::object());
+          if(transient&&!itemStopped(job)&&stringField(job,"state")=="pending"&&
+             !job.value("identityPending",false)&&job.value("verified",false)&&revision>0&&
+             due>0&&due<until&&job.value("attempts",0)>0&&job.value("attempts",0)<automaticAttemptLimit&&
+             job.value("automaticElapsedMs",int64_t{0})<automaticGameMs&&
+             j.value("manualTargetRevisions",Json::object()).value(key,uint64_t{0})==revision&&
+             selected.value("appId",int64_t{0})==job.value("appId",int64_t{0})&&
+             !stringField(selected,"selectionToken").empty())retryKeys.push_back(key);
+        }
+        if(!retryKeys.empty())try{const auto entries=std::move(Store(root_).snapshot()["entries"]);
+          for(const auto& key:retryKeys){const auto current=entries.value(key,Json::object());const auto& job=j["jobs"][key];
+            if(current.value("identityVerified",false)&&current.value("appId",int64_t{0})==job.value("appId",int64_t{0})&&
+               current.value("bindingRevision",uint64_t{0})==job.value("requestBindingRevision",uint64_t{0})&&
+               pendingMediaRefresh(current,"dynamic")&&current.value("selectedVideo",Json::object())==job.value("selectedVideo",Json::object())){keepManualRetry=true;break;}}
+        }catch(...){/* Unknown current selection does not authorize continuation. */}
+      }
+      if(keepManualRetry)j["manualState"]=phase;
+      if(!keepManualRetry&&j.value("manualUntil",int64_t{0})>0&&j.value("manualSession",std::string{})==token&&
           ((j.value("manualSessionRequest",std::string{})==j.value("manualRequestId",std::string{})&&(phase!="completed"||!manualRun(j)||manualWorkComplete(j)))||manualWorkComplete(j))){j["manualUntil"]=0;j["manualState"]=phase;}
       j["phase"] = phase;
       std::string detail = reason;
@@ -1030,7 +1490,7 @@ public:
   }
   // Used after a killed/crashed owner. Leases remain revision fenced; the
   // Store recognizes its dead PID/birth before a later worker can reacquire.
-  void recover(const std::string &token, const std::string &reason,const std::string& failedKey = {}) {
+  void recover(const std::string &token, const std::string &reason,const std::string& failedKey = {},const Json* expiredClaim = nullptr) {
     const auto j = document();
     if (token.empty() || j.value("session", std::string{}) != token)
       return;
@@ -1039,8 +1499,8 @@ public:
     }
     const auto active=j.value("active",Json::object());
     if (!active.empty()) {
-      for (auto it=active.begin();it!=active.end();++it)if(failedKey.empty()||it.key()==failedKey)result(token,it.key(),false,reason);
-    } else {
+      for (auto it=active.begin();it!=active.end();++it)if(failedKey.empty()||it.key()==failedKey)result(token,it.key(),false,reason,0,{}, {}, {},TimeoutStage::supervisor,expiredClaim?expiredClaim:&it.value());
+    } else if(!expiredClaim) {
       auto key=j.value("current",Json::object()).value("key",std::string{});
       if (key.empty()&&!j.value("sessionClaimed",false)) key=j.value("launchTarget",std::string{});
       if (!key.empty()) result(token,key,false,reason);
@@ -1085,6 +1545,22 @@ public:
 class Watcher {
   HANDLE stop_ = nullptr, event_ = nullptr;
   std::thread thread_;
+  std::mutex lifecycleMutex_;
+  // Progress-only notices do not replace the durable queue. This observer
+  // remembers only a successful file observation, never a second policy owner.
+  // File identity distinguishes atomic replacement with equal size/write time.
+  std::string preferenceStamp_;
+  void refreshPowerPreference(const fs::path& root) {
+    if (powerPolicy::ownsPreference()) return;
+    const auto path=custom_steam_library::ioPath(root/L"config"/L"game-media-downloads.json");
+    auto stamp=identityFileStamp(path);
+    if (stamp!="unavailable" && stamp==preferenceStamp_) return;
+    // Keep the original read path without a mutex wait. A replacement during
+    // this read invalidates the observation instead of certifying old bytes.
+    preferenceStamp_.clear();
+    refreshMediaPowerPreference(root);
+    if (stamp!="unavailable" && stamp==identityFileStamp(path)) preferenceStamp_=std::move(stamp);
+  }
 
 public:
   Watcher(const fs::path &root, const std::wstring &role,
@@ -1103,19 +1579,34 @@ public:
       while (WaitForMultipleObjects(2, handles, FALSE, INFINITE) ==
              WAIT_OBJECT_0 + 1) {
         try {
-          refreshMediaPowerPreference(root);
+          refreshPowerPreference(root);
+        } catch (...) {
+        }
+        // An unreadable preference must not hide the queue's unavailable state.
+        // Keep the observer alive and let its existing snapshot path report it.
+        try {
           changed();
         } catch (...) {
         }
       }
     });
   }
-  ~Watcher() {
-    SetEvent(stop_);
-    if (thread_.joinable())
-      thread_.join();
-    CloseHandle(stop_);
-    CloseHandle(event_);
+private:
+  bool finish(bool waitForThread) noexcept {
+    try{std::unique_lock lifecycle(lifecycleMutex_,std::defer_lock);
+      if(waitForThread)lifecycle.lock();else if(!lifecycle.try_lock())return false;
+      if(stop_&&!SetEvent(stop_))return false;
+      if(thread_.joinable()){
+        // The callback can still be publishing. Its events outlive it.
+        if(!waitForThread&&WaitForSingleObject(thread_.native_handle(),0)!=WAIT_OBJECT_0)return false;
+        thread_.join();
+      }
+      const auto close=[](HANDLE& value){if(!value)return true;if(!CloseHandle(value))return false;value=nullptr;return true;};
+      const bool a=close(stop_),b=close(event_);return a&&b;
+    }catch(...){return false;}
   }
+public:
+  bool finishForExit() noexcept {return finish(false);}
+  ~Watcher(){(void)finish(true);}
 };
 } // namespace ymcc::media::downloads

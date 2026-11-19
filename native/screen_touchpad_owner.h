@@ -13,6 +13,10 @@ inline constexpr const wchar_t* kNativeCandidateSwitch=L"--screen-touchpads-nati
 inline constexpr const wchar_t* kNativeLegacySwitch=L"--screen-touchpads-native-input-legacy";
 inline bool nativeStartupRequested=false,nativeStartupConflict=false;
 inline UINT_PTR ownerLifecycleEpoch=1;inline bool ownerRebindQueued=false;
+inline bool ownerPowerWithdrawn=false; // Delivery state only; the shared owner supplies power facts.
+inline bool ownerPowerObserved=false;
+inline unsigned long long ownerProjectedSuspendSerial=0;
+inline bool ownerDisplayReflowInterrupted=false;
 struct NativeStartupPolicy {bool parsed=false,requested=false,legacy=false,conflict=false;};
 inline NativeStartupPolicy parseNativeStartup(const wchar_t* commandLine) noexcept {
     NativeStartupPolicy policy;if(!commandLine||!*commandLine)return policy;int count=0;auto args=CommandLineToArgvW(commandLine,&count);if(!args)return policy;
@@ -22,36 +26,102 @@ inline NativeStartupPolicy parseNativeStartup(const wchar_t* commandLine) noexce
 inline bool onOwnerThread(HWND window) noexcept {DWORD pid=0;return window&&GetWindowThreadProcessId(window,&pid)==GetCurrentThreadId()&&pid==GetCurrentProcessId();}
 } // namespace ymcc::screenpads
 #include "screen_touchpad_visibility.h"
+#include "screen_touchpad_display_transition.h"
+#include "screen_touchpad_resume.h"
+#include "screen_touchpad_export.h"
 namespace ymcc::screenpads {
 inline bool initializeForOwner(HINSTANCE module,HWND window,const Config& config,int profile,const wchar_t* commandLine) {
     if(!onOwnerThread(window)){windowError=ERROR_ACCESS_DENIED;return false;}
+    ownerDisplayReflowInterrupted=false;
+    ownerDisplayLastTimerError.store(0,std::memory_order_relaxed);publishOwnerDisplayExport(DisplayExportPhase::Settled);
+    cancelOwnerDisplayRefresh();cancelOwnerResumeRecovery("initialized");ownerResumeRecovery.observed=false;ownerResumeRecovery.failureSequenceAtStart=nativeInputFailure.sequence;ownerResumeRecovery.firstInputFailure={};ownerFaultBudget={};ownerPowerWithdrawn=false;ownerPowerObserved=false;ownerProjectedSuspendSerial=0;
     const auto policy=parseNativeStartup(commandLine);nativeStartupRequested=policy.parsed&&!policy.legacy&&!policy.conflict;nativeStartupConflict=policy.conflict;
     ++ownerLifecycleEpoch;ownerRebindQueued=false;setNativeInputCandidate(nativeStartupRequested&&!policy.legacy&&!policy.conflict);
     visibilityRefreshObserver=syncOwnerVisibility;
-    initialize(module,window,config,profile);syncOwnerVisibility();return initialized;
+    ymcc::customtouch::resumeDisplayAfterEditing=resumeOwnerDisplayAfterEditor;
+    nativeInputFailureObserver=[] {ownerNativeInputFailed();};
+    initialize(module,window,config,profile);syncOwnerVisibility();
+    if(initialized&&!inputTeardown)openOwnerExport();
+    return initialized;
 }
-inline void ownerOnSuspend() {++ownerLifecycleEpoch;ownerRebindQueued=false;release();}
+inline void ownerOnSuspend() {
+    if(ymcc::customtouch::editing.load())ymcc::customtouch::finish(false,false);
+    if(ownerDisplayRefresh.pending||displayTransitionFence.idleSuspended)ownerDisplayReflowInterrupted=true;
+    // Release sees the withdrawn HWNDs. They must not reset normal idle state.
+    cancelOwnerDisplayRefresh(true);cancelOwnerResumeRecovery("suspended");ownerResumeRecovery.observed=false;
+    if(ownerDisplayReflowInterrupted)publishOwnerDisplayExport(DisplayExportPhase::WaitingForPowerReady);
+    // A display refresh may be on the stack inside a source dispatcher.
+    ++ownerLifecycleEpoch;++padRefreshEpoch;++buttonRefreshEpoch;++ymcc::customtouch::refreshEpoch;
+    ownerRebindQueued=false;cancelOwnerVisibilityWork();release();
+}
 inline bool queueOwnerResumeRebind() {
     // Candidate only: retain all existing Sleep Guard/standby/input-host policy.
     if(!nativeInputCandidateRequested||!initialized)return false;const HWND window=owner.load();if(!onOwnerThread(window))return false;
+    ownerResumeRecovery.observed=true;
+    // Later interactive/automatic notifications from this wake cannot rebuild
+    // the source set again after the committed-Ready verifier took ownership.
+    if(ownerResumeRecovery.consumedEpoch==ownerLifecycleEpoch)return true;
     if(ownerRebindQueued)return true;ownerRebindQueued=true;
     if(PostMessageW(window,kOwnerRebindMessage,ownerLifecycleEpoch,0))return true;
     ownerRebindQueued=false;windowError=GetLastError();return false;
 }
 inline bool consumeOwnerRebind(UINT_PTR epoch) {
-    if(epoch!=ownerLifecycleEpoch||!ownerRebindQueued||!initialized||!onOwnerThread(owner.load()))return false;
-    ownerRebindQueued=false;if(!nativeInputCandidateRequested)return false;
-    release();for(int side=0;side<2;++side)nativeInputClose(side);buttonsNativeInputDisable();
-    refresh(true);return true; // Recreate controlled sources after a compositor/device resume.
+    const HWND window=owner.load();
+    if(epoch!=ownerLifecycleEpoch||!ownerRebindQueued||!initialized||!onOwnerThread(window))return false;
+    ownerRebindQueued=false;
+    const auto lifecycleCurrent=[&]{return initialized&&!inputTeardown&&epoch==ownerLifecycleEpoch&&owner.load()==window&&
+        nativeInputCandidateRequested&&ownerResumeRecovery.consumedEpoch!=epoch&&sharedInputAllowed();};
+    const auto padEpoch=padRefreshEpoch,buttonEpoch=buttonRefreshEpoch,customEpoch=ymcc::customtouch::refreshEpoch;
+    const auto current=[&]{return lifecycleCurrent()&&padEpoch==padRefreshEpoch&&buttonEpoch==buttonRefreshEpoch&&customEpoch==ymcc::customtouch::refreshEpoch;};
+    // Cancellation and close can dispatch window messages. Only the current
+    // wake may tear down the remaining sources or request a fresh display.
+    if(!current())return false;
+    release();if(!current())return false;
+    for(int side=0;side<2;++side){nativeInputClose(side);if(!current())return false;}
+    if(!buttonsNativeInputDisableCurrent(current)||!ymcc::customtouch::detachInputsCurrent(current)||!current())return false;
+    refresh(true);return lifecycleCurrent();
+}
+inline void ownerSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1& power) {
+    if(!initialized||inputTeardown||!onOwnerThread(owner.load()))return;
+    const bool known=power.size==sizeof(power)&&power.version==1&&power.generation&&(power.flags&ymcc::sleeppower::kKnown);
+    const bool newer=known&&ownerPowerObserved&&power.suspendSerial>ownerProjectedSuspendSerial;
+    if(known){ownerPowerObserved=true;ownerProjectedSuspendSerial=std::max(ownerProjectedSuspendSerial,power.suspendSerial);}
+    // The shared publisher may coalesce NonReady and Ready into one delivery.
+    // Its suspend serial still proves that our old sources must be retired.
+    if(newer&&!ownerPowerWithdrawn){ownerPowerWithdrawn=true;ownerOnSuspend();}
+    const bool admitted=known&&ymcc::sleeppower::powerAdmitted(power);
+    if(!admitted){
+        if(!ownerPowerWithdrawn){ownerPowerWithdrawn=true;ownerOnSuspend();}
+        return;
+    }
+    if(!sharedInputAllowed())return;
+    const bool resume=ownerPowerWithdrawn;
+    ownerPowerWithdrawn=false;const auto epoch=ownerLifecycleEpoch;
+    // The timer can observe closed admission even when NonReady delivery was coalesced.
+    if(ownerDisplayReflowInterrupted){
+        queueOwnerDisplayRefresh(true,true);
+        if(epoch!=ownerLifecycleEpoch||ownerPowerWithdrawn||!initialized||inputTeardown)return;
+        // Synchronous Ready fallback can lose admission before the next
+        // projection. Do not consume the wake or start its verifier yet.
+        if(!sharedInputAllowed()){ownerPowerWithdrawn=resume;return;}
+    }
+    if(resume)queueOwnerResumeRebind();
+    if(ownerResumeRecovery.observed)ownerResumeReady(power.generation);
 }
 inline void quiesceForOwner(){
+    retireOwnerExport();
+    ownerDisplayReflowInterrupted=false;cancelOwnerDisplayRefresh();nativeInputFailureObserver=nullptr;
+    ymcc::customtouch::resumeDisplayAfterEditing=nullptr;
+    publishOwnerDisplayExport(DisplayExportPhase::Inactive);
+    cancelOwnerResumeRecovery("exiting");ownerResumeRecovery.observed=false;
     if(quickAccessEdgeObserver)quickAccessEdgeObserver(-1,false);
     quiesce();if(quickAccessContextObserver)quickAccessContextObserver();stopOwnerVisibility();visibilityRefreshObserver=nullptr;++ownerLifecycleEpoch;ownerRebindQueued=false;
 }
 inline void shutdownForOwner(){quiesceForOwner();shutdown();}
 inline Json ownerStartupState(){
     const auto inputState=state();return {{"requested",nativeStartupRequested},{"conflict",nativeStartupConflict},{"compiled",inputState.value("nativeMousePassCompiled",false)},
-        {"active",inputState.value("nativeMousePassActive",false)},{"epoch",ownerLifecycleEpoch},{"rebindQueued",ownerRebindQueued}};
+        {"active",inputState.value("nativeMousePassActive",false)},{"epoch",ownerLifecycleEpoch},{"rebindQueued",ownerRebindQueued},
+        {"resumeRecovery",ownerResumeRecoveryState()},{"displayTransition",ownerDisplayRefreshState()}};
 }
 inline bool ownerSelftestRequested(const wchar_t* commandLine) noexcept {
     if(!commandLine)return false;int count=0;auto args=CommandLineToArgvW(commandLine,&count);if(!args)return false;

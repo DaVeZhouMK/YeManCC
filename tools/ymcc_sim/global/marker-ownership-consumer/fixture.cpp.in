@@ -21,9 +21,12 @@ const std::wstring SG_DIR=L"memory",SG_SLEEP_LEASE_DIR=L"memory\\sleep",SG_MANUA
 struct NativeDetectedGame{DWORD pid=100;ULONGLONG processCreated=1234;};
 struct SgSleepTarget{DWORD pid=0;ULONGLONG processCreated=0,valveGeneration=0,powerGeneration=0;bool captured=false,markerOwned=false;};
 struct SgSuspendResult{DWORD pid=0;std::uint64_t ws=0;bool frozen=false;};struct SgResumeResult{int count=0;std::vector<DWORD> pids;};
+struct SgWorkItem{unsigned long long generation=0;bool pauseOrdinaryWitness=false;DWORD pausePid=0;ULONGLONG pauseProcessCreated=0;};
 enum class PowerLifecycle{Ready,Suspending,Suspended,Resuming};std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspending};
 std::atomic<unsigned long long> g_sgManualPauseSerial{11};std::mutex g_sgOpMtx,g_sgSleepTargetMx;SgSleepTarget g_sgSleepTarget;
 bool g_sgPauseResume=true,g_sgRepairEligible=true;
+bool g_guardEnabled=true;
+std::atomic<bool> g_exitRequested{false};
 std::map<std::wstring,std::string> files;std::set<std::wstring> directories;
 struct MemoryHandle{std::wstring path;};std::map<HANDLE,MemoryHandle> fileHandles;HANDLE nextFileHandle=10000;
 std::vector<json> operations,nativeReceipts;std::vector<int> queryModes;
@@ -42,9 +45,26 @@ bool ProcessIdToSessionId(DWORD pid,DWORD* session){*session=pid==42?currentSess
 bool focusQueryProcessIdentity(DWORD pid,void*,ULONGLONG* created){int mode=queryCalls<int(queryModes.size())?queryModes[queryCalls]:0;++queryCalls;bool ok=processAlive&&mode!=1&&mode!=2;if(mode==2)processAlive=false;if(ok)*created=mode==3?0:processBirth;op("identity-query",{{"call",queryCalls},{"pid",pid},{"ok",ok},{"created",*created},{"alive",processAlive}});return ok;}
 bool nativeValveValidateCurrentTarget(DWORD pid,ULONGLONG created,NativeDetectedGame* target){*target={pid,created};return processAlive&&pid==100&&created==processBirth;}
 bool nativeValveReadCurrentTarget(NativeDetectedGame* target,ULONGLONG* generation){*target={100,processBirth};*generation=11;return true;}
-bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD){return true;}bool sgReleaseConflictingPauseLeaseUnlocked(DWORD){return true;}
+void sgCollectStartupResumeScopeUnlocked(){}
+namespace ymcc::sleepLegacyResume{
+struct ResumeLease{bool held=false;bool current(const std::function<bool()>& check)const{return held&&check();}};
+}
+ymcc::sleepLegacyResume::ResumeLease sgAcquirePauseFiles(const std::wstring& dir,DWORD pid,const std::function<bool()>& current){return {(dir==SG_SLEEP_LEASE_DIR||dir==SG_MANUAL_DIR)&&pid&&current()};}
+bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD,const std::function<bool()>& current){return !current||current();}
+bool sgReleaseConflictingPauseLeaseUnlocked(DWORD,const std::function<bool()>& current){return !current||current();}
 HANDLE OpenProcess(int,bool,DWORD pid){++processOpenCalls;op("memory-process-open",{{"pid",pid},{"alive",processAlive}});return processAlive?pid:0;}
 ULONGLONG nativeProcessCreatedFromHandle(HANDLE){return processBirth+(openedBirthRace?1:0);}
+DWORD GetLastError(){return 0;}
+ULONGLONG GetTickCount64(){return 1000;}
+DWORD GetFullPathNameW(const wchar_t* input,DWORD capacity,wchar_t* buffer,wchar_t**){
+ const std::wstring relative(input);
+ if(relative.rfind(L"memory\\",0)!=0)return 0;
+ const std::wstring resolved=L"X:\\"+relative;
+ if(capacity<=resolved.size())return static_cast<DWORD>(resolved.size()+1);
+ if(!buffer)return 0;
+ std::copy(resolved.cbegin(),resolved.cend(),buffer);buffer[resolved.size()]=L'\0';
+ return static_cast<DWORD>(resolved.size());
+}
 HANDLE CreateFileW(const wchar_t* path,DWORD,DWORD,void*,DWORD,DWORD flags,void*){++createCalls;lastCreateFlags=flags;const std::wstring p(path);op("memory-create",{{"path",narrow(p)},{"flags",flags},{"fail",failCreate}});if(failCreate||files.count(p))return INVALID_HANDLE_VALUE;files[p]={};const HANDLE h=nextFileHandle++;fileHandles[h]={p};return h;}
 bool WriteFile(HANDLE h,const void* data,DWORD length,DWORD* written,void*){++writeCalls;*written=failWrite?0:shortWrite&&length?length-1:length;op("memory-write",{{"bytesRequested",length},{"bytesWritten",*written},{"ok",!failWrite}});if(!fileHandles.count(h))return false;files[fileHandles[h].path].append(static_cast<const char*>(data),*written);return !failWrite;}
 bool FlushFileBuffers(HANDLE){++flushCalls;op("memory-flush",{{"ok",!failFlush}});return !failFlush;}
@@ -61,7 +81,12 @@ bool sgReadSleepTarget(SgSleepTarget& target){target=g_sgSleepTarget;return targ
 void sgClearSleepTargetIfMatches(const SgSleepTarget& target){if(g_sgSleepTarget.pid==target.pid&&g_sgSleepTarget.processCreated==target.processCreated&&g_sgSleepTarget.powerGeneration==target.powerGeneration)g_sgSleepTarget={};}
 void sgWriteFile(const std::wstring& path,const std::string& value){files[path]=value;op("memory-capture-metadata",{{"path",narrow(path)}});}
 bool sgHasMarkerFiles(const std::wstring& dir){for(const auto& item:files)if(item.first.rfind(dir+L"\\",0)==0)return true;return false;}
-SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool){++staleRecoveryCalls;return {};}
+SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool,std::nullptr_t,const std::function<bool()>& current){if(current())++staleRecoveryCalls;return {};}
+bool sgOrdinaryPauseCurrent(const SgWorkItem&){return false;}
+bool sgReturnedPauseCurrent(const SgWorkItem&){return false;}
+bool sensorDetailLoggingGate(){return false;}
+void sgRecordSleepPauseReceipt(unsigned long long,const SgSuspendResult&,const NativeDetectedGame&,unsigned long long,const char*,const json&){}
+static json sgSuspendGameByPidUnlocked(DWORD,const std::wstring&,ULONGLONG,const NativeDetectedGame*,bool,unsigned long long,const std::function<bool()>& = {},const std::function<LONG(HANDLE,bool&,ULONGLONG&)>& = {});
 // EXACT_COMBINATION_FUNCTIONS
 int groups=0,failedGroups=0;
 void record(const char* label,json expected,json actual,bool passed){++groups;if(!passed)++failedGroups;std::cout<<json({{"case",label},{"passed",passed},{"expected",expected},{"actual",actual},{"trace",operations}}).dump()<<std::endl;}

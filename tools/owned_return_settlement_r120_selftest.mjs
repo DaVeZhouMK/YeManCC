@@ -25,7 +25,7 @@ const audit=command('steam-integration-audit',process.execPath,['tools/steam-int
 let inventory;try { inventory=JSON.parse(audit.stdout); } catch { inventory={parseFailed:true}; }
 save('steam-integration-audit.json',inventory);
 command('git-status-before','git',['status','--short'],root);
-const production=['native/main.cpp','native/msi_owned_return_runtime.h','native/msi_owned_return_recovery.h',
+const production=['native/main.cpp','native/sleep_power_state.h','native/msi_owned_return_runtime.h','native/msi_owned_return_recovery.h',
   'native/msi_crash_recovery_runtime.h','native/msi_crash_recovery_journal.h','deps/json/json.hpp'];
 const bytes=new Map(production.map(name=>[name,fs.readFileSync(path.join(root,name))]));
 const snapshot=path.join(run,'snapshot');

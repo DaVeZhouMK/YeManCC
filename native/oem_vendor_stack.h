@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <memory>
 // HC ISpaceWatcher parity, with durable original-state leases and no new worker.
 // Included only after MachineIdentity/kOemBit*/json and serial-worker declarations.
 #ifndef YMCC_VENDOR_STACK_FIXTURE
@@ -31,6 +32,82 @@ static std::vector<std::wstring> g_oemVendorTaskPaths;
 static bool g_oemVendorTaskDiscoveryComplete = false;
 static constexpr size_t kOemVendorMaxTaskPaths = 64;
 static bool g_oemVendorStackWanted = false, g_oemVendorStackOpQueued = false;
+// A serial closure owns this publication until it settles or is discarded.
+// Dropping a queued closure does not spend an attempt or start any new work.
+struct OemVendorStackQueueTicket;
+static const OemVendorStackQueueTicket* g_oemVendorStackQueueOwner = nullptr;
+static const char* g_oemVendorStackQueueStage = "idle";
+static ULONGLONG g_oemVendorStackQueuedAt = 0, g_oemVendorStackStartedAt = 0;
+struct OemVendorStackQueueTicket {
+    unsigned long long submittedEpoch = 0;
+    ~OemVendorStackQueueTicket() noexcept {
+        try {
+            std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+            if (g_oemVendorStackQueueOwner == this) {
+                g_oemVendorStackQueueOwner = nullptr;
+                g_oemVendorStackOpQueued = false;
+                g_oemVendorStackQueueStage = "queue-abandoned";
+            }
+        } catch (...) { /* Retain unknown ownership if the mutex itself fails. */ }
+    }
+};
+static void oemVendorStackQueueLog(const char* state, unsigned long long submittedEpoch,
+                                  unsigned long long executionEpoch, bool accepted) noexcept {
+    const DWORD savedError = GetLastError();
+    try {
+        appendNativeLifecycleLog("oem-vendor-stack", {{"state", state},
+            {"submittedEpoch", submittedEpoch}, {"executionEpoch", executionEpoch},
+            {"accepted", accepted}, {"externalDefaultActionSuppressed", "NOT_CONFIRMED"}});
+    } catch (...) { /* Diagnostics cannot change the serial owner's result. */ }
+    SetLastError(savedError);
+}
+
+
+// Diagnostic context only. It never participates in admission or lease ownership.
+static thread_local unsigned long long g_oemVendorStackIoTraceEpoch = 0;
+struct OemVendorStackIoTraceScope {
+    unsigned long long previous;
+    explicit OemVendorStackIoTraceScope(unsigned long long epoch) noexcept
+        : previous(g_oemVendorStackIoTraceEpoch) { g_oemVendorStackIoTraceEpoch = epoch; }
+    ~OemVendorStackIoTraceScope() noexcept { g_oemVendorStackIoTraceEpoch = previous; }
+};
+static void oemVendorStackIoTraceLog(const char* state, const char* phase,
+                                    const char* call, const wchar_t* target,
+                                    ULONGLONG started, bool result, DWORD error) noexcept {
+    const DWORD savedError = GetLastError();
+    try {
+        appendNativeLifecycleLog("oem-vendor-stack", {{"state", state},
+            {"phase", phase}, {"call", call}, {"target", W2U(target ? target : L"")},
+            {"executionEpoch", g_oemVendorStackIoTraceEpoch},
+            {"epochBound", g_oemVendorStackIoTraceEpoch != 0},
+            {"callStartedTickMs", started}, {"elapsedMs", GetTickCount64() - started},
+            {"result", result}, {"win32Error", error},
+            {"externalDefaultActionSuppressed", "NOT_CONFIRMED"}});
+    } catch (...) { /* Logging must not change any return, error or exception. */ }
+    SetLastError(savedError);
+}
+template<class Call>
+static auto oemVendorStackIoCall(const char* phase, const char* call,
+                                 const wchar_t* target, Call operation) -> decltype(operation()) {
+    const DWORD incomingError = GetLastError();
+    const auto started = GetTickCount64();
+    oemVendorStackIoTraceLog("io-call-begin", phase, call, target, started, false, ERROR_SUCCESS);
+    SetLastError(incomingError);
+    try {
+        const auto result = operation();
+        const DWORD error = GetLastError();
+        oemVendorStackIoTraceLog("io-call-return", phase, call, target, started,
+            static_cast<bool>(result), result ? ERROR_SUCCESS : error);
+        SetLastError(error);
+        return result;
+    } catch (...) {
+        const DWORD error = GetLastError();
+        oemVendorStackIoTraceLog("io-call-exception", phase, call, target, started, false, error);
+        SetLastError(error);
+        throw;
+    }
+}
+
 // Two independent owners feed the same reversible lease. The existing shortcut
 // path remains the default owner; the explicit MSI controller-only shield is a
 // second owner so a settings refresh cannot accidentally clear it.
@@ -266,9 +343,21 @@ static uint64_t oemVendorStackFrontMask(YmccFamily family) {
     default: return 0;
     }
 }
+// A shortcut binding or recording session owns input, not the official
+// frontend's installation/service lifetime. Keep the exact service allowlist
+// below for returning legacy leases; do not acquire it implicitly on ROG.
+static bool oemVendorStackAutomaticTakeoverAllowed(YmccFamily family) {
+    switch (family) {
+    case YmccFamily::AsusRogAllyX: case YmccFamily::AsusRogAlly:
+    case YmccFamily::AsusRogAllyClassic: case YmccFamily::AsusRogAllyXClassic:
+        return false;
+    default: return true;
+    }
+}
 static bool oemVendorStackRuleCanTakeover(YmccFamily family, uint64_t mask,
                                           bool noDesktopKeys, const std::string& trigger) {
-    if (!noDesktopKeys || !mask || (mask & (mask - 1)) || !(mask & oemVendorStackFrontMask(family))) return false;
+    if (!oemVendorStackAutomaticTakeoverAllowed(family) || !noDesktopKeys || !mask ||
+        (mask & (mask - 1)) || !(mask & oemVendorStackFrontMask(family))) return false;
     if (family == YmccFamily::AsusRogAllyX || family == YmccFamily::AsusRogAlly ||
         family == YmccFamily::AsusRogAllyClassic || family == YmccFamily::AsusRogAllyXClassic ||
         family == YmccFamily::MsiClaw) return trigger == "press" || trigger == "double";
@@ -557,6 +646,7 @@ static bool oemVendorStackJournalInteger(const json& value, unsigned long long m
     return number >= minimum && number <= maximum;
 }
 static bool oemVendorStackLoadJournal() {
+    return oemVendorStackIoCall("journal", "journal-load", L"return-journal", [&]() -> bool {
     try {
         std::string bytes; bool exists = false;
         if (!oemVendorStackReadJournal(bytes, exists)) throw 0;
@@ -639,8 +729,10 @@ static bool oemVendorStackLoadJournal() {
         g_oemVendorJournalPendingBytes.clear(); g_oemVendorStackLoaded = true; g_oemVendorStackJournalValid = true; return true;
     } catch (...) { g_oemVendorStackJournalValid = false; }
     appendNativeLifecycleLog("oem-vendor-stack", {{"state", "recovery-held"}, {"reason", "journal-unreadable-or-unbound"}}); return false;
+    });
 }
 static bool oemVendorStackSaveJournal() {
+    return oemVendorStackIoCall("journal", "journal-save", L"return-journal", [&]() -> bool {
     try {
         if (!oemVendorStackLoadJournal()) return false;
         json services = json::array(), tasks = json::array();
@@ -678,18 +770,19 @@ static bool oemVendorStackSaveJournal() {
         g_oemVendorJournalBytes = bytes; g_oemVendorJournalExists = true; g_oemVendorJournalDocument = std::move(doc);
         g_oemVendorJournalPendingBytes.clear(); return true;
     } catch (...) { return false; }
+    });
 }
 static bool oemVendorStackRestoreLocked(const char* reason, bool tasksOnly = false) {
     if (!oemVendorStackLoadJournal()) return false;
     if (g_oemVendorServiceLeases.empty() && g_oemVendorTaskLeases.empty()) return true;
-    SC_HANDLE scm = tasksOnly || g_oemVendorServiceLeases.empty() ? nullptr : OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE scm = tasksOnly || g_oemVendorServiceLeases.empty() ? nullptr : oemVendorStackIoCall("restore", "OpenSCManagerW", L"SCM", [&] { return OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT); });
     std::vector<OemVendorServiceLease> pending = tasksOnly ? g_oemVendorServiceLeases : std::vector<OemVendorServiceLease>{};
     if (!tasksOnly) for (auto& lease : g_oemVendorServiceLeases) {
         if (!oemVendorStackLoadJournal()) { pending.push_back(lease); continue; }
         bool ok = false; DWORD type = 0, state = 0, error = ERROR_SUCCESS;
-        SC_HANDLE service = scm ? OpenServiceW(scm, lease.name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_PAUSE_CONTINUE | SERVICE_CHANGE_CONFIG) : nullptr;
-        if (service && oemVendorServiceQueryConfig(service, type)) {
-            bool runningOk = oemVendorServiceStable(service, state);
+        SC_HANDLE service = scm ? oemVendorStackIoCall("restore", "OpenServiceW", lease.name.c_str(), [&] { return OpenServiceW(scm, lease.name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_PAUSE_CONTINUE | SERVICE_CHANGE_CONFIG); }) : nullptr;
+        if (service && oemVendorStackIoCall("restore", "QueryServiceConfigW", lease.name.c_str(), [&] { return oemVendorServiceQueryConfig(service, type); })) {
+            bool runningOk = oemVendorStackIoCall("restore", "service-stable-poll", lease.name.c_str(), [&] { return oemVendorServiceStable(service, state); });
             const DWORD originalState = lease.originalState ? lease.originalState : lease.wasRunning ? SERVICE_RUNNING : SERVICE_STOPPED;
             bool configOk = type == lease.originalStartType;
             const bool original = configOk && runningOk && state == originalState;
@@ -700,29 +793,29 @@ static bool oemVendorStackRestoreLocked(const char* reason, bool tasksOnly = fal
                 if (!oemVendorStackSaveJournal()) { lease.returnPrepared = false; admitted = false; }
             }
             if (admitted && !configOk && type == SERVICE_DISABLED)
-                configOk = ChangeServiceConfigW(service, SERVICE_NO_CHANGE, lease.originalStartType, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) != FALSE;
-            configOk = admitted && configOk && oemVendorServiceQueryConfig(service, type) && type == lease.originalStartType;
+                configOk = oemVendorStackIoCall("restore", "ChangeServiceConfigW:original", lease.name.c_str(), [&] { return ChangeServiceConfigW(service, SERVICE_NO_CHANGE, lease.originalStartType, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }) != FALSE;
+            configOk = admitted && configOk && oemVendorStackIoCall("restore", "QueryServiceConfigW", lease.name.c_str(), [&] { return oemVendorServiceQueryConfig(service, type); }) && type == lease.originalStartType;
             if (configOk && runningOk && lease.wasRunning && state == SERVICE_STOPPED) {
-                runningOk = lease.originalStartType != SERVICE_DISABLED && StartServiceW(service, 0, nullptr) &&
-                    oemVendorServiceWait(service, SERVICE_RUNNING, kOemVendorServiceBudgetMs);
-                if (runningOk) runningOk = oemVendorServiceQueryState(service, state);
+                runningOk = lease.originalStartType != SERVICE_DISABLED && oemVendorStackIoCall("restore", "StartServiceW", lease.name.c_str(), [&] { return StartServiceW(service, 0, nullptr); }) &&
+                    oemVendorStackIoCall("restore", "service-running-poll", lease.name.c_str(), [&] { return oemVendorServiceWait(service, SERVICE_RUNNING, kOemVendorServiceBudgetMs); });
+                if (runningOk) runningOk = oemVendorStackIoCall("restore", "QueryServiceStatusEx:readback", lease.name.c_str(), [&] { return oemVendorServiceQueryState(service, state); });
             }
             if (configOk && runningOk && lease.wasRunning && state != originalState) {
                 SERVICE_STATUS status{};
-                runningOk = ControlService(service, originalState == SERVICE_PAUSED ? SERVICE_CONTROL_PAUSE : SERVICE_CONTROL_CONTINUE, &status) &&
-                    oemVendorServiceWait(service, originalState, kOemVendorServiceBudgetMs);
+                runningOk = oemVendorStackIoCall("restore", "ControlService:original", lease.name.c_str(), [&] { return ControlService(service, originalState == SERVICE_PAUSED ? SERVICE_CONTROL_PAUSE : SERVICE_CONTROL_CONTINUE, &status); }) &&
+                    oemVendorStackIoCall("restore", "service-original-poll", lease.name.c_str(), [&] { return oemVendorServiceWait(service, originalState, kOemVendorServiceBudgetMs); });
             }
-            if (configOk && runningOk) runningOk = oemVendorServiceQueryState(service, state) && state == originalState;
+            if (configOk && runningOk) runningOk = oemVendorStackIoCall("restore", "QueryServiceStatusEx:readback", lease.name.c_str(), [&] { return oemVendorServiceQueryState(service, state); }) && state == originalState;
             ok = configOk && runningOk;
             if (!configOk && type != SERVICE_DISABLED && type != lease.originalStartType) error = ERROR_REVISION_MISMATCH;
         }
         if (!ok && !error) error = GetLastError() ? GetLastError() : ERROR_TIMEOUT;
         appendNativeLifecycleLog("oem-vendor-stack", {{"state", ok ? "restored" : "restore-failed"}, {"service", W2U(lease.name)},
             {"reason", reason ? reason : "app-exit"}, {"startTypeReadback", type}, {"serviceStateReadback", state}, {"win32Error", error}});
-        if (service) CloseServiceHandle(service);
+        if (service) oemVendorStackIoCall("restore", "CloseServiceHandle", lease.name.c_str(), [&] { return CloseServiceHandle(service); });
         if (!ok) pending.push_back(lease);
     }
-    if (scm) CloseServiceHandle(scm);
+    if (scm) oemVendorStackIoCall("restore", "CloseServiceHandle:SCM", L"SCM", [&] { return CloseServiceHandle(scm); });
     std::vector<OemVendorTaskLease> pendingTasks;
     for (auto& lease : g_oemVendorTaskLeases) {
         if (!oemVendorStackLoadJournal()) { pendingTasks.push_back(lease); continue; }
@@ -895,11 +988,11 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
             {"enabledReadback", facts.enabled}, {"runningReadback", facts.running}, {"win32Error", ok ? ERROR_SUCCESS : GetLastError()}});
         allOk = allOk && ok;
     }
-    SC_HANDLE scm = names.empty() ? nullptr : OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE scm = names.empty() ? nullptr : oemVendorStackIoCall("apply", "OpenSCManagerW", L"SCM", [&] { return OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT); });
     if (!names.empty() && !scm) { appendNativeLifecycleLog("oem-vendor-stack", {{"state", "apply-failed"}, {"reason", "scm-open-failed"}, {"win32Error", GetLastError()}}); return false; }
     for (const auto& name : names) {
         if (!oemVendorStackIntentCurrent(epoch)) { allOk = false; break; }
-        SC_HANDLE service = OpenServiceW(scm, name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_CHANGE_CONFIG);
+        SC_HANDLE service = oemVendorStackIoCall("apply", "OpenServiceW", name.c_str(), [&] { return OpenServiceW(scm, name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_CHANGE_CONFIG); });
         if (!service) {
             const auto error = GetLastError();
             if (error != ERROR_SERVICE_DOES_NOT_EXIST) { ++unavailable; allOk = false; }
@@ -907,38 +1000,38 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
         }
         ++existing; DWORD original = 0, before = 0;
         auto lease = std::find_if(g_oemVendorServiceLeases.begin(), g_oemVendorServiceLeases.end(), [&](const auto& x){return x.name == name;});
-        bool qualified = oemVendorServiceQueryConfig(service, original) && original >= SERVICE_AUTO_START && original <= SERVICE_DISABLED;
+        bool qualified = oemVendorStackIoCall("apply", "QueryServiceConfigW", name.c_str(), [&] { return oemVendorServiceQueryConfig(service, original); }) && original >= SERVICE_AUTO_START && original <= SERVICE_DISABLED;
         // Pending state is not a permanent capability failure. Stabilize it before
         // observing the original running fact; already-leased STOP_PENDING may finish.
-        qualified = qualified && oemVendorServiceStable(service, before);
+        qualified = qualified && oemVendorStackIoCall("apply", "service-stable-poll", name.c_str(), [&] { return oemVendorServiceStable(service, before); });
         if (lease != g_oemVendorServiceLeases.end() && original != SERVICE_DISABLED && original != lease->originalStartType) {
             qualified = false; SetLastError(ERROR_REVISION_MISMATCH);
         }
         if (lease == g_oemVendorServiceLeases.end() && original == SERVICE_DISABLED && before != SERVICE_STOPPED) qualified = false;
         if (!qualified) {
             allOk = false; appendNativeLifecycleLog("oem-vendor-stack", {{"state", "apply-held"}, {"service", W2U(name)},
-                {"reason", "service-facts-unqualified"}, {"serviceStateReadback", before}, {"win32Error", GetLastError()}}); CloseServiceHandle(service); continue;
+                {"reason", "service-facts-unqualified"}, {"serviceStateReadback", before}, {"win32Error", GetLastError()}}); oemVendorStackIoCall("apply", "CloseServiceHandle", name.c_str(), [&] { return CloseServiceHandle(service); }); continue;
         }
         if (lease == g_oemVendorServiceLeases.end() && (original != SERVICE_DISABLED || before != SERVICE_STOPPED)) {
             g_oemVendorServiceLeases.push_back({name, original, before == SERVICE_RUNNING || before == SERVICE_PAUSED, before});
             if (!oemVendorStackSaveJournal()) {
                 g_oemVendorServiceLeases.pop_back(); allOk = false;
                 appendNativeLifecycleLog("oem-vendor-stack", {{"state", "apply-held"}, {"service", W2U(name)}, {"reason", "journal-write-failed"}});
-                CloseServiceHandle(service); break;
+                oemVendorStackIoCall("apply", "CloseServiceHandle", name.c_str(), [&] { return CloseServiceHandle(service); }); break;
             }
         }
         bool disabled = original == SERVICE_DISABLED, stopSent = false;
         DWORD disableError = ERROR_SUCCESS, stopError = ERROR_SUCCESS;
-        if (!disabled && oemVendorStackIntentCurrent(epoch)) disabled = ChangeServiceConfigW(service, SERVICE_NO_CHANGE, SERVICE_DISABLED,
-            SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) != FALSE;
+        if (!disabled && oemVendorStackIntentCurrent(epoch)) disabled = oemVendorStackIoCall("apply", "ChangeServiceConfigW:DISABLED", name.c_str(), [&] { return ChangeServiceConfigW(service, SERVICE_NO_CHANGE, SERVICE_DISABLED,
+            SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }) != FALSE;
         if (!disabled) disableError = GetLastError();
         if (disabled && before != SERVICE_STOPPED && oemVendorStackIntentCurrent(epoch)) {
-            SERVICE_STATUS status{}; stopSent = ControlService(service, SERVICE_CONTROL_STOP, &status) != FALSE;
-            if (stopSent) { if (!oemVendorServiceWait(service, SERVICE_STOPPED, kOemVendorServiceBudgetMs)) stopError = GetLastError(); }
+            SERVICE_STATUS status{}; stopSent = oemVendorStackIoCall("apply", "ControlService:STOP", name.c_str(), [&] { return ControlService(service, SERVICE_CONTROL_STOP, &status); }) != FALSE;
+            if (stopSent) { if (!oemVendorStackIoCall("apply", "service-stopped-poll", name.c_str(), [&] { return oemVendorServiceWait(service, SERVICE_STOPPED, kOemVendorServiceBudgetMs); })) stopError = GetLastError(); }
             else stopError = GetLastError();
         }
         DWORD afterType = 0, afterState = 0;
-        const bool readback = oemVendorServiceQueryConfig(service, afterType) && oemVendorServiceQueryState(service, afterState);
+        const bool readback = oemVendorStackIoCall("apply", "QueryServiceConfigW:readback", name.c_str(), [&] { return oemVendorServiceQueryConfig(service, afterType); }) && oemVendorStackIoCall("apply", "QueryServiceStatusEx:readback", name.c_str(), [&] { return oemVendorServiceQueryState(service, afterState); });
         const DWORD readbackError = readback ? ERROR_SUCCESS : GetLastError();
         const bool ok = readback && afterType == SERVICE_DISABLED && afterState == SERVICE_STOPPED;
         const DWORD error = ok ? ERROR_SUCCESS : readbackError ? readbackError : disableError ? disableError : stopError ? stopError : ERROR_TIMEOUT;
@@ -947,9 +1040,9 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
             {"reason", reason ? reason : "configured-oem-rule"}, {"startTypeBefore", original}, {"serviceStateBefore", before},
             {"disabledSent", disabled}, {"stopSent", stopSent}, {"readbackVerified", readback}, {"startTypeReadback", afterType},
             {"serviceStateReadback", afterState}, {"win32Error", error}});
-        CloseServiceHandle(service);
+        oemVendorStackIoCall("apply", "CloseServiceHandle", name.c_str(), [&] { return CloseServiceHandle(service); });
     }
-    if (scm) CloseServiceHandle(scm);
+    if (scm) oemVendorStackIoCall("apply", "CloseServiceHandle:SCM", L"SCM", [&] { return CloseServiceHandle(scm); });
     if (oemVendorStackIntentCurrent(epoch)) allOk = oemVendorProcessesStop(processNames, epoch) && allOk;
     else allOk = false;
     if (controllerOnly && !wakePass) {
@@ -977,6 +1070,7 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
     return allOk;
 }
 static void oemVendorStackSchedule() {
+    std::shared_ptr<OemVendorStackQueueTicket> ticket;
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
       const auto now = GetTickCount64();
       oemVendorStackShieldWakeRefreshLocked(now);
@@ -986,16 +1080,30 @@ static void oemVendorStackSchedule() {
       if (g_oemVendorStackOpQueued || g_oemVendorStackRequested == g_oemVendorStackCompleted ||
           g_exitRequested.load(std::memory_order_acquire) || g_machineIdentity.family == YmccFamily::Unknown ||
           (g_oemVendorStackRetryAt && GetTickCount64() < g_oemVendorStackRetryAt)) return;
-      g_oemVendorStackOpQueued = true; }
-    const bool accepted = gamepadSerialSubmit([] {
+      ticket = std::make_shared<OemVendorStackQueueTicket>();
+      g_oemVendorStackOpQueued = true;
+      ticket->submittedEpoch = g_oemVendorStackRequested;
+      g_oemVendorStackQueueOwner = ticket.get();
+      g_oemVendorStackQueueStage = "queued";
+      g_oemVendorStackQueuedAt = now; g_oemVendorStackStartedAt = 0; }
+    bool accepted = false;
+    try { accepted = gamepadSerialSubmit([ticket] {
         unsigned long long epoch; bool wanted, wakePass;
         { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
           oemVendorStackShieldWakeRefreshLocked(GetTickCount64());
           epoch = g_oemVendorStackRequested; wanted = g_oemVendorStackWanted;
-          wakePass = epoch == g_oemVendorShieldWake.epoch; }
+          wakePass = epoch == g_oemVendorShieldWake.epoch;
+          g_oemVendorStackQueueStage = "waiting-io";
+          g_oemVendorStackStartedAt = GetTickCount64(); }
+        oemVendorStackQueueLog("worker-started", ticket->submittedEpoch, epoch, true);
         const auto started = GetTickCount64();
         bool ok = false;
-        { std::lock_guard<std::mutex> io(g_oemVendorStackIoMx);
+        try {
+          std::lock_guard<std::mutex> io(g_oemVendorStackIoMx);
+          { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+            g_oemVendorStackQueueStage = "io-acquired"; }
+          OemVendorStackIoTraceScope ioTrace(epoch);
+          oemVendorStackQueueLog("worker-io-acquired", ticket->submittedEpoch, epoch, true);
           // A queued wake job may have waited beyond its window, or the user
           // may have disabled the shield while this worker was busy.
           bool current;
@@ -1023,9 +1131,16 @@ static void oemVendorStackSchedule() {
               }
           }
         }
+        catch (...) {
+            // The serial worker catches exceptions too, but cannot return this
+            // consumer's publication or account for its existing retry budget.
+            oemVendorStackQueueLog("worker-exception", ticket->submittedEpoch, epoch, false);
+        }
         bool exhausted = false;
         { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
           g_oemVendorStackOpQueued = false;
+          g_oemVendorStackQueueOwner = nullptr;
+          g_oemVendorStackQueueStage = "settled";
           oemVendorStackShieldWakeRefreshLocked(GetTickCount64());
           if (epoch == g_oemVendorStackRequested &&
               (!wakePass || oemVendorStackShieldWakeAliveLocked(GetTickCount64()))) {
@@ -1041,13 +1156,21 @@ static void oemVendorStackSchedule() {
                   GetTickCount64() + (g_oemVendorStackAttempts == 1 ? 1000 : 3000);
           }
         }
+        oemVendorStackQueueLog("worker-finished", ticket->submittedEpoch, epoch, ok);
         if (wakePass) appendNativeLifecycleLog("oem-vendor-stack", {{"state", "wake-guard-pass"},
             {"requestedEpoch", epoch}, {"ok", ok}, {"durationMs", GetTickCount64() - started},
             {"intervalMs", kOemVendorShieldWakeIntervalMs}});
         if (exhausted) appendNativeLifecycleLog("oem-vendor-stack", {{"state", "retry-exhausted"}, {"attempts", kOemVendorMaxAttempts}, {"externalDefaultActionSuppressed", "NOT_CONFIRMED"}});
         oemVendorStackSchedule(); // Newer intent only, or later existing 400ms refresh.
-    });
-    if (!accepted) { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorStackOpQueued = false; }
+    }); } catch (...) { accepted = false; }
+    if (!accepted) {
+        std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
+        if (g_oemVendorStackQueueOwner == ticket.get()) {
+            g_oemVendorStackOpQueued = false; g_oemVendorStackQueueOwner = nullptr;
+            g_oemVendorStackQueueStage = "queue-refused";
+        }
+    }
+    oemVendorStackQueueLog("queue-submit-result", ticket->submittedEpoch, 0, accepted);
 }
 static void oemVendorStackShieldWakeBegin(unsigned long long generation, const char* reason) {
     const auto now = GetTickCount64();
@@ -1094,7 +1217,8 @@ static void oemVendorStackRequest(bool wanted) {
 }
 static void oemVendorStackRecordingRequest(bool wanted) {
     const auto family = g_machineIdentity.family;
-    const bool accepted = wanted && oemVendorStackFamilySupported(family) && oemVendorStackMachineSupported();
+    const bool accepted = wanted && oemVendorStackAutomaticTakeoverAllowed(family) &&
+        oemVendorStackFamilySupported(family) && oemVendorStackMachineSupported();
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx); g_oemVendorRecordingWanted = accepted; }
     oemVendorStackUpdateIntent("shortcut-recording", wanted);
 }
@@ -1135,6 +1259,13 @@ static json oemVendorStackShieldRuntimeSnapshot() {
         g_oemVendorStackRequested == g_oemVendorStackCompleted;
     return {{"effective", current},
             {"shortcutOwnerActive", g_oemVendorShortcutWanted},
+            {"operationQueued", g_oemVendorStackOpQueued},
+            {"operationStage", g_oemVendorStackQueueStage},
+            {"queuedAtTick", g_oemVendorStackQueuedAt},
+            {"startedAtTick", g_oemVendorStackStartedAt},
+            {"attempts", g_oemVendorStackAttempts},
+            {"retryAtTick", g_oemVendorStackRetryAt},
+            {"externalDefaultActionSuppressed", "NOT_CONFIRMED"},
             {"isolationOwnerActive", g_oemVendorStackWanted},
             {"wakeGuardActive", oemVendorStackShieldWakeAliveLocked(GetTickCount64())},
             {"wakeGuardGeneration", g_oemVendorShieldWake.generation},

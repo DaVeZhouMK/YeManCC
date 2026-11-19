@@ -4,6 +4,7 @@ L"csrss", L"winlogon", L"lsass", L"services", L"smss", L"system", L"idle",
     L"dwm", L"explorer", L"msedge", L"chrome", L"firefox", L"brave", L"opera",
     L"msedgewebview2", L"searchhost", L"fontdrvhost", L"sihost", L"taskhostw",
     L"audiodg", L"nvcontainer", L"nvdisplay", L"nvdisplaycontainer", L"rundll32",
+    L"igcc", L"igcctray", // Intel Graphics Command Center UI and tray.
     L"conhost", L"systemsettings", L"shellhost", L"startmenuexperiencehost",
     L"runtimebroker", L"applicationframehost", L"peopleexperiencehost", L"lockapp", L"svchost",
     L"powershell", L"pwsh", L"yemancc", L"yemantdpctl", L"rtss", L"rtsshooksloader*",

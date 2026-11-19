@@ -13,8 +13,21 @@ if (typeof (globalThis as any).CustomEvent === 'undefined') {
 }
 const EXE = 'C:\\fixture\\YeManFanHost.exe', PID = 9411, CREATED = '133001111111111111';
 const TOKEN = '0123456789abcdef'.repeat(4);
+const PARENT = { valid: true, pid: 20000, path: 'C:\\fixture\\YeManCC.exe', processCreated: '133001111111111110' };
+const HOST_SHA = 'a'.repeat(64);
+const hostFile = { path: 'YeManFanHost.dll', sha256: HOST_SHA };
+const healthBody = (pid: number, created: string, state: object) => JSON.stringify({
+  ok: true, host: 'YeManFanHost', protocolVersion: 2, state,
+  sharedPowerBusiness: { profile: 'native-f5-deadline-v1', hostPid: pid, hostProcessCreated: created,
+    hostPath: EXE, hostAssemblySha256: HOST_SHA, hostAssemblyMvid: '00112233-4455-6677-8899-aabbccddeeff',
+    parentPid: PARENT.pid, parentProcessCreated: PARENT.processCreated, parentPath: PARENT.path },
+});
 let current: any = { valid: false, pid: PID };
 let exact: any = { ok: false, matched: true, exited: false, reason: 'still-running' };
+let loseExitReceipt = false;
+let exitReadsToDrop = 0;
+let observedExit: any = null;
+let observedExitAt: number | null = null;
 let tree: any = { ok: false, attempted: 1, terminated: 0 };
 let calls: Array<{ cmd: string; args: any }> = [];
 let listener: ((event: { data: any }) => void) | undefined;
@@ -96,7 +109,7 @@ async function handoffInvoke(cmd: string, a: any, f: HandoffFixture): Promise<an
     }
     if (endpoint === '/health' && f.launched && ['off-during-ready', 'generation-during-ready'].includes(f.kind)) f.current = false;
     if (endpoint === '/health') return { status: 200,
-      body: JSON.stringify({ ok: true, host: 'YeManFanHost', protocolVersion: 2, state: handoffState(f) }), headers: '' };
+      body: healthBody(f.launched ? NEW_PID : PID, f.launched ? NEW_CREATED : CREATED, handoffState(f)), headers: '' };
     if (endpoint === '/api/close') return { status: 200,
       body: JSON.stringify({ ok: true, state: handoffState(f) }), headers: '' };
     throw new Error('unexpected handoff endpoint ' + endpoint);
@@ -107,14 +120,13 @@ async function handoffInvoke(cmd: string, a: any, f: HandoffFixture): Promise<an
     assert.equal(f.launched, false, 'one request launches at most one replacement');
     f.launched = true; f.trace.push('launch'); return { ok: true, pid: NEW_PID };
   }
-  if (cmd === 'app.pid') return 20000;
   if (cmd === 'fs.exists') return !/YeManFanBackendV3Adapter\.dll$/i.test(String(a.path));
   if (cmd === 'fs.sha256File') return 'a'.repeat(64);
   if (cmd === 'fs.readTextFile' || cmd === 'fs.readTextRange') {
     let content: string;
     if (/YeManFanHost\.payload\.json$/i.test(a.path)) content = JSON.stringify({ schemaVersion: 2,
       runtimeId: 'owned-runtime', runtimeManifest: '..\\handheldcompanion-runtime\\owned-runtime\\HandheldCompanion.runtime.json',
-      files: [{ path: 'YeManFanHost.dll', sha256: 'a'.repeat(64) }] });
+      files: [hostFile] });
     else if (/HandheldCompanion\.runtime\.json$/i.test(a.path)) content = JSON.stringify({ schemaVersion: 1,
       runtimeId: 'owned-runtime', files: [{ path: 'HandheldCompanion.dll', sha256: 'a'.repeat(64) }] });
     else if (/YeManFanHost\.deployment\.json$/i.test(a.path)) content = JSON.stringify({ schemaVersion: 1,
@@ -128,20 +140,35 @@ async function handoffInvoke(cmd: string, a: any, f: HandoffFixture): Promise<an
 }
 async function invoke(cmd: string, args: any): Promise<any> {
   calls.push({ cmd, args });
+  if (cmd === 'app.pid') return PARENT.pid;
+  if (cmd === 'process.identity' && args.pid === PARENT.pid) return PARENT;
   if (handoff) { const result = await handoffInvoke(cmd, args, handoff); if (result !== undefined) return result; }
-  if (cmd === 'process.identity') return current;
-  if (cmd === 'process.terminateExact') return exact;
+  if (cmd === 'process.identity' && args.exitOf === CREATED && observedExitAt !== null) {
+    if (exitReadsToDrop > 0) {
+      exitReadsToDrop--;
+      throw new Error('fixture: exit observation unavailable');
+    }
+    return { valid: false, pid: PID, exitOf: CREATED, exitConfirmed: virtualNow! >= observedExitAt };
+  }
+  if (cmd === 'process.identity') return args.exitOf === CREATED && observedExit ? observedExit : current;
+  if (cmd === 'process.terminateExact') {
+    if (loseExitReceipt) throw new Error('fixture: exit acknowledgement lost');
+    return exact;
+  }
   if (cmd === 'process.terminateTree') return tree;
   if (cmd === 'app.aiFanMockSession') return { schemaVersion: 1, enabled: false };
   if (cmd === 'app.dataDir') return 'C:\\fixture-data';
   if (cmd === 'app.fanStateDir') return 'C:\\fixture-state';
   if (cmd === 'fs.exists') return /(?:yemanfanhost\.exe|yemanfanhost\.session)$/i.test(String(args.path));
   if (cmd === 'fs.mkdir') return true;
-  if (cmd === 'fs.readTextFile') return TOKEN;
-  if (cmd === 'fs.readTextRange') return { content: TOKEN, offset: 0, size: Buffer.byteLength(TOKEN) };
+  if (cmd === 'fs.readTextFile' || cmd === 'fs.readTextRange') {
+    const content = /YeManFanHost\.payload\.json$/i.test(args.path) ? JSON.stringify({ files: [hostFile] }) : TOKEN;
+    return cmd === 'fs.readTextFile' ? content : { content, offset: 0, size: Buffer.byteLength(content) };
+  }
   if (cmd === 'shell.run') return { exitCode: 0, stdout: ' TCP 127.0.0.1:8765 0.0.0.0:0 LISTENING ' + PID, stderr: '' };
   if (cmd === 'proc.findExact') return { found: true, pid: PID };
-  if (cmd === 'http.request') return { status: 200, body: JSON.stringify({ ok: true, state: { state: 'Ready' } }), headers: '' };
+  if (cmd === 'http.request') return { status: 200, body: new URL(args.url).pathname === '/health'
+    ? healthBody(PID, CREATED, { state: 'Ready' }) : JSON.stringify({ ok: true, state: { state: 'Ready' } }), headers: '' };
   if (cmd === 'app.fanActivity' || cmd === 'app.fanLifecycleEvidence') return null;
   throw new Error('unexpected native command: ' + cmd);
 }
@@ -157,9 +184,10 @@ win.chrome = { webview: {
 (globalThis as any).window = win;
 // The real shared UI lifecycle expects document when a native window fixture exists.
 (globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: 'visible', hidden: false, createElement: () => ({ content: {}, style: {} }) });
-const { NativeFanHostLauncher, resolveFanHostConfig } = await import('../src/bridge/fanHost');
+const { FanHostLifecycle, NativeFanHostLauncher, resolveFanHostConfig } = await import('../src/bridge/fanHost');
+const { NoIoHost } = await import('./fixtures/fan_no_io_host');
 const owned = { pid: PID, executable: EXE, processCreated: CREATED };
-const reset = () => { calls = []; current = { valid: false, pid: PID }; exact = { ok: false, matched: true, exited: false, reason: 'still-running' }; };
+const reset = () => { calls = []; current = { valid: false, pid: PID }; exact = { ok: false, matched: true, exited: false, reason: 'still-running' }; loseExitReceipt = false; observedExit = null; };
 let passed = 0;
 async function run(name: string, fn: () => Promise<void>) { await fn(); passed++; console.log('PASS ' + name); }
 await run('root termination denied must reject even if the request itself resolves', async () => {
@@ -214,6 +242,21 @@ await run('unreadable initial identity rejects adoption instead of publishing an
   assert.equal(retry.adopted, true); assert.equal((retry as any).processCreated, CREATED);
 });
 console.log('FAN-941 original owned Host exit proof: ' + passed + '/9 PASS');
+for (const confirmed of [true, false]) await run('lost exact exit reply: observation '+(confirmed?'settles':'keeps the owner'), async () => {
+  reset(); loseExitReceipt = true;
+  observedExit = { valid: false, pid: PID, exitOf: CREATED, exitConfirmed: confirmed };
+  virtualNow = 0;
+  try {
+    const stopping = new NativeFanHostLauncher().stop(owned);
+    if (confirmed) await stopping;
+    else await assert.rejects(stopping);
+    assert.ok(virtualNow <= 4000, 'no extension of the original exit window');
+  } finally { virtualNow = null; }
+  assert.equal(calls.filter(c => c.cmd === 'process.terminateExact').length, 1, 'cannot replay termination');
+  assert.equal(calls.filter(c => c.cmd === 'process.terminateTree').length, 0);
+  const observations = calls.filter(c => c.cmd === 'process.identity' && c.args.exitOf === CREATED).length;
+  assert.ok(confirmed ? observations === 1 : observations >= 1, 'read-only observations bind the exact owner');
+});
 for (const kind of ['retired', 'pending-settles', 'live', '401', '403', 'wrong-pid', 'missing-instance',
     'changed-instance', 'pid-reuse', 'adopt-pid-reuse', 'unreadable', 'foreign', 'perf-timeout', 'pending', 'live-writes',
     'exit-unproven', 'off-before-exit', 'off-after-exit', 'new-generation', 'off-while-pending', 'generation-while-pending', 'off-during-ready', 'generation-during-ready']) {
@@ -252,4 +295,60 @@ for (const kind of ['retired', 'pending-settles', 'live', '401', '403', 'wrong-p
     } finally { handoff = null; virtualNow = null; }
   });
 }
-console.log('FAN-941 owned Host exit proof: ' + passed + '/32 PASS; actual launcher, inert native only; physical UNKNOWN');
+async function manualExitAfterLostReply(droppedReads: number) {
+  reset();
+  const oldHost = new NoIoHost(), successor = new NoIoHost();
+  let active = oldHost, launches = 0;
+  const adapter = new Proxy(oldHost, { get(_target, key) {
+    const value = Reflect.get(active, key);
+    return typeof value === 'function' ? value.bind(active) : value;
+  } });
+  const launcher = new NativeFanHostLauncher();
+  const life = new FanHostLifecycle({ enabled: true, adapter, heartbeatIntervalMs: 0,
+    readNativeActivity: async () => null,
+    readNativePowerState: async () => ({ generation: 0, phase: 'ready', hardwareWritesAllowed: true,
+      inputReady: true, resumeReady: true, hibernateAvailable: true }),
+    launcher: {
+      async start() {
+        if (++launches === 1) return owned;
+        assert.ok(virtualNow! >= 200 && observedExitAt === 200, 'launch must wait for exact process exit');
+        active = successor;
+        return { ...owned, pid: NEW_PID, processCreated: NEW_CREATED };
+      },
+      async stop(process) {
+        if (process.pid === PID) await launcher.stop(process);
+      },
+    } });
+  const curve = [{tempC:0,dutyPercent:0},{tempC:40,dutyPercent:35},{tempC:100,dutyPercent:100}];
+  try {
+    await life.start({ manualRecovery: true });
+    await life.apply(curve);
+    oldHost.calls.length = 0;
+    oldHost.stateName = 'FaultLocked';
+    virtualNow = 0; loseExitReceipt = true; observedExitAt = 200; exitReadsToDrop = droppedReads;
+    if (Number.isFinite(droppedReads)) {
+      const result = await life.apply(curve);
+      assert.equal(result.state, 'Ready');
+      assert.equal(launches, 2);
+      assert.deepEqual(successor.calls.filter(op => ['open', 'events', 'enable'].includes(op)), ['open', 'events', 'enable']);
+    } else {
+      await assert.rejects(life.apply(curve), /terminate-unavailable/);
+      assert.equal(launches, 1);
+      assert.deepEqual(successor.calls, []);
+    }
+    assert.deepEqual(oldHost.calls.filter(op => ['close', 'shutdown', 'enable'].includes(op)), ['close', 'shutdown']);
+    assert.equal(calls.filter(c => c.cmd === 'process.terminateExact').length, 1);
+    const reads = calls.filter(c => c.cmd === 'process.identity' && c.args.exitOf === CREATED);
+    assert.ok(reads.every(c => c.args.pid === PID));
+    if (Number.isFinite(droppedReads)) assert.equal(reads.length, 3);
+    else assert.ok(reads.length > 1 && virtualNow! <= 4000, 'read failures spend only the original exit window');
+  } finally {
+    virtualNow = null; loseExitReceipt = false; observedExitAt = null; exitReadsToDrop = 0;
+    exact = { ok: true, matched: true, exited: true, reason: 'exited' };
+    await life.close();
+  }
+}
+await run('one explicit curve request crosses delayed exact exit after a lost termination reply', () => manualExitAfterLostReply(0));
+await run('one explicit curve request survives an unavailable first exit observation', () => manualExitAfterLostReply(1));
+await run('unavailable exit observations cannot release the old owner or extend the exit window', () => manualExitAfterLostReply(Infinity));
+console.log('FAN-941 owned Host exit proof: ' + passed + '/37 PASS; actual launcher/lifecycle, inert native and SDK; physical UNKNOWN');

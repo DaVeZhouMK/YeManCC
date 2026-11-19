@@ -1,5 +1,7 @@
 import {strict as assert} from 'node:assert';
 import {MediaDownloads,downloadDescription,downloadInterruptionReason,type MediaDownloadState} from '../src/bridge/gameMediaDownloads';
+import {getSharedPowerLifecycleDiagnostics} from '../src/bridge/powerLifecycleState';
+if(process.argv.includes('--public-power-case')) {await publicMediaPowerCases();} else {
 const events=new EventTarget();Object.assign(globalThis,{window:events});
 let checks=0;const check=(value:unknown,message:string)=>{checks++;assert.ok(value,message);};const tick=()=>new Promise(resolve=>setImmediate(resolve));
 let ready=false,enabled=true,listen:((state:MediaDownloadState)=>void)|null=null,calls:any[]=[],pending:((state:MediaDownloadState)=>void)[]=[];
@@ -24,4 +26,113 @@ check(downloadDescription({enabled:true,pauseReason:'game-running',reason:'media
 {
  const timers:any[]=[];const owner=new MediaDownloads({workAllowed:()=>false,ready:()=>true,enabled:()=>true,listen:()=>()=>{},schedule:((fn:any)=>{timers.push(fn);return 1;}) as any,invoke:(async()=>{throw Error('unavailable');}) as any});const dispose=owner.start();await tick();check(timers.length===0,'unavailable native host cannot start a recurring retry on DC');dispose();
 }
+{
+ const manual:MediaDownloadState={enabled:true,phase:'pending',manualUntil:Date.now()+60000,manualState:'requested',inventoryRequestId:'manual-current',inventoryReadyId:'old',inventoryAwaitUntil:Date.now()+10000,total:49,completed:49,remaining:0,workerPid:0,activeCount:0};
+ check(downloadDescription(manual).includes('手动补齐中')&&downloadDescription(manual).includes('正在获取游戏清单'),'accepted manual inventory must not show a completed previous round');
+ check(!downloadDescription(manual).includes('49 / 49'),'manual inventory preparation never borrows the previous completed counters');
+ for(const reason of ['cpu-busy','cpu-unknown','cpu-recovering']){
+  const label=downloadDescription({...manual,resourcePauseReason:reason,pauseReason:'game-running'});
+  check(label.includes('手动补齐中')&&!label.includes('已暂停'),'manual feedback ignores only stale soft CPU and game pauses: '+reason);
+ }
+ check(downloadDescription({...manual,enabled:false}).includes('手动补齐中'),'accepted explicit manual round remains visible with automatic downloads off');
+ for(const [reason,copy] of [['on-battery','电池模式'],['power-unknown','供电'],['startup-protection','启动保护']]){
+  const label=downloadDescription({...manual,resourcePauseReason:reason});check(label.includes(copy)&&!label.includes('手动补齐中'),'manual feedback retains hard resource protection: '+reason);
+ }
+ for(const reason of ['battery-saver','low-battery','media-storage-unavailable','media-disk-space-low'])check(!downloadDescription({...manual,pauseReason:reason}).includes('手动补齐中'),'manual feedback retains hard policy pause: '+reason);
+ check(downloadDescription({...manual,phase:'deferred',reason:'queue-unreadable'}).includes('暂不可读'),'unreadable diagnostic still precedes accepted manual feedback');
+ check(downloadDescription({...manual,manualUntil:0,resourcePauseReason:'cpu-busy',remaining:1}).includes('CPU 占用'),'automatic work still displays CPU pause');
+ check(downloadDescription({...manual,manualUntil:0,phase:'completed'}).includes('本轮已处理'),'settled automatic work still displays completion');
+}
 console.log(JSON.stringify({ok:true,checks,scope:'production download coordinator; deterministic settings/IPC events, no native startup'}));
+
+}
+
+async function publicMediaPowerCases():Promise<void>{
+ const args=process.argv.slice(2),names=['sequence-held-read','denial-ready','generation-change','metadata-only','startup-sequence','held-recheck','late-failure','stop'];
+ assert.equal(args.length,4);assert.equal(args[0],'--public-power-case');assert.equal(args[2],'--out');
+ const selected=args[1];assert(selected==='all'||names.includes(selected),'Unknown public media power case');
+ const {writeFileSync}=await import('node:fs');const {join,isAbsolute}=await import('node:path');assert(isAbsolute(args[3]));
+ const results:any[]=[];const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};
+ for(const name of selected==='all'?names:[selected]){
+  const events=new EventTarget(),timers=new Map<number,{fn:()=>void,at:number}>(),calls:any[]=[],holds:any[]=[];let serial=0,now=0,hold=name!=='startup-sequence';
+  class Detail extends Event {detail:any;constructor(type:string,detail:any){super(type);this.detail=detail;}}
+  const original={window:(globalThis as any).window,document:(globalThis as any).document,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout};
+  const state:any={known:true,phase:'ready',generation:100,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
+  Object.assign(globalThis,{window:events,document:{visibilityState:'visible',addEventListener(){},removeEventListener(){}},setTimeout:(fn:()=>void,ms:number)=>{const id=++serial;timers.set(id,{fn,at:now+ms});return id;},clearTimeout:(id:number)=>timers.delete(id),__mediaPowerRead:()=>Promise.resolve({...state})});
+  const startupDeadline=Date.now()+30000;let downloads=0,rechecks=0;
+  const invoke=async(command:string,args:any)=>{
+   calls.push({command,args:{...args}});
+   const status=command==='gameMedia.downloads',recheck=command==='gameMedia.background'&&args.recheck===true;
+   if(status)downloads++;if(recheck)rechecks++;
+   if((status&&downloads===1&&name!=='held-recheck'||recheck&&name==='held-recheck')&&hold){return new Promise((resolve,reject)=>holds.push({resolve,reject}));}
+   return {statusRevision:20,enabled:true,phase:'paused',completed:2,remaining:1,...(name==='startup-sequence'?{resourcePauseReason:'startup-protection',startupProtectionUntil:startupDeadline}:{})};
+  };
+  const owner=new MediaDownloads({workAllowed:()=>true,ready:()=>true,enabled:()=>true,threshold:()=>15,listen:()=>()=>{},invoke:invoke as any,schedule:((fn:any,ms:any)=>globalThis.setTimeout(fn,ms)) as any,cancel:((id:any)=>globalThis.clearTimeout(id)) as any});
+  let stop:(()=>void)|undefined,error:any;
+  const publish=async(patch:any)=>{Object.assign(state,patch);events.dispatchEvent(new Detail('ipc:power.lifecycleChanged',{...state}));await flush();};
+  try{
+   stop=owner.start();await flush();assert.equal(downloads,1,'one initial public-admitted status read');
+   if(name==='held-recheck'){await owner.refresh();void owner.recheck();await flush();assert.equal(rechecks,1);}
+   const startupDue=name==='startup-sequence'?[...timers.values()][0]?.at:null;const before=downloads,writes=calls.filter(x=>x.command==='gameMedia.background'&&!x.args.recheck).length;assert.equal(writes,1,'initial already-confirmed configuration replayed at first Ready');
+   if(name==='stop') {stop();stop=undefined;await publish({publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before);}
+   else if(name==='metadata-only'){await publish({publicationRevision:2});assert.equal(downloads,before,'publication-only update must not duplicate healthy/held work');}
+   else if(name==='generation-change'){hold=false;await publish({generation:101,publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before+1,'new generation must not join retired read');}
+   else if(name==='denial-ready'){
+    await publish({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before,'denied public state must not issue status read');
+    hold=false;await publish({notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});assert.equal(downloads,before+1,'same-generation Ready must continue with a fresh read');
+   }else {hold=false;await publish({publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before+1,'same-generation notification must retire the held read before its return');}
+   if(name==='startup-sequence'){assert.equal(timers.size,1,'one original startup observation timer');assert([...timers.values()][0].at<=startupDue!+1,'sequence change extended original startup deadline');}
+   assert.equal(calls.filter(x=>x.command==='gameMedia.background'&&!x.args.recheck).length,writes,'power observation must not replay background policy writes');
+   if(!['metadata-only','stop'].includes(name))assert.equal(owner.state.completed,2,'current read must publish before old return');
+   for(const held of holds.splice(0)){if(name==='late-failure')held.reject(Error('retired read failed'));else held.resolve({statusRevision:99,enabled:true,phase:'downloading',completed:99});}await flush();
+   if(!['metadata-only','stop'].includes(name))assert.equal(owner.state.completed,2,'late old result/failure must not overwrite current snapshot');
+   if(name==='held-recheck'){await owner.recheck();assert.equal(rechecks,2,'new explicit recheck must not retain previous checking promise');}
+   results.push({name,passed:true,downloads,rechecks,backgroundWrites:writes});
+  }catch(e){error=e;results.push({name,passed:false,error:String(e),downloads,rechecks});}
+  finally{
+   for(const held of holds.splice(0))held.resolve({statusRevision:1});await flush();stop?.();await flush();
+   assert.equal(getSharedPowerLifecycleDiagnostics().subscriberCount,0,'shared subscriber returned');assert.equal(timers.size,0,'all public and consumer timers returned');
+   Object.assign(globalThis,{window:original.window,document:original.document,setTimeout:original.setTimeout,clearTimeout:original.clearTimeout});delete(globalThis as any).__mediaPowerRead;
+  }
+  if(error)break;
+ }
+ const result={ok:results.length>0&&results.every(x=>x.passed),cases:results,scope:'actual MediaDownloads+actual public power source;memory-only IPC/settings/wallpaper facts and logical timers;no native/network/installed application',realDownloads:0,realPolicyWrites:0};
+ writeFileSync(join(args[3],'MEDIA-POWER-RESULT.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify(result));if(!result.ok)process.exitCode=1;
+}
+
+async function publicMediaIpcCase(name:any,f:any){
+ const check=(value:any,why:string)=>assert.ok(value,why);await f.start();
+ const writes=()=>f.messages.filter((x:any)=>x.cmd==='gameMedia.background'&&Object.hasOwn(x.args,'enabled'));
+ const manual=()=>f.messages.filter((x:any)=>x.cmd==='gameMedia.background'&&x.args.manual===true);
+ if(name==='policy-lost-return'||name==='policy-remote-failure'){
+  check(writes().length===1,'one original in-flight configuration');await f.publish({publicationRevision:2,observedNotificationSequence:2});
+  check(writes().length===1,'a current snapshot must not replay an unknown transaction immediately');
+  if(name==='policy-lost-return'){await f.advance(4999);check(writes().length===1,'original5s response clock was shortened');await f.advance(5000);}
+  else {f.reply(f.heldPolicy,{error:'original Native configure rejected before commit'});await f.flush();}
+  check(writes().length===2,'interrupted desired configuration remained stranded after its original IPC terminal');
+  check(f.service.state.enabled===true,'current saved preference did not recover through original sync owner');
+  f.reply(f.heldPolicy,{result:{statusRevision:99,enabled:false,pauseReason:'obsolete',cpuThreshold:5}});await f.flush();check(f.service.state.enabled===true,'late retired policy receipt overwrote current state');
+ }else if(name==='policy-retry-deadline'){
+  f.reply(f.heldPolicy,{error:'current original failure'});await f.flush();await f.advance(100);await f.publish({publicationRevision:2,observedNotificationSequence:2});await f.advance(999);check(writes().length===1,'notification shortened original retry');await f.advance(1000);check(writes().length===2,'notification reset original retry deadline');
+ }else if(name==='policy-denied-terminal'){
+  await f.publish({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await f.advance(5000);check(writes().length===1,'denied public scope automatically reasserted configuration');await f.publish({notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});check(writes().length===2&&f.service.state.enabled===true,'Ready after old terminal did not recover saved configuration');
+ }else if(name==='policy-read-confirms-same-intent'){
+  f.native.enabled=true;f.native.statusRevision++;await f.publish({publicationRevision:2,observedNotificationSequence:2});await f.advance(5000);
+  f.bus.dispatchEvent(new Event('ui-settings:changed'));await f.flush();check(writes().length===1,'fresh exact matching Native state was not consumed as the same original policy confirmation');
+ }else if(name==='policy-latest-setting'){
+  f.enabled=false;f.bus.dispatchEvent(new Event('ui-settings:changed'));await f.flush();await f.publish({publicationRevision:2,observedNotificationSequence:2});
+  check(writes().length===1,'latest OFF bypassed the original unknown-completion wait');await f.advance(5000);
+  check(writes().length===2&&writes()[1].args.enabled===false,'latest OFF was lost behind old ON transaction');check(f.service.state.enabled===false,'latest saved OFF did not win');
+ }else if(name==='manual-timeout'){
+  const old=f.service.requestNow().then((v:any)=>({v}),(error:any)=>({error}));await f.flush();const request=manual()[0];await f.publish({publicationRevision:2,observedNotificationSequence:2});
+  await f.advance(7999);check(manual().length===1,'manual action replayed before original8s expiry');await f.advance(8000);const ended=await old;
+  check(ended.error?.code==='IPC_TIMEOUT','actual IPC timeout classification missing');check(manual().length===1,'unknown manual completion automatically replayed');
+  f.reply(request,{result:{statusRevision:99,enabled:true,manualState:'requested'}});await f.flush();check(f.service.state.manualState===undefined,'late timed-out manual receipt changed current state');
+  const next=f.service.requestNow();await f.flush();check(manual().length===2,'new explicit manual confirmation could not enter');const value={...f.native,statusRevision:f.native.statusRevision+1,manualState:'requested'};f.reply(manual()[1],{result:value});check(await next===value,'current explicit caller lost its actual receipt');
+ }else if(name==='manual-reply-crosses-notification'){
+  const old=f.service.requestNow();await f.flush();const request=manual()[0];await f.publish({publicationRevision:2,observedNotificationSequence:2});const value={...f.native,statusRevision:99,manualState:'old-requested'};f.reply(request,{result:value});check(await old===value,'caller must retain original Native manual receipt');await f.flush();check(f.service.state.manualState===undefined&&manual().length===1,'retired manual receipt crossed scope or replayed itself');
+ }else if(name==='stop-bridge-loss'){
+  f.stop();f.rejectAllPending('fixture WebView loss');await f.flush();await f.publish({publicationRevision:2,observedNotificationSequence:2});check(writes().length===1,'stopped transaction recreated background writes');
+ }else throw Error('Unknown actual IPC case');
+ return {name,passed:true,policyRequests:writes().length,manualRequests:manual().length,commands:f.messages.length};
+}

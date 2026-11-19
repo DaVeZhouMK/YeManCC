@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 
 
 const selected=process.argv.includes('--journal-config'),arg=name=>{const i=process.argv.indexOf(name);return i<0?null:process.argv[i+1]},out=selected?arg('--out'):process.argv[2],caseFilter=arg('--case-filter'),sourceOverride=arg('--source');
 if(selected&&(!out||!path.isAbsolute(out)))throw Error('journal-config requires an explicit owned output file');if(sourceOverride&&(!selected||!path.resolve(sourceOverride).startsWith(path.dirname(path.resolve(out))+path.sep)))throw Error('Private source must be inside the owned output directory');
-const sourcePath=sourceOverride||'src/bridge/steamAppearanceDraft.ts',pin=p=>({path:path.resolve(p),sha256:createHash('sha256').update(fs.readFileSync(p)).digest('hex')}),inputPaths=[sourcePath,'tools/steam_appearance_draft_selftest.mjs','node_modules/esbuild/lib/main.js','node_modules/@esbuild/win32-x64/esbuild.exe'],inputs=inputPaths.map(pin),started=performance.now();
+const sourcePath=sourceOverride||'src/bridge/steamAppearanceDraft.ts',pin=p=>({path:path.resolve(p),sha256:createHash('sha256').update(fs.readFileSync(p)).digest('hex')}),inputPaths=[sourcePath,'tools/steam_appearance_draft_selftest.mjs','node_modules/esbuild/lib/main.js',process.env.ESBUILD_BINARY_PATH||'node_modules/@esbuild/win32-x64/esbuild.exe'],inputs=inputPaths.map(pin),started=performance.now();
 
 const names=['Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details'];const module={exports:{}};
 const code=transformSync(fs.readFileSync(sourcePath,'utf8'),{loader:'ts',format:'cjs'}).code;
@@ -38,6 +38,36 @@ const absent=fixture();await absent.init();const normalApply=absent.deps.apply;a
 await check('missing acknowledgement snapshot preserves draft and stops automatic retries',()=>{assert.equal(absent.q.getState().phase,'error');assert.equal(absent.q.getState().changes.Round,false);assert.equal(absent.calls.apply.length,1);assert.equal(absent.timers.size,0)});absent.deps.apply=normalApply;await absent.q.flush(false);await check('manual verification can clear a saved draft without another write',()=>{assert.equal(absent.q.getState().pendingCount,0);assert.equal(absent.calls.apply.length,1)});
 const mismatch=fixture();await mismatch.init();mismatch.deps.apply=async()=>({ok:true,saved:true,snapshot:structuredClone(mismatch.actual)});mismatch.q.set({Round:false});await mismatch.advance(3000);await mismatch.advance(60000);
 await check('acknowledgement with wrong flags retains intent and exhausts finite timers',()=>{assert.equal(mismatch.q.getState().phase,'error');assert.equal(mismatch.q.getState().changes.Round,false);assert.equal(mismatch.timers.size,0)});
+await check('ordinary global preference failure stays visible after the theme owner saved without replay',async()=>{
+ const f=fixture();await f.init();const apply=f.deps.apply;
+ f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:false,preferenceReason:'开机全局外观偏好未保存',message:'开机全局外观偏好未保存'});
+ f.q.set({Round:false});await f.advance(3000);await f.advance(60000);
+ assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.equal(f.q.getState().pendingCount,0);assert.match(f.q.getState().message,/开机全局外观偏好未保存/);assert.equal(f.calls.apply.length,1);assert.equal(f.timers.size,0);
+ await f.q.read();assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.match(f.q.getState().message,/开机全局外观偏好未保存/);
+ await f.q.flush(true);assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.match(f.q.getState().message,/开机全局外观偏好未保存/);assert.equal(f.calls.apply.length,1);
+});
+await check('same saved choice repairs only the ordinary preference with no duplicate theme application',async()=>{
+ const f=fixture();await f.init();let remembers=0;
+ f.deps.rememberPreferences=async(snapshot,states)=>{remembers++;assert.equal(states.Round,false);return {ok:true,saved:true,preferenceSaved:true,snapshot,message:'preference repaired'};};
+ f.q.set({Round:false});f.actual.themes.find(row=>row.name==='Round').configured=false;await f.advance(3000);
+ assert.equal(remembers,1);assert.equal(f.calls.apply.length,0);assert.equal(f.q.getState().pendingCount,0);assert.equal(f.q.getState().phase,'idle');assert.equal(f.timers.size,0);
+});
+await check('an unrelated successful preference cannot erase a failed choice; explicit retry repairs without another theme write',async()=>{
+ const f=fixture();await f.init();const apply=f.deps.apply;let remembers=0;
+ f.deps.rememberPreferences=async(snapshot,states)=>{remembers++;assert.deepEqual(JSON.parse(JSON.stringify(states)),{Round:false});return {ok:true,saved:true,preferenceSaved:true,snapshot};};
+ f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:false,message:'开机全局外观偏好未保存'});
+ f.q.set({Round:false});await f.advance(3000);await f.advance(60000);assert.equal(remembers,0);
+ f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:true});
+ f.q.set({'Art Hero':false});await f.advance(3000);assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.match(f.q.getState().message,/开机全局外观偏好未保存/);assert.equal(remembers,0);
+ await f.q.flush(false);assert.equal(remembers,1);assert.equal(f.calls.apply.length,2);assert.equal(f.q.getState().phase,'idle');assert.equal(f.timers.size,0);
+});
+await check('ordinary preference retry cannot replay a former theme value over a newer external change',async()=>{
+ const f=fixture();await f.init();const apply=f.deps.apply;let remembers=0;
+ f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:false,message:'开机全局外观偏好未保存'});
+ f.q.set({Round:false});await f.advance(3000);f.actual.themes.find(row=>row.name==='Round').configured=true;
+ f.deps.rememberPreferences=async(snapshot,states)=>{remembers++;assert.equal(states.Round,false);assert.equal(snapshot.themes.find(row=>row.name==='Round').configured,true);return {ok:false,saved:true,preferenceSaved:false,snapshot,message:'外观保存回执与本次选择不符'};};
+ await f.q.flush(false);assert.equal(remembers,1);assert.equal(f.calls.apply.length,1);assert.equal(f.actual.themes.find(row=>row.name==='Round').configured,true);assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.equal(f.timers.size,0);
+});
 for(const bad of ['{invalid',JSON.stringify({version:1,targetId:'a'.repeat(16),states:{Round:'false'}}),JSON.stringify({version:1,targetId:'a'.repeat(16),states:{Other:true}})]){const malformed=fixture(new Map([['YMCC.steamAppearanceDraft.v1:'+'a'.repeat(16),bad]]));await malformed.init();await malformed.advance(60000);assert.equal(malformed.q.getState().pendingCount,0);assert.equal(malformed.calls.apply.length,0);assert.equal(malformed.timers.size,0)}
 await check('corrupt or unknown journal values never replay an operation',()=>{});
 const slowReset=fixture();await slowReset.init();slowReset.setHold(true);slowReset.setFail(true);slowReset.q.set({Round:false});await slowReset.advance(3000);const resetting=slowReset.q.reset('preset');await flush();await check('reset waits for an in-flight writer and temporarily locks only reset',()=>{assert.equal(slowReset.calls.reset,0);assert.equal(slowReset.q.getState().locked,true)});slowReset.release();await resetting;await slowReset.advance(60000);await check('reset supersedes a failing older batch without resurrecting its draft',()=>{assert.equal(slowReset.q.getState().locked,false);assert.equal(slowReset.q.getState().phase,'idle');assert.equal(slowReset.calls.reset,1);assert.equal(slowReset.q.getState().pendingCount,0);assert.equal(slowReset.timers.size,0)});
@@ -140,4 +170,4 @@ await check('journal-config: late backend read cannot rebind target or resurrect
 });
 }
 
-const record={ok:!failures.length,passed:cases.length,failed:failures.length,cases,failures,skipped,selected:selected?'journal-config':'original',caseFilter,inputs,sourceDrift:inputPaths.map(pin).filter((x,i)=>x.sha256!==inputs[i].sha256),node:{...pin(process.execPath),version:process.version},elapsedMs:performance.now()-started,realSteamOperations:0,realCssOperations:0,boundary:'Actual TS createAppearanceDraft; original inert SteamAppearance port, fakeStorage and clock only; no real WebView/localStorage/Steam/CSS'};if(out){fs.mkdirSync(path.dirname(path.resolve(out)),{recursive:true});fs.writeFileSync(out,JSON.stringify(record,null,2));}console.log(JSON.stringify(record,null,2));if(failures.length||record.sourceDrift.length)process.exitCode=1;
+const record={ok:!failures.length,passed:cases.length,failed:failures.length,cases,failures,skipped,selected:selected?'journal-config':'original',caseFilter,inputs,sourceDrift:inputPaths.map(pin).filter((x,i)=>x.sha256!==inputs[i].sha256),node:{...pin(process.execPath),version:process.version},elapsedMs:performance.now()-started,realSteamOperations:0,realCssOperations:0,boundary:'Actual TS createAppearanceDraft; original inert SteamAppearance port, fakeStorage and clock only; no real WebView/localStorage/Steam/CSS'};if(out){const directory=path.dirname(path.resolve(out));if(!fs.existsSync(directory))fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(out,JSON.stringify(record,null,2),{flag:'wx'});}console.log(JSON.stringify(record,null,2));if(failures.length||record.sourceDrift.length)process.exitCode=1;

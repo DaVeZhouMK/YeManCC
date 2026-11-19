@@ -13,8 +13,8 @@
 #include <vector>
 #include "process_efficiency.h"
 
-// Exactly one attempt per admitted YMCC process. Independent of wallpaper/UI
-// sessions. No retry, notification, IPC, focus, controller or device ownership.
+// One automatic attempt per YMCC process. An explicit client open may request
+// one fresh pass through the same bounded owner; no resident retry or polling.
 namespace ymcc::optiStartup {
 namespace fs = std::filesystem;
 inline constexpr DWORD delayMs=30000, workerBudgetMs=300000;
@@ -41,16 +41,19 @@ struct Limits {DWORD delay=delayMs,budget=workerBudgetMs;};
 class Owner {
     struct State {
         Handle stop{CreateEventW(nullptr,TRUE,FALSE,nullptr)};
+        Handle done{CreateEventW(nullptr,TRUE,FALSE,nullptr)};
+        std::atomic<DWORD> exitCode{15};
         std::atomic<unsigned> launches{0};
         std::atomic<bool> finished{false};
         std::atomic<DWORD> childPid{0};
     };
-    std::mutex gate_;
-    bool attempted_=false;
+    mutable std::mutex gate_;
+    std::mutex requestGate_;
+    bool attempted_=false, stopped_=false;
     std::shared_ptr<State> state_;
     std::thread thread_;
-    static void run(const std::shared_ptr<State>& state,const fs::path& executable,ULONGLONG started,Limits limits) noexcept {
-        struct Finish{State& state;~Finish(){state.finished.store(true);state.childPid.store(0);}}finish{*state};
+    static void run(const std::shared_ptr<State>& state,const fs::path& executable,ULONGLONG started,Limits limits,bool explicitOpen=false) noexcept {
+        struct Finish{State& state;~Finish(){state.childPid.store(0);state.finished.store(true);SetEvent(state.done.value);}}finish{*state};
         try {
             SetThreadPriority(GetCurrentThread(),THREAD_MODE_BACKGROUND_BEGIN);
             SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_IDLE);
@@ -75,7 +78,7 @@ class Owner {
             cpu.ControlFlags=JOB_OBJECT_CPU_RATE_CONTROL_ENABLE|JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
             cpu.CpuRate=workerCpuRate;
             if(!SetInformationJobObject(job.value,JobObjectCpuRateControlInformation,&cpu,sizeof cpu))return;
-            std::wstring command=quote(executable)+L" --opti-startup "+
+            std::wstring command=quote(executable)+(explicitOpen?L" --opti-catalog-prepare ":L" --opti-startup ")+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(parent.value))+L" "+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(signal.value))+L" "+identity;
             STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof startup;startup.StartupInfo.dwFlags=STARTF_USESHOWWINDOW;
@@ -95,6 +98,8 @@ class Owner {
             if(WaitForMultipleObjects(2,events,FALSE,limits.budget)!=WAIT_OBJECT_0+1){
                 SetEvent(state->stop.value);
                 if(WaitForSingleObject(process.value,250)!=WAIT_OBJECT_0){TerminateJobObject(job.value,16);WaitForSingleObject(process.value,2000);}
+            } else {
+                DWORD code=15;if(GetExitCodeProcess(process.value,&code))state->exitCode.store(code);
             }
         }catch(...){/* Fail once and silently; never reschedule or notify. */}
     }
@@ -102,23 +107,54 @@ public:
     ~Owner(){stop();}
     bool start(const fs::path& executable,ULONGLONG started,Limits limits={}) noexcept {
         std::lock_guard lock(gate_);if(attempted_)return false;attempted_=true;
-        try{state_=std::make_shared<State>();if(!state_->stop.value)return false;
+        try{state_=std::make_shared<State>();if(!state_->stop.value||!state_->done.value)return false;
             thread_=std::thread([state=state_,executable,started,limits]{run(state,executable,started,limits);});return true;
         }catch(...){if(state_)state_->finished.store(true);return false;}
     }
-    void cancel() noexcept {std::lock_guard lock(gate_);attempted_=true;if(state_&&state_->stop.value)SetEvent(state_->stop.value);}
-    void stop() noexcept {
-        std::lock_guard lock(gate_);attempted_=true;if(state_&&state_->stop.value)SetEvent(state_->stop.value);
-        if(thread_.joinable())thread_.join();
+    // Called on the IPC worker only. Duplicate explicit requests do not queue
+    // more passes. An outstanding automatic pass is cancelled and joined first.
+    DWORD prepareForOpen(const fs::path& executable,Limits limits={0,workerBudgetMs}) noexcept {
+        std::unique_lock request(requestGate_,std::try_to_lock);
+        if(!request.owns_lock())return ERROR_BUSY;
+        std::shared_ptr<State> state;
+        std::thread previous;
+        try {
+            {
+                std::lock_guard lock(gate_);if(stopped_)return ERROR_CANCELLED;
+                if(state_&&state_->stop.value)SetEvent(state_->stop.value);
+                previous=std::move(thread_);attempted_=true;
+            }
+            if(previous.joinable())previous.join();
+            {
+                std::lock_guard lock(gate_);if(stopped_)return ERROR_CANCELLED;
+                state=std::make_shared<State>();
+                if(!state->stop.value||!state->done.value)return 15;
+                state_=state;limits.delay=0;
+                thread_=std::thread([state,executable,limits]{run(state,executable,GetTickCount64(),limits,true);});
+            }
+            if(WaitForSingleObject(state->done.value,INFINITE)!=WAIT_OBJECT_0)return 15;
+            std::lock_guard lock(gate_);
+            return stopped_?ERROR_CANCELLED:state->exitCode.load();
+        }catch(...){return 15;}
     }
-    bool finished()const noexcept{return state_&&state_->finished.load();}
-    unsigned launches()const noexcept{return state_?state_->launches.load():0;}
-    DWORD childPid()const noexcept{return state_?state_->childPid.load():0;}
+    void cancel() noexcept {std::lock_guard lock(gate_);stopped_=attempted_=true;if(state_&&state_->stop.value)SetEvent(state_->stop.value);}
+    void stop() noexcept {
+        cancel();
+        std::lock_guard request(requestGate_);
+        std::thread previous;
+        {std::lock_guard lock(gate_);previous=std::move(thread_);}
+        if(previous.joinable())previous.join();
+    }
+    bool finished()const noexcept{std::lock_guard lock(gate_);return state_&&state_->finished.load();}
+    unsigned launches()const noexcept{std::lock_guard lock(gate_);return state_?state_->launches.load():0;}
+    DWORD childPid()const noexcept{std::lock_guard lock(gate_);return state_?state_->childPid.load():0;}
 };
-inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function<void(const std::function<bool()>&)>& operation){
+inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function<void(const std::function<bool()>&)>& operation,bool* explicitOpen=nullptr){
     int count=0;auto* args=CommandLineToArgvW(GetCommandLineW(),&count);if(!args)return 10;
     struct Free{wchar_t** value;~Free(){LocalFree(value);}}free{args};
-    if(count<2||std::wstring_view(args[1])!=L"--opti-startup")return std::nullopt;
+    if(count<2)return std::nullopt;
+    const bool requested=std::wstring_view(args[1])==L"--opti-catalog-prepare";
+    if(!requested&&std::wstring_view(args[1])!=L"--opti-startup")return std::nullopt;
     // A child failure is a silent process exit, including crash/error reporting.
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
     if(count!=5)return 10;
@@ -133,6 +169,7 @@ inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function
     const auto expected=(appRoot.parent_path()/L"YeManCC.exe").lexically_normal(),actual=image(parent.value);
     if(actual.empty()||_wcsicmp(actual.c_str(),expected.c_str())!=0)return 11;
     const std::function<bool()> stopped=[&]{return WaitForSingleObject(parent.value,0)!=WAIT_TIMEOUT||WaitForSingleObject(cancel.value,0)!=WAIT_TIMEOUT;};
+    if(explicitOpen)*explicitOpen=requested;
     try{if(!stopped())operation(stopped);return stopped()?12:0;}catch(...){return 15;}
 }
 } // namespace ymcc::optiStartup

@@ -1,0 +1,188 @@
+// Exact production admission functions; device, history, and public-power reads
+// below are controlled fact ports. This is not a whole Start/Host/hardware test.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <string>
+#include <thread>
+#include <vector>
+#include "json.hpp"
+#include "virtual_start_protection.h"
+using json=nlohmann::json;
+class InputHostMutex {
+    std::mutex value_;std::atomic<DWORD> owner_{0};
+public:
+    void lock(){value_.lock();owner_=GetCurrentThreadId();}
+    bool try_lock(){if(!value_.try_lock())return false;owner_=GetCurrentThreadId();return true;}
+    void unlock(){owner_=0;value_.unlock();}
+    bool ownedByCurrentThread()const{return owner_==GetCurrentThreadId();}
+};
+enum class Family {Gpd,Rog,Msi,OneX,Aya,Unknown};
+enum class PowerLifecycle {Ready,Suspended};
+namespace ymcc::nativeForeground {enum class Profile {Gpd,Rog,Msi,Unsupported};}
+namespace ymcc::sleeppower {struct SharedPowerV1 {std::uint64_t generation=0;};}
+struct {bool resolved=true;Family family=Family::Gpd;} g_machineIdentity;
+struct {bool enabled=true,virtualTargetEnabled=false;} g_realStickTest;
+static InputHostMutex g_inputHostMx;
+static std::mutex g_msiNativeForegroundMx;
+static ymcc::VirtualStartProtection g_virtualStartProtection;
+static std::uint64_t clockNow=1000,powerNow=4,sharedGeneration=4,g_inputHostEpoch=0;
+static std::string configuredPersona="disabled",g_inputHostRunId;
+static HANDLE g_inputHostProcess=nullptr,g_inputHostPrimaryThread=nullptr,g_inputHostServerPipe=nullptr;
+static bool g_inputHostHello=false,g_inputHostPrepared=false,g_inputHostPrepareMayHaveReachedHost=false;
+static bool g_inputHostNeutralized=false,g_inputHostActive=false;
+static bool g_inputHostStartBlocked=false,g_inputHostTransportFault=false,g_inputHostFaultHoldsStart=false;
+static bool g_inputReady=true,sharedKnown=true,pipeReturned=true,historyReturned=true,currentProofPending=false;
+static bool profileKnown=true,publicCurrent=true;
+static unsigned powerChecks=0;static std::function<void()> afterFirstPowerCheck;
+struct {bool active=false;} g_hidHideVisibilityJournal;
+struct Duty {bool pending=false;bool required()const{return pending;}} g_msiSteamDeckReleaseDebt;
+struct {bool pending=false;bool retirementRequired()const{return pending;}} g_psEndpointOwnership;
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+#define FACT(name) static std::atomic<bool> name{false}
+FACT(g_wakeHoldPhysicalUnhide);FACT(g_inputHostReleaseQuarantined);FACT(g_msiDinputReturnOwed);
+FACT(g_inputHostVirtualIntentWriters);FACT(g_inputHostPowerAdmissionRevoked);FACT(g_exitRequested);
+FACT(g_inputCaptureStop);FACT(g_externalPriorityVirtualSuspended);FACT(g_shortcutRecordingActive);
+FACT(g_wakeRescanRequested);FACT(g_inputHostLifecycleWorkRequested);FACT(g_inputHostLifecycleWorkInFlight);
+FACT(g_inputHostSwitchExecutionReturnPending);FACT(g_inputHostSwitchRecoveryPending);FACT(g_inputHostRecoveryPending);
+FACT(g_inputHostTupleHealPending);FACT(g_msiNativeForegroundCyclePending);FACT(g_physicalReleaseWindowDutyActive);
+FACT(g_postHideCycleOwned);FACT(g_coldReturnCycleOwned);FACT(g_msiNativeForegroundPowerHold);
+static bool exitFence=false,physicalRelease=false;
+struct NativeOwner {
+    bool active=false,postHideCycle=false,coldReturnCycle=false,restorePending=false;
+    ymcc::nativeForeground::Profile profile=ymcc::nativeForeground::Profile::Gpd;
+    std::uint64_t power=4;HANDLE cycleProcess=nullptr;
+    std::shared_ptr<int> nativeRefreshWriter,nativeVisibilitySession;
+    std::vector<std::string> deferredVirtualWork;
+} g_msiNativeForegroundLease;
+static std::vector<json> lifecycleLogs;
+static bool ymccIsRogFamily(){return g_machineIdentity.family==Family::Rog;}
+static bool msiClawKnownBoardAuthority(){return g_machineIdentity.family==Family::Msi;}
+static std::uint64_t inputHostStartProtectionNow(){return clockNow;}
+static std::uint64_t currentPowerGeneration(){return powerNow;}
+static std::string inputHostConfiguredPersona(){return configuredPersona;}
+static bool inputHostExitFenceRaised(){return exitFence;}
+static bool physicalReleaseWindowActive(){return physicalRelease;}
+static bool inputHostPipeRetirementProvenLocked(){return pipeReturned;}
+static bool inputHostTargetReturnHistorySettledLocked(){return historyReturned;}
+static bool inputHostTargetReturnCurrentProofPendingLocked(){return currentProofPending;}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& p){p.generation=sharedGeneration;return sharedKnown;}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& p){const bool current=publicCurrent&&sharedKnown&&p.generation==powerNow&&g_powerLifecycle==PowerLifecycle::Ready;if(++powerChecks==1&&afterFirstPowerCheck)afterFirstPowerCheck();return current;}
+static ymcc::nativeForeground::Profile nativeForegroundProfile(){return profileKnown&&g_machineIdentity.resolved&&g_machineIdentity.family==Family::Gpd?ymcc::nativeForeground::Profile::Gpd:ymcc::nativeForeground::Profile::Unsupported;}
+namespace ymcc::inputHost::switchVerificationRuntime {static bool rogXboxSignalScope(){return ymccIsRogFamily();}}
+static void appendNativeLifecycleLog(const char* event,const json& row){auto r=row;r["event"]=event;lifecycleLogs.push_back(r);}
+@@CLEANUP@@
+@@ARM@@
+@@RETIRE@@
+@@MAYQUEUE@@
+static bool originalBusWakeGate(){
+    const bool publicationWanted=g_realStickTest.enabled&&g_realStickTest.virtualTargetEnabled;
+    const bool hostRunning=g_inputHostProcess!=nullptr;
+    @@BUS_RETIRE@@
+    const bool personaTransition=false;
+    const bool nativeWriterWaitMayQueue=publicationWanted&&!hostRunning&&inputHostMayQueueGpdNativeWriterWait();
+    return @@BUS_GATE@@;
+}
+static void reset(){
+    g_virtualStartProtection.~VirtualStartProtection();new(&g_virtualStartProtection)ymcc::VirtualStartProtection;
+    g_machineIdentity={true,Family::Gpd};g_realStickTest={true,false};configuredPersona="disabled";
+    clockNow=1000;powerNow=sharedGeneration=4;g_inputHostEpoch=0;g_inputHostRunId.clear();
+    g_inputHostProcess=g_inputHostPrimaryThread=g_inputHostServerPipe=nullptr;
+    g_inputHostHello=g_inputHostPrepared=g_inputHostPrepareMayHaveReachedHost=g_inputHostNeutralized=g_inputHostActive=false;
+    g_inputHostStartBlocked=g_inputHostTransportFault=g_inputHostFaultHoldsStart=false;
+    g_inputReady=sharedKnown=pipeReturned=historyReturned=profileKnown=publicCurrent=true;currentProofPending=false;
+    g_hidHideVisibilityJournal.active=false;g_msiSteamDeckReleaseDebt.pending=g_psEndpointOwnership.pending=false;
+    g_powerLifecycle=PowerLifecycle::Ready;exitFence=physicalRelease=false;g_msiNativeForegroundLease=NativeOwner{};
+    for(auto* p:{&g_wakeHoldPhysicalUnhide,&g_inputHostReleaseQuarantined,&g_msiDinputReturnOwed,&g_inputHostVirtualIntentWriters,
+      &g_inputHostPowerAdmissionRevoked,&g_exitRequested,&g_inputCaptureStop,&g_externalPriorityVirtualSuspended,
+      &g_shortcutRecordingActive,&g_wakeRescanRequested,&g_inputHostLifecycleWorkRequested,&g_inputHostLifecycleWorkInFlight,
+      &g_inputHostSwitchExecutionReturnPending,&g_inputHostSwitchRecoveryPending,&g_inputHostRecoveryPending,
+      &g_inputHostTupleHealPending,&g_msiNativeForegroundCyclePending,&g_physicalReleaseWindowDutyActive,
+      &g_postHideCycleOwned,&g_coldReturnCycleOwned,&g_msiNativeForegroundPowerHold})p->store(false);
+    lifecycleLogs.clear();powerChecks=0;afterFirstPowerCheck={};
+}
+static std::uint64_t onAfterOffWake(){
+    // OFF suspend uses the actual production arm. The retired wake's lack of
+    // pending work is a declared input; no wake execution/retirement is emulated.
+    inputHostArmWakePhysicalHold("system-suspend");clockNow+=60000;
+    g_realStickTest.virtualTargetEnabled=true;configuredPersona="steamdeck";
+    return g_virtualStartProtection.admit(configuredPersona,clockNow).requestId;
+}
+int main(int argc,char**argv){
+    if(argc!=2)return 2;json results=json::array(),failures=json::array();
+    auto check=[&](const std::string& name,bool ok){results.push_back({{"name",name},{"passed",ok}});if(!ok)failures.push_back(name);};
+    reset();const auto request=onAfterOffWake();const auto before=g_virtualStartProtection.view(clockNow);
+    check("gpd-off-suspend-arms-existing-hold",g_wakeHoldPhysicalUnhide&&request!=0);
+    const bool gate=originalBusWakeGate();
+    check("gpd-idle-wake-first-on-reaches-original-bus-gate",gate&&!g_wakeHoldPhysicalUnhide);
+    const auto after=g_virtualStartProtection.view(clockNow);
+    check("original-request-period-persona-and-fallback-retained",after.requestId==request&&after.persona==before.persona&&after.remainingMs==before.remainingMs&&after.phase=="pending"&&after.fallbackAttempts==before.fallbackAttempts);
+    const auto logCount=lifecycleLogs.size();(void)originalBusWakeGate();
+    check("retirement-is-once-with-no-target-or-device-effect",lifecycleLogs.size()==logCount&&!g_inputHostProcess&&g_inputHostEpoch==0&&g_realStickTest.virtualTargetEnabled&&configuredPersona=="steamdeck");
+    std::vector<std::pair<std::string,std::function<void()>>> refused={
+      {"unresolved-machine",[]{g_machineIdentity.resolved=false;}},{"unknown-gpd-profile",[]{profileKnown=false;}},
+      {"host-epoch",[]{g_inputHostEpoch=1;}},{"host-process",[]{g_inputHostProcess=reinterpret_cast<HANDLE>(1);}},
+      {"host-primary-thread",[]{g_inputHostPrimaryThread=reinterpret_cast<HANDLE>(1);}},
+      {"host-server-pipe",[]{g_inputHostServerPipe=reinterpret_cast<HANDLE>(1);}},
+      {"pipe-unreturned",[]{pipeReturned=false;}},{"hello",[]{g_inputHostHello=true;}},
+      {"prepared",[]{g_inputHostPrepared=true;}},{"prepare-may-have-arrived",[]{g_inputHostPrepareMayHaveReachedHost=true;}},
+      {"neutralized",[]{g_inputHostNeutralized=true;}},{"active-host",[]{g_inputHostActive=true;}},
+      {"active-visibility",[]{g_hidHideVisibilityJournal.active=true;}},{"quarantine",[]{g_inputHostReleaseQuarantined=true;}},
+      {"sd-debt",[]{g_msiSteamDeckReleaseDebt.pending=true;}},{"ps-debt",[]{g_psEndpointOwnership.pending=true;}},
+      {"history-unknown",[]{historyReturned=false;}},{"current-proof-pending",[]{currentProofPending=true;}},
+      {"blocked",[]{g_inputHostStartBlocked=true;}},{"transport-fault",[]{g_inputHostTransportFault=true;}},
+      {"fault-held",[]{g_inputHostFaultHoldsStart=true;}},{"intent-writer",[]{g_inputHostVirtualIntentWriters=true;}},
+      {"non-ready-power",[]{g_powerLifecycle=PowerLifecycle::Suspended;}},{"power-revoked",[]{g_inputHostPowerAdmissionRevoked=true;}},
+      {"exit-fence",[]{exitFence=true;}},{"exit-request",[]{g_exitRequested=true;}},{"capture-stop",[]{g_inputCaptureStop=true;}},
+      {"external-priority",[]{g_externalPriorityVirtualSuspended=true;}},{"recorder",[]{g_shortcutRecordingActive=true;}},
+      {"physical-release-window",[]{physicalRelease=true;}},{"wake-request",[]{g_wakeRescanRequested=true;}},
+      {"queued-lifecycle",[]{g_inputHostLifecycleWorkRequested=true;}},{"lifecycle-inflight",[]{g_inputHostLifecycleWorkInFlight=true;}},
+      {"switch-return",[]{g_inputHostSwitchExecutionReturnPending=true;}},{"switch-recovery",[]{g_inputHostSwitchRecoveryPending=true;}},
+      {"recovery",[]{g_inputHostRecoveryPending=true;}},{"tuple-heal",[]{g_inputHostTupleHealPending=true;}},
+      {"native-cycle-pending",[]{g_msiNativeForegroundCyclePending=true;}},{"physical-duty",[]{g_physicalReleaseWindowDutyActive=true;}},
+      {"native-owner-active",[]{g_msiNativeForegroundLease.active=true;}},{"native-process",[]{g_msiNativeForegroundLease.cycleProcess=reinterpret_cast<HANDLE>(1);}},
+      {"native-writer",[]{g_msiNativeForegroundLease.nativeRefreshWriter=std::make_shared<int>(1);}},
+      {"native-visibility",[]{g_msiNativeForegroundLease.nativeVisibilitySession=std::make_shared<int>(1);}},
+      {"native-posthide",[]{g_msiNativeForegroundLease.postHideCycle=true;}},{"native-cold",[]{g_msiNativeForegroundLease.coldReturnCycle=true;}},
+      {"native-restore",[]{g_msiNativeForegroundLease.restorePending=true;}},
+      {"native-deferred",[]{g_msiNativeForegroundLease.deferredVirtualWork.push_back("unreturned");}},
+      {"posthide-owner",[]{g_postHideCycleOwned=true;}},{"cold-owner",[]{g_coldReturnCycleOwned=true;}},
+      {"native-power-hold",[]{g_msiNativeForegroundPowerHold=true;}},{"unknown-public-power",[]{sharedKnown=false;}},
+      {"retired-public-power",[]{publicCurrent=false;}},{"other-public-generation",[]{sharedGeneration=powerNow+1;}},
+      {"expired-player",[]{clockNow+=30000;}},{"configured-off",[]{configuredPersona="disabled";g_realStickTest.virtualTargetEnabled=false;}}
+    };
+    for(const auto& [name,alter]:refused){reset();(void)onAfterOffWake();alter();check("hold-retained-"+name,!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide);}
+    // Reuse every original common refusal for ROG; GPD-only facts stay excluded.
+    for(const auto& [name,alter]:refused){
+        if(name=="native-owner-active")break;if(name=="unknown-gpd-profile")continue;
+        reset();(void)onAfterOffWake();g_machineIdentity.family=Family::Rog;alter();
+        check("rog-common-hold-retained-"+name,!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide);
+    }
+    for(unsigned change=0;change<3;++change){
+        reset();(void)onAfterOffWake();afterFirstPowerCheck=[change]{if(change==0)publicCurrent=false;else if(change==1)++powerNow;else g_powerLifecycle=PowerLifecycle::Suspended;};
+        check("mid-admission-power-change-retains-hold-"+std::to_string(change),!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide);
+    }
+    for(const auto family:{Family::Msi,Family::OneX,Family::Aya,Family::Unknown}){reset();(void)onAfterOffWake();g_machineIdentity.family=family;check("other-family-unchanged-"+std::to_string(static_cast<int>(family)),!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide);}
+    reset();(void)onAfterOffWake();g_machineIdentity.family=Family::Rog;sharedKnown=false;
+    check("original-rog-admission-unchanged",inputHostRetireUnownedRogWakeHoldForStart()&&!g_wakeHoldPhysicalUnhide);
+    reset();(void)onAfterOffWake();g_msiNativeForegroundCyclePending=true;auto& owner=g_msiNativeForegroundLease;
+    owner.active=true;owner.cycleProcess=reinterpret_cast<HANDLE>(1);
+    check("live-native-writer-keeps-hold-and-existing-queue-authority",originalBusWakeGate()&&g_wakeHoldPhysicalUnhide&&lifecycleLogs.empty());
+    for(bool native:{false,true}){
+        reset();(void)onAfterOffWake();std::atomic<bool> locked=false,release=false;
+        std::thread holder([&]{if(native)g_msiNativeForegroundMx.lock();else g_inputHostMx.lock();locked=true;while(!release)Sleep(1);if(native)g_msiNativeForegroundMx.unlock();else g_inputHostMx.unlock();});
+        while(!locked)Sleep(1);const bool retired=inputHostRetireUnownedRogWakeHoldForStart();release=true;holder.join();
+        check(native?"native-lock-contention-keeps-hold":"host-lock-contention-keeps-hold",!retired&&g_wakeHoldPhysicalUnhide);
+    }
+    std::ofstream(argv[1])<<json({{"passed",failures.empty()},{"checks",results.size()},{"failures",failures},{"results",results},{"scope","actual admission functions and original BUS wake predicate; controlled IO facts; not whole Start or hardware"}}).dump(2);
+    std::cout<<"checks="<<results.size()<<" failures="<<failures.size()<<"\n";return failures.empty()?0:1;
+}

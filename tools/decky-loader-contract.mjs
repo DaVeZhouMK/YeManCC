@@ -6,6 +6,15 @@
  * Do not patch Python, router, store, or boot code inside Loader. YMCC owns only its plugin,
  * authenticated bridge, process lifecycle, and existing whole-package update transaction.
  * No extra runtime EXE, package-manager scripts, elevated Loader, or installed Steam access here.
+ * Windows capability review (v3.3.1 / ffd103b9c1a4ce5bf305e7c0998eda6e05457dad):
+ * backend/decky_loader/localplatform/localplatformwin.py restart_webhelper
+ * returns True without restarting anything; utilities.py only awaits that stub.
+ * PluginLoader.runCrashChecker can print "SP died during startup. Restarting webhelper."
+ * and utilities/restart_webhelper can resolve without restarting anything on Windows.
+ * Keep Windows recovery in native/main.cpp connectionHealth/connectionStep and its
+ * existing Runtime owner. A log line or successful submission is not UI readiness.
+ * On every upstream upgrade, recheck these platform functions and the real frontend
+ * capability before delegating recovery; this review note adds no new release test.
  */
 import fs from 'node:fs';
 import path from 'node:path';

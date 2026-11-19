@@ -1,6 +1,19 @@
 #pragma once
 // Included after the existing read-only owned-PS reader. Uses the same serialized
 // Host/return owner; no timer, Start/retry authority or machine-capability policy.
+static bool psRetiredProfileRootsAbsent(){
+    const auto result=inputHostTargetReturnPsProfileAbsence();
+    using namespace ymcc::targetReturn::pnpAbsence;
+    static std::string lastRun;static std::uint64_t lastEpoch=0;
+    static State lastState=State::Unknown;static Reason lastReason=Reason::ReaderException;static bool seen=false;
+    if(!seen || lastRun!=g_inputHostRunId || lastEpoch!=g_inputHostEpoch || lastState!=result.state || lastReason!=result.reason){
+        seen=true;lastRun=g_inputHostRunId;lastEpoch=g_inputHostEpoch;lastState=result.state;lastReason=result.reason;
+        try{appendNativeLifecycleLog("input-host-ps-profile-return-proof",{{"runId",g_inputHostRunId},{"hostEpoch",g_inputHostEpoch},
+            {"state",stateName(result.state)},{"reason",reasonName(result.reason)},{"scannedNodes",result.scannedNodes},
+            {"scope","no-pin-PS-profile-negative-evidence"},{"ownershipGranted",false},{"provesGameInput",false}});}catch(...){}
+    }
+    return result.absent();
+}
 static bool psRetiredFamilyAbsent() {
     // Without an accepted owned root, only complete absence of this immutable
     // output profile can prove return. Presence never invents ownership.
@@ -9,7 +22,7 @@ static bool psRetiredFamilyAbsent() {
     struct Close {HDEVINFO value;~Close(){SetupDiDestroyDeviceInfoList(value);}} close{set};
     for(DWORD index=0;index<256;++index){
         SP_DEVICE_INTERFACE_DATA iface{};iface.cbSize=sizeof(iface);
-        if(!SetupDiEnumDeviceInterfaces(set,nullptr,&kYeManGuidDeviceInterfaceHid,index,&iface))return GetLastError()==ERROR_NO_MORE_ITEMS;
+        if(!SetupDiEnumDeviceInterfaces(set,nullptr,&kYeManGuidDeviceInterfaceHid,index,&iface))return GetLastError()==ERROR_NO_MORE_ITEMS && psRetiredProfileRootsAbsent();
         DWORD bytes=0;SetupDiGetDeviceInterfaceDetailW(set,&iface,nullptr,0,&bytes,nullptr);
         if(GetLastError()!=ERROR_INSUFFICIENT_BUFFER||bytes<sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W)||bytes>65536)return false;
         std::vector<unsigned char> storage(bytes);auto* detail=reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(storage.data());detail->cbSize=sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
@@ -37,11 +50,25 @@ static bool psRetiredReturnProvenLocked() {
     if(!g_psEndpointOwnership.retirementRequired())return true;
     const auto debt=g_psEndpointOwnership.retirement();
     if(g_inputHostProcess||!debt.owner.epoch||debt.owner.epoch!=g_inputHostEpoch||debt.owner.runId!=g_inputHostRunId)return false;
+    if(inputHostTargetReturnPsLifetimeProvenLocked(debt))return true;
     bool absent=false;const char* basis="profile-negative-census";const char* verdict="unknown";
+    bool rootQueried=false;CONFIGRET rootQuery=CR_SUCCESS;
     if(debt.target.valid){
         const auto probe=psWakeProbeOwnEndpoint(debt.target);basis="exact-retired-SDK-root";
-        absent=probe.enumerationComplete&&!probe.queryError&&(probe.kind==PsWakeProbe::Absent||probe.kind==PsWakeProbe::Foreign);
-        verdict=absent?"absent":probe.kind==PsWakeProbe::Present?"present":"unknown";
+        const bool interfacesAbsent=probe.enumerationComplete&&!probe.queryError&&
+            (probe.kind==PsWakeProbe::Absent||probe.kind==PsWakeProbe::Foreign);
+        verdict=probe.kind==PsWakeProbe::Present?"present":"unknown";
+        if(interfacesAbsent){
+            // HID withdrawal alone cannot prove that the accepted SDK target
+            // root left the present tree. NORMAL is a read-only present lookup;
+            // never include phantom registry records or cancel pending removal.
+            auto root=U2W(debt.target.rootInstanceId);DEVINST node=0;
+            if(!root.empty()){
+                rootQueried=true;rootQuery=CM_Locate_DevNodeW(&node,root.data(),CM_LOCATE_DEVNODE_NORMAL);
+                absent=rootQuery==CR_NO_SUCH_DEVNODE;
+                verdict=absent?"absent":rootQuery==CR_SUCCESS?"root-present":"root-query-unknown";
+            }
+        }
     }else {absent=psRetiredFamilyAbsent();verdict=absent?"absent":"unknown-or-profile-present";}
     // Diagnostics are edges on this existing owner, not a periodic scan log.
     // These fields never authorize return and never change its polling budget.
@@ -50,6 +77,6 @@ static bool psRetiredReturnProvenLocked() {
         if(lastRun!=debt.owner.runId||lastEpoch!=debt.owner.epoch){lastRun=debt.owner.runId;lastEpoch=debt.owner.epoch;lastBasis="";lastVerdict="";checks=0;}
         ++checks;if(std::strcmp(lastBasis,basis)==0&&std::strcmp(lastVerdict,verdict)==0)return absent;
         lastBasis=basis;lastVerdict=verdict;
-        appendNativeLifecycleLog("input-host-ps-return-proof",{{"runId",debt.owner.runId},{"hostEpoch",debt.owner.epoch},{"bindingGeneration",debt.target.generation},{"basis",basis},{"verdict",verdict},{"ownedRootAvailable",debt.target.valid},{"completeAbsence",absent},{"xinputPlaneSubstituted",false},{"provesGameInput",false},{"checksSincePreviousVerdict",checks}});checks=0;}catch(...){}
+        appendNativeLifecycleLog("input-host-ps-return-proof",{{"runId",debt.owner.runId},{"hostEpoch",debt.owner.epoch},{"bindingGeneration",debt.target.generation},{"basis",basis},{"verdict",verdict},{"ownedRootAvailable",debt.target.valid},{"rootQueried",rootQueried},{"rootQueryResult",rootQueried?json(static_cast<unsigned long>(rootQuery)):json(nullptr)},{"completeAbsence",absent},{"xinputPlaneSubstituted",false},{"provesGameInput",false},{"checksSincePreviousVerdict",checks}});checks=0;}catch(...){}
     return absent; // keep the exact debt until physical restore/hold also succeeds
 }

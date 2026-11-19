@@ -1,15 +1,70 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Out)
+param([Parameter(Mandatory=$true)][string]$Out,[string]$ComponentRoot='',[ValidateSet('All','ValidationLoops','IndexFreshness')][string]$Case='All')
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
-. (Join-Path $repo 'PowerControl\steam-appearance\idle.ps1')
-$pack=Join-Path $repo 'PowerControl\steam-appearance'
+if(!$ComponentRoot){$ComponentRoot=Join-Path $repo 'PowerControl'}
+$pack=Join-Path $ComponentRoot 'steam-appearance'
+. (Join-Path $pack 'idle.ps1')
 $manifest=Get-Content -LiteralPath (Join-Path $pack 'manifest.json') -Raw|ConvertFrom-Json
 $cases=New-Object Collections.Generic.List[string]
 function Assert($Value,$Label){if(!$Value){throw $Label};$cases.Add($Label)}
 function Reject([scriptblock]$Work){try{&$Work|Out-Null;return $false}catch{return $true}}
 function Copy-Json($Value){$Value|ConvertTo-Json -Depth 32 -Compress|ConvertFrom-Json}
+if($Case -eq 'IndexFreshness'){
+ $original=$script:AppearanceContentManifestFile
+ $script:AppearanceContentManifestFile=Join-Path $Out 'index-freshness-fixture.json'
+ $owned=$script:AppearanceContentManifestFile
+ [IO.File]::Copy($original,$owned)
+ $item=[IO.FileInfo]::new($owned);$length=$item.Length;$creation=$item.CreationTimeUtc;$mtime=$item.LastWriteTimeUtc
+ $first=Get-AppearanceContentIndex
+ Assert ([object]::ReferenceEquals($first,(Get-AppearanceContentIndex))) 'Identical content reuses the parsed table'
+ $raw=[IO.File]::ReadAllText($owned);$changed=$raw -replace '("renderContentProtocol"\s*:\s*)1','${1}2'
+ Assert ($raw -cne $changed) 'Fixture locates the original index version'
+ [IO.File]::WriteAllText($owned,$changed,[Text.UTF8Encoding]::new($false))
+ [IO.File]::SetCreationTimeUtc($owned,$creation);[IO.File]::SetLastWriteTimeUtc($owned,$mtime)
+ $item=[IO.FileInfo]::new($owned)
+ Assert ($item.Length -eq $length -and $item.CreationTimeUtc -eq $creation -and $item.LastWriteTimeUtc -eq $mtime) 'Replacement retains all previous cache metadata'
+ $failure='';try{Get-AppearanceContentIndex|Out-Null}catch{$failure=$_.Exception.Message}
+ Assert ($failure -ceq 'render-content-index-invalid') 'Same-metadata replacement cannot reuse the stale table'
+ [IO.File]::Copy($original,$owned,$true)
+ Assert ([object]::ReferenceEquals($first,(Get-AppearanceContentIndex))) 'Restoring the exact bytes recovers the valid table'
+ [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);selectedCase=$Case;realSteamOperations=0;realCssOperations=0}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+ Write-Output "PASS: $($cases.Count) bundled index freshness checks"
+ exit 0
+}
+if($Case -eq 'ValidationLoops'){
+ $defined=@{};$configs=@{};$outcomes=New-Object Collections.Generic.List[object]
+ foreach($theme in $manifest.themes){$dir=Join-Path (Join-Path $pack 'themes') $theme.name;$defined[$theme.name]=[IO.File]::ReadAllText((Join-Path $dir 'theme.json'))|ConvertFrom-Json;$configs[$theme.name]=[IO.File]::ReadAllText((Join-Path $dir 'config_USER.json'))|ConvertFrom-Json}
+ function Observe-LoopPlan([string]$Name,$Definition,$Config,[string]$Label,[string]$ExpectedFailure=''){
+  $sourceBefore=($Definition|ConvertTo-Json -Depth 64 -Compress)+'|'+($Config|ConvertTo-Json -Depth 64 -Compress)
+  $plan=$null;$failure='';try{$plan=Get-AppearanceThemeRenderPlan $Name $Definition $Config}catch{$failure=$_.Exception.Message}
+  Assert ($failure -ceq $ExpectedFailure) ('Exact loop validation result: '+$Label)
+  Assert ($sourceBefore -ceq (($Definition|ConvertTo-Json -Depth 64 -Compress)+'|'+($Config|ConvertTo-Json -Depth 64 -Compress))) ('Planning preserves both parsed inputs: '+$Label)
+  $outcomes.Add([pscustomobject]@{name=$Label;error=$failure;plan=$plan})
+ }
+ foreach($variant in @('null','scalar','integer','boolean','nested','too-many','empty','one','sixteen')){
+  $j=Copy-Json $defined['Round'];$v=$null
+  switch($variant){null {$v=$null};scalar {$v='SP'};integer {$v=@('SP',42)};boolean {$v=@('SP',$true)};nested {$v=@(@('SP','MainMenu'),42)};too-many {$v=@(1..17|ForEach-Object{'SP'})};empty {$v=@()};one {$v=@('SP')};sixteen {$v=@(1..16|ForEach-Object{'SP'})}}
+  $j.inject.'shared.css'=$v;$ExpectedFailure=if($variant -in @('empty','one','sixteen')){''}else{'render-inject-targets-invalid'}
+  Observe-LoopPlan 'Round' $j $configs['Round'] ('file-'+$variant) $ExpectedFailure
+ }
+ foreach($variant in @('null','scalar','one','integer','boolean','nested','too-many','sixteen','first-not-target','case-sensitive')){
+  $j=Copy-Json $defined['Art Hero'];$v=$null
+  switch($variant){null {$v=$null};scalar {$v='1'};one {$v=@('1')};integer {$v=@('1',42)};boolean {$v=@('1',$false)};nested {$v=@('1',@('SP','MainMenu'))};too-many {$v=@('1')+@(1..16|ForEach-Object{'SP'})};sixteen {$v=@('1')+@(1..15|ForEach-Object{'SP'})};first-not-target {$v=@('SP','NO-TARGET')};case-sensitive {$v=@('1','sp','mainmenu','quickaccess')}}
+  $j.inject|Add-Member -NotePropertyName '--met-hero-art-z-order' -NotePropertyValue $v -Force
+  $ExpectedFailure=if($variant -in @('sixteen','first-not-target','case-sensitive')){''}else{'render-variable-definition-invalid'}
+  Observe-LoopPlan 'Art Hero' $j $configs['Art Hero'] ('variable-'+$variant) $ExpectedFailure
+ }
+ foreach($variant in @('integer','boolean','missing','wrong-case','default')){
+  $c=Copy-Json $configs['Round'];switch($variant){integer {$c.Intensity=10};boolean {$c.Intensity=$true};missing {$c.Intensity='unknown'};wrong-case {$c.Intensity='10PX'};default {$c.PSObject.Properties.Remove('Intensity')}}
+  Observe-LoopPlan 'Round' $defined['Round'] $c ('selection-'+$variant) $(if($variant -eq 'default'){''}else{'render-patch-selection-invalid'})
+ }
+ [pscustomobject]@{ok=$true;selectedCase=$Case;passed=$cases.Count;cases=@($cases);outcomes=$outcomes.ToArray();realSteamOperations=0;realCssOperations=0}|ConvertTo-Json -Depth 64|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+ Write-Output "PASS: $($cases.Count) original render validation loop boundary checks"
+ return
+}
+
 $rows=@();$defined=@{};$configurations=@{};$all=@{}
 foreach($theme in $manifest.themes){
  $name=$theme.name;$folder=Join-Path (Join-Path $pack 'themes') $name
@@ -94,6 +149,25 @@ foreach($mutation in @('missing-content','invalid-content','duplicate-content','
 }
 foreach($good in @([int]0,[long]0,[int]16384,[long]16384)){Assert (Test-AppearanceReceiptInteger $good 0 16384) ('Bounded native JSON integer accepted: '+$good.GetType().Name)}
 foreach($badInteger in @($true,$false,[decimal]1,[double]1,'1',[long]16385,[long]-1,$null)){Assert (!(Test-AppearanceReceiptInteger $badInteger 0 16384)) 'Boolean, noninteger and out-of-range DOM fields remain invalid'}
+# A whole three-document plan retains its exact results with one pure hash
+# per distinct normalized file in each target. No process/config state is cached.
+$script:ReceiptCalls=0
+$script:OriginalReceiptBody=(Get-Item Function:\Get-AppearanceFileReceipt).ScriptBlock
+function Get-AppearanceFileReceipt([string]$Name,[string]$Relative){$script:ReceiptCalls++;& $script:OriginalReceiptBody $Name $Relative}
+try {
+ foreach($theme in $manifest.themes){
+  $name=$theme.name;$script:ReceiptCalls=0
+  $fresh=Get-AppearanceThemeRenderPlan $name $defined[$name] $configurations[$name]
+  Assert ($script:ReceiptCalls -eq 3*@($fresh.files).Count) ('One validated file receipt per distinct path per target: '+$name)
+  $prior=@($rows|Where-Object name -ceq $name)[0].renderPlan
+  Assert (($fresh|ConvertTo-Json -Depth 32 -Compress) -ceq ($prior|ConvertTo-Json -Depth 32 -Compress)) ('Receipt reuse keeps the complete three-document plan exact: '+$name)
+ }
+ $bad=Copy-Json $defined['Round'];$bad.inject|Add-Member -NotePropertyName 'shared.css/../shared.css' -NotePropertyValue @('SP')
+ Assert (Reject {Get-AppearanceThemeRenderPlan 'Round' $bad $configurations['Round']}) 'A repeated basename cannot bypass normalized path validation'
+ $bad=Copy-Json $defined['Round'];$bad.patches|Add-Member -NotePropertyName 'ReceiptDuplicateTargetCheck' -NotePropertyValue ([pscustomobject]@{default='Default';values=[pscustomobject]@{Default=[pscustomobject]@{'SHARED.CSS'=@($true)}}})
+ Assert (Reject {Get-AppearanceThemeRenderPlan 'Round' $bad $configurations['Round']}) 'Repeated case-equivalent file still validates every target array'
+}finally{Set-Item Function:\Get-AppearanceFileReceipt -Value $script:OriginalReceiptBody}
+
 $watch=[Diagnostics.Stopwatch]::StartNew();for($n=0;$n -lt 5;$n++){foreach($theme in $manifest.themes){$null=Get-AppearanceThemeRenderPlan $theme.name $defined[$theme.name] $configurations[$theme.name]}};$watch.Stop()
 [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);patchValuesExercised=$variantCount;bundledCssFiles=$css.Count;activeDefaultFiles=@($expect|Where-Object enabled).Count;fiveFullPlanPassesMs=$watch.ElapsedMilliseconds;realSteamOperations=0;realCssOperations=0;extraCssResourceReadsDuringPlanning=0;contentIndexSource='One small manifest cached per identity; no CSS file reads during planning';scope='Exact production planning from parsed source manifests/configs; no physical Steam or CSS process'}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) file render planning checks across $variantCount patch values"

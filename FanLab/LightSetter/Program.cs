@@ -46,7 +46,7 @@ internal static class Program
 
     // Awaiting main-controller derivative identity/pin. Empty means disabled;
     // neither a caller hash nor a runtime manifest may enable this profile.
-    private const string ExpectedYmccHcCoreSha256 = "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583";
+    private const string ExpectedYmccHcCoreSha256 = "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c";
     private const string ExpectedYmccHcCoreAssemblyName = "HandheldCompanion";
 
     private static string HcPinForProfile(string profile) => profile switch
@@ -119,7 +119,8 @@ internal static class Program
     internal static Dictionary<string, object?> RunWithSuperJoyPorts(string[] args,
         Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, ISuperJoyLightingTransport> openHid,
         Func<string, CancellationToken, IAyaneoCeLightingEc> openEc,
-        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, IApexLightingTransport>? openApex = null)
+        Func<SuperJoyIdentity, SuperJoyOwnerLease, CancellationToken, IApexLightingTransport>? openApex = null,
+        Func<LightingOemOwnershipCapability, string, Assembly, CancellationToken, IAyaneoOemRestoreIo>? openOem = null)
     {
         string? hcPath = null, runtimeRootOpt = null, action = null, level = null, statusArg = null, presetId = null, expectedDeviceClass = null;
         string? corePath = null, coreCallerHash = null, ownerInterfacePath = null, ownerGeneration = null;
@@ -165,6 +166,10 @@ internal static class Program
 
         ValidateRequest(action, level, statusArg, presetId);
         if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+        if (action == "restore-oem" && (hcProfile != "ymcc-device-core-v1" || level is not null ||
+            statusArg is not null || presetId is not null || brightness is not null || speed is not null ||
+            r is not null || g is not null || b is not null || r2 is not null || g2 is not null || b2 is not null))
+            throw new ArgumentException("OEM_LIGHTING_REQUIRES_APPROVED_PROFILE_AND_EXCLUSIVE_ACTION");
         // Dispatch before legacy HC. Catalog admission remains closed until the
         // actual native selector/lifecycle is wired; caller arguments cannot grant it.
         if (IsSuperJoySourceModel(expectedDeviceClass))
@@ -220,6 +225,14 @@ internal static class Program
             .Invoke(null, null)
             ?? throw new InvalidOperationException("HC IDevice.GetCurrent returned null");
         var capability = RequireCatalogLightingOperation(device.GetType(), expectedDeviceClass, action!, level, brightness is not null, presetId);
+        if (action == "restore-oem")
+        {
+            var restored = ExecuteAyaneoOemRestore(device.GetType(), expectedDeviceClass, runtimeRoot,
+                assembly, timeoutMs, openOem ?? AyaneoOemRestoreWindowsPorts.Open);
+            restored["hcSha256"] = actualHash;
+            restored["backend"] = "ymcc-hc-device-core";
+            return restored;
+        }
         ValidateAyaneoCeRequest(device.GetType(), action!, level, brightness, r, g, b);
         Invoke(device, "Initialize", false, false);
         var ready = WaitReady(device, timeoutMs);
@@ -254,6 +267,10 @@ internal static class Program
             ["queuedWritesCompleted"] = transaction.Completed,
             ["queuedWriteTasks"] = transaction.WriteTasks,
             ["queuedWriteFailures"] = transaction.FailedTasks,
+            ["colorSequencePolicy"] = UsesAokzoeBrightnessFirst(deviceRuntimeType, action, brightness)
+                ? "brightness-settle-color" : "existing",
+            ["colorSequenceDelayMs"] = UsesAokzoeBrightnessFirst(deviceRuntimeType, action, brightness)
+                ? AokzoeColorSettleMs : 0,
             ["physicalEffectVerified"] = false,
         };
     }
@@ -514,6 +531,14 @@ internal static class Program
         actualType.GetMethod(method, BindingFlags.Public | BindingFlags.Instance) is { } candidate &&
         candidate.DeclaringType?.FullName != "HandheldCompanion.Devices.IDevice";
 
+    // These four catalog identities inherit A1's HID-v2 brightness/color setters.
+    // This predicate selects sequencing only; catalog/runtime admission still runs first.
+    private const int AokzoeColorSettleMs = 300;
+    private static bool UsesAokzoeBrightnessFirst(Type type, string? action, int? brightness) =>
+        action == "color" && brightness is > 0 && type.FullName is
+            ("HandheldCompanion.Devices.AOKZOEA1" or "HandheldCompanion.Devices.AOKZOEA1Pro" or
+             "HandheldCompanion.Devices.AOKZOEA1X" or "HandheldCompanion.Devices.AOKZOEA2");
+
     // 灯光 action 真实业务体（从 Run 的 switch 原样提取，逐行不变）。传入已
     // 准备的 device/deviceType 与现有 action/数值参数，返回现有 note；由 Run 在
     // 完成加载、hash/config/init/WaitReady/Open 后调用。提取目的是让离线 fake
@@ -527,6 +552,7 @@ internal static class Program
         ValidateRequest(action, level, statusArg, null);
         ValidateOperationImplementation(deviceType, action!, brightness is not null);
         var ayaneoCe = ValidateAyaneoCeRequest(deviceType, action!, level, brightness, r, g, b);
+        var aokzoeBrightnessFirst = UsesAokzoeBrightnessFirst(deviceType, action, brightness);
         OneXQueuedLighting.PrepareRequestCache(device, action!, brightness, statusArg);
         var note = "ok";
         switch (action)
@@ -552,12 +578,21 @@ internal static class Program
                 // brightness is initialized, so prepare it before the first color.
                 if (ayaneoCe && deviceType.GetMethod("SetLedBrightness")!.Invoke(device, [Clamp(brightness!.Value)]) is not true)
                     return "setLedBrightness-false";
+                // A fresh helper cannot know whether the previous request disabled the lamp.
+                // HID-v2 re-enable must settle before color/mode: HueSync7176803c
+                // onex_led_device_hid.py:414,634-643 (also used by the exact APEX route).
+                if (aokzoeBrightnessFirst)
+                {
+                    if (deviceType.GetMethod("SetLedBrightness")!.Invoke(device, [Clamp(brightness!.Value)]) is not true)
+                        return "setLedBrightness-false";
+                    Thread.Sleep(AokzoeColorSettleMs);
+                }
                 note = contract.SetColor.Invoke(device, [main, secondary, enumValue, speed ?? 100]) is bool ok && ok
                     ? "ok"
                     : "setLedColor-false";
                 // 亮度随 color 一并设置（HC DevicePage 的亮度滑杆与效果同属一次
                 // UpdateLED；0..100 映射由 HC 内部处理）。仅显式传入时写。
-                if (brightness is not null && !ayaneoCe)
+                if (brightness is not null && !ayaneoCe && !aokzoeBrightnessFirst)
                 {
                     var setBrightness = deviceType.GetMethod("SetLedBrightness")
                         ?? throw new MissingMethodException(deviceType.FullName, "SetLedBrightness");
@@ -603,6 +638,36 @@ internal static class Program
         }
 
         return note;
+    }
+
+    // Actual DMI is resolved by Run before this operation. Software consumers
+    // link this same admission/owner validation and replace only the I/O leaf.
+    internal static Dictionary<string, object?> ExecuteAyaneoOemRestore(Type actualType,
+        string? expectedClass, string root, Assembly approvedHc, int timeoutMs,
+        Func<LightingOemOwnershipCapability, string, Assembly, CancellationToken, IAyaneoOemRestoreIo> open)
+    {
+        var operation = RequireCatalogLightingOperation(actualType, expectedClass, "restore-oem", null, false, null);
+        var ownership = HcLightingCapabilityCatalog.ResolveOemOwnership(actualType.FullName)
+            ?? throw new NotSupportedException("OEM_LIGHTING_OWNERSHIP_UNAVAILABLE");
+        var release = actualType.GetMethod("CEcControl_RgbReleaseControl", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (release?.DeclaringType?.FullName != ownership.MethodOwner || release.ReturnType != typeof(void) ||
+            release.GetParameters().Length != 0 || !release.IsFamily || !release.IsVirtual)
+            throw new InvalidOperationException("OEM_LIGHTING_METHOD_OWNER_CHANGED");
+        if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+        using var timeout = new CancellationTokenSource(timeoutMs);
+        using var io = open(ownership, root, approvedHc, timeout.Token);
+        var result = AyaneoOemLightingRestore.Apply(ownership, io, timeout.Token);
+        return new Dictionary<string, object?> {
+            ["device"] = actualType.FullName, ["deviceClass"] = actualType.FullName,
+            ["action"] = "restore-oem", ["expectedDeviceClass"] = expectedClass,
+            ["capabilityId"] = operation.Device.DeviceId, ["capabilityOperation"] = operation.OperationId,
+            ["capabilityCatalogSha256"] = HcLightingCapabilityCatalog.CatalogSha256,
+            ["note"] = result.Reason, ["oemRestoreRequested"] = true,
+            ["ownershipRequestCompleted"] = result.RequestCompleted,
+            ["ownershipProtocol"] = ownership.Protocol == LightingOemOwnershipProtocol.LegacyCec ? "legacy-cec" : "ceii-ram",
+            ["ownershipReadbackAvailable"] = false, ["physicalEffectVerified"] = false,
+            ["writeCallCount"] = result.Writes,
+        };
     }
 
     // No field seeding or guessed current color/brightness: the original CEc
@@ -679,7 +744,7 @@ internal static class Program
     private static void ValidateRequest(string? action, string? level, string? status, string? presetId)
     {
         if (string.IsNullOrWhiteSpace(action)) throw new ArgumentException("--action is required");
-        if (action is not ("color" or "brightness" or "status" or "off" or "preset"))
+        if (action is not ("color" or "brightness" or "status" or "off" or "preset" or "restore-oem"))
             throw new ArgumentException($"unknown action {action}");
         if (action == "status" && !string.Equals(status, "on", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(status, "off", StringComparison.OrdinalIgnoreCase))

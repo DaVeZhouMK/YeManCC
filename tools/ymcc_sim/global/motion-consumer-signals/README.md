@@ -151,7 +151,9 @@ unknown dependencies fail; they cannot become semantic-negative detections.
 The public verifier requires all 80 original configurations.
 
 `toolchain-additions.json` is this motion module's independent first layer. Its
-schema1/sharedManifest/sha pin links the existing five data manifests, unchanged.
+schema1/sharedManifest/sha pin links five data manifests. Motion and MSI use the
+same two byte-pinned `55c4c44` copies for the last two layers, preserving the
+original logical parent names without reading the evolving sleep manifests.
 It adds only the eight reviewed MD/MDd library prerequisites from fixed
 MSVC14.44.35207 and SDK10.0.26100.0. The loader enforces exact membership/hashes,
 rejecting missing, duplicate, replaced or changed tail members. All 574 inherited

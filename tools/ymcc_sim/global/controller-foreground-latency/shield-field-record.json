@@ -26,5 +26,74 @@
     "claim": "new destructive foreground refresh coincides with physical loss; exact CM failing call remains unproven",
     "requiredRegression": "recognize PID1B4C HID XUSB, but native/OFF may not hide then stop/start this node; no SDK/PnP/physical success invented",
     "physicalAcceptance": false
+  },
+  "win5NativeVisibility20261111": {
+    "archives": [
+      {
+        "archive": "YeManCC-logs-20261111-094827-Win5手柄-重启和关闭都无手柄了.zip",
+        "sha256": "4699ac28fe7b25afa29904d83ce620958f6eadb7033c32e3d23a8de99d48e283",
+        "regression": "Actual write-ahead reservation, issue marking, return readback and durable settlement"
+      },
+      {
+        "archive": "YeManCC-logs-20261111-111615-Win5手柄失败-只有SD虚拟手柄能用了.zip",
+        "sha256": "e0a9e5125f95ed0f8e5b4bba3210dd81283b4742d2a29adb62f2571f208a7825",
+        "regression": "Live SD observation must not manufacture cold pending; serial SD-to-Edge/Elite must retain original lifecycle"
+      },
+      {
+        "archive": "YeManCC-logs-20261111-130556-Win5-虚拟手臂又坏了双输入.zip",
+        "sha256": "f04300b43731c4376c5c606ea03bcea085bb4ca7d44f50bd774a273b17207894",
+        "status": "FINAL_MINIMAL_PRODUCT_IMPORTED_57_PASS_TWO_NEGATIVES_HARDWARE_UNVERIFIED",
+        "notCoveredByColdOrNative31": true,
+        "regression": "gpdNativeHandoffCycleChecks actual durable Accept/transfer, exact journal stamp and original first post-hide dispatch",
+        "evidence": "Testing/YMCC/Evidence/VirtualControllerStability-20261108/win5-persistent-20261110/field-130556-r1/VALIDATION-r3.json",
+        "mixedBoundary": "two directly controlled valid-stamp/partial-owned paths; real mixed-donor chain not proven"
+      }
+    ],
+    "canonicalId": "controller.foreground-shield-field",
+    "directedMode": "YMCC_FOREGROUND_SHIELD_MODE=native-visibility",
+    "actualColdConsumer": "tools/fixtures/native_visibility_cold/fixture.cpp",
+    "nativeVisibilityAssertions": 31,
+    "coldCases": 8,
+    "coldAssertions": 19,
+    "negative": "Restore unconditional pending=true before actual current-context admission; same live-SD assertion must fail",
+    "familyBoundary": "GPD has native-UI cold authority; MSI/ROG/OneXPlayer/AYA retain their existing separate authority",
+    "physicalAcceptance": false,
+    "handoffMode": "YMCC_FOREGROUND_SHIELD_MODE=handoff-cycle"
+  },
+  "win5RecoveredField20261112_200615": {
+    "archive": "YeManCC-logs-20261112-200615-Decky视频播放断开.zip",
+    "archiveBytes": 13076480,
+    "sha256": "c9a6ea2b352002b9b16a3597e14c73eca3e704d871cac49b2116ae5b4be64838",
+    "evidence": "Testing/YMCC/Evidence/VC-Win5-Intermittent-20261110-111926/field-200615-r1/FINDINGS.json",
+    "evidenceSha256": "507145ad6c1b878d9740a64ac39f821483dd8812161a5c1b91a9bbf5f0a79039",
+    "canonicalId": "controller.foreground-shield-field",
+    "directedMode": "YMCC_FOREGROUND_SHIELD_MODE=prehost-writer",
+    "userObservation": "Virtual controller seems recovered; record existing fixtures if no new fault",
+    "nativePid": 5224,
+    "nativeCreationTime100ns": "134389564400618492",
+    "nativeExportDiskSha256": "da31fd27db1877418cbd4cd57133c44abf38edc928ab1dd092b067e9154b4bf1",
+    "hostHelloDiskSha256": "d2b93a508cbfad21b71f1c261f5c1bea3d351e893385220331f642984ead9fc1",
+    "hostLoadedMvid": "e44a1d81-97ef-4e4a-bb5e-d50c01e0faee",
+    "loadedBytesOrEarlierExportIdentityProven": false,
+    "firstRequestExpired": true,
+    "disable23ElapsedMs": 65384,
+    "exactRetiredWriterReturnedWithoutInverse": true,
+    "newBoundedRequestId": 2,
+    "newRequestSuccessAtLocal": "2026-11-12T19:29:34.579",
+    "successfulLocalSequence": ["steamdeck", "dualsense-edge", "elite", "disabled", "steamdeck"],
+    "powerNotificationRecovery": "Same epoch1 Host retained; two unproven-hide observations then current-power complete, zero starts/recreates",
+    "lastSteamDeckObservedSpanMs": 788017,
+    "unsolicitedStopObserved": false,
+    "offHostAndOwnedConfigurationReturned": true,
+    "steamPhysicalUseAfterOffProven": false,
+    "steamOpenedSelectedVirtualTargets": true,
+    "nativeToSdkExactJoins": 652,
+    "sdkSampleRowsReturned": 784,
+    "fixtureExecutedThisRound": false,
+    "prior208Assertions": "REFERENCE_ONLY_NOT_NEW_EXECUTION",
+    "newIdOrMinimum": false,
+    "first65sResolved": false,
+    "gameConsumptionOrAllHardwareAccepted": false,
+    "scope": "Positive field counterpart to prior prehost failure; preserve old expiry, same-source/owner/power refusal cases, retained-log and SDK-only limits. No product change or new test producer."
   }
 }

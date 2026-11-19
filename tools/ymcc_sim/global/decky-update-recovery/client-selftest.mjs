@@ -14,7 +14,7 @@ export async function clientTests(root,out){
  const fresh=sockets[1];fresh.emit('open');assert.deepEqual(fresh.sent.map(s=>s.command),['snapshot']);assert(!fresh.sent.some(s=>s.command==='fan.setPreset'));cases++;
  old.emit('message',{type:'snapshot',runId:'b'.repeat(32),snapshot:snapshot('b'.repeat(32),999)});assert.equal(client.snapshot().connected,false);cases++;
  fresh.emit('message',{type:'snapshot',runId:next.runId,snapshot:snapshot(next.runId)});assert(client.snapshot().connected);assert.equal(client.snapshot().snapshot.runId,next.runId);assert.equal(timers.size,0);cases++;
- host.DeckyPluginLoader={plugins:[{name:'ymcc-sidebar',version:'0.0.1',loadType:1}],importPlugin(...args){reloads.push(args);host.__YMCC_DECKY_FRONTEND__={active:true,buildId:next.frontendBuildId};host.dispatchEvent({type:'ymcc-decky-frontend-ready'});return Promise.resolve();}};
+ host.DeckyPluginLoader={plugins:[{name:'ymcc-sidebar',version:'0.0.1',loadType:1}],importPlugin(...args){reloads.push(args);this.plugins=[];host.__YMCC_DECKY_FRONTEND__={active:true,buildId:next.frontendBuildId};host.dispatchEvent({type:'ymcc-decky-frontend-ready'});this.plugins.push({name:'ymcc-sidebar',version:'0.0.1',loadType:1});return Promise.resolve();}};
  const update=vm.runInNewContext(fs.readFileSync(path.join(root,'native/decky_sidebar_frontend_update.js'),'utf8'),{window:host,Error});update(next);await flush();assert.equal(reloads.length,1);assert.equal(host.__YMCC_DECKY_FRONTEND_UPDATE__.phase,'current');assert.equal(timers.size,0);cases++;
  update(next);await flush();assert.equal(reloads.length,1);assert.equal(timers.size,0);// Execute the complete actual native retained bootstrap against the production
  // MirrorClient. This rebind is transport only, with a real pending mutation.
@@ -27,8 +27,19 @@ export async function clientTests(root,out){
  const retained={endpoint:'ws://127.0.0.1:21823/mirror',token:'f'.repeat(64),runId:'e'.repeat(32),frontendBuildId:next.frontendBuildId};
  const expression=parts.map(p=>p[0]==='"'?JSON.parse(p):p==='bootstrap.dump()'?JSON.stringify(retained):p.includes('frontendUpdateScript')?fs.readFileSync(path.join(root,'native/decky_sidebar_frontend_update.js'),'utf8'):p.includes('healthScript')?fs.readFileSync(path.join(root,'native/decky_sidebar_health.js'),'utf8'):version).join('');
  const retainedLine=source.split('\n').find(l=>l.includes('const std::string retainedGate ='));
- const gate=retainedLine.slice(retainedLine.indexOf(' = ')+3).trim().replace(/;$/,'').replace('nlohmann::json(bootstrap.value("frontendBuildId",std::string{})).dump()','JSON.stringify(expected)').replace('nlohmann::json(std::string(ymcc::deckyidentity::version)).dump()','JSON.stringify(version)');
- const complete=vm.runInNewContext(gate,{expression,expected:retained.frontendBuildId,version});
+ const gate=retainedLine.slice(retainedLine.indexOf(' = ')+3).trim().replace(/;$/,'');
+ // Interpret only the actual native string-concatenation terms. Reject a new
+ // expression rather than silently using a hand-written version of the gate.
+ const bindings=new Map([
+  ['nlohmann::json(bootstrap.value("frontendBuildId",std::string{})).dump()',JSON.stringify(retained.frontendBuildId)],
+  ['nlohmann::json(bootstrap.value("retainedFrontendBuildId",bootstrap.value("frontendBuildId",std::string{}))).dump()',JSON.stringify(retained.retainedFrontendBuildId??retained.frontendBuildId)],
+  ['nlohmann::json(std::string(ymcc::deckyidentity::version)).dump()',JSON.stringify(version)],
+  ['expression',expression],
+ ]);
+ const term=/"(?:\\.|[^"\\])*"|nlohmann::json\(bootstrap\.value\("retainedFrontendBuildId",bootstrap\.value\("frontendBuildId",std::string\{\}\)\)\)\.dump\(\)|nlohmann::json\(bootstrap\.value\("frontendBuildId",std::string\{\}\)\)\.dump\(\)|nlohmann::json\(std::string\(ymcc::deckyidentity::version\)\)\.dump\(\)|expression/g;
+ const gateParts=[...gate.matchAll(term)].map(match=>match[0]);
+ assert.equal(gateParts.join(' + '),gate,'actual complete native retained gate contract');
+ const complete=gateParts.map(part=>part.startsWith('"')?JSON.parse(part):bindings.get(part)).join('');
  host.top=host;host.location={origin:'https://steamloopback.host'};host.document={querySelectorAll:()=>[]};host.MutationObserver=class{observe(){}disconnect(){}};host.DeckyPluginLoader.deckyState={publicState:()=>({versionInfo:{current:version}})};
  host.addEventListener('ymcc-decky-bootstrap',()=>client.bootstrapChanged());
  const oldPending=client.mutate('fan.setPreset',{preset:'soft'}).then(()=>null,e=>e);await flush();

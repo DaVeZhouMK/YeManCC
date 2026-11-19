@@ -76,7 +76,7 @@ let build;
 try {
   toolPhase('compile-start');
   build = await esbuild.build(
-{ stdin: { contents: `export {startMonitorNoticeHost} from './src/bridge/monitorNoticeHost'; export {SHORTCUT_FEEDBACK_EVENT} from './src/bridge/shortcutActionFeedback'; export {presentUpdateReady,registerUpdateReadyPresenter} from './src/bridge/updateReadyNotice'; export {setLogSink} from './src/bridge/ipc';`, resolveDir: root, sourcefile: 'lifecycle-harness-entry.ts', loader: 'ts' },
+{ stdin: { contents: `export {startMonitorNoticeHost} from './src/bridge/monitorNoticeHost'; export {SHORTCUT_FEEDBACK_EVENT} from './src/bridge/shortcutActionFeedback'; export {presentUpdateReady,registerUpdateReadyPresenter} from './src/bridge/updateReadyNotice'; export {setLogSink} from './src/bridge/ipc'; export {getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';`, resolveDir: root, sourcefile: 'lifecycle-harness-entry.ts', loader: 'ts' },
   bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'NoticeLifecycleActual', target: 'es2022', metafile: true,
   plugins: [{ name: 'pinned-original-product-bytes', setup(builder) { builder.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, args => {
     const relative = path.relative(root, args.path).replaceAll('\\', '/'), bytes = captured.get(relative);
@@ -188,6 +188,29 @@ await run('sleep-owner-loss-no-self-heal', 'ON host lost during sleep must indep
     readyGranted: Boolean(committedReady && recovery?.committedGeneration === last.currentGeneration && !recovery.powerHeld), committedReadyEvent: committedReady ?? null, actualRecoveryState: recovery ?? null };
   return { measurements: m, checks: [check(healthyBefore.recovered && m.enabled && m.healthObserved, 'start healthy, remain ON and perform independent health observations', m), check(m.recovered && m.observedGeneration === m.currentGeneration, 'healthy current generation owner restored after sleep', m)] };
 });
+await run('shared-power-unknown-ready-denies-recovery', 'Actual shared unknown Ready holds recovery and stop cancels its read lifetime', 'recoverAfterTransientFailure', async make => {
+  const e=make();await e.ready();const initial=e.health('before-unknown-ready');
+  e.publishPowerSnapshot({phase:'ready',generation:1,known:false,inputReady:false,hardwareWritesAllowed:false,publicationRevision:20,observedNotificationSequence:20,notificationPending:true});
+  e.externalLoss('unknown current power authority');const marker=e.trace.length;await e.clock.advance(30000);
+  const denied=e.snapshot(),startsWhileUnknown=e.count('monitorNotice.create',marker),readsWhileUnknown=e.count('power.lifecycle',marker);
+  e.stop();await e.clock.flush();const atStop=e.snapshot(),lateMarker=e.trace.length;
+  e.publishPowerSnapshot({phase:'ready',generation:2,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:21,observedNotificationSequence:21,notificationPending:false});
+  e.deliverRetiredCallbacks();e.deliverRetiredTimers();await e.clock.advance(30000);const stopped=e.snapshot();
+  const m={initial,denied,startsWhileUnknown,readsWhileUnknown,atStop,stopped,startsAfterStop:e.count('monitorNotice.create',lateMarker)};
+  return {measurements:m,checks:[check(initial.recovered,'shared-power probe begins with an actually healthy notice owner',m),check(denied.host.recovery.powerHeld&&denied.sharedPower.snapshot?.known===false&&denied.sharedPower.subscriberCount===1&&startsWhileUnknown===0,'unknown Ready cannot start automatic notice recovery',m),check(readsWhileUnknown>0&&readsWhileUnknown<=6,'actual shared observer retries are bounded by its original backoff',m),check(zero(stopped.remainingOwnedResources)&&!stopped.sharedPower.active&&!stopped.sharedPower.read.retryTimerActive&&m.startsAfterStop===0,'stop releases shared power lifetime and late publications cannot revive the host',m)]};
+});
+await run('shared-power-new-ready-once-stale-and-duplicate-no-replay', 'Current shared Ready recovers one generation while stale and duplicate publications do not replay work', 'recoverAfterSleep', async make => {
+  const e=make();await e.ready();e.feedback();await e.clock.flush();const initial=e.health('before-shared-sleep');
+  e.publishPowerSnapshot({phase:'suspending',generation:1,known:true,inputReady:false,hardwareWritesAllowed:false,publicationRevision:30,observedNotificationSequence:30,notificationPending:false});
+  e.externalLoss('shared sleep retires old owner');e.nextGeneration();const marker=e.trace.length;
+  const ready={phase:'ready',generation:2,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:31,observedNotificationSequence:31,notificationPending:false};
+  e.publishPowerSnapshot(ready);await e.clock.flush();const recovered=e.health('after-shared-ready');
+  e.publishPowerSnapshot({...ready,generation:1,publicationRevision:29,observedNotificationSequence:29},{store:false});
+  e.publishPowerSnapshot({...ready,publicationRevision:32,observedNotificationSequence:32});e.publishPowerSnapshot({...ready,publicationRevision:32,observedNotificationSequence:32});await e.clock.advance(30000);
+  const final=e.snapshot(),m={initial,recovered,final,creates:e.count('monitorNotice.create',marker),frames:e.count('monitorNotice.frame',marker),currentSharedSnapshot:final.sharedPower.snapshot};
+  return {measurements:m,checks:[check(initial.recovered&&recovered.recovered&&recovered.observedGeneration===2,'current actual shared Ready restores the ON owner in the new generation',m),check(m.creates===1&&m.frames===0&&final.host.recovery.committedGeneration===2&&m.currentSharedSnapshot?.generation===2&&m.currentSharedSnapshot?.publicationRevision===32,'stale and duplicate publications neither rebuild nor replay old feedback',m)]};
+});
+
 await run('transient-carrier-loss-no-self-heal', 'ON host externally closed must recover without another receipt or settings change', 'recoverAfterTransientFailure', async make => {
   const e = make(); await e.ready(); const healthyBefore = e.health('before-transient-loss'); e.externalLoss(); const observations = await e.recoveryWindow('after-transient-loss'), last = observations.at(-1), m = { ...last, healthyBefore, observations, attempts: e.count('monitorNotice.status') - 1, recoveryPolicy: e.host.inspect().recovery?.policy ?? null, observationWindowMs: 30000 };
   return { measurements: m, checks: [check(m.enabled && m.healthObserved && healthyBefore.recovered, 'transient failure has independently observed healthy precondition and ON intent', m), check(m.recovered && m.currentGeneration === m.observedGeneration, 'host regains independently observed health', m)] };

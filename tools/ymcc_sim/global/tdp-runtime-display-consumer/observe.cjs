@@ -7,13 +7,17 @@ const mapping=makePaths(caseRoot,sourceRoot),native={resolve:path.resolve.bind(p
 const observation={outputRedirects:0,denied:[],compilerProcesses:0,networkAttempts:0,builds:[]};
 process.once('exit',code=>{native.write(path.join(caseRoot,'boundary-observation.json'),JSON.stringify({...observation,exitCode:code,sourceRoot,legacyOutputNotTouched:mapping.legacy,privateOutput:mapping.output},null,2));});
 native.mkdir(mapping.output,{recursive:true});
-const readRoots=[caseRoot,sourceRoot,path.dirname(process.execPath),tool.esbuildPackageRoot,path.dirname(tool.esbuildExecutable)];
+const compilerRoots=[tool.esbuildPackageRoot,path.dirname(tool.esbuildExecutable)];
+const compilerRealRoots=compilerRoots.map(root=>native.realpath(root));
+const readRoots=[caseRoot,sourceRoot,path.dirname(process.execPath),...compilerRoots];
+// Node can present the resolved name when the pinned compiler is behind a junction.
+const requestedReadRoots=[...readRoots,...compilerRealRoots];
 function redirected(file){const result=mapping.redirect(file);if(result.redirected)observation.outputRedirects++;return result.path;}
 function target(file,writing){
  if(typeof file!=='string'&&!(file instanceof URL))throw Error('TDP_DISPLAY_PATH_TYPE');
  const requested=file instanceof URL?require('node:url').fileURLToPath(file):file,actual=redirected(requested);
  if(writing&&!mapping.inside(caseRoot,actual)){observation.denied.push('WRITE_OUTSIDE_CASE');throw Error('TDP_DISPLAY_WRITE_OUTSIDE_CASE');}
- if(!writing&&!readRoots.some(root=>mapping.inside(root,actual))){observation.denied.push('READ_OUTSIDE_REVIEWED_ROOTS');throw Error('TDP_DISPLAY_READ_OUTSIDE_REVIEWED_ROOTS');}
+ if(!writing&&!requestedReadRoots.some(root=>mapping.inside(root,actual))){observation.denied.push('READ_OUTSIDE_REVIEWED_ROOTS');throw Error('TDP_DISPLAY_READ_OUTSIDE_REVIEWED_ROOTS');}
  let existing=actual;while(!native.exists(existing)&&existing!==path.dirname(existing))existing=path.dirname(existing);
  const resolved=native.realpath(existing);
  if(writing&&!mapping.inside(native.realpath(caseRoot),resolved)){observation.denied.push('WRITE_REPARSE_ESCAPE');throw Error('TDP_DISPLAY_REPARSE_ESCAPE');}

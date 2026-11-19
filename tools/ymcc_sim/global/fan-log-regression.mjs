@@ -12,10 +12,33 @@ import { fileURLToPath } from 'node:url';
 
 const defaultRepo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
+const transpilationSessions = new WeakMap();
+export function createFanFixtureTranspilation() {
+  const work = { compiled: 0, reused: 0 };
+  const session = Object.freeze({ snapshot: () => ({ ...work }) });
+  transpilationSessions.set(session, { entries: new Map(), work });
+  return session;
+}
+
+// Share emitted text, never VM modules or mutable fixture state. Callers still
+// read and verify every source against the file consumed by that fixture.
+export function transpileFanFixtureSource(session, ts, text, fileName) {
+  const { entries, work } = transpilationSessions.get(session);
+  const prior = entries.get(fileName);
+  if (prior?.ts === ts && prior.text === text) { work.reused++; return prior.output; }
+  const output = ts.transpileModule(text, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
+  }, fileName }).outputText;
+  entries.set(fileName, { ts, text, output });
+  work.compiled++;
+  return output;
+}
 const SOURCE_FILES = new Set([
   'src/bridge/fanHost.ts', 'src/bridge/fanApi.ts', 'src/bridge/fanDiagnostics.ts',
   'src/bridge/fanHost/startupConfiguration.ts', 'src/bridge/fanHost/deployment.ts',
   'src/bridge/fanHost/capabilityAdmission.ts',
+  'src/bridge/bootModeGlobalPreferences.ts', 'src/bridge/inputConfigHash.ts',
+  'src/bridge/settingsBaseline.ts', 'PowerControl/settings-baseline.json',
   'src/bridge/fanSessionEvidence.ts', 'src/bridge/hardwareCoordinator.ts',
   'src/bridge/aiFanMock.ts', 'src/bridge/fanHostInstallerRepair.ts',
   'src/bridge/fanHostInstallerAsset.json', 'tools/fixtures/fan_no_io_host.ts',
@@ -88,7 +111,7 @@ export class VirtualClock {
 }
 
 /** Imports only reviewed modules, without rewriting any product expression. */
-export function createFanLogFixture({ repoRoot = defaultRepo, handshake = UNAVAILABLE_HANDSHAKE } = {}) {
+export function createFanLogFixture({ repoRoot = defaultRepo, handshake = UNAVAILABLE_HANDSHAKE } = {}, transpilation = createFanFixtureTranspilation()) {
   const root = fs.realpathSync(repoRoot), require = createRequire(path.join(root, 'package.json'));
   const ts = require('typescript'), clock = new VirtualClock(), diagnostics = [], violations = [], requests = [];
   const loaded = new Map(), modules = new Map();
@@ -143,9 +166,7 @@ export function createFanLogFixture({ repoRoot = defaultRepo, handshake = UNAVAI
     const text = fs.readFileSync(absolute, 'utf8');
     loaded.set(key, { path: key, sha256: sha256(text) });
     if (key.endsWith('.json')) return JSON.parse(text);
-    const compiled = ts.transpileModule(text, { compilerOptions: {
-      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
-    }, fileName: absolute }).outputText;
+    const compiled = transpileFanFixtureSource(transpilation, ts, text, absolute);
     const module = { exports: {} };
     modules.set(key, module);
     const localRequire = specifier => {
@@ -240,11 +261,11 @@ function safeTrace(rows) {
 }
 
 export async function runFanLogRegression(options = {}) {
-  const cases = [], inputs = new Map();
+  const cases = [], inputs = new Map(), transpilation = createFanFixtureTranspilation();
   for (const id of ['fan.hc-init-unavailable-258v', 'fan.post-denial-winhttp-12029']) {
     let f;
     try {
-      f = createFanLogFixture(options);
+      f = createFanLogFixture(options, transpilation);
       const primary = await f.explicitAttempt();
       assertDenial(f, primary, 1);
       let secondary = null;
@@ -285,6 +306,7 @@ export async function runFanLogRegression(options = {}) {
   return {
     schemaVersion: 1, domain: 'fan', scope: 'behavioral-mock', status: failedCount ? 'FAIL' : 'PASS',
     passed: failedCount === 0, failedCount, exitCode: failedCount ? 2 : 0, cases, sourceEvidence: LOG_EVIDENCE,
+    fixtureTranspilation: transpilation.snapshot(),
     sourceInputs: [...inputs.values()].sort((a, b) => a.path.localeCompare(b.path)),
     productSourceExecuted: true, productionClasses: ['FanHostLifecycle', 'HttpFanApiAdapter'], fixture: 'NoIoHost',
     safety: { inMemoryIpc: true, virtualClock: true, localSettingsRead: false, realNetworkUsed: false, hostProcessStarted: false,

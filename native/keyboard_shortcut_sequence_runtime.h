@@ -4,6 +4,11 @@
 // 1 = owned down, 2 = released but awaiting a neutral OS sample. This keeps
 // injected output from becoming the next keyboard shortcut's physical input.
 static std::array<std::atomic<unsigned char>,256> g_keyboardSequenceInputFence{};
+// Receipt qualification reads published ownership without advancing the OS
+// neutral fence or inspecting UI-owned state on a foreign producer thread.
+static unsigned char nativeKeyboardSequenceInputFenceValue(WORD key) noexcept {
+    return key<g_keyboardSequenceInputFence.size()?g_keyboardSequenceInputFence[key].load(std::memory_order_acquire):0;
+}
 static bool nativeKeyboardSequenceOwnsKey(WORD key) {
     if(key>=g_keyboardSequenceInputFence.size())return false;
     const auto state=g_keyboardSequenceInputFence[key].load(std::memory_order_acquire);
@@ -67,16 +72,37 @@ static bool nativeKeyboardSequenceDispatch(const NativeKeyboardShortcutRule& rul
     uint64_t wmiGeneration,uint64_t wmiSequence,bool keyboardWmiFallback,OemProducerTokens producerTokens) {
     const auto epoch=g_oemShortcutEdgeEpoch.load(std::memory_order_acquire);const auto power=currentPowerGeneration();
     const auto revision=ymSettingsFields("input",{"revision"}).value("revision",0ll);
+    const auto actionRevision=GamepadSerialEvent::captureRevision();
     const auto window=GetForegroundWindow();const auto plan=rule.keyboardPlan;const auto id=rule.outputId;
-    auto current=[epoch,power,revision,window,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens,lastSettingsCheck=GetTickCount64()]() mutable {
+    auto current=[epoch,power,revision,actionRevision,window,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens,lastSettingsCheck=GetTickCount64()]() mutable {
+        if(!GamepadSerialEvent::currentRevision(actionRevision))return false;
         const auto now=GetTickCount64();if(now-lastSettingsCheck>=400){lastSettingsCheck=now;if(ymSettingsFields("input",{"revision"}).value("revision",0ll)!=revision)return false;}
         return !g_exitRequested.load(std::memory_order_acquire)&&!g_shortcutRecordingActive.load(std::memory_order_acquire)&&
             g_inputReady.load(std::memory_order_acquire)&&sgVirtualWriterAllowedNow()&&!radialHasInputOwner()&&
             currentPowerGeneration()==power&&g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)==epoch&&
             GetForegroundWindow()==window&&oemProducerTokensCurrent(producerTokens)&&
+            ((producerTokens.requiredMask&((1ull<<20)-1))==0||
+                (!g_inputReleaseRequired.load(std::memory_order_acquire)&&!customSteamLibraryInputSuppressed()))&&
             (sourceEpoch==kOemShortcutUnboundEpoch||sourceEpoch==epoch)&&
             (!wmiGeneration||msiWmiGenerationCurrent(wmiGeneration))&&(!keyboardWmiFallback||!msiWmiShortcutAuthoritative());
     };
-    return nativeYmccShortcutSubmit([id,plan,current]() mutable {if(current())g_nativeKeyboardSequenceOwner.submit(id,plan,current);},
+    // Queue admission and worker admission are separate receipts. Neither
+    // proves SendInput or consumption by another application. OEM-only and
+    // event-driven: ordinary keyboard rules/idle ticks produce no new log.
+    static std::atomic<uint64_t> nextOemRequest{0};
+    const auto oemMask=(rule.requiredMask>>20)?rule.requiredMask:0;
+    const auto request=oemMask?nextOemRequest.fetch_add(1,std::memory_order_relaxed)+1:0;
+    const auto receipt=[oemMask,request,epoch,power](const char* stage,bool accepted) {
+        if(!oemMask)return;
+        appendNativeLifecycleLog("oem-shortcut-edge-delivery",{{"schema",2},{"scope","keyboard-action-admission"},
+            {"requestSequence",request},{"requiredMask",oemMask},{"ruleEpoch",epoch},{"actionPowerGeneration",power},
+            {"stage",stage},{"accepted",accepted},{"actionExecutionProven",false},{"physicalEffectVerified",false}});
+    };
+    const bool queued=nativeYmccShortcutSubmit([id,plan,current,receipt]() mutable {
+        if(!current()){receipt("keyboard-worker-context",false);return;}
+        receipt("keyboard-worker-submit",g_nativeKeyboardSequenceOwner.submit(id,plan,current));
+    },
         SerialJobKind::ExternalInjection,sourceEpoch,wmiGeneration,wmiSequence,keyboardWmiFallback,producerTokens);
+    receipt("serial-queue-submit",queued);
+    return queued;
 }

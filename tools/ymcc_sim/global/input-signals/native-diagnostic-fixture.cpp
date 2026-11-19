@@ -16,6 +16,9 @@
 #include "deps/json/json.hpp"
 #include "native/shortcut_frontend_button.h"
 #include "native/keyboard_shortcut_sequence.h"
+#include "native/desktop_function_shortcut.h"
+#include "native/input_frame_submission.h"
+#include "native/sleep_power_state.h"
 using json=nlohmann::json;
 #include "current-native-types.inc"
 // Current startup identity supplied in memory, never read from the host machine.
@@ -45,6 +48,7 @@ namespace ymcc {using InputShortcutJson=json;
 #include "current-native-inputs.inc"
 static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;
 static uint32_t g_nativeShortcutLegacyOverrideMask=0;
+static bool g_nativeShortcutInventoryDirty=true;
 static void runSummary(){
 #include "current-native-summary.inc"
 }
@@ -89,7 +93,7 @@ int main(int argc,char** argv){
     diagnostic.check(!detail.contains("defaultActionSuppressionVerified")&&!detail.contains("hardwareWriteIssued"),"dispatch log has no invented suppression proof");
     diagnostic.evidence.push_back({{"input",{{"sourceKind",kind},{"supported",std::get<0>(tuple)},{"emit",std::get<1>(tuple)},{"accepted",std::get<2>(tuple)}}},{"consumer","actual-click-log-statement"},{"state",detail},{"feedback",{{"event","oem-shortcut-click"},{"physicalSuppressionConfirmed",false}}}});
    }
-   logs.clear();g_nativeKeyboardShortcuts={rule};++g_nativeShortcutLegacyOverrideMask;runSummary();
+   logs.clear();g_nativeKeyboardShortcuts={rule};g_nativeShortcutInventoryDirty=true;++g_nativeShortcutLegacyOverrideMask;runSummary();
    diagnostic.check(logs.size()==1,"rules summary emits: "+kind);
    const auto summary=logs.at(0).at("detail");diagnostic.check(summary.at("rules").at(0).at("actionId")==expected,"oem-shortcut-rules identity: "+kind);
    diagnostic.evidence.push_back({{"input",{{"sourceKind",kind}}},{"consumer","actual-summary-digest-and-log-block"},{"state",summary},{"feedback",{{"event","oem-shortcut-rules"},{"physicalSuppressionConfirmed",false}}}});
@@ -146,8 +150,8 @@ int main(int argc,char** argv){
   }
   g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.deviceClass.clear();
   // Isolated extra defect: uiAction-only change must refresh the real digest.
-  NativeKeyboardShortcutRule ui;ui.requiredMask=kOemBitClaw;ui.uiAction="monitor.toggle";g_nativeKeyboardShortcuts={ui};++g_nativeShortcutLegacyOverrideMask;
-  logs.clear();runSummary();ui.uiAction="display.frameRateControl";g_nativeKeyboardShortcuts={ui};logs.clear();runSummary();
+  NativeKeyboardShortcutRule ui;ui.requiredMask=kOemBitClaw;ui.uiAction="monitor.toggle";g_nativeKeyboardShortcuts={ui};g_nativeShortcutInventoryDirty=true;++g_nativeShortcutLegacyOverrideMask;
+  logs.clear();runSummary();ui.uiAction="display.frameRateControl";g_nativeKeyboardShortcuts={ui};g_nativeShortcutInventoryDirty=true;logs.clear();runSummary();
   diagnostic.check(logs.size()==1,"UI action-only change refreshes OEM rule digest");
   if(!logs.empty())diagnostic.check(logs.at(0).at("detail").at("rules").at(0).at("actionId")==ui.uiAction,"UI changed summary has the new identity");
   for(const auto& item:fixture.at("mappings")){

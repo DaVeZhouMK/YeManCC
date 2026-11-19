@@ -5,7 +5,7 @@ let checks = 0;
 function check(label: string, body: () => void) { body(); checks++; console.log('PASS ' + label); }
 const sha = 'A'.repeat(64), info: UpdateInfo = { version: '99.0.1', sha256: sha };
 function fixture(initial: Partial<PredownloadPolicy> = {}) {
-  let now = 1000000000, online = true, gameRunning = false, manifestVersion = info.version;
+  let now = 1000000000, online = true, gameRunning = false, manifestVersion = info.version, manifestSha = info.sha256;
   let policy: PredownloadPolicy = { enabled: true, bootId: 'boot-A', lastNotifiedBoot: '', failureCount: 0, nextCheckAt: 0, ...initial };
   let current: { info: UpdateInfo | null; progress: UpdateProgressState } = { info: null, progress: { phase: 'idle' } };
   const calls = { refresh: 0, check: 0, download: 0, cache: 0, cancel: 0, notice: 0, ack: 0, schedule: 0, noticeVersions: [] as string[] };
@@ -21,9 +21,11 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
     initialize: async () => {}, refresh: async () => { calls.refresh++; }, current: () => current,
     check: async () => {
       calls.check++; await pendingCheck?.();
-      if (checkFail) { current.progress = { phase: 'failed', error: 'offline', stage: 'download' }; return; }
-      const cached = current.progress.phase === 'downloaded' && current.info?.version === manifestVersion;
-      current = { info: { ...info, version:manifestVersion }, progress: { phase: cached ? 'downloaded' : 'available', stage: 'download' } };
+      if (checkFail) { current.progress = { ...current.progress, phase: 'failed', error: 'offline', stage: current.progress.stage || 'download' }; return false; }
+      const same = current.info?.version === manifestVersion && current.info.sha256.toUpperCase() === manifestSha.toUpperCase();
+      if (same && current.progress.stage === 'install' && ['failed','interrupted'].includes(current.progress.phase || '')) return;
+      const cached = current.progress.phase === 'downloaded' && same;
+      current = { info: { ...info, version:manifestVersion, sha256:manifestSha }, progress: { phase: cached ? 'downloaded' : 'available', stage: 'download' } };
     },
     prepare: async cacheOnly => {
       cacheOnly ? calls.cache++ : calls.download++;
@@ -46,7 +48,10 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
       }
       now=end;for(let i=0;i<100;i++)await Promise.resolve();return wakes;
     },
-    time(ms: number) { now += ms; }, game(value:boolean){gameRunning=value;scheduler.progress();}, manifest(version:string){manifestVersion=version;}, setVersion(version:string){current.info={...info,version};}, offline(value = true) { online = !value; },
+    time(ms: number) { now += ms; }, game(value:boolean){gameRunning=value;scheduler.progress();}, manifest(version:string,sha256=info.sha256){manifestVersion=version;manifestSha=sha256;}, setVersion(version:string){current.info={...info,version};}, offline(value = true) { online = !value; },
+    savedInstall(phase:'failed'|'interrupted'|'installing',authority:Partial<UpdateProgressState>={}) {
+      current={info:{...info},progress:{phase,stage:'install',installerActive:false,repairAuthorized:false,...authority}};
+    },
     savedReady() { hasPackage = true; current = { info: { ...info }, progress: { phase: 'downloaded', stage: 'install' } }; },
     checkFails(value = true) { checkFail = value; }, prepareFails(value = true) { prepareFail = value; }, missingCache(value = true) { cacheMissing = value; },
     noticeAvailable(value: boolean) { noticeAvailable = value; }, ackFails(value: boolean) { ackFail = value; },
@@ -55,6 +60,26 @@ function fixture(initial: Partial<PredownloadPolicy> = {}) {
 }
 const idleTimersOnly=process.argv.includes('--idle-timers');
 if(!idleTimersOnly){
+for(const phase of ['failed','interrupted'] as const){
+ for(const revision of ['new-version','same-version-new-sha'] as const){
+  const f=fixture();f.savedInstall(phase);f.manifest(revision==='new-version'?'99.0.2':info.version,'B'.repeat(64));await f.scheduler.run();
+  check('stale '+phase+' install does not block '+revision+' manifest discovery',()=>{assert.equal(f.calls.check,1);assert.equal(f.calls.download,1);assert.equal(f.current().info?.sha256,'B'.repeat(64));});
+ }
+ const same=fixture();same.savedInstall(phase);await same.scheduler.run();await same.scheduler.run();
+ check('same '+phase+' install remains manual and uses original manifest deadline',()=>{assert.equal(same.calls.check,1);assert.equal(same.calls.download,0);assert.equal(same.calls.cache,0);assert.equal(same.calls.notice,0);assert.equal(same.policy().nextCheckAt,same.now()+6*3600000);assert.equal(same.current().progress.stage,'install');});
+}
+for(const authority of [{installerActive:true},{repairAuthorized:true}] as const){
+ const f=fixture();f.savedInstall('failed',authority);f.manifest('99.0.2');await f.scheduler.run();
+ check('actual install authority prevents automatic successor check '+Object.keys(authority)[0],()=>{assert.equal(f.calls.check,0);assert.equal(f.calls.download,0);assert.equal(f.calls.cache,0);assert.equal(f.current().progress.stage,'install');});
+}
+for(const phase of ['failed','interrupted'] as const){
+ const f=fixture();f.savedInstall(phase);f.checkFails();await f.scheduler.run();const state=await f.scheduler.read();
+ check('stale '+phase+' install keeps failed manifest query on original failure backoff',()=>{assert.equal(f.calls.check,1);assert.equal(f.calls.download,0);assert.equal(f.policy().failureCount,1);assert.equal(f.policy().nextCheckAt,f.now()+60000);assert.equal(f.current().progress.stage,'install');assert.equal(state.phase,'failed');});
+}
+for(const blocked of ['off','offline','game'] as const){
+ const f=fixture({enabled:blocked!=='off'});f.savedInstall('failed');f.manifest('99.0.2');if(blocked==='offline')f.offline();if(blocked==='game')f.game(true);await f.scheduler.run();
+ check('stale install never bypasses '+blocked+' admission',()=>{assert.equal(f.calls.check,0);assert.equal(f.calls.download,0);});
+}
 {
  const f=fixture(); f.scheduler.start(); await f.scheduler.read();
  check('startup is delayed and provider reads perform no download',()=>{ assert.equal(f.calls.check,0);assert.equal(f.calls.download,0);assert.equal(f.timers.size,1); });

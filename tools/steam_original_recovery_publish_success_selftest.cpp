@@ -4,23 +4,46 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <array>
+#include <atomic>
 #include <cstring>
+#include <cwchar>
+#include <limits>
 #include <fstream>
+#include <functional>
+#include <memory>
+#include <new>
+#include <string>
+#include <utility>
 #include <iostream>
 #include <map>
 #include <stdexcept>
 #include <vector>
 #include "vendor/steam_native_app_state_win32.h"
 #include "running-publish-trial.h"
+#include "publication_revocation.h"
 namespace tr = running_trial;
 namespace rc = ymcc::steamrecord;
 namespace ac = ymcc::steamappstate;
 namespace rw = ymcc::steamrecordwin;
+namespace roles = ymcc::steamgameroles;
 using Json = nlohmann::json;
 using U64 = std::uint64_t;
+#include "steam_original_recovery_publication_qualified_model.inc"
 namespace {
+std::string fixtureLegacyQualification = "content";
+bool qualifiedPublicationFixture = false;
+const publication_fixture_model::ModuleModel* qualifiedClient = nullptr;
+const publication_fixture_model::ModuleModel* qualifiedUi = nullptr;
 tr::Packet bound{};
 tr::Telemetry live{};
+tr::PublicationRevocation publicationRevocation;
+tr::GroupPublicationRevocation groupPublicationRevocation;
+std::atomic<bool> roleRevoked{true};
+bool groupCancellationCurrent() noexcept;
+std::function<void()> groupFinalIdentityHook;
+std::function<void()> snapshotReadHook;
+bool publicationOwnerCleanupFailed = false;
+Json publicationLeaseOwnerEvidence = Json::array();
 rw::Module client, ui;
 std::optional<tr::NativeProfile> nativeProfile;
 rc::ProfileId clientProfile = rc::ProfileId::Legacy1791918634;
@@ -51,19 +74,249 @@ void putHex(U64 address, const char* hex) {
 }
 // Ports: no process handles, ReadProcessMemory, module discovery, or Steam calls.
 bool readLocal(U64 address, void* target, std::size_t bytes) {
+    if (snapshotReadHook) { auto hook = std::move(snapshotReadHook); snapshotReadHook = {}; hook(); }
     auto* out = static_cast<unsigned char*>(target);
+    // Immutable qualified module image supplies code/readonly data; the small
+    // owned sparse overlay supplies object/global/detour bytes only.
+    const bool imageRead = qualifiedPublicationFixture &&
+        ((qualifiedClient && qualifiedClient->read(address, target, bytes)) ||
+         (qualifiedUi && qualifiedUi->read(address, target, bytes)));
     for (std::size_t i = 0; i < bytes; ++i) {
         const auto found = memory.find(address + i);
-        if (found == memory.end()) return false;
-        out[i] = found->second;
+        if (found != memory.end()) out[i] = found->second;
+        else if (!imageRead) return false;
     }
     return true;
 }
-bool identity() { return identityAvailable; }
+bool identity() {
+    // A fixture-only one-shot boundary hook; the production callback body is
+    // unchanged. Snapshot(true) has returned when its guardBefore becomes 1.
+    if (groupFinalIdentityHook && live.guardBefore == 1 && live.publisherCalls == 0) {
+        auto hook = std::move(groupFinalIdentityHook); groupFinalIdentityHook = {}; hook();
+    }
+    return identityAvailable && groupCancellationCurrent();
+}
+
+// Real cancellation resources, entirely owned by this fixture process. The
+// Graph below remains explicit test data, not a ProcessGroupLease/typed owner.
+struct PublicationGroupSources {
+    HANDLE owner = nullptr;
+    std::array<HANDLE, 3> sources{}, slots{};
+    unsigned opened = 0, closed = 0, closeErrors = 0;
+    tr::RoleCancellationWire wire{};
+    bool close() noexcept {
+        bool okay = true;
+        const auto one = [&](HANDLE& item) {
+            if (!item) return;
+            if (CloseHandle(item)) { item = nullptr; ++closed; }
+            else { ++closeErrors; okay = false; }
+        };
+        for (auto& item : slots) one(item);
+        for (auto& item : sources) one(item);
+        one(owner); return okay;
+    }
+    void create(unsigned count = 3) {
+        expect(!owner && std::all_of(sources.begin(), sources.end(), [](HANDLE h) { return !h; }) &&
+               std::all_of(slots.begin(), slots.end(), [](HANDLE h) { return !h; }), "group fixture source debt remains");
+        owner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, GetCurrentProcessId());
+        if (owner) ++opened;
+        expect(owner != nullptr, "group fixture actual self owner unavailable");
+        expect(count == 2 || count == 3, "unknown source count");
+        for (std::size_t i = 0; i < count; ++i) {
+            sources[i] = CreateEventW(nullptr, TRUE, FALSE, nullptr); if (sources[i]) ++opened;
+            expect(sources[i] != nullptr, "group fixture actual source event unavailable");
+            expect(DuplicateHandle(GetCurrentProcess(), sources[i], GetCurrentProcess(), &slots[i],
+                                   SYNCHRONIZE, FALSE, 0) != FALSE, "group fixture receiver-local sync slot unavailable");
+            ++opened;
+            DWORD flags = HANDLE_FLAG_INHERIT;
+            expect(GetHandleInformation(slots[i], &flags) != FALSE && !(flags & HANDLE_FLAG_INHERIT),
+                   "group fixture receiver slot inherited");
+            expect(CompareObjectHandles(sources[i], slots[i]) != FALSE, "group fixture transport changed event object");
+            expect(!SetEvent(slots[i]) && GetLastError() == ERROR_ACCESS_DENIED, "group fixture slot can signal");
+            expect(!ResetEvent(slots[i]) && GetLastError() == ERROR_ACCESS_DENIED, "group fixture slot can reset");
+        }
+        wire = {};
+        wire.sourceGroupEvent = count == 3 ? reinterpret_cast<U64>(slots[0]) : 0;
+        wire.sourceProcessRequestEvent = reinterpret_cast<U64>(slots[count == 3 ? 1 : 0]);
+        wire.sourceBusinessRequestEvent = reinterpret_cast<U64>(slots[count == 3 ? 2 : 1]);
+        expect(count == 3 ? tr::validRoleCancellationWire(wire) : tr::validOriginalCancellationWire(wire), "fixture cancellation wire malformed");
+    }
+    ~PublicationGroupSources() { close(); }
+} publicationGroupSources;
+bool publicationGroupCleanupFailed = false;
+void resetPublicationGroupRequest() {
+    groupFinalIdentityHook = {};
+    groupPublicationRevocation.retire();
+    expect(publicationGroupSources.close(), "group fixture source return before independent request failed");
+    std::destroy_at(&groupPublicationRevocation);
+    std::construct_at(&groupPublicationRevocation);
+    roleRevoked.store(true, std::memory_order_release);
+}
+
+// The owner is this actual fixture process, never an untrusted PID from JSON.
+// Reset/reconstruction is fixture-only: product instances remain single-use.
+struct PublicationSources {
+    HANDLE owner = nullptr, power = nullptr, identityEvent = nullptr;
+    tr::PublicationRevocationWire wire{};
+    bool close() noexcept {
+        bool okay = true;
+        for (auto* item : {&identityEvent, &power, &owner}) {
+            if (*item) { okay = (CloseHandle(*item) != FALSE) && okay; *item = nullptr; }
+        }
+        return okay;
+    }
+    ~PublicationSources() { close(); }
+} publicationSources;
+void freshPublicationRevocation() {
+    publicationRevocation.retire();
+    std::destroy_at(&publicationRevocation);
+    std::construct_at(&publicationRevocation);
+}
+DWORD publicationHandleCount() {
+    DWORD count = 0;
+    expect(GetProcessHandleCount(GetCurrentProcess(), &count) != FALSE, "actual handle inventory unavailable");
+    return count;
+}
+void resetPublicationSources(bool bindNow) {
+    snapshotReadHook = {};
+    freshPublicationRevocation();
+    expect(publicationSources.close(), "source resource return failed");
+    publicationSources.owner = OpenProcess(PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                                           FALSE, GetCurrentProcessId());
+    publicationSources.power = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    publicationSources.identityEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    expect(publicationSources.owner && publicationSources.power && publicationSources.identityEvent,
+           "owned publication source creation failed");
+    publicationSources.wire = {};
+    auto& wire = publicationSources.wire;
+    wire.sourcePowerEvent = reinterpret_cast<U64>(publicationSources.power);
+    wire.sourceIdentityEvent = reinterpret_cast<U64>(publicationSources.identityEvent);
+    wire.power.generation = 31;
+    wire.power.publicationRevision = 47;
+    wire.power.observedNotificationSequence = 53;
+    wire.power.suspendSerial = 11;
+    wire.power.phase = 0;
+    wire.power.flags = ymcc::sleeppower::kKnown | ymcc::sleeppower::kHardwareAllowed;
+    if (bindNow) expect(publicationRevocation.bind(publicationSources.owner, wire), "real publication sources not admitted");
+}
+
+
+// The sole child mode is selected before any target JSON or publisher case.
+// It performs one wait on the single inherited event and returns normally.
+int publicationLeaseOwnerChildMode(const char* decimalHandle) noexcept {
+    try {
+        const std::string text = decimalHandle;
+        if (text.empty() || text.find_first_not_of("0123456789") != text.npos) return 64;
+        const auto value = std::stoull(text);
+        if (!value || value > (std::numeric_limits<std::uintptr_t>::max)()) return 64;
+        HANDLE release = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
+        if (release == INVALID_HANDLE_VALUE) return 64;
+        const DWORD waited = WaitForSingleObject(release, INFINITE);
+        const bool closed = CloseHandle(release) != FALSE;
+        return waited == WAIT_OBJECT_0 && closed ? 0 : 65;
+    } catch (...) { return 64; }
+}
+struct PublicationLeaseOwnerChild {
+    HANDLE release = nullptr;
+    PROCESS_INFORMATION process{};
+    std::vector<unsigned char> attributes;
+    LPPROC_THREAD_ATTRIBUTE_LIST attributeList = nullptr;
+    DWORD pid = 0, exitCode = STILL_ACTIVE, waitCode = WAIT_TIMEOUT;
+    U64 birth = 0;
+    bool returned = false;
+    PublicationLeaseOwnerChild() = default;
+    PublicationLeaseOwnerChild(const PublicationLeaseOwnerChild&) = delete;
+    PublicationLeaseOwnerChild& operator=(const PublicationLeaseOwnerChild&) = delete;
+    static U64 birthKey(HANDLE owner) {
+        FILETIME creation{}, end{}, kernel{}, user{};
+        expect(GetProcessTimes(owner, &creation, &end, &kernel, &user) != FALSE,
+               "actual lease owner creation time unavailable");
+        return (static_cast<U64>(creation.dwHighDateTime) << 32) | creation.dwLowDateTime;
+    }
+    void start() {
+        SECURITY_ATTRIBUTES security{};
+        security.nLength = sizeof(security);
+        security.bInheritHandle = TRUE;
+        release = CreateEventW(&security, TRUE, FALSE, nullptr);
+        expect(release != nullptr, "lease owner release event unavailable");
+        for (HANDLE source : {publicationSources.power, publicationSources.identityEvent}) {
+            DWORD flags = 0;
+            expect(GetHandleInformation(source, &flags) != FALSE && !(flags & HANDLE_FLAG_INHERIT),
+                   "source events must not be inherited at process creation");
+        }
+        SIZE_T bytes = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+        expect(bytes != 0, "handle-list allocation size unavailable");
+        attributes.resize(bytes);
+        auto* preparedAttributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+        expect(InitializeProcThreadAttributeList(preparedAttributes, 1, 0, &bytes) != FALSE,
+               "lease owner handle-list initialization failed");
+        attributeList = preparedAttributes;
+        expect(UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                         &release, sizeof(release), nullptr, nullptr) != FALSE,
+               "single inherited release handle was not installed");
+        std::vector<wchar_t> path(32768);
+        const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        expect(length > 0 && length < path.size(), "actual fixture executable path unavailable");
+        const std::wstring executable(path.data(), length);
+        std::wstring command = L"\"" + executable + L"\" --publication-lease-owner-child " +
+                               std::to_wstring(reinterpret_cast<U64>(release));
+        STARTUPINFOEXW startup{};
+        startup.StartupInfo.cb = sizeof(startup);
+        startup.lpAttributeList = attributeList;
+        expect(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
+                              CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr,
+                              &startup.StartupInfo, &process) != FALSE,
+               "owned inert lease process creation failed");
+        pid = process.dwProcessId;
+        expect(pid != 0 && pid != GetCurrentProcessId() && GetProcessId(process.hProcess) == pid,
+               "lease owner is not the actual distinct child");
+        birth = birthKey(process.hProcess);
+        expect(birth != 0 && WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT,
+               "lease owner exited before source binding");
+    }
+    bool finish() noexcept {
+        bool okay = true;
+        // This guard runs on every test exception, including partial creation or
+        // remote-duplication failure. No external process is terminated.
+        if (release && !SetEvent(release)) okay = false;
+        if (process.hProcess && !returned) {
+            waitCode = WaitForSingleObject(process.hProcess, 10000);
+            if (waitCode != WAIT_OBJECT_0 || !GetExitCodeProcess(process.hProcess, &exitCode)) return false;
+            returned = true;
+            if (exitCode != 0) okay = false;
+        }
+        for (auto* handle : {&process.hThread, &process.hProcess, &release}) {
+            if (*handle) {
+                if (!CloseHandle(*handle)) okay = false;
+                else *handle = nullptr;
+            }
+        }
+        return okay;
+    }
+    ~PublicationLeaseOwnerChild() {
+        if (!finish()) {
+            publicationOwnerCleanupFailed = true;
+            std::cerr << "publication-owner-cleanup-incomplete pid=" << pid << " wait=" << waitCode << '\n';
+        }
+        if (attributeList) DeleteProcThreadAttributeList(attributeList);
+    }
+};
+
 ULONGLONG fixtureTick() { return clockTick; }
 #define GetTickCount64 fixtureTick
 #include "production-publisher.inc"
+#include "steam_original_recovery_legacy_abi6_role_group_shape_fixture.inc"
 #undef GetTickCount64
+void expectPublicationRejection(DWORD reject, LONG before) {
+    const auto untouched = memory;
+    expect(publish(nullptr) == osd::CallbackResult::Rejected, "cancelled publisher callback accepted");
+    expect(live.rejectCode == reject && live.guardBefore == before, "publication cancellation boundary changed");
+    expect(stubCalls == 0 && live.publisherCalls == 0 && live.publisherReturned == 0,
+           "cancelled publication reached original SDK stub");
+    expect(live.callbackResult == 2 && memory == untouched, "cancelled publication changed original record");
+}
+
 void __fastcall capturePublisher(void* self, const U64* gameId, bool running) {
     ++stubCalls;
     capturedSelf = reinterpret_cast<U64>(self);
@@ -73,9 +326,11 @@ void __fastcall capturePublisher(void* self, const U64* gameId, bool running) {
     if (replacePrimaryAfterCall) put(originalRecord + 0x19c, bound.gamePid + 1, 4);
 }
 void setPin(char* out, const std::string& value) { std::copy(value.begin(), value.end(), out); out[64] = 0; }
-void reset(const Json& historical) {
+void resetLegacySparse(const Json& historical, bool bindRevocation) {
+    resetPublicationGroupRequest();
+    resetPublicationSources(bindRevocation);
     memory.clear(); bound = {}; live = {}; client = {}; ui = {}; prepared = {};
-    clientCompatibility = {}; uiCompatibility = {};
+    clientCompatibility = {}; uiCompatibility = {}; fixedOriginalQualification = false;
     clockTick = 1000; identityAvailable = true; replacePrimaryAfterCall = false;
     stubCalls = 0; capturedGameId = capturedSelf = 0; capturedRunning = false;
     bound.gameId = std::stoull(historical.at("gameId").get<std::string>());
@@ -133,7 +388,84 @@ void reset(const Json& historical) {
     setPin(bound.healthyProof.recordPin, pinValues({bound.steamBirth, originalUser.user, originalRecord, bound.gameId}));
     setPin(bound.healthyProof.uiObjectPin, pinValues({bound.steamBirth, ui.base, flagsAddress - 0x20, bound.gameId}));
     expect(validHealthyProof(bound.healthyProof), "fixture proof malformed");
+    roleRevoked.store(false, std::memory_order_release);
 }
+void resetQualified(const Json& historical, bool bindRevocation) {
+    resetPublicationGroupRequest();
+    resetPublicationSources(bindRevocation);
+    memory.clear(); bound = {}; live = {}; prepared = {};
+    fixedOriginalQualification = false;
+    clockTick = 1000; identityAvailable = true; replacePrimaryAfterCall = false;
+    stubCalls = 0; capturedGameId = capturedSelf = 0; capturedRunning = false;
+    bound.gameId = std::stoull(historical.at("gameId").get<std::string>());
+    bound.gamePid = historical.at("originalPid").get<DWORD>();
+    callbackFlagsAfter = historical.at("callbackFlagsAfter").get<DWORD>();
+    bound.account = 76561198000000001ULL; bound.steamBirth = 134370372977050100ULL;
+    bound.deadlineTick = 1001;
+    expect(tr::shortcutAppId(bound.gameId) != 0 && ymcc::steamappstatewin::gameIdMatches(bound.gameId, tr::shortcutAppId(bound.gameId)), "fixture must retain a full type2 GameID");
+    expect(bound.gamePid != 0, "fixture original PID missing");
+    qualifiedClient = &publication_fixture_model::clientFor(fixtureLegacyQualification);
+    qualifiedUi = &publication_fixture_model::uiFor(fixtureLegacyQualification);
+    clientCompatibility = qualifiedClient->disk; uiCompatibility = qualifiedUi->disk;
+    expect(clientCompatibility.layout == ymcc::steamcompat::Layout::OwnerScoped &&
+           uiCompatibility.layout == ymcc::steamcompat::Layout::OwnerScoped, "actual qualified owner-scoped pair required");
+    client.base = qualifiedClient->base; client.size = qualifiedClient->loaded.size();
+    ui.base = qualifiedUi->base; ui.size = qualifiedUi->loaded.size();
+    clientProfile = rc::ProfileId::OwnerScoped; uiProfile = ac::ProfileId::OwnerScoped;
+    nativeProfile = tr::profileForCompatibility(*clientCompatibility.layout, *uiCompatibility.layout);
+    expect(nativeProfile.has_value(), "qualified publication profile missing");
+    nativeProfile->getterRva = ymcc::steamcompat::resolvedRva(clientCompatibility, nativeProfile->getterRva);
+    expect(nativeProfile->getterRva != 0, "qualified getter mapping missing");
+    // Only the external native function address is redirected to owned code.
+    nativeProfile->publisherRva = reinterpret_cast<U64>(&capturePublisher) - client.base;
+    for (std::size_t i = 0; i < osd::kGetterSize; ++i) {
+        prepared.detourBytes[i] = static_cast<unsigned char>(0x40 + i);
+        put(client.base + nativeProfile->getterRva + i, prepared.detourBytes[i], 1);
+    }
+    const auto actualClient = [&](U64 canonical) { const auto actual = ymcc::steamcompat::resolvedRva(clientCompatibility, canonical); expect(actual != 0, "client canonical anchor mapping missing"); return client.base + actual; };
+    const auto actualUi = [&](U64 canonical) { const auto actual = ymcc::steamcompat::resolvedRva(uiCompatibility, canonical); expect(actual != 0, "UI canonical anchor mapping missing"); return ui.base + actual; };
+    const auto& layout = rc::detail::profileLayout(clientProfile);
+    put(actualClient(layout.engineRoot), engineAddress);
+    put(engineAddress, actualClient(layout.engineVtable));
+    put(engineAddress + layout.engineInterfaceOffset, actualClient(layout.engineInterfaceVtable));
+    put(engineAddress + layout.userVectorOffset, vectorAddress); put(engineAddress + layout.userCountOffset, 1, 4);
+    put(vectorAddress + layout.userEntryOffset, userAddress);
+    put(userAddress, actualClient(layout.userVtable)); put(userAddress + layout.userInterfaceOffset, actualClient(layout.userInterfaceVtable));
+    put(userAddress + layout.accountOffset, bound.account);
+    put(userAddress + layout.recordsOffset, recordsAddress); put(userAddress + layout.recordCountOffset, 1, 4);
+    put(recordsAddress + layout.gameIdOffset, bound.gameId);
+    put(recordsAddress + layout.pidPairOffset, (U64(bound.gamePid) << 32) | bound.gamePid);
+    const auto views = qualifiedProcessReadViews(clientCompatibility, client.base, client.size, readLocal);
+    rc::Query query{client.base, ymcc::steamcompat::referenceImageSize(clientCompatibility, client.size), bound.account, bound.gameId, bound.gamePid, true, clientProfile};
+    rc::detail::Reader reader(views);
+    originalUser = rc::detail::selectUser(reader, query);
+    originalTarget = rc::detail::readTargets(reader, query, rc::detail::readHeader(reader, userAddress, clientProfile)).at(0);
+    originalRecord = recordsAddress;
+    ac::Query uiQuery{ui.base, ymcc::steamcompat::referenceImageSize(uiCompatibility, ui.size), tr::shortcutAppId(bound.gameId), true, uiProfile};
+    const auto& anchors = ac::detail::anchors(uiQuery);
+    put(actualUi(anchors.globalRva), ownerAddress); put(ownerAddress + anchors.ownerControllerOffset, controllerAddress);
+    put(controllerAddress, actualUi(anchors.controllerPrimary)); put(controllerAddress + 8, actualUi(anchors.controllerSecondary));
+    put(controllerAddress + anchors.controllerCallbackOffset, actualUi(anchors.callbackTable));
+    const auto header = controllerAddress + anchors.mapOffset;
+    put(header, bucketsAddress); put(header + 0x10, 1, 4); put(header + 0x30, entriesAddress);
+    put(header + 0x44, 1, 4); put(header + 0x4c, 0, 4); put(header + 0x54, 0, 4);
+    put(bucketsAddress, 0, 4); put(entriesAddress, tr::shortcutAppId(bound.gameId), 4);
+    put(entriesAddress + 8, appAddress); put(entriesAddress + 0x10, 0xffffffffU, 4);
+    put(appAddress, actualUi(anchors.appVptr)); put(appAddress + 0x18, 1, 4);
+    flagsAddress = appAddress + 0x20; put(flagsAddress, 4, 4);
+    std::memcpy(bound.healthyProof.pinNonce, "11234567-89ab-4cde-8123-456789abcdef", 36);
+    bound.healthyProof.healthyFlags = 8196;
+    setPin(bound.healthyProof.ownerPin, pinValues({client.base, bound.steamBirth, originalUser.engine, originalUser.user, bound.account}));
+    setPin(bound.healthyProof.recordPin, pinValues({bound.steamBirth, originalUser.user, originalRecord, bound.gameId}));
+    setPin(bound.healthyProof.uiObjectPin, pinValues({bound.steamBirth, ui.base, flagsAddress - 0x20, bound.gameId}));
+    expect(validHealthyProof(bound.healthyProof), "fixture proof malformed");
+    roleRevoked.store(false, std::memory_order_release);
+}
+void reset(const Json& historical, bool bindRevocation = true) {
+    if (qualifiedPublicationFixture) resetQualified(historical, bindRevocation);
+    else resetLegacySparse(historical, bindRevocation);
+}
+
 void expectUnchangedPrimary() {
     U64 pair = 0;
     expect(readLocal(originalRecord + 0x198, &pair, 8), "PID pair unavailable");
@@ -144,7 +476,7 @@ void success() {
     expect(publish(nullptr) == osd::CallbackResult::Completed, "production callback did not complete");
     expect(stubCalls == 1 && live.publisherCalls == 1 && live.publisherReturned == 1, "publisher must run exactly once");
     expect(capturedGameId == bound.gameId, "publisher lost full uint64 GameID");
-    expect(capturedSelf == originalUser.user + 0x3800, "publisher CUser receiver offset changed");
+    expect(nativeProfile && capturedSelf == originalUser.user + nativeProfile->publisherSelfOffset, "publisher CUser receiver offset changed");
     expect(capturedRunning, "publisher must request running=true");
     expect(live.guardBefore == 1 && live.guardAfter == 1 && live.flagsBefore == 4 && live.flagsAfter == callbackFlagsAfter, "before/after guards incomplete");
     expect(live.primaryBefore == bound.gamePid && live.primaryAfter == bound.gamePid && live.foregroundBefore == bound.gamePid && live.foregroundAfter == bound.gamePid, "original PID binding changed");
@@ -159,16 +491,138 @@ void rejectedBeforeCall() {
     expect(stubCalls == 0 && live.publisherCalls == 0 && live.publisherReturned == 0, "rejected callback called publisher");
     expect(memory == before, "rejected callback wrote fixture record");
 }
+
+struct PublicationGroupRequest {
+    DWORD before = 0;
+    unsigned openedBefore = 0, closedBefore = 0;
+    bool receiverBound = false, finished = false;
+    std::string label;
+    explicit PublicationGroupRequest(std::string value) : before(publicationHandleCount()),
+        openedBefore(publicationGroupSources.opened), closedBefore(publicationGroupSources.closed), label(std::move(value)) {}
+    PublicationGroupRequest(const PublicationGroupRequest&) = delete;
+    PublicationGroupRequest& operator=(const PublicationGroupRequest&) = delete;
+    void setup() {
+        const auto saved = bound.healthyProof;
+        publicationGroupSources.create();
+        auto& wire = bound.roleGroup;
+        wire = {}; wire.enabled = 1; wire.sourceRevision = 71; wire.consoleRevision = 73; wire.fullGameId = bound.gameId;
+        const DWORD root = bound.gamePid == MAXDWORD ? bound.gamePid - 1 : bound.gamePid + 1;
+        bound.session = 1; bound.gameBirth = 200;
+        const auto path = [](auto& target, const wchar_t* text) {
+            const auto length = std::wcslen(text);
+            expect(length < std::size(target), "group fixture path too long");
+            std::fill(std::begin(target), std::end(target), L'\0'); std::copy_n(text, length, target);
+        };
+        path(bound.gamePath, L"D:\\Fixture\\selected.exe");
+        wire.graph.count = 2; wire.graph.selectedPid = bound.gamePid;
+        wire.graph.members[0] = {root, bound.session, 0, 100};
+        wire.graph.members[1] = {bound.gamePid, bound.session, root, bound.gameBirth};
+        wire.identities[0].pid = root; wire.identities[0].session = bound.session; wire.identities[0].birth = 100;
+        path(wire.identities[0].path, L"D:\\Fixture\\launcher.exe");
+        wire.identities[1].pid = bound.gamePid; wire.identities[1].session = bound.session; wire.identities[1].birth = bound.gameBirth;
+        path(wire.identities[1].path, L"D:\\Fixture\\selected.exe");
+        wire.expectedPrimary = root; wire.expectedForeground = bound.gamePid; wire.cancellation = publicationGroupSources.wire;
+        expect(tr::validRoleGroupShape(bound) && tr::validRoleGroupWire(bound), "explicit group fixture structural contract invalid");
+        expect(groupPublicationRevocation.bind(publicationGroupSources.owner, wire.cancellation), "real group cancellation receiver bind failed");
+        receiverBound = true;
+        // Independent fixture request initialization only. This is not a claim
+        // of host typed-owner, process/liveness or real native authorization.
+        roleRevoked.store(false, std::memory_order_release);
+        const auto& layout = rc::detail::profileLayout(clientProfile);
+        put(originalRecord + layout.pidPairOffset, (U64(root) << 32) | bound.gamePid);
+        rc::Query query{client.base, client.size, bound.account, bound.gameId, bound.gamePid, true, clientProfile};
+        const rc::Read local = readLocal; rc::detail::Reader reader(local);
+        const auto targets = rc::detail::readTargets(reader, query, rc::detail::readHeader(reader, originalUser.user, clientProfile));
+        expect(targets.size() == 1, "group fixture lost unique owned sparse record"); originalTarget = targets[0];
+        expect(originalTarget.primary == root && originalTarget.foreground == bound.gamePid, "group fixture originalTarget tuple mismatch");
+        expect(std::memcmp(&saved, &bound.healthyProof, sizeof(saved)) == 0 && validHealthyProof(bound.healthyProof) &&
+               matchesSavedHealthy(originalUser, originalRecord, flagsAddress), "group fixture changed original saved healthy pins");
+        expect(groupCancellationCurrent(), "group fixture initial actual receiver was cancelled");
+    }
+    bool finish() noexcept {
+        if (finished) return !publicationGroupCleanupFailed;
+        groupFinalIdentityHook = {}; snapshotReadHook = {};
+        DWORD active = 0, retired = 0, after = 0;
+        bool okay = GetProcessHandleCount(GetCurrentProcess(), &active) != FALSE;
+        groupPublicationRevocation.retire(); roleRevoked.store(true, std::memory_order_release);
+        okay = (GetProcessHandleCount(GetCurrentProcess(), &retired) != FALSE) && okay;
+        okay = publicationGroupSources.close() && okay;
+        okay = (GetProcessHandleCount(GetCurrentProcess(), &after) != FALSE) && okay;
+        const auto opened = publicationGroupSources.opened - openedBefore, closed = publicationGroupSources.closed - closedBefore;
+        okay = okay && opened == closed && publicationGroupSources.closeErrors == 0 && after == before &&
+               (!receiverBound || (active >= 4 && retired == active - 4));
+        try { publicationLeaseOwnerEvidence.push_back({{"groupFixtureRequest", label}, {"handlesBefore", before}, {"handlesActiveBeforeRetire", active},
+            {"handlesAfterReceiverRetire", retired}, {"handlesAfterSourcesClosed", after}, {"ownedSourcesAndSlotsOpened", opened},
+            {"ownedSourcesAndSlotsClosed", closed}, {"closeErrors", publicationGroupSources.closeErrors}, {"actualReceiverBound", receiverBound},
+            {"receiverCopiesExpected", receiverBound ? 4 : 0}, {"resourceReturnConfirmed", okay},
+            {"fixtureGraphNotTypedOwner", true}, {"realProcessTopologyQualified", false}}); }
+        catch (...) { okay = false; }
+        finished = true; if (!okay) publicationGroupCleanupFailed = true; return okay;
+    }
+    ~PublicationGroupRequest() { if (!finish()) publicationOwnerCleanupFailed = true; }
+};
+void expectGroupOtherSources(unsigned cancelled, bool cancellationExpected) {
+    for (unsigned i = 0; i < 3; ++i)
+        expect(WaitForSingleObject(publicationGroupSources.sources[i], 0) ==
+               (cancellationExpected && i == cancelled ? WAIT_OBJECT_0 : WAIT_TIMEOUT), "group cancellation touched another source event");
+    expect(WaitForSingleObject(publicationSources.power, 0) == WAIT_TIMEOUT &&
+           WaitForSingleObject(publicationSources.identityEvent, 0) == WAIT_TIMEOUT && publicationRevocation.current(),
+           "group cancellation touched original power/identity capability");
+}
+void expectGroupPublicationSuccess() {
+    const auto untouched = memory; const auto proof = bound.healthyProof;
+    expect(publish(nullptr) == osd::CallbackResult::Completed, "uncancelled group production callback did not complete");
+    expect(stubCalls == 1 && live.publisherCalls == 1 && live.publisherReturned == 1, "group publisher must call capturing stub exactly once");
+    expect(capturedGameId == bound.gameId && capturedRunning && capturedSelf == originalUser.user + nativeProfile->publisherSelfOffset,
+           "group publisher changed full GameID or original user receiver");
+    expect(live.guardBefore == 1 && live.guardAfter == 1 && live.flagsBefore == 4 && live.flagsAfter == callbackFlagsAfter,
+           "group success did not traverse original before/after snapshot");
+    expect(live.primaryBefore == originalTarget.primary && live.primaryAfter == originalTarget.primary &&
+           live.foregroundBefore == originalTarget.foreground && live.foregroundAfter == originalTarget.foreground,
+           "group success substituted original tuple");
+    auto expected = untouched;
+    for (std::size_t i = 0; i < 4; ++i) expected[flagsAddress + i] = static_cast<unsigned char>(callbackFlagsAfter >> (8 * i));
+    expect(memory == expected, "group success wrote outside capturing stub result field");
+    expect(std::memcmp(&proof, &bound.healthyProof, sizeof(proof)) == 0 && matchesSavedHealthy(originalUser, originalRecord, flagsAddress),
+           "group callback changed original saved owner/record/UI pins");
+    expectGroupOtherSources(0, false);
+}
 }
 int main(int argc, char** argv) {
-    if (argc != 2) return 64;
+    if (argc == 3 && std::string(argv[1]) == "--publication-lease-owner-child")
+        return publicationLeaseOwnerChildMode(argv[2]);
+    if (argc < 2) return 64;
+    std::string scope = "all", selectedCase, clientModulePath, uiModulePath; bool legacyQualificationSpecified = false, caseSpecified = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string option = argv[i];
+        if ((option == "--client-module" || option == "--ui-module") && i + 1 < argc) {
+            if (option == "--client-module") { if (!clientModulePath.empty()) return 64; clientModulePath = argv[++i]; }
+            else { if (!uiModulePath.empty()) return 64; uiModulePath = argv[++i]; }
+        } else if ((option == "--scope" || option == "--case" || option == "--legacy-qualification") && i + 1 < argc) {
+            if (option == "--scope") scope = argv[++i]; else if (option == "--case") { caseSpecified = true; selectedCase = argv[++i]; } else { legacyQualificationSpecified = true; fixtureLegacyQualification = argv[++i]; }
+        } else return 64;
+    }
+    if (scope != "all" && scope != "publication-revocation") return 64;
+    if ((caseSpecified && selectedCase.empty()) || (fixtureLegacyQualification != "fixed" && fixtureLegacyQualification != "content")) return 64;
+    if (legacyQualificationSpecified && (scope != "publication-revocation" || selectedCase != "publication-revocation-real-source-preserves-original-full-gameid")) return 64;
+    if (legacyQualificationSpecified != (!clientModulePath.empty() && !uiModulePath.empty())) return 64;
+    if (!legacyQualificationSpecified && (!clientModulePath.empty() || !uiModulePath.empty())) return 64;
+    if (legacyQualificationSpecified) {
+        const auto utf8Path=[](const std::string& value) { return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(value.data()), value.size())); };
+        publication_fixture_model::setPaths(utf8Path(clientModulePath), utf8Path(uiModulePath));
+    }
+    qualifiedPublicationFixture = legacyQualificationSpecified;
     Json targets; std::ifstream(argv[1]) >> targets;
     Json cases = Json::array(); unsigned passed = 0;
     const auto test = [&](const char* name, const auto& action) {
+        if (!selectedCase.empty() && selectedCase != name) return;
         std::cerr << name << " begin\n"; try { action(); cases.push_back({{"name", name}, {"passed", true}}); ++passed; }
         catch (const std::exception& error) { cases.push_back({{"name", name}, {"passed", false}, {"reason", error.what()}}); }
         catch (...) { cases.push_back({{"name", name}, {"passed", false}, {"reason", "production-reader-exception"}}); }
     };
+    if (scope == "publication-revocation") {
+#include "steam_original_recovery_publication_revocation_cases.inc"
+    } else {
     test("first-success-full-GameID-originalPID-no-second-instance-no-primary-substitution", [&] { reset(targets.at(0)); success(); });
     test("later-success-full-GameID-originalPID-no-second-instance-no-primary-substitution", [&] { reset(targets.at(1)); success(); });
     test("shortcut-AppID-cannot-replace-full-record-GameID", [&] { reset(targets.at(0)); put(originalRecord + 8, tr::shortcutAppId(bound.gameId)); rejectedBeforeCall(); });
@@ -182,6 +636,12 @@ int main(int argc, char** argv) {
     test("legacy-primary-migration-still-refused", [&] { reset(targets.at(0)); bound.qualificationRoute=tr::QualificationRoute::LegacyDynamic; put(originalRecord + 0x19c, bound.gamePid + 1, 4); rejectedBeforeCall(); });
     test("legacy-healthy-pins-still-required", [&] { reset(targets.at(0)); bound.qualificationRoute=tr::QualificationRoute::LegacyDynamic; bound.healthyProof.recordPin[0]=bound.healthyProof.recordPin[0]=='0'?'1':'0'; rejectedBeforeCall(); });
     test("unknown-route-cannot-publish", [&] { reset(targets.at(0)); bound.qualificationRoute=static_cast<tr::QualificationRoute>(99); rejectedBeforeCall(); });
-    std::cout << Json({{"schema", "ymcc.original-recovery-publisher-success-selftest.v1"}, {"success", passed == cases.size()}, {"cases", cases}, {"tests", cases.size()}, {"passed", passed}, {"checks", checks}, {"ports", {"readLocal=owned-sparse-memory", "identity=fixture-boolean", "clock=fixture-ticks", "native-Publisher=capturing-stub"}}, {"steamP2MachineCodeExecuted", false}, {"liveRecoveryVerified", false}, {"gameInstancesStarted", 0}, {"productionPrimaryPidWrites", 0}}).dump() << '\n';
+    }
+    publicationRevocation.retire();
+    const bool sourceResourcesReturned = publicationSources.close();
+    if (cases.empty()) { std::cerr << "empty-or-unknown-case-selection\n"; return 64; }
+    if (publicationOwnerCleanupFailed) { std::cerr << "owned-lease-child-return-unknown\n"; return 2; }
+    if (!sourceResourcesReturned) { std::cerr << "source-handle-return-failed\n"; return 2; }
+    std::cout << Json({{"publicationLeaseOwnerEvidence", publicationLeaseOwnerEvidence}, {"scope", scope}, {"selectedCase", selectedCase}, {"legacyQualificationParameter", fixtureLegacyQualification}, {"schema", "ymcc.original-recovery-publisher-success-selftest.v1"}, {"success", passed == cases.size()}, {"cases", cases}, {"tests", cases.size()}, {"passed", passed}, {"checks", checks}, {"ports", {"readLocal=owned-sparse-memory", "identity=fixture-boolean", "clock=fixture-ticks", "native-Publisher=capturing-stub"}}, {"genuineQualifiedPeModel", qualifiedPublicationFixture}, {"loadedSteamPagesRead", false}, {"steamP2MachineCodeExecuted", false}, {"liveRecoveryVerified", false}, {"gameInstancesStarted", 0}, {"productionPrimaryPidWrites", 0}}).dump() << '\n';
     return passed == cases.size() ? 0 : 1;
 }

@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <iostream>
 #include <set>
+#include <memory>
+#include <stdexcept>
+#include <fstream>
 #include <cstring>
 #include "json.hpp"
 using json=nlohmann::json;
@@ -32,7 +35,16 @@ static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end
 static std::wstring U2W(const std::string& s){return std::wstring(s.begin(),s.end());}
 static std::wstring POWER_CONTROL_DIR=L"memory";
 static std::vector<json> logs;
-static void appendNativeLifecycleLog(const char*,json x){logs.push_back(x);}
+static bool queueDiagnosticThrows = false;
+static bool queueScmThrows = false;
+static bool queueDiagnosticClobbersError = false;
+static void appendNativeLifecycleLog(const char*,json x){
+    const auto state=x.value("state",std::string{});
+    if(queueDiagnosticClobbersError) SetLastError(ERROR_INVALID_HANDLE);
+    if(queueDiagnosticThrows && (state=="queue-submit-result" || state=="worker-started" || state=="worker-io-acquired" || state=="worker-finished" || state=="io-call-begin" || state=="io-call-return" || state=="io-call-exception"))
+        throw std::runtime_error("diagnostic leaf failure");
+    logs.push_back(x);
+}
 struct Service{DWORD type=SERVICE_AUTO_START,state=SERVICE_RUNNING;bool deny=false,stopFail=false,startFail=false,stuck=false,configFail=false,queryFail=false;ULONGLONG settleAt=0;DWORD settleState=SERVICE_RUNNING;DWORD stopDelay=0;};
 struct Task {bool enabled=true,running=true,deny=false,setFail=false,stuck=false;unsigned setCalls=0,failSetCall=0;bool runFail=false;};
 static std::map<std::wstring,Service> services;
@@ -224,7 +236,7 @@ static std::function<void()> onPersist;
 static int taskQueries=0;
 static int mutationCount=0,stops=0,starts=0,taskMutations=0,taskStarts=0,processCalls=0;
 static ULONGLONG tick=1;
-static SC_HANDLE fakeScm(LPCWSTR,LPCWSTR,DWORD){if(scmFail){SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return reinterpret_cast<SC_HANDLE>(1);}
+static SC_HANDLE fakeScm(LPCWSTR,LPCWSTR,DWORD){if(queueScmThrows){queueScmThrows=false;throw std::runtime_error("execution leaf throws before acquiring SCM handle");}if(scmFail){SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return reinterpret_cast<SC_HANDLE>(1);}
 static SC_HANDLE fakeOpen(SC_HANDLE,LPCWSTR name,DWORD){auto i=services.find(name);if(i==services.end()){SetLastError(ERROR_SERVICE_DOES_NOT_EXIST);return nullptr;}if(i->second.deny){SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return reinterpret_cast<SC_HANDLE>(&i->second);}
 static BOOL fakeClose(SC_HANDLE){return TRUE;}
 static BOOL fakeConfigQuery(SC_HANDLE h,LPQUERY_SERVICE_CONFIGW p,DWORD,DWORD* n){auto& v=*reinterpret_cast<Service*>(h);*n=sizeof(QUERY_SERVICE_CONFIGW);if(v.queryFail){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}if(!p){SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}p->dwStartType=v.type;return TRUE;}

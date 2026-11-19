@@ -8,7 +8,20 @@ sys.dont_write_bytecode=True
 def sha(b):return hashlib.sha256(b).hexdigest()
 def mask(text):
  return re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27',lambda m:''.join('\n' if c=='\n' else ' ' for c in m[0]),text,flags=re.S)
-def extract(text,name):
+def extract(text,name,balanced=False):
+ if balanced:
+  clean=mask(text);definitions=[]
+  for hit in re.finditer(r'^(?:[\w:<>]+[\s*&]+)+?'+re.escape(name)+r'\s*\(',clean,re.M):
+   pos=clean.index('(',hit.start())+1;depth=1
+   while depth and pos<len(clean):depth+=(clean[pos]=='(')-(clean[pos]==')');pos+=1
+   if depth:raise RuntimeError('unbalanced parameters '+name)
+   tail=re.match(r'\s*(?:const\s*)?(?:noexcept\s*)?',clean[pos:]);pos+=tail.end()
+   if clean[pos:pos+1]=='{':definitions.append((hit.start(),pos))
+  if len(definitions)!=1:raise RuntimeError('ambiguous/missing exact function '+name+': '+str(len(definitions)))
+  start,pos=definitions[0];pos+=1;depth=1
+  while depth and pos<len(clean):depth+=(clean[pos]=='{')-(clean[pos]=='}');pos+=1
+  if depth:raise RuntimeError('unbalanced body '+name)
+  return text[start:pos],start,pos
  clean=mask(text)
  pattern=r'^(?:[\w:<>]+\s+)+?'+re.escape(name)+r'\s*\([^;{}]*\)\s*(?:const\s*)?\{'
  hits=list(re.finditer(pattern,clean,re.M))
@@ -37,7 +50,7 @@ def main():
  repo=Path(__file__).resolve().parent.parent;out=args.out.resolve();out.mkdir(parents=True,exist_ok=False)
  source=repo/'native/steam_original_recovery_engine.cpp';template=repo/'tools/steam_original_recovery_success_chain_fixture.cpp.in'
  runtime=args.runtime_source.resolve() if args.runtime_source else repo/'native/steam_original_recovery_runtime.h'
- dependencies=[repo/'native/steam_original_recovery_storage.h',repo/'native/steam_original_recovery_config.h',repo/'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json']
+ dependencies=[repo/'tools/fixtures/recovery_startup_handoff_unsupported.h',repo/'native/steam_original_recovery_storage.h',repo/'native/steam_original_recovery_config.h',repo/'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json']
  inputs={str(p):p.read_bytes() for p in [runtime,*dependencies,source,template,Path(__file__).resolve(),repo/'deps/json/json.hpp',repo/'native/steam_original_recovery_wake_watch.h',repo/'native/steam_original_recovery_file_hash.h']}
  text=inputs[str(source)].decode('utf-8-sig').replace('\r\n','\n');parts=[]
  def take(name):
@@ -67,7 +80,7 @@ def main():
  route_definitions=text[route_begin:route_end];parts.append({'name':'route-definitions','startLine':text.count('\n',0,route_begin)+1,'sha256':sha(route_definitions.encode('utf-8'))})
  cpp=cpp.replace('std::atomic<bool> gActive{false};',f'constexpr const char* kEngineRevision="{revision}";constexpr const char* kModuleQualification="{module}";\n{route_definitions}std::atomic<bool> gActive{{false}};')
  copied={}
- for src,dest in [(repo/'deps/json/json.hpp','json.hpp'),(repo/'native/steam_original_recovery_storage.h','steam_original_recovery_storage.h'),(repo/'native/steam_original_recovery_config.h','steam_original_recovery_config.h'),(repo/'deps/json/json.hpp','fixture_json.hpp'),(repo/'native/steam_original_recovery_wake_watch.h','steam_original_recovery_wake_watch.h'),(repo/'native/steam_original_recovery_file_hash.h','steam_original_recovery_file_hash.h')]:
+ for src,dest in [(repo/'tools/fixtures/recovery_startup_handoff_unsupported.h','recovery_startup_handoff_unsupported.h'),(repo/'deps/json/json.hpp','json.hpp'),(repo/'native/steam_original_recovery_storage.h','steam_original_recovery_storage.h'),(repo/'native/steam_original_recovery_config.h','steam_original_recovery_config.h'),(repo/'deps/json/json.hpp','fixture_json.hpp'),(repo/'native/steam_original_recovery_wake_watch.h','steam_original_recovery_wake_watch.h'),(repo/'native/steam_original_recovery_file_hash.h','steam_original_recovery_file_hash.h')]:
   target=(out/dest).resolve();target.write_bytes(inputs[str(src)]);copied[target]=src
  tools=json.loads((repo/'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json').read_text(encoding='utf-8-sig'))['native']
  env={k.upper():v for k,v in os.environ.items()};env['PATH']=';'.join([str(Path(tools['compiler']).parent),'C:/Windows/System32','C:/Windows']);env['INCLUDE']=';'.join(tools['include']);env['LIB']=';'.join(tools['lib']);
@@ -105,4 +118,17 @@ def main():
   report['runs'].append(row)
  report['inputSourcesUnchanged']=all(Path(p).read_bytes()==b for p,b in inputs.items());report['success']=all(r['detected'] for r in report['runs']) and report['inputSourcesUnchanged'];report['fieldAcceptance']=False;report['totalMs']=(time.perf_counter()-task_started)*1000
  (out/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps({'success':report['success'],'runs':[{k:v for k,v in r.items() if k not in ['failedCases','dependencies']} for r in report['runs']],'report':str(out/'report.json')},ensure_ascii=False,indent=2));return 0 if report['success'] else 1
-if __name__=='__main__':raise SystemExit(main())
+def prepare_command_wake_only():
+ from fixtures.recovery_command_wake import CASES,prepare
+ parser=argparse.ArgumentParser(description='Original success-chain exact Wake source preparation only')
+ parser.add_argument('--out',type=Path,required=True)
+ parser.add_argument('--command-wake-only',action='store_true',required=True)
+ parser.add_argument('--prepare-only',action='store_true',required=True)
+ parser.add_argument('--case',choices=CASES)
+ parser.add_argument('--owned-availability-protect-close',choices=['6'])
+ args=parser.parse_args()
+ if args.owned_availability_protect_close is not None and args.case!=CASES[0]:parser.error('protect-close6 requires exact occupied-release-ready-still-4')
+ return prepare(args,Path(__file__).resolve().parent.parent,extract,mask)
+
+if __name__=='__main__':
+ raise SystemExit(prepare_command_wake_only() if '--command-wake-only' in sys.argv[1:] else main())

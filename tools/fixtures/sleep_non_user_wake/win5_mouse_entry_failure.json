@@ -1,0 +1,55 @@
+{
+  "kind": "archived-entry-interruption",
+  "sourceArchiveSha256": "db65e70dfae6b57c87c29640222e38b0f401e8abc89c1344ffabbf7d727040b2",
+  "scope": "isolated per-record counterfactuals; a real earlier repair changes subsequent recorded history",
+  "events": [
+    {
+      "intentLocal": "2026-11-11 19:44:33.209",
+      "exitLocal": "2026-11-11 19:44:38.194",
+      "reason": 32,
+      "exitDelta100ns": 49859870,
+      "sleepEntered": true,
+      "sourceFactLines": [
+        166,
+        182,
+        183
+      ]
+    },
+    {
+      "intentLocal": "2026-11-11 19:44:42.042",
+      "exitLocal": "2026-11-11 19:44:43.187",
+      "reason": 32,
+      "exitDelta100ns": 11455130,
+      "sleepEntered": false,
+      "sourceFactLines": [
+        207,
+        215,
+        216
+      ]
+    },
+    {
+      "intentLocal": "2026-11-11 19:44:51.835",
+      "exitLocal": "2026-11-11 19:44:53.120",
+      "reason": 32,
+      "exitDelta100ns": 12854060,
+      "sleepEntered": false,
+      "sourceFactLines": [
+        241,
+        249,
+        250
+      ]
+    },
+    {
+      "intentLocal": "2026-11-11 19:45:04.197",
+      "exitLocal": "2026-11-11 19:45:15.782",
+      "reason": 32,
+      "exitDelta100ns": 115867290,
+      "sleepEntered": true,
+      "sourceFactLines": [
+        276,
+        285,
+        286
+      ]
+    }
+  ]
+}

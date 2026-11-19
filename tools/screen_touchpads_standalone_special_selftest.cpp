@@ -1,3 +1,17 @@
+#ifdef YMCC_STEAM_MENU_POPUP_CONTINUATION_ONLY
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include "steam_menu_popup_continuation.h"
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include "fixtures/steam_menu_native_continuation_cases.inc"
+int main(int argc,char**argv){return menuNativeContinuationFixture(argc,argv);}
+#else
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -29,6 +43,89 @@ struct MicrophoneFixture {
     HRESULT SetMute(BOOL value,LPCGUID){++writes;if(rejectSet)return E_FAIL;if(!ignoreSet)muted=value;return S_OK;}
 };
 int main(int argc,char** argv) {
+    if(argc==3 && std::string(argv[2])=="--steam-all-profiles") {
+        Json result={{"scope","steam-all-profiles"},{"systemInputInjected",false},{"virtualTargetStarted",false},{"cases",Json::array()},{"presetViews",Json::array()}};
+        auto check=[&](const std::string& name,bool ok){result["cases"].push_back({{"name",name},{"ok",ok}});};
+        dryRun=true;standaloneSubmit=recordAction;
+        for(int profile=0;profile<4;++profile){
+            const std::string name=profileName(profile);Config cfg=profileDefault(profile);
+            const Json partial={{"summonPosition","opposite"},{"summonPlacementVersion",1},{"summonEnabled",true},{"autoHideSeconds",15}};
+            const std::vector<std::pair<std::string,Json>> variants={
+                {"missing",Json::object()},
+                {"explicit-off",{{"standaloneSpecialMode","off"},{"specialMask",0},{"specialEnabled",false}}},
+                {"mask-off",{{"specialMask",0}}},
+                {"flag-off",{{"specialEnabled",false}}},
+                {"Steam-zero",{{"standaloneSpecialMode","steamdeck"},{"specialMask",0},{"specialEnabled",false}}},
+                {"disabled-and-zero",{{"masterEnabled",false},{"standaloneSpecialMode","off"},{"specialMask",0},{"specialEnabled",false},{"autoHideSeconds",0},{"transparency",0},{"summonPosition","off"},{"summonEnabled",false}}},
+                {"native-choice",profile==0?Json{{"standaloneSpecialMode","ps5"}}:Json{{"standaloneSpecialMode","off"},{"specialMask",profile==1?1:profile==2?3:1},{"specialEnabled",true}}},
+                {"legacy-enabled",{{"enabled",true}}}
+            };
+            for(const auto& [variant,patch]:variants){
+                Json saved=partial;saved.update(patch);const ProfileBank bank({{"profiles",{{name,saved}}}});
+                result["presetViews"].push_back({{"persona",name},{"variant",variant},{"saved",saved},{"effective",configJson(bank.slots[profile])}});
+            }
+            activeProfile=profile;appliedProfile=profile;controlTargetEnabled=false;available=false;psAvailable=false;controlEdgeEnabled=false;
+            {std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
+            check(name+"-default-Steam-pair-and-opposite-summon",cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck && cfg.summonPosition==SummonPosition::Opposite);
+            check(name+"-Steam-pair-needs-no-virtual-target",buttonPermitted(cfg,1)&&buttonPermitted(cfg,2)&&directSpecialButton(cfg,1)&&directSpecialButton(cfg,2));
+            for(int index:{1,2}){
+                const auto count=dispatched.size();const auto id=static_cast<UINT32>(100+profile*10+index);
+                buttonEventAtHit(cfg,index,id,0,true);buttonEventAtHit(cfg,index,id,1,true);
+                check(name+"-press-does-not-send-virtual-or-menu-"+std::to_string(index),screenButtonMask.load()==0&&dispatched.size()==count);
+                buttonEventAtHit(cfg,index,id,2,true);
+                check(name+"-release-sends-one-correct-Steam-action-"+std::to_string(index),dispatched.size()==count+1&&dispatched.back()==(index==1?StandaloneAction::SteamMainMenu:StandaloneAction::SteamQuickAccess)&&!standalonePending.load()&&!screenButtonMask.load()&&!buttonContacts[index]);
+            }
+            for(int index:{1,2}){
+                const std::string key=name+"-contact-"+std::to_string(index);
+                const auto count=dispatched.size();const UINT32 oldId=200+profile*10+index,newId=300+profile*10+index;
+                buttonEventAtHit(cfg,index,oldId,0,true);
+                check(key+"-arms-existing-deadline",menuSignalExpires[index-1].load()>GetTickCount64());
+                menuSignalExpires[index-1]=GetTickCount64()+60000;
+                buttonEventAtHit(cfg,index,newId,0,true);buttonEventAtHit(cfg,index,newId,2,true);
+                check(key+"-unexpired-contact-keeps-its-owner",buttonContacts[index]==oldId&&dispatched.size()==count);
+                autoHide.specialContacts[index-1]=oldId;buttonFeedbackContacts[index]=oldId;buttonFeedbackPressed[index]=true;
+                menuSignalExpires[index-1]=1;buttonEventAtHit(cfg,index,newId,0,true);
+                check(key+"-new-DOWN-reclaims-expired-contact",buttonContacts[index]==newId&&buttonArmed[index]&&dispatched.size()==count&&!screenButtonMask.load());
+                check(key+"-reclaim-clears-old-feedback-and-hide-contact",!buttonFeedbackContacts[index]&&!buttonFeedbackPressed[index]&&!autoHide.specialContacts[index-1]);
+                buttonEventAtHit(cfg,index,oldId,2,true);
+                check(key+"-old-UP-cannot-clear-or-trigger-new-contact",buttonContacts[index]==newId&&dispatched.size()==count);
+                buttonEventAtHit(cfg,index,newId,2,true);buttonEventAtHit(cfg,index,oldId,2,true);
+                check(key+"-new-UP-delivers-exactly-once",dispatched.size()==count+1&&!buttonContacts[index]&&!screenButtonMask.load());
+                buttonEventAtHit(cfg,index,newId,0,true);buttonEventAtHit(cfg,index,newId,2,true,true);
+                check(key+"-cancelled-UP-never-delivers",dispatched.size()==count+1&&!buttonContacts[index]);
+                buttonEventAtHit(cfg,index,newId,0,true);handleButtonCaptureLoss(index,newId);buttonEventAtHit(cfg,index,newId,2,true);
+                check(key+"-capture-loss-rejects-late-UP",dispatched.size()==count+1&&!buttonContacts[index]&&!standalonePending.load());
+            }
+            cfg.masterEnabled=false;check(name+"-master-OFF-still-blocks-buttons",!buttonPermitted(cfg,1)&&!buttonPermitted(cfg,2));cfg.masterEnabled=true;
+            controlTargetEnabled=true;screenButtonMask=3;check(name+"-stale-menu-bits-never-enter-report",buttonSnapshot()==0);screenButtonMask=0;
+            const auto roundtrip=ProfileBank(ProfileBank().json());check(name+"-four-profile-default-roundtrip",roundtrip.slots[profile].standaloneSpecialMode==StandaloneSpecialMode::SteamDeck);
+            if(profile==2||profile==3){
+                cfg.standaloneSpecialMode=StandaloneSpecialMode::Off;cfg.specialMask=profile==2?3u:1u;cfg.specialEnabled=true;
+                {std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
+                check(name+"-legacy-native-option-still-selectable",buttonPermitted(cfg,1)&&!directSpecialButton(cfg,1)&&(profile==2?buttonPermitted(cfg,2):!buttonPermitted(cfg,2)));
+                menuSignalExpires[0]=0;buttonEventAtHit(cfg,1,500+profile,0,true);check(name+"-native-option-uses-original-report-bit",buttonSnapshot()==1);
+                check(name+"-native-long-press-has-no-Steam-deadline",menuSignalExpires[0].load()==0);
+                menuSignalExpires[0]=1;buttonEventAtHit(cfg,1,600+profile,0,true);
+                check(name+"-native-long-press-not-reclaimed-by-Steam-rule",buttonContacts[1]==static_cast<UINT32>(500+profile)&&buttonSnapshot()==1);
+                buttonEventAtHit(cfg,1,500+profile,2,true);check(name+"-native-UP-clears-report",buttonSnapshot()==0);
+                Json saved={{"profiles",{{name,configJson(cfg)}}}};ProfileBank restored(saved);check(name+"-saved-native-choice-preserved",restored.slots[profile].standaloneSpecialMode==StandaloneSpecialMode::Off);
+                saved["profiles"][name].erase("standaloneSpecialMode");check(name+"-old-mask-only-choice-preserved",ProfileBank(saved).slots[profile].standaloneSpecialMode==StandaloneSpecialMode::Off);
+            }
+        }
+        {
+            Config cfg=profileDefault(0);cfg.standaloneSpecialMode=StandaloneSpecialMode::PS5;activeProfile=appliedProfile=0;
+            {std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
+            const auto count=dispatched.size();menuSignalExpires[1]=0;buttonEventAtHit(cfg,2,701,0,true);
+            check("no-output-PS-pair-keeps-original-long-press",menuSignalExpires[1].load()==0);
+            menuSignalExpires[1]=1;buttonEventAtHit(cfg,2,702,0,true);check("no-output-Mute-contact-not-reclaimed-as-Steam",buttonContacts[2]==701&&dispatched.size()==count);
+            buttonEventAtHit(cfg,2,701,2,true);check("no-output-PS-pair-still-dispatches-Mute",dispatched.size()==count+1&&dispatched.back()==StandaloneAction::MicrophoneMute);
+        }
+        Config cfg=profileDefault(3);activeProfile=appliedProfile=3;{std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
+        deferAction=true;buttonEventAtHit(cfg,2,777,0,true);buttonEventAtHit(cfg,2,777,2,true);const auto stale=deferredGeneration;
+        standaloneCancel();standaloneFinish(stale,StandaloneStatus::Accepted);check("cancel-rejects-late-action-receipt",!standaloneCurrent(stale)&&!standalonePending.load());
+        standaloneSubmit=nullptr;result["ok"]=std::all_of(result["cases"].begin(),result["cases"].end(),[](const Json& row){return row["ok"]==true;});
+        std::ofstream out(argv[1]);out<<result.dump(2);std::cout<<result.dump()<<'\n';return result["ok"]==true?0:1;
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     Json result=selfTest();auto& cases=result["cases"];
     auto check=[&](const std::string& name,bool ok){cases.push_back({{"name",name},{"ok",ok}});};
@@ -101,9 +198,10 @@ int main(int argc,char** argv) {
         const int profile=profileIndex(persona);setContext(persona,true);configure(profileDefault(profile),profile);pump();
         for(int index:{1,2}) {
             const auto before=dispatched.size();buttonEvent(index,901,0,20,20,80,60);
-            check(std::string(persona)+"-native-held-report-preserved-"+std::to_string(index),buttonSnapshot()==(1u<<(index-1)));
+            const bool direct=profile==1;
+            check(std::string(persona)+"-menu-DOWN-uses-selected-route-"+std::to_string(index),buttonSnapshot()==(direct?0u:(1u<<(index-1))));
             buttonEvent(index,901,2,20,20,80,60);
-            check(std::string(persona)+"-native-release-never-dispatches-standalone-"+std::to_string(index),buttonSnapshot()==0 && dispatched.size()==before);
+            check(std::string(persona)+"-menu-UP-uses-selected-route-"+std::to_string(index),buttonSnapshot()==0 && dispatched.size()==before+(direct?1u:0u));
         }
     }
     for(bool quick:{false,true})for(UINT accepted=0;accepted<=4;accepted++) {
@@ -139,3 +237,5 @@ int main(int argc,char** argv) {
     const char* path=argc>1?argv[1]:"standalone-special-selftest.json";
     std::ofstream out(path);out<<result.dump(2);std::cout<<(ok?"PASS ":"FAIL ")<<cases.size()<<" standalone/core cases\n";return ok?0:1;
 }
+
+#endif // YMCC_STEAM_MENU_POPUP_CONTINUATION_ONLY

@@ -1,3 +1,12 @@
+<!-- AYA-FAMILY-FIELD-RECONCILIATION-HC098 -->
+# AYA家族现场与消费合同（2026-11-07）
+
+用户AIR1S日志已按机型、Host会话和产物身份核对。[AYA家族消费表](AYA-FAMILY-CONSUMPTION.md)及[逐类机器合同](AYA-FAMILY-CONSUMPTION.json)列出26个factory来源、CEc/CEii/既有扩展差异与21/15/21个风扇/灯光/充电源码消费者。注册数不是硬件通过。
+
+本批修正FAN-RETURN旧callback摘要的适用范围，保留原注册路由/枚举与归还unknown；当前继承EC写入与原virtual Open/Close分别记录，不为现场旧Host新增AYA writer。风扇消费端继续负责真实归还和同源入包，库侧没有修改产品或补跑夹具。
+
+---
+
 # HC096：家族Managed准备身份已核，完整行为仍待原消费者验证
 
 更新 2026-11-05T07:29:32.006710+00:00。本次新prepared DLL与26源/23生成/3载荷吻合，HIDHide fake OS仅编译，未执行pipe/完整生命周期或复用。原账余3222.7988ms，90秒追加仍待原owner人类确认，521.9297为保守附加记账而非独立实测；不代跑、不新建额度。
@@ -633,6 +642,9 @@ The remaining independent ASUS work is device detection, bootstrap, complete res
 
 
 ## 灯光消费
+
+2026-11-09 已只读核对当前所选 HC `4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c` 的实际方法体：Lenovo `LegionGoTablet` 的颜色、亮度、状态方法丢弃 `HidDevice.Write(bool)`，无 HID 时也正常返回 true；`LegionGoTablet2` 继承这些实现。GO S 的 `LegionGoSZ1` 三方法返回实际写入结果，无 HID 返回 false，`LegionGoSZ2` 继承之。四条路线保留既有准入，不能从 GO/GO2 的助手 ok 推出写入、可见灯效、关灯或 OEM 归还成功。详见 [灯光审计的所选程序集补证](LIGHTING-CONTROLS-AUDIT-20261101.md)；本次仅校正来源与返回值证据，没有修改消费者、固定 HC 或 DLL。
+
 
 
 
@@ -640,7 +652,8 @@ hc-lighting-policy.json 只描述对冻结声明的已核验执行差异；C#/C+
 
 
 
-原生入口一次解析共享机型，再直接索引动作/后端；LightSetter把启用前已校验的operation传给执行体。助手回执绑定请求与实际机型、动作和总库指纹，保留可能已发生的队列写入证据；错误、短写和超时不成为成功。lighting.unified-capability-dispatch执行真实托管决策、ROG/MSI组包与普通回执，lighting.signal-consumer执行现有产品消费者。gyro.recipe-dispatch-hotpath保留原选择器、五个原始字段失效以及五种成功编译后必须失败的错误缓存键，完整矩阵和35种原语义破坏由既有gyro.machine-motion-consumers负责。
+原生入口一次解析共享机型，再直接索引动作/后端；LightSetter把启用前已校验的operation传给执行体。助手回执绑定请求与实际机型、动作和总库指纹，保留可能已发生的队列写入证据；消费者实际收到的错误、短写和超时不成为成功。所选 GO/GO2 HC 内部被丢弃的写入失败不在这些回执的可观察范围内，仍是待修正的消费端证据缺口。lighting.unified-capability-dispatch执行真实托管决策、ROG/MSI组包与普通回执，lighting.signal-consumer执行现有产品消费者。gyro.recipe-dispatch-hotpath保留原选择器、五个原始字段失效以及五种成功编译后必须失败的错误缓存键，完整矩阵和35种原语义破坏由既有gyro.machine-motion-consumers负责。
+
 
 
 

@@ -311,6 +311,11 @@
       "name": "steamMonitor",
       "owner": "native/steam_monitor_settings.h",
       "policy": "preserve-owner-schema"
+    },
+    {
+      "name": "customTouch",
+      "owner": "native/custom_touch_config.h",
+      "policy": "preserve-owner-schema"
     }
   ],
   "managedResources": [

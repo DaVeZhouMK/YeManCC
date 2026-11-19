@@ -7,6 +7,7 @@ import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { on } from '@/bridge/ipc';
+import { resolveScreenTouchpadPreset } from '@/bridge/screenTouchpadDefaults';
 import { LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, SCREEN_TOUCHPAD_LAYOUTS,
   screenSummonPositions, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, SCREEN_AUTO_HIDE_OPTIONS, screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile, screenTouchpadDefaults,
   type ScreenTouchpadConfig, type ScreenTouchpadState } from '@/bridge/screenTouchpads';
@@ -45,19 +46,20 @@ const singleModes = computed(() => SINGLE_TOUCHPAD_MODES.filter(mode => mode.val
 const rearSupported = profile === 'steamdeck' || props.persona === 'dualsense-edge';
 const standaloneSpecial = profile === 'disabled';
 const specialOptions = computed(() => standaloneSpecial ? STANDALONE_SPECIAL_MODES : profile === 'steamdeck'
-  ? [{ value: 0, label: '关闭' }, { value: 1, label: '只开启 Steam' }, { value: 2, label: '只开启三点' }, { value: 3, label: '都开启' }]
+  ? [{ value: 0, label: '关闭' }, { value: 1, label: '只开启 Steam' }, { value: 2, label: '只开启三点' }, { value: 'steamdeck', label: '开启Steam全部' }]
   : profile === 'dualsense-edge'
-    ? [{ value: 0, label: '关闭' }, { value: 1, label: '只开启 PS' }, { value: 2, label: '只开启静音' }, { value: 3, label: '都开启' }]
-    : profile === 'elite' ? [{ value: 0, label: '关闭' }, { value: 1, label: '都开启', sub: 'Xbox 按键' }] : [{ value: 0, label: '关闭' }]);
+    ? [{ value: 0, label: '关闭' }, { value: 'steamdeck', label: '开启Steam全部' }, { value: 1, label: '只开启 PS' }, { value: 2, label: '只开启静音' }, { value: 3, label: '开启PS5全部' }]
+    : profile === 'elite' ? [{ value: 0, label: '关闭' }, { value: 'steamdeck', label: '开启Steam全部' }, { value: 1, label: '开启Xbox按键' }] : [{ value: 0, label: '关闭' }]);
 // Old Xbox toggle configurations used mask 3, but Xbox only exposes Guide.
 const specialSelection = computed(() => standaloneSpecial ? state.value.standaloneSpecialMode ?? 'off'
+  : state.value.standaloneSpecialMode === 'steamdeck' || (profile === 'steamdeck' && state.value.specialMask === 3) ? 'steamdeck'
   : profile === 'elite' ? state.value.specialMask & 1 : state.value.specialMask);
 const rearOptions = computed(() => profile === 'steamdeck'
   ? [{ value: 10, label: 'L5+R5' }, { value: 5, label: 'L4+R4' }, { value: 15, label: '全开启' }, { value: 0, label: '全关闭' }]
   : profile === 'dualsense-edge'
     ? [{ value: 5, label: 'LFN+RFN' }, { value: 10, label: 'LB+RB' }, { value: 15, label: '全开启' }, { value: 0, label: '全关闭' }]
     : [{ value: 0, label: '全关闭' }]);
-const overlaysEnabled = computed(() => (standaloneSpecial && state.value.standaloneSpecialMode !== undefined && state.value.standaloneSpecialMode !== 'off') || state.value.layout !== 'off' || state.value.summonPosition !== 'off' || state.value.specialMask !== 0 || state.value.rearMask !== 0 || state.value.summonEnabled || state.value.specialEnabled || state.value.rearEnabled);
+const overlaysEnabled = computed(() => (state.value.standaloneSpecialMode !== undefined && state.value.standaloneSpecialMode !== 'off') || state.value.layout !== 'off' || state.value.summonPosition !== 'off' || state.value.specialMask !== 0 || state.value.rearMask !== 0 || state.value.summonEnabled || state.value.specialEnabled || state.value.rearEnabled);
 const mouseEnabled = computed(() => state.value.layout === 'single' ? state.value.singleMode === 'mouse' : state.value.leftMode === 'mouse' || state.value.rightMode === 'mouse');
 // Standalone actions surface real backend failures instead of a successful UI-only click.
 const specialErrors: Record<string,string> = {
@@ -77,10 +79,10 @@ function nativeFailure(state: ScreenTouchpadState): string {
   if (code === 0x80004004) return prefix + 'Windows 上次触摸板操作已中止（' + label + '）。如触摸正常可继续使用，无响应时再重新开启。';
   return prefix + '触摸板操作返回错误（Windows ' + label + '），无响应时可重新开启后重试。';
 }
-const status = computed(() => error.value || (standaloneSpecial && specialErrors[state.value.standaloneSpecialStatus ?? '']) || nativeFailure(state.value));
+const status = computed(() => error.value || ((standaloneSpecial || profile === 'steamdeck' || state.value.standaloneSpecialMode === 'steamdeck') && specialErrors[state.value.standaloneSpecialStatus ?? '']) || nativeFailure(state.value));
 async function refresh(): Promise<void> {
   if (disposed || saving.value || Object.keys(queued).length) return;
-  if(props.presetConfig){state.value={...props.presetConfig,persona:profile,ok:true,available:true,visible:false,reason:'boot-mode-preset'};loading.value=false;return;}
+  if(props.presetConfig){state.value={...resolveScreenTouchpadPreset(profile,props.presetConfig),persona:profile,ok:true,available:true,visible:false,reason:'boot-mode-preset'};loading.value=false;return;}
   const ticket = ++generation;
   try { const next = await screenTouchpadsGet(profile); if (!disposed && ticket === generation) { state.value = next; error.value = ''; } }
   catch (e) { if (!disposed && ticket === generation) error.value = e instanceof Error ? e.message : String(e); }
@@ -124,7 +126,8 @@ function changeSpecial(value: string | number): void {
     // Persist only the disabled overlay slot; never mutate outputTarget or a PS/Deck slot.
     if (STANDALONE_SPECIAL_MODES.some(mode => mode.value === value))
       change({ standaloneSpecialMode: value as ScreenTouchpadConfig['standaloneSpecialMode'] });
-  } else change({ specialMask: Number(value), specialEnabled: Number(value) !== 0 });
+  } else if (value === 'steamdeck') change({ standaloneSpecialMode: 'steamdeck' });
+  else change({ standaloneSpecialMode: 'off', specialMask: Number(value), specialEnabled: Number(value) !== 0 });
 }
 function changeLayout(layout: ScreenTouchpadConfig['layout']): void {
   const patch: Partial<ScreenTouchpadConfig> = { layout, enabled: layout !== 'off' };
@@ -168,7 +171,7 @@ onBeforeUnmount(() => {
       <Dropdown :model-value="state.layout" :options="SCREEN_TOUCHPAD_LAYOUTS" :disabled="locked"
         aria-label="屏幕触摸板布局" @update:model-value="changeLayout($event as ScreenTouchpadConfig['layout'])" />
     </div>
-    <div class="screen-touchpad-auto-hide screen-touchpad-field" title="触摸板、YMCC呼出键和专用按键闲置后完全不可见，触摸原区域即可恢复；保持按住时不会隐藏。">
+    <div class="screen-touchpad-auto-hide screen-touchpad-field" title="触摸板、控制中心呼出键和专用按键闲置后完全不可见，触摸原区域即可恢复；保持按住时不会隐藏。">
       <label>自动隐藏</label>
       <Dropdown :model-value="state.autoHideSeconds ?? 15" :options="SCREEN_AUTO_HIDE_OPTIONS" :disabled="locked"
         aria-label="触摸板和专用按键自动隐藏" @update:model-value="change({ autoHideSeconds: $event as ScreenTouchpadConfig['autoHideSeconds'] })" />
@@ -190,9 +193,9 @@ onBeforeUnmount(() => {
       </template>
     </template>
     <div class="screen-control-selects" data-gp-group="screen-control-selects">
-      <div class="screen-control-select screen-touchpad-field"><label>YMCC呼出</label>
+      <div class="screen-control-select screen-touchpad-field"><label>呼出YeManCC控制中心</label>
         <Dropdown :model-value="state.summonPosition" :options="summonOptions" :disabled="locked"
-          aria-label="YMCC呼出位置" @update:model-value="change({ summonPosition: $event as ScreenTouchpadConfig['summonPosition'], summonEnabled: $event !== 'off' })" />
+          aria-label="呼出YeManCC控制中心位置" @update:model-value="change({ summonPosition: $event as ScreenTouchpadConfig['summonPosition'], summonEnabled: $event !== 'off' })" />
       </div>
       <div class="screen-control-select screen-touchpad-field"><label>{{presetConfig?'屏幕专用按键 · 触摸':'专用按键'}}</label>
         <Dropdown :model-value="specialSelection" :options="specialOptions" :disabled="locked"

@@ -1,0 +1,438 @@
+#ifdef YMCC_STEAM_STARTUP_OWNER_SOURCE
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shlobj.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <functional>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <memory>
+#include <map>
+#include <vector>
+#include <array>
+#include <set>
+#include <algorithm>
+#include <chrono>
+#include <cwctype>
+#include <cstring>
+#include <iterator>
+#include <stdexcept>
+#include <utility>
+#include <exception>
+#include "json.hpp"
+#include "settings_baseline.h"
+using json=nlohmann::json;
+namespace ownerfs=std::filesystem;
+// This branch compiles ORIGINAL Startup/IPC/owner/guard source from the declared
+// generated include. It never includes WindowsPorts or a Steam/service launcher.
+struct OwnerHandle {
+    HANDLE value=nullptr;
+    explicit OwnerHandle(HANDLE h=nullptr):value(h){}
+    ~OwnerHandle(){if(value&&value!=INVALID_HANDLE_VALUE)::CloseHandle(value);}
+    OwnerHandle(const OwnerHandle&)=delete;OwnerHandle& operator=(const OwnerHandle&)=delete;
+};
+static void ownerNeed(bool value,const char* why){if(!value)throw std::runtime_error(why);}
+static std::wstring ownerRoot,ownerSuiteToken,POWER_CONTROL_DIR,YM_SETTINGS_FILE,YM_SETTINGS_BACKUP_FILE;
+static std::timed_mutex g_settingsFileMtx;
+static thread_local bool g_settingsBootOwnerChanged=false;
+static std::atomic<bool> g_exitRequested{false};
+static struct {bool isolated=false;} g_aiFanMockSession;
+static std::map<std::string,std::function<json(const json&)>> ownerHandlers;
+static std::vector<HANDLE> ownerSettingsMutexHandles;
+struct OwnerState {
+    ownerfs::path root,profile;json row;
+    std::atomic<unsigned> reads{0},fallbackReads{0},waits{0},serviceReads{0},serviceRepairs{0},logs{0},mutations{0};
+    std::atomic<bool> armed{true},contended{false};
+    OwnerHandle entered{::CreateEventW(nullptr,TRUE,FALSE,nullptr)},release{::CreateEventW(nullptr,TRUE,FALSE,nullptr)},probed{::CreateEventW(nullptr,TRUE,FALSE,nullptr)};
+    explicit OwnerState(ownerfs::path p,json r):root(std::move(p)),profile(root/L"profile"),row(std::move(r)){
+        ownerNeed(entered.value&&release.value&&probed.value,"owner event creation");
+    }
+};
+static std::unique_ptr<OwnerState> ownerState;
+static unsigned ownerDefaultProfileCalls=0;
+static std::wstring ownerLower(std::wstring value){for(auto& c:value)c=std::towlower(c);return value;}
+static bool ownerBelow(const ownerfs::path& base,const ownerfs::path& value){
+    const auto normalized=[](const ownerfs::path& input){
+        const auto absolute=ownerfs::absolute(input).lexically_normal();auto text=ownerLower(absolute.wstring());
+        const auto rootSize=absolute.root_path().wstring().size();
+        while(text.size()>rootSize&&(text.back()==L'\\'||text.back()==L'/'))text.pop_back();return text;
+    };
+    const auto a=normalized(base),b=normalized(value);
+    return b==a||(b.size()>a.size()&&b.compare(0,a.size(),a)==0&&
+        ((a.back()==L'\\'||a.back()==L'/')||(b[a.size()]==L'\\'||b[a.size()]==L'/')));
+}
+static void ownerPath(const ownerfs::path& path){
+    ownerNeed(path.is_absolute()&&ownerBelow(ownerRoot,path),"foreign fixture path");
+    auto cursor=path.lexically_normal();
+    for(;;){
+        const auto attr=::GetFileAttributesW(cursor.c_str());
+        ownerNeed(attr==INVALID_FILE_ATTRIBUTES||!(attr&FILE_ATTRIBUTE_REPARSE_POINT),"fixture reparse path");
+        if(ownerLower(cursor.wstring())==ownerLower(ownerfs::path(ownerRoot).wstring()))break;
+        const auto parent=cursor.parent_path();ownerNeed(parent!=cursor&&ownerBelow(ownerRoot,parent),"fixture path parent");cursor=parent;
+    }
+}
+static std::string ownerRaw(const ownerfs::path& file){
+    ownerPath(file);std::ifstream input(file,std::ios::binary);
+    ownerNeed(static_cast<bool>(input),"owned file read failed");
+    std::string value((std::istreambuf_iterator<char>(input)),{});
+    ownerNeed(value.size()<=1024u*1024u,"owned file size");return value;
+}
+static void ownerWrite(const ownerfs::path& file,const std::string& value){
+    ownerPath(file);const auto temporary=ownerfs::path(file.wstring()+L".fixture-tmp-"+std::to_wstring(GetCurrentThreadId()));
+    ownerPath(temporary);OwnerHandle handle(::CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));
+    ownerNeed(handle.value!=INVALID_HANDLE_VALUE,"owned atomic write open");DWORD wrote=0;
+    ownerNeed(value.size()<=1024u*1024u&&::WriteFile(handle.value,value.data(),static_cast<DWORD>(value.size()),&wrote,nullptr)&&wrote==value.size()&&::FlushFileBuffers(handle.value),"owned atomic write");
+    ::CloseHandle(handle.value);handle.value=nullptr;
+    ownerNeed(::MoveFileExW(temporary.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"owned atomic replace");
+}
+static void ownerPause(const char* point){
+    const auto scenario=ownerState->row.at("scenario").get<std::string>();
+    const auto change=ownerState->row.at("change").get<std::string>();
+    const bool selected=((scenario=="lock-wait"||scenario=="preparation-lock-wait")&&std::string(point)=="before-final-wait")||
+        (scenario=="atomic-write"&&std::string(point)=="startup-mutation")||
+        (scenario=="service-late"&&std::string(point)=="service")||
+        (scenario=="exit"&&change=="after-write"&&std::string(point)=="startup-written");
+    if(!selected||!ownerState->armed.exchange(false))return;
+    ownerNeed(::SetEvent(ownerState->entered.value)!=FALSE,"signal owner pause");
+    ownerNeed(::WaitForSingleObject(ownerState->release.value,1500)==WAIT_OBJECT_0,"owner pause deadline");
+}
+static HANDLE ownerCreateMutex(LPSECURITY_ATTRIBUTES sa,BOOL initial,LPCWSTR name){
+    ownerNeed(!sa&&!initial&&name&&std::wstring(name)==L"Local\\YeManCC-UnifiedSettings","unexpected production mutex terminal");
+    const auto isolated=L"Local\\YMCC-SteamStartupOwner-"+ownerSuiteToken;
+    HANDLE value=::CreateMutexW(nullptr,FALSE,isolated.c_str());if(value)ownerSettingsMutexHandles.push_back(value);return value;
+}
+static BOOL ownerClose(HANDLE value){
+    const auto found=std::find(ownerSettingsMutexHandles.begin(),ownerSettingsMutexHandles.end(),value);
+    if(found!=ownerSettingsMutexHandles.end())ownerSettingsMutexHandles.erase(found);
+    return ::CloseHandle(value);
+}
+static DWORD ownerWait(HANDLE value,DWORD timeout){
+    const auto ordinal=++ownerState->waits;
+    if((ownerState->row.at("scenario")=="lock-wait"||ownerState->row.at("scenario")=="preparation-lock-wait")&&ordinal==2){
+        ownerPause("before-final-wait");
+        ownerNeed(::WaitForSingleObject(value,0)==WAIT_TIMEOUT,"actual named mutex must be contended");
+        ownerState->contended=true;::SetEvent(ownerState->probed.value);
+    }
+    return ::WaitForSingleObject(value,timeout);
+}
+static HANDLE ownerCreateFile(LPCWSTR name,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES sa,DWORD disposition,DWORD flags,HANDLE model){
+    ownerNeed(name&&!sa&&!model,"unexpected Startup file terminal");ownerPath(name);
+    if(access&GENERIC_WRITE){++ownerState->mutations;ownerPause("startup-mutation");}
+    return ::CreateFileW(name,access,share,sa,disposition,flags,model);
+}
+static DWORD ownerAttributes(LPCWSTR name){ownerPath(name);return ::GetFileAttributesW(name);}
+static BOOL ownerAttributesEx(LPCWSTR name,GET_FILEEX_INFO_LEVELS level,LPVOID data){ownerPath(name);return ::GetFileAttributesExW(name,level,data);}
+static BOOL ownerCopy(LPCWSTR from,LPCWSTR to,BOOL fail){
+    ownerPath(from);ownerPath(to);ownerNeed(fail!=FALSE,"backup must not replace");++ownerState->mutations;ownerPause("startup-mutation");return ::CopyFileW(from,to,fail);
+}
+static BOOL ownerDelete(LPCWSTR name){
+    ownerPath(name);++ownerState->mutations;ownerPause("startup-mutation");const auto ok=::DeleteFileW(name);
+    if(ok&&ownerfs::path(name).filename()==L".earlystart")ownerPause("startup-written");return ok;
+}
+static BOOL ownerMove(LPCWSTR from,LPCWSTR to,DWORD flags){
+    ownerPath(from);ownerPath(to);const auto ok=::MoveFileExW(from,to,flags);
+    if(ok&&ownerfs::path(to).filename()==L".earlystart")ownerPause("startup-written");return ok;
+}
+static std::wstring fixtureProfile(){ownerPath(ownerState->profile);return ownerState->profile.wstring();}
+static std::wstring fixtureImage(){std::vector<wchar_t> bytes(32768);const auto size=::GetModuleFileNameW(nullptr,bytes.data(),static_cast<DWORD>(bytes.size()));ownerNeed(size&&size<bytes.size(),"fixture image path");return {bytes.data(),size};}
+namespace ymcc::steamlaunch {
+// These defaults are deny ports, not user-folder APIs. The sole adapted handler
+// constructor supplies all three arguments; any missed adaptation fails closed.
+[[maybe_unused]] inline std::wstring userDirectory(int){++ownerDefaultProfileCalls;throw std::runtime_error("DEFAULT_PROFILE_LOOKUP_FORBIDDEN");}
+[[maybe_unused]] inline std::wstring executablePath(){throw std::runtime_error("DEFAULT_IMAGE_LOOKUP_FORBIDDEN");}
+}
+static std::string ymSettingsReadRaw(const std::wstring& file){++ownerState->reads;return ownerRaw(file);}
+[[maybe_unused]] static json ymSettingsReadUnlocked(){
+    ++ownerState->fallbackReads;
+    for(const auto* file:{&YM_SETTINGS_FILE,&YM_SETTINGS_BACKUP_FILE}){
+        try{const auto value=ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(*file));if(ymcc::settingsBaseline::supported(value))return value;}catch(...){}
+    }return json::object();
+}
+static void ipc_on(const char* name,std::function<json(const json&)> fn){ownerNeed(std::string(name)=="steam.startup.set","only actual selected handler");ownerHandlers[name]=std::move(fn);}
+static void appendNativeLifecycleLog(const char* name,const json& value){ownerNeed(std::string(name)=="steam-startup-service"&&value.is_object(),"unexpected memory log");++ownerState->logs;}
+static struct {void notifyRequestChanged(){}} g_steamCssUse;
+namespace ymcc::earlystart {
+static json read(){++ownerState->serviceReads;ownerPause("service");return {{"known",true},{"installed",true},{"automatic",true},{"running",true},{"fixture","memory-service"}};}
+static json repair(){++ownerState->serviceRepairs;ownerPause("service");return {{"known",true},{"installed",true},{"automatic",true},{"running",true},{"fixture","memory-service"}};}
+}
+// The code behind these terminals stays byte-identical. Only API leaves for
+// owned files and the isolated mutex are bound here, never an owner model.
+#define CreateMutexW ownerCreateMutex
+#define WaitForSingleObject ownerWait
+#define CloseHandle ownerClose
+#define CreateFileW ownerCreateFile
+#define GetFileAttributesW ownerAttributes
+#define GetFileAttributesExW ownerAttributesEx
+#define CopyFileW ownerCopy
+#define DeleteFileW ownerDelete
+#define MoveFileExW ownerMove
+#include YMCC_STEAM_STARTUP_OWNER_SOURCE
+#undef MoveFileExW
+#undef DeleteFileW
+#undef CopyFileW
+#undef GetFileAttributesExW
+#undef GetFileAttributesW
+#undef CreateFileW
+#undef CloseHandle
+#undef WaitForSingleObject
+#undef CreateMutexW
+static void ownerChange(const std::string& change){
+    const auto original=ymcc::settingsBaseline::parseDocument(ownerRaw(YM_SETTINGS_FILE));
+    if(change=="corrupt"){ownerWrite(YM_SETTINGS_FILE,"{bad-owned-main");return;}
+    auto next=original;ownerNeed(next.is_object(),"peer requires strict settings");
+    if(change=="revision")next["input"]["revision"]=8;
+    else if(change=="input-intent")next["input"]["diagnostics"]["inputLoggingEnabled"]=true;
+    else if(change=="mode"){next["extensions"]["bootModes"]["revision"]=4;if(next["extensions"]["bootModes"].contains("preparation"))next["extensions"]["bootModes"]["global"]["background"]["ui"]["theme"]="red-black";}
+    else if(change=="claim"||change=="claim-rebased"||change=="claim-current"){
+        if(change!="claim-current")next["extensions"]["bootModesClaimWriteId"]="peer-steam-claim";
+        if(change!="claim"){next["extensions"]["bootModes"]["revision"]=4;next["extensions"]["bootModes"]["global"]["background"]["ui"]["theme"]="red-black";}
+    }
+    else if(change=="result")next["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+    else if(change=="observed")next["input"]["startupObservedBoot"]="new-owned-boot";
+    else if(change=="unsupported")next["schemaVersion"]=99;
+    else if(change=="preparation-selection"){next["extensions"]["bootModes"]["revision"]=4;next["extensions"]["bootModes"]["boot"]=next["extensions"]["bootModes"]["boot"]=="global"?"xbox":"global";}
+    else if(change=="preparation-new-request"){next["extensions"]["bootModes"]["revision"]=4;next["extensions"]["bootModes"]["preparation"]["revision"]=4;}
+    else if(change=="preparation-disabled")next["extensions"]["bootModes"]["bootEnabled"]=false;
+    else if(change=="preparation-current")next["extensions"]["bootModes"]["current"]=next["extensions"]["bootModes"]["current"]=="global"?"xbox":"global";
+    else if(change=="preparation-state")next["extensions"]["bootModes"]["preparation"]["status"]="prepared";
+    else if(change=="preparation-rollback")next["extensions"]["bootModes"]["revision"]=2;
+    else if(change=="ack")next["input"]["hostAcknowledgedRevision"]=7;
+    else if(change=="unrelated")next["extensions"]["peer"]={{"keep",true}};
+    else ownerNeed(change=="none","unknown selected mutation");
+    ownerWrite(YM_SETTINGS_FILE,next.dump());
+}
+struct OwnerOutcome {bool ok=false;json reply;std::string error;};
+static OwnerOutcome ownerInvoke(const json& args){
+    OwnerOutcome result;try{result.reply=ownerHandlers.at("steam.startup.set")(args);result.ok=result.reply.value("ok",false);}
+    catch(const std::exception& error){result.error=error.what();}return result;
+}
+static std::wstring ownerEventName(const char* suffix){
+    return L"Local\\YMCC-SteamStartupOwner-"+ownerSuiteToken+L"-"+std::to_wstring(ownerState->row.at("index").get<unsigned>())+L"-"+std::wstring(suffix,suffix+std::strlen(suffix));
+}
+struct OwnerChild {
+    OwnerHandle ready,release,job,process,thread;bool assigned=false,joined=false,zero=false,forced=false;
+    DWORD exitCode=STILL_ACTIVE;
+    explicit OwnerChild(const char* operation){
+      try{
+        ready.value=::CreateEventW(nullptr,TRUE,FALSE,ownerEventName("ready").c_str());ownerNeed(ready.value&&GetLastError()!=ERROR_ALREADY_EXISTS,"fresh peer ready event");
+        release.value=::CreateEventW(nullptr,TRUE,FALSE,ownerEventName("release").c_str());ownerNeed(release.value&&GetLastError()!=ERROR_ALREADY_EXISTS,"fresh peer release event");
+        job.value=::CreateJobObjectW(nullptr,nullptr);ownerNeed(job.value!=nullptr,"owned peer Job");
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ownerNeed(::SetInformationJobObject(job.value,JobObjectExtendedLimitInformation,&limits,sizeof(limits))!=FALSE,"peer Job kill policy");
+        const auto image=fixtureImage();const std::wstring op(operation,operation+std::strlen(operation));
+        std::wstring command=L"\""+image+L"\" --startup-owner-lock-child \""+ownerState->root.wstring()+L"\" "+ownerSuiteToken+L" "+op;
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;PROCESS_INFORMATION created{};
+        ownerNeed(::CreateProcessW(image.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_SUSPENDED|CREATE_NO_WINDOW,nullptr,ownerState->root.c_str(),&startup,&created)!=FALSE,"exact hidden owned peer");
+        process.value=created.hProcess;thread.value=created.hThread;
+        if(!::AssignProcessToJobObject(job.value,process.value))throw std::runtime_error("peer Job assignment refused");
+        assigned=true;ownerNeed(::ResumeThread(thread.value)!=static_cast<DWORD>(-1),"peer resume after Job assignment");
+      }catch(...){const auto error=std::current_exception();collectOwned(false);std::rethrow_exception(error);}
+    }
+    ~OwnerChild(){if(process.value&&(!joined||!zero))collectOwned(false);}
+    void collectOwned(bool requireNatural){
+        if(!process.value)return;
+        const auto deadline=GetTickCount64()+1800;
+        const auto remaining=[&]()->DWORD{const auto now=GetTickCount64();return now<deadline?static_cast<DWORD>(deadline-now):0;};
+        if(release.value)::SetEvent(release.value);
+        if(!joined)joined=::WaitForSingleObject(process.value,1200)==WAIT_OBJECT_0;
+        if(!joined){
+            forced=true;
+            if(assigned&&job.value)::TerminateJobObject(job.value,124);
+            else ::TerminateProcess(process.value,125); // Exact suspended child owned by this constructor.
+            joined=::WaitForSingleObject(process.value,remaining())==WAIT_OBJECT_0;
+        }
+        if(joined&&!::GetExitCodeProcess(process.value,&exitCode))joined=false;
+        if(job.value){
+            do{
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION account{};
+                if(!::QueryInformationJobObject(job.value,JobObjectBasicAccountingInformation,&account,sizeof(account),nullptr))break;
+                zero=account.ActiveProcesses==0;
+                if(zero||!remaining())break;
+                if(joined&&!forced&&remaining()<=250){forced=true;::TerminateJobObject(job.value,124);}
+                ::Sleep(2);
+            }while(remaining());
+        }
+        if(requireNatural)ownerNeed(assigned&&joined&&zero&&!forced&&exitCode==0,"natural peer exit and assigned Job zero before close");
+    }
+    void finish(){collectOwned(true);}
+};
+static void ownerInitPaths(const ownerfs::path& root,const json& row){
+    ownerState=std::make_unique<OwnerState>(root,row);ownerPath(root);ownerfs::create_directory(ownerState->profile);
+    const auto pc=root/L"PowerControl";ownerfs::create_directory(pc);POWER_CONTROL_DIR=pc.wstring();
+    YM_SETTINGS_FILE=(pc/L"yeman-settings.json").wstring();YM_SETTINGS_BACKUP_FILE=YM_SETTINGS_FILE+L".bak";
+}
+static int ownerChildMain(const ownerfs::path& root,const std::wstring& token,const std::wstring& operation){
+    wchar_t temp[MAX_PATH]{};const auto tempSize=::GetTempPathW(MAX_PATH,temp);
+    ownerNeed(tempSize>0&&tempSize<MAX_PATH&&root.is_absolute()&&ownerBelow(temp,root)&&
+        root.parent_path().filename().wstring().rfind(L"ymcc-steam-startup-owner-",0)==0,"owned temporary peer root");
+    ownerRoot=root.parent_path().wstring();ownerSuiteToken=token;ownerPath(root);
+    const auto authority=json::parse(ownerRaw(root/L"peer-authority.json"));
+    ownerNeed(authority.at("kind")=="ymcc-steam-startup-owner-peer.v1"&&authority.at("token")==std::string(token.begin(),token.end())&&authority.at("image")==ownerfs::path(fixtureImage()).generic_string(),"peer authority tuple");
+    ownerNeed(operation==L"commit-hold"||operation==L"probe-commit","exact owned peer operation");
+    ownerInitPaths(root,authority.at("row"));
+    OwnerHandle ready(::OpenEventW(EVENT_MODIFY_STATE,FALSE,ownerEventName("ready").c_str()));
+    OwnerHandle release(::OpenEventW(SYNCHRONIZE,FALSE,ownerEventName("release").c_str()));
+    ownerNeed(ready.value&&release.value,"owned peer events");
+    if(operation==L"probe-commit"){
+        OwnerHandle mutex(::OpenMutexW(SYNCHRONIZE|MUTEX_MODIFY_STATE,FALSE,(L"Local\\YMCC-SteamStartupOwner-"+token).c_str()));
+        ownerNeed(mutex.value!=nullptr,"peer opens exact isolated mutex");const auto probe=::WaitForSingleObject(mutex.value,0);
+        if(probe==WAIT_OBJECT_0||probe==WAIT_ABANDONED)::ReleaseMutex(mutex.value);
+        ownerWrite(root/L"peer-probe.json",json{{"blocked",probe==WAIT_TIMEOUT}}.dump());::SetEvent(ready.value);
+        {SettingsFileGuard guard;ownerChange("mode");ownerWrite(root/L"peer-committed","yes");}
+    }else{
+        SettingsFileGuard guard;ownerChange(authority.at("row").at("change").get<std::string>());
+        ::SetEvent(ready.value);ownerNeed(::WaitForSingleObject(release.value,1500)==WAIT_OBJECT_0,"peer held lock release");
+    }
+    for(const auto handle:ownerSettingsMutexHandles)::CloseHandle(handle);ownerSettingsMutexHandles.clear();return 0;
+}
+static json ownerCase(const ownerfs::path& suite,const json& row){
+    const auto root=suite/std::to_wstring(row.at("index").get<unsigned>());ownerfs::create_directory(root);ownerInitPaths(root,row);
+    const auto scenario=row.at("scenario").get<std::string>(),change=row.at("change").get<std::string>();
+    const auto mode=row.at("mode").get<std::string>();const bool enabled=row.at("enabled").get<bool>();
+    g_exitRequested=false;g_aiFanMockSession.isolated=false;
+    json document={{"schemaVersion",1},{"input",{{"revision",7},{"startupObservedBoot","owned-boot"},{"outputTarget",{{"persona","elite"}}},{"diagnostics",{{"inputLoggingEnabled",false}}}}},
+        {"extensions",{{"bootModes",{{"schema",1},{"revision",3},{"current",mode},{"boot",mode}}},{"bootModesAppliedBoot","owned-boot"}}}};
+    if(scenario=="preparation"||scenario=="preparation-lock-wait"){
+        auto& modeDocument=document["extensions"]["bootModes"];modeDocument["bootEnabled"]=true;
+        modeDocument["preparation"]={{"schema",1},{"mode",mode},{"enabled",true},{"revision",3},{"observedBoot","owned-boot"},{"status","preparing"},{"steps",{{"steam",{{"state","waiting"}}}}}};
+    }
+    if(change=="claim"||change=="claim-rebased"||change=="claim-current")document["extensions"]["bootModesClaimWriteId"]="original-steam-claim";
+    if(scenario=="route"&&change.rfind("disabled-",0)==0)document["extensions"]["bootModes"]["bootEnabled"]=false;
+    if(scenario=="route"&&change.rfind("unconfigured-",0)==0)document["extensions"]["bootModes"].erase("boot");
+    ownerWrite(YM_SETTINGS_FILE,document.dump());ownerWrite(YM_SETTINGS_BACKUP_FILE,document.dump());
+    const auto early=ownerState->profile/L".earlystart";const std::string custom="owned unrelated advanced command\r\n";ownerWrite(early,custom);
+    ownerWrite(root/L"peer-authority.json",json{{"kind","ymcc-steam-startup-owner-peer.v1"},{"token",std::string(ownerSuiteToken.begin(),ownerSuiteToken.end())},{"image",ownerfs::path(fixtureImage()).generic_string()},{"row",row}}.dump());
+    json args={{"enabled",enabled},{"repairCommand",true},{"origin","boot-mode"},{"bootContext",{{"input",document.at("input")},{"extensions",document.at("extensions")}}}};
+    if(scenario=="stale-dispatch")ownerChange(change);
+    if((scenario=="current"||scenario=="preparation")&&change!="none")ownerChange(change);
+    if(scenario=="ordinary"){args.erase("bootContext");if(change=="absent-origin")args.erase("origin");else args["origin"]=change;}
+    if(scenario=="custom-refused")args["repairCommand"]=false;
+    if(scenario=="invalid"){
+        if(change=="origin-invalid")args["origin"]="bad";
+        if(change=="origin-type")args["origin"]=true;
+        if(change=="context-without-origin")args.erase("origin");
+        if(change=="ordinary-context")args["origin"]="ordinary";
+        if(change=="boot-origin-without-context")args.erase("bootContext");
+        if(change=="context-null")args["bootContext"]=nullptr;
+        if(change=="context-extra-key")args["bootContext"]["unknown"]=true;
+        if(change=="context-input-revision")args["bootContext"]["input"]["revision"]=-1;
+        if(change=="context-mode-schema")args["bootContext"]["extensions"]["bootModes"]["schema"]=2;
+        if(change=="enabled-type")args["enabled"]="true";
+        if(change=="repair-type")args["repairCommand"]="true";
+        if(change=="unknown-argument")args["unknown"]=true;
+        if(change=="isolated")g_aiFanMockSession.isolated=true;
+    }
+    if(scenario=="exit"&&change=="before")g_exitRequested=true;
+    const auto backupBefore=ownerRaw(YM_SETTINGS_BACKUP_FILE);OwnerOutcome outcome;
+    std::unique_ptr<OwnerChild> peer;std::thread local,handler;std::atomic<bool> localBlocked{false},localDone{false};std::string localError,error;
+    try{
+        const bool async=scenario=="lock-wait"||scenario=="preparation-lock-wait"||scenario=="atomic-write"||scenario=="service-late"||(scenario=="exit"&&change=="after-write");
+        if(async){
+            handler=std::thread([&]{outcome=ownerInvoke(args);});
+            ownerNeed(::WaitForSingleObject(ownerState->entered.value,1800)==WAIT_OBJECT_0,"selected production phase reached");
+            if(scenario=="lock-wait"||scenario=="preparation-lock-wait"){
+                peer=std::make_unique<OwnerChild>("commit-hold");
+                ownerNeed(::WaitForSingleObject(peer->ready.value,1500)==WAIT_OBJECT_0,"cross-process new settings committed while holding mutex");
+                ::SetEvent(ownerState->release.value);
+                ownerNeed(::WaitForSingleObject(ownerState->probed.value,1500)==WAIT_OBJECT_0,"actual final lock contention observed");
+                peer->finish();
+            }else if(scenario=="atomic-write"){
+                if(change=="local"){
+                    local=std::thread([&]{try{
+                        const bool acquired=g_settingsFileMtx.try_lock();if(acquired)g_settingsFileMtx.unlock();localBlocked=!acquired;
+                        ::SetEvent(ownerState->probed.value);
+                        {SettingsFileGuard guard;ownerChange("mode");ownerWrite(root/L"peer-committed","yes");}localDone=true;
+                    }catch(const std::exception& ex){localError=ex.what();::SetEvent(ownerState->probed.value);}});
+                    ownerNeed(::WaitForSingleObject(ownerState->probed.value,1000)==WAIT_OBJECT_0&&localBlocked.load(),"real nonrecursive local mutex blocks settings commit");
+                }else{
+                    peer=std::make_unique<OwnerChild>("probe-commit");
+                    ownerNeed(::WaitForSingleObject(peer->ready.value,1500)==WAIT_OBJECT_0,"cross-process settings writer probed");
+                    ownerNeed(json::parse(ownerRaw(root/L"peer-probe.json")).at("blocked")==true,"actual named mutex blocks settings commit");
+                }
+                ownerNeed(!ownerfs::exists(root/L"peer-committed"),"new settings cannot commit during actual Startup mutation");
+                ::SetEvent(ownerState->release.value);
+            }else if(scenario=="service-late"){
+                if(change=="exit")g_exitRequested=true;
+                else {SettingsFileGuard guard;ownerChange("mode");}
+                ::SetEvent(ownerState->release.value);
+            }else {g_exitRequested=true;::SetEvent(ownerState->release.value);}
+            handler.join();if(local.joinable())local.join();if(peer&&!peer->joined)peer->finish();
+            ownerNeed(localError.empty(),"local settings writer failed");if(scenario=="atomic-write"&&change=="local")ownerNeed(localDone.load(),"local writer completion");
+        }else outcome=ownerInvoke(args);
+        const bool accepted=scenario=="current"||scenario=="ordinary"||scenario=="atomic-write"||
+            (scenario=="route"&&(change=="disabled-current"||change=="unconfigured-current"))||
+            ((scenario=="preparation"||scenario=="preparation-lock-wait")&&(change=="mode"||change=="unrelated"||change=="ack"||change=="claim-current"));
+        const bool routeOrClaim=scenario=="route"||change=="claim"||change=="claim-rebased"||change=="claim-current";
+        if(scenario!="atomic-write")ownerNeed(outcome.ok==accepted,"actual IPC acceptance differs from selected boundary");
+        if(routeOrClaim&&!accepted)ownerNeed(outcome.error=="BOOT_STEAM_STARTUP_REQUEST_EXPIRED"&&ownerState->logs==0&&ownerState->serviceReads+ownerState->serviceRepairs==0,"rejected route or claim never reaches service");
+        if(scenario=="ordinary"||scenario=="invalid"||(scenario=="exit"&&change=="before"))ownerNeed(ownerState->reads==0&&ownerState->fallbackReads==0,"ordinary/invalid request must not read settings");
+        ownerNeed(ownerState->fallbackReads==0,"boot write must never read fallback backup/defaults");
+        ownerNeed(ownerRaw(YM_SETTINGS_BACKUP_FILE)==backupBefore,"handler preserved settings backup bytes");
+        ownerNeed(ownerDefaultProfileCalls==0,"default user profile must never be queried");
+        const bool fileAccepted=accepted||scenario=="service-late"||(scenario=="exit"&&change=="after-write");
+        unsigned backups=0;for(const auto& entry:ownerfs::directory_iterator(ownerState->profile)){
+            const auto name=entry.path().filename().wstring();
+            if(name.rfind(L".earlystart.ymcc-before-",0)==0){++backups;ownerNeed(ownerRaw(entry.path())==custom,"actual Startup backup preserves exact custom bytes");}
+            ownerNeed(name.rfind(L".earlystart.ymcc-",0)!=0||name.rfind(L".earlystart.ymcc-before-",0)==0,"no temporary Startup file leak");
+        }
+        if(fileAccepted){
+            ownerNeed(backups==1,"one original custom command backup");
+            // Compare using the actual Startup command, without querying defaults.
+            const ymcc::steamlaunch::Startup inspect(POWER_CONTROL_DIR,fixtureImage(),fixtureProfile());
+            if(enabled){std::wstring value;ownerNeed(inspect.read(value)&&value==inspect.command+L"\r\n","exact original Startup command");}
+            else ownerNeed(!ownerfs::exists(early),"disabled startup removes only owned earlystart");
+        }else ownerNeed(ownerRaw(early)==custom&&backups==0&&ownerState->mutations==0,"rejected request preserved file and backups");
+        if(scenario=="current"||scenario=="ordinary"||((scenario=="preparation"||scenario=="preparation-lock-wait")&&accepted))ownerNeed(ownerState->logs==1&&ownerState->serviceReads+ownerState->serviceRepairs==1,"current request has one memory service completion/log");
+        if(scenario=="stale-dispatch"||scenario=="lock-wait"||scenario=="invalid"||scenario=="custom-refused"||scenario=="exit")
+            ownerNeed(ownerState->logs==0&&ownerState->serviceReads+ownerState->serviceRepairs==0,"rejected/exit request has no late service/log");
+        if(scenario=="service-late")ownerNeed(!outcome.ok&&ownerState->logs==0&&ownerState->serviceReads+ownerState->serviceRepairs==1,"late service completion cannot publish old success");
+        if(scenario=="lock-wait"||scenario=="preparation-lock-wait")ownerNeed(ownerState->contended.load(),"actual named mutex contention evidence");
+    }catch(const std::exception& ex){error=ex.what();::SetEvent(ownerState->release.value);if(peer)::SetEvent(peer->release.value);if(handler.joinable())handler.join();if(local.joinable())local.join();if(peer&&!peer->joined){try{peer->finish();}catch(const std::exception& finish){error+=";peer cleanup:"+std::string(finish.what());}}}
+    g_exitRequested=false;g_aiFanMockSession.isolated=false;
+    return {{"selection",row},{"status",error.empty()?"PASS":"FAIL"},{"error",error},{"handlerOk",outcome.ok},{"handlerError",outcome.error},
+        {"settingsReads",ownerState->reads.load()},{"fallbackReads",ownerState->fallbackReads.load()},{"startupMutationPorts",ownerState->mutations.load()},
+        {"serviceReads",ownerState->serviceReads.load()},{"serviceRepairs",ownerState->serviceRepairs.load()},{"logs",ownerState->logs.load()},
+        {"defaultProfileQueries",ownerDefaultProfileCalls},{"crossProcess",peer!=nullptr},{"peerAssigned",peer?peer->assigned:false},
+        {"peerNaturalExit",peer?peer->joined&&!peer->forced&&peer->exitCode==0:false},{"peerJoined",peer?peer->joined:false},
+        {"peerExitCode",peer?json(peer->exitCode):json(nullptr)},{"peerJobZeroBeforeClose",peer?peer->zero:false},{"peerForced",peer?peer->forced:false},
+        {"runtimeRoot",root.generic_string()},{"realSteamActions",0},{"installedSettingsWrites",0}};
+}
+int wmain(int argc,wchar_t** argv){
+    try{
+        if(argc==5&&std::wstring(argv[1])==L"--startup-owner-lock-child"){
+            const auto code=ownerChildMain(argv[2],argv[3],argv[4]);return code;
+        }
+        if((argc!=3&&argc!=5)||std::wstring(argv[1])!=L"--startup-owner-only")return 2;
+        wchar_t temp[MAX_PATH]{};const auto tempSize=::GetTempPathW(MAX_PATH,temp);ownerNeed(tempSize>0&&tempSize<MAX_PATH,"temporary root");
+        const ownerfs::path root=ownerfs::absolute(argv[2]).lexically_normal();
+        ownerNeed(ownerBelow(temp,root)&&root.filename().wstring().rfind(L"ymcc-steam-startup-owner-",0)==0&&
+            ownerLower(root.wstring())!=ownerLower(ownerfs::path(temp).wstring())&&!ownerfs::exists(root),"fresh owned temporary run root required");
+        ownerNeed(!ownerBelow(root,ownerfs::path(root.wstring()+L"-sibling"))&&!ownerBelow(root,root.parent_path()),"owned path sibling and parent remain rejected");
+        const auto allSelection=startupOwnerSelection();auto selection=allSelection;
+        if(argc==5){
+            const auto requested=std::wstring(argv[4]);
+            ownerNeed(std::wstring(argv[3])==L"--case-index"&&!requested.empty()&&requested.size()<=9&&
+                requested.find_first_not_of(L"0123456789")==std::wstring::npos,"exact positive case index required");
+            const auto index=std::stoul(requested);selection=json::array();
+            for(const auto& row:allSelection)if(row.at("index").get<unsigned>()==index)selection.push_back(row);
+            ownerNeed(selection.size()==1,"unknown or empty startup owner selection");
+        }
+        ownerRoot=root.wstring();ownerNeed(ownerfs::create_directory(root),"exclusive owned run directory");ownerPath(root);
+        ownerSuiteToken=std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+        registerStartupOwnerHandler();json results=json::array();bool okay=true;
+        for(const auto& row:selection){auto result=ownerCase(root,row);okay=result.at("status")=="PASS";results.push_back(std::move(result));if(!okay)break;}
+        for(const auto handle:ownerSettingsMutexHandles)::CloseHandle(handle);ownerSettingsMutexHandles.clear();
+        const json report={{"suite","Steam native launch / explicit startup owner only"},{"status",okay?"PASS":"FAIL"},
+            {"selected",selection},{"results",results},{"executed",results.size()},{"availableCases",allSelection.size()},
+            {"wholeOwnerSuite",argc==3},{"pathSiblingAndParentRejected",true},{"defaultCasesExecuted",0},{"realSteamActions",0},{"installedSettingsWrites",0},{"bootIdentityQueries",0}};
+        ownerWrite(root/L"result.json",report.dump(2));std::cout<<report.dump(2)<<std::endl;return okay?0:23;
+    }catch(const std::exception& error){std::cerr<<"FAIL startup-owner-only "<<error.what()<<std::endl;return 23;}
+}
+#else
+#error Explicit YMCC_STEAM_STARTUP_OWNER_SOURCE preparation required
+#endif

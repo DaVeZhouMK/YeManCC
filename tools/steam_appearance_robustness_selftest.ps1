@@ -1,17 +1,21 @@
-﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\robust', [switch]$Observe)
+﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\robust', [switch]$Observe, [switch]$BootTransactions, [string]$BootModeCases, [ValidateSet('All','Remaining')][string]$BootTransactionSelection='All')
 $ErrorActionPreference='Stop'
 $source=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\steam-appearance.ps1'
 # Offline fixtures must not query live Steam/CSS ownership.
 function Get-Process {param($Name,$Id) @()}
 function Get-NetTCPConnection {param($State,$LocalPort) @()}
 . $source -Action Library
+function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $script:PresetStateBase=Join-Path $Out 'states';$script:FixtureMode='offline'
+# Explicit empty receipt for the existing shared native process channel in this offline fixture.
+function Update-AppearanceProcessInventory {$script:AppearanceProcessReceipt=[pscustomobject]@{rows=@();steamPid=[uint32]0;steamBirth='0'};return $script:AppearanceProcessReceipt}
 function Get-BackendProcesses {@()}
 function Test-BackendOwner {$false}
-function Invoke-LoaderRpc([string]$Method,$Arguments=@{}) {
+function Invoke-LoaderRpc([string]$Method,$Arguments=@{},[ref]$WriteAttempted) {
  if($Method -eq 'get_themes'){return @($script:ThemeNames|ForEach-Object {[pscustomobject]@{name=$_;enabled=($script:FixtureMode -ne 'ignore')}})}
  if($Method -eq 'set_theme_state'){
+   if($WriteAttempted){$WriteAttempted.Value=$true}
    if($script:FixtureMode -eq 'cascade-fail'){
      $p=Join-Path $script:ThemeRoot 'Mini Carousel\config_USER.json';$c=[IO.File]::ReadAllText($p)|ConvertFrom-Json;$c.active=$false;Write-ConfigAtomic $p ($c|ConvertTo-Json -Depth 64 -Compress)
      throw 'fixture cascade failure'
@@ -25,6 +29,11 @@ function Check([bool]$Passed,[string]$Name){$checks.Add([pscustomobject]@{ok=$Pa
 function Rejected([scriptblock]$Work){try{& $Work|Out-Null;return $false}catch{return $true}}
 function Profile([switch]$Bundle){$script:FixtureMode='offline';$script:ThemeRoot=Join-Path $Out ('profile-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $script:ThemeRoot -Force|Out-Null;if($Bundle){foreach($name in $script:ThemeNames){Copy-Item -LiteralPath (Join-Path $script:PackRoot ('themes\'+$name)) -Destination $script:ThemeRoot -Recurse}}}
 function Foreign([string]$Folder,[string]$Name){$d=Join-Path $script:ThemeRoot $Folder;New-Item -ItemType Directory -Path $d -Force|Out-Null;[IO.File]::WriteAllText((Join-Path $d 'theme.json'),(@{name=$Name;manifest_version=1;inject=@{}}|ConvertTo-Json -Compress));[IO.File]::WriteAllText((Join-Path $d 'config_USER.json'),'{"active":true,"Tone":"keep-me"}');return $d}
+if($BootTransactions){
+ if(!$BootModeCases){throw 'BootTransactions requires exact resolved mode cases'}
+ . (Join-Path $PSScriptRoot 'fixtures\appearance_boot_transactions.ps1')
+ return
+}
 # A corrupt ownership file must not silently begin a new takeover.
 Profile;Invoke-PresetPrepare|Out-Null;$owner=Join-Path (Get-PresetStateDir) 'owner.json';[IO.File]::WriteAllText($owner,'{broken');$round=Join-Path $script:ThemeRoot 'Round\config_USER.json';$before=Get-ConfigHash $round
 $blocked=Rejected {Invoke-PresetPrepare};Check ($blocked -and (Get-ConfigHash $round) -eq $before -and [IO.File]::ReadAllText($owner) -eq '{broken') 'Corrupt ownership is rejected without replacing the original restore pointer'

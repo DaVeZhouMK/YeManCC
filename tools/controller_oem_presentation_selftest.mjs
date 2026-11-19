@@ -17,11 +17,12 @@ function freeze(value){if(value&&typeof value==='object'){Object.freeze(value);f
 const numberedRearSlots={
  kRogKeys:{m1:4,m2:3},kRogXbox2025Keys:{m1:4,m2:3},
  kZotacKeys:{m1:3,m2:4},kMsiClawKeys:{m1:4,m2:3},kMsiClawG3EKeys:{m1:4,m2:3},
+ kAyaneoNext2Keys:{m1:1,l4:3,m2:2,r4:4},
 };
 let catalogs=0,renamed=0;
 for(const match of native.matchAll(/static const OemKeyDef (\w+)\[\] = \{([\s\S]*?)\n\};/g)){
  const keys=[...match[2].matchAll(/\{"([^\"]+)", "([^\"]+)", (\d+), OemKeyForm::\w+, (true|false)\}/g)].map(m=>({keyId:m[1],label:m[2],backIndex:Number(m[3])||null,triggerCapability:m[4]==='true'?'click-only':'full'}));
- const catalog=freeze({familyId:match[1],supported:true,keys}),before=JSON.stringify(catalog);catalogs++;
+ const catalog=freeze({familyId:match[1],deviceClass:match[1]==='kAyaneoNext2Keys'?'HandheldCompanion.Devices.AYANEONEXT2':undefined,supported:true,keys}),before=JSON.stringify(catalog);catalogs++;
  for(const persona of ['steamdeck','ps5','xbox']){
   const displayed=controllerOemDisplayCatalog(persona,catalog);
   check(displayed.keys.length===keys.length,match[1]+' '+persona+' key count');

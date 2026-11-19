@@ -31,15 +31,16 @@ function fixture(handler) {
   const calls = [], messages = [], errMsg = ref('');
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
-    module, exports: module.exports, ref, errMsg, Error, String, tdpDiagnosticDeliveryFailures: () => 0,
-    frontendDiagnosticDeliveryFailures: () => 0,
+    module, exports: module.exports, ref, errMsg, Error, String, tdpDiagnosticDeliveryFailures: () => 0, tdpDiagnosticDeliveryEvidence: () => ({schema:1,inFlightRequests:0}),
+    frontendDiagnosticDeliveryFailures: () => 0, frontendDiagnosticDeliveryEvidence: () => ({schema:1,failureCount:0,channels:[]}),
+    getSharedPowerLifecycleDiagnostics: () => ({}),
     invoke: async (...args) => { calls.push(args); return handler(...args); },
     dialog: { message: async (...args) => { messages.push(args); throw new Error('Unexpected popup'); } },
   }, { filename: sourcePath });
   return { ...module.exports, calls, messages, errMsg };
 }
 const successfulArchive = { ok: true, path: 'X:\\fixture\\YeManCC-logs.zip', count: 7 };
-const exportText = `已导出 7 个日志文件到桌面：${successfulArchive.path}`;
+const exportText = `日志 ZIP 已导出到桌面（本次收集 7 个日志文件）：${successfulArchive.path}`;
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 try {
@@ -58,6 +59,7 @@ try {
     assert(card.includes('<p v-if="detailLogStatus" class="muted body fan-log-status" role="status">{{ detailLogStatus }}</p>'));
     assert(card.lastIndexOf('</button>') < card.indexOf('<p '));
     assert(card.includes('@click="exportAllLogs">导出日志</button>'));
+    assert(card.includes('title="包含 Windows 电源报告查询"'));
     assert(!source.includes('默认只记录错误与关键事件（开关/连接/睡眠/故障）'));
     assert(!source.includes('detailLogExporting'));
     assert(!section.includes('dialog.message') && !section.includes('showDetailLogMessage'));
@@ -128,10 +130,16 @@ try {
       assert.equal(f.messages.length, 0);
     }
   });
-  await check('export-success-restores-original-inline-count-and-destination', async () => {
+  await check('ordinary-export-reports-one-zip-destination-and-input-log-count', async () => {
     const f = fixture(async () => successfulArchive);
     await f.exportAllLogs();
     assert.equal(f.calls[0][0], 'logs.exportAll');
+    assert.deepEqual(Object.keys(f.calls[0][1]).sort(), [
+      'frontendDiagnosticDeliveryEvidence', 'frontendDiagnosticDeliveryFailures', 'sharedPowerLifecycleDiagnostics',
+      'tdpDiagnosticDeliveryEvidence', 'tdpDiagnosticDeliveryFailures',
+    ]);
+    assert.deepEqual(f.calls[0][1].tdpDiagnosticDeliveryEvidence,{schema:1,inFlightRequests:0});
+    assert.deepEqual(f.calls[0][1].frontendDiagnosticDeliveryEvidence,{schema:1,failureCount:0,channels:[]});
     assert.equal(f.calls[0][2].timeoutMs, 900000, '15-minute UI wait covers two five-minute attempts and snapshot work');
     assert.equal(f.detailLogStatus.value, exportText);
     assert.equal(f.detailLogBusy.value, false);
@@ -159,18 +167,23 @@ try {
   await check('export-failure-is-inline-and-clears-busy-state', async () => {
     const f = fixture(async () => ({ ok: false, reason: 'archive-failed-after-2-attempts' }));
     await f.exportAllLogs();
-    assert.equal(f.detailLogStatus.value, '导出失败：archive-failed-after-2-attempts');
+    assert.equal(f.detailLogStatus.value, '导出未完成：日志打包失败');
     assert.equal(f.detailLogBusy.value, false);
     assert.equal(f.messages.length, 0);
   });
   await check('export-failure-preserves-native-stage-code-attempts-and-cleanup-warning', async () => {
-    const f = fixture(async () => ({ ok: false, reason: 'archive-failed-after-2-attempts', lastError: 'tar-exit-nonzero', win32Error: 5, attempts: 2, cleanupOk: false }));
-    await f.exportAllLogs();
-    assert.equal(f.detailLogStatus.value, '导出失败：archive-failed-after-2-attempts；失败阶段：tar-exit-nonzero；Win32 代码：5；尝试次数：2；临时文件清理未完成');
-    assert.equal(f.detailLogBusy.value, false);
-    assert.equal(f.calls.length, 1, 'Showing native retry count must not retry the export');
-    assert.equal(f.calls[0][0], 'logs.exportAll');
-    assert.equal(f.messages.length, 0);
+    for (const [reason, lastError, win32Error, attempts] of [
+      ['archive-failed', 'promote-failed', 183, 1],
+      ['archive-failed-after-2-attempts', 'tar-exit-nonzero', 5, 2],
+    ]) {
+      const f = fixture(async () => ({ ok: false, reason, lastError, win32Error, attempts, cleanupOk: false }));
+      await f.exportAllLogs();
+      assert.equal(f.detailLogStatus.value, `导出未完成：日志打包失败；失败阶段：${lastError}；Win32 代码：${win32Error}；尝试次数：${attempts}；临时文件清理未完成`);
+      assert.equal(f.detailLogBusy.value, false);
+      assert.equal(f.calls.length, 1, 'Showing native retry count must not retry the export');
+      assert.equal(f.calls[0][0], 'logs.exportAll');
+      assert.equal(f.messages.length, 0);
+    }
   });
   await check('export-failure-fields-are-independent-and-zero-code-is-not-dropped', async () => {
     for (const [fields, detail] of [
@@ -181,7 +194,7 @@ try {
     ]) {
       const f = fixture(async () => ({ ok: false, ...fields }));
       await f.exportAllLogs();
-      assert(f.detailLogStatus.value.startsWith('导出失败：'));
+      assert(f.detailLogStatus.value.startsWith('导出未完成：'));
       assert(f.detailLogStatus.value.includes(detail), detail);
       assert(!f.detailLogStatus.value.includes('undefined'));
       assert.equal(f.detailLogBusy.value, false);
@@ -219,7 +232,7 @@ try {
     for (const response of [{ ok: true }, { path: successfulArchive.path }]) {
       const f = fixture(async () => response);
       await f.exportAllLogs();
-      assert(f.detailLogStatus.value.startsWith('导出失败：'));
+      assert(f.detailLogStatus.value.startsWith('导出结果未确认：'));
       assert.equal(f.messages.length, 0);
     }
   });
@@ -271,7 +284,7 @@ try {
   await check('export-transport-error-is-inline-without-popup', async () => {
     const f = fixture(async () => { throw 'fixture-transport-failed'; });
     await f.exportAllLogs();
-    assert.equal(f.detailLogStatus.value, '导出失败：fixture-transport-failed');
+    assert.equal(f.detailLogStatus.value, '导出结果未确认：fixture-transport-failed');
     assert.equal(f.detailLogBusy.value, false);
     assert.equal(f.messages.length, 0);
   });

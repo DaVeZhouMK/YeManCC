@@ -1,0 +1,561 @@
+// Private original success-chain successor. Identity/SDK/engine I/O are explicit
+// frozen MEMORY LEAVES. Coordinator, clocks, event waits and storage are real.
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <bcrypt.h>
+#include <algorithm>
+#include <array>
+#include <span>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+#include "resource_diag.h"
+#include "owned_resource_accounting.h"
+#include "fixture_json.hpp"
+#include "recovery_startup_handoff_unsupported.h"
+#include "steam_original_recovery_wake_watch.h"
+#include "steam_original_recovery_file_hash.h"
+#include "steam_original_recovery_storage.h"
+#include "steam_original_recovery_config.h"
+#include "steam_command_availability.h"
+using Json=nlohmann::json;using J=Json;using U64=std::uint64_t;
+namespace fp=std::filesystem;
+using Emit=std::function<void(const J&)>;using Current=std::function<bool()>;using WakeSignal=std::uintptr_t;
+// These types model the memory-port ABI. No real Native ReadScope, SourceOwner,
+// discovery object, SDK module or Steam/game process is constructed or opened.
+namespace ymcc::sleeppower {
+enum class MemoryPower {Revoked,Admitted};
+bool powerAdmitted(MemoryPower p)noexcept{return p==MemoryPower::Admitted;}
+}
+namespace ymcc::steamnative {
+class ReadScope final {
+ Current frozenCurrent_;HANDLE power_,identity_;
+public:
+ ReadScope(Current c,HANDLE p,HANDLE i):frozenCurrent_(std::move(c)),power_(p),identity_(i){}
+ bool current()const noexcept{try{return frozenCurrent_&&frozenCurrent_()&&power_&&identity_&&power_!=identity_&&WaitForSingleObject(power_,0)==WAIT_TIMEOUT&&WaitForSingleObject(identity_,0)==WAIT_TIMEOUT;}catch(...){return false;}}
+ sleeppower::MemoryPower power()const noexcept{return current()?sleeppower::MemoryPower::Admitted:sleeppower::MemoryPower::Revoked;}
+ HANDLE powerCancellationEvent()const noexcept{return power_;}
+ HANDLE identityCancellationEvent()const noexcept{return identity_;}
+};
+}
+namespace ymcc::steamgameroles {enum class State{ExactSelected,VerifiedGroupRoles};}
+namespace ymcc::steamgamefacts {
+struct GroupNativeRoleBinding {Current frozenCurrent;bool current()const{return frozenCurrent&&frozenCurrent();}};
+class RequestCancellation final {
+ HANDLE borrowed_=nullptr;Current frozenCurrent_;
+public:
+ RequestCancellation(HANDLE h,Current c):borrowed_(h),frozenCurrent_(std::move(c)){}
+ HANDLE event()const noexcept{return borrowed_;}
+ bool current()const noexcept{try{return borrowed_&&frozenCurrent_&&frozenCurrent_()&&WaitForSingleObject(borrowed_,0)==WAIT_TIMEOUT;}catch(...){return false;}}
+ void cancel()noexcept{if(borrowed_)(void)SetEvent(borrowed_);}
+};
+// Group objects are typed, but openScope and runTrial explicitly refuse their
+// use in this strict single-tuple fixture. No group authority is synthesized.
+class ProcessGroupLease final {
+public:
+ struct Member{DWORD pid=0;};struct Graph{unsigned count=0;std::array<Member,2> members{};};
+ struct Inspection{steamgameroles::State state=steamgameroles::State::ExactSelected;unsigned reason=0;};
+private:
+ Graph graph_;Current frozenCurrent_;
+public:
+ ProcessGroupLease(Graph g,Current c):graph_(g),frozenCurrent_(std::move(c)){}
+ // The strict memory fixture never admits a group; this branch lends no handle.
+ std::span<const HANDLE> additionalProcessLiveness()const noexcept{return {};}
+ const Graph& graph()const noexcept{return graph_;}
+ bool processCurrent()const noexcept{try{return graph_.count>0&&graph_.count<=2&&frozenCurrent_&&frozenCurrent_();}catch(...){return false;}}
+ bool originalProcessesCurrent()const noexcept{return processCurrent();}
+ std::optional<Inspection> inspectNativeRoles(DWORD primary,DWORD foreground)const{
+  if(!processCurrent())return {};
+  bool p=false,f=false;
+  for(unsigned i=0;i<graph_.count;++i){p=p||graph_.members[i].pid==primary;f=f||graph_.members[i].pid==foreground;}
+  if(!p||!f)return {};
+  return Inspection{graph_.count==1?steamgameroles::State::ExactSelected:steamgameroles::State::VerifiedGroupRoles,0};
+ }
+};
+}
+namespace rc {
+inline constexpr const char* kClientSha256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+enum class ProfileId{Legacy1791918634};inline unsigned profileVersion(ProfileId){return 1;}
+namespace detail{struct Selection{U64 engine=0,user=0;};struct Header{U64 records=0;};struct Target{U64 index=0;DWORD primary=0,foreground=0;};}
+}
+namespace app{inline constexpr const char* kUiSha256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";enum class ProfileId{Legacy1791918634};inline unsigned profileVersion(ProfileId){return 1;}}
+namespace compat{struct Qualification{};}
+namespace tr{bool profileForHashes(const std::string& a,const std::string& b){return a==rc::kClientSha256&&b==app::kUiSha256;}}
+@@ROUTES@@
+struct MemoryIdentity{HANDLE event=nullptr;DWORD pid=0,session=0;U64 born=0;std::wstring path;};
+struct Fixture{
+ std::array<MemoryIdentity,4> bindings{};J frozenEvent;
+ U64 account=76561198000000001ULL;DWORD flags=8196,postFlags=8196;
+ bool identityAllowed=false,failPreflight=false;
+ unsigned snapshots=0,queries=0,source=0,drivers=0,queryEnds=0,queryFinishes=0,waits=0;
+ std::vector<std::string> order;J request,lastReceipt;fp::path data;
+} fixture;
+std::atomic<bool> gActive{false};Emit gEmit;Current gCurrent,gObservationCurrent;
+WakeSignal gWakeSignal=0,gCancelSignal=0,gIdentityCancelSignal=0;
+std::shared_ptr<ymcc::steamnative::ReadScope> gPublicationScope;
+std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> gGroupRequestCancellation;
+std::wstring gTrialDirectory;bool gCleanupMode=false;std::function<bool()> gOriginalSteam,gSourceContextInit;
+@@BASE@@
+struct DiagnosticFailure:std::runtime_error{J detail;DiagnosticFailure(const char* reason,J value):runtime_error(reason),detail(std::move(value)){}};
+template<class F>void nativeFailureBoundary(F&& fn,const char*){fn();}
+void publish(const J& row){if(gEmit)gEmit(row);}
+bool current(){try{return gCurrent&&gCurrent();}catch(...){return false;}}
+bool observationCurrent(){try{return gObservationCurrent?gObservationCurrent():current();}catch(...){return false;}}
+void requireCurrent(){need(current(),"native-current-guard-revoked");}
+@@PUBLICATION@@
+@@CLOCKS@@
+struct WorkerStamp{};struct WorkerCost{U64 cycles=0,clockFailures=0;void add(const WorkerStamp&,const WorkerStamp&){}};
+WorkerStamp workerStamp(){return {};}
+void noteWorkerPhase(J&,const char*,const WorkerStamp&){}
+void noteSnapshotCost(J&,const char*,const J&){}
+struct ExecutionProbeScope{ExecutionProbeScope(J&,const char*){}};
+namespace rw{
+struct Module{U64 base=0,size=0;std::wstring path;};
+bool exactProcess(HANDLE h,DWORD pid,U64 born,const std::wstring& path,DWORD session){
+ if(!fixture.identityAllowed||!h||WaitForSingleObject(h,0)!=WAIT_TIMEOUT)return false;
+ return std::any_of(fixture.bindings.begin(),fixture.bindings.end(),[&](const auto& b){return h==b.event&&pid==b.pid&&born==b.born&&path==b.path&&session==b.session;});
+}
+}
+struct BorrowedFixtureHandle{HANDLE h=nullptr;};
+struct BoundLive{DWORD pid=0,session=0;U64 born=0;std::wstring path;BorrowedFixtureHandle handle;};
+@@NATIVE_TYPES@@
+@@SNAPSHOT_TYPE@@
+namespace embedded{const unsigned char image[]={0x52,0x36,0x46,0x49,0x58,0x54,0x55,0x52,0x45};std::string sha256;}
+J normalizedIdentity(const J& value){
+ need(value.is_object(),"memory-identity-not-object");
+ const auto found=std::any_of(fixture.bindings.begin(),fixture.bindings.end(),[&](const auto& b){return value.at("pid")==b.pid&&decimal(value.at("birthFileTime"))==b.born&&utf16(value.at("path").get<std::string>())==b.path&&value.at("session")==b.session;});
+ need(found,"memory-identity-outside-frozen-tuple");return value;
+}
+std::pair<U64,DWORD> targetIdentity(const J& game){
+ const auto id=decimal(game.at("gameId"));const auto appid=dword(game.at("appid"));
+ need(fixture.frozenEvent.is_object()&&id==decimal(fixture.frozenEvent.at("target").at("gameId"))&&appid==dword(fixture.frozenEvent.at("target").at("appid")),"memory-target-outside-frozen-tuple");return {id,appid};
+}
+Scope openScope(const J& event,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group={},std::shared_ptr<NativeRoleChoice> choice={}){
+ need(!group&&!choice,"memory-group-port-unsupported");need(fixture.identityAllowed,"memory-identity-revoked");
+ Scope s;const auto id=targetIdentity(event.at("target"));s.gameId=id.first;s.appid=id.second;
+ const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+ for(std::size_t i=0;i<4;++i){
+  const auto& raw=event.at(names[i]);need(raw==fixture.frozenEvent.at(names[i]),"memory-role-not-exact-frozen-tuple");
+  const auto n=normalizedIdentity(raw);s.identities[names[i]]=n;
+  s.roles[i].pid=dword(n.at("pid"));s.roles[i].born=decimal(n.at("birthFileTime"));s.roles[i].path=utf16(n.at("path").get<std::string>());s.roles[i].session=dword(n.at("session"),true);s.roles[i].handle.h=fixture.bindings[i].event;
+ }
+ need(s.owned(),"memory-scope-no-longer-current");return s;
+}
+Snapshot snapshot(Scope& scope,U64 account){
+ requireCurrent();need(scope.owned()&&account==fixture.account,"memory-snapshot-scope-or-account-changed");
+ ++fixture.snapshots;fixture.order.push_back("snapshot:"+std::to_string(fixture.flags));
+ Snapshot s;s.flags=fixture.flags;s.gameId=scope.gameId;s.flagsAddress=0x390000020ULL;
+ s.client.base=0x180000000ULL;s.ui.base=0x190000000ULL;s.selected.engine=0x200000000ULL;s.selected.user=0x210000000ULL;s.records.records=0x220000000ULL;
+ s.target.primary=scope.roles[1].pid;s.target.foreground=scope.roles[1].pid;s.executionProfile=J::object();s.record=J::object();s.compatibility=J::object();return s;
+}
+struct LifetimeMutex{void acquire(DWORD pid,U64 born){need(pid==fixture.bindings[0].pid&&born==fixture.bindings[0].born&&fixture.identityAllowed,"memory-lifetime-tuple-mismatch");}};
+unsigned moduleCapacity(DWORD pid){need(pid==fixture.bindings[0].pid&&fixture.identityAllowed,"memory-module-capacity-tuple-mismatch");return 1;}
+@@REFERENCES@@
+@@SEED@@
+@@LOAD_REFERENCE@@
+@@NATIVE_STATE@@
+std::size_t ledgerCount(){std::size_t n=0;if(fp::exists(fixture.data/L"consumed"))for(const auto& e:fp::directory_iterator(fixture.data/L"consumed"))if(e.is_regular_file())++n;return n;}
+struct QueryActor{
+ bool finished=false;
+ QueryActor(U64 account,const std::wstring& path,RecoveryRoute route=RecoveryRoute::SemiStatic,std::string hash={},bool fixed=false,J* summary=nullptr){
+  requireCurrent();need(account==fixture.account&&route==RecoveryRoute::SemiStatic&&hash==rc::kClientSha256&&!fixed&&summary&&fp::path(path)==fp::path(fixture.bindings[0].path).parent_path()/L"steamclient64.dll","memory-query-exact-inputs");
+  ++fixture.queries;fixture.order.push_back("query");need(ledgerCount()==0,"query-before-durable-commit-must-not-spend");
+ }
+ void waitReady(){requireCurrent();fixture.order.push_back("query-ready");}
+ void finish(){need(!finished,"memory-query-double-finish");finished=true;++fixture.queryFinishes;}
+ ~QueryActor(){++fixture.queryEnds;fixture.order.push_back("query-end");}
+};
+J sourceGetterContext(Scope& scope,const Snapshot& sample,U64 account,QueryActor&,J&){
+ requireCurrent();need(scope.owned()&&sample.flags==4&&account==fixture.account&&ledgerCount()==0,"memory-source-exact-inputs");
+ ++fixture.source;fixture.order.push_back("source");return {{"tid",991u},{"threadBirthFileTime","134371000000000001"}};
+}
+J runTrial(const J& request,QueryActor&,Current beforeMutation={},std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group={},DWORD primary=0,DWORD foreground=0,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> strict={},std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding> binding={}){
+ requireCurrent();need(!group&&!strict&&!binding&&!primary&&!foreground,"memory-driver-group-port-unsupported");
+ need(request.at("account64")==std::to_string(fixture.account)&&request.at("gameId")==fixture.frozenEvent.at("target").at("gameId")&&request.at("appid")==fixture.frozenEvent.at("target").at("appid"),"memory-driver-target-mismatch");
+ for(const auto* role:{"steam","game","ymcc","cef"})need(request.at("processes").at(role)==fixture.frozenEvent.at(role),"memory-driver-role-mismatch");
+ need(request.at("sourceThreadId")==991u&&request.at("sourceThreadBirth")=="134371000000000001"&&ledgerCount()==0,"memory-driver-source-or-preflight-mismatch");
+ fixture.order.push_back("driver-readonly-preflight");
+ if(fixture.failPreflight)return {{"status","failed"},{"reason","loaded-client-ui-compatibility-contract"},{"mutationCommitAccepted",false},{"remoteAllocationAttempted",false}};
+ need(beforeMutation&&beforeMutation(),"memory-driver-durable-commit-refused");
+ need(ledgerCount()==2,"memory-driver-before-durable-commit");++fixture.drivers;fixture.order.push_back("driver");fixture.request=request;fixture.flags=fixture.postFlags;
+ return {{"mutationCommitAccepted",true},{"remoteAllocationAttempted",true},{"entryRestored",true},{"debugRegistersRestored",true},{"debuggerDetached",true},{"disarmConfirmed",true},{"mutationResult",{{"publisherCalls",1},{"publisherReturned",true},{"guardBefore",true},{"guardAfter",true}}}};
+}
+struct WakeProbeReader{
+ Scope& scope;U64 calls=0,bytes=0;explicit WakeProbeReader(Scope& value):scope(value){}
+ bool owned()const{return scope.owned()&&observationCurrent();}
+ DWORD flags(const Snapshot&){need(owned(),"memory-probe-scope-revoked");++calls;bytes+=4;return fixture.flags;}
+};
+DWORD pairedWaitForMultipleObjects(DWORD,const HANDLE*,BOOL,DWORD);
+#define WaitForMultipleObjects pairedWaitForMultipleObjects
+@@WAKE_WAIT@@
+#undef WaitForMultipleObjects
+@@HANDLE@@
+
+#include "resource_diag_json.h"
+#include "owned_resource_accounting_json.h"
+unsigned checks=0;
+void check(bool value,const char* why){++checks;if(!value)throw std::runtime_error(why);}
+enum class WakeCase{Recovered,ReadyHealthy,Expired,PowerCancelled,IdentityCancelled,ProcessExited,InvalidEvent,DriverReadonlyRefusal,Healthy,IdentityMismatch};
+struct EventRow{std::string name;HANDLE handle=nullptr;bool closed=false;DWORD closeError=0;};
+class WakeCaseOwner;
+WakeCaseOwner* activeOwner=nullptr;
+// Preallocated private fixture strong leases. A refused resource stays owned;
+// normal teardown releases its reservation. No heap-forgotten shared_ptr.
+struct AvailabilityDebtSlot {bool reserved=false;HANDLE exact=nullptr;std::shared_ptr<ymcc::steamcommand::AvailabilityEvent> lease;};
+std::array<AvailabilityDebtSlot,10> availabilityDebtSlots{};
+bool availabilityProtectCloseControlRequested=false;
+struct AvailabilityCloseControl {
+ bool requested=false,applied=false,initialRefusal=false,initialDebt=false,lateAttempted=false,lateClosed=false,notQuiescent=false;
+ HANDLE exact=nullptr;BOOL protectResult=FALSE,clearResult=FALSE;
+ DWORD protectError=0,clearError=0,firstCloseError=0,lateCloseError=0;
+ unsigned debtCreationSerial=0;
+};
+class WakeCaseOwner final{
+public:
+ WakeCase mode;std::vector<EventRow> events;
+ std::array<HANDLE,4> roles{};HANDLE power=nullptr,identity=nullptr,hint=nullptr,entered=nullptr,done=nullptr,stopPeer=nullptr;
+ std::shared_ptr<ymcc::steamcommand::AvailabilityEvent> availability;
+ std::unique_ptr<ymcc::steamcommand::Coordinator> coordinator;
+ std::unique_ptr<ymcc::steamcommand::Provider> provider;
+ std::shared_ptr<ymcc::steamcommand::Intent> intent;
+ ymcc::steamcommand::Ticket blocker;
+ std::shared_ptr<ymcc::steamnative::ReadScope> publication;
+ std::unique_ptr<std::thread> peer;
+ std::exception_ptr peerException;std::mutex peerMutex;
+ DWORD handlesBefore=0,lastWait=WAIT_FAILED,lastDelay=0,waitError=0;unsigned commandWaits=0;
+ std::uintptr_t diagnosticPeerHandle=0;
+ bool stopped=false,peerJoined=false;
+ bool directCleanupFault=false,cleanupJsonFault=false,cleanupCompleted=false;
+ unsigned accountingBegin=0;
+ std::size_t debtSlot=availabilityDebtSlots.size();
+ AvailabilityCloseControl closeControl{};
+ std::atomic<bool> registeredWaiting{false},availabilityResetSeen{false},invalidCloseConfirmed{false};
+ J cleanup=J::object();
+ explicit WakeCaseOwner(WakeCase value):mode(value){}
+ HANDLE event(const char* name){
+  HANDLE h=CreateEventW(nullptr,TRUE,FALSE,nullptr);need(h!=nullptr,"owned-event-create");
+  try{events.push_back({name,h,false,0});}
+  catch(...){const auto closed=CloseHandle(h);if(!closed)std::cerr<<"unrecorded-owned-event-close-refused "<<GetLastError()<<std::endl;throw;}
+  return h;
+ }
+ bool exactTupleCurrent()const{
+  if(!fixture.identityAllowed||!fixture.frozenEvent.is_object()||!power||!identity||
+      WaitForSingleObject(power,0)!=WAIT_TIMEOUT||WaitForSingleObject(identity,0)!=WAIT_TIMEOUT)return false;
+  const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+  for(std::size_t i=0;i<4;++i){
+   const auto& b=fixture.bindings[i];const auto& frozen=fixture.frozenEvent.at(names[i]);
+   if(b.event!=roles[i]||b.pid!=dword(frozen.at("pid"))||b.born!=decimal(frozen.at("birthFileTime"))||
+       b.path!=utf16(frozen.at("path").get<std::string>())||b.session!=dword(frozen.at("session"),true))return false;
+  }
+  return !fixture.bindings[0].path.empty()&&fixture.account==decimal(fixture.frozenEvent.at("account64"));
+ }
+ void open(){
+  for(std::size_t i=0;i<availabilityDebtSlots.size();++i)if(!availabilityDebtSlots[i].reserved){debtSlot=i;availabilityDebtSlots[i].reserved=true;break;}
+  need(debtSlot<availabilityDebtSlots.size(),"private-availability-debt-slots-full");
+  accountingBegin=resource_diag::apiCount.load(std::memory_order_acquire);
+  need(GetProcessHandleCount(GetCurrentProcess(),&handlesBefore),"owned-handle-count-before");
+  resource_diag::capture(resource_diag::before);
+  for(std::size_t i=0;i<roles.size();++i)roles[i]=event(("role"+std::to_string(i)).c_str());
+  power=event("power-cancel");identity=event("identity-cancel");hint=event("observation-hint");
+  entered=event("wait-entered");done=event("peer-done");stopPeer=event("peer-stop");
+  availability=std::make_shared<ymcc::steamcommand::AvailabilityEvent>();need(availability->open(),"owned-availability-open");
+  coordinator=std::make_unique<ymcc::steamcommand::Coordinator>();
+  provider=std::make_unique<ymcc::steamcommand::Provider>(*coordinator);need(bool(*provider),"private-coordinator-provider-conflict");
+  publication=std::make_shared<ymcc::steamnative::ReadScope>([this]{return exactTupleCurrent();},power,identity);
+ }
+ bool closeOne(HANDLE h){
+  for(auto& row:events)if(row.handle==h&&!row.closed){
+   if(!CloseHandle(h)){row.closeError=GetLastError();return false;}
+   row.closed=true;return true;
+  }
+  return false;
+ }
+ void startPeer(){
+  need(!peer,"owned-peer-already-started");
+  peer=std::make_unique<std::thread>([this]{
+   try{
+    const HANDLE starts[]{stopPeer,entered};const auto start=::WaitForMultipleObjects(2,starts,FALSE,5000);
+    if(start==WAIT_OBJECT_0)return;
+    need(start==WAIT_OBJECT_0+1,"owned-peer-registration-wait");
+    registeredWaiting=intent&&intent->status()==ymcc::steamcommand::IntentStatus::Waiting;
+    availabilityResetSeen=availability&&WaitForSingleObject(availability->event(),0)==WAIT_TIMEOUT;
+    need(registeredWaiting&&availabilityResetSeen,"reset-before-promote-or-original-registration-missing");
+    switch(mode){
+     case WakeCase::PowerCancelled:need(SetEvent(power),"owned-power-cancel-set");blocker.parentReturned();break;
+     case WakeCase::IdentityCancelled:need(SetEvent(identity),"owned-identity-cancel-set");blocker.parentReturned();break;
+     case WakeCase::ProcessExited:need(SetEvent(roles[1]),"owned-role-exit-set");blocker.parentReturned();break;
+     case WakeCase::InvalidEvent:invalidCloseConfirmed=closeOne(roles[0]);need(invalidCloseConfirmed,"owned-invalid-close-failed");break;
+     case WakeCase::Expired:break;
+     default:blocker.parentReturned();break;
+    }
+   }catch(...){std::lock_guard lock(peerMutex);peerException=std::current_exception();}
+   if(!SetEvent(done)){std::lock_guard lock(peerMutex);if(!peerException)peerException=std::make_exception_ptr(std::runtime_error("owned-peer-done-set"));}
+  });
+  diagnosticPeerHandle=reinterpret_cast<std::uintptr_t>(peer->native_handle());
+  resource_diag::note(resource_diag::ThreadCreate,diagnosticPeerHandle,0,1,GetLastError());
+ }
+ void afterPeer(){std::lock_guard lock(peerMutex);if(peerException)std::rethrow_exception(peerException);}
+ void protectAvailabilityForControl()noexcept{
+  closeControl.requested=availabilityProtectCloseControlRequested;
+  if(!closeControl.requested)return;
+  if(!availability||(closeControl.exact=availability->event())==nullptr){directCleanupFault=true;return;}
+  closeControl.protectResult=SetHandleInformation(closeControl.exact,HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE);
+  closeControl.protectError=GetLastError();closeControl.applied=closeControl.protectResult!=FALSE;
+  if(!closeControl.applied)directCleanupFault=true;
+ }
+ void lateAvailabilityControlCleanup()noexcept{
+  if(!closeControl.requested||closeControl.lateAttempted)return;
+  closeControl.lateAttempted=true;
+  if(!peerJoined){closeControl.notQuiescent=true;return;}
+  if(debtSlot>=availabilityDebtSlots.size())return;
+  auto& slot=availabilityDebtSlots[debtSlot];
+  if(!closeControl.applied||!slot.lease||slot.exact!=closeControl.exact)return;
+  closeControl.clearResult=SetHandleInformation(slot.exact,HANDLE_FLAG_PROTECT_FROM_CLOSE,0);
+  closeControl.clearError=GetLastError();if(closeControl.clearResult==FALSE)return;
+  closeControl.lateClosed=slot.lease->close();const auto status=slot.lease->status();closeControl.lateCloseError=status.closeError;
+  if(closeControl.lateClosed&&!status.opened&&status.closeError==ERROR_SUCCESS){slot.lease.reset();slot.exact=nullptr;}
+ }
+ J close(){
+  if(stopped)return cleanup;
+  owned_resource::initial.strictSuccess=false;cleanupCompleted=false;
+  stopped=true;J errors=J::array();bool processWideOnly=false,bodyReachedEnd=false;
+  const auto error=[&](const char* text){if(!processWideOnly)directCleanupFault=true;try{errors.push_back(text);}catch(...){cleanupJsonFault=true;}};
+  try{
+   if(stopPeer&&!SetEvent(stopPeer))error("peer-stop-set-failed");
+   if(peer&&peer->joinable()){
+    try{peer->join();peerJoined=!peer->joinable();resource_diag::note(resource_diag::ThreadJoin,diagnosticPeerHandle,0,peerJoined?1:0,GetLastError());}catch(...){error("peer-join-exception");}
+    if(peer->joinable()){(void)peer.release();error("peer-thread-retained-join-debt");}
+   }else peerJoined=true;
+   peer.reset();
+   try{afterPeer();}catch(const std::exception& e){error(e.what());}catch(...){error("peer-unknown-exception");}
+   if(intent)intent->cancel();
+   blocker.parentReturned();intent.reset();provider.reset();coordinator.reset();publication.reset();
+   if(availability){
+    const auto borrowedBeforeClose=availability->event();
+    if(!availability->close())error("availability-close-refused");
+    const auto status=availability->status();
+    if(status.opened||status.closeError||status.signalError||status.resetError||availability->event())error("availability-resource-or-api-error");
+    cleanup["availability"]={{"opened",status.opened},{"closeError",status.closeError},{"signalError",status.signalError},{"resetError",status.resetError}};
+    if(status.opened){
+     if(debtSlot<availabilityDebtSlots.size()){
+      auto& slot=availabilityDebtSlots[debtSlot];slot.exact=borrowedBeforeClose;slot.lease=std::move(availability);
+      closeControl.initialDebt=bool(slot.lease);closeControl.firstCloseError=status.closeError;
+      closeControl.initialRefusal=closeControl.requested&&closeControl.applied&&slot.exact==closeControl.exact&&status.closeError==ERROR_INVALID_HANDLE;
+     }
+     error("availability-retained-close-debt");
+    }
+    else availability.reset();
+   }
+   for(auto& row:events)if(!row.closed){
+    if(CloseHandle(row.handle))row.closed=true;
+    else{row.closeError=GetLastError();error("owned-event-close-refused");}
+   }
+   DWORD after=0;if(!GetProcessHandleCount(GetCurrentProcess(),&after))error("owned-handle-count-after-failed");
+   resource_diag::capture(resource_diag::after);
+   cleanup["handleCountBefore"]=handlesBefore;cleanup["handleCountAfter"]=after;
+   processWideOnly=true;
+   if(after!=handlesBefore)error("owned-handle-count-not-restored");
+   processWideOnly=false;
+   cleanup["events"]=J::array();
+   for(const auto& row:events)cleanup["events"].push_back({{"name",row.name},{"handle",std::to_string(reinterpret_cast<std::uintptr_t>(row.handle))},{"closed",row.closed},{"closeError",row.closeError}});
+   cleanup["peerJoined"]=peerJoined;if(!peerJoined)error("owned-peer-not-joined");
+   bodyReachedEnd=true;
+  }catch(const std::exception& e){error(e.what());}catch(...){error("cleanup-unknown-exception");}
+  try{cleanup["errors"]=errors;cleanup["success"]=errors.empty()&&!cleanupJsonFault&&bodyReachedEnd;}catch(...){cleanupJsonFault=true;}
+  cleanupCompleted=bodyReachedEnd&&!cleanupJsonFault;
+  return cleanup;
+ }
+ ~WakeCaseOwner(){
+  if(!stopped){try{(void)close();}catch(...){std::cerr<<"owned-owner-emergency-close-exception"<<std::endl;}std::cerr<<"owned-owner-emergency-close"<<std::endl;}
+  if(closeControl.requested)lateAvailabilityControlCleanup();
+  if(debtSlot<availabilityDebtSlots.size()&&!availabilityDebtSlots[debtSlot].lease)availabilityDebtSlots[debtSlot].reserved=false;
+  // A still-retained slot remains a strong, exact debt until process teardown;
+  // permanent refusal is never reported as return or global resource success.
+ }
+};
+DWORD pairedWaitForMultipleObjects(DWORD count,const HANDLE* handles,BOOL all,DWORD delay){
+ auto* owner=activeOwner;need(owner!=nullptr,"owned-wait-owner-unavailable");
+ need(count==7&&all==FALSE&&handles[0]==owner->power&&handles[1]==owner->identity,"owned-wait-cancellation-shape");
+ for(std::size_t i=0;i<4;++i)need(handles[i+2]==owner->roles[i],"owned-wait-role-shape");
+ need(handles[6]==owner->availability->event()&&handles[6]!=owner->hint,"availability-not-independent-observation-hint");
+ need(ledgerCount()==0&&fixture.queries==0&&fixture.source==0&&fixture.drivers==0,"command-wait-acquired-source-or-spent-budget");
+ ++fixture.waits;++owner->commandWaits;owner->lastDelay=delay;
+ need(SetEvent(owner->entered),"owned-wait-entered-set");
+ need(WaitForSingleObject(owner->done,5000)==WAIT_OBJECT_0,"owned-peer-done-wait");owner->afterPeer();
+ if(owner->mode==WakeCase::ReadyHealthy)fixture.flags=8196;
+ // All original parameters are forwarded to the REAL API, with no virtual
+ // timeout or substituted handle. The peer completes before this call.
+ const auto result=::WaitForMultipleObjects(count,handles,all,delay);const auto error=GetLastError();
+ owner->lastWait=result;owner->waitError=error;SetLastError(error);return result;
+}
+J eventFor(const fp::path& dir){
+ J e;const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+ for(std::size_t i=0;i<4;++i)e[names[i]]={{"pid",4000u+static_cast<DWORD>(i)},{"birthFileTime",std::to_string(134370000000000001ULL+i)},{"session",1},{"path","D:\\owned-fixture\\"+std::string(names[i])+".exe"}};
+ e["target"]=e["game"];e["target"]["gameId"]="10260559608980439040";e["target"]["appid"]=2388972698u;
+ e["dataRoot"]=utf8((dir/L"data").wstring());e["evidenceRoot"]=utf8((dir/L"evidence").wstring());e["logRoot"]=utf8((dir/L"logs").wstring());e["account64"]="76561198000000001";e["recoveryAllowed"]=true;
+ e["trigger"]={{"kind","wake"},{"generation","7"},{"id","original-command-wake"},{"rulesEpoch","1"},{"powerEventFileTime",std::to_string(nowFileTime())}};return e;
+}
+void freezeFixture(const J& e,WakeCaseOwner& owner){
+ fixture=Fixture{};fixture.data=absolute(e.at("dataRoot"));fixture.frozenEvent=e;fixture.identityAllowed=true;
+ const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+ for(std::size_t i=0;i<4;++i){const auto& v=e.at(names[i]);fixture.bindings[i]={owner.roles[i],dword(v.at("pid")),dword(v.at("session"),true),decimal(v.at("birthFileTime")),utf16(v.at("path").get<std::string>())};}
+ embedded::sha256=digest(embedded::image,sizeof embedded::image);
+}
+J invokeCommandWakeOnly(const J& event,WakeCaseOwner& owner){
+ check(event.at("trigger").at("kind")=="wake","non-wake-selector-refused");
+ const auto frozen=fixture.frozenEvent;const auto tupleCurrent=[&owner,frozen]{return fixture.frozenEvent==frozen&&owner.exactTupleCurrent();};
+ auto result=handle(event,{},tupleCurrent,tupleCurrent,reinterpret_cast<WakeSignal>(owner.hint),reinterpret_cast<WakeSignal>(owner.power),reinterpret_cast<WakeSignal>(owner.identity),owner.publication,{}, {},owner.intent,owner.availability,{},{},{},{});
+ fixture.lastReceipt=result;
+ check(!gActive.load()&&!gEmit&&!gCurrent&&!gObservationCurrent&&!gOriginalSteam&&!gPublicationScope&&!gGroupRequestCancellation&&!gWakeSignal&&!gCancelSignal&&!gIdentityCancelSignal&&!gCleanupMode,"full-handle-per-job-cleanup-leaked");return result;
+}
+void makeHealthyReference(J event,WakeCaseOwner& owner){
+ event["recoveryAllowed"]=false;fixture.flags=8196;
+ const auto receipt=invokeCommandWakeOnly(event,owner);
+ check(receipt.at("status")=="healthy"&&receipt.value("referenceCaptured",false)&&!receipt.at("consumed").get<bool>(),"wake-healthy-reference-not-captured");
+ check(ledgerCount()==0&&fixture.queries==0&&fixture.source==0&&fixture.drivers==0,"wake-healthy-reference-mutated");
+ fixture.snapshots=0;fixture.order.clear();fixture.lastReceipt=nullptr;
+}
+struct CaseSpec{const char* name;WakeCase mode;};
+constexpr CaseSpec commandWakeCases[]{
+ {"occupied-release-ready-still-4",WakeCase::Recovered},
+ {"occupied-release-ready-now-8196",WakeCase::ReadyHealthy},
+ {"original-physical-remainder-expires",WakeCase::Expired},
+ {"power-cancel-and-availability",WakeCase::PowerCancelled},
+ {"identity-cancel-and-availability",WakeCase::IdentityCancelled},
+ {"process-event-and-availability",WakeCase::ProcessExited},
+ {"actual-closed-event-wait-failed",WakeCase::InvalidEvent},
+ {"driver-readonly-preflight-no-durable-consume",WakeCase::DriverReadonlyRefusal},
+ {"healthy-wake-no-consume",WakeCase::Healthy},
+ {"memory-tuple-mismatch-refused",WakeCase::IdentityMismatch}
+};
+J runCommandWakeCase(const fp::path& dir,const CaseSpec& spec){
+ WakeCaseOwner owner(spec.mode);J row={{"name",spec.name},{"passed",false}};activeOwner=&owner;
+ try{
+  owner.open();auto event=eventFor(dir);freezeFixture(event,owner);makeHealthyReference(event,owner);
+  const ymcc::steamcommand::Target target{fixture.bindings[0].pid,fixture.bindings[0].born,fp::path(fixture.bindings[0].path).parent_path().wstring()};
+  owner.blocker=owner.coordinator->reserve(target,ymcc::steamcommand::Plan::Single);check(bool(owner.blocker),"original-occupied-slot-not-held");
+  owner.intent=ymcc::steamcommand::prepareIntent(target,owner.availability);
+  check(bool(owner.intent)&&owner.intent->status()==ymcc::steamcommand::IntentStatus::Observing,"passive-intent-wrong-state");
+  fixture.flags=spec.mode==WakeCase::Healthy?8196:4;fixture.failPreflight=spec.mode==WakeCase::DriverReadonlyRefusal;
+  event["trigger"]["powerEventFileTime"]=std::to_string(spec.mode==WakeCase::Expired?nowFileTime()-58500ULL*10000ULL:nowFileTime());
+  const auto originalEpisode=event.at("trigger").at("powerEventFileTime");
+  if(spec.mode==WakeCase::Healthy)event["recoveryAllowed"]=false;
+  if(spec.mode==WakeCase::IdentityMismatch)event["steam"]["birthFileTime"]="134370000000999999";
+  if(spec.mode!=WakeCase::Healthy&&spec.mode!=WakeCase::IdentityMismatch){
+   owner.availability->notify();
+   check(WaitForSingleObject(owner.availability->event(),0)==WAIT_OBJECT_0,"stale-availability-not-primed");
+   owner.startPeer();
+  }
+  const auto receipt=invokeCommandWakeOnly(event,owner);row["receipt"]=receipt;
+  check(event.at("trigger").at("powerEventFileTime")==originalEpisode,"physical-episode-renewed");
+  check(WaitForSingleObject(owner.hint,0)==WAIT_TIMEOUT,"availability-changed-original-observation-hint");
+  if(spec.mode==WakeCase::Recovered){
+   check(receipt.at("status")=="recovered-native"&&receipt.at("consumed")==true&&ledgerCount()==2,"command-wake-recovery-not-single-durable-commit");
+   check(fixture.queries==1&&fixture.source==1&&fixture.drivers==1&&fixture.queryEnds==1&&fixture.queryFinishes==1,"command-wake-source-not-single-or-not-returned");
+   check(fixture.order.size()>=2&&fixture.order[0]=="snapshot:4"&&fixture.order[1]=="snapshot:4","ready-did-not-repeat-complete-lost-snapshot");
+   check(receipt.at("commandCoordination").at("observationCadenceChanged")==false,"command-availability-altered-wake-cadence");
+  }else if(spec.mode==WakeCase::ReadyHealthy){
+   check(receipt.at("status")=="healthy"&&!receipt.at("consumed").get<bool>()&&ledgerCount()==0,"ready-healthy-consumed");
+   check(fixture.snapshots==2&&fixture.order==std::vector<std::string>{"snapshot:4","snapshot:8196"},"ready-healthy-did-not-fresh-read");
+   check(fixture.queries==0&&fixture.source==0&&fixture.drivers==0,"ready-healthy-acquired-query-source-driver");
+  }else if(spec.mode==WakeCase::DriverReadonlyRefusal){
+   check(receipt.value("reason",std::string())=="loaded-client-ui-compatibility-contract"&&receipt.at("consumptionPreflightPassed")==true&&!receipt.at("consumed").get<bool>()&&ledgerCount()==0,"readonly-driver-refusal-spent-durable-budget");
+   check(fixture.queries==1&&fixture.source==1&&fixture.drivers==0&&fixture.queryEnds==1,"readonly-driver-refusal-bad-memory-port-counts");
+  }else{
+   check(!receipt.value("consumed",false)&&ledgerCount()==0&&fixture.queries==0&&fixture.source==0&&fixture.drivers==0,"rejected-or-healthy-wake-mutated");
+   if(spec.mode==WakeCase::Healthy)check(receipt.at("status")=="healthy"&&owner.commandWaits==0,"healthy-wake-requested-command");
+   else if(spec.mode==WakeCase::IdentityMismatch)check(receipt.value("reason",std::string())=="memory-role-not-exact-frozen-tuple"&&owner.commandWaits==0,"nonexact-memory-identity-admitted");
+   else if(spec.mode==WakeCase::InvalidEvent)check(owner.invalidCloseConfirmed&&owner.lastWait==WAIT_FAILED&&owner.waitError==ERROR_INVALID_HANDLE&&receipt.value("reason",std::string())=="wake-event-wait-failed","actual-invalid-event-accepted");
+   else if(spec.mode==WakeCase::ProcessExited)check(owner.lastWait==WAIT_OBJECT_0+3&&receipt.value("reason",std::string())=="public-steam-command-wait-ended","process-not-before-availability");
+   else if(spec.mode==WakeCase::PowerCancelled)check(owner.lastWait==WAIT_OBJECT_0&&receipt.value("reason",std::string())=="native-current-guard-revoked","power-cancel-not-before-availability");
+   else if(spec.mode==WakeCase::IdentityCancelled)check(owner.lastWait==WAIT_OBJECT_0+1&&receipt.value("reason",std::string())=="native-current-guard-revoked","identity-cancel-not-before-availability");
+   else if(spec.mode==WakeCase::Expired)check(owner.lastWait==WAIT_TIMEOUT&&owner.commandWaits==1&&owner.lastDelay<=1500&&receipt.value("reason",std::string())=="native-current-guard-revoked","physical-remainder-was-renewed-or-not-expired");
+  }
+  if(spec.mode!=WakeCase::Healthy&&spec.mode!=WakeCase::IdentityMismatch)check(owner.commandWaits==1&&owner.registeredWaiting&&owner.availabilityResetSeen,"original-command-wait-or-reset-order-not-observed");
+  row["passed"]=true;
+ }catch(const std::exception& e){row["failure"]=e.what();}catch(...){row["failure"]="unknown-case-exception";}
+ row["counts"]={{"snapshots",fixture.snapshots},{"queries",fixture.queries},{"source",fixture.source},{"drivers",fixture.drivers},{"queryEnds",fixture.queryEnds},{"kernelWaits",owner.commandWaits}};
+ row["wait"]={{"result",owner.lastWait},{"error",owner.waitError},{"delayMs",owner.lastDelay}};
+ row["trace"]=fixture.order;
+ const bool businessPassed=row.value("passed",false);row["businessPassed"]=businessPassed;row["passed"]=false;
+ owner.protectAvailabilityForControl();
+ try{
+  row["cleanup"]=owner.close();
+  const bool quiescent=owner.peerJoined&&(!owner.peer||!owner.peer->joinable());
+  const auto end=resource_diag::apiCount.load(std::memory_order_acquire);
+  owned_resource::evaluate(owned_resource::initial,owner.accountingBegin,end,quiescent);
+  if(owner.directCleanupFault||owner.cleanupJsonFault||!owner.cleanupCompleted)owned_resource::fault(owned_resource::initial,"owner-cleanup-incomplete-or-diagnostic-fault",end);
+  if(owner.closeControl.requested){
+   for(unsigned i=0;i<owned_resource::initial.used;++i){const auto& l=owned_resource::initial.lives[i];
+    if(l.domain==owned_resource::Event&&l.handle==reinterpret_cast<std::uintptr_t>(owner.closeControl.exact)&&l.live&&l.refused)owner.closeControl.debtCreationSerial=l.serial;
+   }
+   if(!owner.closeControl.initialRefusal||!owner.closeControl.initialDebt||!owner.closeControl.debtCreationSerial)
+    owned_resource::fault(owned_resource::initial,"expected-real-availability-close6-not-observed",end);
+  }
+  // Initial POD verdict/debt/refusal are frozen BEFORE any fixture-only repair.
+  const bool initialScopedSuccess=owned_resource::initial.strictSuccess;
+  if(owner.closeControl.requested){
+   owner.lateAvailabilityControlCleanup();
+   owned_resource::evaluate(owned_resource::afterLate,owner.accountingBegin,resource_diag::apiCount.load(std::memory_order_acquire),quiescent);
+  }
+  const auto before=row["cleanup"].value("handleCountBefore",DWORD(0));const auto after=row["cleanup"].value("handleCountAfter",DWORD(0));
+  row["cleanup"]["processWide"]={{"scope","Original whole-process count, independent diagnostic"},{"before",before},{"after",after},
+   {"restored",after==before},{"legacyCountError",after!=before?J("owned-handle-count-not-restored"):J()},
+   {"status","UNKNOWN"},{"resourcePass",false},{"legacyCleanupSuccess",row["cleanup"].value("success",false)}};
+  row["cleanup"]["directOwned"]=directOwnedReport(owned_resource::initial);
+  row["resultScope"]="Original business checks plus strict direct API-owned lifecycle ONLY; process-wide resources UNKNOWN";
+  if(owner.closeControl.requested){
+   const auto& c=owner.closeControl;
+   row["availabilityProtectClose6"]={{"protectResult",c.protectResult},{"protectLastError",c.protectError},{"exactBorrowedHandle",std::to_string(reinterpret_cast<std::uintptr_t>(c.exact))},
+    {"initialRefusal",c.initialRefusal},{"firstCloseError",c.firstCloseError},{"initialStrongDebt",c.initialDebt},{"debtCreationSerial",c.debtCreationSerial},
+    {"lateAttempted",c.lateAttempted},{"clearResult",c.clearResult},{"clearLastError",c.clearError},{"lateCloseReturned",c.lateClosed},{"lateCloseError",c.lateCloseError},
+    {"lateNotQuiescent",c.notQuiescent},{"initialVerdictNotRecomputed",true},{"afterLate",directOwnedReport(owned_resource::afterLate)}};
+  }
+  row["passed"]=businessPassed&&initialScopedSuccess;
+ }
+ catch(const std::exception& e){row["passed"]=false;row["cleanupException"]=e.what();}
+ catch(...){row["passed"]=false;row["cleanupException"]="unknown-cleanup-exception";}
+ row["resourceDiagnostic"]=diagnosticReport();
+ activeOwner=nullptr;fixture.identityAllowed=false;return row;
+}
+int main(int argc,char** argv){
+ if((argc!=3&&argc!=5&&argc!=6)||std::string(argv[2])!="--command-wake-only")return 64;
+ std::string selected;
+ if(argc>=5){
+  if(std::string(argv[3])!="--case"||!argv[4][0])return 64;
+  selected=argv[4];
+  if(std::none_of(std::begin(commandWakeCases),std::end(commandWakeCases),[&](const auto& spec){return selected==spec.name;}))return 64;
+ }
+ if(argc==6){
+  if(std::string(argv[5])!="--owned-availability-protect-close=6"||selected!="occupied-release-ready-still-4")return 64;
+  availabilityProtectCloseControlRequested=true;
+ }
+ try{
+  const auto root=fp::absolute(fp::path(argv[1])).lexically_normal();need(!fp::exists(root),"wake-output-must-be-new");fp::create_directories(root);
+  J cases=J::array();for(const auto& spec:commandWakeCases){
+   if(!selected.empty()&&selected!=spec.name)continue;
+   cases.push_back(runCommandWakeCase(root/std::to_wstring(cases.size()),spec));
+   if(cases.back().at("passed")!=true)break;
+  }
+  const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& row){return row.at("passed")==true;});
+  const J report={{"schema","ymcc.steam-recovery-success-chain-consumer.v1"},{"selector","--command-wake-only"},{"tests",cases.size()},{"passed",passed},{"checks",checks},{"cases",cases},{"success",static_cast<std::size_t>(passed)==cases.size()},{"applicationIdentityAndSdk","explicit frozen memory leaves; no Steam authority"},{"liveSteamOperations",0},{"extraGameProcesses",0},{"sleepActions",0},{"fieldRecoveryVerified",false},{"resultScope","business plus direct API-owned lifecycle only"},{"processWideResources","UNKNOWN"},{"processWideResourcePass",false},{"sourceReady",false},{"independentReviewRequiredBeforeExecution",true}};
+  std::cout<<report.dump(2)<<std::endl;return report.at("success")==true?0:1;
+ }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}
+}

@@ -1,3 +1,84 @@
+// Original frontend consumer, extended for the common touch/shortcut transport.
+static void shortcutSteamMenuCases() {
+    for(int button:{1,5})for(const auto* persona:{"disabled","steamdeck","dualsense-edge","elite"})for(bool prepared:{false,true}) {
+        auto r=rule("input.frontendButton","");r["params"]={{"button",button==1?"steam":"steamQuickAccess"}};
+        resetRoute(json::array({r}),dedicated(baseInput()));fixtureFrontendPersona=persona;g_inputHostBoundPersona="elite";
+        g_inputHostPrepared=prepared;g_inputHostEpochMirror=0;if(!prepared)g_inputHostProcess=nullptr;
+        const auto before=fixtureInput.dump();tick(0,10000);tick(XINPUT_GAMEPAD_A,10020);flushJobs();
+        tick(XINPUT_GAMEPAD_A,10100);flushJobs();
+        check(fixtureSteamAttempts==1 && fixtureSteamRequests.size()==1,"held controller action dispatches exactly one native Steam key for every virtual mode");
+        const auto& request=fixtureSteamRequests[0];
+        check(request.value("operation","")=="menu.button" && request.value("menu","")==(button==1?"main":"quick-access") && !request.contains("qamFollowup"),"controller selects exact shared main/QAM request without touch recovery ticket");
+        check(!g_frontendButtonPulse.pending() && fixtureSendInputs.empty() && fixtureOwnActions.empty(),"Steam sends no Guide, Ctrl shortcut, focus mutation or second route");
+        check(fixtureInput.dump()==before && fixtureRefreshes==0,"Steam menu never changes global or dedicated settings");
+        check(std::any_of(fixtureLogs.begin(),fixtureLogs.end(),[button](const json& row){return row.value("event","")=="shortcut-frontend-button" && row.value("button",0)==button && row.value("ok",false) && row.value("signal","")=="steam-native-button" && row.value("keyDelivered",false) && !row.value("runtimeAccepted",true);}),"receipt distinguishes key delivery from visible menu response");
+    }
+    for(int button:{1,5}) {
+        for(bool newerTouch:{false,true}) {
+            resetRoute(json::array());
+            {
+                std::lock_guard<std::mutex> lock(ymcc::qamfollowup::mutex);
+                ymcc::qamfollowup::current.generation=++ymcc::qamfollowup::generation;
+                ymcc::qamfollowup::done=false;ymcc::qamfollowup::pending=true;
+            }
+            nativeYmccShortcutEmit("input.frontendButton",button);
+            if(newerTouch) {
+                std::lock_guard<std::mutex> lock(ymcc::qamfollowup::mutex);
+                ymcc::qamfollowup::current.generation=++ymcc::qamfollowup::generation;
+            }
+            flushJobs();
+            check(ymcc::qamfollowup::done.load()!=newerTouch && ymcc::qamfollowup::pending.load()==newerTouch,
+                "new controller menu cancels captured touch recovery but preserves a later touch ticket");
+        }
+        resetRoute(json::array());fixtureWindowForeground=true;fixtureDesktopDown={VK_SHIFT,VK_LCONTROL,VK_MENU};
+        check(nativeYmccShortcutEmit("input.frontendButton",button),"Steam accepts direct route without physical modifier or virtual target gate");flushJobs();
+        check(fixtureSteamRequests.size()==1 && fixtureOwnActions.empty() && fixtureWindowForeground,"Steam menu leaves foreground ownership unchanged");
+        resetRoute(json::array());fixtureJobAccept=false;
+        check(!nativeYmccShortcutEmit("input.frontendButton",button) && fixtureSteamAttempts==0,"queue rejection never sends or falls back");
+        for(int gate=0;gate<7;++gate)for(bool during:{false,true}) {
+            resetRoute(json::array());
+            const auto invalidate=[gate] {
+                if(gate==0)g_shortcutRecordingActive=true;
+                if(gate==1)g_exitRequested=true;
+                if(gate==2)g_inputReady=false;
+                if(gate==3)fixtureWriterAllowed=false;
+                if(gate==4)++fixturePowerGeneration;
+                if(gate==5)++g_oemShortcutEdgeEpoch;
+                if(gate==6)++GamepadSerialEvent::ConfigurationRevision;
+            };
+            check(nativeYmccShortcutEmit("input.frontendButton",button),"Steam request accepted before lifecycle transition");
+            if(during)fixtureSteamBeforeSend=invalidate;else invalidate();
+            flushJobs();check(fixtureSteamRequests.empty() && fixtureSendInputs.empty() && !g_frontendButtonPulse.pending(),"stale recording/exit/input/power/source/config cancels before final send");
+        }
+        for(int fault=0;fault<6;++fault) {
+            resetRoute(json::array());
+            if(fault==0)fixtureSteamResult={{"ok",false},{"mutated",false},{"reason","live-api-unavailable"}};
+            if(fault==1)fixtureSteamResult={{"ok",false},{"mutated",true},{"reason","timeout"}};
+            if(fault==2)fixtureSteamResult=nullptr;
+            if(fault==3)fixtureSteamResult={{"ok","true"}};
+            if(fault==4)fixtureSteamResult={{"ok",true},{"mutated","false"}};
+            if(fault==5)fixtureSteamThrows=true;
+            nativeYmccShortcutEmit("input.frontendButton",button);flushJobs();
+            check(fixtureSteamAttempts==1 && fixtureSteamRequests.size()==1 && fixtureSendInputs.empty() && !g_frontendButtonPulse.pending(),"failure/malformed/uncertain transport has one attempt and no fallback");
+            const std::string reason=fault==0?"steam-menu-unavailable":"steam-menu-result-uncertain";
+            check(std::any_of(fixtureLogs.begin(),fixtureLogs.end(),[&](const json& row){return row.value("event","")=="shortcut-frontend-button" && !row.value("ok",true) && row.value("reason","")==reason;}),"Steam failure settles through existing frontend receipt");
+        }
+    }
+#if defined(YMCC_STEAM_MENU_DIRECT_SOURCE)
+    for(bool quick:{false,true}) {
+        resetRoute(json::array());const json ticket=quick?json{{"id","original-touch"},{"startedAt",1000}}:json();
+        const auto result=nativeSteamMenuButton(quick,[]{return true;},ticket);
+        check(result.value("ok",false) && fixtureSteamRequests.size()==1 && fixtureSteamRequests[0].value("operation","")=="menu.button","touch-style call executes the same actual native sender");
+        check(quick?fixtureSteamRequests[0]["qamFollowup"]==ticket:!fixtureSteamRequests[0].contains("qamFollowup"),"touch recovery ticket is preserved exactly and only for QAM");
+        fixtureSteamRequests.clear();nativeSteamMenuButton(quick,[]{return false;},ticket);
+        check(fixtureSteamRequests.empty(),"shared sender rejects invalid touch lifecycle before entering transport");
+    }
+#endif
+    auto keyboard=rule("input.frontendButton","","press","keyboard","KeyK");keyboard["params"]={{"button","steamQuickAccess"}};
+    resetRoute(json::array({keyboard}));tick(0,10000);fixtureDesktopDown.insert('K');tick(0,10020);flushJobs();
+    check(fixtureSteamRequests.size()==1 && fixtureSteamRequests[0].value("menu","")=="quick-access","recorded keyboard source shares controller and touch Steam channel");
+}
+
 // Memory-only coverage of the production dispatcher, shared predicate and pulse.
 static void shortcutSummonFrontendCases() {
     for (const bool foreground : {false, true}) {
@@ -36,12 +117,12 @@ static void shortcutSummonFrontendCases() {
     check(fixtureOwnActions==std::vector<std::string>{"window.hideToTray"},"dedicated OEM LIB summon uses actual unified hide branch");
 #endif
     int delta=0;
-    for (const auto& name : {"steam","ps","xbox","gamebar"}) {
-        check(nativeYmccShortcutAction("input.frontendButton") && nativeYmccShortcutDelta("input.frontendButton",{{"button",name}},delta),"frontend action parses each of four buttons");
+    for (const auto& name : {"steam","steamQuickAccess","ps","xbox","gamebar"}) {
+        check(nativeYmccShortcutAction("input.frontendButton") && nativeYmccShortcutDelta("input.frontendButton",{{"button",name}},delta),"frontend action parses all five buttons");
     }
     for (const auto& bad : {json::object(),json{{"button","invalid"}},json{{"button",3}}})
         check(!nativeYmccShortcutDelta("input.frontendButton",bad,delta),"frontend parser rejects missing/unknown/non-string parameter");
-    for (const auto& entry : std::vector<std::pair<std::string,std::string>>{{"steam","steamdeck"},{"ps","dualsense-edge"},{"ps","dualsense"},{"xbox","elite"},{"xbox","xbox360"}}) {
+    for (const auto& entry : std::vector<std::pair<std::string,std::string>>{{"ps","dualsense-edge"},{"xbox","elite"}}) {
         auto r=rule("input.frontendButton","");r["params"]={{"button",entry.first}};
         resetRoute(json::array({r}),dedicated(baseInput()));fixtureFrontendPersona=g_inputHostBoundPersona=entry.second;
         const auto before=fixtureInput.dump();tick(0,10000);tick(XINPUT_GAMEPAD_A,10020);flushJobs();
@@ -49,31 +130,36 @@ static void shortcutSummonFrontendCases() {
         check(fixtureInput.dump()==before && fixtureRefreshes==0,"frontend action never changes global/dedicated settings or active preset");
         check(g_frontendButtonPulse.sample(10140,1,true)==0,"Guide pulse auto-releases after 120ms without timer");
     }
-    resetRoute(json::array());fixtureFrontendPersona="steamdeck";g_inputHostBoundPersona="elite";
-    check(!nativeYmccShortcutEmit("input.frontendButton",1),"configured Steam persona cannot inject into an old still-bound Xbox target");
-    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";g_inputHostPrepared=false;
-    check(!nativeYmccShortcutEmit("input.frontendButton",1),"unprepared matching target reports failure instead of pretending to send Guide");
+    for(const auto& persona:std::vector<std::pair<std::string,std::string>>{{"ps","dualsense"},{"xbox","xbox360"}}) {
+        resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona=persona.second;
+        check(!nativeYmccShortcutEmit("input.frontendButton",static_cast<int>(ymcc::frontendButton(persona.first))),"unsupported historical PS/Xbox target rejected");
+    }
+    resetRoute(json::array());fixtureFrontendPersona="dualsense-edge";g_inputHostBoundPersona="elite";
+    check(!nativeYmccShortcutEmit("input.frontendButton",2),"PS cannot inject into an old still-bound Xbox target");
+    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="dualsense-edge";g_inputHostPrepared=false;
+    check(!nativeYmccShortcutEmit("input.frontendButton",2),"unprepared matching PS target reports failure");
     resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="disabled";
-    check(!nativeYmccShortcutEmit("input.frontendButton",1) && !g_frontendButtonPulse.pending(),"Steam action fails explicitly when matching pad is disabled");
+    check(!nativeYmccShortcutEmit("input.frontendButton",2) && !g_frontendButtonPulse.pending(),"PS explicitly requires matching enabled pad");
     fixtureFrontendPersona=g_inputHostBoundPersona="elite";
-    check(!nativeYmccShortcutEmit("input.frontendButton",2) && !g_frontendButtonPulse.pending(),"PS action never creates/switches an Xbox virtual target");
-    fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";g_inputHostEpochMirror=0;
-    check(!nativeYmccShortcutEmit("input.frontendButton",1),"frontend requires nonzero live Host generation");
-    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";
-    check(nativeYmccShortcutEmit("input.frontendButton",1),"frontend admits matching target before queue");
-    ++g_inputHostEpochMirror;flushJobs();check(!g_frontendButtonPulse.pending(),"target changed during queued action cancels Guide request");
+    check(!nativeYmccShortcutEmit("input.frontendButton",2) && !g_frontendButtonPulse.pending(),"PS never creates or switches an Xbox target");
+    fixtureFrontendPersona=g_inputHostBoundPersona="dualsense-edge";g_inputHostEpochMirror=0;
+    check(!nativeYmccShortcutEmit("input.frontendButton",2),"PS requires nonzero live Host generation");
+    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="dualsense-edge";
+    check(nativeYmccShortcutEmit("input.frontendButton",2),"PS admits matching target before queue");
+    ++g_inputHostEpochMirror;flushJobs();check(!g_frontendButtonPulse.pending(),"target changed during queued PS action cancels Guide request");
     for (const int gate : {0,1,2,3}) {
-        resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";
-        nativeYmccShortcutEmit("input.frontendButton",1);
+        resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="dualsense-edge";
+        nativeYmccShortcutEmit("input.frontendButton",2);
         if(gate==0)g_shortcutRecordingActive=true;
         if(gate==1)g_exitRequested=true;
         if(gate==2)g_inputReady=false;
         if(gate==3)fixtureWriterAllowed=false;
-        flushJobs();check(!g_frontendButtonPulse.pending(),"queued frontend obeys recording/exit/input/power gate");
+        flushJobs();check(!g_frontendButtonPulse.pending(),"queued PS obeys recording/exit/input/power gate");
     }
-    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";fixtureWindowForeground=true;
-    nativeYmccShortcutEmit("input.frontendButton",1);flushJobs();
-    check(fixtureOwnActions==std::vector<std::string>{"window.hideToTray"},"frontend hides focused YMCC with double-B primitive before external menu output");
+    resetRoute(json::array());fixtureFrontendPersona=g_inputHostBoundPersona="dualsense-edge";fixtureWindowForeground=true;
+    nativeYmccShortcutEmit("input.frontendButton",2);flushJobs();
+    check(fixtureOwnActions==std::vector<std::string>{"window.hideToTray"},"PS retains existing focus-return primitive before virtual output");
+    shortcutSteamMenuCases();
     resetRoute(json::array());
     check(nativeYmccShortcutEmit("input.frontendButton",4),"Gamebar works without virtual target");flushJobs();
     check(fixtureSendInputs.size()==1 && fixtureSendInputs[0].size()==4,"Gamebar uses one atomic SendInput sequence");
@@ -91,7 +177,7 @@ static void shortcutSummonFrontendCases() {
     resetRoute(json::array({frontendOem}));fixtureFrontendPersona=g_inputHostBoundPersona="steamdeck";tick(0,10000);
     const auto frontendOemGeneration=activateProducer(OemProducerId::RogClick);BYTE frontendLib[]={0x5A,147};
     fixtureTick+=20;rogOemKeyParse(frontendLib,2,frontendOemGeneration);nativeOemProducerDrain();flushJobs();
-    check(g_frontendButtonPulse.pending(),"dedicated OEM shortcut emits frontend Guide via real production rule router");
+    check(fixtureSteamRequests.size()==1 && fixtureSteamRequests[0].value("menu","")=="main" && !g_frontendButtonPulse.pending(),"dedicated OEM shortcut uses same direct Steam transport via real rule router");
 #endif
     ymcc::FrontendButtonPulse pulse;
     check(pulse.sample(0,1,true)==0 && !pulse.request(0,0),"idle/zero-epoch Guide pulse has no output");

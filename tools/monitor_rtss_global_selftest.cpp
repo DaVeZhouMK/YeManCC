@@ -1,4 +1,32 @@
+#include <windows.h>
+#include <cstddef>
+static std::size_t readerOpens = 0, readerReads = 0, watchesOpened = 0, watchesClosed = 0;
+static HANDLE lastWatch = INVALID_HANDLE_VALUE;
+static bool denyWatch = false;
+static HANDLE countedCreateFileW(LPCWSTR p, DWORD a, DWORD s, LPSECURITY_ATTRIBUTES sa, DWORD c, DWORD f, HANDLE t) {
+    ++readerOpens; return CreateFileW(p,a,s,sa,c,f,t);
+}
+static BOOL countedReadFile(HANDLE h, LPVOID b, DWORD n, LPDWORD r, LPOVERLAPPED o) {
+    ++readerReads; return ReadFile(h,b,n,r,o);
+}
+static HANDLE countedFindFirstChangeNotificationW(LPCWSTR p, BOOL subtree, DWORD filter) {
+    if (denyWatch) { SetLastError(ERROR_NOT_SUPPORTED); return INVALID_HANDLE_VALUE; }
+    lastWatch = FindFirstChangeNotificationW(p,subtree,filter);
+    if (lastWatch != INVALID_HANDLE_VALUE) ++watchesOpened;
+    return lastWatch;
+}
+static BOOL countedFindCloseChangeNotification(HANDLE h) {
+    const auto result = FindCloseChangeNotification(h); if (result) ++watchesClosed; return result;
+}
+#define CreateFileW countedCreateFileW
+#define ReadFile countedReadFile
+#define FindFirstChangeNotificationW countedFindFirstChangeNotificationW
+#define FindCloseChangeNotification countedFindCloseChangeNotification
 #include "../native/monitor_rtss_global.h"
+#undef CreateFileW
+#undef ReadFile
+#undef FindFirstChangeNotificationW
+#undef FindCloseChangeNotification
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -55,5 +83,51 @@ int main(int argc, char** argv) {
     check("existing-owner directory change invalidates old cap",!reader.sample(now+=1000,tick+=1000).valid);
     const auto registeredCap=reader.sample(now+=1000,tick+=1000);check("registered path is sole source",registeredCap.valid && registeredCap.fps==30);
     registerDirectory(L"");check("lost path never falls back to another installation",globalPath().empty() && !reader.sample(now+=1000,tick+=1000).valid);
+    const auto quietDir=dir / "Triggered";std::filesystem::create_directories(quietDir);
+    const auto quietPath=(quietDir / "Global").wstring();
+    auto quietWrite=[&](const char* text){std::ofstream f(quietPath,std::ios::binary|std::ios::trunc);assert(f.good());f<<text;f.close();};
+    auto notified=[&]{check("real directory notification arrived",lastWatch!=INVALID_HANDLE_VALUE && WaitForSingleObject(lastWatch,1000)==WAIT_OBJECT_0);};
+    ChangeDrivenReader quiet;ULONGLONG qt=1000;long long qn=1700000000000LL;
+    auto qs=[&](ULONGLONG step=1000){qt+=step;qn+=step;return quiet.sample(quietPath,qn,qt);};
+    // Windows may deliver more than one notification for write + SetFileTime
+    // or create + rename. Each event must revoke the in-flight confirmation.
+    auto settleQuiet=[&](double expected){Limit cap{};for(int i=0;i<4;++i){cap=qs();check("pending notifications never publish the previous cap",!cap.valid || cap.fps==expected);if(cap.valid)break;}return cap;};
+    quietWrite("[Framerate]\nLimit=120\n");
+    check("triggered first observation pending",!qs().valid);
+    check("triggered second stable observation confirmed",qs().fps==120);
+    auto readsBefore=readerReads,opensBefore=readerOpens;
+    for(int i=0;i<29;++i){const auto cap=qs();check("quiet notification renews only confirmed configuration",cap.valid && cap.fps==120 && cap.ts==qn);}
+    check("quiet ticks perform zero file reads or opens",readerReads==readsBefore && readerOpens==opensBefore);
+    const auto fallback=qs();check("30s fallback rechecks unchanged bytes without a display gap",fallback.valid && fallback.fps==120 && fallback.ts==qn && readerReads==readsBefore+1);
+    FILETIME quietTime{};{Handle f(quietPath);FileState info{};assert(state(f.value,info));quietTime=info.written;}
+    quietWrite("[Framerate]\nLimit=060\n");
+    {HANDLE h=CreateFileW(quietPath.c_str(),FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);assert(h!=INVALID_HANDLE_VALUE);assert(SetFileTime(h,nullptr,nullptr,&quietTime));CloseHandle(h);}
+    notified();check("notification invalidates same-size same-mtime old cap",!qs().valid);
+    check("changed cap still needs separated observations",!qs(0).valid && !qs(100).valid);
+    const auto changedCap=settleQuiet(60);check("changed cap confirmed after stable read",changedCap.valid && changedCap.fps==60);
+    quietWrite("[Framerate]\nLimit=\n");notified();check("triggered half-write invalidates old cap",!qs().valid);
+    check("triggered persistent malformed stays unknown",!qs().valid);
+    for(int i=0;i<4;++i)check("malformed remains unknown while pending notifications settle",!qs().valid);
+    readsBefore=readerReads;for(int i=0;i<8;++i)check("quiet malformed does not revive old cap",!qs().valid);
+    check("quiet malformed does not repeatedly read",readerReads==readsBefore);
+    quietWrite("[Framerate]\nLimit=0\n");notified();check("repair notification starts fresh confirmation",!qs().valid);
+    const auto unlimited=settleQuiet(0);check("triggered explicit zero remains unlimited",unlimited.valid && unlimited.fps==0);
+    const auto quietReplace=(quietDir / "Replacement").wstring();{std::ofstream f(quietReplace);f<<"[Framerate]\nLimit=90\n";}
+    assert(MoveFileExW(quietReplace.c_str(),quietPath.c_str(),MOVEFILE_REPLACE_EXISTING));notified();
+    check("triggered atomic replacement invalidates old cap",!qs().valid);check("triggered replacement confirms actual new file",settleQuiet(90).fps==90);
+    check("triggered sleep-size gap invalidates cached cap",!qs(6000).valid);check("triggered gap needs fresh second observation",qs().fps==90);
+    qt-=2000;check("triggered clock rollback invalidates cached cap",!quiet.sample(quietPath,qn,qt).valid);check("triggered rollback recovers after confirmation",qs().fps==90);
+    quiet.reset();check("demand OFF releases notification handle",watchesOpened==watchesClosed);
+    check("demand ON does not reuse previous cap",!qs().valid);check("demand ON confirms current cap",qs().fps==90);
+    assert(DeleteFileW(quietPath.c_str()));notified();check("deleted file becomes unknown",!qs().valid);check("missing file second bounded attempt stays unknown",!qs().valid);
+    readsBefore=readerReads;opensBefore=readerOpens;for(int i=0;i<8;++i)check("quiet missing remains unknown",!qs().valid);
+    check("missing file retries are suppressed",readerReads==readsBefore && readerOpens==opensBefore);
+    quietWrite("[Framerate]\nLimit=30\n");notified();check("file recreation event bypasses backoff",!qs().valid);check("recreated config confirmed",settleQuiet(30).fps==30);
+    quiet.reset();denyWatch=true;
+    check("unsupported notifications first observation pending",!qs().valid);const auto noWatch=qs();check("unsupported notifications still read actual config",noWatch.valid && noWatch.fps==30);
+    const auto retained=qs();check("missing notification cannot renew old observation timestamp",retained.valid && retained.ts==noWatch.ts && retained.ts<qn);
+    quiet.reset();denyWatch=false;check("all notification resources returned",watchesOpened==watchesClosed);
+    check("unregistered path remains unknown without creating a watch",!quiet.sample(qn,qt).valid && watchesOpened==watchesClosed);
+    std::cout << "Native event configuration reader: opens=" << readerOpens << ", reads=" << readerReads << ", watches=" << watchesOpened << "/" << watchesClosed << ".\n";
     std::cout << "Native Global reader PASS: " << cases.size() << " assertions (10000 malformed suffixes included).\n";
 }

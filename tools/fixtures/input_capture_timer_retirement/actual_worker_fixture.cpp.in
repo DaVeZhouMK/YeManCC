@@ -120,6 +120,10 @@ static void inputCaptureInit(){
     if(current->fault==1)throw std::runtime_error("fixture owned init failed");
     if(current->fault==2)throw 123;
 }
+// The optional-initialization helper is a named leaf in this timer-retirement scope.
+// Its actual OEM-only implementation executes in the selected OEM action fixture.
+static void inputCaptureInitializeConsumers(bool){inputCaptureInit();}
+static void inputCaptureReconcileRequestedInitialization(){}
 struct RealStick {bool virtualTargetEnabled=false,motionEnabled=false,enabled=false;};
 static RealStick g_realStickTest;
 static const char* inputHostConfiguredPersona(){return "disabled";}

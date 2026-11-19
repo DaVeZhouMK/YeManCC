@@ -9,11 +9,14 @@ export { cleanGameTitle, normalizeGameTitle, scoreSteamTitle, stripLaunchModeSuf
 export type {DynamicBackgroundConfig,DynamicBackgroundResult} from './steamMediaSource';
 // Native/cache replies are runtime input: a deleted or malformed asset cannot
 // authorize a renderer, even when an old reply still advertises ready=true.
+function backgroundEntryUrl(entry:GameMediaEntry):string {
+  return entry.localUrl?.trim() || entry.url?.trim() || '';
+}
 function usableBackgroundEntry(entry:GameMediaEntry|null|undefined):entry is GameMediaEntry {
   return !!entry && entry.ready===true && entry.deleted!==true &&
     typeof entry.key==='string' && !!entry.key && Number.isSafeInteger(entry.bindingRevision) && entry.bindingRevision>=0 &&
-    typeof entry.url==='string' && !!entry.url.trim() &&
-    (entry.localUrl===undefined || typeof entry.localUrl==='string') &&
+    (entry.url===undefined || typeof entry.url==='string') && (entry.localUrl===undefined || typeof entry.localUrl==='string') &&
+    !!backgroundEntryUrl(entry) &&
     (entry.asset?.kind===undefined || entry.asset.kind==='image' || entry.asset.kind==='video');
 }
 function backgroundReadAdmitted(state:DynamicBackgroundState):boolean {
@@ -32,17 +35,17 @@ async function refreshDynamicBackgroundImpl(game:DetectedGame):Promise<DynamicBa
   const powerEpoch=captureWallpaperPower();
   const admitted=()=>wallpaperPowerCurrent(powerEpoch)&&getDynamicBackgroundConfig().enabled;
   const mediaReadEpoch=gameMediaRevisions.capture();
-  const cached=await sharedGameMedia.lookup({executable:game.path}).catch(()=>null);
+  const cached=await sharedGameMedia.lookup({executable:game.path,currentGameWallpaper:true,localWallpaperDelivery:true}).catch(()=>null);
   if(!admitted())return null;
   const target={...(cached?.ready?{appId:cached.appId||0,name:cached.name||game.title,executable:game.path,verified:cached.identityVerified===true}:await resolveSteamWallpaperIdentity(game)),legacyTarget:{pid:game.pid,processCreated:game.processCreated}};
   if(!admitted())return null;
-  const migrated=!cached?.ready&&target.verified?await invoke<import('./sharedGameMedia').GameMediaEntry>('gameMedia.legacy',{...target,...target.legacyTarget}).catch(()=>null):null;
+  const migrated=!cached?.ready&&target.verified?await invoke<import('./sharedGameMedia').GameMediaEntry>('gameMedia.legacy',{...target,...target.legacyTarget,localWallpaperDelivery:true}).catch(()=>null):null;
   if(!admitted())return null;
   const entry=cached?.ready&&!cached.deleted?cached:migrated?.ready?migrated:await sharedGameMedia.ensure(target,'ymcc',true,true);
   // Shared and verified legacy bytes render now, independently of network work.
-  if((cached?.ready||migrated?.ready)&&usableBackgroundEntry(entry))void (async()=>{
+  if((cached?.ready||migrated?.ready)&&usableBackgroundEntry(entry)&&!entry.currentGameWallpaperFallback)void (async()=>{
     if(!admitted())return;
-    if(cached?.ready&&!cached.dynamicReady&&cached.asset?.kind!=='video'&&target.verified)await invoke('gameMedia.legacy',{...target,...target.legacyTarget}).catch(()=>null);
+    if(cached?.ready&&!cached.dynamicReady&&cached.asset?.kind!=='video'&&target.verified)await invoke('gameMedia.legacy',{...target,...target.legacyTarget,localWallpaperDelivery:true}).catch(()=>null);
     if(admitted())await sharedGameMedia.ensure(target,'ymcc',true,true);
   })().catch(()=>{});
   if(!admitted()||!usableBackgroundEntry(entry))return null;
@@ -50,7 +53,7 @@ async function refreshDynamicBackgroundImpl(game:DetectedGame):Promise<DynamicBa
   // is reusable while performance/input still require the original process.
   const current=await validateGameTarget(game);
   if(!current||current.pid!==game.pid||current.processCreated!==game.processCreated)return null;
-  const state:DynamicBackgroundState={enabled:true,mediaReadEpoch,kind:entry.asset?.kind||'video',url:entry.localUrl||entry.url,appId:entry.appId||target.appId,gameName:entry.name||target.name,source:'shared-cache',pid:game.pid,processCreated:game.processCreated,mediaKey:entry.key,mediaAssetId:entry.asset?.id,mediaBindingRevision:entry.bindingRevision,playback:entry.playback};
+  const state:DynamicBackgroundState={enabled:true,mediaReadEpoch,kind:entry.asset?.kind||'video',url:backgroundEntryUrl(entry),appId:entry.appId||target.appId,gameName:entry.name||target.name,source:'shared-cache',pid:game.pid,processCreated:game.processCreated,mediaKey:entry.key,mediaAssetId:entry.asset?.id,mediaBindingRevision:entry.bindingRevision,playback:entry.playback};
   if(!admitted()||!backgroundReadAdmitted(state))return null;
   window.dispatchEvent(new CustomEvent('dynamic-background:loaded',{detail:state}));
   return {state,appId:entry.appId||target.appId,gameName:entry.name||target.name,source:state.kind==='video'?'video':'background',detectedTitle:target.name,matchedBy:'cache'};
@@ -60,8 +63,8 @@ export async function getDynamicBackgroundState():Promise<DynamicBackgroundState
   const mediaReadEpoch=gameMediaRevisions.capture();
   const powerEpoch=captureWallpaperPower();
   const game=await detectGame(true);if(!wallpaperPowerCurrent(powerEpoch)||!game?.processCreated)return {enabled:false,url:''};
-  const entry=await sharedGameMedia.lookup({executable:game.path});if(!wallpaperPowerCurrent(powerEpoch)||!usableBackgroundEntry(entry))return {enabled:false,url:''};
+  const entry=await sharedGameMedia.lookup({executable:game.path,currentGameWallpaper:true,localWallpaperDelivery:true});if(!wallpaperPowerCurrent(powerEpoch)||!usableBackgroundEntry(entry))return {enabled:false,url:''};
   const current=await validateGameTarget(game);if(!current||current.pid!==game.pid||current.processCreated!==game.processCreated)return {enabled:false,url:''};
-  const state:DynamicBackgroundState={enabled:true,mediaReadEpoch,url:entry.localUrl||entry.url,kind:entry.asset?.kind||'video',appId:entry.appId,gameName:entry.name,pid:game.pid,processCreated:game.processCreated,mediaKey:entry.key,mediaAssetId:entry.asset?.id,mediaBindingRevision:entry.bindingRevision,playback:entry.playback};
+  const state:DynamicBackgroundState={enabled:true,mediaReadEpoch,url:backgroundEntryUrl(entry),kind:entry.asset?.kind||'video',appId:entry.appId,gameName:entry.name,pid:game.pid,processCreated:game.processCreated,mediaKey:entry.key,mediaAssetId:entry.asset?.id,mediaBindingRevision:entry.bindingRevision,playback:entry.playback};
   return wallpaperPowerCurrent(powerEpoch)&&backgroundReadAdmitted(state)?state:{enabled:false,url:''};
 }

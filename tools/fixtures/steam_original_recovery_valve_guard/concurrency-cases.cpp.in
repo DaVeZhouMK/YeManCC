@@ -6,6 +6,7 @@
 #include <cwchar>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -14,7 +15,7 @@
 #include "monitor_identity.h"
 #include "json.hpp"
 using json=nlohmann::json;
-std::string W2U(const std::wstring& value){return std::string(value.begin(),value.end());}
+std::string W2U(const std::wstring& value){std::string out;for(const auto ch:value)out.push_back(static_cast<char>(ch));return out;}
 using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;using SIZE_T=std::size_t;using HANDLE=void*;
 constexpr bool FALSE=false;constexpr DWORD PROCESS_QUERY_LIMITED_INFORMATION=1,PROCESS_VM_READ=2;
 constexpr SIZE_T SG_MIN_WS=500;
@@ -22,13 +23,15 @@ constexpr SIZE_T SG_MIN_WS=500;
 @@GAME_STRUCT@@
 struct PROCESS_MEMORY_COUNTERS{DWORD cb=0;SIZE_T WorkingSetSize=0;};using PROCESS_MEMORY_COUNTERS_EX=PROCESS_MEMORY_COUNTERS;
 namespace ports {
-enum class Point{None,Rules,FirstIdentity,FinalIdentity};
+enum class Point{None,Rules,FirstIdentity,FinalIdentity,ScanComplete};
 struct State {
  unsigned steps=0,identities=0,ruleReads=0,hooks=0,publications=0,scans=0;
  unsigned rulesError=0,failAtSnapshot=1;unsigned long long publishedGeneration=0;
  bool publicationOk=true;
  bool identityOk=true,sessionsOk=true,sameSession=true,memoryOk=true,openOk=true,excluded=false;
  SIZE_T memory=900;double now=100;
+ NativeGameDiscoveryState discoveryState=NativeGameDiscoveryState::Complete;
+ ULONGLONG qualificationObservedAt=100000,tick=100000;
  NativeDetectedGame process,candidate;
  std::vector<std::wstring> white{L"bluey"},black{L"explorer"},custom{L"bluey"};
  Point point=Point::None;std::function<void()> hook;
@@ -55,23 +58,69 @@ bool GetProcessMemoryInfo(HANDLE,PROCESS_MEMORY_COUNTERS*p,std::size_t){ports::s
 void nativeRefreshGameRulesEpochFromDiskLocked(){++ports::s.ruleReads;ports::hit(ports::Point::Rules);if(ports::s.rulesError==1&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules metadata/read failure");}
 std::vector<std::wstring> sgExcludes(){ports::step();if(ports::s.rulesError==2&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.black;}
 std::vector<std::wstring> sgGameWhitelist(){ports::step();if(ports::s.rulesError==3&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.white;}
+void sgReadRecognitionGameRules(std::vector<std::wstring>& excludes,std::vector<std::wstring>& whitelist){auto a=sgExcludes();auto b=sgGameWhitelist();excludes.swap(a);whitelist.swap(b);}
 std::vector<std::wstring> nativeConfiguredGameExes(){ports::step();if(ports::s.rulesError==4&&ports::s.ruleReads>=ports::s.failAtSnapshot)throw std::runtime_error("fixture rules configuration unavailable");return ports::s.custom;}
 bool nativeMonitorExcluded(const std::wstring&){ports::step();return ports::s.excluded;}
 bool nativeIsConfiguredGameExe(const std::wstring& name,const std::vector<std::wstring>& list){ports::step();return std::find(list.begin(),list.end(),name)!=list.end();}
 NativeOnePidResult nativeScanGameOnePid(DWORD,const std::wstring&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*out,bool*topologyChanged=nullptr){ports::step();++ports::s.scans;if(topologyChanged)*topologyChanged=false;if(!out)return NativeOnePidResult::Rejected;*out=ports::s.candidate;return out->pid?NativeOnePidResult::Ok:NativeOnePidResult::Rejected;}
-NativeDetectedGame nativeScanGame(DWORD,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeGameDiscoveryState*discoveryState=nullptr){ports::step();++ports::s.scans;if(discoveryState)*discoveryState=NativeGameDiscoveryState::Complete;return ports::s.candidate;}
+NativeDetectedGame nativeScanGame(DWORD,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeGameDiscoveryState*discoveryState=nullptr,ULONGLONG*qualificationObservedAt=nullptr){ports::step();++ports::s.scans;if(discoveryState)*discoveryState=ports::s.discoveryState;if(qualificationObservedAt)*qualificationObservedAt=ports::s.qualificationObservedAt;if(ports::s.point==ports::Point::ScanComplete)ports::hit(ports::Point::ScanComplete);return ports::s.candidate;}
 bool nativeScanGameConfiguredBest(const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*){ports::step();++ports::s.scans;return false;}
 std::wstring nativeProcessWindowTitle(DWORD){ports::step();return L"Bluey";}
 static std::atomic<bool> g_updateGameDetected{true};
 static std::atomic<ULONGLONG> g_updateGameObservationTick{0};
-static ULONGLONG GetTickCount64(){return 100000;}
+static ULONGLONG GetTickCount64(){return ports::s.tick;}
+static unsigned long long fixturePower=7;
+static unsigned long long currentPowerGeneration(){return fixturePower;}
+namespace ymcc::gameInventory {static std::atomic<unsigned long long>invalidation{9};}
+static std::atomic<ULONGLONG>g_focusLightProofNotBefore{0};
+enum class PowerLifecycle {Ready,Suspending,Resuming};
+static std::atomic<PowerLifecycle>g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<bool>g_exitRequested{false};
+static void* g_hwnd=nullptr;
+static std::atomic<bool>g_focusLightIsolationTicket{false};
+static constexpr unsigned WM_LIGHT_ISOLATION_RECHECK=1;
+static bool PostMessageW(void*,unsigned,std::uintptr_t,std::intptr_t){ports::step();return true;}
 struct FixtureDownloadControl {struct State{int operation=0;};State status(){return {};}void cancel(int){}};
 static FixtureDownloadControl g_updateDownloadControl;
 static const std::wstring MONITOR_GAME_TARGET_JSON=L"owned-memory-only";
 static bool sgWriteMonitorSnapshotDurable(const std::wstring&,const std::string&){ports::step();++ports::s.publications;return ports::s.publicationOk;}
 static void steamOriginalRecoveryTargetChanged(DWORD,ULONGLONG,const std::wstring&,unsigned long long){}
 static void gamepadSerialPostEvent(const char*,const json&){}
+static void steamGameLinkNotify(){}
+static std::atomic<bool> g_focusIsolationGameOpen{false};
 static void appendNativeLifecycleLog(const char*,const json&){}
+static void mousePolicyGameContextChanged(){}
+static bool focusLightVirtualIdle(){return true;}
+static void steamOriginalRecoveryBusinessCommit(bool,const std::function<void()>& publish){publish();}
+
+namespace ymcc::sleeppower {struct SharedPowerV1 { unsigned long long generation=0, sequence=0; };}
+static unsigned long long overlaySequence=10;
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& p){
+ if(g_powerLifecycle!=PowerLifecycle::Ready||g_exitRequested)return false;
+ p={fixturePower,overlaySequence};return true;
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& p){
+ return g_powerLifecycle==PowerLifecycle::Ready&&!g_exitRequested&&p.generation==fixturePower&&p.sequence==overlaySequence;
+}
+
+#ifdef YMCC_TEST_OVERLAY
+using HWND=void*;
+struct RECT { long a,b,c,d; };
+static HWND overlayForeground=reinterpret_cast<HWND>(7780);
+static constexpr unsigned GA_ROOT=2;
+static HWND GetForegroundWindow(){return overlayForeground;}
+static HWND GetAncestor(HWND window,unsigned){return window;}
+static unsigned long long overlayRevocations=0;
+static unsigned overlayRegistrations=0;
+struct OverlayRegistration {
+ unsigned long long revision;
+ explicit OverlayRegistration(unsigned long long r):revision(r){++overlayRegistrations;}
+ ~OverlayRegistration(){--overlayRegistrations;}
+ explicit operator bool()const{return true;}
+ bool cancelled()const{return revision!=overlayRevocations;}
+};
+static OverlayRegistration observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1&){return OverlayRegistration(overlayRevocations);}
+#endif
 
 namespace frozen {
 // BEGIN PRESERVED ROG 20261023-125040 FUNCTIONS
@@ -384,13 +433,16 @@ namespace production {
 @@CURRENT_STRUCT@@
 static NativeGameValveSnapshot g_gameValveTarget;
 static unsigned long long g_gameValveGeneration=0;
+static unsigned long long g_gameNoGameEpoch=1;
 std::mutex g_gameValveMx;
 static std::mutex g_gameValvePublishMx;
 static unsigned long long g_gameValvePublishedGeneration=0;
 static json nativeGameTargetJson(const NativeGameValveSnapshot& target);
+static std::atomic<std::shared_ptr<const NativeGameValveSnapshot>>g_gameValveObservation;
 @@CURRENT_PUBLISHER@@
 @@CURRENT_FUNCTIONS@@
 }
+@@OVERLAY_QUALIFICATION@@
 struct View{NativeDetectedGame game;unsigned long long generation=0,identity=0,rules=0;double selected=0,last=0;};
 template<class T> View viewOf(const T&t){View v{t.game,t.generation,0,t.rulesEpoch,t.selectedAtEpoch,t.lastSeenEpoch};if constexpr(requires{t.identityGeneration;})v.identity=t.identityGeneration;return v;}
 #define ADAPTER(TYPE,NS,CLEAR) struct TYPE{ \
@@ -409,7 +461,7 @@ ADAPTER(New,production,production::nativeValveClearLocked(NativeGameDiscoverySta
 unsigned checks=0,cases=0,maxPortSteps=0;
 void check(bool okay,const std::string& why){++checks;if(!okay)throw std::runtime_error(why);}
 NativeDetectedGame original(){NativeDetectedGame g;g.pid=10340;g.name=L"bluey";g.title=L"Bluey";g.path=L"D:\\Game\\Bluey.exe";g.processCreated=134372069314736092ULL;g.workingSet=900;g.whitelisted=true;g.customConfigured=true;g.whitelistRule=L"bluey";return g;}
-template<class A> void reset(){ports::s={};g_gameRulesEpoch=5;g_updateGameDetected=true;g_updateGameObservationTick=0;ports::s.process=original();ports::s.candidate=original();A::reset();A::commit(original());}
+template<class A> void reset(){ports::s={};fixturePower=7;ymcc::gameInventory::invalidation=9;g_focusLightProofNotBefore=0;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;production::g_gameValveObservation.store({});g_gameRulesEpoch=5;g_updateGameDetected=true;g_updateGameObservationTick=0;ports::s.process=original();ports::s.candidate=original();A::reset();A::commit(original());}
 struct Result{bool accepted=false;View begin,end;unsigned long long output=999;NativeDetectedGame game;unsigned hooks=0;};
 template<class A> Result round(ports::Point point,std::function<void()> hook,bool expected,const char*name){
  Result r;r.begin=A::view();ports::s.point=point;ports::s.hook=std::move(hook);r.game.pid=999;
@@ -493,7 +545,7 @@ void ruleConfigurationFailures(){
  }
  scenario("persistent bad config does not create publication storm",[&]{reset<New>();ports::s.rulesError=2;production::nativeValveAcquire();const auto first=New::view();for(unsigned i=0;i<40;++i){auto value=production::nativeValveAcquire();check(!value.pid,"bad config regained target");}check(New::view().generation==first.generation&&New::view().identity==first.identity&&ports::s.publications==1&&ports::s.scans==0,"repeated failure changed lease or repeated writes");});
  scenario("cold start bad config stays usable then repairs",[&]{reset<New>();New::reset();ports::s.rulesError=1;auto game=production::nativeValveAcquire();check(!game.pid&&ports::s.scans==0&&ports::s.publications==1,"cold bad config guessed identity");ports::s.rulesError=0;game=production::nativeValveAcquire();check(game.pid==original().pid,"cold repair did not re-elect");});
- scenario("already published idle loses readiness on config error",[&]{reset<New>();production::nativeValveClearLocked();production::nativeValvePublish(production::g_gameValveTarget);check(!g_updateGameDetected.load()&&g_updateGameObservationTick.load()!=0,"healthy no-game publication fixture missing");const auto publications=ports::s.publications;ports::s.rulesError=2;production::NativeGameValveSnapshot observation;production::nativeValveAcquire(0,0,&observation);check(g_updateGameDetected.load()&&g_updateGameObservationTick.load()==0&&observation.generation==New::view().generation&&observation.generation>0&&observation.discoveryState==NativeGameDiscoveryState::Unavailable,"old no-game readiness remained trusted");check(ports::s.publications==publications+1,"idle-to-unavailable transition did not publish one tombstone");});
+ scenario("already published idle loses readiness on config error",[&]{reset<New>();production::nativeValveClearLocked(NativeGameDiscoveryState::Complete,ports::s.qualificationObservedAt);production::nativeValvePublish(production::g_gameValveTarget);check(!g_updateGameDetected.load()&&g_updateGameObservationTick.load()!=0,"healthy no-game publication fixture missing");const auto publications=ports::s.publications;ports::s.rulesError=2;production::NativeGameValveSnapshot observation;production::nativeValveAcquire(0,0,&observation);check(g_updateGameDetected.load()&&g_updateGameObservationTick.load()==0&&observation.generation==New::view().generation&&observation.generation>0&&observation.discoveryState==NativeGameDiscoveryState::Unavailable,"old no-game readiness remained trusted");check(ports::s.publications==publications+1,"idle-to-unavailable transition did not publish one tombstone");});
  scenario("failed tombstone publication retries without new lease",[&]{reset<New>();ports::s.rulesError=2;ports::s.publicationOk=false;production::nativeValveAcquire();const auto generation=New::view().generation;ports::s.publicationOk=true;production::nativeValveAcquire();check(New::view().generation==generation&&ports::s.publications==2,"failed invalid publication did not retry stable generation");production::nativeValveAcquire();check(ports::s.publications==2,"successful tombstone was not de-duplicated");});
  scenario("stale config error cannot revoke newer healthy observation",[&]{reset<New>();production::nativeValveClearLocked();const auto old=production::g_gameValveTarget;production::nativeValvePublish(old,false);const auto selected=production::nativeValveAcquire();check(selected.pid==original().pid&&g_updateGameObservationTick.load()!=0,"healthy successor missing");const auto writes=ports::s.publications;const auto observed=g_updateGameObservationTick.load();production::nativeValvePublish(old,false);check(g_updateGameObservationTick.load()==observed&&g_updateGameDetected.load()&&ports::s.publications==writes,"stale failure replaced fresher game readiness");});
  unsigned failed=0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;std::cout<<json{{"passed",failed==0},{"cases",rows},{"caseCount",rows.size()},{"failed",failed},{"checks",checks},{"realWindowsActions",0}}.dump(2)<<"\n";if(failed)throw std::runtime_error("configuration caller scenarios failed");
@@ -513,4 +565,33 @@ void identityPathRecovery(){
  check(New::view().identity==lease&&New::view().generation>recovered.generation,"later heartbeat must preserve completed lease");
  std::cout<<"{\"passed\":true,\"selection\":\"identity-path-recovery\",\"checks\":"<<checks<<",\"actualAcquireExecuted\":true,\"realWindowsOrSteamActions\":0}";
 }
-int main(int argc,char** argv){try{if(argc>1&&std::string(argv[1])=="--identity-path-recovery-only"){identityPathRecovery();return 0;}if(argc>1&&std::string(argv[1])=="--config-read-errors-only"){ruleConfigurationFailures();return 0;}readers();writers();responses();std::cout<<"{\"passed\":true,\"checks\":"<<checks<<",\"wireSamples\":"<<wireSamples.dump()<<",\"readerCases\":"<<cases<<",\"maxPortSteps\":"<<maxPortSteps<<",\"portStepBudget\":256,\"frozenHeartbeatFalseRejectionReproduced\":true,\"productionHeartbeatAccepted\":true,\"actualAcquireRetainedBranchExecuted\":true,\"targetAndClearABARejected\":true,\"realWindowsOrSteamActions\":0}";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+void emptyObservations(){
+ json rows=json::array();
+ auto scenario=[&](const char* name,const std::function<void()>& body){try{body();rows.push_back({{"name",name},{"ok",true}});}catch(const std::exception& error){rows.push_back({{"name",name},{"ok",false},{"error",error.what()}});}};
+ auto start=[] {reset<New>();New::reset();ports::s.candidate={};};
+ auto acquire=[] {production::NativeGameValveSnapshot observation;const auto game=production::nativeValveAcquire(0,0,&observation);check(!game.pid&&!observation.game.pid,"empty observation elected a game");return observation;};
+ scenario("same empty qualification preserves generation and one durable write",[&]{start();const auto first=acquire();const auto observed=production::g_gameValveObservation.load();for(unsigned i=0;i<6;++i){ports::s.tick+=1000;const auto next=acquire();check(next.generation==first.generation&&next.identityGeneration==first.identityGeneration,"duplicate empty observation changed generation");check(next.qualificationObservedAt==first.qualificationObservedAt,"duplicate empty observation renewed its age");}check(ports::s.publications==1&&production::g_gameValveObservation.load()==observed,"duplicate empty observation repeated durable publication");check(ports::s.scans==7&&ports::s.ruleReads==7,"dedup suppressed the actual rule/discovery ports");});
+ scenario("new exhausted inventory observation advances generation",[&]{start();const auto first=acquire();++ports::s.qualificationObservedAt;const auto next=acquire();check(next.generation>first.generation&&next.qualificationObservedAt==ports::s.qualificationObservedAt&&ports::s.publications==2,"new observation did not publish");check(next.identityGeneration==first.identityGeneration,"new empty observation revoked unchanged identity lease");});
+ scenario("empty qualification rule boundary advances generation",[&]{start();const auto first=acquire();++g_gameRulesEpoch;const auto next=acquire();check(next.generation>first.generation&&next.qualificationRulesEpoch==g_gameRulesEpoch.load()&&ports::s.publications==2,"new rules must publish empty qualification");check(next.rulesEpoch==0&&production::focusLightNoGameQualified(ports::s.tick),"qualification used public zero rules epoch");});
+ scenario("empty qualification power boundary advances generation",[&]{start();const auto first=acquire();++fixturePower;const auto next=acquire();check(next.generation>first.generation&&next.qualificationPower==fixturePower&&ports::s.publications==2,"new power boundary did not publish");});
+ scenario("empty qualification inventory boundary advances generation",[&]{start();const auto first=acquire();++ymcc::gameInventory::invalidation;const auto next=acquire();check(next.generation>first.generation&&next.qualificationInventory==ymcc::gameInventory::invalidation.load()&&ports::s.publications==2,"inventory invalidation did not publish");});
+ scenario("first empty generation is always published",[&]{start();auto& target=New::raw();target.discoveryState=NativeGameDiscoveryState::Complete;target.qualificationObservedAt=ports::s.qualificationObservedAt;target.qualificationRulesEpoch=g_gameRulesEpoch;target.qualificationPower=fixturePower;target.qualificationInventory=ymcc::gameInventory::invalidation;const auto next=acquire();check(next.generation>0&&ports::s.publications==1,"zero generation was coalesced");});
+ scenario("zero qualification never acquires reusable idle proof",[&]{start();ports::s.qualificationObservedAt=0;const auto first=acquire(),next=acquire();check(next.generation>first.generation&&ports::s.publications==2&&!production::focusLightNoGameQualified(ports::s.tick),"zero qualification became cached idle proof");});
+ scenario("failed empty write retries the same generation",[&]{start();ports::s.publicationOk=false;const auto first=acquire();check(production::g_gameValvePublishedGeneration==0&&ports::s.publications==1,"failed write advanced durable watermark");ports::s.publicationOk=true;const auto next=acquire();check(next.generation==first.generation&&ports::s.publications==2&&production::g_gameValvePublishedGeneration==first.generation,"same observed empty retry must preserve generation");acquire();check(ports::s.publications==2,"successful retry was not deduplicated");});
+ scenario("pending complete unavailable repair transitions remain visible",[&]{start();ports::s.discoveryState=NativeGameDiscoveryState::Pending;const auto pending=acquire();acquire();check(ports::s.publications==1&&g_updateGameDetected&&g_updateGameObservationTick==0,"pending became confirmed idle");ports::s.discoveryState=NativeGameDiscoveryState::Complete;const auto complete=acquire();check(complete.generation>pending.generation&&ports::s.publications==2&&!g_updateGameDetected&&g_updateGameObservationTick==ports::s.qualificationObservedAt,"pending to complete was coalesced");ports::s.rulesError=2;const auto unknown=acquire();check(unknown.discoveryState==NativeGameDiscoveryState::Unavailable&&unknown.generation>complete.generation&&g_updateGameDetected&&g_updateGameObservationTick==0,"unavailable inputs retained idle proof");ports::s.rulesError=0;const auto repaired=acquire();check(repaired.generation>unknown.generation&&ports::s.publications==4&&production::focusLightNoGameQualified(ports::s.tick),"repair failed to republish complete empty observation");});
+ scenario("valid target heartbeats and return to empty remain unchanged",[&]{start();const auto empty=acquire();ports::s.candidate=original();const auto game=production::nativeValveAcquire();const auto firstGame=New::raw();check(game.pid==original().pid&&firstGame.generation>empty.generation&&firstGame.identityGeneration!=empty.identityGeneration,"empty to game lost identity boundary");production::nativeValveAcquire();check(New::raw().generation>firstGame.generation&&New::raw().identityGeneration==firstGame.identityGeneration&&ports::s.publications==3,"valid target heartbeat was suppressed");ports::s.identityOk=false;ports::s.candidate={};const auto gone=acquire();check(gone.generation>firstGame.generation&&gone.identityGeneration!=firstGame.identityGeneration&&ports::s.publications==4,"game exit did not publish empty state");});
+ scenario("strict rejected PID is unavailable and never idle",[&]{start();const auto empty=acquire();production::NativeGameValveSnapshot rejected;const auto game=production::nativeValveAcquire(999,0,&rejected);check(!game.pid&&rejected.rejectedPreferredPid==999&&rejected.discoveryState==NativeGameDiscoveryState::Unavailable&&rejected.generation>empty.generation&&!production::focusLightNoGameQualified(ports::s.tick),"strict rejected PID reused complete empty proof");const auto next=acquire();check(next.generation>rejected.generation&&production::focusLightNoGameQualified(ports::s.tick),"normal discovery did not recover after strict rejection");});
+ scenario("cached empty observations cannot extend 30s proof",[&]{start();const auto first=acquire();check(production::focusLightNoGameQualified(first.qualificationObservedAt+30000)&&!production::focusLightNoGameQualified(first.qualificationObservedAt+30001),"qualification expiry boundary changed");ports::s.tick=first.qualificationObservedAt+30001;acquire();check(!production::focusLightNoGameQualified(ports::s.tick)&&g_updateGameObservationTick==first.qualificationObservedAt&&ports::s.publications==1,"duplicate acquire renewed expired proof");ports::s.qualificationObservedAt=ports::s.tick;acquire();check(production::focusLightNoGameQualified(ports::s.tick)&&ports::s.publications==2,"fresh inventory did not restore proof");});
+ scenario("idle proof still obeys readiness cutoff and exit",[&]{start();const auto first=acquire();g_focusLightProofNotBefore=first.qualificationObservedAt+1;check(!production::focusLightNoGameQualified(ports::s.tick),"pre-sleep qualification bypassed cutoff");g_focusLightProofNotBefore=0;g_powerLifecycle=PowerLifecycle::Suspending;check(!production::focusLightNoGameQualified(ports::s.tick),"suspending qualification became ready");g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=true;check(!production::focusLightNoGameQualified(ports::s.tick),"exit retained idle proof");});
+ scenario("late empty cannot replace newer failed positive observation",[&]{start();const auto empty=acquire();ports::s.candidate=original();ports::s.publicationOk=false;production::nativeValveAcquire();const auto newer=production::g_gameValveObservation.load();const auto writes=ports::s.publications;production::nativeValvePublish(empty);check(newer->game.pid==original().pid&&production::g_gameValveObservation.load()==newer&&ports::s.publications==writes&&g_updateGameDetected,"late empty replaced failed positive authority");});
+ unsigned failed=0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;
+ std::cout<<json{{"passed",failed==0},{"selection","empty-observations"},{"cases",rows},{"caseCount",rows.size()},{"failed",failed},{"checks",checks},{"portStepBudget",256},{"actualAcquireAndPublisherExecuted",true},{"realWindowsOrSteamActions",0}}.dump(2)<<'\n';
+ if(failed)throw std::runtime_error("empty observation cases failed");
+}
+@@OVERLAY_CASES@@
+int main(int argc,char** argv){try{
+#ifdef YMCC_TEST_OVERLAY
+ if(argc>1&&std::string(argv[1])=="--overlay-qualification-only"){overlayCases(false);return 0;}
+ if(argc>1&&std::string(argv[1])=="--overlay-old-control"){overlayCases(true);return 0;}
+#endif
+if(argc>1&&std::string(argv[1])=="--empty-observation-only"){emptyObservations();return 0;}if(argc>1&&std::string(argv[1])=="--identity-path-recovery-only"){identityPathRecovery();return 0;}if(argc>1&&std::string(argv[1])=="--config-read-errors-only"){ruleConfigurationFailures();return 0;}readers();writers();responses();std::cout<<"{\"passed\":true,\"checks\":"<<checks<<",\"wireSamples\":"<<wireSamples.dump()<<",\"readerCases\":"<<cases<<",\"maxPortSteps\":"<<maxPortSteps<<",\"portStepBudget\":256,\"frozenHeartbeatFalseRejectionReproduced\":true,\"productionHeartbeatAccepted\":true,\"actualAcquireRetainedBranchExecuted\":true,\"targetAndClearABARejected\":true,\"realWindowsOrSteamActions\":0}";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

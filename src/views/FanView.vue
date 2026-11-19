@@ -46,6 +46,8 @@ import { compactFanStatus } from './fanStatusText';
 import { fanDiagnosticLog } from '@/bridge/fanDiagnostics';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { emitNativeEvent } from '@/bridge/ipc';
+import { onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
+let stopSharedFanPower: (() => void) | null = null;
 
 type FanPreset = FanFeatureSettings['preset'];
 
@@ -55,12 +57,12 @@ const PRESETS: Record<FanPreset, FanNode[]> = {
     { tempC: 70, dutyPercent: 20 }, { tempC: 100, dutyPercent: 80 },
   ],
   balanced: [
-    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 },
-    { tempC: 70, dutyPercent: 45 }, { tempC: 100, dutyPercent: 90 },
+    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 30 },
+    { tempC: 70, dutyPercent: 65 }, { tempC: 90, dutyPercent: 100 },
   ],
   aggressive: [
     { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 30 },
-    { tempC: 70, dutyPercent: 75 }, { tempC: 100, dutyPercent: 100 },
+    { tempC: 65, dutyPercent: 67 }, { tempC: 80, dutyPercent: 100 },
   ],
 };
 const PRESET_OPTIONS = [
@@ -344,7 +346,7 @@ const recoveryStageText = computed(() => {
 });
 const controlText = computed(() => controlStartPending.value ? '正在开启…'
   : controlRecoveryPending.value ? '正在恢复…'
-  : controlEstablished.value ? '风扇已开启' : '风扇未操控');
+  : controlEstablished.value ? '点击关闭' : '点击启用');
 
 function hostHasLiveControl(state: Awaited<ReturnType<typeof fanHostLifecycle.getState>>): boolean {
   const lease = fanHostLifecycle.currentLease;
@@ -574,7 +576,7 @@ async function refreshTelemetry(): Promise<void> {
   const intentEpoch = controlCommitEpoch;
   telemetryInFlightGeneration = generation;
   try {
-    const state = await fanHostLifecycle.getState({ discardSuperseded: true });
+    const state = await fanHostLifecycle.getState({ discardSuperseded: true, diagnosticSource: 'page-telemetry' });
     if (!state) return;
     // 迟到的 in-flight 结果按视图代丢弃：页面失活/隐藏/卸载后不得再写回状态。
     if (generation !== telemetryGeneration || intentEpoch !== controlCommitEpoch) return;
@@ -711,10 +713,16 @@ function onDocumentVisibilityChange(): void {
 }
 
 function onFanPowerSuspending(event: Event): void {
-  const generation = Number((event as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
+  const detail = (event as CustomEvent<{ generation?: number; scope?: string; resumeCatchup?: boolean }>).detail;
+  const generation = Number(detail?.generation) || 0;
   if (!Number.isSafeInteger(generation) || generation <= 0
       || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration
       || generation < fanPowerGeneration) return;
+  // Wake-time Close catchup belongs to this ON request. App owns the lease
+  // retirement; keep the page commit and its fixed click guard until it settles.
+  // Shared/legacy sleep events still retire the page epoch below.
+  if (event.type === 'ipc:fan.suspending' && detail?.scope === 'fan-only'
+      && detail.resumeCatchup === true) return;
   fanWakeProtectionDeadline = 0;
   fanControlSwitchProtectionDeadline = 0;
   syncControlSwitchLock();
@@ -1368,9 +1376,20 @@ onMounted(() => {
   viewActive = true;
   viewVisible = !document.hidden;
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
-  window.addEventListener('ipc:power.suspending', onFanPowerSuspending);
   window.addEventListener('ipc:fan.suspending', onFanPowerSuspending);
-  window.addEventListener('ipc:power.resumed', onFanPowerWake);
+  let sharedPowerKey = '', sharedGeneration = 0;
+  stopSharedFanPower = onSharedPowerLifecycle(state => {
+    const key = `${state.generation}:${state.phase}:${state.known}`;
+    if (key === sharedPowerKey) return;
+    const newGeneration = sharedGeneration > 0 && state.generation > sharedGeneration;
+    sharedPowerKey = key; sharedGeneration = state.generation;
+    // Shared unknown/input readiness cannot replace the Fan-only kernel facts.
+    if (state.known === false) return;
+    const event = new CustomEvent('shared:power-lifecycle', { detail: state });
+    if (state.phase === 'suspending' || state.phase === 'suspended') onFanPowerSuspending(event);
+    else if (state.phase === 'ready' && (newGeneration || fanSuspendBoundary || fanHostLifecycle.state === 'suspended'))
+      onFanPowerWake(event);
+  });
   window.addEventListener('ipc:power.resume-ready', onFanPowerWake);
   window.addEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.addEventListener('fan:guard-state', onFanGuardState);
@@ -1451,9 +1470,8 @@ onUnmounted(() => {
   viewActive = false;
   emitNativeEvent('gamepad.fan-node-edit', { active: false });
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
-  window.removeEventListener('ipc:power.suspending', onFanPowerSuspending);
+  stopSharedFanPower?.(); stopSharedFanPower = null;
   window.removeEventListener('ipc:fan.suspending', onFanPowerSuspending);
-  window.removeEventListener('ipc:power.resumed', onFanPowerWake);
   window.removeEventListener('ipc:power.resume-ready', onFanPowerWake);
   window.removeEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.removeEventListener('fan:guard-state', onFanGuardState);

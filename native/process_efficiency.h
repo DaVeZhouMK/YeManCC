@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include "process_handle_inheritance.h"
 #include <shellapi.h>
 #include <algorithm>
 #include <array>
@@ -103,6 +104,8 @@ inline BOOL createProcess(LPCWSTR application,LPWSTR command,LPSECURITY_ATTRIBUT
     // class. Self-owned tasks are opted back into efficiency via their handle.
     constexpr DWORD priorityFlags=IDLE_PRIORITY_CLASS|BELOW_NORMAL_PRIORITY_CLASS|NORMAL_PRIORITY_CLASS|ABOVE_NORMAL_PRIORITY_CLASS|HIGH_PRIORITY_CLASS|REALTIME_PRIORITY_CLASS;
     if(!(flags&priorityFlags))flags|=NORMAL_PRIORITY_CLASS;
+    std::unique_lock<std::recursive_mutex> inheritedCreate(ymcc::processInheritance::owner(),std::defer_lock);
+    try{if(inherit)inheritedCreate.lock();}catch(...){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return FALSE;}
     const BOOL created=CreateProcessW(application,command,processAttributes,threadAttributes,inherit,flags,environment,directory,startup,info);
     if(created&&info&&info->hProcess)applyOwnedChild(info->hProcess);
     return created;

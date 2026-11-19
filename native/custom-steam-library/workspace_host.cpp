@@ -6,6 +6,9 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include "../process_efficiency.h"
+#include "../steam_information_client.h"
+#include "../steam_offline_mutation_gate.h"
+#include "../steam_client_action_channel.h"
 #include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
@@ -53,12 +56,15 @@
 #include "json.hpp"
 #include "custom_steam_library_paths.h"
 #include "custom_steam_library_config.h"
+#include "custom_steam_library_exclusions.h"
 #include "custom_steam_library_inventory.h"
 #include "custom_steam_library_identity_cache.h"
+#include "custom_steam_library_plan_receipt.h"
 #include "custom_steam_library_video_catalog.h"
 #include "../shared_game_media_video_request.h"
 #include "custom_steam_library_opti_catalog.h"
 #include "../opti_catalog_startup.h"
+#include "../steamdeck_mouse_vdf.h"
 #include "../shared_game_media.h"
 #include "../power_source_channel.h"
 #include "../shared_game_media_download_worker.h"
@@ -81,6 +87,7 @@ namespace fs = std::filesystem;
 static constexpr UINT WM_WORKSPACE_RESULT = WM_APP + 0x41;
 static constexpr UINT WM_WORKSPACE_DIRECTORY_DIRTY = WM_APP + 0x42;
 static constexpr UINT WM_WORKSPACE_NETWORK_RESTORED = WM_APP + 0x43;
+static constexpr UINT WM_WORKSPACE_WRITES_DRAINED = WM_APP + 0x46;
 static constexpr UINT_PTR DIRECTORY_DEBOUNCE_TIMER = 0x51;
 static constexpr UINT_PTR GAMEPAD_TIMER = 0x52;
 static constexpr UINT_PTR UPDATE_HEALTH_EXIT_TIMER = 0x53;
@@ -125,6 +132,12 @@ static ComPtr<ICoreWebView2Environment> g_webviewEnvironment;
 static std::atomic<UINT64> g_webviewExpectedNavigationId{0};
 static std::atomic<uint64_t> g_refreshDocumentEpoch{1};
 static std::atomic<uint64_t> g_refreshProtocolEpoch{0};
+static std::atomic<uint64_t> g_mediaProgressProtocolEpoch{0};
+static std::atomic<uint64_t> g_webviewBindingEpoch{0};
+static std::mutex g_replyRoutesMutex;
+static uint64_t g_replySequence=0;
+struct WorkspaceReplyRoute {uint64_t browserId,document;};
+static std::unordered_map<uint64_t,WorkspaceReplyRoute> g_replyRoutes;
 static std::atomic<bool> g_webviewMainDocumentReady{false};
 static std::atomic<int> g_webviewNavigationRetries{0};
 static std::atomic<int> g_webviewProcessRecoveries{0};
@@ -190,6 +203,8 @@ static HANDLE g_workerProcessJob = nullptr;
 static std::atomic<bool> g_libraryPipelineRunning{false};
 static std::atomic<bool> g_scrapeQueueRunning{false};
 static std::atomic<bool> g_scrapeQueueForceRequested{false};
+static std::mutex g_scrapeQueueStateMutex;
+static bool g_scrapeQueueFollowupRequested = false; // guarded by queue state mutex
 static std::atomic<uint64_t> g_scrapeBatchSequence{0};
 static std::atomic<bool> g_manualIdentifyRunning{false};
 static std::mutex g_manualSubmissionMutex;
@@ -247,6 +262,7 @@ struct BackgroundJobControl {
     std::string key;
     std::string jobId;
     uint64_t generation = 0;
+    std::set<std::string> removedExecutableKeys; // Queue-local, released with its owner.
 };
 using BackgroundJob = std::shared_ptr<BackgroundJobControl>;
 static std::mutex g_backgroundJobsMutex;
@@ -295,6 +311,10 @@ static std::atomic<bool> g_directoryDirty{false};
 // continue to plan against the account the user selected.
 static json g_steamTarget = json::object();
 static std::mutex g_steamTargetMutex;
+// Last explicitly observed read target only; never a Steam write target.
+// Reuse the existing target mutex and keep it scoped to this data root/selection.
+static json g_steamPlanReadTarget = json::object(), g_steamPlanReadSelection = json::object();
+static fs::path g_steamPlanReadRoot;
 
 static void setSteamTarget(const json& target) {
     std::lock_guard<std::mutex> lock(g_steamTargetMutex);
@@ -659,21 +679,27 @@ static bool hostDiscoveryDocumentValid(const fs::path& path,const json& value) {
     const auto text=[](const json& item){return item.is_string()&&item.get_ref<const std::string&>().find('\0')==std::string::npos;};
     for(const auto* key:{"libraryState","accountId","shortcutsVdf","steamRoot","mode","selectionMode"})if(value.contains(key)&&!text(value[key]))return false;
     const auto name=path.filename().wstring();
-    const auto rows=[&](const char* key){
+    const auto rows=[&](const char* key, bool allowUnconfirmedPrimary = false){
         if(!value.contains(key))return true;
         if(!value[key].is_array())return false;
         for(const auto& row:value[key]){
             if(!row.is_object())return false;
-            for(const auto* field:{"primaryExecutable","gameDirectory","directoryName","status","contentType","primaryRole","accountId","shortcutsVdf","steamRoot"})
+            for(const auto* field:{"primaryExecutable","primaryRole"})
+                if(row.contains(field)&&!text(row[field])&&!(allowUnconfirmedPrimary&&row[field].is_null()))return false;
+            for(const auto* field:{"gameDirectory","directoryName","status","contentType","accountId","shortcutsVdf","steamRoot"})
                 if(row.contains(field)&&!text(row[field]))return false;
             for(const auto* field:{"scanComplete","realSteamTarget","steamNative","committed"})if(row.contains(field)&&!row[field].is_boolean())return false;
         }
         return true;
     };
-    if(name==L"library-scan.json")for(const auto* key:{"games","roots","unscannedGames","missingGames"})if(!rows(key))return false;
+    // The Worker emits null primary fields when no executable was confirmed.
+    if(name==L"library-scan.json"){
+        if(!rows("roots"))return false;
+        for(const auto* key:{"games","unscannedGames","missingGames"})if(!rows(key,true))return false;
+    }
     if(name==L"steam-accounts.json"&&!rows("accounts"))return false;
     if(name==L"steam-add-plan.json"||name==L"library-steam-add-plan.json"){
-        if(!value.contains("items")||!value["items"].is_array()||!value.contains("summary")||!value["summary"].is_object()||!rows("items"))return false;
+        if(!value.contains("items")||!value["items"].is_array()||!value.contains("summary")||!value["summary"].is_object()||!rows("items",true))return false;
     }
     return true;
 }
@@ -879,9 +905,18 @@ static std::optional<json> admitHostDataRootCommand(const std::string& command) 
     // Pure window/dialog/cancellation control remains available; no storage or
     // worker/network entry may pass on an unknown root. New commands fail closed.
     static const std::set<std::string> controls={"closeWorkspace","cancelTask","cancelArtwork","cancelIdentitySearch","activateWorkspace","keyboard","pickArtwork","pickVideo","pickExecutable","pickDirectory"};
+    static const std::set<std::string> views={"state","startup","openLibrary","mediaState","mediaDownloadStatus","steamAccounts","steamCommitPreflight","uiError"};
+    // The hidden upgrade probe loads the same real page, whose startup/open
+    // requests must never begin business work or publish Steam ownership.
+    if(g_updateHealthOnly){
+        if(!views.contains(command))throw std::runtime_error("library-update-health-read-only");
+        auto snapshot=hostReadOnlyDataRootSnapshot();snapshot["healthOnly"]=true;
+        snapshot["dataRootReadiness"]["reason"]="update-health-only";
+        if(command=="uiError")snapshot["recorded"]=false;
+        return snapshot;
+    }
     if(controls.contains(command))return std::nullopt;
     if(hostDataRootReadiness().ready)return std::nullopt;
-    static const std::set<std::string> views={"state","startup","openLibrary","mediaState","mediaDownloadStatus","steamAccounts","steamCommitPreflight","uiError"};
     if(views.contains(command)){auto snapshot=hostReadOnlyDataRootSnapshot();if(command=="uiError")snapshot["recorded"]=false;return snapshot;}
     requireHostDataRootReady();return std::nullopt;
 }
@@ -951,6 +986,12 @@ static bool jobIsCurrent(
     std::lock_guard<std::mutex> lock(g_backgroundJobsMutex);
     const auto it = generations.find(job->key);
     return it != generations.end() && it->second == job->generation;
+}
+
+static bool scrapeExecutableRemoved(const BackgroundJob& owner, const std::string& key) {
+    if (!owner) return false;
+    std::lock_guard<std::mutex> lock(g_backgroundJobsMutex);
+    return owner->removedExecutableKeys.count(key) != 0;
 }
 
 static bool cancelBackgroundJobs(
@@ -1046,67 +1087,68 @@ static std::string mappedDataUrl(const fs::path& path) {
 static std::string jsonStringOr(const json& value, const char* key, const std::string& fallback = {});
 static json refreshArtworkForAllSteamAccounts(const json& requestedTarget);
 
-static bool hostProcessRunningByName(const wchar_t* wantedName, std::wstring* firstPath = nullptr) {
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return false;
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    bool running = false;
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            if (_wcsicmp(entry.szExeFile, wantedName) != 0) continue;
-            running = true;
-            if (firstPath && firstPath->empty()) {
-                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
-                if (process) {
-                    wchar_t path[MAX_PATH * 4]{};
-                    DWORD length = static_cast<DWORD>(std::size(path));
-                    if (QueryFullProcessImageNameW(process, 0, path, &length)) *firstPath = std::wstring(path, length);
-                    CloseHandle(process);
-                }
-            }
-        } while (Process32NextW(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return running;
+static bool hostSteamRunning(std::wstring* firstPath = nullptr) {
+    // Fresh facts are produced only by the YMCC Steam owner. Unknown is
+    // never proof that offline Steam writes or shutdown have succeeded.
+    const auto facts = ymcc::steaminfo::read(ymcc::steaminfo::Presence);
+    if (!facts.available || facts.presence < 0)
+        throw std::runtime_error("[steam-process-unknown] 无法从 YMCC Steam 层确认运行状态，未授权写入 Steam 文件或确认关闭成功");
+    if (firstPath) *firstPath = toWide(facts.processPath);
+    return facts.presence == 1;
 }
 
-static void waitForHostProcessExit(const wchar_t* wantedName, DWORD timeoutMs) {
-    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
-    while (hostProcessRunningByName(wantedName) && GetTickCount64() < deadline) Sleep(100);
+static uint64_t steamActionNumber(const json& value,const char* key,bool positive=true) {
+    if(!value.is_object()||!value.contains(key)||!value[key].is_string())throw std::runtime_error("Steam 关闭请求缺少原实例身份，请重新检测并确认");
+    const auto text=value[key].get<std::string>();uint64_t result=0;
+    if(text.empty()||text.size()>20||(text.size()>1&&text.front()=='0'))throw std::runtime_error("Steam 关闭请求身份无效");
+    for(const auto c:text){if(c<'0'||c>'9'||result>((std::numeric_limits<uint64_t>::max)()-uint64_t(c-'0'))/10)throw std::runtime_error("Steam 关闭请求身份无效");result=result*10+uint64_t(c-'0');}
+    if(positive&&!result)throw std::runtime_error("Steam 关闭请求身份未知，请重新检测并确认");return result;
 }
-
-static void closeSteamForShortcutCommit() {
-    std::wstring steamPath;
-    if (!hostProcessRunningByName(L"steam.exe", &steamPath)) return;
-    if (steamPath.empty() || !fs::is_regular_file(fs::path(steamPath))) {
-        throw std::runtime_error("无法定位正在运行的 Steam 程序，未执行关闭，也未写入 Steam 文件");
+static json steamActionClient(const ymcc::steaminfo::Facts& facts) {
+    if(facts.presence!=1||!facts.processPid||!facts.processBirth||!facts.actionPowerGeneration)return nullptr;
+    return {{"pid",facts.processPid},{"birth",std::to_string(facts.processBirth)},
+        {"powerGeneration",std::to_string(facts.actionPowerGeneration)},
+        {"powerSequence",std::to_string(facts.actionPowerSequence)},{"powerSerial",std::to_string(facts.actionPowerSerial)}};
+}
+static void closeSteamForShortcutCommit(const json& arguments, bool* initialRunning = nullptr,
+        std::string* initialPath = nullptr) {
+    // One fresh observation both decides whether shutdown is needed and
+    // binds the confirmed client. The action owner still revalidates at dispatch.
+    const auto facts = ymcc::steaminfo::read(ymcc::steaminfo::Presence);
+    if(!facts.available||facts.presence<0)
+        throw std::runtime_error("[steam-process-unknown] 无法从 YMCC Steam 层确认运行状态，未授权写入 Steam 文件或确认关闭成功");
+    if(initialRunning)*initialRunning=facts.presence==1;
+    if(initialPath)*initialPath=facts.processPath;
+    if(facts.presence==0)return;
+    const auto expected=arguments.value("steamClient",json{});
+    if(!expected.is_object()||expected.size()!=5||!expected.contains("pid")||!expected["pid"].is_number_unsigned()||
+        !expected["pid"].get<uint64_t>()||expected["pid"].get<uint64_t>()>MAXDWORD)
+        throw std::runtime_error("Steam 关闭请求缺少已确认的实例，请重新检测并确认");
+    const auto pid=expected["pid"].get<DWORD>();const auto birth=steamActionNumber(expected,"birth");
+    const auto generation=steamActionNumber(expected,"powerGeneration"),sequence=steamActionNumber(expected,"powerSequence",false),serial=steamActionNumber(expected,"powerSerial",false);
+    const auto deadline=arguments.value("_nativeSteamDeadlineTick",uint64_t{});
+    const auto current=[&]{return !g_shuttingDown.load()&&!g_cancelRequested.load()&&GetTickCount64()<deadline;};
+    if(!current())throw std::runtime_error("Steam 关闭请求已取消或过期，请重新确认");
+    if(facts.processPid!=pid||facts.processBirth!=birth||facts.actionPowerGeneration!=generation||
+        facts.actionPowerSequence!=sequence||facts.actionPowerSerial!=serial)
+        throw std::runtime_error("Steam 实例或电源状态已变化，请重新检测并确认；未关闭新实例");
+    const auto outcome=ymcc::steamaction::shutdown(pid,birth,deadline,generation,sequence,serial,current);
+    if(outcome==ymcc::steamaction::Outcome::Busy)
+        throw std::runtime_error("Steam 命令通道正忙，本次未提交退出、未自动重发或写入文件，请稍后重新确认");
+    if(outcome!=ymcc::steamaction::Outcome::Submitted)
+        throw std::runtime_error(outcome==ymcc::steamaction::Outcome::Unknown?
+            "Steam 关闭请求结果不确定，未自动重发或写入文件，请检查状态后重新确认":
+            "Steam 层拒绝或未能提交温和退出，请检查状态后重新确认；未写入文件");
+    // Submission is not an exit receipt. Fresh complete absence remains required.
+    const auto until=GetTickCount64()+20000;
+    while(!g_shuttingDown.load()&&!g_cancelRequested.load()&&GetTickCount64()<until){
+        const auto observed=ymcc::steaminfo::read(ymcc::steaminfo::Presence);
+        if(!observed.available||observed.presence<0)throw std::runtime_error("Steam 关闭后的状态未知，未写入文件");
+        if(observed.presence==0)return;
+        if(observed.processPid!=pid||observed.processBirth!=birth)throw std::runtime_error("Steam 关闭期间启动了新实例，未关闭新实例，也未写入文件");
+        Sleep(100);
     }
-
-    // Steam's supported shutdown switch lets Steam flush shortcuts.vdf and
-    // localconfig.vdf before exiting.  Do not fall back to a hard process
-    // kill: that is precisely what can leave an incomplete transaction.
-    std::wstring command = quoteArgument(steamPath) + L" -shutdown";
-    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
-    mutableCommand.push_back(0);
-    STARTUPINFOW startup{sizeof(startup)};
-    startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION process{};
-    if (!ymcc::processEfficiency::createProcess(
-            steamPath.c_str(), mutableCommand.data(), nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW, nullptr, fs::path(steamPath).parent_path().c_str(),
-            &startup, &process)) {
-        const auto error = GetLastError();
-        throw std::runtime_error("无法请求 Steam 温和退出（系统错误码：" + std::to_string(error) + "），未写入 Steam 文件");
-    }
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-
-    waitForHostProcessExit(L"steam.exe", 20000);
-    if (hostProcessRunningByName(L"steam.exe")) {
-        throw std::runtime_error("Steam 未在温和退出期限内关闭，未写入 Steam 文件；请先手动退出 Steam");
-    }
+    throw std::runtime_error("Steam 未在温和退出期限内关闭，或请求已取消；未写入文件，请手动检查 Steam");
 }
 
 static int64_t jsonIntegerOr(const json& value, const char* key, int64_t fallback = 0) {
@@ -1130,20 +1172,41 @@ static bool workspaceRefreshEvent(const std::string& event) {
     return events.contains(event);
 }
 static void retireWorkspaceRefreshProtocol() noexcept {
+    std::lock_guard lock(g_replyRoutesMutex);
     g_refreshProtocolEpoch = 0;
+    g_mediaProgressProtocolEpoch = 0;
     ++g_refreshDocumentEpoch;
+    g_replyRoutes.clear();
+}
+// Browser request numbers restart in each document. Native work can outlive
+// that document, so its correlation token must never be reused by a new page.
+static uint64_t registerWorkspaceReply(uint64_t browserId){
+    if(!browserId)return 0;
+    std::lock_guard lock(g_replyRoutesMutex);
+    if(g_replySequence==UINT64_MAX)throw std::runtime_error("Workspace reply identifiers exhausted");
+    const auto token=++g_replySequence;g_replyRoutes.emplace(token,WorkspaceReplyRoute{browserId,g_refreshDocumentEpoch.load()});return token;
+}
+static std::optional<uint64_t> consumeWorkspaceReply(uint64_t token){
+    std::lock_guard lock(g_replyRoutesMutex);const auto found=g_replyRoutes.find(token);
+    if(found==g_replyRoutes.end())return std::nullopt;
+    const auto route=found->second;g_replyRoutes.erase(found);
+    return route.document==g_refreshDocumentEpoch.load()?std::optional<uint64_t>{route.browserId}:std::nullopt;
 }
 static void acceptWorkspaceRefreshProtocol(const json& arguments) {
     g_refreshProtocolEpoch = jsonIntegerOr(arguments, "advisoryRefreshProtocol", 0) == 1
         ? g_refreshDocumentEpoch.load() : 0;
+    g_mediaProgressProtocolEpoch = jsonIntegerOr(arguments, "advisoryMediaProgressProtocol", 0) == 1
+        ? g_refreshDocumentEpoch.load() : 0;
 }
 static bool workspaceRefreshMessageCurrent(const json& message) {
-    if (!jsonBoolOr(message, "refreshRequested", false) || jsonStringOr(message, "kind") != "event" ||
-        !workspaceRefreshEvent(jsonStringOr(message, "event"))) return true;
+    if (!jsonBoolOr(message, "refreshRequested", false) || jsonStringOr(message, "kind") != "event") return true;
+    const auto event = jsonStringOr(message, "event");
+    const bool mediaProgress = event == "media-download-progress";
+    if (!mediaProgress && !workspaceRefreshEvent(event)) return true;
     const auto epoch = jsonIntegerOr(message, "refreshDocument", 0);
-    return jsonIntegerOr(message, "refreshProtocol", 0) == 1 && epoch > 0 &&
+    return jsonIntegerOr(message, mediaProgress ? "mediaProgressProtocol" : "refreshProtocol", 0) == 1 && epoch > 0 &&
         static_cast<uint64_t>(epoch) == g_refreshDocumentEpoch.load() &&
-        static_cast<uint64_t>(epoch) == g_refreshProtocolEpoch.load();
+        static_cast<uint64_t>(epoch) == (mediaProgress ? g_mediaProgressProtocolEpoch.load() : g_refreshProtocolEpoch.load());
 }
 
 // Workspace state is assembled from manifests produced by several providers
@@ -1410,7 +1473,8 @@ static void writeHostBytesAtomic(const fs::path& target, std::string_view bytes)
 }
 
 static void writeJsonWithLocalBackup(
-    const fs::path& path, const json& document, bool writeCentralBackup = true) {
+    const fs::path& path, const json& document, bool writeCentralBackup = true, bool* activated = nullptr) {
+    if (activated) *activated = false;
     requireHostDataRootWrite(path);
     auto text = document.dump(2) + '\n';
     // Take the cross-process lock first: callers may already own it for RMW.
@@ -1440,6 +1504,8 @@ static void writeJsonWithLocalBackup(
             }
         }
         activateHostStagedFile(temporary.path,path);
+        // Durable activation precedes optional readback/cache bookkeeping.
+        if (activated) *activated = true;
         policy::remember(path,policy::read(path),committed);
         return;
     }
@@ -1464,6 +1530,7 @@ static void writeJsonWithLocalBackup(
         writeHostBytesAtomic(nextHostBackupPath(archive, path), before);
     }
     activateHostStagedFile(temporary.path, path);
+    if (activated) *activated = true;
 }
 
 static void appendUiError(const json& payload) noexcept {
@@ -1485,7 +1552,7 @@ static void appendUiError(const json& payload) noexcept {
     }
 }
 
-static fs::path copyArtworkToIsolation(const fs::path& source, const std::string& gameKey, const std::string& type) {
+static fs::path copyArtworkToIsolation(const fs::path& source, const std::string& gameKey, const std::string& type, const std::string& revision = {}) {
     requireHostDataRootReady();
     std::error_code error;
     if (!fs::is_regular_file(source, error)) throw std::runtime_error("指定图片不存在");
@@ -1503,7 +1570,8 @@ static fs::path copyArtworkToIsolation(const fs::path& source, const std::string
     const auto directory = g_dataRoot / L"artwork" / L"overrides" / toWide(safeArtworkSegment(gameKey));
     fs::create_directories(directory, error);
     if (error) throw std::runtime_error("无法创建隔离素材目录");
-    const auto fileName = toWide(type + lowerAscii(toUtf8(source.extension().wstring())));
+    const auto fileName = toWide(type + (revision.empty() ? std::string{} : "-" + safeArtworkSegment(revision)) +
+        lowerAscii(toUtf8(source.extension().wstring())));
     const auto destination = directory / fileName;
     copyHostFileAtomic(source, destination);
     return destination;
@@ -1833,16 +1901,18 @@ static json scrapeArtifactSummary(const fs::path& outputDirectory, const std::st
     try {
         std::vector<fs::path> manifestPaths;
         std::error_code error;
-        if (fs::is_regular_file(outputDirectory / L"manifest.json", error)) {
+        const auto ioRoot = custom_steam_library::ioPath(outputDirectory, true);
+        if (fs::is_regular_file(custom_steam_library::ioPath(outputDirectory / L"manifest.json"), error)) {
             manifestPaths.push_back(outputDirectory / L"manifest.json");
         }
         error.clear();
-        if (fs::is_directory(outputDirectory, error)) {
-            for (const auto& entry : fs::recursive_directory_iterator(outputDirectory, error)) {
+        if (fs::is_directory(ioRoot, error)) {
+            for (const auto& entry : fs::recursive_directory_iterator(ioRoot, error)) {
                 if (error) { error.clear(); continue; }
+                const auto ordinaryPath = outputDirectory / entry.path().lexically_relative(ioRoot);
                 if (entry.is_regular_file(error) && entry.path().filename() == L"manifest.json" &&
-                    entry.path() != outputDirectory / L"manifest.json") {
-                    manifestPaths.push_back(entry.path());
+                    ordinaryPath != outputDirectory / L"manifest.json") {
+                    manifestPaths.push_back(ordinaryPath);
                 }
                 error.clear();
             }
@@ -1850,8 +1920,8 @@ static json scrapeArtifactSummary(const fs::path& outputDirectory, const std::st
         std::sort(manifestPaths.begin(), manifestPaths.end(), [](const auto& left, const auto& right) {
             std::error_code leftError;
             std::error_code rightError;
-            const auto leftTime = fs::last_write_time(left, leftError);
-            const auto rightTime = fs::last_write_time(right, rightError);
+            const auto leftTime = fs::last_write_time(custom_steam_library::ioPath(left), leftError);
+            const auto rightTime = fs::last_write_time(custom_steam_library::ioPath(right), rightError);
             if (leftError != rightError) return !leftError;
             if (!leftError && leftTime != rightTime) return leftTime > rightTime;
             return left.wstring() > right.wstring();
@@ -1870,7 +1940,7 @@ static json scrapeArtifactSummary(const fs::path& outputDirectory, const std::st
         }
         if (manifestPath.empty()) {
             const auto failedPath = outputDirectory / L"rounds-failed.json";
-            if (fs::is_regular_file(failedPath, error)) {
+            if (fs::is_regular_file(custom_steam_library::ioPath(failedPath), error)) {
                 const auto failure = readJson(failedPath, json::object());
                 if (failure.is_object()) {
                     summary["failureRecordPath"] = toUtf8(failedPath.wstring());
@@ -1980,7 +2050,8 @@ static bool hostIdentityRecordValid(const custom_steam_library::identity_cache::
             (app>0||jsonIntegerOr(match,"igdbId",0)>0||!jsonStringOr(match,"formalName",jsonStringOr(match,"displayName")).empty());
     }catch(...){return false;}
 }
-static bool persistResolvedIdentityCache(const fs::path& manifestPath) {
+static bool matchesManualIdentityRequest(const json& match, const json& request);
+static bool persistResolvedIdentityCache(const fs::path& manifestPath, const json& request = json::object()) {
     namespace cache=custom_steam_library::identity_cache;
     requireHostDataRootReady();
     // Preserve the existing cross-process owner and actual worker-artifact
@@ -1994,6 +2065,7 @@ static bool persistResolvedIdentityCache(const fs::path& manifestPath) {
     const auto executable=manifest["exe"].get<std::string>();
     const auto target=cache::executableKey(executable);
     const auto& match=manifest["match"];
+    if (!matchesManualIdentityRequest(match, request)) return false;
     const auto appId=jsonIntegerOr(match,"storefrontAppId",jsonIntegerOr(match,"appId",0));
     const auto igdbId=jsonIntegerOr(match,"igdbId",0);
     const auto formalName=jsonStringOr(match,"formalName",jsonStringOr(match,"displayName"));
@@ -2007,7 +2079,12 @@ static bool persistResolvedIdentityCache(const fs::path& manifestPath) {
         if(!previousTarget.empty()&&previousTarget!=target)return false;
     }
     const bool valid=hostIdentityRecordValid(previous,executable,time);
-    if(valid&&custom_steam_library::verifiedSteamIdentityMatch(previous.value["match"])&&!custom_steam_library::verifiedSteamIdentityMatch(match))return false;
+    const bool selectedMetadata = jsonStringOr(request,"steamId").empty()&&!jsonStringOr(request,"igdbId").empty()&&
+        jsonStringOr(match,"primaryProvider")=="playnite-igdb"&&jsonStringOr(match,"identityStatus")=="metadata-verified"&&
+        jsonStringOr(match,"metadataVerificationStatus")=="metadata-verified"&&matchesManualIdentityRequest(match,request);
+    // Automatic hints cannot downgrade official identity. A bound explicit
+    // metadata choice may supersede it without inheriting Steam authority.
+    if(valid&&custom_steam_library::verifiedSteamIdentityMatch(previous.value["match"])&&!custom_steam_library::verifiedSteamIdentityMatch(match)&&!selectedMetadata)return false;
     if(valid&&cache::integer(previous.value,"updatedAt")>time)return false;
     json value=valid?previous.value:json::object();
     value["schemaVersion"]=1;value["executable"]=executable;value["manifestPath"]=toUtf8(manifestPath.wstring());
@@ -2026,8 +2103,17 @@ static bool persistResolvedIdentityCache(const fs::path& manifestPath) {
     return true;
 }
 
+static bool matchesManualIdentityRequest(const json& match, const json& request) {
+    const auto steamId = jsonStringOr(request, "steamId");
+    if (!steamId.empty()) return custom_steam_library::steamIdentityMatchesManualSelection(match, {{"steamId", steamId}});
+    const auto igdbId = jsonStringOr(request, "igdbId");
+    if (igdbId.empty()) return true;
+    if (igdbId.find_first_not_of('0') == std::string::npos) return false;
+    return custom_steam_library::steamIdentityMatchesManualSelection(match, {{"igdbId", igdbId}});
+}
+
 static bool persistResolvedIdentityFromOutput(
-    const fs::path& outputDirectory, const std::string& executable) {
+    const fs::path& outputDirectory, const std::string& executable, const json& request = json::object()) {
     std::error_code error;
     for (const auto& entry : fs::recursive_directory_iterator(outputDirectory, error)) {
         if (error) { error.clear(); break; }
@@ -2038,7 +2124,8 @@ static bool persistResolvedIdentityFromOutput(
         const auto manifest = readJson(entry.path(), json::object());
         if (samePath(fs::path(toWide(jsonStringOr(manifest, "exe"))),
                      fs::path(toWide(executable)))) {
-            return persistResolvedIdentityCache(entry.path());
+            if (!matchesManualIdentityRequest(jsonObjectOr(manifest, "match"), request)) continue;
+            return persistResolvedIdentityCache(entry.path(), request);
         }
         error.clear();
     }
@@ -2099,6 +2186,13 @@ static bool outputHasVerifiedSteamIdentity(
 static void attachResolvedIdentityCache(json& snapshot) {
     if(!hostDataRootReadiness().ready){snapshot["resolvedIdentities"]=json::object();return;}
     json byExecutable = json::object();
+    std::unordered_map<std::wstring, const json*> manualIdentities;
+    const auto manual = snapshot.find("manualOverrides");
+    if (manual != snapshot.end() && manual->is_object()) {
+        const auto items = manual->find("items");
+        if (items != manual->end() && items->is_object()) for (auto it=items->cbegin();it!=items->cend();++it)
+            if (it->is_object()) manualIdentities.emplace(normalizedPathKey(fs::path(toWide(it.key()))), &it.value());
+    }
     const auto identityCacheRoot = g_dataRoot / L"cache" / L"identity";
     std::vector<fs::path> roots{identityCacheRoot};
     std::error_code error;
@@ -2126,15 +2220,17 @@ static void attachResolvedIdentityCache(json& snapshot) {
     }
     for (const auto& root : roots) {
         error.clear();
-        if (!fs::is_directory(root, error)) continue;
-        for (const auto& entry : fs::recursive_directory_iterator(root, error)) {
+        const auto ioRoot = custom_steam_library::ioPath(root, true);
+        if (!fs::is_directory(ioRoot, error)) continue;
+        for (const auto& entry : fs::recursive_directory_iterator(ioRoot, error)) {
             if (error) { error.clear(); break; }
             if (!entry.is_regular_file(error)) { error.clear(); continue; }
             const bool cachedIdentity = entry.path().extension() == L".json" && entry.path().filename() != L"manifest.json";
             if (!cachedIdentity && entry.path().filename() != L"manifest.json") { error.clear(); continue; }
             try {
                 namespace cache=custom_steam_library::identity_cache;
-                const auto observed=cache::readSnapshot(entry.path());
+                const auto ordinaryPath = root / entry.path().lexically_relative(ioRoot);
+                const auto observed=cache::readSnapshot(ordinaryPath);
                 if(!observed.exists||!observed.parsed)continue;
                 const auto& document=observed.value;
                 const auto executable = jsonStringOr(document, "executable", jsonStringOr(document, "exe"));
@@ -2153,9 +2249,12 @@ static void attachResolvedIdentityCache(json& snapshot) {
                 const auto steamVerificationStatus = jsonStringOr(match, "steamVerificationStatus");
                 if (appId <= 0 && igdbId <= 0 && formalName.empty()) { error.clear(); continue; }
                 const auto key = toUtf8(normalizedPathKey(fs::path(toWide(executable))));
+                const auto selected = manualIdentities.find(normalizedPathKey(fs::path(toWide(executable))));
+                if (selected != manualIdentities.end() &&
+                    !custom_steam_library::steamIdentityMatchesManualSelection(match, *selected->second)) continue;
                 json value = match;
                 value["executable"] = executable;
-                value["manifestPath"] = toUtf8(entry.path().wstring());
+                value["manifestPath"] = toUtf8(ordinaryPath.wstring());
                 if (!formalName.empty()) value["formalName"] = formalName;
                 if (appId > 0) value["steamAppId"] = appId;
                 if (igdbId > 0) value["igdbId"] = igdbId;
@@ -2330,7 +2429,8 @@ static void attachExistingSteamArtwork(json& plan) {
         else item.erase("artworkPreview");
     }
 }
-static std::vector<fs::path> directNativeSteamRoots(const json& item) {
+static std::vector<fs::path> directNativeSteamRoots(const json& item,
+    const std::vector<ymcc::steaminfo::Installation>& installations) {
     std::vector<fs::path> result;
     std::set<std::wstring> seen;
     auto appendRoot = [&](const fs::path& root) {
@@ -2353,43 +2453,15 @@ static std::vector<fs::path> directNativeSteamRoots(const json& item) {
         const auto gameDirectory = fs::path(toWide(gameDirectoryText));
         appendRoot(gameDirectory.parent_path().parent_path().parent_path());
     }
-    auto registryPath = [](HKEY root, const wchar_t* key, const wchar_t* valueName) -> std::optional<fs::path> {
-        DWORD bytes = 0;
-        if (RegGetValueW(root, key, valueName, RRF_RT_REG_SZ, nullptr, nullptr, &bytes) != ERROR_SUCCESS ||
-            bytes < sizeof(wchar_t)) return std::nullopt;
-        std::wstring value(bytes / sizeof(wchar_t), L'\0');
-        if (RegGetValueW(root, key, valueName, RRF_RT_REG_SZ, nullptr, value.data(), &bytes) != ERROR_SUCCESS) {
-            return std::nullopt;
-        }
-        while (!value.empty() && value.back() == L'\0') value.pop_back();
-        std::replace(value.begin(), value.end(), L'/', L'\\');
-        return value.empty() ? std::nullopt : std::optional<fs::path>(fs::path(value));
-    };
-    for (const auto& path : {
-        registryPath(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath"),
-        registryPath(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"InstallPath"),
-        registryPath(HKEY_LOCAL_MACHINE, L"Software\\WOW6432Node\\Valve\\Steam", L"InstallPath"),
-        registryPath(HKEY_LOCAL_MACHINE, L"Software\\Valve\\Steam", L"InstallPath")
-    }) {
-        if (path) appendRoot(*path);
-    }
-    auto environmentPath = [](const wchar_t* name, const fs::path& fallback) {
-        const DWORD needed = GetEnvironmentVariableW(name, nullptr, 0);
-        if (needed <= 1) return fallback;
-        std::wstring value(needed, L'\0');
-        const DWORD length = GetEnvironmentVariableW(name, value.data(), needed);
-        if (length == 0 || length >= needed) return fallback;
-        value.resize(length);
-        return fs::path(value);
-    };
-    appendRoot(environmentPath(L"ProgramFiles(x86)", fs::path(L"C:\\Program Files (x86)")) / L"Steam");
-    appendRoot(environmentPath(L"ProgramFiles", fs::path(L"C:\\Program Files")) / L"Steam");
-    appendRoot(fs::path(L"C:\\Steam"));
+    for (const auto& candidate : installations)
+        if (candidate.error == ERROR_SUCCESS && !candidate.path.empty())
+            appendRoot(fs::path(toWide(candidate.path)));
     return result;
 }
 
 static std::vector<std::pair<std::string, fs::path>> directNativeSteamGridDirectories(
-    const json& item, const json& steamAccounts) {
+    const json& item, const json& steamAccounts,
+    const std::vector<ymcc::steaminfo::Installation>& installations) {
     std::vector<std::pair<std::string, fs::path>> result;
     std::set<std::wstring> seen;
     auto appendGrid = [&](const std::string& accountId, const fs::path& grid) {
@@ -2405,7 +2477,7 @@ static std::vector<std::pair<std::string, fs::path>> directNativeSteamGridDirect
         appendGrid(jsonStringOr(account, "accountId", "native"),
             fs::path(toWide(shortcutsText)).parent_path() / L"grid");
     }
-    for (const auto& root : directNativeSteamRoots(item)) {
+    for (const auto& root : directNativeSteamRoots(item, installations)) {
         const auto userdata = root / L"userdata";
         std::error_code error;
         for (const auto& entry : fs::directory_iterator(userdata, error)) {
@@ -2496,11 +2568,18 @@ static json nativeSteamArtworkFromCache(const json& cached) {
     return previews;
 }
 
-static void attachNativeSteamArtwork(json& plan, const json& steamAccounts, bool refreshDirect) {
+static void attachNativeSteamArtwork(json& plan, const json& steamAccounts, bool refreshDirect,
+    decltype(&ymcc::steaminfo::read) readFacts = ymcc::steaminfo::read) {
     if(!hostDataRootReadiness().ready)return;
     if (!plan.contains("items") || !plan["items"].is_array()) return;
     auto cache = nativeSteamArtworkCacheDocument();
     bool cacheDirty = false;
+    ymcc::steaminfo::Facts installationFacts;
+    const auto installations = [&]() -> const std::vector<ymcc::steaminfo::Installation>& {
+        // Only a successful receipt survives within this display refresh.
+        if (!installationFacts.available) installationFacts = readFacts(ymcc::steaminfo::Installations);
+        return installationFacts.installations;
+    };
     for (auto& item : plan["items"]) {
         if (!jsonBoolOr(item, "steamNative", false)) continue;
         const auto appId = jsonStringOr(item, "nativeSteamAppId",
@@ -2533,7 +2612,7 @@ static void attachNativeSteamArtwork(json& plan, const json& steamAccounts, bool
         bool localTallFound = false;
         bool localLongFound = false;
         bool localHeroFound = false;
-        for (const auto& [accountId, grid] : directNativeSteamGridDirectories(item, steamAccounts)) {
+        for (const auto& [accountId, grid] : directNativeSteamGridDirectories(item, steamAccounts, installations())) {
             std::error_code error;
             if (!fs::is_directory(grid, error)) continue;
             const auto cacheKey = safeArtworkSegment("native_" + accountId + "_" + appId);
@@ -2579,7 +2658,7 @@ static void attachNativeSteamArtwork(json& plan, const json& steamAccounts, bool
         // appcache\librarycache, not in the custom-shortcut grid directory.
         // Read it directly by AppID as the default source; this is local I/O,
         // not a network scrape and never enters the background queue.
-        for (const auto& root : directNativeSteamRoots(item)) {
+        for (const auto& root : directNativeSteamRoots(item, installations())) {
             const auto cacheKey = safeArtworkSegment("native_appcache_" + appId);
             const auto cacheDirectory = g_dataRoot / L"cache" / L"existing-steam-artwork" / toWide(cacheKey);
             std::error_code error;
@@ -2677,6 +2756,9 @@ static void attachArtworkPreviews(json& plan) {
         }
         if (!manifestText.empty() && !manifest.empty()) item["artworkManifest"] = manifestText;
         const auto manual = manualLookup.find(executable);
+        if (!jsonBoolOr(manual, "idCleared", false) && !custom_steam_library::steamIdentityMatchesManualSelection(jsonObjectOr(manifest, "match"), manual)) {
+            manifest = json::object();manifestText.clear();item.erase("artworkManifest");
+        }
         const auto protection = jsonObjectOr(manual, "artworkProtection");
         json previews = json::object();
         for (const auto& artwork : jsonArrayOr(manifest, "artwork")) {
@@ -2826,10 +2908,139 @@ static json hostArtworkReadiness(const json& manifest, const json& manualOverrid
     return {{"automaticSlotsComplete", (tall || tallDeleted) && (longArtwork || longDeleted) && (hero || heroDeleted)}, {"minimumComplete", tall && hero}, {"tall", tall}, {"long", longArtwork}, {"hero", hero}};
 }
 
+static void discardSteamPlanIdentity(json& item, const std::string& fallbackName) {
+    for (const auto* field : {"steamStoreAppId", "storefrontAppId", "appId", "steamAppId", "canonicalAppId", "localAppId", "requestedAppId", "baseGameAppId", "matchedContentAppId", "igdbId",
+             "identityStatus", "steamVerificationStatus", "metadataVerificationStatus", "resolverVersion", "identityKind", "contentRelation", "identitySource", "identityConfidence", "identityTrust", "primaryProvider",
+             "year", "releaseYear", "releaseDate", "displayName", "artwork", "artworkFallbackComplete", "artworkFallbackEligible", "metadataGameSignal", "resolverRefreshRecommended", "reason"}) item.erase(field);
+    item["formalName"] = fallbackName;
+}
+
 static bool steamPlanItemAlreadyOwned(const json& item) {
     const auto status = jsonStringOr(item, "status");
     return status == "already-in-steam" || status == "added-to-steam" ||
         status == "steam-native" || jsonBoolOr(item, "steamNative", false);
+}
+
+static json libraryPlanRow(const json& game) {
+    const auto executable = jsonStringOr(game, "primaryExecutable");
+    return {
+        {"gameDirectory", jsonStringOr(game, "gameDirectory")},
+        {"directoryName", jsonStringOr(game, "directoryName")},
+        {"primaryExecutable", executable.empty() ? json(nullptr) : json(executable)},
+        {"primarySelectionStatus", jsonStringOr(game, "status", "unknown")},
+        {"selectionSource", jsonStringOr(game, "selectionSource")},
+        {"selectedForAdd", true}
+    };
+}
+
+static bool isScannedNativeSteamGame(const json& game) {
+    return jsonBoolOr(game, "steamNative", false) || jsonStringOr(game, "contentType") == "steam-native";
+}
+
+static void setNativeSteamPlanIdentity(json& item, const json& game) {
+    const auto appId = jsonIntegerOr(game, "nativeSteamAppId", 0);
+    item["status"] = "already-in-steam";
+    item["steamNative"] = true;
+    item["steamOwnership"] = "native-steam";
+    item["reason"] = "steam-native-game-excluded";
+    item["nativeSteamAppId"] = appId;
+    item["steamStoreAppId"] = appId;
+    item["storefrontAppId"] = appId;
+    item["nativeSteamExecutable"] = item["primaryExecutable"];
+    item["nativeSteamGameDirectory"] = jsonStringOr(game, "nativeSteamGameDirectory", jsonStringOr(game, "gameDirectory"));
+    item["nativeSteamManifestPath"] = jsonStringOr(game, "nativeSteamManifestPath");
+    item["nativeSteam"] = jsonObjectOr(game, "nativeSteam");
+    item["nativeSteam"]["appId"] = appId;
+    item["nativeSteam"]["executablePath"] = item["primaryExecutable"];
+    item["nativeSteam"]["gameDirectory"] = item["nativeSteamGameDirectory"];
+    item["nativeSteam"]["manifestPath"] = item["nativeSteamManifestPath"];
+    if (!item["nativeSteam"].contains("manifestName")) item["nativeSteam"]["manifestName"] = item["directoryName"];
+}
+
+// The account plan is reusable across scans, but native identity belongs to
+// the current installation. Do this before any artwork lookup consumes it.
+static void projectScannedNativeSteamRows(json& plan, const json& library) {
+    const auto key = [](const std::string& path) {
+        return path.empty() ? std::wstring{} : hostRootLexicalKey(fs::path(toWide(path)));
+    };
+    struct Projection { const json* game; json* retained = nullptr; bool compatible = false; };
+    std::unordered_map<std::wstring, Projection> native;
+    for (const auto& game : library["games"]) {
+        if (!isScannedNativeSteamGame(game)) continue;
+        const auto directory = key(jsonStringOr(game, "gameDirectory"));
+        if (!directory.empty()) native.try_emplace(directory, Projection{&game});
+    }
+    auto& items = plan["items"];
+    if (jsonBoolOr(library, "nativeSteamInstallationUnavailable", false)) {
+        // Retained inventory rows are display-only. Do not let an older
+        // account plan lend their native identity to active cards or artwork.
+        std::unordered_set<std::wstring> pendingDirectories, pendingExecutables;
+        for (const auto& game : library["unscannedGames"]) {
+            if (!isScannedNativeSteamGame(game) || !jsonBoolOr(game, "nativeSteamScanUnconfirmed", false)) continue;
+            auto directory = key(jsonStringOr(game, "gameDirectory"));
+            if (directory.empty() || native.contains(directory)) continue;
+            pendingDirectories.insert(std::move(directory));
+            auto executable = key(jsonStringOr(game, "primaryExecutable"));
+            if (!executable.empty()) pendingExecutables.insert(std::move(executable));
+        }
+        if (!pendingDirectories.empty()) {
+            std::erase_if(items.get_ref<json::array_t&>(), [&](const json& item) {
+                if (!isScannedNativeSteamGame(item) && jsonStringOr(item, "steamOwnership") != "native-steam" &&
+                    jsonStringOr(item, "status") != "steam-native") return false;
+                const auto directory = key(jsonStringOr(item, "gameDirectory"));
+                return directory.empty() ? pendingExecutables.contains(key(jsonStringOr(item, "primaryExecutable")))
+                                         : pendingDirectories.contains(directory);
+            });
+        }
+    }
+    if (native.empty()) return;
+    bool removeDuplicates = false;
+    for (auto& item : items) {
+        const auto match = native.find(key(jsonStringOr(item, "gameDirectory")));
+        if (match == native.end()) continue;
+        auto& projection = match->second;
+        const auto& game = *projection.game;
+        const auto appId = jsonIntegerOr(game, "nativeSteamAppId", 0);
+        const auto executable = key(jsonStringOr(game, "primaryExecutable"));
+        const auto nested = jsonObjectOr(item, "nativeSteam");
+        const bool compatible = jsonBoolOr(item, "steamNative", false) &&
+            jsonIntegerOr(item, "nativeSteamAppId", 0) == appId &&
+            jsonIntegerOr(item, "steamStoreAppId", appId) == appId &&
+            jsonIntegerOr(item, "storefrontAppId", appId) == appId &&
+            jsonIntegerOr(nested, "appId", appId) == appId &&
+            key(jsonStringOr(item, "primaryExecutable")) == executable &&
+            key(jsonStringOr(item, "nativeSteamExecutable", jsonStringOr(item, "primaryExecutable"))) == executable &&
+            key(jsonStringOr(nested, "executablePath", jsonStringOr(item, "primaryExecutable"))) == executable;
+        if (!projection.retained) {
+            projection.retained = &item;
+            projection.compatible = compatible;
+        } else {
+            // Keep the first display position but prefer the first compatible
+            // row; a trailing legacy row must not replace it in the UI map.
+            if (!projection.compatible && compatible) {
+                *projection.retained = std::move(item);
+                projection.compatible = true;
+            }
+            item = nullptr;
+            removeDuplicates = true;
+        }
+    }
+    for (auto it = native.begin(); it != native.end();) {
+        auto& [game, retained, compatible] = it->second;
+        if (!retained) { ++it; continue; }
+        if (!compatible) {
+            *retained = libraryPlanRow(*game);
+            setNativeSteamPlanIdentity(*retained, *game);
+        }
+        it = native.erase(it);
+    }
+    if (removeDuplicates) std::erase_if(items.get_ref<json::array_t&>(), [](const json& item) { return item.is_null(); });
+    for (const auto& game : library["games"]) {
+        if (!isScannedNativeSteamGame(game) || !native.erase(key(jsonStringOr(game, "gameDirectory")))) continue;
+        auto item = libraryPlanRow(game);
+        setNativeSteamPlanIdentity(item, game);
+        items.push_back(std::move(item));
+    }
 }
 
 // A local artwork refresh has no authority to change Steam shortcut ownership.
@@ -2905,36 +3116,9 @@ static json buildLocalSteamPlanSnapshot(const json& snapshot, const json& owners
     for (const auto& game : games) {
         if (!game.is_object()) continue;
         const auto executable = jsonStringOr(game, "primaryExecutable");
-        json item = {
-            {"gameDirectory", jsonStringOr(game, "gameDirectory")},
-            {"directoryName", jsonStringOr(game, "directoryName")},
-            {"primaryExecutable", executable.empty() ? json(nullptr) : json(executable)},
-            {"primarySelectionStatus", jsonStringOr(game, "status", "unknown")},
-            {"selectionSource", jsonStringOr(game, "selectionSource")},
-            {"selectedForAdd", true}
-        };
-        if (jsonBoolOr(game, "steamNative", false) ||
-            jsonStringOr(game, "contentType") == "steam-native") {
-            item["status"] = "already-in-steam";
-            item["steamNative"] = true;
-            item["steamOwnership"] = "native-steam";
-            item["reason"] = "steam-native-game-excluded";
-            const int nativeAppId = static_cast<int>(jsonIntegerOr(game, "nativeSteamAppId", 0));
-            item["nativeSteamAppId"] = nativeAppId;
-            item["steamStoreAppId"] = nativeAppId;
-            item["storefrontAppId"] = nativeAppId;
-            item["nativeSteamExecutable"] = executable.empty() ? json(nullptr) : json(executable);
-            item["nativeSteamGameDirectory"] = jsonStringOr(game, "nativeSteamGameDirectory",
-                jsonStringOr(game, "gameDirectory"));
-            item["nativeSteamManifestPath"] = jsonStringOr(game, "nativeSteamManifestPath");
-            item["nativeSteam"] = game.contains("nativeSteam") && game["nativeSteam"].is_object()
-                ? game["nativeSteam"] : json{
-                    {"appId", nativeAppId},
-                    {"executablePath", executable.empty() ? json(nullptr) : json(executable)},
-                    {"gameDirectory", jsonStringOr(game, "gameDirectory")},
-                    {"manifestPath", jsonStringOr(game, "nativeSteamManifestPath")},
-                    {"manifestName", jsonStringOr(game, "directoryName")}
-                };
+        auto item = libraryPlanRow(game);
+        if (isScannedNativeSteamGame(game)) {
+            setNativeSteamPlanIdentity(item, game);
             ++steamNativeGames;
             items.push_back(std::move(item));
             continue;
@@ -2943,7 +3127,14 @@ static json buildLocalSteamPlanSnapshot(const json& snapshot, const json& owners
         if (owned) {
             // Preserve shortcut IDs, grid paths and existing previews as well as
             // the category. Artwork/online identity is not ownership evidence.
-            items.push_back(*owned);
+            auto retained = *owned;
+            auto ownedMatch = retained;
+            ownedMatch["appId"] = jsonIntegerOr(retained, "steamStoreAppId", jsonIntegerOr(retained, "storefrontAppId", 0));
+            const auto manual = manualLookup.find(executable);
+            if (!jsonBoolOr(retained, "steamNative", false) && !custom_steam_library::steamIdentityMatchesManualSelection(ownedMatch, manual)) {
+                discardSteamPlanIdentity(retained, jsonStringOr(retained, "steamShortcutName", jsonStringOr(game, "directoryName")));
+            }
+            items.push_back(std::move(retained));
             if (jsonBoolOr(*owned, "steamNative", false)) ++steamNativeGames;
             else ++alreadyInSteam;
             continue;
@@ -2966,13 +3157,15 @@ static json buildLocalSteamPlanSnapshot(const json& snapshot, const json& owners
 
         const auto cachedIdentity = cachedIdentityFor(executable);
         const auto manifestResult = manifests.find(executable);
-        const json manifest = manifestResult ? manifestResult->first : json::object();
-        const auto match = jsonObjectOr(manifest, "match");
         const auto manualIdentity = manualLookup.find(executable);
         const bool idCleared = jsonBoolOr(manualIdentity, "idCleared", false);
+        const bool manifestCompatible = manifestResult && (idCleared || custom_steam_library::steamIdentityMatchesManualSelection(jsonObjectOr(manifestResult->first, "match"), manualIdentity));
+        const json manifest = manifestCompatible ? manifestResult->first : json::object();
+        const auto match = jsonObjectOr(manifest, "match");
+        const auto currentCached = custom_steam_library::steamIdentityMatchesManualSelection(cachedIdentity, manualIdentity) ? cachedIdentity : json::object();
         const auto identityMatch = idCleared ? json::object() :
             ((match.empty() || (!custom_steam_library::verifiedSteamIdentityMatch(match) &&
-                custom_steam_library::verifiedSteamIdentityMatch(cachedIdentity))) ? cachedIdentity : match);
+                custom_steam_library::verifiedSteamIdentityMatch(currentCached))) ? currentCached : match);
         const auto provider = jsonStringOr(identityMatch, "primaryProvider");
         const auto identityStatus = jsonStringOr(identityMatch, "identityStatus");
         const auto steamVerificationStatus = jsonStringOr(identityMatch, "steamVerificationStatus");
@@ -2993,7 +3186,7 @@ static json buildLocalSteamPlanSnapshot(const json& snapshot, const json& owners
         if (!provider.empty()) item["primaryProvider"] = provider;
         if (!identityStatus.empty()) item["identityStatus"] = identityStatus;
         if (!steamVerificationStatus.empty()) item["steamVerificationStatus"] = steamVerificationStatus;
-        if (manifestResult) item["artworkManifest"] = toUtf8(manifestResult->second.wstring());
+        if (manifestCompatible) item["artworkManifest"] = toUtf8(manifestResult->second.wstring());
 
         const auto artwork = hostArtworkReadiness(manifest, manualIdentity);
         item["artwork"] = artwork;
@@ -3040,6 +3233,8 @@ struct ProcessResult {
     DWORD exitCode = ERROR_GEN_FAILURE;
     std::string output;
 };
+
+enum class HostProcessAdmission { readyRoot, startupRootInitialization };
 
 static fs::path resolveExecutablePath(const fs::path& executable) {
     if (executable.is_absolute()) {
@@ -3090,8 +3285,18 @@ static ProcessResult runProcess(
     // only for legacy local commands which have not supplied one.
     DWORD timeoutMs = kWorkerDefaultTimeoutMs,
     std::atomic<bool>* cancelFlag = nullptr,
-    HANDLE* activeProcessSlot = nullptr) {
-    if(!g_dataRoot.empty())requireHostDataRootReady();
+    HANDLE* activeProcessSlot = nullptr,
+    HostProcessAdmission admission = HostProcessAdmission::readyRoot) {
+    if (admission == HostProcessAdmission::startupRootInitialization) {
+        // Only the existing startup cleanup may reach the original Worker
+        // initializer before a missing record exists. Ordinary IPC/reads stay
+        // read-only, and an invalid existing record never grants this path.
+        const auto state = hostDataRootReadiness();
+        if (g_updateHealthOnly || g_dataRoot.empty() || !samePath(executable, g_worker) ||
+            arguments != std::vector<std::wstring>{L"--cleanup-interrupted-transactions", L"--expected-data-root", g_dataRoot.wstring()} ||
+            (!state.ready && state.reason != "missing-root-record"))
+            throw std::runtime_error("library-data-root-initialization-not-admitted");
+    } else if(!g_dataRoot.empty())requireHostDataRootReady();
     auto* effectiveCancelFlag = cancelFlag ? cancelFlag : &g_cancelRequested;
     auto* effectiveProcessSlot = activeProcessSlot ? activeProcessSlot : &g_activeProcess;
     if (g_shuttingDown.load() || effectiveCancelFlag->load()) {
@@ -3277,6 +3482,12 @@ static ProcessResult runWorkerBounded(
     return runProcess(g_worker, arguments, timeoutMs, cancelFlag, activeProcessSlot);
 }
 
+static ProcessResult runStartupTransactionCleanup() {
+    return runProcess(g_worker,
+        {L"--cleanup-interrupted-transactions", L"--expected-data-root", g_dataRoot.wstring()},
+        10000, nullptr, nullptr, HostProcessAdmission::startupRootInitialization);
+}
+
 static fs::path workspacePlanPath() {
     return g_dataRoot / L"state" / L"steam-add-plan.json";
 }
@@ -3291,13 +3502,30 @@ struct CachedSteamPlan {
     fs::file_time_type modified{};
 };
 
-static bool isPlanForCurrentLibrary(const json& plan) {
-    if (!hostDiscoveryDocumentValid(workspacePlanPath(),plan)) return false;
-    const auto libraryState=jsonStringOr(plan,"libraryState");
-    if(libraryState.empty()||!samePath(fs::path(toWide(libraryState)),g_dataRoot/L"state"/L"library-scan.json"))return false;
-    // A cached plan is display-only. Even that display must not borrow another
-    // selected account/installation's already-added or ready-to-add statuses.
-    const auto selected=steamTargetSnapshot();
+static bool sameSteamPlanReadSelection(const json& left, const json& right) {
+    for (const auto* key : {"selectionMode", "accountId", "steamRoot", "shortcutsVdf"})
+        if (jsonStringOr(left,key) != jsonStringOr(right,key)) return false;
+    return true;
+}
+
+static void rememberSteamPlanReadTarget(const json& target, const json& selection) {
+    std::lock_guard<std::mutex> lock(g_steamTargetMutex);
+    if (!sameSteamPlanReadSelection(selection,g_steamTarget)) return;
+    g_steamPlanReadTarget = target;
+    g_steamPlanReadSelection = selection;
+    g_steamPlanReadRoot = g_dataRoot;
+}
+
+static json steamPlanReadTargetSnapshot() {
+    std::lock_guard<std::mutex> lock(g_steamTargetMutex);
+    if (!jsonStringOr(g_steamTarget,"accountId").empty() || !jsonStringOr(g_steamTarget,"steamRoot").empty() ||
+        !jsonStringOr(g_steamTarget,"shortcutsVdf").empty()) return g_steamTarget;
+    if (g_steamPlanReadRoot == g_dataRoot && sameSteamPlanReadSelection(g_steamTarget,g_steamPlanReadSelection))
+        return g_steamPlanReadTarget;
+    return g_steamTarget;
+}
+
+static bool steamPlanMatchesTarget(const json& plan, const json& selected) {
     const auto account=jsonStringOr(selected,"accountId");
     if(!account.empty()&&jsonStringOr(plan,"accountId")!=account)return false;
     const auto expected=jsonStringOr(selected,"shortcutsVdf");
@@ -3312,8 +3540,16 @@ static bool isPlanForCurrentLibrary(const json& plan) {
     return true;
 }
 
-static CachedSteamPlan newestCachedSteamPlan(bool allowBatchPlan) {
+static bool isPlanForCurrentLibrary(const json& plan, const json& expectedTarget = steamTargetSnapshot()) {
+    if (!hostDiscoveryDocumentValid(workspacePlanPath(),plan)) return false;
+    const auto libraryState=jsonStringOr(plan,"libraryState");
+    if(libraryState.empty()||!samePath(fs::path(toWide(libraryState)),g_dataRoot/L"state"/L"library-scan.json"))return false;
+    return steamPlanMatchesTarget(plan,expectedTarget);
+}
+
+static CachedSteamPlan newestCachedSteamPlan(bool allowBatchPlan, const json& expectedTarget = json::object()) {
     CachedSteamPlan newest;
+    const auto readTarget = expectedTarget.empty() ? steamPlanReadTargetSnapshot() : expectedTarget;
     std::vector<fs::path> candidates = {workspacePlanPath()};
     if (allowBatchPlan) candidates.push_back(batchPlanPath());
     const auto selected=steamTargetSnapshot();
@@ -3334,7 +3570,7 @@ static CachedSteamPlan newestCachedSteamPlan(bool allowBatchPlan) {
         // matched only to current executable/directory keys by the UI.
         if (timeError) continue;
         const auto document = readJson(candidate, json::object());
-        if (!isPlanForCurrentLibrary(document)) continue;
+        if (!isPlanForCurrentLibrary(document) || !steamPlanMatchesTarget(document,readTarget)) continue;
         if (newest.source.empty() || modified > newest.modified) {
             newest.document = document;
             newest.source = candidate;
@@ -3373,9 +3609,73 @@ static std::vector<std::wstring> steamTargetArguments(const json& target) {
     return arguments;
 }
 
+static json defaultSteamPlanAccount(const json& report);
+
+static const char* steamRefreshWorkerFailure(const ProcessResult& result) noexcept {
+    if (result.exitCode == ERROR_CANCELLED) return nullptr;
+    if (result.exitCode == ERROR_TIMEOUT) return "worker-timeout";
+    const auto& output = result.output;
+    if (output.find("WORKER_OUTPUT_TRUNCATED") != std::string::npos) return "output-truncated";
+    if (output.find("[steam-information-unavailable]") != std::string::npos) return "steam-information-unavailable";
+    if (output.find("[steam-process-unknown]") != std::string::npos) return "steam-process-unknown";
+    if (output.find("ERROR_STEAM_ADD_PLAN_UNCONFIRMED:") != std::string::npos) return "plan-publication-unconfirmed";
+    if (output.find("ERROR_STEAM_ADD_PLAN_RECEIPT_UNAVAILABLE") != std::string::npos) return "worker-receipt-unavailable";
+    return result.exitCode == 0 ? "receipt-unconfirmed" : "worker-failed";
+}
+
+static void recordSteamPlanRefreshFailure(const char* stage, const char* reason) noexcept {
+    if (!reason) return;
+    try {
+        // The existing export includes ui-errors.jsonl; do not persist raw
+        // Worker output, which can contain account IDs, game paths and VDF data.
+        appendUiError({{"type", "steam-plan-refresh-failed"}, {"stage", stage}, {"reason", reason}});
+    } catch (...) {}
+}
+
+template <size_t N>
+static std::string steamWorkerErrorText(std::string_view output, const std::string_view (&receiptPrefixes)[N]) {
+    constexpr size_t maxDetailBytes = 1600;
+    constexpr std::string_view whitespace = " \t\r\n\v\f";
+    // The pipe multiplexes stderr with stdout. Keep useful error lines, not
+    // protocol headers, file paths and receipts from the Worker.
+    std::string detail;
+    for (std::string_view lines(output); !lines.empty() && detail.size() < maxDetailBytes;) {
+        const auto newline = lines.find('\n');
+        auto line = lines.substr(0, newline);
+        lines.remove_prefix(newline == std::string_view::npos ? lines.size() : newline + 1);
+        const auto first = line.find_first_not_of(whitespace);
+        if (first == std::string_view::npos) continue;
+        line.remove_prefix(first);
+        if (std::any_of(std::begin(receiptPrefixes), std::end(receiptPrefixes),
+            [&](std::string_view prefix) { return line.starts_with(prefix); })) continue;
+        line = line.substr(0, line.find_last_not_of(whitespace) + 1);
+        auto size = (std::min)(line.size(), maxDetailBytes - detail.size() - (detail.empty() ? 0 : 1));
+        while (size > 0 && size < line.size() && (static_cast<unsigned char>(line[size]) & 0xc0) == 0x80) --size;
+        if (!size) break;
+        if (!detail.empty()) detail += '\n';
+        detail.append(line.substr(0, size));
+        if (size != line.size()) break;
+    }
+    return detail;
+}
+
+static json failedSteamAccountReport(const std::string& output = {}) {
+    constexpr std::string_view receiptPrefixes[] = {
+        "STEAM_ACCOUNTS:", "STEAM_ACCOUNTS_STATUS:", "STEAM_ACCOUNTS_JSON:",
+        "ACCOUNTS_WRITE_CONFIRMED:", "MULTIPLE_STEAM_ACCOUNTS:",
+        "EXPLICIT_ACCOUNT_SELECTION_REQUIRED:", "OUTPUT:", "WORKER_OUTPUT_TRUNCATED"
+    };
+    const auto detail = steamWorkerErrorText(output, receiptPrefixes);
+    return json{{"schemaVersion", 1}, {"accounts", json::array()},
+        {"steamStatus", "error"},
+        {"steamDownloadUrl", "https://store.steampowered.com/about/"},
+        {"error", detail.empty() ? "Steam 账户扫描未确认，请重新检测。" : detail}};
+}
+
 static json readSteamAccounts(
     const json& requestedRoots = json::array(),
-    const BackgroundJob& backgroundJob = nullptr) {
+    const BackgroundJob& backgroundJob = nullptr,
+    const char** failureReason = nullptr) {
     std::vector<std::wstring> arguments = {L"--list-steam-accounts"};
     for (const auto& root : requestedRoots) {
         if (!root.is_string() || root.get<std::string>().empty()) continue;
@@ -3391,13 +3691,198 @@ static json readSteamAccounts(
     auto* cancelFlag = backgroundJob ? &backgroundJob->cancelRequested : nullptr;
     auto* activeProcess = backgroundJob ? &backgroundJob->activeProcess : nullptr;
     const auto result = runWorkerBounded(arguments, kLocalScanWorkerTimeoutMs, cancelFlag, activeProcess);
-    if (result.exitCode != 0) {
-        return json{{"schemaVersion", 1}, {"accounts", json::array()},
-            {"steamStatus", "error"},
-            {"steamDownloadUrl", "https://store.steampowered.com/about/"},
-            {"error", result.output.empty() ? "Steam 账户扫描失败" : result.output}};
+    // A successful Worker may be followed by another account scan which
+    // replaces the shared cache. Consume this process's immutable report,
+    // keeping the durable file as a cache rather than a fresh-read receipt.
+    const auto failure = [&] {
+        if (failureReason) *failureReason = steamRefreshWorkerFailure(result);
+        return failedSteamAccountReport(result.output);
+    };
+    if (result.exitCode != 0 || result.output.find("WORKER_OUTPUT_TRUNCATED") != std::string::npos) return failure();
+    unsigned currentCount=0, writeCount=0, payloadCount=0;
+    std::string line, payload;
+    std::istringstream lines(result.output);
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.starts_with("STEAM_ACCOUNTS_STATUS:")) {
+            if (line != "STEAM_ACCOUNTS_STATUS: current" || ++currentCount != 1) return failure();
+        } else if (line.starts_with("ACCOUNTS_WRITE_CONFIRMED:")) {
+            if (line != "ACCOUNTS_WRITE_CONFIRMED: true" || ++writeCount != 1) return failure();
+        } else if (line.starts_with("STEAM_ACCOUNTS_JSON:")) {
+            if (!line.starts_with("STEAM_ACCOUNTS_JSON: ") || ++payloadCount != 1) return failure();
+            payload=line.substr(std::string("STEAM_ACCOUNTS_JSON: ").size());
+        }
     }
-    return readJson(outputPath, json{{"accounts", json::array()}});
+    if (currentCount != 1 || writeCount != 1 || payloadCount != 1) return failure();
+    const auto report=json::parse(payload,nullptr,false);
+    if (!hostDiscoveryDocumentValid(outputPath,report) || !report.contains("accounts") || !report["accounts"].is_array()) return failure();
+    const auto status=jsonStringOr(report,"steamStatus");
+    if ((status != "ready" && status != "not-installed" && status != "installed-no-account") ||
+        ((status == "ready") != !report["accounts"].empty())) return failure();
+    for (const auto& account : report["accounts"])
+        if (jsonStringOr(account,"accountId").empty() ||
+            (account.contains("readError") && !account["readError"].is_null())) return failure();
+    if (report.contains("unavailableAccounts")) {
+        const auto& unavailable = report["unavailableAccounts"];
+        if (!unavailable.is_array() || unavailable.empty() || !jsonBoolOr(report,"partialAccounts",false)) return failure();
+        std::set<std::pair<std::string,std::wstring>> known;
+        for (const auto& account : report["accounts"])
+            known.insert({jsonStringOr(account,"accountId"), normalizedPathKey(fs::path(toWide(jsonStringOr(account,"shortcutsVdf"))))});
+        for (const auto& account : unavailable) {
+            const auto id=jsonStringOr(account,"accountId"), root=jsonStringOr(account,"steamRoot"), vdf=jsonStringOr(account,"shortcutsVdf");
+            if (id.empty() || root.empty() || !std::all_of(id.begin(),id.end(),[](unsigned char c){return c>='0'&&c<='9';}) ||
+                !fs::path(toWide(root)).is_absolute() || !samePath(fs::path(toWide(vdf)),fs::path(toWide(root))/L"userdata"/toWide(id)/L"config"/L"shortcuts.vdf")) return failure();
+            if (!account.is_object() || jsonStringOr(account,"accountId").empty() ||
+                jsonStringOr(account,"shortcutsVdf").empty() || jsonStringOr(account,"readError").empty() ||
+                !known.insert({jsonStringOr(account,"accountId"), normalizedPathKey(fs::path(toWide(jsonStringOr(account,"shortcutsVdf"))))}).second)
+                return failure();
+        }
+        const auto selected = defaultSteamPlanAccount(report);
+        if (!jsonStringOr(selected,"readError").empty()) {
+            auto blocked = failure();
+            blocked["error"] = "当前登录的 Steam 账户无法读取，未切换到历史账户；请关闭占用或修复账户文件后重新检测。";
+            blocked["unavailableAccounts"] = unavailable;
+            return blocked;
+        }
+    } else if (jsonBoolOr(report,"partialAccounts",false)) return failure();
+    return report;
+}
+
+// Read only at an explicit plan refresh. Historical userdata folders are not
+// evidence of the currently signed-in user's library. Bind ActiveUser to the
+// same registry installation before preferring its freshly discovered row.
+static json defaultSteamPlanAccount(const json& report) {
+    const auto accounts = jsonArrayOr(report, "accounts");
+    if (accounts.empty()) return json::object();
+    const auto facts = ymcc::steaminfo::read(ymcc::steaminfo::Session);
+    // UI account and registry candidate retain their distinct provenance.
+    const auto accountId = facts.uiAccountKnown ? facts.uiAccount :
+        (facts.accountError == ERROR_SUCCESS ? facts.registryAccount : 0);
+    if (facts.available && accountId && facts.rootError == ERROR_SUCCESS && !facts.root.empty()) {
+        const auto wanted = std::to_string(accountId);
+        for (const auto* section : {"accounts", "unavailableAccounts"}) {
+            for (const auto& account : jsonArrayOr(report, section)) {
+                const auto root = jsonStringOr(account, "steamRoot");
+                if (jsonStringOr(account, "accountId") == wanted && !root.empty() &&
+                    samePath(fs::path(toWide(root)), fs::path(toWide(facts.root)))) return account;
+            }
+        }
+    }
+    // Explicit/offline multi-account discovery keeps its original fallback.
+    return accounts.front();
+}
+
+static bool planReplyMatchesDocument(const ProcessResult& result, const json& document) {
+    if (result.exitCode != 0 || result.output.find("WORKER_OUTPUT_TRUNCATED") != std::string::npos) return false;
+    std::istringstream lines(result.output);
+    std::string line, receipt;
+    unsigned count = 0;
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.starts_with("STEAM_PLAN_RECEIPT:")) continue;
+        if (++count != 1) return false;
+        receipt = line;
+    }
+    if (count != 1) return false;
+    const auto digest = custom_steam_library::plan_receipt::digest(document);
+    return !digest.empty() && receipt == "STEAM_PLAN_RECEIPT: sha256-v1:" + digest;
+}
+
+static bool identityWorkerQueuedNetworkRetry(const ProcessResult& result) {
+    // The worker emits this acknowledgement only after committing its queue.
+    // A failed write, truncated output, or a different worker failure keeps
+    // the original Host retry policy.
+    if ((result.exitCode != 1 && result.exitCode != 4) ||
+        result.output.find("WORKER_OUTPUT_TRUNCATED") != std::string::npos) return false;
+    constexpr std::string_view prefix = "NETWORK_RETRY_JOB: ";
+    bool queued = false, waiting = false, unresolved = false;
+    std::string_view lines(result.output);
+    while (!lines.empty()) {
+        const auto newline = lines.find('\n');
+        auto line = lines.substr(0, newline);
+        if (newline == std::string_view::npos) lines = {};
+        else lines.remove_prefix(newline + 1);
+        if (line.ends_with('\r')) line.remove_suffix(1);
+        if (line.starts_with("NETWORK_RETRY_QUEUE_UNAVAILABLE:")) return false;
+        if (line.starts_with("NETWORK_RETRY_JOB:")) {
+            if (queued || !line.starts_with(prefix)) return false;
+            const auto id = line.substr(prefix.size());
+            if (id.size() != 64 || id.find_first_not_of("0123456789abcdef") != std::string_view::npos) return false;
+            queued = true;
+        } else if (line == "NETWORK_RETRY_WAKE_MODE: event-driven-no-polling") {
+            if (waiting) return false;
+            waiting = true;
+        } else if ((result.exitCode == 1 && line == "FAILURE_KIND: network-unavailable") ||
+                   (result.exitCode == 4 && line == "STEAM_ID_RESOLVED: false")) {
+            unresolved = true;
+        }
+    }
+    return queued && waiting && unresolved;
+}
+
+static void requireSuccess(const ProcessResult& result);
+static json readSteamAddCompletion(const ProcessResult& result, const fs::path& outputPath, const json& target) {
+    requireSuccess(result);
+    std::string receipt, line;
+    unsigned count = 0;
+    std::istringstream lines(result.output);
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.starts_with("STEAM_ADD_RESULT_RECEIPT:")) { receipt = line; ++count; }
+    }
+    const std::string prefix = "STEAM_ADD_RESULT_RECEIPT: sha256-v1:";
+    if (result.output.find("WORKER_OUTPUT_TRUNCATED") != std::string::npos || count != 1 ||
+        !receipt.starts_with(prefix) || receipt.size() != prefix.size() + 64 ||
+        receipt.find_first_not_of("0123456789abcdef", prefix.size()) != std::string::npos)
+        throw std::runtime_error("加入 Steam 子进程已结束，但完成回执未确认；请刷新游戏库核对，勿重复加入。");
+    const auto account = jsonStringOr(target, "accountId");
+    std::vector<fs::path> candidates{outputPath};
+    if (!account.empty()) {
+        std::string token = account;
+        for (auto& ch : token) if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '-' && ch != '_') ch = '_';
+        candidates.push_back(g_dataRoot / L"state" / toWide("last-steam-add-" + token + ".json"));
+    }
+    candidates.push_back(g_dataRoot / L"state" / L"last-steam-add.json");
+    for (const auto& candidate : candidates) {
+        const auto document = readHostDiscoveryState(candidate, json::object());
+        if (!document.contains("schemaVersion") || !document["schemaVersion"].is_number_integer() || document["schemaVersion"] != json(1) ||
+            jsonStringOr(document,"mode") != "steam-library-add-commit" ||
+            !document.contains("committed") || !document["committed"].is_boolean() ||
+            (!document["committed"].get<bool>() && jsonStringOr(document,"reason") != "nothing-ready-to-add") ||
+            !isPlanForCurrentLibrary(document,target) || (!account.empty() && jsonStringOr(document,"accountId") != account)) continue;
+        const auto actual = fs::path(toWide(jsonStringOr(document,"shortcutsVdf")));
+        const auto expected = jsonStringOr(target,"shortcutsVdf"), root = jsonStringOr(target,"steamRoot");
+        if (actual.empty() || (!expected.empty() && !samePath(actual,fs::path(toWide(expected)))) ||
+            (!root.empty() && !samePath(actual.parent_path().parent_path().parent_path().parent_path(),fs::path(toWide(root))))) continue;
+        const auto digest = custom_steam_library::plan_receipt::addCompletionDigest(document);
+        if (!digest.empty() && receipt == prefix + digest) return document;
+    }
+    // This is result-readback uncertainty, never permission to replay a write.
+    throw std::runtime_error("Steam 已完成本次加入处理，但结果记录未能确认；请刷新游戏库核对，勿重复加入。");
+}
+
+// A completed write is never retried merely because one result publication failed.
+// Reuse the original bounded result files and completion digest semantics.
+static json readSteamActionCompletion(const ProcessResult& result,const fs::path& outputPath,const json& target,bool refresh) {
+    requireSuccess(result);
+    const std::string token=refresh?"STEAM_REFRESH_RESULT_RECEIPT:":"STEAM_DELETE_RESULT_RECEIPT:";
+    const auto prefix=token+" sha256-v1:";std::string line,receipt;unsigned count=0;
+    std::istringstream lines(result.output);
+    while(std::getline(lines,line)){if(!line.empty()&&line.back()=='\r')line.pop_back();if(line.starts_with(token)){receipt=line;++count;}}
+    const auto uncertain=[&](){return std::runtime_error(std::string("Steam 已处理本次")+(refresh?"图片刷新":"删除")+"，但完成结果未能确认；请刷新游戏库核对，勿重复操作。");};
+    if(result.output.find("WORKER_OUTPUT_TRUNCATED")!=std::string::npos||count!=1||!receipt.starts_with(prefix)||receipt.size()!=prefix.size()+64||receipt.find_first_not_of("0123456789abcdef",prefix.size())!=std::string::npos)throw uncertain();
+    const auto global=g_dataRoot/L"state"/(refresh?L"last-steam-artwork-refresh.json":L"last-steam-delete.json");
+    for(const auto& candidate:{outputPath,global}){
+        const auto document=readHostDiscoveryState(candidate,json::object());
+        if(!document.contains("schemaVersion")||!document["schemaVersion"].is_number_integer()||document["schemaVersion"]!=json(1)||jsonStringOr(document,"mode")!=(refresh?"steam-artwork-refresh":"steam-library-delete-commit")||
+            !document.contains("committed")||!document["committed"].is_boolean()||!document["committed"].get<bool>()||
+            !document.contains("items")||!document["items"].is_array()||!steamPlanMatchesTarget(document,target)||
+            (!refresh&&!isPlanForCurrentLibrary(document,target)))continue;
+        if(jsonStringOr(document,"accountId").empty()||jsonStringOr(document,"shortcutsVdf").empty())continue;
+        const auto digest=custom_steam_library::plan_receipt::addCompletionDigest(document);
+        if(!digest.empty()&&receipt==prefix+digest)return document;
+    }
+    throw uncertain();
 }
 
 struct NativeSteamArtworkTarget {
@@ -3462,18 +3947,18 @@ static int64_t nativeSteamAppIdFromRecord(const json& value) {
 }
 
 static std::optional<json> nativeSteamRecordForExecutable(const fs::path& executable) {
-    const std::array<fs::path, 2> sources = {
-        workspacePlanPath(), g_dataRoot / L"state" / L"library-scan.json"
-    };
-    for (const auto& source : sources) {
-        const auto document = readJson(source, json::object());
-        const auto values = document.contains("items") && document["items"].is_array()
-            ? document["items"] : jsonArrayOr(document, "games");
-        for (const auto& value : values) {
-            if (!isNativeSteamRecord(value) || !nativeSteamRecordMatchesExecutable(value, executable)) continue;
-            return value;
+    const auto library = readJson(g_dataRoot / L"state" / L"library-scan.json", json::object());
+    if (const auto games = library.find("games"); games != library.end() && games->is_array()) {
+        for (const auto& game : *games) {
+            if (!isNativeSteamRecord(game)) continue;
+            const auto primary = jsonStringOr(game, "primaryExecutable");
+            if (!primary.empty() && samePath(fs::path(toWide(primary)), executable)) return game;
         }
+        return std::nullopt;  // A cached row cannot revive a retired primary.
     }
+    const auto plan = readJson(workspacePlanPath(), json::object());
+    if (isPlanForCurrentLibrary(plan)) for (const auto& item : plan["items"])
+        if (nativeSteamRecordMatchesExecutable(item, executable)) return item;
     return std::nullopt;
 }
 
@@ -3525,16 +4010,18 @@ static std::vector<fs::path> nativeSteamArtworkFiles(
     const fs::path& grid, const std::string& stem) {
     std::vector<fs::path> result;
     std::error_code error;
-    if (!fs::is_directory(grid, error)) return result;
-    for (const auto& entry : fs::directory_iterator(grid, error)) {
-        if (error) { error.clear(); break; }
-        if (!entry.is_regular_file(error)) { error.clear(); continue; }
-        if (toUtf8(entry.path().stem().wstring()) != stem || !supportedArtworkFile(entry.path())) {
-            error.clear();
-            continue;
-        }
-        result.push_back(entry.path());
+    if (!fs::is_directory(custom_steam_library::ioPath(grid), error) || error)
+        throw std::runtime_error("无法读取原生 Steam 素材目录：" + toUtf8(grid.wstring()));
+    fs::directory_iterator entries(custom_steam_library::ioPath(grid), error), end;
+    if (error) throw std::runtime_error("无法枚举原生 Steam 素材目录：" + toUtf8(grid.wstring()));
+    for (; entries != end; entries.increment(error)) {
+        if (error) break;
+        const auto& entry = *entries;
+        if (!entry.is_regular_file(error)) { if (error) break; continue; }
+        if (toUtf8(entry.path().stem().wstring()) == stem && supportedArtworkFile(entry.path()))
+            result.push_back(grid / entry.path().filename());
     }
+    if (error) throw std::runtime_error("原生 Steam 素材枚举未完成，未继续写入：" + toUtf8(grid.wstring()));
     return result;
 }
 
@@ -3549,65 +4036,204 @@ static std::string nativeSteamArtworkStem(int64_t appId, const std::string& type
 static void backupNativeSteamArtworkFile(const fs::path& source, const fs::path& directory) {
     requireHostDataRootReady();
     std::error_code error;
-    fs::create_directories(directory, error);
+    fs::create_directories(custom_steam_library::ioPath(directory), error);
     if (error) throw std::runtime_error("无法创建原生 Steam 素材备份目录");
     const auto destination = directory / source.filename();
     copyHostFileAtomic(source, destination);
 }
 
-static void writeNativeSteamArtwork(
-    const NativeSteamArtworkTarget& target,
-    const std::string& type,
-    const std::string& sourceText,
-    bool clear) {
-    requireHostDataRootReady();
-    if (target.appId <= 0 || target.grids.empty()) {
-        throw std::runtime_error("未找到原生 Steam 的本地 grid 目录；请先登录 Steam 后重试");
+struct NativeSteamArtworkEdit {
+    std::string type;
+    fs::path source;
+    bool clear = false;
+};
+
+static bool nativeArtworkFilesEqual(const fs::path& left, const fs::path& right) {
+    std::error_code error;
+    const auto a = fs::file_size(custom_steam_library::ioPath(left), error);
+    if (error) return false;
+    const auto b = fs::file_size(custom_steam_library::ioPath(right), error);
+    if (error || a != b) return false;
+    std::ifstream first(custom_steam_library::ioPath(left), std::ios::binary);
+    std::ifstream second(custom_steam_library::ioPath(right), std::ios::binary);
+    if (!first || !second) return false;
+    std::array<char, 65536> x{}, y{};
+    while (first && second) {
+        first.read(x.data(), x.size()); second.read(y.data(), y.size());
+        if (first.gcount() != second.gcount() ||
+            !std::equal(x.begin(), x.begin() + first.gcount(), y.begin())) return false;
     }
+    return first.eof() && second.eof() && !first.bad() && !second.bad();
+}
+
+// One synchronous editor write owns this bounded set of native files. Backups
+// are durable; staging belongs only to this object. No startup replay or timer.
+class NativeSteamArtworkWrite {
+    struct Change {
+        fs::path path, backup, replacement;
+        bool existed = false, applied = false;
+    };
+    std::vector<Change> changes_;
+    std::vector<std::pair<fs::path, std::string>> observedSlots_;
+    std::vector<std::unique_ptr<HostStagedFile>> stages_;
+    fs::path backupRoot_;
+    const bool* configurationActivated_ = nullptr;
+    bool committed_ = false, rollbackAttempted_ = false;
+    bool durable() const { return committed_ || (configurationActivated_ && *configurationActivated_); }
+    void verifyObservedFile(const Change& change) const {
+        std::error_code error;
+        const bool exists = fs::exists(custom_steam_library::ioPath(change.path), error);
+        const bool expected = change.applied ? !change.replacement.empty() : change.existed;
+        const auto& accepted = change.applied ? change.replacement : change.backup;
+        if (error || exists != expected || (expected && !nativeArtworkFilesEqual(change.path, accepted)))
+            throw std::runtime_error("原生 Steam 素材在准备后发生变化，已停止保存，请刷新后重试：" + toUtf8(change.path.wstring()));
+    }
+    void verifyObservedSlot(const fs::path& grid, const std::string& stem) const {
+        std::set<std::wstring> expected, current;
+        for (const auto& change : changes_) {
+            if (!samePath(change.path.parent_path(), grid) || toUtf8(change.path.stem().wstring()) != stem) continue;
+            if (change.applied ? !change.replacement.empty() : change.existed)
+                expected.insert(normalizedPathKey(change.path));
+        }
+        for (const auto& path : nativeSteamArtworkFiles(grid, stem)) current.insert(normalizedPathKey(path));
+        if (current != expected)
+            throw std::runtime_error("原生 Steam 素材文件列表在准备后发生变化，已停止保存，请刷新后重试：" + toUtf8(grid.wstring()));
+    }
+    void verifyObservedState() const {
+        // Include initially empty clear slots; a new extension is still a change.
+        for (const auto& [grid, stem] : observedSlots_) verifyObservedSlot(grid, stem);
+        for (const auto& change : changes_) verifyObservedFile(change);
+    }
+    void rollback() {
+        if (durable() || rollbackAttempted_) return;
+        rollbackAttempted_ = true;
+        std::string failures;
+        for (auto it = changes_.rbegin(); it != changes_.rend(); ++it) {
+            auto& change = *it;
+            if (!change.applied) continue;
+            try {
+                std::error_code error;
+                const bool exists = fs::exists(custom_steam_library::ioPath(change.path), error);
+                if (error) throw std::runtime_error("cannot inspect rollback target");
+                if (change.existed && nativeArtworkFilesEqual(change.path, change.backup)) {
+                    change.applied = false; continue;
+                }
+                if (!change.existed && !exists) { change.applied = false; continue; }
+                // An intervening editor's different bytes are not ours to undo.
+                if ((change.replacement.empty() && exists) ||
+                    (!change.replacement.empty() && !nativeArtworkFilesEqual(change.path, change.replacement)))
+                    throw std::runtime_error("native artwork changed after this write");
+                if (change.existed) copyHostFileAtomic(change.backup, change.path);
+                else {
+                    fs::remove(custom_steam_library::ioPath(change.path), error);
+                    if (error) throw std::runtime_error("cannot remove uncommitted native artwork");
+                }
+                change.applied = false;
+            } catch (...) {
+                if (!failures.empty()) failures += "; ";
+                failures += toUtf8(change.path.wstring());
+            }
+        }
+        if (!failures.empty()) throw std::runtime_error("原生 Steam 素材恢复未完成，请勿重复保存。备份：" +
+            toUtf8(backupRoot_.wstring()) + "；未恢复文件：" + failures);
+    }
+public:
+    NativeSteamArtworkWrite(const NativeSteamArtworkTarget& target,
+        const std::vector<NativeSteamArtworkEdit>& edits, const bool* activated = nullptr)
+        : configurationActivated_(activated) {
+        requireHostDataRootReady();
+        if (target.appId <= 0 || target.grids.empty() || edits.empty())
+            throw std::runtime_error("未找到原生 Steam 的本地 grid 目录；请先登录 Steam 后重试");
+        if (hostSteamRunning()) {
+            throw std::runtime_error("原生 Steam 素材写入需要先关闭 Steam；请先退出 Steam 后再保存编辑内容");
+        }
+        const auto token = ymcc::media::randomId();
+        backupRoot_ = g_dataRoot / L"backups" / L"native-steam-grid" / toWide(token) / toWide(std::to_string(target.appId));
+        const auto stageRoot = g_dataRoot / L"cache" / L"native-steam-artwork-write";
+        std::set<std::wstring> destinations;
+        for (const auto& edit : edits) {
+            const auto stem = nativeSteamArtworkStem(target.appId, edit.type);
+            if (stem.empty()) throw std::runtime_error("原生 Steam 素材类型不受支持");
+            fs::path staged;
+            if (!edit.clear) {
+                std::error_code error;
+                if (!fs::is_regular_file(custom_steam_library::ioPath(edit.source), error) || error || !supportedArtworkFile(edit.source))
+                    throw std::runtime_error("手动素材必须是本地 JPG、PNG、WEBP、BMP 或 ICO 文件");
+                stages_.push_back(std::make_unique<HostStagedFile>());
+                stages_.back()->path = stageRoot / (toWide(token + "-" + edit.type) + edit.source.extension().wstring());
+                copyHostFileAtomic(edit.source, stages_.back()->path);
+                staged = stages_.back()->path;
+            }
+            for (size_t gridIndex = 0; gridIndex < target.grids.size(); ++gridIndex) {
+                const auto& [account, grid] = target.grids[gridIndex];
+                const auto existing = nativeSteamArtworkFiles(grid, stem);
+                observedSlots_.push_back({grid, stem});
+                const auto backup = backupRoot_ / toWide(safeArtworkSegment(account) + "-" + std::to_string(gridIndex));
+                const auto destination = edit.clear ? fs::path{} : grid / (toWide(stem) + staged.extension().wstring());
+                for (const auto& path : existing) backupNativeSteamArtworkFile(path, backup);
+                if (!edit.clear) {
+                    if (!destinations.insert(normalizedPathKey(destination)).second)
+                        throw std::runtime_error("原生 Steam 素材目标重复，未写入");
+                    const auto previous = std::find_if(existing.begin(), existing.end(), [&](const auto& path) { return samePath(path, destination); });
+                    changes_.push_back({destination, previous == existing.end() ? fs::path{} : backup / previous->filename(), staged, previous != existing.end(), false});
+                }
+                for (const auto& path : existing) {
+                    if (!edit.clear && samePath(path, destination)) continue;
+                    if (!destinations.insert(normalizedPathKey(path)).second)
+                        throw std::runtime_error("原生 Steam 素材目标重复，未写入");
+                    changes_.push_back({path, backup / path.filename(), {}, true, false});
+                }
+            }
+        }
+    }
+    void write(const std::function<void()>& commit) {
+        try {
+            verifyObservedState();
+            if (hostSteamRunning()) {
+                throw std::runtime_error("原生 Steam 素材写入需要先关闭 Steam；请先退出 Steam 后再保存编辑内容");
+            }
+            for (auto& change : changes_) {
+                verifyObservedSlot(change.path.parent_path(), toUtf8(change.path.stem().wstring()));
+                verifyObservedFile(change);
+                if (!change.replacement.empty()) {
+                    copyHostFileAtomic(change.replacement, change.path);
+                    change.applied = true;
+                } else {
+                    std::error_code error;
+                    change.applied = fs::remove(custom_steam_library::ioPath(change.path), error);
+                    if (error) throw std::runtime_error("原生 Steam 旧素材清理失败：" + toUtf8(change.path.wstring()));
+                }
+            }
+            verifyObservedState();
+            commit();
+            committed_ = true;
+        } catch (...) {
+            const auto primary = std::current_exception();
+            try { rollback(); }
+            catch (const std::exception& recovery) {
+                std::string original = "原生 Steam 素材保存失败";
+                try { std::rethrow_exception(primary); } catch (const std::exception& error) { original = error.what(); } catch (...) {}
+                throw std::runtime_error(original + "；" + recovery.what());
+            }
+            std::rethrow_exception(primary);
+        }
+    }
+    ~NativeSteamArtworkWrite() noexcept {
+        if (!durable() && !rollbackAttempted_) {
+            try { rollback(); }
+            catch (const std::exception& error) { appendUiError({{"type","native-artwork-rollback-failed"},{"error",error.what()}}); }
+            catch (...) { }
+        }
+    }
+};
+
+static void writeNativeSteamArtwork(const NativeSteamArtworkTarget& target,
+    const std::string& type, const std::string& sourceText, bool clear) {
+    ymcc::steamoffline::Guard offline;
+    if (!offline) throw std::runtime_error("Steam 文件正在处理，请稍后重试（错误码：" + std::to_string(offline.error()) + "）");
     HostDataTransaction transaction;
-    const auto stem = nativeSteamArtworkStem(target.appId, type);
-    if (stem.empty()) throw std::runtime_error("原生 Steam 素材类型不受支持");
-
-    fs::path staged;
-    HostStagedFile stagedCleanup{};
-    if (!clear) {
-        const auto source = fs::path(toWide(sourceText));
-        std::error_code error;
-        if (!fs::is_regular_file(source, error) || !supportedArtworkFile(source)) {
-            throw std::runtime_error("手动素材必须是本地 JPG、PNG、WEBP、BMP 或 ICO 文件");
-        }
-        const auto stageDirectory = g_dataRoot / L"cache" / L"native-steam-artwork-write";
-        fs::create_directories(stageDirectory, error);
-        if (error) throw std::runtime_error("无法创建原生 Steam 素材临时目录");
-        staged = stageDirectory / toWide(
-            safeArtworkSegment(std::to_string(GetCurrentProcessId()) + "-" +
-                std::to_string(unixTimeMsHost()) + "-" + type) + source.extension().string());
-        stagedCleanup.path = staged;
-        copyHostFileAtomic(source, staged);
-    }
-
-    const auto backupRoot = g_dataRoot / L"backups" / L"native-steam-grid" /
-        toWide(std::to_string(unixTimeMsHost())) / toWide(std::to_string(target.appId));
-    for (const auto& [accountId, grid] : target.grids) {
-        const auto accountBackup = backupRoot / toWide(safeArtworkSegment(accountId));
-        const auto existing = nativeSteamArtworkFiles(grid, stem);
-        for (const auto& path : existing) backupNativeSteamArtworkFile(path, accountBackup);
-        const auto destination = clear ? fs::path{} : grid / (toWide(stem) + staged.extension().wstring());
-        if (!clear) copyHostFileAtomic(staged, destination);
-        // On any copy/activation failure, all previous extensions still exist.
-        // Only an explicit delete or successfully activated replacement may
-        // remove the old variants. Backups remain available on cleanup error.
-        for (const auto& path : existing) {
-            if (!clear && samePath(path, destination)) continue;
-            std::error_code error;
-            fs::remove(path, error);
-            if (error) throw std::runtime_error("原生 Steam 素材已备份，但旧扩展名清理失败：" + toUtf8(path.wstring()));
-        }
-    }
-    if (!staged.empty()) {
-        std::error_code error;
-        fs::remove(staged, error);
-    }
+    NativeSteamArtworkWrite write(target, {{type, fs::path(toWide(sourceText)), clear}});
+    write.write([] {});
 }
 
 static void requireSuccess(const ProcessResult& result) {
@@ -3633,6 +4259,158 @@ static json describeWorkspaceMediaEntry(ymcc::media::Store& store,json entry) {
     if(entry.contains("assets"))for(const auto* slot:{"static","dynamic"})if(entry["assets"].contains(slot))
         entry[std::string(slot)+"PreviewUrl"]=mappedDataUrl(store.assetPath(entry["assets"][slot]));
     return entry;
+}
+
+// Cached plans still record Steam membership, but an earlier identity cannot
+// override a newer explicit selection. This changes only the returned snapshot.
+static void applyManualIdentitySelectionToPlan(json& plan, const json& overrides) {
+    const auto records = overrides.find("items");
+    if (!overrides.is_object() || records == overrides.end() || !records->is_object()) return;
+    const bool constrained = std::any_of(records->cbegin(), records->cend(), [](const json& value) {
+        return value.is_object() && (value.contains("steamId") || value.contains("igdbId") || jsonBoolOr(value, "idCleared", false));
+    });
+    if (!constrained || !plan.is_object() || !plan.contains("items") || !plan["items"].is_array()) return;
+    ManualArtworkOverrideLookup manualLookup(overrides);
+    for (auto& item : plan["items"]) {
+        if (!item.is_object() || jsonBoolOr(item, "steamNative", false) || jsonStringOr(item, "status") == "steam-native") continue;
+        const auto manual = manualLookup.find(jsonStringOr(item, "primaryExecutable"));
+        if (!manual.contains("steamId") && !manual.contains("igdbId") && !jsonBoolOr(manual, "idCleared", false)) continue;
+        const auto app = jsonIntegerOr(item, "steamStoreAppId", jsonIntegerOr(item, "storefrontAppId", jsonIntegerOr(item, "appId", 0)));
+        // A deliberately ID-less import remains eligible for manual import.
+        if (app <= 0) continue;
+        json match{{"appId", app}};
+        for (const auto* field : {"matchedContentAppId", "baseGameAppId", "identityKind", "igdbId"}) if (item.contains(field)) match[field] = item[field];
+        if (custom_steam_library::steamIdentityMatchesManualSelection(match, manual)) continue;
+        const auto status = jsonStringOr(item, "status");
+        const auto name = jsonStringOr(item, "steamShortcutName", jsonStringOr(item, "directoryName",
+            toUtf8(fs::path(toWide(jsonStringOr(item, "gameDirectory"))).filename().wstring())));
+        discardSteamPlanIdentity(item, name);
+        item["identityStatus"] = "needs-confirmation";
+        item["steamVerificationStatus"] = "needs-confirmation";
+        if (status == "ready-to-add" || status == "ready-not-selected" || status == "needs-minimum-artwork") {
+            item["status"] = "waiting-steam-verification";
+            item["reason"] = "manual-steam-id-selection-changed";
+            auto& summary = plan["summary"];
+            if (!summary.is_object()) summary = json::object();
+            const auto bump = [&](const char* field, int delta) { summary[field] = (std::max)(int64_t{0}, int64_t{jsonIntegerOr(summary, field, 0)} + delta); };
+            bump(status == "ready-to-add" ? "readyToAdd" : status == "ready-not-selected" ? "readyNotSelected" : "needsMinimumArtwork", -1);
+            bump("needsIdentity", 1);bump("needsSteamVerification", 1);
+        }
+    }
+}
+
+// Advisory pages read current state after identity publication. Project only
+// unresolved current cards from the cache already loaded by this read; do not
+// rebuild the plan, search manifests again or infer Steam membership here.
+static void projectResolvedIdentityIntoPendingPlan(json& snapshot) {
+    auto& plan = snapshot["steamPlan"];
+    const auto identities = snapshot.find("resolvedIdentities");
+    if (!plan.is_object() || !plan.contains("items") || !plan["items"].is_array() ||
+        identities == snapshot.end() || !identities->is_object() || identities->empty()) return;
+    const bool pending = std::any_of(plan["items"].cbegin(), plan["items"].cend(), [](const json& item) {
+        const auto status = jsonStringOr(item, "status");
+        return !steamPlanItemAlreadyOwned(item) && (status == "waiting-steam-verification" || status == "needs-steam-verification" || status == "needs-identity-confirmation" || status == "needs-identity-and-artwork");
+    });
+    if (!pending) return;
+    const auto library = snapshot.find("library");
+    if (library == snapshot.end() || !library->is_object()) return;
+    std::unordered_map<std::wstring, std::unordered_set<std::wstring>> currentDirectories;
+    for (const auto& game : jsonArrayOr(*library, "games")) {
+        const auto exe = jsonStringOr(game, "primaryExecutable"), directory = jsonStringOr(game, "gameDirectory");
+        if (exe.empty() || directory.empty() || jsonStringOr(game, "status") != "ready" ||
+            jsonBoolOr(game, "steamNative", false) || jsonBoolOr(game, "unrecognizedTool", false) ||
+            jsonStringOr(game, "contentType") == "steam-native" || jsonStringOr(game, "contentType") == "non-game") continue;
+        currentDirectories[normalizedPathKey(fs::path(toWide(exe)))].insert(normalizedPathKey(fs::path(toWide(directory))));
+    }
+    const auto overrides = jsonObjectOr(snapshot, "manualOverrides");
+    ManualArtworkOverrideLookup manualLookup(overrides);
+    for (auto& item : plan["items"]) {
+        if (!item.is_object() || steamPlanItemAlreadyOwned(item)) continue;
+        const auto status = jsonStringOr(item, "status");
+        if (status != "waiting-steam-verification" && status != "needs-steam-verification" && status != "needs-identity-confirmation" && status != "needs-identity-and-artwork") continue;
+        if (jsonIntegerOr(item, "steamStoreAppId", jsonIntegerOr(item, "storefrontAppId", jsonIntegerOr(item, "appId", 0))) > 0) continue;
+        const auto exe = jsonStringOr(item, "primaryExecutable"), directory = jsonStringOr(item, "gameDirectory");
+        if (exe.empty() || directory.empty()) continue;
+        const auto key = normalizedPathKey(fs::path(toWide(exe)));
+        const auto current = currentDirectories.find(key);
+        if (current == currentDirectories.end() || !current->second.contains(normalizedPathKey(fs::path(toWide(directory))))) continue;
+        const auto identity = identities->find(toUtf8(key));
+        const auto manual = manualLookup.find(exe);
+        if (identity == identities->end() || !identity->is_object() || jsonBoolOr(manual, "idCleared", false) ||
+            !custom_steam_library::verifiedSteamIdentityMatch(*identity) ||
+            !custom_steam_library::steamIdentityMatchesManualSelection(*identity, manual)) continue;
+        const auto appId = jsonIntegerOr(*identity, "steamAppId", jsonIntegerOr(*identity, "storefrontAppId", jsonIntegerOr(*identity, "appId", 0)));
+        if (appId <= 0) continue;
+        for (const auto* field : {"appId", "steamAppId", "canonicalAppId", "localAppId", "requestedAppId", "baseGameAppId", "matchedContentAppId", "igdbId",
+                 "identityStatus", "steamVerificationStatus", "metadataVerificationStatus", "resolverVersion", "identityKind", "contentRelation", "identitySource", "identityConfidence", "identityTrust", "primaryProvider",
+                 "year", "releaseYear", "releaseDate", "displayName", "metadataGameSignal", "resolverRefreshRecommended", "reason"}) item.erase(field);
+        for (const auto* field : {"baseGameAppId", "matchedContentAppId", "igdbId", "identityStatus", "steamVerificationStatus", "metadataVerificationStatus", "resolverVersion", "identityKind", "contentRelation", "primaryProvider", "year", "releaseYear", "releaseDate", "displayName"})
+            if (identity->contains(field)) item[field] = (*identity)[field];
+        item["steamStoreAppId"] = appId;
+        item["storefrontAppId"] = appId;
+        item["formalName"] = jsonStringOr(*identity, "formalName", jsonStringOr(*identity, "displayName", jsonStringOr(item, "directoryName")));
+        item["identitySource"] = "resolved-identity-cache";
+        const auto previews = jsonObjectOr(item, "artworkPreview");
+        const auto ready = [&](const char* slot) { return !jsonStringOr(jsonObjectOr(previews, slot), "url").empty(); };
+        const bool tall = ready("tall"), hero = ready("hero"), minimum = tall && hero;
+        auto artwork = jsonObjectOr(item, "artwork");
+        artwork["tall"] = tall;artwork["long"] = ready("long");artwork["hero"] = hero;artwork["minimumComplete"] = minimum;
+        item["artwork"] = std::move(artwork);
+        item["artworkFallbackComplete"] = minimum;
+        const bool selected = jsonBoolOr(item, "selectedForAdd", true);
+        item["status"] = !minimum ? "needs-minimum-artwork" : selected ? "ready-to-add" : "ready-not-selected";
+        auto& summary = plan["summary"];
+        if (!summary.is_object()) summary = json::object();
+        const auto bump = [&](const char* field, int delta) { summary[field] = (std::max)(int64_t{0}, int64_t{jsonIntegerOr(summary, field, 0)} + delta); };
+        bump("needsIdentity", -1);bump("needsSteamVerification", -1);
+        bump(!minimum ? "needsMinimumArtwork" : selected ? "readyToAdd" : "readyNotSelected", 1);
+    }
+}
+
+// A verified card may have been planned before its artwork arrived. The
+// current preview layer already checked files and user deletions; update only
+// that waiting status without reopening identity or Steam membership.
+static void projectCompletedArtworkIntoPendingPlan(json& snapshot) {
+    auto& plan = snapshot["steamPlan"];
+    if (!plan.is_object() || !plan.contains("items") || !plan["items"].is_array() ||
+        !std::any_of(plan["items"].cbegin(), plan["items"].cend(), [](const json& item) {
+            return !steamPlanItemAlreadyOwned(item) && jsonStringOr(item, "status") == "needs-minimum-artwork";
+        })) return;
+    std::unordered_map<std::wstring, std::unordered_set<std::wstring>> currentDirectories;
+    for (const auto& game : jsonArrayOr(jsonObjectOr(snapshot, "library"), "games")) {
+        const auto exe = jsonStringOr(game, "primaryExecutable"), directory = jsonStringOr(game, "gameDirectory");
+        if (exe.empty() || directory.empty() || jsonStringOr(game, "status") != "ready" ||
+            jsonBoolOr(game, "steamNative", false) || jsonBoolOr(game, "unrecognizedTool", false) ||
+            jsonStringOr(game, "contentType") == "steam-native" || jsonStringOr(game, "contentType") == "non-game") continue;
+        currentDirectories[normalizedPathKey(fs::path(toWide(exe)))].insert(normalizedPathKey(fs::path(toWide(directory))));
+    }
+    const auto overrides = jsonObjectOr(snapshot, "manualOverrides");
+    ManualArtworkOverrideLookup manualLookup(overrides);
+    for (auto& item : plan["items"]) {
+        if (steamPlanItemAlreadyOwned(item) || jsonStringOr(item, "status") != "needs-minimum-artwork" ||
+            jsonStringOr(item, "identityStatus") != "verified" || jsonStringOr(item, "steamVerificationStatus") != "steam-verified") continue;
+        const auto appId = jsonIntegerOr(item, "steamStoreAppId", jsonIntegerOr(item, "storefrontAppId", jsonIntegerOr(item, "appId", 0)));
+        if (appId <= 0 || appId > 2147483647) continue;
+        const auto exe = jsonStringOr(item, "primaryExecutable"), directory = jsonStringOr(item, "gameDirectory");
+        if (exe.empty() || directory.empty()) continue;
+        const auto current = currentDirectories.find(normalizedPathKey(fs::path(toWide(exe))));
+        if (current == currentDirectories.end() || !current->second.contains(normalizedPathKey(fs::path(toWide(directory))))) continue;
+        auto identity = item;identity["appId"] = appId;
+        if (!custom_steam_library::steamIdentityMatchesManualSelection(identity, manualLookup.find(exe))) continue;
+        const auto previews = jsonObjectOr(item, "artworkPreview");
+        const auto ready = [&](const char* slot) { return !jsonStringOr(jsonObjectOr(previews, slot), "url").empty(); };
+        if (!ready("tall") || !ready("hero")) continue;
+        auto artwork = jsonObjectOr(item, "artwork");
+        artwork["tall"] = true;artwork["hero"] = true;artwork["long"] = ready("long");artwork["minimumComplete"] = true;
+        item["artwork"] = std::move(artwork);item["artworkFallbackComplete"] = true;
+        const bool selected = jsonBoolOr(item, "selectedForAdd", true);
+        item["status"] = selected ? "ready-to-add" : "ready-not-selected";
+        auto& summary = plan["summary"];
+        if (!summary.is_object()) summary = json::object();
+        summary["needsMinimumArtwork"] = (std::max)(int64_t{0}, int64_t{jsonIntegerOr(summary, "needsMinimumArtwork", 0)} - 1);
+        const auto counter = selected ? "readyToAdd" : "readyNotSelected";
+        summary[counter] = jsonIntegerOr(summary, counter, 0) + 1;
+    }
 }
 
 static json workspaceSnapshot(
@@ -3680,56 +4458,103 @@ static json workspaceSnapshot(
     const auto localFallbackPlan = [&] { return buildLocalSteamPlanSnapshot(snapshot); };
     if (refreshPlan) {
         auto target = requestedTarget.empty() ? selectedTarget : requestedTarget;
+        const auto cancelled = [&] {
+            return g_shuttingDown.load() ||
+                (backgroundJob ? backgroundJob->cancelRequested.load() : g_cancelRequested.load());
+        };
         // Account discovery is detached from the ordinary local snapshot, but
         // every explicit plan refresh should publish its result to the UI.
         // This distinguishes no Steam, no signed-in userdata account, and an
         // installed account whose shortcuts.vdf is still empty.
+        bool accountDiscoveryFailed = false;
         if (jsonStringOr(target, "selectionMode") == "all-steam-accounts" || target.empty()) {
-            const auto discoveredAccounts = readSteamAccounts(json::array(), backgroundJob);
+            const char* failureReason = nullptr;
+            json discoveredAccounts;
+            try { discoveredAccounts = readSteamAccounts(json::array(), backgroundJob, &failureReason); }
+            catch (...) {
+                if (!hostDataRootReadiness().ready) return hostReadOnlyDataRootSnapshot();
+                failureReason = cancelled() ? nullptr : "worker-exception";
+                discoveredAccounts = failedSteamAccountReport();
+            }
             snapshot["steamAccounts"] = discoveredAccounts;
+            accountDiscoveryFailed = jsonStringOr(discoveredAccounts, "steamStatus") == "error";
+            if (accountDiscoveryFailed) recordSteamPlanRefreshFailure("account-discovery", failureReason);
         }
-        if (jsonStringOr(target, "selectionMode") == "all-steam-accounts" && jsonStringOr(target, "accountId").empty()) {
-            const auto accounts = jsonArrayOr(snapshot["steamAccounts"], "accounts");
-            if (!accounts.empty()) {
-                target["accountId"] = jsonStringOr(accounts.front(), "accountId");
-                target["steamRoot"] = jsonStringOr(accounts.front(), "steamRoot");
-            }
-        }
-        std::vector<std::wstring> arguments = {L"--plan-add-library-to-steam"};
-        const auto targetArguments = steamTargetArguments(target);
-        arguments.insert(arguments.end(), targetArguments.begin(), targetArguments.end());
-        arguments.push_back(L"--output");
-        arguments.push_back(workspacePlanPath().wstring());
-        // Plan generation is read-only and may touch Steam files.  Keep the
-        // snapshot path bounded so a slow/disconnected Steam install cannot
-        // hold the UI request forever; the newest matching cached plan is
-        // returned below when this worker times out or fails.
-        auto* cancelFlag = backgroundJob ? &backgroundJob->cancelRequested : nullptr;
-        auto* activeProcess = backgroundJob ? &backgroundJob->activeProcess : nullptr;
-        const auto result = runWorkerBounded(arguments, kLocalScanWorkerTimeoutMs, cancelFlag, activeProcess);
-        if (result.exitCode == 0) {
-            const auto refreshed = readJson(workspacePlanPath(), json::object());
-            if (isPlanForCurrentLibrary(refreshed)) {
-                snapshot["steamPlan"] = refreshed;
-                snapshot["steamPlanSource"] = toUtf8(workspacePlanPath().wstring());
-                snapshot["steamPlanError"] = nullptr;
-            } else {
-                const auto cached = newestCachedSteamPlan(selectedTarget.empty());
-                snapshot["steamPlan"] = cached.source.empty() ? localFallbackPlan() : cached.document;
-                snapshot["steamPlanSource"] = cached.source.empty()
-                    ? "local-scrape-fallback" : toUtf8(cached.source.wstring());
-                snapshot["steamPlanError"] = "Steam 计划已生成，但与当前游戏库状态不一致";
-            }
-        } else {
-            // Keep the newest matching read-only plan visible when a local
-            // re-plan fails.  The batch plan is eligible only before the UI
-            // has selected a target, so it can never replace a per-account or
-            // per-selection plan.
+        if (accountDiscoveryFailed) {
+            // An unconfirmed account scan cannot select a default account for
+            // a new plan or erase the detection error. Keep display data only;
+            // a later explicit refresh can resume after discovery succeeds.
             const auto cached = newestCachedSteamPlan(selectedTarget.empty());
             snapshot["steamPlan"] = cached.source.empty() ? localFallbackPlan() : cached.document;
             snapshot["steamPlanSource"] = cached.source.empty()
                 ? "local-scrape-fallback" : toUtf8(cached.source.wstring());
-            snapshot["steamPlanError"] = result.output;
+            snapshot["steamPlanError"] = jsonStringOr(snapshot["steamAccounts"], "error",
+                "Steam 账户检测未完成，请重新检测。");
+        } else {
+            if ((target.empty() || jsonStringOr(target, "selectionMode") == "all-steam-accounts") &&
+                jsonStringOr(target, "accountId").empty() && jsonStringOr(target, "steamRoot").empty() &&
+                jsonStringOr(target, "shortcutsVdf").empty()) {
+                const auto account = defaultSteamPlanAccount(snapshot["steamAccounts"]);
+                if (!account.empty()) {
+                    target["accountId"] = jsonStringOr(account, "accountId");
+                    target["steamRoot"] = jsonStringOr(account, "steamRoot");
+                }
+            }
+            rememberSteamPlanReadTarget(target,selectedTarget);
+            std::vector<std::wstring> arguments = {L"--plan-add-library-to-steam"};
+            const auto targetArguments = steamTargetArguments(target);
+            arguments.insert(arguments.end(), targetArguments.begin(), targetArguments.end());
+            arguments.push_back(L"--output");
+            arguments.push_back(workspacePlanPath().wstring());
+            // Plan generation is read-only and may touch Steam files.  Keep the
+            // snapshot path bounded so a slow/disconnected Steam install cannot
+            // hold the UI request forever; the newest matching cached plan is
+            // returned below when this worker times out or fails.
+            auto* cancelFlag = backgroundJob ? &backgroundJob->cancelRequested : nullptr;
+            auto* activeProcess = backgroundJob ? &backgroundJob->activeProcess : nullptr;
+            ProcessResult result;
+            bool workerException = false;
+            try { result = runWorkerBounded(arguments, kLocalScanWorkerTimeoutMs, cancelFlag, activeProcess); }
+            catch (...) {
+                if (!hostDataRootReadiness().ready) return hostReadOnlyDataRootSnapshot();
+                if (cancelled()) result.exitCode = ERROR_CANCELLED;
+                else workerException = true;
+            }
+            if (result.exitCode == 0) {
+                const auto refreshed = readJson(workspacePlanPath(), json::object());
+                const auto failureReason = !isPlanForCurrentLibrary(refreshed) ? "plan-not-current"
+                    : !steamPlanMatchesTarget(refreshed, target) ? "plan-target-mismatch"
+                    : !planReplyMatchesDocument(result, refreshed) ? steamRefreshWorkerFailure(result) : nullptr;
+                if (!failureReason) {
+                    snapshot["steamPlan"] = refreshed;
+                    snapshot["steamPlanSource"] = toUtf8(workspacePlanPath().wstring());
+                    snapshot["steamPlanError"] = nullptr;
+                } else {
+                    recordSteamPlanRefreshFailure("plan-receipt", failureReason);
+                    const auto cached = newestCachedSteamPlan(selectedTarget.empty(),target);
+                    snapshot["steamPlan"] = cached.source.empty() ? localFallbackPlan() : cached.document;
+                    snapshot["steamPlanSource"] = cached.source.empty()
+                        ? "local-scrape-fallback" : toUtf8(cached.source.wstring());
+                    snapshot["steamPlanError"] = "Steam 计划回执未确认或内容已变化，已保留缓存，请重新检测。";
+                }
+            } else {
+                recordSteamPlanRefreshFailure("plan-worker", workerException ? "worker-exception" : steamRefreshWorkerFailure(result));
+                // Keep the newest matching read-only plan visible when a local
+                // re-plan fails.  The batch plan is eligible only before the UI
+                // has selected a target, so it can never replace a per-account or
+                // per-selection plan.
+                const auto cached = newestCachedSteamPlan(selectedTarget.empty(),target);
+                snapshot["steamPlan"] = cached.source.empty() ? localFallbackPlan() : cached.document;
+                snapshot["steamPlanSource"] = cached.source.empty()
+                    ? "local-scrape-fallback" : toUtf8(cached.source.wstring());
+                constexpr std::string_view receiptPrefixes[] = {
+                    "STEAM_ADD_", "STEAM_ACCOUNT:", "STEAM_SHORTCUTS:", "STEAM_RELOAD_REQUIRED:",
+                    "STEAM_PLAN_RECEIPT:", "OUTPUT:", "WORKER_OUTPUT_TRUNCATED"
+                };
+                const auto detail = steamWorkerErrorText(result.output, receiptPrefixes);
+                snapshot["steamPlanError"] = result.exitCode != ERROR_CANCELLED && detail.empty()
+                    ? "Steam 计划刷新失败，请重新检测。" : detail;
+            }
         }
     } else {
         const auto cached = newestCachedSteamPlan(selectedTarget.empty());
@@ -3738,11 +4563,16 @@ static json workspaceSnapshot(
             ? "local-scrape-fallback" : toUtf8(cached.source.wstring());
         snapshot["steamPlanError"] = nullptr;
     }
+    if (snapshot["steamPlanSource"] != "local-scrape-fallback")
+        projectScannedNativeSteamRows(snapshot["steamPlan"], snapshot["library"]);
     snapshot["steamPlan"]["items"] = custom_steam_library::uniqueExecutableInventory(
         jsonArrayOr(snapshot["steamPlan"], "items"), [](const std::string& path) {
             return toUtf8(normalizedPathKey(fs::path(toWide(path))));
         });
+    applyManualIdentitySelectionToPlan(snapshot["steamPlan"], snapshot["manualOverrides"]);
     attachWorkspaceArtwork(snapshot["steamPlan"], snapshot["steamAccounts"], refreshNativeArtwork);
+    projectResolvedIdentityIntoPendingPlan(snapshot);
+    projectCompletedArtworkIntoPendingPlan(snapshot);
     snapshot["taskRunning"] = g_taskRunning.load();
     snapshot["backgroundTaskRunning"] = backgroundLibraryTaskRunning();
     {
@@ -3804,7 +4634,20 @@ static bool automaticIdentityCacheExists(const std::string& executable) {
 }
 
 static bool automaticIdentityAttempted(const json& overrides, const std::string& executable) {
-    const auto item = manualArtworkOverrideForExecutable(overrides, executable);
+    // Attempt writers use this exact key. Legacy display/artwork aliases may
+    // sort before it, but must not hide the current automatic retry record.
+    json item;
+    if (overrides.is_object()) {
+        const auto items = overrides.find("items");
+        if (items != overrides.end() && items->is_object()) {
+            const auto key = toUtf8(normalizedPathKey(fs::path(toWide(executable))));
+            const auto canonical = items->find(key);
+            if (canonical != items->end() && canonical->is_object() &&
+                (canonical->contains("automaticIdentityAttemptedAt") ||
+                 canonical->contains("automaticIdentityRetryAfterAt"))) item = *canonical;
+        }
+    }
+    if (!item.is_object()) item = manualArtworkOverrideForExecutable(overrides, executable);
     if (!item.is_object()) return false;
     // Success cooldown only applies while its durable identity cache exists.
     if (jsonStringOr(item, "automaticIdentityLastStatus") == "completed" &&
@@ -3817,11 +4660,14 @@ static bool automaticIdentityAttempted(const json& overrides, const std::string&
     const auto attemptedAt = jsonIntegerOr(item, "automaticIdentityAttemptedAt", 0);
     return attemptedAt > 0 && attemptedAt + kAutomaticIdentityRetryBaseMs > unixTimeMsHost();
 }
-static void markAutomaticIdentityAttempt(const std::string& executable) {
+static void markAutomaticIdentityAttempt(const std::string& executable,
+    const BackgroundJob& itemJob = nullptr, const BackgroundJob& ownerJob = nullptr) {
     // Only the read/modify/write transaction is protected.  Do not use the
     // task boundary as a lock for the whole weak-network scrape job: manual
     // edits and Steam commit commands must remain available while scraping.
     std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+    if ((itemJob && !jobIsCurrent(g_scrapeQueueGenerations, itemJob)) ||
+        scrapeExecutableRemoved(ownerJob, backgroundExecutableKey(executable))) return;
     const auto path = g_dataRoot / L"config" / L"manual-overrides.json";
     HostDataTransaction configTransaction;
 
@@ -3845,8 +4691,11 @@ static void markAutomaticIdentityAttempt(const std::string& executable) {
 }
 
 static void recordAutomaticIdentityResult(
-    const std::string& executable, bool success, const std::string& error = {}) {
+    const std::string& executable, bool success, const std::string& error = {},
+    const BackgroundJob& itemJob = nullptr, const BackgroundJob& ownerJob = nullptr) {
     std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+    if ((itemJob && !jobIsCurrent(g_scrapeQueueGenerations, itemJob)) ||
+        scrapeExecutableRemoved(ownerJob, backgroundExecutableKey(executable))) return;
     const auto path = g_dataRoot / L"config" / L"manual-overrides.json";
     HostDataTransaction configTransaction;
 
@@ -3878,12 +4727,13 @@ static void recordAutomaticIdentityResult(
 
 // Forward declarations for the non-blocking open-library pipeline.
 static void startLibraryPipeline(bool allowFirstRunDefaults = false);
-static bool startScrapeQueue(bool forceManual = false);
+static bool startScrapeQueue(bool forceManual = false, bool continueAfterBusy = false);
 static bool startManualIdentifyTask(const json& arguments);
 static json startIdentitySearchTask(const json& arguments);
 static void startArtworkTask(uint64_t id, std::string command, json arguments);
 static void startNetworkWakeTask(uint64_t id);
 static void postPipelineEvent(const std::string& event, json payload = json::object()) noexcept;
+static void postWorkspaceMediaProgress(const fs::path& root) noexcept;
 static json identitySearchCandidatesFromDirectory(const fs::path& outputDirectory);
 static json identitySearchCachedCandidates(const fs::path& executable, const std::string& query = {});
 static json commitToAllSteamAccounts(const json& requestedTarget);
@@ -3941,6 +4791,19 @@ static json workspaceLibraryMediaArguments(const json& arguments) {
     owned.erase("demandEpoch");owned.erase("demandRevision");return owned;
 }
 
+static void validateManualIdentityIds(const json& arguments) {
+    const auto steamId=jsonStringOr(arguments,"steamId"),igdbId=jsonStringOr(arguments,"igdbId");
+    if(!steamId.empty()&&!igdbId.empty())throw std::runtime_error("Steam AppID 与 IGDB ID 只能填写一个");
+    const auto valid=[](const std::string& text,uint64_t maximum){
+        if(text.empty()||text.size()>20)return false;
+        uint64_t value=0;
+        for(unsigned char ch:text){if(ch<'0'||ch>'9')return false;const auto digit=uint64_t(ch-'0');if(value>(maximum-digit)/10)return false;value=value*10+digit;}
+        return value>0;
+    };
+    if(!steamId.empty()&&!valid(steamId,2147483647ULL))throw std::runtime_error("Steam AppID 必须是 1 到 2147483647 的整数");
+    if(!igdbId.empty()&&!valid(igdbId,9223372036854775807ULL))throw std::runtime_error("IGDB ID 必须是 1 到 9223372036854775807 的整数");
+}
+
 static json executeWorkspaceCommand(
     const std::string& command,
     const json& arguments,
@@ -3962,7 +4825,7 @@ static json executeWorkspaceCommand(
     // update library-scan.json and the batch plan while the workspace stays
     // open; merely checking that an older plan file exists left the UI stuck
     // on its previous ready-to-add count.
-    if(command=="state"){static const bool mediaInventoryRequested=[](){ymcc::media::downloads::Queue(g_dataRoot).requestSupplement();return true;}();(void)mediaInventoryRequested;static ymcc::media::downloads::Watcher downloadsWatcher(g_dataRoot,L"library",[]{postPipelineEvent("media-download-progress",{{"mediaDownloads",ymcc::media::downloads::Queue(g_dataRoot).snapshot()}});});static ymcc::media::Watcher mediaWatcher(g_dataRoot,[]{postPipelineEvent("game-media-changed");},L"library");return workspaceSnapshot(false);}
+    if(command=="state"){static const bool mediaInventoryRequested=[](){ymcc::media::downloads::Queue(g_dataRoot).requestSupplement();return true;}();(void)mediaInventoryRequested;static ymcc::media::downloads::Watcher downloadsWatcher(g_dataRoot,L"library",[]{postWorkspaceMediaProgress(g_dataRoot);});static ymcc::media::Watcher mediaWatcher(g_dataRoot,[]{postPipelineEvent("game-media-changed");},L"library");return workspaceSnapshot(false);}
     if(command=="mediaDownloadNow"){ymcc::media::downloads::Queue(g_dataRoot).requestSupplement(true);return ymcc::media::downloads::Queue(g_dataRoot).snapshot();}
     if(command=="mediaDownloadStatus"){ymcc::media::downloads::Queue queue(g_dataRoot);queue.recheck();return queue.snapshot();}
     if(command=="mediaDownloadCancel"){ymcc::media::downloads::Queue(g_dataRoot).cancelManual();return ymcc::media::downloads::Queue(g_dataRoot).snapshot();}
@@ -3985,6 +4848,7 @@ static json executeWorkspaceCommand(
         // Validate the complete submission before the first durable write.
         for(const auto& operation:operations)if(!operation.is_object()||!allowed.contains(jsonStringOr(operation,"command"))||!operation.contains("arguments")||!operation["arguments"].is_object())throw std::runtime_error("编辑保存项目无效");
         for(size_t i=0;i<operations.size();++i)if(jsonStringOr(operations[i],"command")=="setPrimary"&&i!=0)throw std::runtime_error("请先保存主程序选择，再保存名称和素材");
+        for(const auto& operation:operations)if(jsonStringOr(operation,"command")=="identifyOne")validateManualIdentityIds(operation["arguments"]);
         for(const auto& operation:operations){auto args=operation["arguments"];args["deferSnapshot"]=true;executeWorkspaceCommand(jsonStringOr(operation,"command"),args);}
         return workspaceSnapshot(false,json::object(),nullptr,jsonBoolOr(arguments,"refreshNativeArtwork",false));
     }
@@ -3997,18 +4861,19 @@ static json executeWorkspaceCommand(
         return readSteamAccounts(roots);
     }
     if (command == "steamCommitPreflight") {
-        std::wstring runningPath;
-        const bool running = hostProcessRunningByName(L"steam.exe", &runningPath);
-        return json{{"steamRunning", running}, {"steamPath", toUtf8(runningPath)},
-            {"requiresClose", running}, {"restartBigPicture", running}};
+        const auto facts=ymcc::steaminfo::read(ymcc::steaminfo::Presence);
+        if(!facts.available||facts.presence<0)throw std::runtime_error("无法从 YMCC Steam 层确认运行状态，请重新检测");
+        const bool running=facts.presence==1;
+        return json{{"steamRunning",running},{"steamPath",facts.processPath},{"steamClient",steamActionClient(facts)},
+            {"requiresClose",running},{"restartBigPicture",false}};
     }
     if (command == "closeSteam") {
-        std::wstring runningPath;
-        const bool wasRunning = hostProcessRunningByName(L"steam.exe", &runningPath);
-        if (wasRunning) closeSteamForShortcutCommit();
+        std::string runningPath;
+        bool wasRunning = false;
+        closeSteamForShortcutCommit(arguments, &wasRunning, &runningPath);
         std::wstring remainingPath;
-        const bool stillRunning = hostProcessRunningByName(L"steam.exe", &remainingPath);
-        return json{{"steamRunning", stillRunning}, {"steamPath", toUtf8(stillRunning ? remainingPath : runningPath)},
+        const bool stillRunning = hostSteamRunning(&remainingPath);
+        return json{{"steamRunning", stillRunning}, {"steamPath", stillRunning ? toUtf8(remainingPath) : runningPath},
             {"closed", wasRunning && !stillRunning}};
     }
     if (command == "startup") {
@@ -4061,40 +4926,59 @@ static json executeWorkspaceCommand(
         setSteamTarget(arguments);
         const auto target = arguments;
         const bool forceClose = jsonBoolOr(target, "forceCloseSteam", false);
-        if(!forceClose&&hostProcessRunningByName(L"steam.exe"))throw std::runtime_error("请先关闭 Steam，再点击卡片中的加入 Steam 重试");
-        if (forceClose && hostProcessRunningByName(L"steam.exe")) closeSteamForShortcutCommit();
+        if(!forceClose&&hostSteamRunning())throw std::runtime_error("请先关闭 Steam，再点击卡片中的加入 Steam 重试");
+        if (forceClose) closeSteamForShortcutCommit(target);
         // Writing shortcuts never authorizes restarting Steam or choosing its UI mode.
+        json completed;
         if (target.value("selectionMode", std::string{}) == "all-steam-accounts") {
-            commitToAllSteamAccounts(target);
+            completed = commitToAllSteamAccounts(target);
         } else {
             std::vector<std::wstring> workerArguments = {L"--commit-add-library-to-steam", L"--confirm-steam-closed"};
             const auto targetArguments = steamTargetArguments(target);
             workerArguments.insert(workerArguments.end(), targetArguments.begin(), targetArguments.end());
             workerArguments.push_back(L"--output");
             workerArguments.push_back(workspacePlanPath().wstring());
-            requireSuccess(runWorker(workerArguments));
+            completed = readSteamAddCompletion(runWorker(workerArguments), workspacePlanPath(), target);
         }
-        // Every account commit already publishes its verified plan. Reuse it
-        // instead of launching another discovery/plan worker after each card.
-        return workspaceSnapshot(false, target);
+        // Use this invocation's verified completion even if its requested
+        // output remained stale and an original account receipt was needed.
+        auto snapshot = workspaceSnapshot(false, target);
+        auto warning = jsonStringOr(completed,"accountCommitWarning");
+        const auto readWarning = jsonStringOr(completed,"accountReadWarning");
+        if (!readWarning.empty()) warning += (warning.empty() ? "" : "\n") + readWarning;
+        if (!warning.empty()) snapshot["steamAccountWriteWarning"] = std::move(warning);
+        if (jsonBoolOr(completed,"displayAccountCompletionConfirmed",true)) {
+            attachArtworkPreviews(completed);
+            snapshot["steamPlan"] = std::move(completed);
+            snapshot["steamPlanSource"] = "verified-steam-add-completion";
+            snapshot["steamPlanError"] = nullptr;
+        } else {
+            // Keep receipts for other accounts out of the current account's card projection.
+            snapshot["steamAddCompletion"] = std::move(completed);
+        }
+        return snapshot;
     }
     if (command == "refreshSteamArtwork") {
         std::lock_guard<std::mutex> steamOperationLock(g_steamOperationMutex);
         setSteamTarget(arguments);
         const auto target = arguments;
         const bool forceClose = jsonBoolOr(target, "forceCloseSteam", false);
-        if (forceClose && hostProcessRunningByName(L"steam.exe")) closeSteamForShortcutCommit();
+        if (forceClose) closeSteamForShortcutCommit(target);
         // Success and failure both leave Steam closed; the user owns the next launch.
-        refreshArtworkForAllSteamAccounts(target);
-        return workspaceSnapshot(true, target);
+        const auto completed = refreshArtworkForAllSteamAccounts(target);
+        auto snapshot = workspaceSnapshot(true, target);
+        snapshot["steamAccountWriteWarning"] = jsonStringOr(completed,"accountReadWarning");
+        return snapshot;
     }
     if (command == "deleteFromSteam") {
         std::lock_guard<std::mutex> steamOperationLock(g_steamOperationMutex);
         setSteamTarget(arguments);
         const auto target = arguments;
         if (target.value("selectionMode", std::string{}) == "all-steam-accounts") {
-            deleteFromAllSteamAccounts(target);
-            return workspaceSnapshot(true, target);
+            const auto completed = deleteFromAllSteamAccounts(target);
+            auto snapshot = workspaceSnapshot(true, target);
+            snapshot["steamAccountWriteWarning"] = jsonStringOr(completed,"accountReadWarning");
+            return snapshot;
         }
         std::vector<std::wstring> workerArguments = {L"--commit-delete-library-from-steam", L"--confirm-steam-closed"};
         const auto targetArguments = steamTargetArguments(target);
@@ -4103,8 +4987,9 @@ static json executeWorkspaceCommand(
             if (directory.is_string()) { workerArguments.push_back(L"--select-game"); workerArguments.push_back(toWide(directory.get<std::string>())); }
         }
         workerArguments.push_back(L"--output");
-        workerArguments.push_back((g_dataRoot / L"state" / L"steam-delete-plan.json").wstring());
-        requireSuccess(runWorker(workerArguments));
+        const auto output=g_dataRoot/L"state"/L"steam-delete-plan.json";
+        workerArguments.push_back(output.wstring());
+        readSteamActionCompletion(runWorker(workerArguments),output,target,false);
         return workspaceSnapshot(false);
     }
     if (command == "searchIdentity") {
@@ -4134,19 +5019,11 @@ static json executeWorkspaceCommand(
         const auto steamId = jsonStringOr(arguments, "steamId");
         const auto igdbId = jsonStringOr(arguments, "igdbId");
         if (executableText.empty()) throw std::runtime_error("请选择需要识别的主 EXE");
-        if (!steamId.empty() && !igdbId.empty()) throw std::runtime_error("Steam AppID 与 IGDB ID 只能填写一个");
+        validateManualIdentityIds(arguments);
         if (manualName.empty() && steamId.empty() && igdbId.empty()) {
             throw std::runtime_error("请填写游戏名称、Steam AppID 或 IGDB ID");
         }
         if (manualName.size() > 300) throw std::runtime_error("游戏名称过长");
-        auto validateId = [](const std::string& value) {
-            return !value.empty() && value.size() <= 20 &&
-                std::all_of(value.begin(), value.end(), [](unsigned char ch) { return std::isdigit(ch); }) &&
-                value != "0";
-        };
-        if ((!steamId.empty() && !validateId(steamId)) || (!igdbId.empty() && !validateId(igdbId))) {
-            throw std::runtime_error("商店 ID 必须是正整数");
-        }
         const fs::path executable = fs::path(toWide(executableText));
         if (!fs::is_regular_file(executable)) throw std::runtime_error("主 EXE 不存在");
         bool knownPrimary = false;
@@ -4195,6 +5072,8 @@ static json executeWorkspaceCommand(
                 configTransaction.release();
                 return jsonBoolOr(arguments,"deferSnapshot",false)?json{{"saved",true}}:workspaceSnapshot(false);
             }
+            // A new request owns the choice, not the previous result's proof.
+            for (const auto* field : {"formalName", "storefrontSteamId", "steamVerificationStatus", "metadataVerificationStatus", "steamIdCandidate"}) item.erase(field);
             if (!steamId.empty()) { item["steamId"] = std::stoll(steamId); item.erase("igdbId"); item.erase("idCleared"); }
             if (!igdbId.empty()) { item["igdbId"] = std::stoll(igdbId); item.erase("steamId"); item.erase("idCleared"); }
             item["identityStatus"] = "pending-network";
@@ -4245,7 +5124,8 @@ static json executeWorkspaceCommand(
         if (requested.empty()) throw std::runtime_error("游戏目录或 EXE 路径不能为空");
         std::error_code pathError;
         fs::path directory = requested;
-        if (fs::is_regular_file(requested, pathError)) {
+        const bool selectedExecutable = fs::is_regular_file(requested, pathError);
+        if (selectedExecutable) {
             if (lowerAscii(toUtf8(requested.extension().wstring())) != ".exe") {
                 throw std::runtime_error("单独添加只能选择 EXE 文件或游戏目录");
             }
@@ -4258,14 +5138,60 @@ static json executeWorkspaceCommand(
         std::error_code canonicalError;
         const auto canonicalDirectory = fs::weakly_canonical(directory, canonicalError);
         const auto directoryToAdd = canonicalError ? fs::absolute(directory) : canonicalDirectory;
-        requireSuccess(runWorker({L"--add-library-game", L"--game-dir", directoryToAdd.wstring()}));
+        std::vector<std::wstring> addArguments{L"--add-library-game", L"--game-dir", directoryToAdd.wstring()};
+        if (selectedExecutable) addArguments.insert(addArguments.end(), {L"--exe", fs::absolute(requested).wstring()});
+        requireSuccess(runWorker(addArguments));
         requireSuccess(runWorker(libraryScanWorkerArguments(true)));
         return workspaceSnapshot(true);
     }
     if (command == "removeGame") {
         const auto directory = toWide(jsonStringOr(arguments, "gameDirectory"));
         if (directory.empty()) throw std::runtime_error("游戏目录不能为空");
-        requireSuccess(runWorker({L"--remove-library-game", L"--game-dir", directory}));
+        {
+            // A confirmed removal owns its deleted choices. Keep late manual
+            // results outside that interval, then retire exactly the jobs whose
+            // saved override disappeared. The Worker already decides ownership
+            // for nested games and alternate executables; do not guess it here.
+            std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+            const auto overridesPath = g_dataRoot / L"config" / L"manual-overrides.json";
+            const auto before = jsonObjectOr(readJson(overridesPath, json::object()), "items");
+            const auto inventoryPath = g_dataRoot / L"state" / L"library-scan.json";
+            const auto beforeInventory = readJson(inventoryPath, json::object());
+            requireSuccess(runWorker({L"--remove-library-game", L"--game-dir", directory}));
+            const auto after = jsonObjectOr(readJson(overridesPath, json::object()), "items");
+            const auto afterInventory = readJson(inventoryPath, json::object());
+            std::set<std::string> retainedKeys, candidates;
+            for (const auto& [key, value] : after.items()) retainedKeys.insert(backgroundExecutableKey(key));
+            auto directoryKey = normalizedPathKey(fs::path(directory));
+            if (!directoryKey.empty() && directoryKey.back() != L'\\') directoryKey += L'\\';
+            for (const auto& [key, value] : before.items()) {
+                const auto executableKey = backgroundExecutableKey(key);
+                if (toWide(executableKey).starts_with(directoryKey)) candidates.insert(executableKey);
+            }
+            // Artwork-only/queued games may never have written an override.
+            // Use the Worker's actual inventory deletion for those identities.
+            for (const auto* section : {"games", "missingGames", "unscannedGames"}) {
+                for (const auto& row : jsonArrayOr(beforeInventory, section)) {
+                    const auto executable = jsonStringOr(row, "primaryExecutable");
+                    if (!executable.empty() && samePath(fs::path(toWide(jsonStringOr(row, "gameDirectory"))), fs::path(directory)))
+                        candidates.insert(backgroundExecutableKey(executable));
+                }
+                for (const auto& row : jsonArrayOr(afterInventory, section)) {
+                    const auto executable = jsonStringOr(row, "primaryExecutable");
+                    if (!executable.empty()) retainedKeys.insert(backgroundExecutableKey(executable));
+                }
+            }
+            for (const auto& executableKey : candidates) {
+                if (retainedKeys.count(executableKey)) continue;
+                {
+                    std::lock_guard<std::mutex> lock(g_backgroundJobsMutex);
+                    for (const auto& owner : g_scrapeQueueJobs)
+                        if (owner && owner->key == "library") owner->removedExecutableKeys.insert(executableKey);
+                }
+                cancelBackgroundJobs(g_manualIdentifyJobs, executableKey);
+                cancelBackgroundJobs(g_scrapeQueueJobs, "library-item|" + executableKey);
+            }
+        }
         requireSuccess(runWorker(libraryScanWorkerArguments(true)));
         return workspaceSnapshot(true);
     }
@@ -4285,7 +5211,9 @@ static json executeWorkspaceCommand(
         std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
         const auto executableText = jsonStringOr(arguments, "executable");
         const auto name = trimHost(jsonStringOr(arguments, "name"));
-        if (executableText.empty() || name.empty()) throw std::runtime_error("保存内容需要主程序和名称");
+        const bool clearName = jsonBoolOr(arguments, "clearName", false);
+        if (executableText.empty() || (!clearName && name.empty())) throw std::runtime_error("保存内容需要主程序和名称");
+        if (clearName && !name.empty()) throw std::runtime_error("清空名称不能同时提交新名称");
         const fs::path executable = fs::path(toWide(executableText));
         if (!fs::is_regular_file(executable)) throw std::runtime_error("游戏主程序不存在");
         const auto overridesPath = g_dataRoot / L"config" / L"manual-overrides.json";
@@ -4298,12 +5226,12 @@ static json executeWorkspaceCommand(
         const auto key = toUtf8(normalizedPathKey(executable));
         auto& item = overrides["items"][key];
         if (!item.is_object()) item = json::object();
-        if(jsonStringOr(item,"name")==name){
+        if(clearName ? !item.contains("name") : jsonStringOr(item,"name")==name){
             configTransaction.release();
             return jsonBoolOr(arguments,"deferSnapshot",false)?json{{"saved",true},{"unchanged",true}}:workspaceSnapshot(false);
         }
-        item["name"] = name;
-        item["source"] = "manual";
+        if (clearName) item.erase("name");
+        else { item["name"] = name; item["source"] = "manual"; }
         item["updatedAt"] = unixTimeMsHost();
         writeJsonWithLocalBackup(overridesPath, overrides);
 
@@ -4347,6 +5275,9 @@ static json executeWorkspaceCommand(
         writeJsonWithLocalBackup(overridesPath, overrides);
 
         configTransaction.release();
+        // The tombstone is durable before retiring the older enrichment.
+        // A failed save keeps the previously accepted task authoritative.
+        cancelBackgroundJobs(g_manualIdentifyJobs, backgroundExecutableKey(executableText));
         return jsonBoolOr(arguments,"deferSnapshot",false)?json{{"saved",true}}:workspaceSnapshot(false);
     }
     if (command == "setBucket") {
@@ -4507,13 +5438,18 @@ static json executeWorkspaceCommand(
         NativeSteamArtworkTarget nativeTarget;
         const bool isNativeSteam = nativeRecord.has_value();
         if (isNativeSteam) {
-            if (hostProcessRunningByName(L"steam.exe")) {
+            if (hostSteamRunning()) {
                 throw std::runtime_error("原生 Steam 素材写入需要先关闭 Steam；请先退出 Steam 后再保存编辑内容");
             }
             nativeTarget = locateNativeSteamArtworkTarget(executable);
             if (nativeTarget.appId <= 0 || nativeTarget.grids.empty()) {
                 throw std::runtime_error("未找到原生 Steam 的本地 grid 目录；请先登录 Steam 后重试");
             }
+        }
+        std::optional<ymcc::steamoffline::Guard> offline;
+        if (isNativeSteam) {
+            offline.emplace(0);
+            if (!*offline) throw std::runtime_error("Steam 文件正在处理，请稍后重试（错误码：" + std::to_string(offline->error()) + "）");
         }
         const auto overridesPath = g_dataRoot / L"config" / L"manual-overrides.json";
         HostDataTransaction configTransaction;
@@ -4528,6 +5464,21 @@ static json executeWorkspaceCommand(
         const auto cacheKey = artworkGameKey(executable);
         auto& artworkProtection = item["artworkProtection"];
         if (!artworkProtection.is_object()) artworkProtection = json::object();
+        // A failed bundle must never overwrite an image referenced by the old
+        // configuration (or its backup). Each save owns fresh asset names.
+        struct PendingArtworkAssets {
+            std::vector<fs::path> paths;
+            bool committed = false;
+            ~PendingArtworkAssets() noexcept {
+                if (committed) return;
+                for (const auto& path : paths) {
+                    try { std::error_code error; fs::remove(custom_steam_library::ioPath(path), error); }
+                    catch (...) { }
+                }
+            }
+        } pendingAssets;
+        pendingAssets.paths.reserve(3);
+        std::string artworkRevision;
         auto saveOne = [&](const std::string& type, const std::string& sourceText, bool clear) {
             // A fresh explicit wallpaper decision can reselect the same file or
             // delete an already absent slot; unrelated card saves do not change it.
@@ -4543,7 +5494,10 @@ static json executeWorkspaceCommand(
             const auto sourcePath = fs::path(toWide(sourceText));
             const auto dimensions = inspectArtworkDimensions(sourcePath);
             const auto sizeRule = artworkSizeRule(type);
-            const auto destination = copyArtworkToIsolation(sourcePath, cacheKey, type);
+            if (artworkRevision.empty()) artworkRevision = ymcc::media::randomId();
+            auto copied = copyArtworkToIsolation(sourcePath, cacheKey, type, artworkRevision);
+            pendingAssets.paths.push_back(std::move(copied));
+            const auto& destination = pendingAssets.paths.back();
             artworkProtection[type] = "manual";
             item[type] = {
                 {"source", "manual"},
@@ -4559,25 +5513,31 @@ static json executeWorkspaceCommand(
         saveOne("cover", coverPath, clearCover);
         saveOne("long", longPath, clearLong);
         saveOne("wallpaper", wallpaperPath, clearWallpaper);
-        // Native Steam artwork is intentionally written only from this
-        // explicit editor command.  The automatic scraper never enters this
-        // path, so a Steam game's local grid cannot be silently replaced.
+        // Only the explicit editor enters native grids. Reuse the immutable
+        // isolated copies accepted above, across all slots and accounts.
+        std::vector<NativeSteamArtworkEdit> nativeEdits;
         if (isNativeSteam) {
-            if (!coverPath.empty() || clearCover) {
-                writeNativeSteamArtwork(nativeTarget, "cover", coverPath, clearCover);
-            }
-            if (!longPath.empty() || clearLong) {
-                writeNativeSteamArtwork(nativeTarget, "long", longPath, clearLong);
-            }
-            if (!wallpaperPath.empty() || clearWallpaper) {
-                writeNativeSteamArtwork(nativeTarget, "wallpaper", wallpaperPath, clearWallpaper);
-            }
+            const auto addNative = [&](const std::string& type, const std::string& source, bool clear) {
+                if (source.empty() && !clear) return;
+                nativeEdits.push_back({type, clear ? fs::path{} :
+                    fs::path(toWide(jsonStringOr(jsonObjectOr(item, type.c_str()), "portableFile"))), clear});
+            };
+            addNative("cover", coverPath, clearCover);
+            addNative("long", longPath, clearLong);
+            addNative("wallpaper", wallpaperPath, clearWallpaper);
         }
         if (artworkProtection.empty()) item.erase("artworkProtection");
         if (item.empty()) overrides["items"].erase(key);
-        writeJsonWithLocalBackup(overridesPath, overrides);
+        const auto persistArtwork = [&] {
+            writeJsonWithLocalBackup(overridesPath, overrides, true, &pendingAssets.committed);
+        };
+        if (isNativeSteam) {
+            NativeSteamArtworkWrite nativeWrite(nativeTarget, nativeEdits, &pendingAssets.committed);
+            nativeWrite.write(persistArtwork);
+        } else persistArtwork();
 
         configTransaction.release();
+        offline.reset();
         if(!wallpaperPath.empty()||clearWallpaper){try{ymcc::media::Store media(g_dataRoot);const auto identified=media.identity(toUtf8(executable.wstring()));json target={{"executable",toUtf8(executable.wstring())}};if(identified.value("verified",false))target["appId"]=identified.value("appId",int64_t{0});media.registerEntry(target);}catch(const std::exception& e){postPipelineEvent("game-media-sync-error",{{"error",e.what()}});}}
         return jsonBoolOr(arguments,"deferSnapshot",false)?json{{"saved",true}}:workspaceSnapshot(false, json::object(), nullptr, isNativeSteam);
     }
@@ -4807,23 +5767,182 @@ public:
     }
 };
 
+static bool optiNativePlanManifestMatches(const json& item, const fs::path& directory, int appId) {
+    using custom_steam_library::opti_catalog::absolutePath;
+    using custom_steam_library::opti_catalog::pathKey;
+    const auto manifest = jsonStringOr(item, "nativeSteamManifestPath",
+        jsonStringOr(jsonObjectOr(item, "nativeSteam"), "manifestPath"));
+    if (!absolutePath(manifest)) return false;
+    const auto common = directory.parent_path(), steamApps = common.parent_path();
+    if (pathKey(toUtf8(common.filename().wstring())) != "common" ||
+        pathKey(toUtf8(steamApps.filename().wstring())) != "steamapps" ||
+        pathKey(manifest) != pathKey(toUtf8((steamApps / (L"appmanifest_" + std::to_wstring(appId) + L".acf")).wstring())))
+        return false;
+    try {
+        const auto text = readText(fs::path(toWide(manifest)), 2u << 20);
+        const auto roots = ymcc::steamdeck::Vdf(text).parse();
+        const auto* app = ymcc::steamdeck::unique(roots, "AppState");
+        if (!app || !app->object || ymcc::steamdeck::scalar(app->children, "appid") != std::to_string(appId)) return false;
+        const auto install = ymcc::steamdeck::scalar(app->children, "installdir");
+        return !install.empty() && install.find_first_of("/\\") == std::string::npos &&
+            pathKey(install) == pathKey(toUtf8(directory.filename().wstring()));
+    } catch (const std::runtime_error&) { return false; }
+}
+
+using OptiSteamFactsReader = std::function<ymcc::steaminfo::Facts(std::uint32_t)>;
+
+// Cold explicit OPT opens may use current Steam installation facts, without
+// starting library discovery or looking for executables anywhere on disk.
+static std::vector<custom_steam_library::opti_catalog::Candidate> optiColdSteamCandidates(
+    custom_steam_library::opti_catalog::WorkBudget& budget, const OptiSteamFactsReader& readFacts) {
+    using namespace custom_steam_library::opti_catalog;
+    namespace config = custom_steam_library::config;
+    const auto policy = config::readRuntime(g_dataRoot/L"config"/L"library-config.json");
+    if (policy.unreadable || (policy.exists && (!policy.document || !config::structurallyValid(*policy.document,true)))) return {};
+    const auto& settings = policy.document.value_or(json::object());
+    if (jsonBoolOr(settings,"scanRootsExplicitlyCleared",false)) return {};
+    std::set<std::string> excluded;
+    for (const auto& row : jsonArrayOr(settings,"excludedGameDirectories")) {
+        budget.checkpoint();
+        const auto key=pathKey(row.is_string()?row.get<std::string>():jsonStringOr(row,"path"));
+        if (!key.empty()) excluded.insert(key);
+    }
+    const auto buckets=jsonObjectOr(settings,"manualBuckets");
+    for (const auto& [key,row] : buckets.items()) {
+        budget.checkpoint();
+        if (jsonStringOr(row,"bucket")=="non-game") excluded.insert(pathKey(jsonStringOr(row,"gameDirectory",key)));
+    }
+    const auto local=[](const std::string& value) {
+        if (!absolutePath(value)) return fs::path{};
+        auto path=fs::path(toWide(value)).lexically_normal();
+        if (path.filename().empty() && path!=path.root_path()) path=path.parent_path();
+        if (GetDriveTypeW(path.root_path().c_str())!=DRIVE_FIXED || !hostRootPathInspectable(path)) return fs::path{};
+        return path;
+    };
+    budget.checkpoint();
+    const auto facts=readFacts(ymcc::steaminfo::Installations);
+    if (!facts.available) return {};
+    fs::path primary;
+    for (const auto& fact : facts.installations) {
+        budget.checkpoint();
+        if (fact.error!=ERROR_SUCCESS) continue;
+        auto root=local(fact.path);
+        if (!root.empty() && hostRootPathInspectable(root/L"steam.exe") && hostRegularFile(root/L"steam.exe")) {
+            primary=std::move(root); break;
+        }
+    }
+    if (primary.empty()) return {};
+    std::map<std::string,fs::path> roots;
+    roots.emplace(pathKey(toUtf8(primary.wstring())),primary);
+    const auto index=primary/L"steamapps"/L"libraryfolders.vdf";
+    if (hostRootPathInspectable(index)) {
+        try {
+            const auto bytes=readText(index,2u<<20);
+            if (!bytes.empty()) for (const auto& declared : ymcc::steamdeck::libraryPaths(bytes)) {
+                budget.checkpoint();
+                auto root=local(declared);
+                if (!root.empty()) roots.try_emplace(pathKey(toUtf8(root.wstring())),std::move(root));
+            }
+        } catch (const custom_steam_library::opti_catalog::WorkLimit&) { throw; }
+        catch (const std::runtime_error&) { budget.checkpoint(); }
+    }
+    constexpr size_t rootCap=16,entryCap=2048,manifestCap=512,aggregateCap=16u<<20,fileCap=512u<<10;
+    if (roots.size()>rootCap) return {};
+    const auto number=[](const std::string& value) -> unsigned {
+        unsigned out=0;
+        const auto parsed=std::from_chars(value.data(),value.data()+value.size(),out);
+        return parsed.ec==std::errc{} && parsed.ptr==value.data()+value.size()?out:0;
+    };
+    std::map<std::string,std::vector<Candidate>> byDirectory;
+    std::map<int,size_t> idCounts;
+    size_t entries=0,manifests=0,bytesRead=0;
+    for (const auto& [_,root] : roots) {
+        budget.checkpoint();
+        const auto apps=root/L"steamapps";
+        if (!hostRootPathInspectable(apps)) continue;
+        std::error_code error;
+        for (fs::directory_iterator it(apps,error),end; !error && it!=end; it.increment(error)) {
+            budget.checkpoint();
+            if (++entries>entryCap) return {};
+            const auto filename=pathKey(toUtf8(it->path().filename().wstring()));
+            constexpr std::string_view prefix="appmanifest_",suffix=".acf";
+            if (!filename.starts_with(prefix) || !filename.ends_with(suffix)) continue;
+            const auto id=number(filename.substr(prefix.size(),filename.size()-prefix.size()-suffix.size()));
+            if (!id || id>INT_MAX || !hostRootPathInspectable(it->path())) continue;
+            if (++manifests>manifestCap || bytesRead>=aggregateCap) return {};
+            std::string text;
+            try { text=readText(it->path(),(std::min)(fileCap,aggregateCap-bytesRead)); }
+            catch (const std::runtime_error&) { continue; }
+            bytesRead+=text.size();
+            if (text.empty() || text.find('\0')!=std::string::npos) continue;
+            try {
+                const auto nodes=ymcc::steamdeck::Vdf(text).parse();
+                const auto* app=ymcc::steamdeck::unique(nodes,"AppState");
+                if (!app || !app->object || ymcc::steamdeck::scalar(app->children,"appid")!=std::to_string(id)) continue;
+                const auto dir=ymcc::steamdeck::scalar(app->children,"installdir");
+                const auto flags=number(ymcc::steamdeck::scalar(app->children,"StateFlags"));
+                constexpr unsigned installed=4, unusable=1|32|128|2048; // EAppState: uninstalled, files missing/corrupt, uninstalling
+                if (!(flags&installed) || (flags&unusable) || dir.empty() || dir.back()=='.' || dir.back()==' ' ||
+                    dir.find_first_of("/\\")!=std::string::npos) continue;
+                const auto name=ymcc::steamdeck::scalar(app->children,"name");
+                const auto directory=apps/L"common"/toWide(dir);
+                Candidate item{toUtf8(directory.wstring()),{},name,{},static_cast<int>(id)};
+                if (!valid(item) || !hostRootPathInspectable(directory)) continue;
+                std::error_code directoryError;
+                if (!fs::is_directory(directory,directoryError) || directoryError) continue;
+                const auto key=pathKey(item.installPath);
+                ++idCounts[item.steamAppId];
+                auto& matches=byDirectory[key];
+                const bool excludedPath=std::any_of(excluded.begin(),excluded.end(),[&](const auto& path){return key==path || key.starts_with(path+"\\");});
+                if (name.empty() || excludedPath || custom_steam_library::builtinExcludedSteamToolName(name) ||
+                    custom_steam_library::builtinExcludedSteamToolPath(item.installPath) || custom_steam_library::builtinExcludedSteamAppId(id))
+                    item.name.clear();
+                matches.push_back(std::move(item));
+            } catch (const std::runtime_error&) { /* A changing or malformed manifest grants no candidate. */ }
+        }
+        if (error && error!=std::errc::no_such_file_or_directory) return {};
+    }
+    std::vector<Candidate> result;
+    for (auto& [_,matches] : byDirectory) {
+        budget.checkpoint();
+        if (matches.size()==1 && !matches[0].name.empty() && idCounts[matches[0].steamAppId]==1)
+            result.push_back(std::move(matches[0]));
+    }
+    return result;
+}
+
 static std::vector<custom_steam_library::opti_catalog::Candidate> optiCatalogCandidates(
-    const std::function<bool()>& cancelled = [] { return g_shuttingDown.load(); }, bool includeCovers = true) {
+    const std::function<bool()>& cancelled = [] { return g_shuttingDown.load(); }, bool includeCovers = true,
+    bool* inventoryAvailable = nullptr) {
     using namespace custom_steam_library::opti_catalog;
     WorkBudget enumeration(cancelled,ymcc::optiStartup::workerBudgetMs);
     const auto library=readJson(g_dataRoot/L"state"/L"library-scan.json",json::object());
-    const auto games=custom_steam_library::uniqueExecutableInventory(jsonArrayOr(library,"games"),pathKey);
+    const auto scanned=jsonArrayOr(library,"games");
+    const auto games=custom_steam_library::uniqueExecutableInventory(scanned,pathKey);
     const auto cached=newestCachedSteamPlan(true);
     // Exact EXE + installation directory (or recorded current alias), same
     // library only. A store ID/title never grants non-Steam ownership.
     std::map<std::pair<std::string,std::string>,const json*> owned;
+    std::vector<const json*> nativePlan;
+    const bool allowNativePlan=library.contains("games")&&library["games"].is_array()&&
+        !jsonBoolOr(library,"nativeSteamInstallationUnavailable",false)&&!library.contains("libraryScanRecovery");
+    if(inventoryAvailable)*inventoryAvailable=allowNativePlan;
     if(isPlanForCurrentLibrary(cached.document)&&cached.document.contains("items")&&cached.document["items"].is_array())for(const auto& item:cached.document["items"]) {
         enumeration.checkpoint();
         if(!steamPlanItemAlreadyOwned(item))continue;
+        if(allowNativePlan&&isNativeSteamRecord(item)&&jsonStringOr(item,"status")=="already-in-steam"&&
+            !jsonBoolOr(item,"nativeSteamScanUnconfirmed",false)&&!jsonBoolOr(item,"unrecognizedTool",false)&&
+            jsonStringOr(item,"contentType")!="non-game"&&!custom_steam_library::builtinExcludedSteamTool(item))
+            nativePlan.push_back(&item);
         const auto exe=pathKey(jsonStringOr(item,"primaryExecutable")),dir=pathKey(jsonStringOr(item,"gameDirectory"));
         if(!exe.empty()&&!dir.empty())owned.try_emplace(std::make_pair(exe,dir),&item);
     }
     std::unique_ptr<OptiCatalogArtworkIndex> artwork;
+    auto addCover=[&](Candidate& candidate) {
+        if(!includeCovers)return;
+        if(!artwork)artwork=std::make_unique<OptiCatalogArtworkIndex>(cancelled,[&]{enumeration.checkpoint();});
+        candidate.coverPath=artwork->coverFor(candidate);
+    };
     std::vector<Candidate> candidates;size_t inspected=0;
     for(const auto& game:games) {
         enumeration.checkpoint();
@@ -4853,10 +5972,89 @@ static std::vector<custom_steam_library::opti_catalog::Candidate> optiCatalogCan
         std::error_code error;
         if(!fs::is_directory(fs::path(toWide(candidate.installPath)),error)||error)continue;
         if(!candidate.executablePath.empty()&&(!fs::is_regular_file(fs::path(toWide(candidate.executablePath)),error)||error))continue;
-        if(includeCovers) {
-            if(!artwork)artwork=std::make_unique<OptiCatalogArtworkIndex>(cancelled,[&]{enumeration.checkpoint();});
-            candidate.coverPath=artwork->coverFor(candidate);
+        addCover(candidate);
+        candidates.push_back(std::move(candidate));if(candidates.size()>=maxGames)break;
+    }
+    if(nativePlan.empty()||candidates.size()>=maxGames)return candidates;
+
+    // The cached plan can include native installations outside the latest
+    // scan. Never resurrect a directory the user or current scan excluded.
+    std::unordered_set<std::string> blockedDirectories;
+    std::unordered_set<int64_t> nativeIds;
+    namespace config = custom_steam_library::config;
+    const auto policy = config::readRuntime(g_dataRoot/L"config"/L"library-config.json");
+    if (policy.unreadable || (policy.exists && (!policy.document || !config::structurallyValid(*policy.document,true))))
+        return candidates;
+    if (policy.document) {
+        for (const auto& row : jsonArrayOr(*policy.document,"excludedGameDirectories")) {
+            enumeration.checkpoint();
+            const auto path = pathKey(row.is_string() ? row.get<std::string>() : jsonStringOr(row,"path"));
+            if (!path.empty()) blockedDirectories.insert(path);
         }
+        const auto buckets = jsonObjectOr(*policy.document,"manualBuckets");
+        for (const auto& [key,row] : buckets.items()) {
+            enumeration.checkpoint();
+            if (jsonStringOr(row,"bucket")=="non-game")
+                blockedDirectories.insert(pathKey(jsonStringOr(row,"gameDirectory",key)));
+        }
+    }
+    for (const auto& row : jsonArrayOr(library,"skippedDirectories")) {
+        enumeration.checkpoint();
+        const auto directory = pathKey(jsonStringOr(row,"path"));
+        if (!directory.empty()) blockedDirectories.insert(directory);
+    }
+    const auto reserveScanRow=[&](const json& row) {
+        enumeration.checkpoint();
+        const auto directory=pathKey(jsonStringOr(row,"gameDirectory"));
+        if(!directory.empty())blockedDirectories.insert(directory);
+        if(isNativeSteamRecord(row)) {
+            const auto id=nativeSteamAppIdFromRecord(row);
+            if(id>0)nativeIds.insert(id);
+        }
+    };
+    for(const auto& row:scanned)reserveScanRow(row);
+    std::unordered_set<std::string> weakMissingDirectories, weakMissingBindings;
+    std::unordered_set<int64_t> weakMissingIds;
+    for(const auto& row:jsonArrayOr(library,"missingGames")) {
+        enumeration.checkpoint();
+        const auto id=jsonIntegerOr(row,"nativeSteamAppId",0);
+        const auto directory=jsonStringOr(row,"gameDirectory"),exe=jsonStringOr(row,"primaryExecutable");
+        // Older custom scans could omit an entire native Steam library and
+        // label its still-installed games "missing-or-filtered". Only the
+        // exact retained native binding can be rechecked against disk below.
+        if(id>0&&id<=INT_MAX&&isNativeSteamRecord(row)&&!jsonBoolOr(row,"nativeSteamScanUnconfirmed",false)&&
+            !jsonBoolOr(row,"unrecognizedTool",false)&&!custom_steam_library::builtinExcludedSteamTool(row)&&
+            jsonStringOr(row,"contentType")!="non-game"&&
+            jsonStringOr(row,"lifecycleStatus")=="primary-executable-missing-or-filtered"&&!exe.empty()&&
+            valid(Candidate{directory,exe,{},{},static_cast<int>(id)})) {
+            weakMissingDirectories.insert(pathKey(directory));
+            weakMissingIds.insert(id);
+            weakMissingBindings.insert(candidateKey(Candidate{directory,exe,{},{},static_cast<int>(id)}));
+        } else reserveScanRow(row);
+    }
+    for(const auto& row:jsonArrayOr(library,"unscannedGames")) {
+        enumeration.checkpoint();
+        if(jsonBoolOr(row,"nativeSteamScanUnconfirmed",false))reserveScanRow(row);
+    }
+    for(const auto* item:nativePlan) {
+        enumeration.checkpoint();
+        if(++inspected%32==0)Sleep(1);
+        const auto id=jsonIntegerOr(*item,"nativeSteamAppId",0);
+        if(id<=0||id>INT_MAX||nativeIds.contains(id))continue;
+        Candidate candidate{jsonStringOr(*item,"gameDirectory"),jsonStringOr(*item,"primaryExecutable"),
+            jsonStringOr(*item,"formalName",jsonStringOr(*item,"directoryName")),{},static_cast<int>(id)};
+        const auto directoryKey=pathKey(candidate.installPath);
+        if(blockedDirectories.contains(directoryKey)||!valid(candidate))continue;
+        if((weakMissingIds.contains(id)||weakMissingDirectories.contains(directoryKey))&&
+            !weakMissingBindings.contains(candidateKey(candidate)))continue;
+        auto directory=fs::path(toWide(candidate.installPath)).lexically_normal();
+        if(directory.filename().empty())directory=directory.parent_path();
+        std::error_code error;
+        if(!fs::is_directory(directory,error)||!optiNativePlanManifestMatches(*item,directory,candidate.steamAppId))continue;
+        if(!candidate.executablePath.empty()&&!fs::is_regular_file(fs::path(toWide(candidate.executablePath)),error))continue;
+        addCover(candidate);
+        nativeIds.insert(id);
+        blockedDirectories.insert(directoryKey);
         candidates.push_back(std::move(candidate));if(candidates.size()>=maxGames)break;
     }
     return candidates;
@@ -4952,10 +6150,16 @@ struct OptiCatalogCostSample {
     }
 };
 
+static bool optiCatalogClientInstalled() {
+    return hostRegularFile(fs::path(L"C:/SOFT/OptiscalerClient/OptiscalerClient.exe"));
+}
+
 static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
     const std::function<bool()>& permitted, const std::string& trigger,
     const std::function<fs::path()>& clientRootFor = optiCatalogClientRoot,
-    std::function<bool()> running = optiClientRunningForCatalog) {
+    std::function<bool()> running = optiClientRunningForCatalog,
+    const std::function<bool()>& installed = optiCatalogClientInstalled,
+    const OptiSteamFactsReader& readFacts = [](std::uint32_t mask){return ymcc::steaminfo::read(mask);}) {
     const OptiCatalogCostSample cost;
     const bool backgroundMode = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != FALSE;
     if (!backgroundMode) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
@@ -4968,11 +6172,17 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
         if (cancelled() || !permitted()) return {{"status", "cancelled"}};
         clientRoot = clientRootFor();
         std::error_code error;
-        if (!fs::is_directory(clientRoot, error) || error) {
+        const bool configured=fs::is_directory(clientRoot,error)&&!error;
+        if (!configured && trigger!="ymcc-client-open" && !installed()) {
             receipt = {{"status", "idle"}, {"reason", "client-not-configured"}};
         } else if (running()) {
             receipt = {{"status", "deferred"}, {"reason", "client-running"}};
         } else {
+            if(!configured) {
+                requireHostDataRootReady();
+                if(cancelled()||!permitted())return {{"status","cancelled"}};
+                fs::create_directories(clientRoot); // Installed first start and explicit open both seed missing data.
+            }
             // A visible window and a media worker can coexist. Only one metadata
             // transaction owns this user's OPT catalog; the other skips its pass.
             const auto name = L"Local\\YMCC-OptiCatalog-" + ymcc::media::wide(
@@ -4987,7 +6197,18 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
                 struct Release { HANDLE handle; ~Release() { ReleaseMutex(handle); } } release{mutex.value};
                 using namespace custom_steam_library::opti_catalog;
                 WorkBudget budget(cancelled);
-                auto candidates=optiCatalogCandidates(cancelled, false);
+                bool inventoryAvailable=false;
+                auto candidates=optiCatalogCandidates(cancelled, false, &inventoryAvailable);
+                bool coldSteam=false;
+                if(trigger=="ymcc-client-open"&&!inventoryAvailable&&candidates.empty()) {
+                    const auto scan=g_dataRoot/L"state"/L"library-scan.json";
+                    const auto state=fs::symlink_status(scan,error);
+                    if (state.type()==fs::file_type::not_found && (!error || error==std::errc::no_such_file_or_directory) &&
+                        hostRootPathInspectable(scan)) {
+                        candidates=optiColdSteamCandidates(budget,readFacts);
+                        coldSteam=!candidates.empty();
+                    }
+                }
                 const auto previous=readJson(g_dataRoot/L"state"/L"last-opti-client-supplement.json",json::object());
                 // A cursor belongs to this exact client. Removed candidates simply
                 // fall back to normal order; missing covers cannot starve the tail.
@@ -4995,6 +6216,11 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
                     jsonBoolOr(previous,"workLimited",false) && resumeCandidates(candidates,jsonStringOr(previous,"nextCandidate"));
                 receipt = supplementOptiCatalog(clientRoot, candidates,
                     std::move(running), cancelled, permitted, &budget);
+                if(trigger=="ymcc-client-open"&&!inventoryAvailable&&candidates.empty()&&receipt["status"]=="idle") {
+                    receipt["status"]="deferred";
+                    receipt["reason"]="library-scan-unavailable";
+                }
+                if(coldSteam)receipt["inventorySource"]="steam-manifests";
                 receipt["resumed"]=resumed;
                 receipt["clientRoot"]=toUtf8(normalizedPathKey(clientRoot));
             }
@@ -5028,17 +6254,33 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
     return receipt;
 }
 
+// The renderer receives the child exit code via optiClient.prepareCatalog.
+static int optiCatalogPreparationExitCode(const json& result) {
+    if (jsonStringOr(result,"status") == "deferred") {
+        const auto reason = jsonStringOr(result,"reason");
+        return reason=="client-running"?20:reason=="library-scan-unavailable"?22:21;
+    }
+    // A bounded pass may commit a prefix but still have a continuation.
+    if (jsonBoolOr(result,"workLimited",false)) return 21;
+    return jsonStringOr(result,"inventorySource")=="steam-manifests"?23:0;
+}
+
 static std::optional<int> runLibraryOptiStartupEntrypoint(const fs::path& appRoot,
     const std::function<fs::path()>& clientRootFor = optiCatalogClientRoot,
-    std::function<bool()> running = optiClientRunningForCatalog) {
-    return ymcc::optiStartup::entrypoint(appRoot, [&](const std::function<bool()>& cancelled) {
+    std::function<bool()> running = optiClientRunningForCatalog,
+    const std::function<bool()>& installed = optiCatalogClientInstalled,
+    const OptiSteamFactsReader& readFacts = [](std::uint32_t mask){return ymcc::steaminfo::read(mask);}) {
+    bool explicitOpen=false;int preparationCode=0;
+    const auto admitted=ymcc::optiStartup::entrypoint(appRoot, [&](const std::function<bool()>& cancelled) {
         g_dataRoot = custom_steam_library::defaultDataRoot(appRoot);
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         struct EndCom { bool active; ~EndCom() { if (active) CoUninitialize(); } } endCom{SUCCEEDED(com)};
         const auto result = runOptiCatalogSupplement(cancelled, [&] { return !cancelled(); },
-            "ymcc-startup-once", clientRootFor, std::move(running));
+            explicitOpen?"ymcc-client-open":"ymcc-startup-once", clientRootFor, std::move(running), installed, readFacts);
         if (result.value("status", std::string{}) == "error") throw std::runtime_error("OPT startup supplement failed");
-    });
+        if (explicitOpen) preparationCode = optiCatalogPreparationExitCode(result);
+    }, &explicitOpen);
+    return admitted&&*admitted==0?std::optional<int>{preparationCode}:admitted;
 }
 
 static json scrapeStateSnapshot() {
@@ -5298,8 +6540,27 @@ static std::string safeSteamAccountToken(std::string value) {
 
 static void requireSuccess(const ProcessResult& result);
 
+static void attachSteamAccountReadWarning(json& result, const json& report) {
+    const auto unavailable = jsonArrayOr(report,"unavailableAccounts");
+    if (unavailable.empty()) return;
+    result["unavailableAccounts"] = unavailable;
+    result["partialSteamAccounts"] = true;
+    result["accountReadWarning"] = "另有 " + std::to_string(unavailable.size()) +
+        " 个 Steam 账户暂时无法读取，本次未处理这些账户，原始数据已保留。修复后可重新操作。";
+}
+
+static json steamAccountTargetsForWrite(json* discovery = nullptr) {
+    const auto report = readSteamAccounts();
+    if (jsonStringOr(report, "steamStatus") == "error") {
+        throw std::runtime_error("Steam 账户检测未完成，请重新检测。\n" + jsonStringOr(report, "error"));
+    }
+    if (discovery) *discovery = report;
+    return jsonArrayOr(report, "accounts");
+}
+
 static json commitToAllSteamAccounts(const json& requestedTarget) {
-    const auto accounts = jsonArrayOr(readSteamAccounts(), "accounts");
+    json accountDiscovery;
+    const auto accounts = steamAccountTargetsForWrite(&accountDiscovery);
     if (accounts.empty()) throw std::runtime_error("未发现可写入的 Steam 大屏用户");
     const auto selected = requestedTarget.value("selectedGameDirectories", json::array());
     json results = json::array();
@@ -5323,22 +6584,61 @@ static json commitToAllSteamAccounts(const json& requestedTarget) {
         prepared.push_back({common, planPath});
     }
     if (prepared.empty()) throw std::runtime_error("Steam 账户列表没有可用的账户目标");
+    json unconfirmedAccount;
+    std::string commitError;
     for (const auto& [common, planPath] : prepared) {
         std::vector<std::wstring> commitArgs = {L"--commit-add-library-to-steam", L"--confirm-steam-closed"};
         commitArgs.insert(commitArgs.end(), common.begin(), common.end());
-        requireSuccess(runWorker(commitArgs));
-        results.push_back(readJson(planPath, json::object()));
+        json target;
+        for (size_t i = 0; i + 1 < common.size(); ++i) {
+            if (common[i] == L"--account") target["accountId"] = toUtf8(common[i+1]);
+            if (common[i] == L"--steam-root") target["steamRoot"] = toUtf8(common[i+1]);
+        }
+        try {
+            results.push_back(readSteamAddCompletion(runWorker(commitArgs), planPath, target));
+        } catch (const std::exception& error) {
+            if (results.empty()) throw;
+            // A missing readback may follow a real write. Do not retry or advance to another account.
+            unconfirmedAccount = std::move(target);
+            commitError = error.what();
+            break;
+        }
     }
-    json summary = results.back();
+    const auto displayTarget = defaultSteamPlanAccount(accountDiscovery);
+    const auto display = std::find_if(results.cbegin(),results.cend(),[&](const auto& result){return steamPlanMatchesTarget(result,displayTarget);});
+    const bool displayConfirmed = display != results.cend();
+    if (!displayConfirmed && unconfirmedAccount.is_null())
+        throw std::runtime_error("Steam 加入已处理，但当前账户的完成结果未能确认；请刷新核对，勿重复加入。");
+    json summary = displayConfirmed ? *display : json::object();
+    rememberSteamPlanReadTarget(displayTarget,steamTargetSnapshot());
     summary["mode"] = "steam-library-add-commit-all-accounts";
     summary["allSteamAccounts"] = true;
     summary["accountResults"] = results;
-    writeJsonWithLocalBackup(g_dataRoot / L"state" / L"last-steam-add-all-accounts.json", summary);
+    attachSteamAccountReadWarning(summary, accountDiscovery);
+    if (!unconfirmedAccount.is_null()) {
+        const auto skipped = prepared.size() - results.size() - 1;
+        summary["displayAccountCompletionConfirmed"] = displayConfirmed;
+        summary["partialSteamAccounts"] = true;
+        summary["unconfirmedAccount"] = std::move(unconfirmedAccount);
+        summary["skippedAccountCount"] = skipped;
+        summary["accountCommitWarning"] = "已确认 " + std::to_string(results.size()) +
+            " 个账户处理完成，另有 1 个账户结果未确认。" +
+            (skipped ? "后续 " + std::to_string(skipped) + " 个账户未处理。" : "") +
+            (!displayConfirmed ? "当前账户结果未确认。" : "") +
+            "请先刷新游戏库核对，勿直接重复加入。\n" + commitError;
+    }
+    if (displayConfirmed) {
+        const auto path = g_dataRoot / L"state" / L"last-steam-add-all-accounts.json";
+        if (commitError.empty()) writeJsonWithLocalBackup(path, summary);
+        else try { writeJsonWithLocalBackup(path, summary); }
+             catch (const std::exception&) { /* The verified per-account receipts remain authoritative. */ }
+    }
     return summary;
 }
 
 static json refreshArtworkForAllSteamAccounts(const json& requestedTarget) {
-    const auto accounts = jsonArrayOr(readSteamAccounts(), "accounts");
+    json accountDiscovery;
+    const auto accounts = steamAccountTargetsForWrite(&accountDiscovery);
     const auto selected = requestedTarget.value("selectedGameDirectories", json::array());
     if (accounts.empty()) throw std::runtime_error("未发现可更新的 Steam 大屏用户");
     if (selected.empty()) throw std::runtime_error("请先在“已加入 Steam”页面选择要更新图标的游戏");
@@ -5372,20 +6672,21 @@ static json refreshArtworkForAllSteamAccounts(const json& requestedTarget) {
             args.push_back(L"--select-game"); args.push_back(toWide(directory));
         }
         args.push_back(L"--output"); args.push_back(output.wstring());
-        requireSuccess(runWorker(args));
-        results.push_back(readJson(output, json::object()));
+        results.push_back(readSteamActionCompletion(runWorker(args),output,account,true));
     }
     if (results.empty()) throw std::runtime_error("Steam 账户列表没有可用的账户目标");
     json summary = results.back();
     summary["mode"] = "steam-artwork-refresh-all-accounts";
     summary["allSteamAccounts"] = true;
     summary["accountResults"] = results;
+    attachSteamAccountReadWarning(summary, accountDiscovery);
     writeJsonWithLocalBackup(g_dataRoot / L"state" / L"last-steam-artwork-refresh-all-accounts.json", summary);
     return summary;
 }
 
 static json deleteFromAllSteamAccounts(const json& requestedTarget) {
-    const auto accounts = jsonArrayOr(readSteamAccounts(), "accounts");
+    json accountDiscovery;
+    const auto accounts = steamAccountTargetsForWrite(&accountDiscovery);
     if (accounts.empty()) throw std::runtime_error("未发现可删除的 Steam 大屏用户");
     const auto selected = requestedTarget.value("selectedGameDirectories", json::array());
     if (selected.empty()) throw std::runtime_error("删除 Steam 快捷方式必须明确选择游戏");
@@ -5397,7 +6698,7 @@ static json deleteFromAllSteamAccounts(const json& requestedTarget) {
         if (accountId.empty()) continue;
         const auto token = safeSteamAccountToken(accountId);
         const auto planPath = g_dataRoot / L"state" / toWide("steam-delete-plan-" + token + ".json");
-        std::vector<std::wstring> common = {L"--account", toWide(accountId)};
+        std::vector<std::wstring> common = {L"--account", toWide(accountId),L"--allow-already-absent"};
         if (!steamRoot.empty()) { common.push_back(L"--steam-root"); common.push_back(toWide(steamRoot)); }
         for (const auto& directory : selected) {
             if (directory.is_string()) { common.push_back(L"--select-game"); common.push_back(toWide(directory.get<std::string>())); }
@@ -5409,16 +6710,27 @@ static json deleteFromAllSteamAccounts(const json& requestedTarget) {
         prepared.push_back({common, planPath});
     }
     if (prepared.empty()) throw std::runtime_error("Steam 账户列表没有可用的账户目标");
+    try {
     for (const auto& [common, planPath] : prepared) {
         std::vector<std::wstring> commitArgs = {L"--commit-delete-library-from-steam", L"--confirm-steam-closed"};
         commitArgs.insert(commitArgs.end(), common.begin(), common.end());
-        requireSuccess(runWorker(commitArgs));
-        results.push_back(readJson(planPath, json::object()));
+        json target;
+        for(size_t i=0;i+1<common.size();++i){if(common[i]==L"--account")target["accountId"]=toUtf8(common[i+1]);if(common[i]==L"--steam-root")target["steamRoot"]=toUtf8(common[i+1]);}
+        results.push_back(readSteamActionCompletion(runWorker(commitArgs),planPath,target,false));
+    }
+    } catch(const std::exception& error) {
+        if(!results.empty()){
+            json partial={{"schemaVersion",1},{"mode","steam-library-delete-partial"},{"allSteamAccounts",true},{"committed",false},{"accountResults",results},{"completedAccountCount",results.size()},{"error",error.what()}};
+            try{writeJsonWithLocalBackup(g_dataRoot/L"state"/L"last-steam-delete-all-accounts.json",partial);}catch(...){/* Keep the actual account failure primary. */}
+            throw std::runtime_error(std::string(error.what())+"\n已确认完成 "+std::to_string(results.size())+" 个账户；已完成结果保留，修复后可再次删除其余账户。");
+        }
+        throw;
     }
     json summary = results.back();
     summary["mode"] = "steam-library-delete-commit-all-accounts";
     summary["allSteamAccounts"] = true;
     summary["accountResults"] = results;
+    attachSteamAccountReadWarning(summary, accountDiscovery);
     writeJsonWithLocalBackup(g_dataRoot / L"state" / L"last-steam-delete-all-accounts.json", summary);
     return summary;
 }
@@ -5457,6 +6769,27 @@ static void postPipelineEvent(const std::string& event, json payload) noexcept {
     } catch (...) {
         // Progress is advisory. A WebView notification must not terminate a
         // recognition lane or the native host under memory/network pressure.
+    }
+}
+
+// A background page only needs a dirty notice. Require a separate capability:
+// older pages understand library advisories but still require full media progress.
+static void postWorkspaceMediaProgress(const fs::path& root) noexcept {
+    try {
+        const auto window = g_window.load();
+        if (g_shuttingDown.load() || !window || !IsWindow(window)) return;
+        const auto epoch = g_refreshDocumentEpoch.load();
+        const bool active = IsWindowVisible(window) && !IsIconic(window) && GetForegroundWindow() == window;
+        if (!active && epoch != 0 && g_mediaProgressProtocolEpoch.load() == epoch) {
+            auto result = std::make_unique<AsyncResult>();
+            result->message = {{"kind", "event"}, {"event", "media-download-progress"},
+                {"refreshRequested", true}, {"mediaProgressProtocol", 1}, {"refreshDocument", epoch}};
+            enqueueWorkspaceResult(std::move(result));
+        } else {
+            postPipelineEvent("media-download-progress", {{"mediaDownloads", ymcc::media::downloads::Queue(root).snapshot()}});
+        }
+    } catch (...) {
+        // Progress is advisory; the next current state read restores it.
     }
 }
 
@@ -5516,10 +6849,13 @@ static int scrapeArtworkConcurrency() {
     return 4;
 }
 
-static bool startScrapeQueue(bool forceManual) {
+static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
     if(!hostDataRootReadiness().ready)return false;
+    {
+    std::lock_guard<std::mutex> stateLock(g_scrapeQueueStateMutex);
     bool expected = false;
     if (!g_scrapeQueueRunning.compare_exchange_strong(expected, true)) {
+        if (continueAfterBusy) g_scrapeQueueFollowupRequested = true;
         // A manual refresh is an explicit retry request.  Do not leave it
         // behind an automatic weak-network batch whose item timeout can be
         // several minutes. Cancel the current batch at its next safe
@@ -5532,6 +6868,8 @@ static bool startScrapeQueue(bool forceManual) {
             cancelBackgroundJobs(g_scrapeQueueJobs);
         }
         return false;
+    }
+    g_scrapeQueueFollowupRequested = false;
     }
     BackgroundJob job;
     try {
@@ -5696,6 +7034,10 @@ static bool startScrapeQueue(bool forceManual) {
                             jsonStringOr(game, "contentType") == "steam-native") continue;
                         const auto executable = jsonStringOr(game, "primaryExecutable");
                         if (executable.empty()) continue;
+                        // Old ready scans may predate local-program classification.
+                        // Do not repeatedly guess game identities for emulator apps;
+                        // explicit manual refresh retains its existing path.
+                        if (!forceManual && custom_steam_library::libraryLocalProgramExecutable(toWide(executable))) continue;
                         bool pending = false;
                         bool hasVerifiedSteamId = false;
                         int steamAppId = 0;
@@ -5819,7 +7161,7 @@ static bool startScrapeQueue(bool forceManual) {
                     });
                     const auto outputDirectory = workspaceJobsRoot() / L"library-batch-identification";
                     const auto batchOutputDirectory = outputDirectory / toWide(batchId);
-                    requireHostDataRootReady();fs::create_directories(batchOutputDirectory);
+                    requireHostDataRootReady();fs::create_directories(custom_steam_library::ioPath(batchOutputDirectory));
             {
                 std::lock_guard<std::mutex> lock(historyMutex);
                 history["queue"] = {
@@ -5839,6 +7181,8 @@ static bool startScrapeQueue(bool forceManual) {
                     std::mutex stageResultMutex;
                     std::set<std::string> identitySucceeded;
                     std::set<std::string> identityFailed;
+                    std::set<std::string> identityCooldownSkipped;
+                    std::set<std::string> identityNetworkRetryQueued;
                     std::set<std::string> deferredKeys;
                     std::set<std::string> completedKeys;
                     std::set<std::string> round1DoneKeys;
@@ -6128,6 +7472,12 @@ static bool startScrapeQueue(bool forceManual) {
                                 }, roundNumber);
                             };
                             try {
+                                {
+                                std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+                                if (scrapeExecutableRemoved(job, key)) {
+                                    postCompleted(target, "skipped-removed", stage, json::object(), roundNumber);
+                                    return;
+                                }
                                 gameLease = tryAcquireScrapeGameTask(executable, stage);
                                 if (!gameLease) {
                                     postDeferredManual();
@@ -6137,6 +7487,7 @@ static bool startScrapeQueue(bool forceManual) {
                                 itemJob = beginBackgroundJob(
                                     "scrape-item", g_scrapeQueueJobs, g_scrapeQueueGenerations,
                                     "library-item|" + key);
+                                }
                                 if (!gameTaskLeaseIsCurrent(*gameLease)) {
                                     postDeferredManual();
                                     return;
@@ -6185,6 +7536,10 @@ static bool startScrapeQueue(bool forceManual) {
                                 }
                                 if (metadataOnly && !forceManual && !retryingIdentityInCurrentBatch &&
                                     automaticIdentityAttempted(latestOverrides, executable)) {
+                                    {
+                                        std::lock_guard<std::mutex> lock(stageResultMutex);
+                                        identityCooldownSkipped.insert(key);
+                                    }
                                     postStageResult("identity-failed", false, {
                                         {"reason", "automatic-retry-cooldown"}
                                     });
@@ -6197,10 +7552,10 @@ static bool startScrapeQueue(bool forceManual) {
                                     finishItem();
                                     return;
                                 }
-                                if (metadataOnly && !forceManual) markAutomaticIdentityAttempt(executable);
+                                if (metadataOnly && !forceManual) markAutomaticIdentityAttempt(executable, itemJob, job);
                                 const auto itemOutputDirectory = batchOutputDirectory / toWide(stage) /
                                     (L"item-" + std::to_wstring(outputIndexOffset + queueIndex + 1));
-                                requireHostDataRootReady();fs::create_directories(itemOutputDirectory);
+                                requireHostDataRootReady();fs::create_directories(custom_steam_library::ioPath(itemOutputDirectory));
                                 std::vector<std::wstring> workerArguments = {
                                     toWide(executable), itemOutputDirectory.wstring(), L"--platform", L"pc"
                                 };
@@ -6276,6 +7631,11 @@ static bool startScrapeQueue(bool forceManual) {
                                     finishItem();
                                     return;
                                 }
+                                if (scrapeExecutableRemoved(job, key)) {
+                                    postCompleted(target, "skipped-removed", stage, json::object(), roundNumber);
+                                    finishItem();
+                                    return;
+                                }
                                 const bool leaseLost = !gameTaskLeaseIsCurrent(*gameLease);
                                 if (leaseLost && !job->cancelRequested.load()) {
                                     // A manual edit took ownership.  This is a
@@ -6318,7 +7678,12 @@ static bool startScrapeQueue(bool forceManual) {
                                         // Persist the manifest for diagnostics and
                                         // for the next round, but only a verified
                                         // Steam AppID counts as first-round success.
-                                        persistResolvedIdentityFromOutput(itemOutputDirectory, executable);
+                                        {
+                                            std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+                                            if (jobIsCurrent(g_scrapeQueueGenerations, itemJob) &&
+                                                !scrapeExecutableRemoved(job, key) && gameTaskLeaseIsCurrent(*gameLease))
+                                                persistResolvedIdentityFromOutput(itemOutputDirectory, executable);
+                                        }
                                         if (resolvedIgdbId > 0) {
                                             std::lock_guard<std::mutex> lock(stageResultMutex);
                                             identityResolvedIgdbIds[key] = resolvedIgdbId;
@@ -6338,7 +7703,7 @@ static bool startScrapeQueue(bool forceManual) {
                                         // Promote it immediately so the next
                                         // plan sees the SteamID instead of
                                         // waiting for a later full refresh.
-                                        if (!forceManual) recordAutomaticIdentityResult(executable, true);
+                                        if (!forceManual) recordAutomaticIdentityResult(executable, true, {}, itemJob, job);
                                         postStageResult("identity-ready", true, retryInfo);
                                 } else {
                                         postCompleted(target,
@@ -6355,7 +7720,11 @@ static bool startScrapeQueue(bool forceManual) {
                                         }
                                         const auto identityError = retryInfo.contains("error") && retryInfo["error"].is_string()
                                             ? retryInfo["error"].get<std::string>() : detail;
-                                        if (!forceManual) recordAutomaticIdentityResult(executable, false, identityError);
+                                        if (!forceManual) recordAutomaticIdentityResult(executable, false, identityError, itemJob, job);
+                                        if (!forceManual && identityWorkerQueuedNetworkRetry(result)) {
+                                            std::lock_guard<std::mutex> lock(stageResultMutex);
+                                            identityNetworkRetryQueued.insert(key);
+                                        }
                                         postStageResult("identity-failed", false, retryInfo);
                                     } else {
                                         if (stage == "artwork" && workerMode == "steam-artwork-only") {
@@ -6388,7 +7757,7 @@ static bool startScrapeQueue(bool forceManual) {
                                 finishItem();
                             } catch (const std::exception& error) {
                                 if (metadataOnly) {
-                                    if (!forceManual) recordAutomaticIdentityResult(executable, false, error.what());
+                                    if (!forceManual) recordAutomaticIdentityResult(executable, false, error.what(), itemJob, job);
                                     postStageResult("identity-failed", false, {{"error", error.what()}});
                                 }
                                 else {
@@ -6398,7 +7767,7 @@ static bool startScrapeQueue(bool forceManual) {
                                 finishItem();
                             } catch (...) {
                                 if (metadataOnly) {
-                                    if (!forceManual) recordAutomaticIdentityResult(executable, false, "身份识别发生未知异常");
+                                    if (!forceManual) recordAutomaticIdentityResult(executable, false, "身份识别发生未知异常", itemJob, job);
                                     postStageResult("identity-failed", false, {{"error", "身份识别发生未知异常"}});
                                 }
                                 else {
@@ -6456,6 +7825,10 @@ static bool startScrapeQueue(bool forceManual) {
                     auto processQueueTarget = [&](const ScrapeQueueTarget& target, size_t targetIndex) {
                         if (cancelled.load() || job->cancelRequested.load()) return;
                         const auto key = backgroundExecutableKey(target.executable);
+                        if (scrapeExecutableRemoved(job, key)) {
+                            postCompleted(target, "skipped-removed", "identity", json::object());
+                            return;
+                        }
                         bool retryingVisualFallback = false;
                         {
                             std::lock_guard<std::mutex> lock(stageResultMutex);
@@ -6468,6 +7841,7 @@ static bool startScrapeQueue(bool forceManual) {
                         }
                         if (cancelled.load() || job->cancelRequested.load()) return;
 
+                        if (scrapeExecutableRemoved(job, key)) return;
                         int resolvedSteamAppId = target.steamAppId;
                         uint64_t resolvedIgdbId = target.igdbId;
                         bool identityReady = target.hasVerifiedSteamId && resolvedSteamAppId > 0;
@@ -6580,6 +7954,19 @@ static bool startScrapeQueue(bool forceManual) {
                                  }
                                  return;
                              }
+                             bool cooldownSkipped = false;
+                             {
+                                 std::lock_guard<std::mutex> lock(stageResultMutex);
+                                 cooldownSkipped = identityCooldownSkipped.count(key) != 0;
+                             }
+                             if (cooldownSkipped) {
+                                 // A skipped cooldown is not a new failed attempt.
+                                 // Missing pictures already took the fallback above.
+                                 postCompleted(target, "identity-failed", "identity", {
+                                     {"reason", "automatic-retry-cooldown"}
+                                 }, 1);
+                                 return;
+                             }
                              // A metadata-verified IGDB match is enough to
                              // start the explicitly non-Steam artwork fallback.
                              // Retrying Steam identity first only delays the
@@ -6593,6 +7980,17 @@ static bool startScrapeQueue(bool forceManual) {
                                  pauseScrapeBudget(key);
                                  std::lock_guard<std::mutex> queueLock(artworkFallbackQueueMutex);
                                  artworkFallbackQueue.push_back(std::move(fallbackTarget));
+                                 return;
+                             }
+                             bool alreadyQueuedForNetwork = false;
+                             {
+                                 std::lock_guard<std::mutex> lock(stageResultMutex);
+                                 alreadyQueuedForNetwork = identityNetworkRetryQueued.count(key) != 0;
+                             }
+                             if (alreadyQueuedForNetwork) {
+                                 postCompleted(target, "identity-failed", "identity", {
+                                     {"reason", "network-retry-queued"}
+                                 }, 1);
                                  return;
                              }
                              int retryAttempt = 0;
@@ -6889,9 +8287,18 @@ static bool startScrapeQueue(bool forceManual) {
                 }
             }
             finishBackgroundJob(g_scrapeQueueJobs, job);
-            const bool rerunManual = g_scrapeQueueForceRequested.exchange(false);
-            g_scrapeQueueRunning = false;
-            if (rerunManual && !g_shuttingDown.load()) startScrapeQueue(true);
+            bool rerunManual = false, rerunFollowup = false;
+            {
+                std::lock_guard<std::mutex> stateLock(g_scrapeQueueStateMutex);
+                rerunManual = g_scrapeQueueForceRequested.exchange(false);
+                rerunFollowup = g_scrapeQueueFollowupRequested;
+                g_scrapeQueueFollowupRequested = false;
+                g_scrapeQueueRunning = false;
+            }
+            // Only a successfully finished batch may consume an automatic
+            // followup; an explicit manual retry keeps its original priority.
+            if (!g_shuttingDown.load() && (rerunManual || (rerunFollowup && !cancelled.load() && !failed.load() && !job->cancelRequested.load())))
+                startScrapeQueue(rerunManual, rerunFollowup);
             } catch (const std::exception& error) {
                 markScrapeHistoryFailed(failureHistoryPath, error.what());
                 appendUiError({
@@ -6902,8 +8309,12 @@ static bool startScrapeQueue(bool forceManual) {
                     {"error", "自动刮削调度异常，已安全停止本轮"}
                 });
                 finishBackgroundJob(g_scrapeQueueJobs, job);
-                g_scrapeQueueForceRequested = false;
-                g_scrapeQueueRunning = false;
+                {
+                    std::lock_guard<std::mutex> stateLock(g_scrapeQueueStateMutex);
+                    g_scrapeQueueForceRequested = false;
+                    g_scrapeQueueFollowupRequested = false;
+                    g_scrapeQueueRunning = false;
+                }
             } catch (...) {
                 markScrapeHistoryFailed(failureHistoryPath, "unknown exception");
                 appendUiError({
@@ -6914,13 +8325,22 @@ static bool startScrapeQueue(bool forceManual) {
                     {"error", "自动刮削调度发生未知异常，已安全停止本轮"}
                 });
                 finishBackgroundJob(g_scrapeQueueJobs, job);
-                g_scrapeQueueForceRequested = false;
-                g_scrapeQueueRunning = false;
+                {
+                    std::lock_guard<std::mutex> stateLock(g_scrapeQueueStateMutex);
+                    g_scrapeQueueForceRequested = false;
+                    g_scrapeQueueFollowupRequested = false;
+                    g_scrapeQueueRunning = false;
+                }
             }
         });
     } catch (...) {
         finishBackgroundJob(g_scrapeQueueJobs, job);
-        g_scrapeQueueRunning = false;
+        {
+            std::lock_guard<std::mutex> stateLock(g_scrapeQueueStateMutex);
+            g_scrapeQueueForceRequested = false;
+            g_scrapeQueueFollowupRequested = false;
+            g_scrapeQueueRunning = false;
+        }
         throw;
     }
     return true;
@@ -6960,13 +8380,13 @@ static bool startManualIdentifyTask(const json& arguments) {
         try {
             requireHostDataRootReady();fs::create_directories(outputDirectory);
             std::vector<std::wstring> args = {toWide(executable), outputDirectory.wstring(), L"--platform", L"pc"};
-            if (!manualName.empty()) { args.push_back(L"--save-name"); args.push_back(toWide(manualName)); }
+            // identifyOne already committed the user's choice. Enrichment
+            // queries with that choice without replaying it after later edits.
+            if (!manualName.empty()) { args.push_back(L"--name"); args.push_back(toWide(manualName)); }
             if (!steamId.empty()) {
                 args.push_back(L"--steam-id"); args.push_back(toWide(steamId));
-                args.push_back(L"--save-id");
             } else if (!igdbId.empty()) {
                 args.push_back(L"--igdb-id"); args.push_back(toWide(igdbId));
-                args.push_back(L"--save-id");
             }
             // Match automatic scraping's protection rule: keep existing good
             // artwork and only fill missing/invalid fields during enrichment.
@@ -7005,7 +8425,9 @@ static bool startManualIdentifyTask(const json& arguments) {
 
                 configTransaction.release();
             };
+            const json identityRequest{{"steamId", steamId}, {"igdbId", igdbId}};
             if (result.exitCode == 0 && jobIsCurrent(g_manualIdentifyGenerations, job)) {
+                bool matchingRequestResult = false, rejectedRequestResult = false;
                 // Promote only a manifest belonging to this EXE.  This keeps a
                 // previous game's partial output from becoming the new identity.
                 std::error_code manifestError;
@@ -7020,12 +8442,23 @@ static bool startManualIdentifyTask(const json& arguments) {
                     if (!entry.is_regular_file(manifestError) || entry.path().filename() != L"manifest.json") { manifestError.clear(); continue; }
                     const auto document = readJson(entry.path(), json::object());
                     if (samePath(fs::path(toWide(jsonStringOr(document, "exe"))), fs::path(toWide(executable)))) {
-                        if (jobIsCurrent(g_manualIdentifyGenerations, job)) persistResolvedIdentityCache(entry.path());
                         const auto match = jsonObjectOr(document, "match");
+                        if (!matchesManualIdentityRequest(match, identityRequest)) { rejectedRequestResult=true; continue; }
+                        matchingRequestResult=true;
+                        bool identityAcknowledged = false;
+                        {
+                            std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+                            if (jobIsCurrent(g_manualIdentifyGenerations, job)) identityAcknowledged = persistResolvedIdentityCache(entry.path(), identityRequest);
+                        }
+                        // A label or a refused cache write is not a verified
+                        // identity receipt. Keep manual choice as a candidate.
+                        const bool steamVerified = identityAcknowledged && custom_steam_library::verifiedSteamIdentityMatch(match);
                         resolvedFormalName = jsonStringOr(match, "formalName", jsonStringOr(match, "displayName"));
-                        resolvedSteamId = jsonIntegerOr(match, "storefrontAppId", jsonIntegerOr(match, "appId", 0));
+                        resolvedSteamId = steamVerified ? jsonIntegerOr(match, "storefrontAppId", jsonIntegerOr(match, "appId", 0)) : 0;
                         resolvedIgdbId = jsonIntegerOr(match, "igdbId", 0);
                         resolvedSteamVerificationStatus = jsonStringOr(match, "steamVerificationStatus");
+                        if (!steamVerified && resolvedSteamVerificationStatus == "steam-verified")
+                            resolvedSteamVerificationStatus = "needs-confirmation";
                         resolvedMetadataVerificationStatus = jsonStringOr(match, "metadataVerificationStatus");
                         resolvedSteamIdCandidate = jsonIntegerOr(match, "steamIdCandidate", 0);
                     }
@@ -7047,11 +8480,9 @@ static bool startManualIdentifyTask(const json& arguments) {
                             overrides["schemaVersion"] = 1;
                             auto& item = overrides["items"][currentKey];
                             if (!item.is_object()) item = json::object();
-                            // A name typed or selected by the user is authoritative.
-                            // Network enrichment may add formalName/IDs, but must never
-                            // silently replace that explicit evidence (including an
-                            // intentionally unusual test value such as 123123).
-                            if (manualName.empty()) item["name"] = resolvedFormalName;
+                            // Formal metadata is independent of the current manual
+                            // name, including its deliberate absence after clearing.
+                            // Only the original explicit save owns that field.
                             item["formalName"] = resolvedFormalName;
                             const bool steamVerified = resolvedSteamId > 0 &&
                                 resolvedSteamVerificationStatus == "steam-verified";
@@ -7088,13 +8519,15 @@ static bool startManualIdentifyTask(const json& arguments) {
                 }
                 const std::string reportedStatus = resolvedSteamVerificationStatus.empty()
                     ? "needs-confirmation" : resolvedSteamVerificationStatus;
-                persistState(reportedStatus, reportedStatus != "ready", {});
+                const bool rejectedRequest = rejectedRequestResult && !matchingRequestResult;
+                persistState(reportedStatus, reportedStatus != "ready", rejectedRequest ? "后台返回的身份与本次选择不一致，已保留当前 ID。" : std::string{});
                 if (jobIsCurrent(g_manualIdentifyGenerations, job)) {
-                    requestArtworkFollowup = true;
+                    requestArtworkFollowup = !rejectedRequest;
                     postPipelineEvent("manual-identify-complete", {
                         {"executable", executable}, {"jobId", job->jobId},
                         {"generation", job->generation}, {"attempts", attempts},
-                        {"identityStatus", resolvedSteamVerificationStatus},
+                        {"identityStatus", reportedStatus},
+                        {"error", rejectedRequest ? json("后台返回的身份与本次选择不一致，已保留当前 ID。") : json(nullptr)},
                         {"outputDirectory", toUtf8(outputDirectory.wstring())}
                     });
                 }
@@ -7109,7 +8542,9 @@ static bool startManualIdentifyTask(const json& arguments) {
                         // valid identity and a partial tall/hero set.  Keep
                         // that identity and let the normal artwork queue
                         // retry only the missing slots.
-                        partialManifest = persistResolvedIdentityFromOutput(outputDirectory, executable);
+                        std::lock_guard<std::mutex> boundaryLock(g_taskBoundaryMutex);
+                        if (jobIsCurrent(g_manualIdentifyGenerations, job))
+                            partialManifest = persistResolvedIdentityFromOutput(outputDirectory, executable, identityRequest);
                     } catch (...) {
                         partialManifest = false;
                     }
@@ -7149,11 +8584,11 @@ static bool startManualIdentifyTask(const json& arguments) {
             // and fills any artwork slot that the manual worker could not
             // finish, without blocking the editor or creating a second
             // worker for the same EXE.
-            if (requestArtworkFollowup && !g_shuttingDown.load()) {
+            if (requestArtworkFollowup && !g_shuttingDown.load() && jobIsCurrent(g_manualIdentifyGenerations, job)) {
                 // The manual worker already bypassed automatic suppression.
                 // The follow-up is only a detached plan/artwork continuation;
                 // keep it out of the UI's manual-refresh progress label.
-                startScrapeQueue(false);
+                startScrapeQueue(false, true);
             }
             finishBackgroundJob(g_manualIdentifyJobs, job);
         });
@@ -7253,7 +8688,7 @@ static void startLibraryPipeline(bool allowFirstRunDefaults) {
         launchHostBackgroundTask([job, firstRunDiscovery] {
         // Directory enumeration is local work and must not turn the later
         // weak-network scrape queue into a foreground input gate.
-        bool cancelled = false;
+        bool cancelled = false,scanConfirmed=false;
         try {
             auto scanArguments = libraryScanWorkerArguments(firstRunDiscovery);
             const auto result = runWorkerBounded(
@@ -7261,12 +8696,19 @@ static void startLibraryPipeline(bool allowFirstRunDefaults) {
                 &job->cancelRequested, &job->activeProcess);
             if (result.exitCode != 0) {
                 if (job->cancelRequested.load()) cancelled = true;
-                else throw std::runtime_error(result.output.empty() ? "目录扫描失败" : result.output);
-            }
+                else {
+                    const auto error=result.output.empty()?std::string("目录扫描失败"):result.output;
+                    if(firstRunDiscovery)postPipelineEvent("library-first-run-error",{{"error",error}});
+                    postPipelineEvent("library-open-error",{{"error",error}});
+                }
+            } else scanConfirmed=true;
+            // Publish only confirmed scan results. An ordinary scan failure
+            // retains its error and cached inventory; it must not prevent the
+            // independent, bounded read-only Steam membership refresh below.
             // Publish the local scan immediately.  Plan generation remains in
             // this detached pipeline, so a slow Steam install cannot delay the
             // visible library or any foreground input.
-            if (!cancelled && !job->cancelRequested.load()) {
+            if (scanConfirmed && !cancelled && !job->cancelRequested.load()) {
                 const auto scanSnapshot = workspaceSnapshot(false, json::object(), job);
                 postWorkspaceRefreshNotice("library-scan-complete", [&] { return scanSnapshot; }, {{"planPending", true}}, job);
                 if (firstRunDiscovery) {
@@ -7285,7 +8727,7 @@ static void startLibraryPipeline(bool allowFirstRunDefaults) {
             // persisted scraping switch controls whether that first pass is
             // allowed; directory maintenance remains separately disabled by
             // kAutomaticLibraryMaintenanceEnabled.
-            if (!cancelled && !job->cancelRequested.load() && automaticScrapingEnabled()) {
+            if (scanConfirmed && !cancelled && !job->cancelRequested.load() && automaticScrapingEnabled()) {
                 startScrapeQueue(false);
             }
         } catch (const std::exception& error) {
@@ -7316,6 +8758,11 @@ static void startLibraryPipeline(bool allowFirstRunDefaults) {
 
 static void postWebMessage(const json& message) {
     if (!workspaceRefreshMessageCurrent(message) || !g_webview) return;
+    if(jsonStringOr(message,"kind")=="response"&&message.value("id",uint64_t{0})!=0){
+        const auto browserId=consumeWorkspaceReply(message.value("id",uint64_t{0}));if(!browserId)return;
+        auto response=message;response["id"]=*browserId;const auto text=toWide(response.dump());
+        g_webview->PostWebMessageAsJson(text.c_str());return;
+    }
     const auto text = toWide(message.dump());
     g_webview->PostWebMessageAsJson(text.c_str());
 }
@@ -7489,7 +8936,7 @@ struct WorkspaceQueuedCommand { uint64_t id;std::string command;json arguments; 
 static std::mutex g_commandQueueMutex;
 static std::queue<WorkspaceQueuedCommand> g_commandQueue;
 static std::map<std::string,std::vector<uint64_t>> g_commitWaiters;
-static std::string steamCommitRequestKey(json arguments){auto directories=jsonArrayOr(arguments,"selectedGameDirectories");std::sort(directories.begin(),directories.end());arguments["selectedGameDirectories"]=std::move(directories);return arguments.dump();}
+static std::string steamCommitRequestKey(json arguments){arguments.erase("_nativeSteamDeadlineTick");auto directories=jsonArrayOr(arguments,"selectedGameDirectories");std::sort(directories.begin(),directories.end());arguments["selectedGameDirectories"]=std::move(directories);return arguments.dump();}
 static std::atomic<unsigned> g_acceptedWrites{0};
 static std::atomic<bool> g_closeAfterWrites{false};
 static bool retainedWorkspaceWrite(const std::string& command){return command=="saveEditor"||command=="commit"||command=="mediaEdit"||command=="mediaImport";}
@@ -7550,6 +8997,10 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
         }
         return;
     }
+    // This original request budget includes time spent waiting in this FIFO.
+    // UI-supplied timestamps cannot extend it, and metadata never grants power.
+    if(command=="closeSteam"||((command=="commit"||command=="refreshSteamArtwork")&&jsonBoolOr(arguments,"forceCloseSteam",false)))
+        arguments["_nativeSteamDeadlineTick"]=GetTickCount64()+ymcc::steamaction::requestBudgetMs;
     // A single native FIFO owns foreground commands. Accepted edits and Steam
     // writes outlive the editor, and cannot race a second shortcuts writer.
     {
@@ -7571,7 +9022,7 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
                     std::lock_guard<std::mutex> queueLock(g_commandQueueMutex);
                     if(g_commandQueue.empty()){
                         g_taskRunning=false;
-                        if(g_closeAfterWrites.load())PostMessageW(g_window,WM_CLOSE,0,0);
+                        if(g_closeAfterWrites.load())PostMessageW(g_window,WM_WORKSPACE_WRITES_DRAINED,0,0);
                         return;
                     }
                     item=std::move(g_commandQueue.front());g_commandQueue.pop();
@@ -7582,7 +9033,9 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
                 try{
                     result->message={{"kind","response"},{"id",item.id},{"ok",true},{"result",executeWorkspaceCommand(item.command,item.arguments)}};
                     result->refreshWatchers=item.command=="startup"||item.command=="setEnabled"||item.command=="addRoot"||item.command=="removeRoot";
-                    steamCommitProgress(item,"completed");
+                    const auto writeWarning = item.command == "commit"
+                        ? jsonStringOr(result->message["result"],"steamAccountWriteWarning") : std::string{};
+                    steamCommitProgress(item,writeWarning.empty()?"completed":"partial",writeWarning);
                 }catch(const std::exception& error){
                     result->message={{"kind","response"},{"id",item.id},{"ok",false},{"error",error.what()}};
                     steamCommitProgress(item,"failed",error.what());
@@ -8117,8 +9570,8 @@ static LRESULT CALLBACK splashProcedure(HWND window, UINT message,
         if (wParam == SPLASH_FALLBACK_TIMER_ID) {
             // The spinner is only a startup overlay. A missed WebView2
             // navigation callback must never keep the actual workspace hidden.
-            if (g_window && IsWindow(g_window)) {
-                ShowWindow(g_window, SW_SHOW);
+            if (g_window && IsWindow(g_window) && IsWindowVisible(g_window) &&
+                !IsIconic(g_window) && !g_shuttingDown.load() && !g_closeAfterWrites.load()) {
                 UpdateWindow(g_window);
             }
             closeSplash();
@@ -8321,6 +9774,7 @@ static void setHostExitReason(std::string_view kind, std::string_view detail = {
 struct WorkspaceWebViewFailure {
     COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
     int exitCode = 0;
+    uint64_t binding = 0;
 };
 
 static bool isWorkspaceUiSource(const std::wstring& source) {
@@ -8334,9 +9788,32 @@ static bool isWorkspaceUiSource(const std::wstring& source) {
         startsWith(L"https://steam-library.local/");
 }
 
+// Message ownership follows the document that actually sent it, not just
+// the controller binding. A mapped media/data page is never a command UI.
+static bool isWorkspaceWebMessageSource(ICoreWebView2WebMessageReceivedEventArgs* arguments) {
+    if(!arguments)return false;
+    LPWSTR raw=nullptr;const auto result=arguments->get_Source(&raw);
+    const bool allowed=SUCCEEDED(result)&&raw&&isWorkspaceUiSource(raw);
+    if(raw)CoTaskMemFree(raw);
+    return allowed;
+}
+
 static void navigateWorkspaceDocument() {
     if (!g_webview || g_shuttingDown.load()) return;
     g_webview->Navigate(kWorkspaceUiUrl);
+}
+
+static void finishWorkspaceNavigationPresentation() {
+    const auto window = g_window.load();
+    const bool current = window && IsWindow(window) && !g_shuttingDown.load() && !g_closeAfterWrites.load();
+    if (g_splash) {
+        if (current && IsWindowVisible(window) && !IsIconic(window)) UpdateWindow(window);
+        closeSplash();
+    }
+    // Completion may arrive after the user minimizes, switches apps or closes.
+    // The host was already presented at launch; only repair current UI focus.
+    if (!g_updateHealthOnly && current && IsWindowVisible(window) && !IsIconic(window) &&
+        GetForegroundWindow() == window) focusWorkspaceWindow();
 }
 
 static void handleWorkspaceNavigationCompleted(
@@ -8377,12 +9854,7 @@ static void handleWorkspaceNavigationCompleted(
     g_webviewMainDocumentReady = true;
     g_webviewNavigationRetries = 0;
     g_webviewProcessRecoveries = 0;
-    if (g_splash) {
-        ShowWindow(g_window, SW_SHOW);
-        UpdateWindow(g_window);
-        closeSplash();
-    }
-    if (!g_updateHealthOnly) focusWorkspaceWindow();
+    finishWorkspaceNavigationPresentation();
     if (g_updateHealthOnly) {
         if (writeUpdateHealthMarker("ready")) {
             setHostExitReason("update-health-ready-exit");
@@ -8397,6 +9869,7 @@ static bool bindWorkspaceWebView(ICoreWebView2Controller* controller) {
     g_webview.Reset();
     controller->get_CoreWebView2(&g_webview);
     if (!g_webview) return false;
+    const auto binding=++g_webviewBindingEpoch;
     if (parentInputModeEnabled()) {
         g_webview->AddScriptToExecuteOnDocumentCreated(
             L"window.__customSteamLibraryParentMode=true;", nullptr);
@@ -8408,7 +9881,12 @@ static bool bindWorkspaceWebView(ICoreWebView2Controller* controller) {
         settings->put_IsScriptEnabled(TRUE);
         settings->put_AreDefaultContextMenusEnabled(FALSE);
         settings->put_AreDevToolsEnabled(FALSE);
+        settings->put_IsZoomControlEnabled(FALSE);
+        ComPtr<ICoreWebView2Settings5> settings5;
+        if (SUCCEEDED(settings.As(&settings5))) settings5->put_IsPinchZoomEnabled(FALSE);
     }
+    // Clear any persisted browser zoom; ordinary wheel input keeps native scroll.
+    controller->put_ZoomFactor(1.0);
 
     ComPtr<ICoreWebView2_3> webview3;
     if (FAILED(g_webview.As(&webview3)) || !webview3) return false;
@@ -8425,19 +9903,22 @@ static bool bindWorkspaceWebView(ICoreWebView2Controller* controller) {
     EventRegistrationToken messageToken{};
     g_webview->add_WebMessageReceived(
         Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+            [binding](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                if(binding!=g_webviewBindingEpoch.load()||!isWorkspaceWebMessageSource(args))return S_OK;
                 LPWSTR raw = nullptr;
                 if (FAILED(args->get_WebMessageAsJson(&raw)) || !raw) return S_OK;
                 const std::wstring text(raw);
                 CoTaskMemFree(raw);
+                uint64_t id=0;
                 try {
                     const auto request = json::parse(toUtf8(text));
-                    const uint64_t id = request.value("id", static_cast<uint64_t>(0));
+                    id=registerWorkspaceReply(request.value("id",uint64_t{0}));
                     const auto command = request.value("command", std::string{});
                     const auto arguments = request.value("arguments", json::object());
                     beginCommand(id, command, arguments);
                 } catch (const std::exception& error) {
-                    postWebMessageNoThrow({{"kind", "event"}, {"event", "host-error"}, {"error", error.what()}});
+                    if(id)postWebMessageNoThrow({{"kind","response"},{"id",id},{"ok",false},{"error",error.what()}});
+                    else postWebMessageNoThrow({{"kind", "event"}, {"event", "host-error"}, {"error", error.what()}});
                 }
                 return S_OK;
             }).Get(), &messageToken);
@@ -8445,15 +9926,15 @@ static bool bindWorkspaceWebView(ICoreWebView2Controller* controller) {
     EventRegistrationToken startingToken{};
     g_webview->add_NavigationStarting(
         Callback<ICoreWebView2NavigationStartingEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
-                if (!args) return S_OK;
+            [binding](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                if (!args||binding!=g_webviewBindingEpoch.load()) return S_OK;
                 LPWSTR uriRaw = nullptr;
                 UINT64 navigationId = 0;
                 args->get_Uri(&uriRaw);
                 args->get_NavigationId(&navigationId);
                 const std::wstring uri = uriRaw ? uriRaw : L"";
                 if (uriRaw) CoTaskMemFree(uriRaw);
-                if (!isWorkspaceUiSource(uri)) return S_OK;
+                if (!isWorkspaceUiSource(uri)) { args->put_Cancel(TRUE); return S_OK; }
                 retireWorkspaceRefreshProtocol();
                 g_webviewExpectedNavigationId = navigationId;
                 return S_OK;
@@ -8462,17 +9943,19 @@ static bool bindWorkspaceWebView(ICoreWebView2Controller* controller) {
     EventRegistrationToken completedToken{};
     g_webview->add_NavigationCompleted(
         Callback<ICoreWebView2NavigationCompletedEventHandler>(
-            [](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* arguments) -> HRESULT {
+            [binding](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* arguments) -> HRESULT {
+                if(binding!=g_webviewBindingEpoch.load())return S_OK;
                 handleWorkspaceNavigationCompleted(sender, arguments);
                 return S_OK;
             }).Get(), &completedToken);
 
     g_webview->add_ProcessFailed(
         Callback<ICoreWebView2ProcessFailedEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
-                if (!args || g_shuttingDown.load()) return S_OK;
+            [binding](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+                if (!args || g_shuttingDown.load()||binding!=g_webviewBindingEpoch.load()) return S_OK;
                 auto* failure = new (std::nothrow) WorkspaceWebViewFailure();
                 if (!failure) return S_OK;
+                failure->binding=binding;
                 args->get_ProcessFailedKind(&failure->kind);
                 ComPtr<ICoreWebView2ProcessFailedEventArgs2> args2;
                 if (SUCCEEDED(args->QueryInterface(IID_PPV_ARGS(&args2))) && args2) {
@@ -8650,6 +10133,8 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam
             resizeWebView();
             return 0;
         case WM_SHOWWINDOW:
+            // Explicitly showing a hidden retained-write host resumes its session.
+            if(wParam && lParam==0 && !g_shuttingDown.load()) g_closeAfterWrites=false;
             syncWorkspaceGamepadTimer(wParam!=FALSE);
             if (g_controller) g_controller->put_IsVisible(wParam && !IsIconic(window));
             break;
@@ -8712,9 +10197,14 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam
         case WM_WEBVIEW_PROCESS_FAILED: {
             std::unique_ptr<WorkspaceWebViewFailure> failure(
                 reinterpret_cast<WorkspaceWebViewFailure*>(lParam));
-            if (failure) recoverWorkspaceWebView(failure->kind, failure->exitCode);
+            if (failure&&failure->binding==g_webviewBindingEpoch.load()) recoverWorkspaceWebView(failure->kind, failure->exitCode);
             return 0;
         }
+        case WM_WORKSPACE_WRITES_DRAINED:
+            // A queued completion cannot close a subsequently reopened window.
+            if(g_closeAfterWrites.load() && !g_acceptedWrites.load())
+                return windowProcedure(window,WM_CLOSE,0,0);
+            return 0;
         case WM_CLOSE:
             if(g_acceptedWrites.load()){
                 g_closeAfterWrites=true;
@@ -8787,7 +10277,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             ? (windowUsesParentInput(existing) && windowParentPid(existing) == g_launchOptions.parentPid)
             : !windowUsesParentInput(existing));
         if (compatible && !g_updateHealthOnly) {
-            ShowWindow(existing, SW_RESTORE);
+            ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
             SetForegroundWindow(existing);
         }
         CloseHandle(singleInstance);
@@ -8847,8 +10337,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // journal before opening the UI; failure is retained for a later pass
         // and must not prevent the workspace from starting.
         try {
-            const auto cleanup = runWorkerBounded(
-                {L"--cleanup-interrupted-transactions"}, 10000);
+            const auto cleanup = runStartupTransactionCleanup();
             if (cleanup.exitCode != 0) {
                 writeHostCrashRecord("transaction-cleanup-warning", cleanup.exitCode, cleanup.output);
             }
@@ -8923,7 +10412,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // Show the real host immediately. The spinner is a non-activating overlay
     // above it, so a delayed/missed WebView2 event cannot leave an invisible
     // window or an empty desktop behind the startup animation.
-    ShowWindow(g_window, g_updateHealthOnly ? SW_HIDE : SW_SHOW);
+    ShowWindow(g_window, g_updateHealthOnly ? SW_HIDE : SW_MAXIMIZE);
     if (!g_updateHealthOnly) UpdateWindow(g_window);
     if (!g_updateHealthOnly) focusWorkspaceWindow();
     if (g_splash) {
@@ -8933,7 +10422,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // Parent mode receives semantic WM_COPYDATA actions and must not start a
     // second XInput poller. Standalone mode keeps the existing host-owned path.
     syncWorkspaceGamepadTimer();
-    if (!g_updateHealthOnly) NotifyIpInterfaceChange(AF_UNSPEC, networkChanged, nullptr, FALSE, &g_networkNotification);
+    if (kAutomaticLibraryMaintenanceEnabled && !g_updateHealthOnly) NotifyIpInterfaceChange(AF_UNSPEC, networkChanged, nullptr, FALSE, &g_networkNotification);
     initializeWebView();
 
     MSG message{};

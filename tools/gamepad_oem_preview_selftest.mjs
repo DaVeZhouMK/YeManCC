@@ -6,8 +6,10 @@ import {createRequire} from 'node:module';
 import {createServer} from 'node:http';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const root=process.cwd(),req=createRequire(path.join(root,'package.json'));
 const out=process.env.YMCC_UI_BROWSER_OUT||'G:/YeManCC-Work/_scratch/controller-oem-preview-mainline-20261013';
+const selectedCases=process.env.YMCC_OEM_PREVIEW_CASES||'all';assert(['all','aya-short-edge'].includes(selectedCases),'Unknown OEM preview case selection');const ayaOnly=selectedCases==='aya-short-edge';if(ayaOnly)assert(process.env.YMCC_OEM_RECORDING_RESULT,'AYA selected preview needs actual native catalog result');
 fs.mkdirSync(out,{recursive:true});
 const native=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
 const tables={msi:'kMsiClawKeys',msig3e:'kMsiClawG3EKeys',rog:'kRogKeys',rogXbox:'kRogXbox2025Keys',aya:'kAyaneoCecKeys',legion:'kLegionGoKeys',legions:'kLegionSKeys',gpd:'kGpdLegacyKeys',gpdWin5:'kGpdWin5Keys',deck:'kSteamDeckKeys'};
@@ -17,6 +19,19 @@ for(const [name,table] of Object.entries(tables)){
  examples[name]={familyId:name.startsWith('legion')?'lenovo-legion-go':name.startsWith('msi')?'msi-claw':name==='rogXbox'?'asus-rog-ally-x':name==='gpdWin5'?'gpd':name,supported:true,keys:[...body.matchAll(/\{"([^"]+)", "([^"]+)", (\d+), OemKeyForm::\w+, (true|false)\}/g)].map(m=>({keyId:m[1],label:m[2],backIndex:Number(m[3])||null,triggerCapability:m[4]==='true'?'click-only':'full'}))};
 }
 examples.none={familyId:'unknown',supported:false,keys:[]};
+// Optional output of the existing native recorder supplies actual model replies.
+const nativeCatalogPath=process.env.YMCC_OEM_RECORDING_RESULT;
+let nativeCatalogReceipt=null;const ayaExamples=[];
+if(nativeCatalogPath){
+ const bytes=fs.readFileSync(nativeCatalogPath),result=JSON.parse(bytes),proof=JSON.parse(fs.readFileSync(path.join(path.dirname(nativeCatalogPath),'SOURCE.json'),'utf8'));
+ assert.equal(result.pass,true);assert.equal(result.deviceIo,false);assert.equal(proof.mainSha256,createHash('sha256').update(native).digest('hex'));
+ nativeCatalogReceipt={path:nativeCatalogPath,sha256:createHash('sha256').update(bytes).digest('hex'),mainSha256:proof.mainSha256};
+ for(const [deviceClass,catalog] of Object.entries(result.modelCatalogs))if(catalog.familyId==='ayanero'){
+  const id='aya-native-'+ayaExamples.length;examples[id]=catalog;ayaExamples.push(id);
+ }
+ assert(ayaExamples.length>0);
+}
+
 // Compile the production key resolver/publication function with catalog-only stubs.
 const maskStart=native.indexOf('static bool nativeKeyboardShortcutMaskBit(');
 const maskEnd=native.indexOf('// Canonical strings avoid JS precision loss',maskStart);
@@ -37,7 +52,7 @@ struct {int family=0;std::string deviceClass;}g_machineIdentity;
 static const OemKeyDef msi[]={{"claw"},{"qs"},{"m1"},{"m2"}};
 static const OemKeyDef rog[]={{"cc"},{"ac"},{"m1"},{"m2"},{"lib"}};
 static const OemKeyDef legion[]={{"legionfrontl"},{"legionfrontr"},{"legiony2"},{"legionm2"}};
-static OemCatalogRef oemCatalogForFamily(int family,const std::string&){switch(family){case 0:return{msi,4};case 1:return{rog,5};case 2:return{legion,4};default:return{nullptr,0};}}
+static OemCatalogRef oemBoundCatalogForFamily(int family,const std::string&){switch(family){case 0:return{msi,4};case 1:return{rog,5};case 2:return{legion,4};default:return{nullptr,0};}}
 ${native.slice(maskStart,maskEnd)}
 ${native.slice(helperStart,helperEnd)}
 int main(){
@@ -54,7 +69,7 @@ g_machineIdentity.family=3;assert(gamepadOemPressedKeys(~0ull).empty());
 std::cout<<"OEM_NATIVE_PUBLICATION_PASS 8 cases; deviceOperations=0\\n";}
 `;
 fs.writeFileSync(path.join(out,'oem-native-fixture.cpp'),nativeTest);
-fs.writeFileSync(path.join(out,'oem-native-fixture.cmd'),`@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\nif errorlevel 1 exit /b 1\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT "${out}/oem-native-fixture.cpp" /I"${root}/deps/json" /Fo"${out}/oem-native-fixture.obj" /Fe"${out}/oem-native-fixture.exe"\r\nif errorlevel 1 exit /b 1\r\n"${out}/oem-native-fixture.exe"\r\nexit /b %errorlevel%\r\n`);
+fs.writeFileSync(path.join(out,'oem-native-fixture.cmd'),calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')+`cl /nologo /std:c++20 /utf-8 /EHsc /MT "${out}/oem-native-fixture.cpp" /I"${root}/deps/json" /Fo"${out}/oem-native-fixture.obj" /Fe"${out}/oem-native-fixture.exe"\r\nif errorlevel 1 exit /b 1\r\n"${out}/oem-native-fixture.exe"\r\nexit /b %errorlevel%\r\n`);
 const nativeRun=spawnSync('cmd.exe',['/d','/c',path.join(out,'oem-native-fixture.cmd')],{encoding:'utf8',windowsHide:true});
 fs.writeFileSync(path.join(out,'oem-native-fixture.log'),(nativeRun.stdout||'')+(nativeRun.stderr||''));assert.equal(nativeRun.status,0,nativeRun.stdout+nativeRun.stderr);
 const gate=native.slice(native.indexOf('    static int publishedDriverSetup = -1;'),native.indexOf('static void gamepadReadState(bool',native.indexOf('    static int publishedDriverSetup = -1;')));
@@ -62,25 +77,27 @@ assert(gate.includes('oemMask == publishedOemMask')&&gate.includes('publishedOem
 const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compiler-sfc');
 const {chromium}=createRequire((process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules')+'/_oem-preview.cjs')('playwright');
 const styles=[],errors=[],cases=[];
+const ayaProductFiles=['src/components/GamepadVisualizer.vue','src/components/ControllerVectorArtwork.ts','src/bridge/controllerFeatureStatus.ts','src/bridge/controllerShortcutRules.ts','src/bridge/controllerOemPresentation.ts','src/bridge/controllerPressFeedback.ts','src/bridge/controllerGamepadPresentation.ts'].filter(file=>fs.existsSync(path.join(root,file)));
+const ayaSourceHashes=ayaProductFiles.map(file=>({file,sha256:createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')}));
 const mocks={
  '@/bridge/ipc':`export function on(name,cb){const set=window.__fixture.events[name]??=new Set();set.add(cb);return()=>set.delete(cb)};export function isNativeRuntime(){return true};export async function invoke(){return {}}`,
- '@/bridge/yeman':`export async function summonGet(){return structuredClone(window.__fixture.gamepad)};export async function summonSet(){window.__fixture.writes++;return summonGet()};export async function oemKeysGet(){window.__fixture.catalogReads++;return structuredClone(window.__fixture.catalog)};export async function setShortcutRecording(){return {ok:true}}`,
- '@/bridge/gameproc':`export async function getGameInputRedistState(){return {mouseInterfaceAvailable:true}};export async function installGameInputRedist(){};export async function setMouseBackend(){window.__fixture.writes++;return {ok:true}}`,
+ '@/bridge/yeman':`export async function summonGet(){return structuredClone(window.__fixture.gamepad)};export async function summonSet(){window.__fixture.writes++;return summonGet()};export async function oemKeysGet(){window.__fixture.catalogReads++;return structuredClone(window.__fixture.catalog)};export async function setShortcutRecording(){return {ok:true}};export async function getShortcutRecordingState(){return {active:false}}`,
+ '@/bridge/gameproc':`export async function getGameInputRedistState(){return {mouseInterfaceAvailable:true}};export async function installGameInputRedist(){};export async function setMouseBackend(){window.__fixture.writes++;return {ok:true}};export async function getMouseModeState(){return {ok:false,error:"mouse-state-outside-preview-scope"}};export async function setMouseModePolicy(){throw Error("UNEXPECTED_MOUSE_MODE_WRITE")}`,
  '@/bridge/settingsRepository':`export async function loadSettings(){return structuredClone(window.__fixture.settings)};export async function compareAndSwapInputSettings(){window.__fixture.writes++;return {ok:false}}`,
- '@/bridge/api':`export const fs={},settingsStore={},shell={}`,
+ '@/bridge/api':`export const fs={},settingsStore={},shell={},dialog={openFile:async()=>{throw Error('UNEXPECTED_FILE_DIALOG')}},keyboard={open:async()=>{throw Error('UNEXPECTED_KEYBOARD_WRITE')}},windowApi={controllerEditorWidth:async()=>({ok:false})}`,
  '@/gamepad/focus':`export function focusGamepadElement(n){n?.focus()};export function getGamepadPopupPlacement(){return {style:{},above:false}}`,
 };
 const bundle=await build({stdin:{resolveDir:root,loader:'ts',contents:`
 import {createApp,h} from 'vue';import Card from './src/components/ControllerShortcutsCard.vue';import Editor from './src/views/ControllerShortcutEditorView.vue';import Preview from './src/components/GamepadVisualizer.vue';
-import {normalizeSettings} from './src/bridge/settingsRepository.ts';import {NATIVE_DEFAULT_SHORTCUTS,newControllerShortcutRule} from './src/bridge/controllerShortcutRules.ts';
-const examples=${JSON.stringify(examples)};
+import {normalizeSettings} from './src/bridge/settingsRepository.ts';import {NATIVE_DEFAULT_SHORTCUTS,newControllerShortcutRule,normalizeOemKeysSnapshot} from './src/bridge/controllerShortcutRules.ts';
+const examples=Object.fromEntries(Object.entries(${JSON.stringify(examples)}).map(([id,catalog])=>[id,normalizeOemKeysSnapshot(catalog)]));
 window.__fixture={events:{},writes:0,catalogReads:0,catalog:examples.msi,gamepad:{...Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(d=>[d.defaultKey,false])),mouseBackend:'joyxoff'}};
 window.__emit=(name,data)=>{for(const cb of window.__fixture.events[name]??[])cb(data)};
-let app;window.__mount=(mode='card',device='msi')=>{
+let app;window.__mount=(mode='card',device='msi',persona='disabled')=>{
  app?.unmount();const f=window.__fixture;f.catalog=examples[device];f.events={};
  f.settings=normalizeSettings({input:{buttonMapping:{rules:{schemaVersion:2,shortcutRules:[{...newControllerShortcutRule('oem-test','window.summon'),inputs:[{source:'oem',code:f.catalog.keys[0]?.keyId??'claw'}],enabled:true,trigger:'press'}]}}}});
- app=createApp({render:()=>h(mode==='editor'?Editor:mode==='card'?Card:Preview,mode==='preview'?{settings:{},oemKeys:f.catalog,showTestMode:false}:{})});app.mount('#app');
-};window.__mount();`},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'oem-preview',setup(b){
+ app=createApp({render:()=>h(mode==='editor'?Editor:mode==='card'?Card:Preview,(mode==='preview'||mode==='edge-preview')?{settings:{},oemKeys:f.catalog,persona,showTestMode:false,minimumPressFeedback:mode==='edge-preview'}:{})});app.mount('#app');
+};window.__mount();`},bundle:true,write:false,format:'iife',platform:'browser',loader:{'.svg':'dataurl','.png':'dataurl'},alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'oem-preview',setup(b){
  b.onResolve({filter:/.*/},a=>a.path in mocks?{path:a.path,namespace:'mock'}:undefined);
  b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],loader:'ts',resolveDir:root}));
  b.onLoad({filter:/\.vue$/},a=>{const {descriptor}=parse(fs.readFileSync(a.path,'utf8'),{filename:a.path});const id='data-v-'+createHash('sha1').update(a.path).digest('hex').slice(0,8);const c=compileScript(descriptor,{id,inlineTemplate:true});for(const s of descriptor.styles){const css=compileStyle({source:s.content,filename:a.path,id,scoped:s.scoped});assert.deepEqual(css.errors,[]);styles.push(css.code)}return{contents:c.content.replace('export default','const C =')+'\nC.__scopeId='+JSON.stringify(id)+';export default C;',loader:'ts',resolveDir:path.dirname(a.path)}});
@@ -91,11 +108,46 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
 try{
  browser=await chromium.launch({headless:true,executablePath:process.env.YMCC_UI_BROWSER_EXE||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
  const page=await browser.newPage({viewport:{width:1280,height:800}});page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:'+server.address().port);
+ const send=async keys=>page.evaluate(keys=>window.__emit('gamepad.state',{connected:true,name:'fixture',buttons:Array(16).fill(false),axes:[0,0,0,0],oemPressedKeys:keys}),keys);
+ async function runAyaShortEdges(){
+ for(const device of ayaExamples){
+  await page.evaluate(d=>window.__mount('edge-preview',d),device);await page.locator('.viz').waitFor();
+  const catalog=examples[device];
+  for(const key of catalog.keys.filter(k=>k.captureImplemented!==false)){
+   const selector='[data-oem-key="'+key.keyId+'"]';await page.locator(selector).first().waitFor();
+   await send([]);
+   await page.evaluate(receipt=>window.__emit('oem.keys.observed',receipt),{schemaVersion:1,familyId:catalog.familyId,deviceClass:catalog.deviceClass,observedKeys:[key.keyId],actionExecutionProven:false});
+   await page.waitForFunction(sel=>[...document.querySelectorAll(sel)].some(n=>n.classList.contains('live')),selector);
+   await send([]);assert(await page.locator(selector+'.live').count()>0,'AYA short edge pulse survives neutral sampled state '+catalog.deviceClass+'/'+key.keyId);
+   await page.waitForFunction(sel=>[...document.querySelectorAll(sel)].every(n=>!n.classList.contains('live')),selector);
+   await page.evaluate(receipt=>window.__emit('oem.keys.observed',receipt),{schemaVersion:1,familyId:catalog.familyId,deviceClass:'wrong-model',observedKeys:[key.keyId]});
+   assert.equal(await page.locator(selector+'.live').count(),0,'AYA mismatched model cannot flash preview');
+  }
+  if(catalog.deviceClass==='HandheldCompanion.Devices.AYANEONEXT2'){
+   for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
+    await page.evaluate(({device,persona})=>window.__mount('edge-preview',device,persona),{device,persona});await page.locator('.device-key[data-back-index]').first().waitFor({state:'attached'});
+    assert.equal(await page.locator('.device-key[data-back-index]').count(),4,'NEXT2 has four rear targets for '+persona);
+    const positions=await page.locator('.device-key[data-back-index]').evaluateAll(nodes=>Object.fromEntries(nodes.map(n=>[n.dataset.oemKey,[parseFloat(n.style.left),parseFloat(n.style.top),n.dataset.backIndex,n.dataset.control]])));
+    assert.equal(Object.keys(positions).length,4,'NEXT2 each physical rear has an independent key target');
+    assert.deepEqual(Object.fromEntries(Object.entries(positions).map(([key,value])=>[key,Number(value[2])])),{m1:1,m2:2,l4:3,r4:4},'NEXT2 exact four source positions for '+persona);
+    assert(positions.m1[0]<positions.m2[0]&&positions.l4[0]<positions.r4[0]&&positions.m1[1]<positions.l4[1]&&positions.m2[1]<positions.r4[1],'NEXT2 upper/lower and front-view sides for '+persona);
+    for(const keyId of ['m1','m2','l4','r4']){
+     await page.evaluate(receipt=>window.__emit('oem.keys.observed',receipt),{schemaVersion:1,familyId:catalog.familyId,deviceClass:catalog.deviceClass,observedKeys:[keyId],actionExecutionProven:false});
+     await page.waitForFunction(id=>document.querySelector('.device-key[data-oem-key="'+id+'"]')?.classList.contains('live'),keyId);
+     await page.waitForFunction(id=>!document.querySelector('.device-key[data-oem-key="'+id+'"]')?.classList.contains('live'),keyId);
+    }
+   }
+   await page.screenshot({path:path.join(out,'AYANEONEXT2-four-rear-preview.png')});
+  }
+  if(catalog.deviceClass==='HandheldCompanion.Devices.AYANEOAIR1S'||catalog.deviceClass==='HandheldCompanion.Devices.AYANEO3')await page.screenshot({path:path.join(out,catalog.deviceClass.split('.').pop()+'-preview.png')});
+  cases.push(catalog.deviceClass+' actual native catalog -> real Vue short-edge pulse, neutral retention and identity rejection');
+ }
+ }
+ if(ayaOnly){await runAyaShortEdges();}else{
  await page.locator('[data-oem-key="claw"]').waitFor();
  assert.deepEqual(await page.locator('.oem-special-exterior .oem-name').allTextContents(),['CLAW','QS']);
  assert.deepEqual(await page.locator('.oem-back-code').allTextContents(),['M1','M2']);
  await page.locator('.shortcut-toggle').first().focus();await page.waitForFunction(()=>document.querySelector('[data-oem-key="claw"]').classList.contains('mapped'));cases.push('controller card uses real catalog and selected rule');
- const send=async keys=>page.evaluate(keys=>window.__emit('gamepad.state',{connected:true,name:'fixture',buttons:Array(16).fill(false),axes:[0,0,0,0],oemPressedKeys:keys}),keys);
  await send(['qs','m1']);assert.equal(await page.locator('.oem-capsule.live,.oem-back-key.live').count(),2);
  await page.screenshot({path:path.join(out,'mainline-controller.png')});
  await send([]);assert.equal(await page.locator('.oem-capsule.live,.oem-back-key.live').count(),0);cases.push('physical press/release updates capsules and rear independently of standard buttons');
@@ -199,13 +251,16 @@ try{
   if(device==='legion'){assert.equal(await page.locator('.oem-additional-back .oem-capsule').count(),2);await send(['legionfrontr','legionm2']);assert.equal(await page.locator('.oem-capsule.live').count(),2)}
   cases.push(device+' catalog separation and empty-area behavior');
  }
+ await runAyaShortEdges();
  await page.evaluate(()=>window.__mount('preview','aya'));
  for(const width of [1280,800,420,320])for(const theme of ['', 'red-black','cyberpunk']){
   await page.setViewportSize({width,height:800});await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth||[...document.querySelectorAll('.oem-capsules')].some(n=>n.scrollWidth>n.clientWidth)),false);
  }
  cases.push('long real names wrap without overflow at four widths and three themes');
+ }
  assert.equal(await page.evaluate(()=>window.__fixture.writes),0);assert.deepEqual(errors,[]);
- fs.writeFileSync(path.join(out,'oem-preview-results.json'),JSON.stringify({pass:true,nativeCases:8,cases,errors,deviceOperations:0,productionStatusSha256:createHash('sha256').update(native.slice(helperStart,helperEnd)).digest('hex')},null,2));
+ assert(ayaSourceHashes.every(row=>createHash('sha256').update(fs.readFileSync(path.join(root,row.file))).digest('hex')===row.sha256),'AYA product source changed during browser replay');
+ fs.writeFileSync(path.join(out,'oem-preview-results.json'),JSON.stringify({pass:true,selectedCases,ayaSourceHashes,nativeCases:8,ayaModels:ayaExamples.length,nativeCatalogReceipt,toolchainPreambleSha256:createHash('sha256').update(fs.readFileSync(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'))).digest('hex'),cases,errors,deviceOperations:0,productionStatusSha256:createHash('sha256').update(native.slice(helperStart,helperEnd)).digest('hex')},null,2));
  console.log('OEM_PREVIEW_PASS native=8 browser='+cases.length+' deviceOperations=0');
 }finally{await browser?.close();await new Promise(r=>server.close(r));}

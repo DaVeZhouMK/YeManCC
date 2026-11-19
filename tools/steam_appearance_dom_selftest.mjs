@@ -2,10 +2,11 @@
 // receipt expression against bundled CSS. No installed Steam or CSS process.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import crypto from 'node:crypto';
-import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createRequire} from 'node:module';
+import {execFile,execFileSync} from 'node:child_process';import {promisify} from 'node:util';import {createRequire} from 'node:module';
 const exec=promisify(execFile),root=process.cwd(),out=path.resolve(process.argv[2]);fs.mkdirSync(out,{recursive:true});
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
-const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const context=await browser.newContext();await context.route('**/*',route=>route.abort());
+let sharedDocumentExe=process.env.YMCC_SHARED_DOCUMENT_EXE;if(!sharedDocumentExe){const nativeOut=path.join(out,'public-document-consumer');await exec('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(root,'tools/steam_live_transport_selftest.ps1'),'-DocumentReadOnly','-OutputDirectory',nativeOut],{windowsHide:true,timeout:90000});sharedDocumentExe=path.join(nativeOut,'fixture.exe');}
+const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const context=await browser.newContext();await context.route('**/*',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><html><body>Owned Steam-origin fixture</body></html>'}));
 const pack=path.join(root,'PowerControl/steam-appearance'),manifest=JSON.parse(fs.readFileSync(path.join(pack,'manifest.json'),'utf8'));const names=manifest.themes.map(row=>row.name);
 const definitions=Object.fromEntries(names.map(name=>[name,{manifest:JSON.parse(fs.readFileSync(path.join(pack,'themes',name,'theme.json'),'utf8')),config:JSON.parse(fs.readFileSync(path.join(pack,'themes',name,'config_USER.json'),'utf8'))}]));
 function configFor(name,opts,render=false){const c={...definitions[name].config,...opts.configOverrides?.[name],...(render?opts.renderConfigOverrides?.[name]:{})};if(opts.missingConfigKey?.name===name)delete c[opts.missingConfigKey.key];if(opts.disabled)c.active=false;return c;}
@@ -18,9 +19,33 @@ const defaultPatchFiles=names.flatMap(name=>selectedFiles(name,definitions[name]
 const sourceHashes=Object.fromEntries(names.map(name=>{const file=path.join(pack,'themes',name,'shared.css');return [path.relative(root,file).replaceAll('\\','/'),crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')]}));
 for(const relative of ['PowerControl/steam-appearance/idle.ps1','PowerControl/steam-appearance.ps1','PowerControl/steam-appearance/manifest.json'])sourceHashes[relative]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,relative))).digest('hex');
 let scenario={},port=0,queries=0,frames=0,expressions=[],themeWrites=[],visualSnapshots=[];const sockets=new Set(),pagesByTarget=new Map(),failures=[];
-const familyFor=(id)=>{const tab=(scenario.pages??[]).find(p=>p.id===id);const title=tab?.title||(id==='popup'?'QuickAccess':'');return /^MainMenu(?:_uid\d+)?$/.test(title)?'MainMenu':/^QuickAccess(?:_uid\d+)?$/.test(title)?'QuickAccess':'SP'};
-const page=(id,title='Steam Big Picture')=>({id,type:'page',title,url:'about:blank?browserType=3',webSocketDebuggerUrl:`ws://127.0.0.1:${port}/devtools/page/${id}`});
+const familyFor=(id)=>{const tab=(scenario.pages??[]).find(p=>p.id===id);const title=tab?.title||(id==='popup'?'QuickAccess':id==='menu'?'MainMenu':'');return /^MainMenu(?:_uid\d+)?$/.test(title)?'MainMenu':/^QuickAccess(?:_uid\d+)?$/.test(title)?'QuickAccess':'SP'};
+const page=(id,title='Steam Big Picture')=>({id,type:'page',title,url:'https://steamloopback.host/index.html?browserType=3',webSocketDebuggerUrl:`ws://127.0.0.1:${port}/devtools/page/${id}`});
 const server=http.createServer((req,res)=>{
+ if(req.url==='/fixture/shared'){
+  let text='';req.on('data',b=>{text+=b;if(text.length>65536)req.destroy()});req.on('end',()=>{void(async()=>{
+   const request=JSON.parse(text);assert.equal(request.operation,'documents');queries++;
+   const planFile=path.join(out,'last-shared-plan.json'),expressionFile=path.join(out,'last-shared-expressions.json');
+   fs.writeFileSync(planFile,JSON.stringify(request.plans));
+   execFileSync(sharedDocumentExe,['--style-expressions',planFile,expressionFile],{windowsHide:true,timeout:5000});
+   const codes=JSON.parse(fs.readFileSync(expressionFile,'utf8')),docs=[];
+   const reject=reason=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,reason,documents:[],complete:false}));};
+   const tabs=scenario.pages??[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'},{...page('popup','QuickAccess'),url:'about:blank'}];
+   if(scenario.foreignOwner||scenario.wrongOwnerPath||scenario.address==='0.0.0.0')return reject('document-read-cancelled'); // Public OS proof is independently tested by the native consumer.
+   const targetFile=path.join(out,'last-shared-targets.json'),selectedFile=path.join(out,'last-shared-selected.json');
+   if(scenario.badUrl&&Array.isArray(tabs)&&tabs.length)tabs[0].webSocketDebuggerUrl='ws://example.invalid:8080/devtools/page/main';
+   fs.writeFileSync(targetFile,JSON.stringify({targets:tabs,port}));
+   let selected;try{execFileSync(sharedDocumentExe,['--style-targets',targetFile,selectedFile],{windowsHide:true,timeout:5000,stdio:'pipe'});selected=JSON.parse(fs.readFileSync(selectedFile,'utf8'));}catch{return reject('document-targets-invalid');}
+   for(const tab of selected){
+    if(scenario.rpcError||scenario.exceptionDetails||scenario.wrongType||scenario.targetRpcError?.includes(tab.id))return reject('document-evaluation-unconfirmed');
+    const family=tab.kind,target=await renderTarget(tab.id);let value=await target.evaluate(codes[family]);frames++;expressions.push(codes[family]);
+    visualSnapshots.push({target:family,...await target.evaluate(()=>({roundRadius:getComputedStyle(document.getElementById('proof-round')).borderRadius,ringAnimation:getComputedStyle(document.getElementById('proof-ring')).animationName,carouselTransform:getComputedStyle(document.getElementById('proof-carousel')).transform,scaleValue:getComputedStyle(document.documentElement).getPropertyValue('--scale-value').trim()}))});
+    if(scenario.badProtocol)value.protocol=99;if(scenario.booleanProtocol)value.protocol=true;if(scenario.notReady)value.ready=false;if(scenario.truncatedValues)value.values.pop();if(scenario.nonStringValue)value.values[0]=true;
+    docs.push({kind:family,id:tab.id,sourceUrl:tab.url,value});
+   }
+   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,protocol:1,sequential:true,complete:new Set(docs.map(r=>r.kind)).size===3,documents:docs}));
+  })().catch(error=>{failures.push(String(error));res.writeHead(500);res.end()})});return;
+ }
  if(req.url==='/fixture/apply'){
   let text='';req.on('data',b=>{text+=b;if(text.length>4096)req.destroy()});req.on('end',()=>{void(async()=>{
    const request=JSON.parse(text);assert(names.includes(request.name));assert.equal(typeof request.state,'boolean');themeWrites.push({name:request.name,state:request.state});
@@ -33,21 +58,21 @@ const server=http.createServer((req,res)=>{
   })().catch(error=>{failures.push(String(error));res.writeHead(500);res.end()})});return;
  }
  if(req.url!=='/json/list'){res.writeHead(404);res.end();return;}++queries;
- let pages=scenario.pages??[page('main'),{...page('popup','QuickAccess'),url:'about:blank?popup=1'},{...page('shared','SharedJSContext'),url:'https://steamloopback.host/'}];
+ let pages=scenario.pages??[page('main'),{...page('popup','QuickAccess'),url:'about:blank'},{...page('shared','SharedJSContext'),url:'https://steamloopback.host/'}];
  if(scenario.badUrl)pages[0].webSocketDebuggerUrl='ws://example.invalid:8080/devtools/page/main';
  res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(pages));
 });
 function send(socket,value){if(socket.destroyed)return;const body=Buffer.from(JSON.stringify(value));assert(body.length<=65535);let header;if(body.length<126)header=Buffer.from([0x81,body.length]);else{header=Buffer.alloc(4);header[0]=0x81;header[1]=126;header.writeUInt16BE(body.length,2)}socket.write(Buffer.concat([header,body]));}
 async function renderTarget(id){
  if(pagesByTarget.has(id))return pagesByTarget.get(id);
- const created=await context.newPage();pagesByTarget.set(id,created);const family=familyFor(id);
+ const created=await context.newPage();await created.goto('https://steamloopback.host/index.html');pagesByTarget.set(id,created);const family=familyFor(id);
  let included=scenario.included??(scenario.disabled?[]:names);
  included=included.filter(name=>!(scenario.missing??[]).includes(name)&&!(scenario.targetMissing?.[id]??[]).includes(name));
  let files=included.flatMap(name=>selectedFiles(name,configFor(name,scenario,true),family));
  files=files.filter(file=>!(scenario.missingFiles??[]).includes(file)&&!(scenario.targetMissingFiles?.[id]??[]).includes(file));files.push(...(scenario.extraFiles??[]),...(scenario.targetExtraFiles?.[id]??[]));
   let css=files.map(file=>{
   const current=fs.readFileSync(path.join(pack,'themes',file),'utf8');let body=current;
-  if((scenario.staleContentFiles??[]).includes(file)){body=current.replace(/--ymcc-content-[0-9a-f]{16}/g,'--ymcc-content-0000000000000000');if(file==='Round/round-outline.css')body=body.replaceAll('animation: none !important;','animation: fixture_twitch 1.2s ease-in-out infinite;')+'\n@keyframes fixture_twitch {50%{opacity:.25}}';}
+  if((scenario.staleContentFiles??[]).includes(file)){body=current.replace(/--ymcc-content-[0-9a-f]{16}/g,'--ymcc-content-0000000000000000');if(file==='Round/round-outline.css')body+='\n.BasicUI #proof-ring {animation: fixture_twitch 1.2s ease-in-out infinite !important;}\n@keyframes fixture_twitch {50%{opacity:.25}}';}
   if((scenario.duplicateWithinStyle??[]).includes(file))body+=body;
   const copies=(scenario.duplicateFiles??[]).includes(file)?2:1;
   return Array.from({length:copies},()=>'<style class="css-loader-style" data-fixture-theme="'+file.split('/')[0]+'">'+body+'</style>').join('\n');
@@ -96,9 +121,10 @@ async function probe(name,opts={},moduleFile=process.env.YMCC_DOM_MODULE_OVERRID
  const ps=String.raw`$ErrorActionPreference='Stop'
 . '__MODULE__'
 $script:AppearanceContentManifestFile='__CONTENT_MANIFEST__'
-function Get-AppearanceProcessPath($p){$p.Path}
-function Get-NetTCPConnection {param($State,$LocalPort) @([pscustomobject]@{LocalAddress='__ADDRESS__';OwningProcess=42})}
-function Get-Process {param($Id) [pscustomobject]@{Path='C:\fixture\Steam\__IMAGE__';SessionId=1}}
+function Invoke-AppearanceSharedSteam($Request){Invoke-RestMethod -Uri 'http://127.0.0.1:__PORT__/fixture/shared' -Method Post -Body ([Text.Encoding]::UTF8.GetBytes(($Request|ConvertTo-Json -Depth 12 -Compress))) -ContentType 'application/json; charset=utf-8' -TimeoutSec 10}
+function Get-AppearanceProcessPath($p){throw 'PRIVATE_STEAM_PATH_DENIED'}
+function Get-AppearanceTcpListeners {throw 'PRIVATE_STEAM_PORT_DENIED'}
+function Get-Process {throw 'PRIVATE_STEAM_PROCESS_DENIED'}
 function Test-CurrentUserProcess($p){__OWNER__}
 $inputs=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__STATUS__'))|ConvertFrom-Json
 $status=[pscustomobject]@{themes=@(foreach($item in $inputs){
@@ -106,7 +132,7 @@ $status=[pscustomobject]@{themes=@(foreach($item in $inputs){
  try {if(Get-Command Get-AppearanceThemeRenderPlan -ErrorAction SilentlyContinue){$plan=Get-AppearanceThemeRenderPlan $item.name $item.manifest $item.config;if(__BAD_CONTEXT_PLAN__){$plan.contextProtocol=$true}}}catch{$planError=$_.Exception.Message}
  [pscustomobject]@{name=$item.name;installed=$true;configured=$item.config.active;error=$planError;renderPlan=$plan}
 })}
-$session=[pscustomobject]@{root='C:\fixture\Steam';pid=42;birth='100'}
+$session=[pscustomobject]@{root='C:\fixture\Steam';pid=42;birth='100';processEpoch='1';accountEpoch='1';powerGeneration='1'}
 $timer=[Diagnostics.Stopwatch]::StartNew()
 if(__WRAPPER__){$observed=$null;$value=Test-AppearanceRendered $session $status}elseif(Get-Command Get-AppearanceRenderedStatus -ErrorAction SilentlyContinue){$observed=Get-AppearanceRenderedStatus $session $status;$value=$observed.confirmed}else{$observed=$null;$value=Test-AppearanceRendered $session $status}
 
@@ -149,33 +175,33 @@ if(__REPAIR__){
 $variableDefaults=@{};if(Get-Command Get-AppearanceVariableDefaults -ErrorAction SilentlyContinue){foreach($item in $inputs){$variableDefaults[$item.name]=Get-AppearanceVariableDefaults $item.name}}
 [pscustomobject]@{variableDefaults=$variableDefaults;confirmed=[bool]$value;receipt=$observed;repairOk=$(if($repairResult){[bool]$repairResult.ok}else{$null});repairMessage=$repairMessage;powerShell=$PSVersionTable.PSVersion.ToString();elapsedMs=$timer.ElapsedMilliseconds}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath '__RESULT__' -Encoding UTF8
 `;
- fs.writeFileSync(wrapper,'\ufeff'+ps.replace('__MODULE__',target.replaceAll("'","''")).replace('__CONTENT_MANIFEST__',path.join(pack,'manifest.json').replaceAll("'","''")).replace('__RESULT__',result.replaceAll("'","''")).replace('__ADDRESS__',opts.address||'127.0.0.1').replace('__IMAGE__',opts.wrongOwnerPath?'other.exe':'bin\\cef\\steamwebhelper.exe').replace('__OWNER__',opts.foreignOwner?'$false':'$true').replace('__STATUS__',encoded).replace('__BAD_CONTEXT_PLAN__',opts.badContextPlan?'$true':'$false').replace('__WRAPPER__',opts.wrapper?'$true':'$false').replace('__REPAIR__',opts.repair?'$true':'$false').replace('__PORT__',String(port)).replace('__EDITOR_RACE__',opts.editorRace?'$true':'$false').replace('__CONFIG_RACE__',opts.configRace?'$true':'$false').replace('__CONTROL__',path.join(root,'PowerControl/steam-appearance.ps1').replaceAll("'","''")));
+ fs.writeFileSync(wrapper,'\ufeff'+ps.replace('__MODULE__',target.replaceAll("'","''")).replace('__CONTENT_MANIFEST__',path.join(pack,'manifest.json').replaceAll("'","''")).replace('__RESULT__',result.replaceAll("'","''")).replace('__ADDRESS__',opts.address||'127.0.0.1').replace('__IMAGE__',opts.wrongOwnerPath?'other.exe':'bin\\cef\\steamwebhelper.exe').replace('__OWNER__',opts.foreignOwner?'$false':'$true').replace('__STATUS__',encoded).replace('__BAD_CONTEXT_PLAN__',opts.badContextPlan?'$true':'$false').replace('__WRAPPER__',opts.wrapper?'$true':'$false').replace('__REPAIR__',opts.repair?'$true':'$false').replaceAll('__PORT__',String(port)).replace('__EDITOR_RACE__',opts.editorRace?'$true':'$false').replace('__CONFIG_RACE__',opts.configRace?'$true':'$false').replace('__CONTROL__',path.join(root,'PowerControl/steam-appearance.ps1').replaceAll("'","''")));
  await exec(process.env.YMCC_DOM_POWERSHELL||'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',['-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',wrapper],{windowsHide:true,timeout:15000});
  const row={name,...JSON.parse(fs.readFileSync(result,'utf8').replace(/^\ufeff/,'')),queries,frames,expressions,themeWrites:[...themeWrites],visualSnapshots:[...visualSnapshots]};cases.push(row);return row;
 }
 try{
  if(process.argv[3]){const old=await probe('before-missing-active-patch',{missingFiles:['Round/intensity/10px.css']},path.resolve(process.argv[3]));assert.equal(old.confirmed,true);assert.equal(old.frames,1);console.log('EXPECTED_OLD_FALSE_POSITIVE: eight shared theme receipts passed while the selected Round intensity CSS was missing');}
  if(process.env.YMCC_VARIABLE_BEFORE_MODULE){const old=await probe('before-missing-selected-variable',{configOverrides:{'Mini Carousel':{Size:'0.9'}},missingVariables:['--scale-value']},path.resolve(process.env.YMCC_VARIABLE_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.visualSnapshots[0].scaleValue,'0.7');console.log('EXPECTED_OLD_FALSE_POSITIVE: selected 0.9, variable missing, actual scale 0.7');}
- if(process.env.YMCC_CONTEXT_BEFORE_MODULE){const old=await probe('before-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']}},path.resolve(process.env.YMCC_CONTEXT_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.frames,1);console.log('EXPECTED_OLD_FALSE_POSITIVE: main page matches while the independent MainMenu focus CSS is missing');}
+ if(process.env.YMCC_CONTEXT_BEFORE_MODULE){const old=await probe('before-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetMissingFiles:{menu:['Round/round-outline.css']}},path.resolve(process.env.YMCC_CONTEXT_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.frames,1);console.log('EXPECTED_OLD_FALSE_POSITIVE: main page matches while the independent MainMenu focus CSS is missing');}
  if(process.env.YMCC_CONTENT_BEFORE_MODULE){const old=await probe('before-stale-content-current-path',{staleContentFiles:['Round/round-outline.css']},path.resolve(process.env.YMCC_CONTENT_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.frames,1);assert.equal(old.visualSnapshots[0].ringAnimation,'fixture_twitch');console.log('EXPECTED_OLD_FALSE_POSITIVE: previous path-only receipt accepts the same CSS path while an obsolete focus animation is actually running');}
  const scenarios=[
   ['contexts-only-main-document',{pages:[page('main')]},true],
-  ['contexts-disabled-all',{disabled:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},true],
-  ['contexts-reject-boolean-plan-protocol',{badContextPlan:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
-  ['contexts-reject-menu-foreign-websocket',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1',webSocketDebuggerUrl:'ws://example.invalid:8080/devtools/page/menu'}]},false],
-  ['contexts-reject-duplicate-target-id',{pages:[page('main'),{...page('main','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
-  ['contexts-reject-menu-without-main',{pages:[{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
-  ['contexts-ignore-unrecognized-menu-title',{pages:[page('main'),{...page('other','MainMenu_invalid'),url:'about:blank?popup=1'}]},true],
-  ['contexts-closed-menu-stays-unconfirmed',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetRpcError:['menu'],expectedWrites:[]},false],
-  ['contexts-SP-file-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetExtraFiles:{menu:['Mini Carousel/shared.css']}},false],
-  ['contexts-SP-variable-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}}},false],
-  ['contexts-repair-SP-variable-leak',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}},expectedWrites:['Mini Carousel']},true],
-  ['contexts-main-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']}},false],
-  ['contexts-quickaccess-only-missing',{pages:[page('main'),{...page('quick','QuickAccess_uid2'),url:'about:blank?popup=1'}],targetMissingFiles:{quick:['Round/intensity/10px.css']}},false],
-  ['contexts-two-menu-uids',{pages:[page('main'),{...page('menu1','MainMenu_uid1'),url:'about:blank?popup=1'},{...page('menu2','MainMenu_uid2'),url:'about:blank?popup=1'},{...page('quick1','QuickAccess_uid1'),url:'about:blank?popup=1'},{...page('quick2','QuickAccess_uid2'),url:'about:blank?popup=1'}]},true],
-  ['contexts-repair-menu-focus',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']},expectedWrites:['Round']},true],
-  ['contexts-repair-same-theme-two-documents',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'},{...page('quick','QuickAccess_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css'],quick:['Round/shared.css']},expectedWrites:['Round']},true],
-  ['contexts-excess-menu-targets',{pages:[page('main'),...Array.from({length:9},(_,i)=>({...page('m'+i,'MainMenu_uid'+i),url:'about:blank?popup=1'}))]},false],
+  ['contexts-disabled-all',{disabled:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}]},true],
+  ['contexts-reject-boolean-plan-protocol',{badContextPlan:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}]},false],
+  ['contexts-reject-menu-foreign-websocket',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank',webSocketDebuggerUrl:'ws://example.invalid:8080/devtools/page/menu'}]},false],
+  ['contexts-reject-duplicate-target-id',{pages:[page('main'),{...page('main','MainMenu_uid1'),url:'about:blank'}]},false],
+  ['contexts-reject-menu-without-main',{pages:[{...page('menu','MainMenu_uid1'),url:'about:blank'}]},false],
+  ['contexts-ignore-unrecognized-menu-title',{pages:[page('main'),{...page('other','MainMenu_invalid'),url:'about:blank'}]},true],
+  ['contexts-closed-menu-stays-unconfirmed',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetRpcError:['menu'],expectedWrites:[]},false],
+  ['contexts-SP-file-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetExtraFiles:{menu:['Mini Carousel/shared.css']}},false],
+  ['contexts-SP-variable-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}}},false],
+  ['contexts-repair-SP-variable-leak',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}},expectedWrites:['Mini Carousel']},true],
+  ['contexts-main-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetMissingFiles:{menu:['Round/round-outline.css']}},false],
+  ['contexts-quickaccess-only-missing',{pages:[page('main'),{...page('quick','QuickAccess_uid2'),url:'about:blank'}],targetMissingFiles:{quick:['Round/intensity/10px.css']}},false],
+  ['contexts-two-menu-uids',{pages:[page('main'),{...page('menu1','MainMenu_uid1'),url:'about:blank'},{...page('menu2','MainMenu_uid2'),url:'about:blank'},{...page('quick1','QuickAccess_uid1'),url:'about:blank'},{...page('quick2','QuickAccess_uid2'),url:'about:blank'}]},true],
+  ['contexts-repair-menu-focus',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'}],targetMissingFiles:{menu:['Round/round-outline.css']},expectedWrites:['Round']},true],
+  ['contexts-repair-same-theme-two-documents',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank'},{...page('quick','QuickAccess_uid1'),url:'about:blank'}],targetMissingFiles:{menu:['Round/round-outline.css'],quick:['Round/shared.css']},expectedWrites:['Round']},true],
+  ['contexts-excess-menu-targets',{pages:[page('main'),...Array.from({length:9},(_,i)=>({...page('m'+i,'MainMenu_uid'+i),url:'about:blank'}))]},false],
 
   ['healthy-all-eight',{},true],['boolean-wrapper-healthy',{wrapper:true},true],['boolean-wrapper-partial',{wrapper:true,included:[names[0]]},false],['single-page',{pages:[page('only')]},true],['unrelated-events',{unrelated:true},true],
   ['one-of-eight-only',{included:[names[0]],extraStyles:31},false],['no-themes',{included:[]},false],
@@ -218,7 +244,7 @@ try{
   ['repair-off-variable',{repair:true,disabled:true,variableOverrides:{'Mini Carousel':{'--scale-value':'0.5'}},expectedWrites:['Mini Carousel']},true],
   ['repair-variable-silently-fails',{repair:true,keepVariables:true,configOverrides:{'Mini Carousel':{Size:'0.9'}},missingVariables:['--scale-value'],expectedWrites:['Mini Carousel']},false],
   ['foreign-websocket',{badUrl:true},false],['wrong-owner-path',{wrongOwnerPath:true},false],['foreign-owner',{foreignOwner:true},false],
-  ['nonlocal-listener',{address:'0.0.0.0'},false],['no-main',{pages:[{...page('popup','Popup'),url:'about:blank?popup=1'}]},false],
+  ['nonlocal-listener',{address:'0.0.0.0'},false],['no-main',{pages:[{...page('popup','Popup'),url:'about:blank'}]},false],
   ['empty-list',{pages:[]},false],['oversized-list',{pages:Array.from({length:65},(_,i)=>page('p'+i))},false],
   ['too-many-main-pages',{pages:Array.from({length:5},(_,i)=>page('p'+i))},false],
   ['malformed-root',{pages:{id:'fake',type:'page',title:'Steam Big Picture',webSocketDebuggerUrl:`ws://127.0.0.1:${port}/devtools/page/fake`}},false],
@@ -227,8 +253,10 @@ try{
   ['incomplete-receipt',{truncatedValues:true},false],['non-string-receipt',{nonStringValue:true},false],['document-still-loading',{notReady:true},false],
   ['incomplete-config-snapshot',{badSnapshot:true},false],['invalid-config-value',{badConfigured:true},false]
  ];
- const selectedScenarios=process.env.YMCC_CONTEXT_DOM_ONLY==='1'?scenarios.filter(([name])=>name.startsWith('contexts-')):process.env.YMCC_CONTENT_DOM_ONLY==='1'?scenarios.filter(([name])=>/healthy-all-eight|stale-file-current-path|stale-two-files|duplicate-exact-current-file|duplicate-within-current-style|repair-stale-current-path|repair-duplicate-current-file|repair-stale-content-silently-fails/.test(name)):scenarios;
- for(const [name,opts,expected] of selectedScenarios){const row=await probe(name,opts);assert.equal(row.confirmed,expected,name+' '+row.receipt?.reason);assert(row.queries<=(opts.repair?4:1),name+' repeated target query');if(opts.repair)assert.deepEqual(row.themeWrites.map(write=>write.name),opts.expectedWrites,name+' unrelated or repeated theme write');if(expected){const documents=opts.pages?opts.pages.filter(t=>t?.type==='page'&&(/browserType=3/.test(t.url)||/^(MainMenu|QuickAccess)/.test(t.title))).length:2;assert(row.frames>=1&&row.frames<=(opts.repair?4:1)*documents);assert(row.powerShell.startsWith(process.env.YMCC_DOM_POWERSHELL?'7.':'5.1.'));if(!opts.wrapper)assert.equal(row.receipt.checked,true);}if(name.startsWith('missing-managed-theme-')||name.startsWith('missing-active-patch-')){assert.equal(row.receipt.checked,true);assert.equal(row.receipt.mismatched.length,1);}if(['repair-one-active-patch','repair-two-patches-one-theme','repair-two-themes'].includes(name)){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'0px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'10px');}
+ const requestedScenarios=process.env.YMCC_DOM_CASES?.split(',');
+ if(requestedScenarios){assert(requestedScenarios.length&&new Set(requestedScenarios).size===requestedScenarios.length&&requestedScenarios.every(name=>scenarios.some(([known])=>name===known)),'Unknown, empty or duplicate DOM case selection');assert(!process.env.YMCC_CONTEXT_DOM_ONLY&&!process.env.YMCC_CONTENT_DOM_ONLY,'Ambiguous DOM case selection');}
+ const selectedScenarios=requestedScenarios?scenarios.filter(([name])=>requestedScenarios.includes(name)):process.env.YMCC_CONTEXT_DOM_ONLY==='1'?scenarios.filter(([name])=>name.startsWith('contexts-')):process.env.YMCC_CONTENT_DOM_ONLY==='1'?scenarios.filter(([name])=>/healthy-all-eight|stale-file-current-path|stale-two-files|duplicate-exact-current-file|duplicate-within-current-style|repair-stale-current-path|repair-duplicate-current-file|repair-stale-content-silently-fails/.test(name)):scenarios;
+ for(const [name,opts,expected] of selectedScenarios){const row=await probe(name,opts);assert.equal(row.confirmed,expected,name+' '+row.receipt?.reason);assert(row.queries<=(opts.repair?4:1),name+' repeated target query');if(opts.repair)assert.deepEqual(row.themeWrites.map(write=>write.name),opts.expectedWrites,name+' unrelated or repeated theme write');if(expected){const documents=opts.pages?opts.pages.filter(t=>t?.type==='page'&&(/browserType=3/.test(t.url)||/^(MainMenu|QuickAccess)/.test(t.title))).length:3;assert(row.frames>=1&&row.frames<=(opts.repair?4:1)*documents);assert(row.powerShell.startsWith(process.env.YMCC_DOM_POWERSHELL?'7.':'5.1.'));if(!opts.wrapper)assert.equal(row.receipt.checked,true);}if(name.startsWith('missing-managed-theme-')||name.startsWith('missing-active-patch-')){assert.equal(row.receipt.checked,true);assert.equal(row.receipt.mismatched.length,1);}if(['repair-one-active-patch','repair-two-patches-one-theme','repair-two-themes'].includes(name)){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'0px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'10px');}
  if(name==='repair-old-option-residue'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'10px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'30px');}
  if(name==='repair-backend-silently-fails'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'0px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'0px');}
  if(name==='repair-selected-variable'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').carouselTransform,'matrix(0.7, 0, 0, 0.7, 0, 0)');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).carouselTransform,'matrix(0.9, 0, 0, 0.9, 0, 0)');}
@@ -246,5 +274,5 @@ try{
   assert.equal(value,'1','CSS parser swallowed file receipt: '+file.path);const contentValue=await assetPage.evaluate(key=>getComputedStyle(document.documentElement).getPropertyValue(key).trim(),file.contentProperty);assert.equal(contentValue,'1','CSS parser swallowed content receipt: '+file.path);assetReceiptChecks.push({file:file.path,property,value,contentProperty:file.contentProperty,contentValue});
  }
  await assetPage.close();
- const report={ok:true,baselineChecks,passed:selectedScenarios.length,cases,sourceHashes,assetReceiptChecks,realPowerShell51:!process.env.YMCC_DOM_POWERSHELL,realPowerShell7:!!process.env.YMCC_DOM_POWERSHELL,realHttpAndWebSocket:true,actualBrowserExpressionExecution:true,realSteamOperations:0,realCssOperations:0,scope:'Actual shared and configured static patch CSS files, including obsolete-option residues; actual selected dynamic values and static fallbacks included; independent renderer targets and real Steam GPU visuals remain separate acceptance'};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2));console.log('STEAM_DOM_OK cases='+selectedScenarios.length+' CSS assets='+assetReceiptChecks.length);
+ const report={ok:true,baselineChecks,passed:selectedScenarios.length,cases,sourceHashes,assetReceiptChecks,realPowerShell51:!process.env.YMCC_DOM_POWERSHELL,realPowerShell7:!!process.env.YMCC_DOM_POWERSHELL,realSharedHttpAdapter:true,actualPublicNativeTargetValidation:true,actualBrowserExpressionExecution:true,realSteamOperations:0,realCssOperations:0,scope:'Actual shared and configured static patch CSS files, including obsolete-option residues; actual selected dynamic values and static fallbacks included; independent renderer targets and real Steam GPU visuals remain separate acceptance'};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2));console.log('STEAM_DOM_OK cases='+selectedScenarios.length+' CSS assets='+assetReceiptChecks.length);
 }finally{for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));await context.close();await browser.close();}

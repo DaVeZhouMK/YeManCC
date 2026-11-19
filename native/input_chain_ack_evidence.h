@@ -33,25 +33,24 @@ inline const std::string* stringValue(const Json& object, const char* name) {
 // Fast identity comes from the strict validator's proven equality plus its
 // parsed host ID. DOM identity comes from the already accepted parsed reply.
 // Current shared power/epoch samples must never stand in for this request view.
-inline Json project(const View& view) noexcept {
-    try {
-        Json result={{"schema",1},{"authority","native-local-ack-diagnostic"},
-            {"nativeAccepted",view.nativeAccepted},{"tupleVerified",false},
-            {"status",view.nativeAccepted?"unknown":"not-accepted"},{"identityOrigin","none"},
-            {"gameInputUnverified",true},{"steamConsumptionProven",false}};
-        if(!view.nativeAccepted)return result;
+struct VerifiedIdentity {
+    const char* origin = nullptr;
+    const std::string* hostId = nullptr;
+    const std::string* requestId = nullptr;
+};
+inline VerifiedIdentity verifiedIdentity(const View& view) {
+        if(!view.nativeAccepted)return {};
         if(!view.requestBindingCaptured||view.protocolPowerGeneration==0||view.hostEpoch==0||view.requestedSequence==0||
-           !view.runId||view.runId->empty()||!view.boundHostInstanceId||view.boundHostInstanceId->empty())return result;
+           !view.runId||view.runId->empty()||!view.boundHostInstanceId||view.boundHostInstanceId->empty())return {};
         const std::string* requestId=nullptr;
         const std::string* hostId=nullptr;
         if(view.fastReceiptUsed) {
             if(!view.preparedRequestId||view.preparedRequestId->empty()||!view.parsedFastHostInstanceId||
-               *view.parsedFastHostInstanceId!=*view.boundHostInstanceId)return result;
-            requestId=view.preparedRequestId;hostId=view.parsedFastHostInstanceId;
-            result["identityOrigin"]="strict-fast-validator-equality-and-parsed-host";
+               *view.parsedFastHostInstanceId!=*view.boundHostInstanceId)return {};
+            return {"strict-fast-validator-equality-and-parsed-host",view.parsedFastHostInstanceId,view.preparedRequestId};
         } else {
             const auto* reply=view.parsedDomReceipt;
-            if(!reply||!reply->is_object())return result;
+            if(!reply||!reply->is_object())return {};
             const auto ok=reply->find("ok");
             const auto* command=stringValue(*reply,"command");const auto* status=stringValue(*reply,"status");
             const auto* run=stringValue(*reply,"runId");hostId=stringValue(*reply,"hostInstanceId");requestId=stringValue(*reply,"requestId");
@@ -62,14 +61,24 @@ inline Json project(const View& view) noexcept {
                !unsignedValue(*reply,"powerGeneration",power)||power!=view.protocolPowerGeneration||
                !unsignedValue(*reply,"epoch",epoch)||epoch!=view.hostEpoch||
                !unsignedValue(*reply,"sequence",sequence)||sequence!=view.requestedSequence||
-               (view.preparedRequestId&&!view.preparedRequestId->empty()&&*requestId!=*view.preparedRequestId))return result;
-            result["identityOrigin"]="existing-validator-and-parsed-dom-reply";
+               (view.preparedRequestId&&!view.preparedRequestId->empty()&&*requestId!=*view.preparedRequestId))return {};
+            return {"existing-validator-and-parsed-dom-reply",hostId,requestId};
         }
+}
+inline Json project(const View& view) noexcept {
+    try {
+        Json result={{"schema",1},{"authority","native-local-ack-diagnostic"},
+            {"nativeAccepted",view.nativeAccepted},{"tupleVerified",false},
+            {"status",view.nativeAccepted?"unknown":"not-accepted"},{"identityOrigin","none"},
+            {"gameInputUnverified",true},{"steamConsumptionProven",false}};
+        const auto identity=verifiedIdentity(view);
+        if(!identity.origin)return result;
+        result["identityOrigin"]=identity.origin;
         result["status"]="verified-local-ack";result["tupleVerified"]=true;
         result["requestBindingCapturedBeforeRequest"]=true;
         result["protocolPowerGeneration"]=view.protocolPowerGeneration;
         result["hostEpoch"]=view.hostEpoch;result["wireSequence"]=view.requestedSequence;
-        result["runId"]=*view.runId;result["hostInstanceId"]=*hostId;result["requestId"]=*requestId;
+        result["runId"]=*view.runId;result["hostInstanceId"]=*identity.hostId;result["requestId"]=*identity.requestId;
         result["protocolGenerationScope"]="input-host-bound-protocol;not-current-shared-power";
         return result;
     } catch(...) { return Json(nullptr); }

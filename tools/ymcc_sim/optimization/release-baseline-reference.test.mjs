@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,16 +8,48 @@ import {verifyParentBaselineReference,verifyPackageMaintenanceReference,verifyCu
 import {baselineEnvironment,packageMaintenanceEnvironment} from '../global/decky-persistent-lifecycle/baseline-environment.mjs';
 import {PARENT_ID} from '../global/decky-persistent-lifecycle/current-parent-global.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
-const repo=path.resolve(import.meta.dirname,'../../..'),controlCore=path.resolve(simulationCorePath()),root=process.env.YMCC_BASELINE_REFERENCE_CONTROL_ROOT?path.resolve(process.env.YMCC_BASELINE_REFERENCE_CONTROL_ROOT):path.join(controlCore,'Evidence/FixtureIntake-20261030/Continuation-20261031/BaselineReuse-20261031/Controls');assert(root.toLowerCase().startsWith(controlCore.toLowerCase()+path.sep),'REFERENCE_CONTROL_ROOT_MUST_STAY_IN_CORE');fs.mkdirSync(root,{recursive:true});
+const repo=path.resolve(import.meta.dirname,'../../..'),controlCore=path.resolve(simulationCorePath());
+const requestedRoot=process.env.YMCC_BASELINE_REFERENCE_CONTROL_ROOT;
+const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+const controlPrefix='baseline-reference-controls-';
+let root,ownedControl;
+after(()=>{
+ if(!ownedControl)return;
+ const {workspace,owned,created}=ownedControl;
+ assert.equal(path.dirname(path.resolve(owned)),workspace);assert(path.basename(owned).startsWith(controlPrefix));
+ const current=fs.lstatSync(owned,{bigint:true});
+ assert(current.isDirectory()&&!current.isSymbolicLink()&&current.dev===created.dev&&current.ino===created.ino);
+ assert(samePath(fs.realpathSync(owned),owned));fs.rmSync(owned,{recursive:true,force:false});
+});
+function controlRoot(){
+ if(root!==undefined)return root;
+ if(requestedRoot){
+  const candidate=path.resolve(requestedRoot),rel=path.relative(controlCore,candidate);
+  assert(rel&&rel!=='..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel),'REFERENCE_CONTROL_ROOT_MUST_STAY_IN_CORE');
+  // Explicit callers retain their diagnostic outputs, but cannot redirect writes outside the core.
+  for(let folder=candidate;;folder=path.dirname(folder)){
+   if(fs.existsSync(folder))assert(!fs.lstatSync(folder).isSymbolicLink()&&samePath(fs.realpathSync(folder),folder));
+   if(samePath(folder,controlCore))break;
+  }
+  fs.mkdirSync(candidate,{recursive:true});return root=candidate;
+ }
+ const workspace=path.join(controlCore,'Workspace');
+ assert(!fs.lstatSync(workspace).isSymbolicLink()&&samePath(fs.realpathSync(workspace),workspace));
+ const owned=fs.mkdtempSync(path.join(workspace,controlPrefix)),created=fs.lstatSync(owned,{bigint:true});
+ ownedControl={workspace,owned,created};
+ return root=owned;
+}
+// Reuse only the inert receipt seed; the production verifier hashes the actual program.
+let nodeSeed;
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),pin=file=>({path:file,sha256:hash(file),bytes:fs.statSync(file).size}),write=(f,v)=>{fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,JSON.stringify(v,null,2)+'\n');};
 // Inert JSON/source fixtures validate bindings only; none is an original product acceptance.
 function fixture(){
- const own=fs.mkdtempSync(path.join(root,'owned-')),project=path.join(own,'repo'),core=path.join(own,'core'),run=path.join(core,'Evidence/run'),parentFile=path.join(run,'cases',PARENT_ID,'decky-persistent-lifecycle/result.json'),out=path.dirname(parentFile),globalFile=path.join(run,'result.json');fs.mkdirSync(out,{recursive:true});
+ const own=fs.mkdtempSync(path.join(controlRoot(),'owned-')),project=path.join(own,'repo'),core=path.join(own,'core'),run=path.join(core,'Evidence/run'),parentFile=path.join(run,'cases',PARENT_ID,'decky-persistent-lifecycle/result.json'),out=path.dirname(parentFile),globalFile=path.join(run,'result.json');fs.mkdirSync(out,{recursive:true});
  const alias='tools/decky_update_recovery_selftest.mjs',entry='tools/ymcc_sim/global/decky-update-recovery/run.mjs',required='native/original-negative-fixture.h';
  for(const name of [alias,entry,required]){const f=path.join(project,name);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,name===alias?fs.readFileSync(path.join(repo,alias)):'Inert binding fixture, never compiled or executed.\n');}
  const sources=[alias,entry,required].sort().map(name=>({path:name,sha256:hash(path.join(project,name))})),raw=path.join(core,'Evidence/baseline/result.json'),stdout=path.join(out,'processes/original.plugins.decky-update-recovery.stdout.bin'),stderr=path.join(out,'processes/original.plugins.decky-update-recovery.stderr.bin');fs.mkdirSync(path.dirname(stdout),{recursive:true});fs.writeFileSync(stdout,'inert original output');fs.writeFileSync(stderr,'');
  const original={passed:true,fieldRegression:'decky-update-disconnect-20261020',nativeChecks:1,sourceInputs:sources,inputsUnchanged:true,realSteamActions:0,userSettingsWrites:0,hardwareWrites:0};write(raw,original);
- const start=Date.now()-1000,tools=[pin(process.execPath)],processProof={id:'original.plugins.decky-update-recovery',startedAt:new Date(start+100).toISOString(),finishedAt:new Date(start+200).toISOString(),program:tools[0],arguments:[path.join(project,entry),'--evidence-dir',path.dirname(raw)],cwd:project,originalBudgetMs:240000,timeoutMs:240000,elapsedMs:100,exitCode:0,signal:null,error:null,timedOut:false,outputTruncated:false,stdout:pin(stdout),stderr:pin(stderr),boundSourceInputs:sources,toolArtifacts:tools,baselineEnvironment:baselineEnvironment(),originalResult:pin(raw)};
+ const start=Date.now()-1000,tools=[{...(nodeSeed??=Object.freeze(pin(process.execPath)))}],processProof={id:'original.plugins.decky-update-recovery',startedAt:new Date(start+100).toISOString(),finishedAt:new Date(start+200).toISOString(),program:tools[0],arguments:[path.join(project,entry),'--evidence-dir',path.dirname(raw)],cwd:project,originalBudgetMs:240000,timeoutMs:240000,elapsedMs:100,exitCode:0,signal:null,error:null,timedOut:false,outputTruncated:false,stdout:pin(stdout),stderr:pin(stderr),boundSourceInputs:sources,toolArtifacts:tools,baselineEnvironment:baselineEnvironment(),originalResult:pin(raw)};
  const processFile=path.join(out,'processes/original.plugins.decky-update-recovery.json'),parent={id:PARENT_ID,status:'PASS',passed:true,fullPersistentAcceptance:true,sourceUnchanged:true,toolsUnchanged:true,metadataIntegrity:true,startedAt:new Date(start).toISOString(),finishedAt:new Date(start+500).toISOString(),sourceInputs:sources,toolArtifacts:tools,processes:[processProof],rawEvidence:[pin(raw)],originalUpdateRecovery:{raw:pin(raw),process:processProof,sourceVerified:true,reused:false},legacyTypedMigration:{status:'INERT_METADATA_TEST_ONLY'}};
  const global={startedAt:new Date(start-100).toISOString(),verdict:{status:'PASS_SELECTED_SCOPE'},results:[{id:PARENT_ID,status:'PASS',exitCode:0}]};
  const refresh=()=>{
@@ -40,13 +72,23 @@ test('unreviewed release alias additions cannot silently lose their new assertio
 test('different tool scope and corrupt mandatory parent metadata both reject',()=>{const f=fixture();f.processProof.toolArtifacts=[];f.refresh();assert.throws(f.verify,/TOOL_SCOPE_CHANGED/);const g=fixture();write(path.join(g.out,'HISTORY.json'),{status:'PASS',oldSummary:{failed:0},files:[]});assert.throws(g.verify,/HISTORICAL|HISTORY|FAILURE/);});
 test('duplicate or absent global parent cannot turn an old producer into a current required step',()=>{const f=fixture();f.global.results.push({...f.global.results[0]});f.refresh();assert.throws(f.verify,/PARENT_NOT_UNIQUE/);const g=fixture();g.global.results=[];g.refresh();assert.throws(g.verify,/PARENT_NOT_UNIQUE/);});
 
+const loadGateFunctions=String.raw`
+foreach($functionName in $controlFunctions){
+ $definition=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $functionName},$true))
+ if($definition.Count -ne 1){throw ('ORIGINAL_GATE_FUNCTION_NOT_UNIQUE '+$functionName)}
+ . ([ScriptBlock]::Create($definition[0].Extent.Text))
+}
+`;
 test('the actual release loop defers the alias, runs the parent once and preserves unmet failure',{timeout:15000},()=>{
- const own=fs.mkdtempSync(path.join(root,'flow-')),harness=path.join(own,'harness.ps1'),observed=path.join(own,'observed.json');
+ const own=fs.mkdtempSync(path.join(controlRoot(),'flow-')),harness=path.join(own,'harness.ps1'),observed=path.join(own,'observed.json');
  fs.writeFileSync(harness,`param([switch]$ParentFails)
 $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile('${path.join(repo,'tools/decky_update_release_gate.ps1').replaceAll("'","''")}',[ref]$tokens,[ref]$errors)
 $node=$ast.Find({param($n) $n -is [System.Management.Automation.Language.TryStatementAst] -and $n.Body.Statements.Count -gt 0 -and $n.Body.Statements[0].Extent.Text.StartsWith('$env:YMCC_DECKY_ARTIFACT_ROOT=')},$true)
 if(-not $node){throw 'ORIGINAL_RELEASE_LOOP_NOT_FOUND'}
+$controlFunctions=@('Get-DeckyJavascriptReferenceSteps')
+${loadGateFunctions}
+function New-DeckyJavascriptReferenceRequest {return @{scope='INERT_REQUEST_ONLY'}}
 $script:events=[Collections.Generic.List[object]]::new();$script:baselineStarts=0;$script:parentStarts=0;$steps=[Collections.Generic.List[object]]::new();$script:recoveryRequirement=$null
 function Invoke-Required([string]$Name,[string]$Program,[string[]]$Arguments){if($Name -eq 'decky_update_recovery_selftest'){throw 'DUPLICATE_ALIAS_PRODUCER'};$script:events.Add(@{name=$Name;args=$Arguments})|Out-Null}
 function Invoke-DeckyLifecycleRequired {$script:parentStarts++;$script:baselineStarts++;if($ParentFails){throw 'ORIGINAL_PARENT_FAIL'};$steps.Add(@{lifecycleProof=@{current='inert-proof'}})|Out-Null;$script:events.Add(@{name='parent'})|Out-Null}
@@ -169,7 +211,8 @@ test('INERT failed baseline or parent remains failure with a complete package pr
  const g=packageMaintenanceFixture();g.parent.status='FAIL';g.parent.passed=false;g.refresh();assert.throws(g.verifyParent);assert.equal(JSON.parse(fs.readFileSync(g.parentFile,'utf8')).status,'FAIL');
 });
 test('INERT actual PowerShell sharing function uses one verifier for all original steps and preserves deferred parent failure',{timeout:15000},()=>{
- const f=packageMaintenanceFixture(),reference=f.verifyParent(),own=fs.mkdtempSync(path.join(root,'package-flow-')),harness=path.join(own,'harness.ps1'),template=path.join(own,'INERT-reference.json'),observed=path.join(own,'observed.json');reference.resources=Object.fromEntries([['cache','decky-local-resource-cache'],['worker','decky-owned-resource-worker']].map(([family,step])=>[family,{fixtureKind:'INERT_METADATA_ONLY',status:'SHARED_REFERENCE',requiredReleaseStep:step,originalProducerExecutionsWithinParent:1,originalProducerExecutionsByThisReference:0,cached:false,originalProcess:reference.originalProcess,originalResult:reference.originalResult,originalElapsedMs:1}]));write(template,reference);
+ const f=packageMaintenanceFixture(),reference=f.verifyParent(),own=fs.mkdtempSync(path.join(controlRoot(),'package-flow-')),harness=path.join(own,'harness.ps1'),template=path.join(own,'INERT-reference.json'),observed=path.join(own,'observed.json');reference.resources=Object.fromEntries([['cache','decky-local-resource-cache'],['worker','decky-owned-resource-worker']].map(([family,step])=>[family,{fixtureKind:'INERT_METADATA_ONLY',status:'SHARED_REFERENCE',requiredReleaseStep:step,originalProducerExecutionsWithinParent:1,originalProducerExecutionsByThisReference:0,cached:false,originalProcess:reference.originalProcess,originalResult:reference.originalResult,originalElapsedMs:1}]));write(template,reference);
+ const javascriptSteps=['decky_loader_official_selftest','decky_sidebar_safety_selftest','decky_sidebar_client_selftest','decky_sidebar_host_selftest','decky_sidebar_stability_matrix_selftest'];
  fs.writeFileSync(harness,`param([string]$Mode)
 $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile('${path.join(repo,'tools/decky_update_release_gate.ps1').replaceAll("'","''")}',[ref]$tokens,[ref]$errors)
@@ -178,7 +221,27 @@ $function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.Fun
 $loop=$ast.Find({param($n) $n -is [System.Management.Automation.Language.TryStatementAst] -and $n.Body.Statements.Count -gt 0 -and $n.Body.Statements[0].Extent.Text.StartsWith('$env:YMCC_DECKY_ARTIFACT_ROOT=')},$true)
 if(-not $function -or -not $loop){throw 'ACTUAL_SHARING_AST_MISSING'}
 $actualFunction=Join-Path $PSScriptRoot 'actual-shared-function.ps1';[IO.File]::WriteAllText($actualFunction,$function.Extent.Text);. $actualFunction
+$controlFunctions=@('Get-DeckyJavascriptReferenceSteps','Assert-DeckyJavascriptSharedScope','Assert-DeckyNativeSharedScope','Assert-DeckyNativeHealthSharedScope')
+${loadGateFunctions}
 $script:reference=Get-Content -LiteralPath '${template.replaceAll("'","''")}' -Raw|ConvertFrom-Json
+function New-DeckyJavascriptReferenceRequest {
+ $file=Join-Path $PSScriptRoot 'INERT-request.json'
+ @{fixtureKind='INERT_METADATA_ONLY';steps=@(Get-DeckyJavascriptReferenceSteps)}|ConvertTo-Json|Set-Content -LiteralPath $file -Encoding UTF8
+ return @{path=$file;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}
+}
+$jsRows=@(foreach($name in @(Get-DeckyJavascriptReferenceSteps)){
+ @{status='SHARED_REFERENCE';requiredReleaseStep=$name;originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;cached=$false;executedThisRun=$false;actualPassedThisRun=$false;originalProcess=$script:reference.originalProcess;originalResult=$script:reference.originalResult;originalElapsedMs=1}
+})
+$script:reference|Add-Member -NotePropertyName javascript -NotePropertyValue $jsRows
+foreach($family in @('health','runtime')){
+ $row=@{status='SHARED_REFERENCE';requiredReleaseBuildStep=('official-native-'+$family+'-build');requiredReleaseRunStep=('official-native-'+$family);originalProducerExecutionsWithinParent=1;originalProducerExecutionsByThisReference=0;compilerInvocationsWithinParent=1;compilerInvocationsByThisReference=0;cached=$false;executedThisRun=$false;actualPassedThisRun=$false}
+ foreach($role in @('originalCompileProcess','originalRunProcess','originalProgram','compilerGraph')){
+  $file=Join-Path $PSScriptRoot ('INERT-'+$family+'-'+$role+'.txt')
+  Set-Content -LiteralPath $file -Value ('INERT metadata only: '+$family+' '+$role) -Encoding UTF8
+  $row[$role]=@{path=$file;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}
+ }
+ $script:reference|Add-Member -NotePropertyName ('native'+$family) -NotePropertyValue $row
+}
 if($Mode -eq 'missing-package'){$script:reference.PSObject.Properties.Remove('packageMaintenance')}
 if($Mode -eq 'package-producer'){$script:reference.packageMaintenance.originalProducerExecutionsByThisReference=1}
 if($Mode -eq 'missing-resource'){$script:reference.resources.PSObject.Properties.Remove('cache')}
@@ -188,8 +251,9 @@ $script:packageMaintenanceRequirement=@{name='decky-package-maintenance';status=
 $script:resourceRequirements=@{cache=@{name='decky-local-resource-cache';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0};worker=@{name='decky-owned-resource-worker';status='NOT_RUN_DEFERRED_TO_PARENT';originalProducerExecutionsByThisReference=0}}
 function Invoke-Required([string]$Name,[string]$Program,[string[]]$Arguments){
  if($Name -ne 'decky_update_recovery_selftest'){return}
- if($Program -cne 'node' -or [IO.Path]::GetFileName($Arguments[0]) -cne 'release-baseline-reference.mjs' -or $Arguments.Count -ne 11){throw 'UNEXPECTED_SHARED_HELPER'}
- $expected=@('--global-result',$script:reference.globalResult.path,'--global-sha256',$script:reference.globalResult.sha256,'--parent-result',$script:reference.parentResult.path,'--parent-sha256',$script:reference.parentResult.sha256,'--out',(Join-Path (Split-Path -Parent $script:reference.globalResult.path) 'release-baseline-shared-reference.json'))
+ if($Program -cne 'node' -or [IO.Path]::GetFileName($Arguments[0]) -cne 'release-baseline-reference.mjs'){throw 'UNEXPECTED_SHARED_HELPER'}
+ $expected=@('--global-result',$script:reference.globalResult.path,'--global-sha256',$script:reference.globalResult.sha256,'--parent-result',$script:reference.parentResult.path,'--parent-sha256',$script:reference.parentResult.sha256,'--out',(Join-Path (Split-Path -Parent $script:reference.globalResult.path) 'release-baseline-shared-reference.json'),'--javascript-request',$script:javascriptReferenceRequest.path,'--native-health-reference','required','--native-runtime-reference','required')
+ if($Arguments.Count -ne ($expected.Count+1)){throw 'UNEXPECTED_SHARED_HELPER_ARGUMENT_COUNT'}
  for($i=0;$i -lt $expected.Count;$i++){if($Arguments[$i+1] -cne $expected[$i]){throw 'SHARED_HELPER_BINDING_CHANGED'}}
  $script:helperCalls++;$script:reference|ConvertTo-Json -Depth 30|Set-Content -LiteralPath $Arguments[10] -Encoding UTF8
  $steps.Add(@{name=$Name;passed=$true;exitCode=0})|Out-Null
@@ -209,8 +273,9 @@ try{. $actualLoop}catch{$caught=$_.Exception.Message}
   assert.equal(v.fixtureKind,'INERT_METADATA_ONLY');assert.equal(v.parentStarts,1);assert.equal(v.restored,'INERT-caller-root');assert.equal(v.helperCalls,mode==='parent-fail'?0:1);
   const shared=v.steps.filter(row=>row.execution==='SHARED_REFERENCE');
   if(mode==='valid'){
-   assert.equal(v.caught,null);assert.equal(shared.length,4);assert.deepEqual(shared.map(row=>row.name),['decky_update_recovery_selftest','decky-package-maintenance','decky-local-resource-cache','decky-owned-resource-worker']);
+   assert.equal(v.caught,null);assert.deepEqual(shared.map(row=>row.name),['decky_update_recovery_selftest','decky-package-maintenance','decky-local-resource-cache','decky-owned-resource-worker',...javascriptSteps,'official-native-health-build','official-native-health','official-native-runtime-build','official-native-runtime']);
    for(const row of shared)assert.equal(row.originalProducerExecutions,0);
+   for(const row of shared.slice(4)){assert.equal(row.cached,false);assert.equal(row.executedThisRun,false);assert.equal(row.actualPassedThisRun,false);if(row.name.startsWith('official-native-'))assert.equal(row.compilerInvocations,0);}
    assert.equal(shared[0].verificationExecuted,true);assert.equal(shared[1].verificationExecuted,false);assert.equal(shared[1].verificationSharedWith,'decky_update_recovery_selftest');assert.equal(shared[1].sharedReference.path,shared[0].sharedReference.path);assert.equal(shared[1].sharedReference.sha256,shared[0].sharedReference.sha256);
    for(const requirement of [v.recovery,v.package,v.resources.cache,v.resources.worker]){assert.equal(requirement.status,'SHARED_REFERENCE');assert.equal(requirement.originalProducerExecutionsWithinParent,1);assert.equal(requirement.originalProducerExecutionsByThisReference,0);}
   }else{

@@ -25,6 +25,47 @@ export type ControllerShortcutRecordMode = 'controller' | 'keyboard-mouse' | 'oe
  */
 export type OemTriggerCapability = 'full' | 'click-only'; // click-only：WMI 一次性事件（MSI CLAW/QS），仅 press/double
 export type OemKeyPhysicalForm = 'keyboard-vk' | 'hid-button' | 'wmi-event' | 'embedded';
+/** A one-way keyboard contribution from the existing native profile, never a physical alias. */
+export interface OemKeyboardContribution {
+  schemaVersion: 1;
+  scope: 'profile-keyboard-contribution';
+  profileId: number;
+  ruleIndex: number;
+  exclusiveGroup: number;
+  outputMask: string;
+  earlierGroupRules: OemKeyboardExpression[];
+  keyGroups: string[][];
+  mouseCodes: string[];
+  chordMatch: 'subset';
+  configuredMaskMatch: 'exact';
+  modifierSides: 'folded';
+  requiresBoundInterface: boolean;
+  bindingEquivalenceProven: false;
+}
+
+type OemKeyboardExpression = Pick<OemKeyboardContribution, 'ruleIndex' | 'exclusiveGroup' | 'outputMask' | 'keyGroups' | 'mouseCodes' | 'requiresBoundInterface'>;
+
+function normalizeOemKeyboardContributions(raw: unknown): OemKeyboardContribution[] {
+  if (!Array.isArray(raw)) return [];
+  const expression = (r: OemKeyboardExpression): boolean => !!r && typeof r === 'object' &&
+    Number.isSafeInteger(r.ruleIndex) && r.ruleIndex >= 0 && Number.isSafeInteger(r.exclusiveGroup) && r.exclusiveGroup >= 0 && r.exclusiveGroup < 32 &&
+    typeof r.outputMask === 'string' && /^(?:0|[1-9][0-9]{0,19})$/.test(r.outputMask) && BigInt(r.outputMask) <= 18446744073709551615n &&
+    typeof r.requiresBoundInterface === 'boolean' && Array.isArray(r.keyGroups) &&
+    r.keyGroups.every(group => Array.isArray(group) && group.length > 0 && group.every(code => typeof code === 'string' && keyboardCodePattern.test(code))) &&
+    Array.isArray(r.mouseCodes) && r.mouseCodes.every(code => ['MouseLeft', 'MouseRight', 'MouseMiddle', 'MouseBack', 'MouseForward'].includes(code)) &&
+    (r.keyGroups.length > 0 || r.mouseCodes.length > 0);
+  const copyExpression = (r: OemKeyboardExpression): OemKeyboardExpression => ({ ...r, keyGroups: r.keyGroups.map(group => [...group]), mouseCodes: [...r.mouseCodes] });
+  return raw.filter((value): value is OemKeyboardContribution => {
+    if (!value || typeof value !== 'object') return false;
+    const r = value as OemKeyboardContribution;
+    return expression(r) && r.outputMask !== '0' && r.schemaVersion === 1 && r.scope === 'profile-keyboard-contribution' &&
+      Number.isSafeInteger(r.profileId) && r.profileId >= 0 && r.chordMatch === 'subset' && r.configuredMaskMatch === 'exact' &&
+      r.modifierSides === 'folded' && r.bindingEquivalenceProven === false && Array.isArray(r.earlierGroupRules) &&
+      r.earlierGroupRules.every((prior, index, all) => expression(prior) && r.exclusiveGroup !== 0 && prior.exclusiveGroup === r.exclusiveGroup &&
+        prior.ruleIndex < r.ruleIndex && (index === 0 || prior.ruleIndex > all[index - 1].ruleIndex));
+  }).map(r => ({ ...r, ...copyExpression(r), earlierGroupRules: r.earlierGroupRules.map(copyExpression) }));
+}
+
 export interface OemSpecialKey {
   keyId: string;                 // 机型库语义键名（m1/m2/claw/qs/back1...）
   label: string;                 // 真实键名（M1/CLAW/QS/L4...）
@@ -33,6 +74,7 @@ export interface OemSpecialKey {
   physicalForm?: OemKeyPhysicalForm; // 采集形态（键盘 VK / HID 按钮 / WMI 事件 / 嵌入式）
   captureImplemented?: boolean; // 缺省沿用旧机型行为；false 仅保留目录展示
   captureReason?: string; // 内部能力原因，不直接展示给用户
+  keyboardContributions?: OemKeyboardContribution[]; // 原profile的只读表达式，不授权跨来源合并
   physicalKeyIds?: string[]; // 同一实体键的组合／长按操作不重复计入硬件数量
 }
 export interface OemKeysSnapshot {
@@ -59,6 +101,8 @@ export function normalizeOemKeysSnapshot(raw: unknown): OemKeysSnapshot {
         .map((k) => ({
           keyId: String(k.keyId),
           label: String(k.label),
+          ...(normalizeOemKeyboardContributions(k.keyboardContributions).length
+            ? { keyboardContributions: normalizeOemKeyboardContributions(k.keyboardContributions) } : {}),
           ...(Object.prototype.hasOwnProperty.call(k, 'captureImplemented')
             ? { captureImplemented: typeof k.captureImplemented === 'boolean' ? k.captureImplemented : false }
             : {}),
@@ -224,7 +268,7 @@ export const CONTROLLER_SHORTCUT_ACTIONS: ControllerShortcutAction[] = [
   { id: 'mouse.toggle', label: '模拟鼠标', category: '输入', scope: 'native-global', available: true },
   {
     id: 'input.frontendButton', label: '前端呼出按钮', category: '输入', scope: 'native-global', available: true,
-    description: 'Steam 键和三点键根据实际虚拟手柄路由：运行中的 Steam Deck 分别发送对应专用键；无虚拟手柄时按 Ctrl+1 回退。PS / Xbox 需对应虚拟手柄；Gamebar 发送 Win+G。不切换预设。',
+    description: 'Steam 键和三点键与触摸专用键使用同一 Steam 菜单通道，无需虚拟手柄。PS / Xbox 需对应虚拟手柄；Gamebar 发送 Win+G。不切换预设。',
     parameters: [{ id: 'button', label: '呼出按钮', type: 'select', default: 'steam', options: [
       { value: 'steam', label: 'Steam 键' }, { value: 'steamQuickAccess', label: 'Steam 三点键' }, { value: 'ps', label: 'PS' },
       { value: 'xbox', label: 'Xbox' }, { value: 'gamebar', label: 'Gamebar【Win+G】' },
@@ -347,11 +391,13 @@ function normalizeInput(value: unknown): ControllerShortcutInput | null {
 export function actionById(actionId: string): ControllerShortcutAction | undefined { return actionMap.get(actionId); }
 /** Presentation only: hidden actions remain in the schema and saved rules. */
 export function isControllerShortcutActionVisible(actionId: string): boolean { return actionById(actionId)?.available === true; }
+export const DEFAULT_SUMMON_HOLD_MS = 250;
+
 export function nativeDefaultRule(defaultKey: (typeof NATIVE_DEFAULT_SHORTCUTS)[number]['defaultKey'], enabled = true): ControllerShortcutRule {
   const definition = NATIVE_DEFAULT_SHORTCUTS.find((item) => item.defaultKey === defaultKey)!;
   const base = newControllerShortcutRule(`native-${defaultKey}`, definition.actionId);
   const byKey: Record<string, { inputs: ControllerShortcutInput[]; trigger: ControllerTrigger; holdMs?: number; doubleWindowMs?: number; intervalMs?: number; params?: Record<string, string | number | boolean> }> = {
-    enabled: { inputs: [controllerInput('lb'), controllerInput('rb')], trigger: 'hold', holdMs: 500 },
+    enabled: { inputs: [controllerInput('lb'), controllerInput('rb')], trigger: 'hold', holdMs: DEFAULT_SUMMON_HOLD_MS },
     bDoubleMinimize: { inputs: [controllerInput('b')], trigger: 'double', doubleWindowMs: 500 },
     tdpShortcut: { inputs: [controllerInput('start'), controllerInput('dpadUp')], trigger: 'repeat', holdMs: 0, intervalMs: 150, params: { direction: 'up', amount: '1', linearAcceleration: true } },
     fpsShortcut: { inputs: [controllerInput('start'), controllerInput('dpadRight')], trigger: 'repeat', holdMs: 0, intervalMs: 150, params: { direction: 'right', amount: '5', linearAcceleration: true } },
@@ -384,7 +430,7 @@ export function newControllerShortcutRule(seed = `${Date.now()}`, actionId = 'wi
     enabled: true,
     actionId,
     inputs: [controllerInput('lb'), controllerInput('rb')],
-    trigger: keyboardAction ? 'press' : 'hold',
+    trigger: 'press',
     holdMs: keyboardAction ? 500 : 2000,
     doubleWindowMs: 500,
     intervalMs: 150,
@@ -409,6 +455,11 @@ export function normalizeControllerShortcutRule(value: unknown, index: number): 
     const persona = migrateControllerPersona(params.preset);
     if (persona !== 'disabled') params.preset = persona;
   }
+  const holdMs = finite(raw.holdMs, 500, trigger === 'repeat' ? 0 : 100, 10000);
+  const oldDefaultSummon = raw.origin === 'native-default' && raw.defaultKey === 'enabled' &&
+    actionId === 'window.summon' && trigger === 'hold' && holdMs === 500 && params.explicitSummonHold !== true &&
+    raw.inputs?.length === 2 && inputs.length === 2 &&
+    inputs.every(input => input.source === 'controller' && (input.code === 'lb' || input.code === 'rb'));
   return {
     ...preserved,
     id: typeof raw.id === 'string' && raw.id ? raw.id : `rule-import-${index}`,
@@ -419,7 +470,7 @@ export function normalizeControllerShortcutRule(value: unknown, index: number): 
     actionId,
     inputs,
     trigger,
-    holdMs: finite(raw.holdMs, 500, trigger === 'repeat' ? 0 : 100, 10000),
+    holdMs: oldDefaultSummon ? DEFAULT_SUMMON_HOLD_MS : holdMs,
     doubleWindowMs: finite(raw.doubleWindowMs, 500, 200, 2000),
     intervalMs: finite(raw.intervalMs, 150, 40, 2000),
     params,
@@ -538,6 +589,9 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
     ? new Set(oemKeys.keys.map((key) => key.keyId))
     : null; // 无机型库上下文时不校验存在性（保持可编辑），运行时 fail-closed
   const oemUnavailable = new Set(oemKeys?.keys.filter((key) => key.captureImplemented === false).map((key) => key.keyId));
+  const oemClickOnly = new Set(oemKeys?.supported
+    ? oemKeys.keys.filter((key) => key.triggerCapability === 'click-only').map((key) => key.keyId)
+    : []);
   for (const rule of rules) {
     if (seenIds.has(rule.id)) problems.push('动作编号重复，请重新新建动作。');
     seenIds.add(rule.id);
@@ -582,6 +636,8 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
         problems.push('此专用按键的输入暂不可用，请更换输入。');
       } else if (oemKnown && !oemKnown.has(input.code)) {
         problems.push('未识别此专用按键，请在当前设备上重新录制。');
+      } else if (oemClickOnly.has(input.code) && rule.trigger !== 'press' && rule.trigger !== 'double') {
+        problems.push('此专用按键仅提供点击信号，请选择按下或双击触发。');
       }
     }
   }

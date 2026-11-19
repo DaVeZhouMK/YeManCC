@@ -1,6 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
 import {CONFIGURATIONS,EXPECTED_MUTATIONS,SOURCE_FINISH_FLAGS,needsCapabilityGrid,validHash,MAX_RAW_REPORT_JSON_BYTES,MAX_COMPILER_INPUT_PATH_CHARS} from './contracts.mjs';
-export const hashFile=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const hashBytes=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+export const hashFile=file=>hashBytes(fs.readFileSync(file));
 export function inside(root,target){const rel=path.relative(root,target);return rel===''||(!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel));}
 export function readJson(file){if(fs.statSync(file).size>MAX_RAW_REPORT_JSON_BYTES)throw Error('MOTION_JSON_SIZE_LIMIT');return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));}
 function noReparseAncestors(target){let cursor=path.resolve(target);for(;;){if(fs.existsSync(cursor)&&fs.lstatSync(cursor).isSymbolicLink())throw Error('MOTION_OUTPUT_REPARSE_PATH');const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;}}
@@ -22,20 +23,24 @@ const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 /** Bind reports to the actual original logs, compiled executables and raw inputs. */
 export function verifyMotionEvidence(rawRoot,report,expected) {
  if(!validHash(report.oracleSha256)||!validHash(report.generatedCppSha256))throw Error('MOTION_REQUIRED_EVIDENCE_HASH_MISSING');
- const proofs=[];const requireFile=(relative,sha256)=>{const file=ownedFile(rawRoot,relative),actual=hashFile(file);if(sha256!==undefined&&(!validHash(sha256)||actual!==sha256.toLowerCase()))throw Error('MOTION_EVIDENCE_HASH_MISMATCH');proofs.push({path:file,sha256:actual});return file;};
- requireFile('source-bindings.json');const oracleFile=requireFile('expectations.json',report.oracleSha256);if(!same(readJson(oracleFile),expected))throw Error('MOTION_ORACLE_EVIDENCE_DIFFERS');requireFile('motion_consumer.cpp',report.generatedCppSha256);
+ const proofs=[],checkedConfigs=new Map();
+ const recordFile=(file,actual,expectedSha256)=>{if(expectedSha256!==undefined&&(!validHash(expectedSha256)||actual!==expectedSha256.toLowerCase()))throw Error('MOTION_EVIDENCE_HASH_MISMATCH');const row={path:file,sha256:actual};proofs.push(row);return row;};
+ const requireFile=(relative,sha256)=>{const file=ownedFile(rawRoot,relative);return recordFile(file,hashFile(file),sha256);};
+ requireFile('source-bindings.json');const oracleFile=requireFile('expectations.json',report.oracleSha256);if(!same(readJson(oracleFile.path),expected))throw Error('MOTION_ORACLE_EVIDENCE_DIFFERS');requireFile('motion_consumer.cpp',report.generatedCppSha256);
  const checkConfig=(folder,config,expectedReport,failed=false)=>{
   if(!validHash(config.executableSha256)||!Array.isArray(config.compileCommand)||config.compileCommand[0]!=='cl.exe'||!config.compileCommand.includes(config.name==='Release'?'/O2':'/Od'))throw Error('MOTION_COMPILED_BINARY_IDENTITY_REQUIRED');
-  requireFile(path.join(folder,'compile.log'));const exe=requireFile(path.join(folder,'motion_consumer.exe'),config.executableSha256);const runLog=requireFile(path.join(folder,'run.log'));
-  let observed;try{observed=JSON.parse(fs.readFileSync(runLog,'utf8').trim());}catch{throw Error('MOTION_EXECUTABLE_LOG_INVALID');}
+  requireFile(path.join(folder,'compile.log'));const exe=requireFile(path.join(folder,'motion_consumer.exe'),config.executableSha256);
+  const logPath=ownedFile(rawRoot,path.join(folder,'run.log')),logBytes=fs.readFileSync(logPath),log=recordFile(logPath,hashBytes(logBytes));
+  let observed;try{observed=JSON.parse(logBytes.toString('utf8').trim());}catch{throw Error('MOTION_EXECUTABLE_LOG_INVALID');}
   if(!same(observed,expectedReport))throw Error('MOTION_EXECUTABLE_LOG_DIFFERS');
   if(failed&&(config.exitCode!==1||observed.status!=='fail'||!observed.failures?.length))throw Error('MOTION_COMPILE_OR_SETUP_IS_NOT_DETECTION');
-  return {configuration:config.name,exe,exeSha256:hashFile(exe),log:runLog,logSha256:hashFile(runLog)};
+  for(const row of [exe,log])checkedConfigs.set(row.path,row.sha256);
+  return {configuration:config.name,exe:exe.path,exeSha256:exe.sha256,log:log.path,logSha256:log.sha256};
  };
  const positive=report.configurations.map(config=>checkConfig(config.name,config,config.report));const faults=[];
  for(const name of EXPECTED_MUTATIONS){
   const outer=report.mutations.find(row=>row.name===name);if(!outer)throw Error('MOTION_FAULT_MISSING');
-  const childRelative=path.join('mutants',name,'evidence'),childRoot=path.join(rawRoot,childRelative),childFile=requireFile(path.join(childRelative,'source-bindings.json'));const child=readJson(childFile);
+  const childRelative=path.join('mutants',name,'evidence'),childRoot=path.join(rawRoot,childRelative),childFile=requireFile(path.join(childRelative,'source-bindings.json'));const child=readJson(childFile.path);
   if(path.resolve(outer.evidence??'')!==path.resolve(childRoot)||path.resolve(child.out??'')!==path.resolve(childRoot)||path.resolve(child.source?.path??'')!==path.resolve(rawRoot,'mutants',name,'main.mutant.cpp')||!validHash(child.source?.sha256)||!validHash(child.oracleSha256)||!validHash(child.generatedCppSha256))throw Error('MOTION_FAULT_INPUT_OR_OUTPUT_IDENTITY_INVALID');
   if(child.schema!==report.schema||child.mode!=='candidate'||child.status!=='fail'||child.error!=='Semantic failures in candidate'||child.consumerOnlyControl!==!needsCapabilityGrid(name)||!Array.isArray(child.configurations)||child.configurations.length!==2||new Set(child.configurations.map(row=>row.name)).size!==2||!CONFIGURATIONS.every(config=>child.configurations.some(row=>row.name===config)))throw Error('MOTION_FAULT_SETUP_OR_WRONG_GRID');
   if(!child.sourceAtFinish||SOURCE_FINISH_FLAGS.some(flag=>child.sourceAtFinish[flag]!==true)||child.sourceAtFinish.sha256!==child.source?.sha256)throw Error('MOTION_FAULT_SOURCE_REJECTION_IS_NOT_DETECTION');
@@ -49,5 +54,12 @@ export function verifyMotionEvidence(rawRoot,report,expected) {
   faults.push({name,configurations:configs,actualSemanticDetection:true});
  }
  // Every generated report, log, source, object, PDB and executable remains hash-bound.
- const closure=ownedTree(rawRoot).map(file=>({path:file,sha256:hashFile(file)}));return {positive,faults,closure,requiredFiles:proofs};
+ const closingRoot=fs.realpathSync(rawRoot);
+ const closure=ownedTree(rawRoot).map(file=>{
+  const sha256=hashFile(file),key=path.resolve(closingRoot,path.relative(rawRoot,file)),expected=checkedConfigs.get(key);
+  if(expected!==undefined&&expected!==sha256)throw Error('MOTION_CONFIG_ARTIFACT_CHANGED_DURING_VALIDATION');
+  checkedConfigs.delete(key);return {path:file,sha256};
+ });
+ if(checkedConfigs.size)throw Error('MOTION_CONFIG_ARTIFACT_CHANGED_DURING_VALIDATION');
+ return {positive,faults,closure,requiredFiles:proofs};
 }

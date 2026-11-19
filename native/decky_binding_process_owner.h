@@ -457,7 +457,7 @@ public:
     ~Owner() noexcept {
         if (!stop().fullyDestroyed) detail::retain(state_.release());
     }
-    Result start() {
+    Result start(HANDLE externalCancelSignal = nullptr) {
         auto& s = *state_;
         std::unique_lock<std::mutex> lock(s.mutex);
         if (s.stopping || s.cancelRequested.load(std::memory_order_acquire))
@@ -468,16 +468,31 @@ public:
         try {
             const auto prepare = [&]() -> bool {
                 s.changed.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                if (!s.changed.value) { error = GetLastError(); return false; }
                 SECURITY_ATTRIBUTES inherit{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-                const HANDLE cancelEvent = CreateEventW(&inherit, TRUE, FALSE, nullptr);
+                HANDLE cancelEvent = nullptr;
+                if (externalCancelSignal) {
+                    // A per-request, never-reset event replaces the original
+                    // cancel slot; only pipe + cancel are inherited as before.
+                    const DWORD waited = WaitForSingleObject(externalCancelSignal, 0);
+                    if (waited != WAIT_TIMEOUT) {
+                        if (waited != WAIT_FAILED) SetLastError(ERROR_OPERATION_ABORTED);
+                        return false;
+                    }
+                    if (!DuplicateHandle(GetCurrentProcess(), externalCancelSignal,
+                        GetCurrentProcess(), &cancelEvent, SYNCHRONIZE | EVENT_MODIFY_STATE,
+                        TRUE, 0)) return false;
+                } else cancelEvent = CreateEventW(&inherit, TRUE, FALSE, nullptr);
+                if (!cancelEvent) { error = GetLastError(); return false; }
                 {
                     std::lock_guard<std::mutex> signal(s.cancelMutex);
                     s.cancel.value = cancelEvent;
                     if (s.cancel.value && s.cancelRequested.load(std::memory_order_acquire)) SetEvent(s.cancel.value);
                 }
                 s.job.value = CreateJobObjectW(nullptr, nullptr);
+                if (!s.job.value) { error = GetLastError(); return false; }
                 s.port.value = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
-                if (!s.changed.value || !s.cancel.value || !s.job.value || !s.port.value) return false;
+                if (!s.port.value) { error = GetLastError(); return false; }
                 JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
                 limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
                 if (!SetInformationJobObject(s.job.value, JobObjectExtendedLimitInformation,
@@ -528,6 +543,13 @@ public:
                 startup.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
                 startup.lpAttributeList = attributes.list;
                 PROCESS_INFORMATION info{};
+                if (externalCancelSignal) {
+                    const DWORD waited = WaitForSingleObject(s.cancel.value, 0);
+                    if (waited != WAIT_TIMEOUT) {
+                        if (waited != WAIT_FAILED) SetLastError(ERROR_OPERATION_ABORTED);
+                        return false;
+                    }
+                }
                 if (!CreateProcessW(image.c_str(), command.data(), nullptr, nullptr, TRUE,
                     CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                     nullptr, nullptr, &startup.StartupInfo, &info)) return false;
@@ -539,13 +561,20 @@ public:
                 // Close the parent's copy before resuming, so child death really closes the peer.
                 if (!s.peer.close(s.cleanupError)) { SetLastError(s.cleanupError); return false; }
                 if (s.cancelRequested.load(std::memory_order_acquire)) { SetLastError(ERROR_OPERATION_ABORTED); return false; }
+                if (externalCancelSignal) {
+                    const DWORD waited = WaitForSingleObject(s.cancel.value, 0);
+                    if (waited != WAIT_TIMEOUT) {
+                        if (waited != WAIT_FAILED) SetLastError(ERROR_OPERATION_ABORTED);
+                        return false;
+                    }
+                }
                 if (ResumeThread(s.thread.value) == MAXDWORD) return false;
                 if (!s.thread.close(s.cleanupError)) { SetLastError(s.cleanupError); return false; }
                 s.started = true;
                 return true;
             };
             if (prepare()) return detail::resultLocked(s, Code::ok);
-            error = GetLastError();
+            if (!error) error = GetLastError();
         } catch (...) { error = ERROR_NOT_ENOUGH_MEMORY; }
         lock.unlock();
         auto cleanup = stop();
@@ -574,21 +603,47 @@ public:
         return r;
     }
     // Caller owns these non-inheritable observation leases. No job/kill access.
-    HANDLE copyReadPipe() const noexcept {
+    HANDLE copyReadPipe(DWORD* error = nullptr) const noexcept {
+        if (error) *error = ERROR_SUCCESS;
         std::lock_guard<std::mutex> lock(state_->mutex);
         HANDLE copy = nullptr;
-        if (state_->stopping || state_->cancelRequested.load(std::memory_order_acquire) || !state_->started) return nullptr;
+        if (state_->stopping || state_->cancelRequested.load(std::memory_order_acquire)) {
+            if (error) *error = ERROR_OPERATION_ABORTED; return nullptr;
+        }
+        if (!state_->started) { if (error) *error = ERROR_INVALID_STATE; return nullptr; }
         if (!DuplicateHandle(GetCurrentProcess(), state_->pipe.value, GetCurrentProcess(),
-                             &copy, GENERIC_READ | SYNCHRONIZE, FALSE, 0)) return nullptr;
+                             &copy, GENERIC_READ | SYNCHRONIZE, FALSE, 0)) { if (error) *error = GetLastError(); return nullptr; }
         return copy;
     }
-    HANDLE copyChildProcess() const noexcept {
+    HANDLE copyChildProcess(DWORD* error = nullptr) const noexcept {
+        if (error) *error = ERROR_SUCCESS;
         std::lock_guard<std::mutex> lock(state_->mutex);
         HANDLE copy = nullptr;
-        if (state_->stopping || state_->cancelRequested.load(std::memory_order_acquire) || !state_->started) return nullptr;
+        if (state_->stopping || state_->cancelRequested.load(std::memory_order_acquire)) {
+            if (error) *error = ERROR_OPERATION_ABORTED; return nullptr;
+        }
+        if (!state_->started) { if (error) *error = ERROR_INVALID_STATE; return nullptr; }
         if (!DuplicateHandle(GetCurrentProcess(), state_->process.value, GetCurrentProcess(),
-                             &copy, PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, 0)) return nullptr;
+                             &copy, PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, 0)) { if (error) *error = GetLastError(); return nullptr; }
         return copy;
+    }
+    // Non-owning observation only for an exclusively owned, same-stack Owner.
+    // Finish all queries/waits before requestCancel/stop/destruction; never close,
+    // retain or publish this handle. Concurrent/asynchronous users must keep
+    // using copyChildProcess() so their observation has an independent lifetime.
+    HANDLE borrowChildProcessForObservation(DWORD* error = nullptr) const noexcept {
+        if (error) *error = ERROR_SUCCESS;
+        auto& s = *state_;
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.stopping || s.cancelRequested.load(std::memory_order_acquire)) {
+            if (error) *error = ERROR_OPERATION_ABORTED;
+            return nullptr;
+        }
+        if (!s.started || !s.process.value) {
+            if (error) *error = ERROR_INVALID_STATE;
+            return nullptr;
+        }
+        return s.process.value;
     }
     Result writeFrame(const std::vector<std::uint8_t>& payload, DWORD timeoutMs,
                       std::uint64_t expectedGeneration = 0) {

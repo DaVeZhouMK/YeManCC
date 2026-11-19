@@ -368,7 +368,80 @@ void requireAttemptCapacity(DWORD pid, const std::wstring &selected) {
   need(retained < 16, "per-steam-attempt-capacity");
 }
 
-J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
+void assignGroupRoleWire(tr::Packet& packet,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& roleLease,
+    DWORD expectedPrimary,DWORD expectedForeground,
+    const std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding>& nativeRoleBinding = {}) {
+  need(roleLease&&roleLease->processCurrent(),"driver-group-role-lease-revoked");
+  need(roleLease->graph().count==2,"driver-group-role-count-unqualified");
+  need(tr::terminatedPath(packet.gamePath)&&
+       rw::pathKey(roleLease->selectedGame().image)==rw::pathKey(packet.gamePath),
+       "driver-group-selected-wire-path");
+  auto& wire=packet.roleGroup;wire.enabled=1;wire.graph=roleLease->graph();
+  wire.sourceRevision=roleLease->source().sourceRevision;
+  wire.consoleRevision=roleLease->source().consoleRevision;wire.fullGameId=roleLease->source().fullGameId;
+  wire.expectedPrimary=expectedPrimary;wire.expectedForeground=expectedForeground;
+  for(std::uint32_t index=0;index<wire.graph.count;++index){
+    const auto& member=wire.graph.members[index];const auto witness=roleLease->witness(member.pid);
+    need(witness&&witness->created==member.birth&&witness->image.size()<std::size(wire.identities[index].path),
+        "driver-group-member-wire-identity");
+    auto& identity=wire.identities[index];identity.pid=member.pid;identity.birth=member.birth;identity.session=member.session;
+    // The selected witness and Packet have already matched by normalized path.
+    // Preserve Packet's canonical spelling; the wire requires an exact copy.
+    const std::wstring selectedPath=member.pid==packet.gamePid?std::wstring(packet.gamePath):witness->image;
+    need(selectedPath.size()<std::size(identity.path),"driver-group-member-wire-path-limit");
+    std::copy(selectedPath.begin(),selectedPath.end(),identity.path);
+  }
+  const auto inspected=roleLease->inspectNativeRoles(expectedPrimary,expectedForeground);
+  if(nativeRoleBinding){
+    const auto& site=nativeRoleBinding->modulesAndProcesses();
+    const auto& query=nativeRoleBinding->query();
+    need(nativeRoleBinding->processGroup()==roleLease&&nativeRoleBinding->readScope()==gPublicationScope&&
+        nativeRoleBinding->businessCancellation()==gGroupRequestCancellation&&nativeRoleBinding->current(),
+        "driver-group-native-role-binding-revoked");
+    need(query.account64==packet.account&&query.gameId64==packet.gameId&&query.expectedPid==packet.gamePid&&
+        nativeRoleBinding->firstTuple()==std::pair<std::uint32_t,std::uint32_t>{expectedPrimary,expectedForeground}&&
+        site.steam.pid==packet.steamPid&&site.steam.created==packet.steamBirth&&
+        site.selected.pid==packet.gamePid&&site.selected.created==packet.gameBirth&&
+        site.windowsSession==packet.session&&rw::pathKey(site.steam.image)==rw::pathKey(packet.steamPath)&&
+        rw::pathKey(site.selected.image)==rw::pathKey(packet.gamePath),"driver-group-native-role-packet-mismatch");
+    need(inspected&&ymcc::steamgameroles::directLauncherTuple(roleLease->graph(),expectedPrimary,expectedForeground),
+        "driver-group-native-launcher-tuple-required");
+    wire.version=3; // Only the same completed native binding enables this grammar.
+  }else{
+    need(inspected&&(inspected->nativePrimaryExact||inspected->nativeForegroundExact),"driver-group-selected-native-role-required");
+  }
+  need(roleLease->processCurrent()&&tr::validRoleGroupShape(packet),"driver-group-role-wire-invalid");
+}
+
+// Both export sets share the original management outcome and cleanup boundary.
+// Each receiver owns its own copies before these temporary transport slots go.
+struct RequestPublicationExports {
+  tr::PublicationEventExport native,group;
+  bool begin(HANDLE target,HANDLE power,HANDLE identity,const Current& current){return native.begin(target,power,identity,current);}
+  bool beginGroup(HANDLE target,HANDLE groupEvent,HANDLE processEvent,HANDLE businessEvent,const Current& current){return group.beginThree(target,groupEvent,processEvent,businessEvent,current);}
+  bool beginOriginal(HANDLE target,HANDLE processEvent,HANDLE businessEvent,const Current& current){return group.begin(target,processEvent,businessEvent,current);}
+  std::uint64_t power()const noexcept{return native.power();}
+  std::uint64_t identity()const noexcept{return native.identity();}
+  bool pending()const noexcept{return native.pending()||group.pending();}
+  bool forgetIfExited()noexcept{
+    const bool first=!native.pending()||native.forgetIfExited();
+    const bool second=!group.pending()||group.forgetIfExited();return first&&second;
+  }
+  bool releaseKnown()noexcept{
+    const bool first=native.releaseKnown();const bool second=group.releaseKnown();return first&&second;
+  }
+};
+
+J runTrial(const J &req, QueryActor &query, Current beforeMutation = {},
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& roleLease = {},
+    DWORD expectedPrimary=0,DWORD expectedForeground=0,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& originalCancellationLease = {},
+    const std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding>& nativeRoleBinding = {}) {
+  struct FailedQualifiedRoleRead {
+    std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding> binding;bool completed=false;
+    ~FailedQualifiedRoleRead(){if(binding&&!completed)binding->cancel();}
+  } qualifiedRoleReadGuard{nativeRoleBinding};
   J out = {{"schema", "wuxia-single-original-publisher-trial.v1"},
            {"sleep", 0},
            {"gameLaunches", 0},
@@ -392,7 +465,9 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
   BoundLive steam, game, ymcc, cef;
   LifetimeMutex lifetimeMutex;
   Mem packetMemory, pathMemory;
-  tr::Packet packet{};
+  tr::Packet packet{};RequestPublicationExports revocationExports;
+  std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> heldGroupSignal,heldProcessSignal;
+  const auto& cancellationLease=roleLease?roleLease:originalCancellationLease;
   std::uint64_t control = 0, dllBase = 0, getter = 0, dllSize = 0,
                 activeWatchAddress = 0;
   bool loaded = false, preparedTrial = false, attached = false,
@@ -403,18 +478,40 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
   std::string sessionNonce;
   H managementThread;
   std::wstring trialPath;
+  std::uint64_t installedBoundaryTick = 0;
   DWORD pendingStatus = DBG_CONTINUE;
   DEBUG_EVENT pending{};
   std::vector<SavedThread> threads;
   DWORD pid = 0;
   std::array<unsigned char, 14> original{};
   DWORD originalProtection = 0;
+  // Cleanup authority is raw invocation state, never a diagnostic JSON key.
+  bool disarmKnown = false, ownerTargetExitObserved = false;
+  // Declared after every borrowed process/thread/export/scalar, so this guard
+  // runs BEFORE any of their destructors on all returns and exception unwinds.
+  // Loaded DLLs, parked trampolines and ordinary retained buffers alone are
+  // deliberately not active command debt.
+  const auto retainActiveOwnerBeforeReturn = [&]() noexcept {
+    if (ownerTargetExitObserved || !process.good()) return;
+    if (attached || pendingNow || patched || managementThread.good() ||
+        controlUnknown || ((preparedTrial || armAttempted) && !disarmKnown) ||
+        revocationExports.pending()) {
+      ownerHeld(process.h, sessionNonce, out, pendingNow);
+      // ownerHeld returns only after WAIT_OBJECT_0 on this exact retained handle.
+      ownerTargetExitObserved = true;
+    }
+  };
+  struct ActiveOwnerReturn final {
+    decltype(retainActiveOwnerBeforeReturn)& retain;
+    ~ActiveOwnerReturn() noexcept { retain(); }
+  } activeOwnerReturn{retainActiveOwnerBeforeReturn};
   const auto controlCall = [&](tr::Op op) {
     need(!controlUnknown, "control-outcome-unresolved");
     packet.op = op;
     const auto nonce = packet.nonce;
     const auto healthyProof = packet.healthyProof;const auto expectedRoute=packet.qualificationRoute;
-    const auto expectedYmcc = packet.ymcc, expectedCef = packet.cef;
+    const auto expectedYmcc = packet.ymcc, expectedCef = packet.cef;const auto expectedRevocation=packet.revocation;
+    const auto expectedRoleGroup=packet.roleGroup;
     if (op == tr::Op::Arm) {
       requireMutationDeadline(packet.deadlineTick,GetTickCount64());
       armAttempted = true;
@@ -424,7 +521,8 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
                                  managementThread, &controlUnknown);
     readExact(process.h, packetMemory.address, &packet, sizeof packet);
     checkPacket(packet, op, nonce);
-    need(packet.qualificationRoute==expectedRoute&&!std::memcmp(&packet.healthyProof, &healthyProof, sizeof healthyProof) &&
+    need(!std::memcmp(&packet.roleGroup,&expectedRoleGroup,sizeof expectedRoleGroup)&&
+         !std::memcmp(&packet.revocation,&expectedRevocation,sizeof expectedRevocation)&&packet.qualificationRoute==expectedRoute&&!std::memcmp(&packet.healthyProof, &healthyProof, sizeof healthyProof) &&
          !std::memcmp(&packet.ymcc, &expectedYmcc, sizeof expectedYmcc) &&
          !std::memcmp(&packet.cef, &expectedCef, sizeof expectedCef), "control-proof-and-auxiliary-identity");
     need(code == packet.returnCode, "control-return-consistent");
@@ -479,7 +577,7 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
   try {
     nativeFailureBoundary([&] {
     requireCurrent();
-    validateRequest(req);
+    validateRequest(req);requirePublicationScope();
     bindQualificationRoute(packet,req); // Explicitly set the wire route; never inherit the Packet default.
     need(req.value("recoveryRoute",std::string("semi-static"))==routeName(),"host-driver-route-mismatch");
     out["recoveryRoute"]=tr::qualificationRouteName(packet.qualificationRoute);out["trialAbi"]=tr::abi;
@@ -501,6 +599,12 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     ymcc = bindLive(req.at("processes").at("ymcc"), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE);
     cef = bindLive(req.at("processes").at("cef"), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE);
     bindAuxiliary(packet.ymcc, ymcc); bindAuxiliary(packet.cef, cef);
+    need(ymcc.pid==GetCurrentProcessId(),"native-publication-provider-is-current-ymcc");
+    const auto& delegated=gPublicationScope->expected();
+    need(delegated.session.pid==steam.pid&&delegated.session.created==steam.born&&
+         delegated.windowsSessionKnown&&delegated.windowsSession==steam.session&&
+         rw::pathKey(delegated.session.root+L"\\steam.exe")==rw::pathKey(steam.path),"native-publication-steam-scope");
+    packet.revocation.power=gPublicationScope->power();
     process = duplicate(steam.handle.h);
     BOOL debugger = TRUE;
     need(CheckRemoteDebuggerPresent(process.h, &debugger) && !debugger,
@@ -510,16 +614,18 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
                            tr::steamModulePath(steam.path,L"steamclient64.dll"),
                            tr::steamModulePath(steam.path,L"SteamUI.dll"), client, ui),
          "client-ui-module-pair");
-    const auto clientCompatibility=ymcc::steamcompat::qualifyFile(client.path,ymcc::steamcompat::ModuleKind::Client,false);
-    const auto uiCompatibility=ymcc::steamcompat::qualifyFile(ui.path,ymcc::steamcompat::ModuleKind::Ui,false);
+    // A launcher binding freezes the actual file digest from its first sample.
+    // Request it on this fresh driver qualification as well, including a cache
+    // miss; the original exact/split path keeps its prior optional-digest mode.
+    const bool requireRoleDigest=bool(nativeRoleBinding);
+    const auto clientCompatibility=ymcc::steamcompat::qualifyFile(client.path,ymcc::steamcompat::ModuleKind::Client,requireRoleDigest);
+    const auto uiCompatibility=ymcc::steamcompat::qualifyFile(ui.path,ymcc::steamcompat::ModuleKind::Ui,requireRoleDigest);
     need(clientCompatibility.layout.has_value()&&uiCompatibility.layout.has_value(),"client-ui-compatibility-contract");
     auto nativeProfile=tr::profileForCompatibility(*clientCompatibility.layout,*uiCompatibility.layout);
     if(nativeProfile){nativeProfile->getterRva=ymcc::steamcompat::resolvedRva(clientCompatibility,nativeProfile->getterRva);
         nativeProfile->publisherRva=ymcc::steamcompat::resolvedRva(clientCompatibility,nativeProfile->publisherRva);}
-    const std::optional<ymcc::steamrecord::ProfileId> clientProfile=*clientCompatibility.layout==ymcc::steamcompat::Layout::Public ?
-        ymcc::steamrecord::ProfileId::Public1792618285 : ymcc::steamrecord::ProfileId::Legacy1791918634;
-    const std::optional<app::ProfileId> uiProfile=*uiCompatibility.layout==ymcc::steamcompat::Layout::Public ?
-        app::ProfileId::Public1792618285 : app::ProfileId::Legacy1791918634;
+    const std::optional<ymcc::steamrecord::ProfileId> clientProfile=recordProfileForLayout(*clientCompatibility.layout);
+    const std::optional<app::ProfileId> uiProfile=uiProfileForLayout(*uiCompatibility.layout);
     need(nativeProfile.has_value()&&nativeProfile->getterRva&&nativeProfile->publisherRva,"module-compatibility-selectors");
     const auto loadedRead=[&](const rw::Module& module){return ymcc::steamcompat::ReadRva([&,module](std::uint64_t rva,void* target,std::size_t bytes){
       if(rva>=module.size||bytes>module.size-rva)return false;SIZE_T got=0;
@@ -543,16 +649,27 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
          "getter-profile-contract");
     getter = client.base + nativeProfile->getterRva;
     readExact(process.h, getter, original.data(), original.size());
-    need(!std::memcmp(original.data(), osd::kGetterBytes, 14),
-         "unmodified-getter-required");
+    const auto& expectedGetter=ymcc::steamrecord::detail::profileLayout(*clientProfile).getterBytes;
+    need(original==expectedGetter,"unmodified-getter-required");
     const auto owned = [&] {
       return current() && rw::exactProcess(process.h, steam.pid, steam.born, steam.path,
                               steam.session) &&
              rw::exactProcess(game.handle.h, game.pid, game.born, game.path,
                               game.session) &&
              rw::exactProcess(ymcc.handle.h, ymcc.pid, ymcc.born, ymcc.path, ymcc.session) &&
-             rw::exactProcess(cef.handle.h, cef.pid, cef.born, cef.path, cef.session);
+             rw::exactProcess(cef.handle.h, cef.pid, cef.born, cef.path, cef.session)&&
+              (!cancellationLease||(roleLease?roleLease->processCurrent():originalCancellationLease->originalProcessesCurrent()))&&
+              (!nativeRoleBinding||nativeRoleBinding->current());
     };
+    need(!roleLease||!originalCancellationLease,"driver-cancellation-lease-ambiguous");
+    if(originalCancellationLease){
+      need(originalCancellationLease->originalProcessesCurrent()&&
+          originalCancellationLease->source().fullGameId==gameId&&originalCancellationLease->source().appid==appid&&
+          originalCancellationLease->selectedGame().pid==game.pid&&originalCancellationLease->selectedGame().created==game.born&&
+          rw::pathKey(originalCancellationLease->selectedGame().image)==rw::pathKey(game.path)&&
+          originalCancellationLease->steam().pid==steam.pid&&originalCancellationLease->steam().created==steam.born&&
+          rw::pathKey(originalCancellationLease->steam().image)==rw::pathKey(steam.path),"driver-original-cancellation-scope");
+    }
     const app::Read read = [&](std::uint64_t a, void *p, std::size_t n) {
       SIZE_T got = 0;
       return ymcc::steamappstatewin::readableRegion(process.h, a, n) &&
@@ -560,24 +677,70 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
                                &got) &&
              got == n;
     };
-    const auto uiRead=ymcc::steamcompat::adaptProcessRead(uiCompatibility,ui.base,ui.size,read);
-    const auto recordRead=ymcc::steamcompat::adaptProcessRead(clientCompatibility,client.base,client.size,read);
+    // Preserve module anchors and explicit module pointers separately from raw object fields.
+    const auto uiViews=ymcc::steamcompat::makeProcessReadViews(uiCompatibility,ui.base,ui.size,read);
+    const auto recordViews=ymcc::steamcompat::makeProcessReadViews(clientCompatibility,client.base,client.size,read);
     app::Query aq{ui.base, ymcc::steamcompat::referenceImageSize(uiCompatibility,ui.size), appid, true, *uiProfile};
-    need(!app::observe(aq, uiRead, owned).value("runningBitSet", true),
+    need(!app::observeWithReadViews(aq, uiViews, owned).value("runningBitSet", true),
          "lost-baseline-before-prepare");
-    app::detail::Reader ar(uiRead);
+    app::detail::Reader ar(uiViews);
     need(app::detail::readFlags(ar, aq) == 4, "lost-flags");
     const auto flagAddress = ar.fields.back().address;
     activeWatchAddress = flagAddress;
     ymcc::steamrecord::Query rq{client.base, ymcc::steamcompat::referenceImageSize(clientCompatibility,client.size),
                                 account,     gameId,
                                 game.pid,    true, *clientProfile};
-    need(ymcc::steamrecord::observe(rq, recordRead, owned)
-             .value("originalPrimaryMatched", false),
-         "original-primary-required");
-    ymcc::steamrecord::detail::Reader rr(recordRead);
-    const auto selected = ymcc::steamrecord::detail::selectUser(rr, rq);
-    const auto manager = selected.user + 0x3800;
+    std::unique_ptr<ymcc::steamgamefacts::BoundQualifiedRead> qualifiedRoleRead;
+    if(nativeRoleBinding){
+      Snapshot driverSample;driverSample.client=client;driverSample.ui=ui;
+      driverSample.clientSha256=clientCompatibility.fixed?clientCompatibility.fixed->sha256:clientCompatibility.content.sha256;
+      driverSample.uiSha256=uiCompatibility.fixed?uiCompatibility.fixed->sha256:uiCompatibility.content.sha256;
+      driverSample.clientProfile=*clientProfile;driverSample.uiProfile=*uiProfile;
+      driverSample.getterRva=nativeProfile->getterRva;driverSample.publisherRva=nativeProfile->publisherRva;
+      driverSample.fixedOriginalQualification=clientCompatibility.fixed.has_value()&&uiCompatibility.fixed.has_value();
+      qualifiedRoleRead=EngineQualifiedReadAdapter::openDriver(steam,game,driverSample,rq,aq,recordViews,owned,
+          roleLease,nativeRoleBinding);
+    }
+    const auto recordObservation=qualifiedRoleRead?qualifiedRoleRead->begin():
+        ymcc::steamrecord::observeWithReadViews(rq,recordViews,owned);
+    if(!roleLease){
+      need(recordObservation.value("originalPrimaryMatched",false),"original-primary-required");
+    }else{
+      // The only enabling input is the source owner's in-process object. An
+      // event/request JSON boolean or a historical group DTO cannot enter here.
+      need(roleLease->processCurrent()&&roleLease->source().fullGameId==gameId&&
+          roleLease->source().appid==appid&&roleLease->selectedGame().pid==game.pid&&
+          roleLease->selectedGame().created==game.born&&
+          rw::pathKey(roleLease->selectedGame().image)==rw::pathKey(game.path)&&
+          roleLease->steam().pid==steam.pid&&roleLease->steam().created==steam.born&&
+          rw::pathKey(roleLease->steam().image)==rw::pathKey(steam.path),"driver-group-role-scope");
+      need(recordObservation.contains("available")&&recordObservation.at("available").is_boolean()&&
+          recordObservation.at("available")==true&&recordObservation.contains("matchingTargetRecordCount")&&
+          recordObservation.at("matchingTargetRecordCount").is_number_integer()&&
+          recordObservation.at("matchingTargetRecordCount")==1,"driver-group-original-record-unavailable");
+    }
+    ymcc::steamrecord::detail::Reader rr(recordViews);
+    const auto selected = [&]{
+      if(qualifiedRoleRead){qualifiedRoleRead->finish();return qualifiedRoleRead->takeSelection();}
+      return ymcc::steamrecord::detail::selectUser(rr,rq);
+    }();
+    if(roleLease){
+      const auto targets=[&]{
+        if(qualifiedRoleRead)return qualifiedRoleRead->targets();
+        const auto header=ymcc::steamrecord::detail::readHeader(rr,selected.user,*clientProfile);
+        return ymcc::steamrecord::detail::readTargets(rr,rq,header);
+      }();
+      need(targets.size()==1&&expectedPrimary&&expectedForeground&&
+          targets[0].primary==expectedPrimary&&targets[0].foreground==expectedForeground,
+          "driver-group-original-role-tuple-changed");
+      const auto roles=roleLease->inspectNativeRoles(expectedPrimary,expectedForeground);
+      need(roles&&(roles->state==ymcc::steamgameroles::State::ExactSelected||
+          roles->state==ymcc::steamgameroles::State::VerifiedGroupRoles),"driver-group-original-roles-unqualified");
+    }
+    if(qualifiedRoleRead)need(qualifiedRoleRead->complete()==nativeRoleBinding&&nativeRoleBinding->current(),
+        "driver-group-native-role-read-not-completed");
+    qualifiedRoleReadGuard.completed=true;
+    const auto manager = ymcc::steamrecord::detail::offset(selected.user, nativeProfile->publisherSelfOffset);
     const auto utf = trialPath;
     const auto controlRva = exportRva(utf, "RunningTrialControl");
     rw::Module existing;
@@ -600,6 +763,17 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     std::copy(game.path.begin(), game.path.end(), packet.gamePath);
     need(steam.path.size()<std::size(packet.steamPath),"steam-path-limit");
     std::copy(steam.path.begin(),steam.path.end(),packet.steamPath);
+    if(roleLease){
+      assignGroupRoleWire(packet,roleLease,expectedPrimary,expectedForeground,nativeRoleBinding);
+      heldGroupSignal=roleLease->groupCancellation();heldProcessSignal=roleLease->processCancellation();
+      need(heldGroupSignal&&heldProcessSignal&&gGroupRequestCancellation&&
+          heldGroupSignal->current()&&heldProcessSignal->current()&&gGroupRequestCancellation->current(),
+          "driver-group-request-cancellation-unavailable");
+    }else if(originalCancellationLease){
+      heldProcessSignal=originalCancellationLease->processCancellation();
+      need(heldProcessSignal&&gGroupRequestCancellation&&heldProcessSignal->current()&&gGroupRequestCancellation->current(),
+          "driver-original-request-cancellation-unavailable");
+    }
     packet.nonce.low = std::stoull(nonce.substr(0, 8) + nonce.substr(9, 4) +
                                        nonce.substr(14, 4),
                                    nullptr, 16);
@@ -616,8 +790,40 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     if(beforeMutation){out["mutationCommitCallbackInvoked"] = true;
       need(beforeMutation(), "publication-commit-rejected");}
     out["mutationCommitAccepted"] = true;
-    requireCurrent();need(owned(), "cohort-after-mutation-commit");
+    requirePublicationScope();need(owned(), "cohort-after-mutation-commit");
     requireMutationDeadline(packet.deadlineTick,GetTickCount64());
+    out["revocationExportAttempted"] = true;
+    need(revocationExports.begin(process.h,reinterpret_cast<HANDLE>(gCancelSignal),reinterpret_cast<HANDLE>(gIdentityCancelSignal),[&](){requirePublicationScope();return owned();}),"native-publication-event-export");
+    packet.revocation.sourcePowerEvent=revocationExports.power();packet.revocation.sourceIdentityEvent=revocationExports.identity();
+    need(tr::validPublicationRevocation(packet.revocation),"native-publication-delegation-wire");
+    if(roleLease){
+      need(heldGroupSignal&&heldProcessSignal&&gGroupRequestCancellation&&
+          heldGroupSignal->current()&&heldProcessSignal->current()&&gGroupRequestCancellation->current(),
+          "driver-group-request-cancelled-before-export");
+      need(revocationExports.beginGroup(process.h,heldGroupSignal->event(),heldProcessSignal->event(),
+          gGroupRequestCancellation->event(),[&](){requirePublicationScope();return owned()&&
+          heldGroupSignal->current()&&heldProcessSignal->current()&&gGroupRequestCancellation->current();}),
+          "group-publication-cancellation-export");
+      auto& cancellation=packet.roleGroup.cancellation;
+      cancellation.sourceGroupEvent=revocationExports.group.power();
+      cancellation.sourceProcessRequestEvent=revocationExports.group.identity();
+      cancellation.sourceBusinessRequestEvent=revocationExports.group.third();
+      need(tr::validRoleGroupWire(packet),"group-publication-cancellation-wire");
+    }else if(originalCancellationLease){
+      const auto originalCurrent=[&](){requirePublicationScope();return owned()&&
+          heldProcessSignal&&gGroupRequestCancellation&&heldProcessSignal->current()&&gGroupRequestCancellation->current();};
+      need(originalCurrent(),"driver-original-request-cancelled-before-export");
+      need(revocationExports.beginOriginal(process.h,heldProcessSignal->event(),gGroupRequestCancellation->event(),originalCurrent),
+          "original-publication-cancellation-export");
+      // The old reader checks this version before its disabled fast path.
+      // This is cancellation only; native exact-selected matching remains unchanged.
+      packet.roleGroup.version=2;
+      auto& cancellation=packet.roleGroup.cancellation;
+      cancellation.sourceProcessRequestEvent=revocationExports.group.power();
+      cancellation.sourceBusinessRequestEvent=revocationExports.group.identity();
+      need(tr::validRoleGroupWire(packet),"original-publication-cancellation-wire");
+    }
+    requirePublicationScope();need(owned(),"cohort-after-revocation-export");
     out["remoteAllocationAttempted"] = true; // Set before even a failed allocation.
     pathMemory = Mem(process.h, (utf.size() + 1) * sizeof(wchar_t));
     writeExact(process.h, pathMemory.address, utf.c_str(),
@@ -639,6 +845,8 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     out["prepareReturnCode"] = prepareCode;
     out["prepareStatus"] = statusJson(packet);
     preparedTrial = prepareCode == 0;
+    need(revocationExports.releaseKnown(),"native-publication-event-export-return");
+    out["revocationExportsReturned"] = true;
     need(prepareCode == 0, "trial-prepare");
     need(packet.status.state == osd::State::Prepared &&
              packet.status.trampolineAllocated == 1 &&
@@ -659,7 +867,7 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     requireCurrent();
     need(owned(), "cohort-before-install");
     const auto expected = 4u;
-    need(app::observe(aq, uiRead, owned).at("nativeAppFlags").get<unsigned>() ==
+    need(app::observeWithReadViews(aq, uiViews, owned).at("nativeAppFlags").get<unsigned>() ==
              expected,
          "expected-native-state");
     need(controlCall(tr::Op::Arm) == 0, "trial-arm");
@@ -771,11 +979,10 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
                "installed-entry-readback");
           started = true;
           armedTick = GetTickCount64();
+          installedBoundaryTick = armedTick;
           out["getterEntryPatched"] = true;
           out["threadsAtInstall"] = count;
-          publish(J{{"event", "installed"},
-                         {"nonce", nonce},
-                         {"gamePid", game.pid}});
+          // No progress callback or log IO while the target is paused.
           query.fire();
         } else if (code == EXCEPTION_SINGLE_STEP && started) {
           auto it = std::find_if(threads.begin(), threads.end(), [&](auto &t) {
@@ -867,6 +1074,8 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     restorationOrDetachStarted = false;
     out["debuggerDetached"] = true;
     need(controlCall(tr::Op::Disarm) == 0, "trial-disarm-after-restore");
+    disarmKnown = packet.status.state != osd::State::Armed &&
+                  packet.status.state != osd::State::Running;
     out["statusAfterDisarm"] = statusJson(packet);
     out["disarmConfirmed"] = true;
     out["publisherCalls"] = packet.telemetry.publisherCalls;
@@ -901,8 +1110,8 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     need(CheckRemoteDebuggerPresent(process.h, &after) && !after,
          "trial-final-no-debugger");
     out["sameOriginalCohortAtExit"] = owned();
-    out["finalNativeApp"] = app::observe(aq, uiRead, owned);
-    out["finalRecord"] = ymcc::steamrecord::observe(rq, recordRead, owned);
+    out["finalNativeApp"] = app::observeWithReadViews(aq, uiViews, owned);
+    out["finalRecord"] = ymcc::steamrecord::observeWithReadViews(rq, recordViews, owned);
     out["debugEvents"] = events;
     out["endReason"] = reason;
     out["status"] = reason == "query-completed"
@@ -911,14 +1120,18 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
     out["trialDllMayRemainLoaded"] = loaded;
     }, "trial-native-exception");
   } catch (const std::exception &e) {
-    out["status"] = "failed";
-    out["reason"] = e.what();
-    if (const auto* diagnostic = dynamic_cast<const DiagnosticFailure*>(&e))
-      out["failureDiagnostic"] = diagnostic->detail;
+    try {
+      out["status"] = "failed";
+      out["reason"] = e.what();
+      if (const auto* diagnostic = dynamic_cast<const DiagnosticFailure*>(&e))
+        out["failureDiagnostic"] = diagnostic->detail;
+    } catch (...) {} // Failure diagnostics cannot skip original restoration.
+
     bool recoveryKnown = true;
     if (entryEverExposed && restorationOrDetachStarted) {
-      out["debuggerAttachedOrUncertain"] = true;
+      try { out["debuggerAttachedOrUncertain"] = true; } catch (...) {}
       ownerHeld(process.h, sessionNonce, out, pendingNow);
+      ownerTargetExitObserved = true;
       recoveryKnown = false;
     }
     const auto recoverPending = [&] {
@@ -1004,40 +1217,65 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
         BOOL detachedCheck = TRUE;
         need(CheckRemoteDebuggerPresent(process.h, &detachedCheck) && !detachedCheck, "error-detach-confirmation");
         restorationOrDetachStarted = false;
-        out["errorDetach"] = true;
+        try { out["errorDetach"] = true; } catch (...) {}
       }
     } catch (const std::exception &cleanup) {
       recoveryKnown = false;
-      if (out.value("status", "") != "unsupported-target-exited") out["status"] = "unsupported";
-      out["cleanupError"] = cleanup.what();
-      out["automaticContinuationSuppressed"] = pendingNow;
-      out["pendingDebugEventUnresolved"] = pendingNow;
+      try {
+        if (!ownerTargetExitObserved) out["status"] = "unsupported";
+        out["cleanupError"] = cleanup.what();
+        out["automaticContinuationSuppressed"] = pendingNow;
+        out["pendingDebugEventUnresolved"] = pendingNow;
+      } catch (...) {}
       // Stay on this debugger's owning thread; no unwinding while Steam lives.
-      if (out.value("status", "") != "unsupported-target-exited")
+      if (!ownerTargetExitObserved) {
         ownerHeld(process.h, sessionNonce, out, pendingNow);
+        ownerTargetExitObserved = true;
+      }
     }
     if (recoveryKnown && preparedTrial && !attached && !patched &&
-               !managementThread.good() && !controlUnknown) {
+               !managementThread.good() && !controlUnknown && !disarmKnown) {
       try {
         // Cleanup of this invocation's known control is independent of a
         // revoked game/rules/power guard. It still pins the original Steam.
         enterCleanup();
         const auto code = controlCall(tr::Op::Disarm);
-        out["errorDisarmCode"] = code;
-        out["errorStatus"] = statusJson(packet);
+        try {
+          out["errorDisarmCode"] = code;
+          out["errorStatus"] = statusJson(packet);
+        } catch (...) {}
         need(code == 0 && packet.status.state != osd::State::Armed &&
              packet.status.state != osd::State::Running, "error-disarm-failed");
-        out["disarmConfirmed"] = true;
+        disarmKnown = true;
+        try { out["disarmConfirmed"] = true; } catch (...) {}
       } catch (const std::exception &disarm) {
-        out["errorDisarmUnknown"] = true;
-        out["errorDisarmReason"] = disarm.what();
+        try {
+          out["errorDisarmUnknown"] = true;
+          out["errorDisarmReason"] = disarm.what();
+        } catch (...) {}
       }
     }
-    if (process.good() && WaitForSingleObject(process.h, 0) == WAIT_TIMEOUT &&
+    if (process.good() && WaitForSingleObject(process.h, 0) != WAIT_OBJECT_0 &&
         (managementThread.good() || controlUnknown ||
-         ((preparedTrial || armAttempted) && !out.value("disarmConfirmed", false)))) {
+         ((preparedTrial || armAttempted) && !disarmKnown))) {
       ownerHeld(process.h, sessionNonce, out, pendingNow);
+      ownerTargetExitObserved = true;
       recoveryKnown = false;
+    }
+    if(revocationExports.pending()){
+      bool returned=revocationExports.forgetIfExited();
+      if(!returned){
+        try{
+          enterCleanup();
+          if(!managementThread.good()&&!controlUnknown)returned=revocationExports.releaseKnown();
+        }catch(...){} // Unknown ownership cannot unwind the live target lease.
+        if(!returned){
+          try{out["revocationExportReturnUnknown"]=true;}catch(...){}
+          ownerHeld(process.h,sessionNonce,out,pendingNow);ownerTargetExitObserved=true;recoveryKnown=false;
+          returned=revocationExports.forgetIfExited();
+        }
+      }
+      try { out["revocationExportsReturned"]=returned; } catch (...) {}
     }
     if (recoveryKnown && !managementThread.good()) {
       try {
@@ -1046,18 +1284,26 @@ J runTrial(const J &req, QueryActor &query, Current beforeMutation = {}) {
         out["packetMemoryReleased"] = true;
         out["pathMemoryReleased"] = true;
       } catch (const std::exception &memory) {
-        out["inputMemoryReleaseError"] = memory.what();
+        try { out["inputMemoryReleaseError"] = memory.what(); } catch (...) {}
       }
     }
-    out["managementCallUnresolved"] = managementThread.good();
-    out["controlOutcomeUnknown"] = controlUnknown;
-    out["trialDllMayRemainLoaded"] =
-        loaded || (loadAttempted && !loadCompleted);
-    out["entryMayRemainPatched"] = patched;
-    out["armAttempted"] = armAttempted;
-    out["entryEverExposed"] = entryEverExposed;
-    out["packetMemoryRetained"] = packetMemory.address != 0;
-    out["pathMemoryRetained"] = pathMemory.address != 0;
+    try {
+      out["managementCallUnresolved"] = managementThread.good();
+      out["controlOutcomeUnknown"] = controlUnknown;
+      out["trialDllMayRemainLoaded"] =
+          loaded || (loadAttempted && !loadCompleted);
+      out["entryMayRemainPatched"] = patched;
+      out["armAttempted"] = armAttempted;
+      out["entryEverExposed"] = entryEverExposed;
+      out["packetMemoryRetained"] = packetMemory.address != 0;
+      out["pathMemoryRetained"] = pathMemory.address != 0;
+    } catch (...) {}
+  }
+  // Preserve this diagnostic after confirmed detach; unknown detach suppresses it.
+  if (out.value("getterEntryPatched", false) && !attached &&
+      (out.value("debuggerDetached", false) || out.value("errorDetach", false))) {
+    publish(J{{"event", "installed"}, {"nonce", sessionNonce}, {"gamePid", game.pid},
+              {"boundaryTick", installedBoundaryTick}, {"deliveryDeferredUntilDetach", true}});
   }
   publish(J{{"event", "result"}, {"result", out}});
   return out;

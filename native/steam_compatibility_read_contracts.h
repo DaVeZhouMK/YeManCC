@@ -1,5 +1,7 @@
 #pragma once
 #include "steam_compatibility_core.h"
+#include "steam_compatibility_owner_scoped_record_graph.h"
+#include "steam_compatibility_owner_scoped_ui_graph.h"
 #include <limits>
 
 // Generated from existing fixed-PE CUser/SteamUI qualification evidence.
@@ -3445,6 +3447,7 @@ inline Evidence check(const Image& image, const std::array<Range,N>& original,
 inline Evidence checkRecordLayout(const Image& image, Layout layout) noexcept {
     using namespace read_contract_detail;
     switch(layout) {
+    case Layout::OwnerScoped: return checkRanges(image,owner_scoped_record::fixedRanges);
     case Layout::Legacy: return check(image,kRecordLegacyRanges,kRecordLegacyPointers);
     case Layout::Public: return check(image,kRecordPublicRanges,kRecordPublicPointers);
     }
@@ -3453,6 +3456,7 @@ inline Evidence checkRecordLayout(const Image& image, Layout layout) noexcept {
 inline Evidence checkUiLayout(const Image& image, Layout layout) noexcept {
     using namespace read_contract_detail;
     switch(layout) {
+    case Layout::OwnerScoped: return checkRanges(image,owner_scoped_ui::fixedRanges);
     case Layout::Legacy: return check(image,kUiLegacyRanges,kUiLegacyPointers);
     case Layout::Public: return check(image,kUiPublicRanges,kUiPublicPointers);
     }

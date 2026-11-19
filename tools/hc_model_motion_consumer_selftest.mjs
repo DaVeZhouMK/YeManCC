@@ -58,6 +58,16 @@ const genericCatalogPath=path.join(repo,'native/hc_generic_motion_catalog.h'),ge
 writeGenerated('hc_generic_motion_catalog.h',genericCatalogBytes);
 writeGenerated('hc_default_motion_catalog.h',defaultCatalogBytes);
 const bindings=[];
+function rewriteMotionCapabilityField(source, field, before, after) {
+  const forms=[
+    [JSON.stringify(field)+','+before, JSON.stringify(field)+','+after],
+    [JSON.stringify(field)+', '+before, JSON.stringify(field)+', '+after],
+  ].map(([a,b])=>['{'+a+'}','{'+b+'}']);
+  for(const owner of ['receipt','genericReceipt'])forms.push([owner+'['+JSON.stringify(field)+'] = '+before+';',owner+'['+JSON.stringify(field)+'] = '+after+';']);
+  const matches=forms.filter(([from])=>source.includes(from));
+  if(matches.length!==1 || source.split(matches[0][0]).length!==2)throw Error('Capability mutation source shape: '+field);
+  return source.replace(matches[0][0],matches[0][1]);
+}
 function extractor(text,label,allowMissingNew=false,allowMissingLegacy=false,allowMissingCapability=false) {
   const entries=[];
   function bind(name,start,end,kind='compiled-definition') {
@@ -162,7 +172,7 @@ const bool calibrationPairProven=false;const float motionDeltaSeconds=0.008f;
 mockProcessCalls=0;mockProcessAxes={};g_gmProcessedThisTick=false;
 ${effect}
 }
-return {hcMatrixAdmitted,{mgx,mgy,mgz,maxa,may,maz},matrixIdentity,mockProcessCalls,mockProcessAxes};
+return {hcMatrixAdmitted,{mgx,mgy,mgz,maxa,may,maz},${prepare.includes("matrixIdentityFallback")?"matrixIdentity.empty() ? std::string(matrixIdentityFallback) : matrixIdentity":"matrixIdentity"},mockProcessCalls,mockProcessAxes};
 }
 static bool probeConsumer(bool live,bool gyro,bool accel,const std::string& gp,const std::string& ap,UINT64 gg,UINT64 ag) {return probeActive(live,gyro,accel,gp,ap,gg,ag).admitted;}`);
   code.push(`static constexpr bool resolveNewAvailable=${!!newResolver};\nstatic bool resolveNewForTest(const MachineIdentity& id,HcMotionSelectorReceipt& receipt) {${newResolver?'return inputCaptureResolveNewHcMotionSelector(id,receipt);':'(void)id;(void)receipt;return false;'}}`);
@@ -175,6 +185,8 @@ const frozen=extractor(beforeBytes.toString('utf8'),'before',false,true,true);
 const historical=extractor(historicalBytes.toString('utf8'),'historical',true,true,true);
 const capabilityBefore=extractor(capabilityBeforeBytes.toString('utf8'),'capability-before',false,false,true);
 const actual=extractor(sourceBytes.toString('utf8'),'current',!!opt['new9-baseline'],isBaseline,isBaseline);
+// Exact OEM dependencies used by the extracted shared identity resolver.
+const originalOemInputFiles=["capabilities/HcOemInputCapabilityBinding.h","capabilities/HcOneXVendorInputContract.h","capabilities/hc-device-catalog.generated.h"];
 const unifiedFiles=['capabilities/HcMotionCapabilityCatalog.h','capabilities/HcMotionCapabilityCatalog.generated.h'];
 const privateCatalogPath=path.join(repo,'native/hc_oem_windows_motion_catalog.h');
 writeGenerated('hc_oem_windows_motion_catalog.h',fs.readFileSync(privateCatalogPath));
@@ -182,22 +194,38 @@ writeGenerated('unified_binding.cpp',fs.readFileSync(path.join(fixture,'unified_
 const unifiedInput=file=>file==='capabilities/HcMotionCapabilityCatalog.h'&&opt['binding-header']?path.resolve(opt['binding-header']):
  file==='capabilities/HcMotionCapabilityCatalog.generated.h'&&opt['binding-catalog']?path.resolve(opt['binding-catalog']):path.join(repo,file);
 for(const file of unifiedFiles)writeGenerated(path.basename(file),fs.readFileSync(unifiedInput(file)));
-const preamble=`#include <algorithm>\n#include <array>\n#include <atomic>\n#include <cctype>\n#include <cmath>\n#include <cstdint>\n#include <fstream>\n#include <iostream>\n#include <map>\n#include <mutex>\n#include <optional>\n#include <set>\n#include <stdexcept>\n#include <string>\n#include <string_view>\n#include <utility>\n#include <vector>\n#include "json.hpp"\n#include "hc_model_motion_catalog.snapshot.h"\n#include "hc_legacy_motion_catalog.snapshot.h"\n#include "msi_motion_capabilities.snapshot.h"\n#include "hc_default_motion_catalog.h"\n#include "hc_generic_motion_catalog.h"\n#include "HcMotionCapabilityCatalog.h"\n#include "hc_oem_windows_motion_catalog.h"\nusing json=nlohmann::json;using UINT32=std::uint32_t;using UINT64=std::uint64_t;\n`;
+for(const file of originalOemInputFiles)writeGenerated(path.basename(file),fs.readFileSync(path.join(repo,file)));
+const preamble=`#include <algorithm>\n#include <array>\n#include <atomic>\n#include <cctype>\n#include <cmath>\n#include <cstdint>\n#include <fstream>\n#include <iostream>\n#include <map>\n#include <mutex>\n#include <optional>\n#include <set>\n#include <stdexcept>\n#include <string>\n#include <string_view>\n#include <utility>\n#include <vector>\n#include "json.hpp"\n#include "hc_model_motion_catalog.snapshot.h"\n#include "hc_legacy_motion_catalog.snapshot.h"\n#include "msi_motion_capabilities.snapshot.h"\n#include "hc_default_motion_catalog.h"\n#include "hc_generic_motion_catalog.h"\n#include "HcMotionCapabilityCatalog.h"\n#include "HcOemInputCapabilityBinding.h"\n#include "hc_oem_windows_motion_catalog.h"\nusing json=nlohmann::json;using UINT32=std::uint32_t;using UINT64=std::uint64_t;\n`;
 const generated=preamble+`static constexpr bool consumerOnlyControl=${!!opt['consumer-only']};\n`+`namespace before {\n${frozen.code}\n}\nnamespace historical {\n${historical.code}\n}\nnamespace candidate {\n${actual.code}\n}\n`+fs.readFileSync(path.join(fixture,'harness.cpp'),'utf8');
 const cpp=path.join(out,'motion_consumer.cpp');writeGenerated('motion_consumer.cpp',generated);
 const fixtureInputs=['private-binding-contract.json','unified_binding.cpp','unified-binding-contract.json','oracle.mjs','reviewed_resources.mjs','mocks.cpp','bridge.cpp','harness.cpp','README.md'].map(name=>({path:path.join(fixture,name),sha256:sha(fs.readFileSync(path.join(fixture,name)))}));
+fixtureInputs.push(...expected.win5MotionOverride.inputs);
 fixtureInputs.push({path:path.join(repo,'tools/lib/hc_motion_mutation_pool.mjs'),sha256:sha(fs.readFileSync(path.join(repo,'tools/lib/hc_motion_mutation_pool.mjs')))});
 for(const file of [TRACE_HELPER,TRACE_VERIFIER])fixtureInputs.push({path:path.join(repo,file),sha256:sha(fs.readFileSync(path.join(repo,file)))});
 if(opt['binding-header']){const file=path.resolve(opt['binding-header']);fixtureInputs.push({path:file,sha256:sha(fs.readFileSync(file))});}
 fixtureInputs.push({path:privateCatalogPath,sha256:sha(fs.readFileSync(privateCatalogPath))});
 fixtureInputs.push(...unifiedFiles.map(file=>{const input=unifiedInput(file);return {path:input,sha256:sha(fs.readFileSync(input))};}));
+fixtureInputs.push(...originalOemInputFiles.map(file=>{const input=path.join(repo,file);return {path:input,sha256:sha(fs.readFileSync(input))};}));
 fixtureInputs.push({path:genericCatalogPath,sha256:sha(genericCatalogBytes)},{path:defaultCatalogPath,sha256:sha(defaultCatalogBytes)},{path:path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),sha256:sha(fs.readFileSync(path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')))});
 const sameBodies=['inputCaptureResolveMsiMotionSelector','normalizeHcDmi','ymccApplyNamedImuMatrix','inputCaptureMotionPairAdmitted','BUS:matrix-candidate-preparation','BUS:six-axis-activation','BUS:GamepadMotion-condition-and-call-prefix'];
 const legacySourceChecks=sameBodies.map(name=>{
  const a=frozen.entries.find(e=>e.name===name)?.code,b=actual.entries.find(e=>e.name===name)?.code;
  return {name,beforeSha256:sha(a||''),currentSha256:sha(b||''),unchanged:sourceTextEqual(a,b),comparison:'CRLF-to-LF-only'};
 });
-const msiMatrixTail=s=>s.slice(s.indexOf('    const auto legacyFields=inputCaptureLegacySensorFieldsSnapshot();'));const oldMatrix=frozen.entries.find(e=>e.name==='inputCaptureApplyHcMatrixCandidate').code,newMatrix=actual.entries.find(e=>e.name==='inputCaptureApplyHcMatrixCandidate').code;legacySourceChecks.push({name:'MSI legacy field override tail',beforeSha256:sha(msiMatrixTail(oldMatrix)),currentSha256:sha(msiMatrixTail(newMatrix)),unchanged:sourceTextEqual(msiMatrixTail(oldMatrix),msiMatrixTail(newMatrix)),comparison:'CRLF-to-LF-only'});
+const msiMatrixTail=s=>s.slice(s.indexOf('    const auto legacyFields=inputCaptureLegacySensorFieldsSnapshot();'));
+const oldMatrix=frozen.entries.find(e=>e.name==='inputCaptureApplyHcMatrixCandidate').code;
+const newMatrix=actual.entries.find(e=>e.name==='inputCaptureApplyHcMatrixCandidate').code;
+// A negative legacy-field snapshot makes only the pure MSI override unused.
+// Admit this exact demand guard; every other old tail byte still must match.
+const msiDemandGuard='\n    // Without legacy fields the MSI override cannot change either axis set.\n    if (!legacyFields.gyro && !legacyFields.accel) return;';
+const oldMsiTail=msiMatrixTail(oldMatrix),newMsiTail=msiMatrixTail(newMatrix);
+const normalizedMsiTail=newMsiTail.replaceAll('\r\n','\n');
+const demandOnlyMsiTail=normalizedMsiTail.split(msiDemandGuard).length===2&&
+  sourceTextEqual(oldMsiTail,normalizedMsiTail.replace(msiDemandGuard,''));
+legacySourceChecks.push({name:'MSI legacy field override tail',beforeSha256:sha(oldMsiTail),currentSha256:sha(newMsiTail),
+  unchanged:sourceTextEqual(oldMsiTail,newMsiTail),
+  ...(demandOnlyMsiTail?{controlledRefactorVerified:true,refactorScope:'fresh-negative-legacy-fields-skip-pure-lookup-only'}:{}),
+  comparison:'CRLF-to-LF-only; optionally one exact negative-legacy demand guard with all remaining tail bytes preserved'});
 const beforeEntry=frozen.entries.find(e=>e.name==='inputCaptureResolveHcMotionSelector').code;
 const currentEntry=actual.entries.find(e=>e.name==='inputCaptureResolveHcMotionSelector').code;
 const fallback=s=>s.slice(s.indexOf('        const std::string manufacturer = normalizeHcDmi(sgRegSZ('));
@@ -272,12 +300,70 @@ if(sourceBytes.includes(Buffer.from('const bool windowsFrameProcessed=inputCaptu
 // original source controls and all original executable matrix assertions remain.
 {
  const name='ymccApplyNamedImuMatrix',beforeSha='6ec35a253da070abcc474e733f7e6bf5d0e3fc04b5a966a7aaad5bc279833aa9',afterSha='002f62358825f90094ba760c58290224696febe403cd74b6765a8ceab7419fef';
+ const cachedSha='6f916d6102e44e353df1749e77574457344280501532211dd9a31e5492c08071';
  const legacyFile=path.join(repo,'tools/fixtures/hc_legacy_motion_catalog/axis-parser-legacy-reference.cpp'),legacyBytes=fs.readFileSync(legacyFile);
  if(sha(legacyBytes)!=='cdef906232005b1456c91490ea23511231563e594da0d0de46181d51dabce035')throw Error('Immutable axis parser comparison drift');
  fixtureInputs.push({path:legacyFile,sha256:sha(legacyBytes)});
  const current=actual.entries.find(row=>row.name===name);
- if(current&&sha(current.code)===afterSha)for(const check of [...capabilityControlChecks,...legacySourceChecks])if(check.name===name&&check.beforeSha256===beforeSha){
-  check.controlledRefactorVerified=true;check.refactorScope='allocation-free-axis-parser-contract';check.expectedAfterSha256=afterSha;check.immutableComparisonSha256=sha(legacyBytes);
+ const actualSha=current&&sha(current.code);
+ // The original axis-only differential and targeted 127/128/129-byte cache-key controls cover this exact cached parser.
+ if(actualSha===afterSha||actualSha===cachedSha)for(const check of [...capabilityControlChecks,...legacySourceChecks])if(check.name===name&&check.beforeSha256===beforeSha&&check.currentSha256===actualSha){
+  check.controlledRefactorVerified=true;
+  check.refactorScope=actualSha===cachedSha?'bounded-thread-local-axis-parser-contract':'allocation-free-axis-parser-contract';
+  check.expectedAfterSha256=actualSha;check.immutableComparisonSha256=sha(legacyBytes);
+ }
+}
+// The private dual-config OneX check exercised these exact identities and recipes.
+const oneXFactoryCheck=capabilityControlChecks.find(row=>row.name==='ymccResolveFamily');
+{
+ const before='a871cb030687e83e831123df7f47a506a4b67a882b84f3ddf9ffcf7193b60f1b';
+ const after='ec8deb9b4a113ab095f0d46728a8f14d28facf2eda8d1c6e40f2fad70bb1e1c5';
+ const shared='5d9e26557993cfb0eb1fd9f67c438b1545e8871b7f0295d2669787f9b164a2f4';
+ const upstream='f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47';
+ if(oneXFactoryCheck?.unchanged===false&&oneXFactoryCheck.beforeSha256===before&&oneXFactoryCheck.currentSha256===after){
+  const factory=path.join(repo,'capabilities/upstream/f2e58468/IDevice.cs');
+  const header=fixtureInputs.find(row=>row.path===path.join(repo,'capabilities/HcOemInputCapabilityBinding.h'));
+  const generatedHeader=generatedInputsAtCreation.find(row=>row.path===path.join(out,'HcOemInputCapabilityBinding.h'));
+  if(header?.sha256===shared&&generatedHeader?.sha256===shared&&fs.existsSync(factory)&&sha(fs.readFileSync(factory))===upstream){
+   fixtureInputs.push({path:factory,sha256:upstream});
+   Object.assign(oneXFactoryCheck,{controlledRefactorVerified:true,refactorScope:'exact-onex-factory-identity',oneXBindingHeaderSha256:shared,oneXFactorySourceSha256:upstream});
+  }
+ }
+}
+// The deferred default label was compared with the original JSON field and both real writers.
+const busMatrixPrepName='BUS:matrix-candidate-preparation';
+const busMatrixPrepRows=[...capabilityControlChecks,...legacySourceChecks].filter(row=>row.name===busMatrixPrepName);
+{
+ const before='240a7184fda9592bdacfb98be4734171b60c9bce0bad4957b93f03a1a1493b87';
+ const after='a8332593171a93b4ff49cdf9d3452cc2584dcc0e2816aec6018e96d3d26fb794';
+ const preparation=actual.entries.find(row=>row.name===busMatrixPrepName)?.code;
+ if(preparation&&sha(preparation)===after){
+  const text=sourceBytes.toString('utf8');
+  const starts=[...text.matchAll(/^static void inputCaptureOnGamepad\(/gm)].map(m=>m.index)
+    .filter(i=>text.indexOf('{',i)<text.indexOf(';',i));
+  if(starts.length===1){
+   const at=starts[0],callback=text.slice(at,closeBrace(text,text.indexOf('{',at))+1);
+   const unique=(s,marker)=>{const i=s.indexOf(marker);return i>=0&&s.indexOf(marker,i+1)<0?i:-1;};
+   const block=marker=>{const p=unique(callback,marker);return p<0?'':callback.slice(p,closeBrace(callback,callback.indexOf('{',p))+1);};
+   const activation=block('    if (hcMatrixAdmitted) {');
+   const legion=block('    if (controllerMotionRoute) {\r\n        if (controllerProcessed) {');
+   const gate=block('    if (wantFullSample) {');
+   const field=/^        rec\["matrixIdentity"\] = [^\r\n]+;$/m.exec(gate)?.[0]??'';
+   const positions=[preparation,activation,legion,field].map(s=>s?unique(callback,s):-1);
+   const identity=/\b(?:matrixIdentity|matrixIdentityFallback)\b/g;
+   const externalUses=[...text.matchAll(identity)].length;
+   const otherUses=[...([preparation,activation,legion,field].filter(Boolean).reduce((s,part)=>s.replace(part,''),callback)).matchAll(identity)].length;
+   const publications=[field,activation,legion].map(sha);
+   if(positions.every((p,i)=>p>=0&&(!i||p>positions[i-1]))&&externalUses===8&&otherUses===0&&
+      publications[0]==='41d53b8a7e6077914d1eb510c98fed0882710031ec6ea3940b63235c0e625e43'&&
+      publications[1]==='f205d92d9b258207c4f9db1745a61c20d3cca687d08e1e7ca77b404d3109003c'&&
+      publications[2]==='3e2688cf0182b7114069c5b1b7bab86f23947c951ea1d6f259c86cf663b7d2d5'){
+    for(const row of busMatrixPrepRows)if(row.beforeSha256===before&&row.currentSha256===after&&row.unchanged===false){
+     row.controlledRefactorVerified=true;row.refactorScope='exact-deferred-bus-matrix-label-publication';
+     [row.identityPublicationSha256,row.identityActivationSha256,row.identityControllerSha256]=publications;
+    }
+   }
+  }
  }
 }
 // Only the exact reviewed binding changes are admitted; arbitrary selector changes still fail.
@@ -303,7 +389,17 @@ for(const method of privateContract.methods) {
 if(sourceBytes.includes(Buffer.from('ymcc::capabilities::motion::primaryKind('))){
  const file=path.join(fixture,'primary-owner-contract.json'),bytes=fs.readFileSync(file),contract=JSON.parse(bytes);fixtureInputs.push({path:file,sha256:sha(bytes)});
  if(contract.schemaVersion!==1||contract.methods.length!==3)throw Error('Motion primary-owner contract schema');
- if((!opt['collect-failures']||opt['generate-only'])&&(contract.preservedMethods.length!==5||contract.preservedMethods.some(method=>{const body=actual.entries.find(x=>x.name===method.symbol);return !body||sha(body.code.replaceAll('\r\n','\n'))!==method.sha256;})))throw Error('Motion primary-owner changed preserved source/identity gates');
+ if((!opt['collect-failures']||opt['generate-only'])&&(contract.preservedMethods.length!==5||contract.preservedMethods.some(method=>{
+  const body=actual.entries.find(x=>x.name===method.symbol);if(!body)return true;
+  let preserved=body.code.replaceAll('\r\n','\n');
+  // Only the exact Win5 family case may extend this previously frozen bound
+  // helper. All remaining identity/source checks must retain the original hash.
+  if(method.symbol==='inputCaptureNewHcMotionSelectorBound'){
+   const win5='recipe->deviceClass == "HandheldCompanion.Devices.GPDWin5" ? YmccFamily::Gpd :\n        ';
+   if(preserved.split(win5).length===2)preserved=preserved.replace(win5,'');
+  }
+  return sha(preserved)!==method.sha256;
+ })))throw Error('Motion primary-owner changed preserved source/identity gates');
  for(const method of contract.methods){
   if(sha(method.before)!==method.beforeSha256)throw Error('Motion primary-owner preimage changed');
   const current=actual.entries.find(entry=>entry.name===method.symbol);if(!current||sha(current.code.replaceAll('\r\n','\n'))!==method.afterSha256)continue;
@@ -342,7 +438,9 @@ function run(command,argv,log,env=process.env,cwd=out) {
 }
 function required(r,label) {if(r.error||r.status!==0)throw Error(`${label} failed (${r.status}); see evidence log`);return r.stdout;}
 try {
+  if(!isBaseline&&!opt['collect-failures']&&oneXFactoryCheck?.unchanged===false&&!oneXFactoryCheck.controlledRefactorVerified)throw Error('Exact OneX factory identity source or bound dependencies changed before compilation');
   if(opt['generate-only']) {report.status='generated-only';persist();console.log(out);process.exit(0);}
+  if(!isBaseline&&!opt['collect-failures']&&busMatrixPrepRows.some(row=>!row.unchanged&&!row.controlledRefactorVerified))throw Error('BUS matrix preparation or exact label publication changed before compilation');
   if(process.platform!=='win32')throw Error('MSVC Windows toolchain required');
   let vcvars=opt.vcvars;
   if(!vcvars) {
@@ -377,7 +475,7 @@ try {
       parsed.failures.some(f=>f.group==='aliases')&&!parsed.failures.some(f=>['preserved-routes','legacy-static','legacy-controller'].includes(f.group));
     const legacyDeficit=parsed.new9FeatureAvailable===true&&parsed.legacyFeatureAvailable===false&&parsed.failures.some(f=>f.group==='legacy-admission')&&!parsed.failures.some(f=>['preserved-routes','legacy-static','legacy-controller'].includes(f.group));
     const reviewedFailureGroups=new Set(['catalog','legacy-active-axes','legacy-matrices','legacy-receipt','legacy-unbound-receipt','reviewed-no-fallback','reviewed-receipt','reviewed-selection','reviewed-tuple']);
-    const reviewedDeficit=parsed.reviewedResourceModels===18&&parsed.new9FeatureAvailable===true&&parsed.legacyFeatureAvailable===true&&parsed.failures.some(f=>f.group==='reviewed-selection')&&parsed.failures.some(f=>f.group==='legacy-matrices')&&parsed.failures.every(f=>reviewedFailureGroups.has(f.group));
+    const reviewedDeficit=parsed.reviewedResourceModels===expected.reviewed.length&&parsed.new9FeatureAvailable===true&&parsed.legacyFeatureAvailable===true&&parsed.failures.some(f=>f.group==='reviewed-selection')&&parsed.failures.some(f=>f.group==='legacy-matrices')&&parsed.failures.every(f=>reviewedFailureGroups.has(f.group));
     const accepted=isBaseline?result.status===1&&parsed.status==='fail'&&(opt['reviewed-baseline']?reviewedDeficit:opt['new9-baseline']?new9Deficit:legacyDeficit):result.status===0&&parsed.status==='pass';
     report.configurations.push({name,flags,compileCommand:['cl.exe',...argv],executableSha256:sha(fs.readFileSync(exe)),exitCode:result.status,
       accepted,report:parsed,compilerTrace,nativeProcess});persist();
@@ -410,14 +508,14 @@ try {
       ['gamepadmotion-bypasses-admission',()=>mutateFn('BUS:GamepadMotion-condition-and-call-prefix',s=>s.replace('((live && pairProven) || calibrationPairProven || privateMotionPairProven)','true'))],
       ['catalog-resource-sha-wrong',null,s=>s.replace(/"[0-9a-f]{64}"/,`"${'0'.repeat(64)}"`)],
       ['capability-evidence-ignores-binding',()=>mutateFn('inputCaptureMotionEvidenceDue',s=>s.replace('lastPower != power || lastBinding != binding','lastPower != power'))],
-      ['capability-deletes-windows-consumer',()=>mutateFn('inputCaptureMotionCapabilityReceipt',s=>s.replace('{"inputConsumerImplemented", windows || tablet || legionS}','{"inputConsumerImplemented", false}'))],
-      ['capability-observation-promotes-controller',()=>mutateFn('inputCaptureMotionCapabilityReceipt',s=>s.replace('{"inputConsumerImplemented", windows || tablet || legionS}','{"inputConsumerImplemented", windows || tablet || legionS || (controller && controllerObserved)}'))],
+      ['capability-deletes-windows-consumer',()=>mutateFn('inputCaptureMotionCapabilityReceipt',s=>rewriteMotionCapabilityField(s,'inputConsumerImplemented','windows || tablet || legionS','false'))],
+      ['capability-observation-promotes-controller',()=>mutateFn('inputCaptureMotionCapabilityReceipt',s=>rewriteMotionCapabilityField(s,'inputConsumerImplemented','windows || tablet || legionS','windows || tablet || legionS || (controller && controllerObserved)'))],
       ['legacy-cache-processor-unchecked',()=>mutateFn('inputCaptureLegacyHcMotionSelectorBound',s=>s.replace('g_hcMotionSelector.dmiProcessor == g_machineIdentity.processor','true'))],
       ['legacy-cache-version-unchecked',()=>mutateFn('inputCaptureLegacyHcMotionSelectorBound',s=>s.replace('g_hcMotionSelector.dmiSystemVersion == g_machineIdentity.systemVersion','true'))],
       ['legacy-crosspair-lookup',null,null,s=>s.replace('recipe.accelMatrixId == accelMatrixId','true')],
       ['legacy-controller-windows-admitted',()=>{let t=source;for(const name of ['inputCaptureResolveLegacyHcMotionSelector','inputCaptureLegacyHcMotionSelectorBound']){const s=actual.entries.find(e=>e.name===name).code;t=t.replace(s,s.replace(' || recipe->controllerPreferred',''));}return t;}],
       ['catalog-steammachine-added',null,s=>s.replace('inline constexpr Recipe recipes[] = {','inline constexpr Recipe recipes[] = {\n{"HandheldCompanion.Devices.SteamMachine","forged","gyro","accel","wrong","wrong"},')],
-      ['generic-claims-exact-machine',()=>mutateFn('inputCaptureMotionCapabilityReceipt',v=>v.replace('{"machineIdentityResolved",identity.resolved}','{"machineIdentityResolved",true}'))],
+      ['generic-claims-exact-machine',()=>mutateFn('inputCaptureMotionCapabilityReceipt',v=>rewriteMotionCapabilityField(v,'machineIdentityResolved','identity.resolved','true'))],
       ['generic-cache-product-unchecked',()=>mutateFn('inputCaptureGenericHcMotionSelectorBound',v=>v.replace('g_hcMotionSelector.dmiProduct==g_machineIdentity.product','true'))],
       ['generic-cache-source-digest-unchecked',()=>mutateFn('inputCaptureGenericHcMotionSelectorBound',v=>v.replace('g_hcMotionSelector.matrixSourceSha256==recipe->sourceSha256','true'))],
 

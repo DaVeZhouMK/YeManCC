@@ -12,7 +12,7 @@ for(let i=0;i<args.length;++i){const arg=args[i];if(!arg.startsWith('--')){asser
 const selectedCases=options.get('--case')?.split(',')??[];assert(new Set(selectedCases).size===selectedCases.length&&selectedCases.every(Boolean),'Invalid case selection');
 const originalVariants=['production','background-owner-original','original-child-bypass','msi-original-bound-gap','msi-family-gate-removed','virtual-ui-original-gap','dsu-native-original-bypass'];
 const selectedVariants=options.get('--variants')?.split(',')??originalVariants;
-assert(selectedVariants.length&&new Set(selectedVariants).size===selectedVariants.length&&selectedVariants.every(v=>[...originalVariants,'background-discovery-every-tick'].includes(v)),'Invalid explicit variant selection');
+assert(selectedVariants.length&&new Set(selectedVariants).size===selectedVariants.length&&selectedVariants.every(v=>[...originalVariants,'background-discovery-every-tick','dsu-idle-original-check'].includes(v)),'Invalid explicit variant selection');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const build = path.resolve(repo, '../../Build/CustomSteamLibrary');
 const coreEvidence = path.resolve(repo, '../../../Testing/YMCC/Evidence');
@@ -20,18 +20,45 @@ const root = path.resolve(rootArgument || path.join(coreEvidence, 'Build', 'Cust
 const within = (base, file) => { const relative = path.relative(base, file); return relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); };
 assert([build, coreEvidence].some(base => within(base, root)) && !fs.existsSync(root), 'Use a fresh isolated legacy Build or Testing/YMCC/Evidence directory');
 fs.mkdirSync(root, { recursive: true });
-const preparationInputs=['tools/custom_steam_library_virtual_input_selftest.mjs','tools/custom_steam_library_virtual_input_fixture.cpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','native/dsu_server.cpp','native/controller_persona.h','native/custom-steam-library/workspace_host.cpp','native/dsu_frame.h','native/dsu_server.h','deps/json/json.hpp'].map(relative=>{
+const preparationInputs=['tools/custom_steam_library_virtual_input_selftest.mjs','tools/custom_steam_library_virtual_input_fixture.cpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','native/radial_input_isolation.h','native/dsu_server.cpp','native/controller_persona.h','native/custom-steam-library/workspace_host.cpp','native/dsu_frame.h','native/dsu_server.h','native/gamepad_ui_gate_evidence.h','deps/json/json.hpp'].map(relative=>{
  const bytes=fs.readFileSync(path.join(repo,relative)),snapshot=path.join(root,'preparation-inputs',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{relative,snapshot,sha256:createHash('sha256').update(bytes).digest('hex')};
 });
 const mainFile = path.join(repo, 'native/main.cpp');
 const expanded = snapshotVirtualControllerSource(mainFile, path.join(root, 'source/native'));
 const bytes = expanded.inputs[0].data;
 const source = expanded.source.replaceAll('\r\n', '\n');
+const usesPropertyNames = source.includes('g_customSteamLibraryPropertyNames');
+if (usesPropertyNames) {
+  const relative='native/window_property_names.h';
+  const bytes=fs.readFileSync(path.join(repo,relative)),snapshot=path.join(root,'preparation-inputs',relative);
+  fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});
+  preparationInputs.push({relative,snapshot,sha256:createHash('sha256').update(bytes).digest('hex')});
+}
+// The ordinary controller consumer keeps these as explicit memory ports.
+// LightNoGame behavior remains owned by its existing dedicated consumer.
+let refocusSupport = '';
+if (source.includes('const ymcc::lightforeground::Request* lightOrigin')) {
+  const relative='native/light_foreground_handoff.h',bytes=fs.readFileSync(path.join(repo,relative));
+  const request=bytes.toString('utf8').match(/struct Request \{[\s\S]*?\n\};/);
+  assert(request,'Missing current Light foreground request declaration');
+  const snapshot=path.join(root,'preparation-inputs',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});
+  fs.writeFileSync(snapshot,bytes,{flag:'wx'});preparationInputs.push({relative,snapshot,sha256:createHash('sha256').update(bytes).digest('hex')});
+  refocusSupport = 'namespace ymcc::lightforeground {\n'+request[0]+'\n'+
+    'static ULONGLONG processCreated(DWORD){throw std::runtime_error("light handoff outside selected controller consumer");}\n}\n'+
+    'static struct {bool lightNoGame=false;HWND summonOrigin=nullptr;} g_focusSession;\n'+
+    'static unsigned long long g_focusSessionSequence=0;\nstatic std::atomic<unsigned long long> g_webviewGeneration{1};\n'+
+    'static bool focusLightMayRefocus(ULONGLONG){throw std::runtime_error("light admission outside selected controller consumer");}\n'+
+    'static bool taskViewFocusHandoffPaused(){throw std::runtime_error("light queue outside selected controller consumer");}\n'+
+    'static void appendNativeLifecycleLog(const char*,const json&);\n';
+}
+
 const expansionHelper = path.join(repo, 'tools/virtual_controller_runtime_source.mjs');
 const helperBytes = fs.readFileSync(expansionHelper);
 fs.copyFileSync(expansionHelper, path.join(root, 'source/virtual_controller_runtime_source.mjs'));
 function block(marker, declaration = false) {
-  const start = source.indexOf(marker); assert(start >= 0, 'Missing production marker: ' + marker);
+  let start = source.indexOf(marker);
+  while (start >= 0 && source.indexOf(';', start) >= 0 && source.indexOf(';', start) < source.indexOf('{', start)) start = source.indexOf(marker, start + marker.length);
+  assert(start >= 0, 'Missing production definition: ' + marker);
   const open = source.indexOf('{', start); assert(open > start);
   let depth = 0, state = '', escaped = false;
   for (let i = open; i < source.length; i++) {
@@ -64,7 +91,7 @@ assert(child.includes('if (parentInputModeEnabled()) {') && /g_launchOptions\.in
   'Parent integration must not start a second child XInput poller');
 const propertiesStart = source.indexOf('static constexpr wchar_t kCustomSteamLibraryInputOwnerProperty[]');
 const propertiesEnd = source.indexOf('static ULONG_PTR customSteamLibraryWindowProperty(', propertiesStart);
-const radialHelpers=declaration('g_radialUiOwnsInput')+'\n'+declaration('g_radialReturning')+'\n'+block('static bool radialHasInputOwner(');
+const radialHelpers='#include "radial_input_isolation.h"\n'+['g_radialUiOwnsInput','g_radialReturning','g_radialInputIsolation','g_radialInputIsolationSourceRevision','g_radialInputIsolationHostEpoch'].map(declaration).join('\n')+'\n'+block('static bool radialInputIsolationBindingCurrent() {')+'\n'+['radialInputIsolationInvalidate','radialInputIsolationOwnership','radialInputIsolationObserve'].map(name=>block('static void '+name+'(')).join('\n')+'\n'+block('static bool radialHasInputOwner() {');
 const windowHelpers = [
   'static bool focusMainWindowIsForeground(', 'static bool refocusWebView(', 'static HWND customSteamLibraryWindow(',
   'static ULONG_PTR customSteamLibraryWindowProperty(', 'static bool customSteamLibraryProcessMatches(',
@@ -79,8 +106,8 @@ const uiStart = source.indexOf('static WORD g_uiShoulderPending = 0;');
 const uiEnd = source.indexOf('static constexpr SHORT GP_UI_THUMB_THRESHOLD = 16000;', uiStart)
   + 'static constexpr SHORT GP_UI_THUMB_THRESHOLD = 16000;'.length;
 assert(uiStart >= 0 && uiEnd > uiStart);
-const outputDecision = ['steamDeckUiNeutral', 'ps5UiNeutral', 'msiUiNeutral', 'virtualUiCovered', 'virtualUiNeutral', 'submitNeutral', 'dsuUiNeutral', 'dsuSubmitNeutral'].map(name => {
-  const line = source.split('\n').find(line => line.trimStart().startsWith('const bool ' + name + ' ='));
+const outputDecision = ['steamDeckUiNeutral', 'ps5UiNeutral', 'msiUiNeutral', 'virtualUiCovered', 'virtualUiNeutral', 'submitNeutral', 'dsuDemand', 'dsuUiNeutral', 'dsuSubmitNeutral'].map(name => {
+  const line = source.split('\n').find(line => line.trimStart().startsWith((name==='dsuDemand'?'const auto ':'const bool ') + name + ' ='));
   assert(line, 'Missing final-output decision: ' + name); return line;
 }).join('\n');
 const effectiveStart = source.indexOf('    FocusFrameContent effectiveContent =');
@@ -88,28 +115,35 @@ const effectiveEnd = source.indexOf('    // B1：hash', effectiveStart);
 assert(effectiveStart >= 0 && effectiveEnd > effectiveStart);
 const fixture = fs.readFileSync(path.join(repo, 'tools/custom_steam_library_virtual_input_fixture.cpp'), 'utf8');
 const replacements = {
+  '//__PRODUCTION_REFOCUS_SUPPORT__': refocusSupport,
   '//__PRODUCTION_OWNER_DECLARATIONS__': block('enum class CustomSteamLibraryInputPhase', true) + '\n' +
     declaration('g_controllerFrontendIsolationEnabled') + '\n' + block('static bool controllerFrontendIsolationSetting(') + '\n' +
     declaration('g_inputReleaseRequired') + '\n' + declaration('g_customSteamLibraryInputPhase') + '\n' + declaration('g_customSteamLibraryInputDeadline') + '\n' +
     source.slice(propertiesStart, propertiesEnd),
   '//__PRODUCTION_WINDOW_HELPERS__': radialHelpers+'\n'+windowHelpers,
   '//__PRODUCTION_UI_GLOBALS__': source.slice(uiStart, uiEnd) + '\n' + declaration('g_gamepadAxisNeutralAdmissionRequired'),
+  '//__PRODUCTION_UI_LOG_RECOVERY_MEMO__': block('struct UiOutputLogRecoveryMemo', true),
   '//__PRODUCTION_OUTPUT_GATES__': block('enum class FocusDecision', true) + '\n' + block('struct FocusPlan {', true) + '\n' + block('static bool msiUiBoundTargetAdmitted(') + '\n' + block('static const char* virtualUiBoundPersona(') + '\n' + outputGates + '\n' + block('static void virtualUiOutputNote(') + '\n' + block('static FocusPlan focusIsolationPlanTick(') + '\n' + block('static void dsuUiOutputNote('),
   '//__PRODUCTION_FRAME_ASSEMBLY__': block('static constexpr float inputHostNormalizeAxis(') + '\n' +
     block('struct FocusFrameContent {', true) + '\n' + block('static FocusFrameContent focusIsolationNeutralContent(') + '\n' +
     block('static json focusIsolationAssembleFrame('),
+  '//__PRODUCTION_UI_SAMPLE__': block('struct UiActionSharedHidSample {',true),
   '//__PRODUCTION_UI_PROCESS__': block('static void gamepadProcessUiInput('),
   '//__PRODUCTION_FINAL_OUTPUT_DECISION__': outputDecision,
   '//__PRODUCTION_EFFECTIVE_FRAME__': source.slice(effectiveStart, effectiveEnd),
   '//__PRODUCTION_DSU_NEUTRAL__': block('struct FocusNeutralDsu {', true) + '\n' + block('static FocusNeutralDsu focusIsolationNeutralDsu('),
   '//__PRODUCTION_DSU_DECISION__': outputDecision,
-  '//__PRODUCTION_DSU_FEED__': block('    {\n        TickPreHostSubScope dsuScope('),
+  '//__PRODUCTION_DSU_FEED__': block('    if (dsuDemand) {\n        TickPreHostSubScope dsuScope('),
 };
 function generate(mutant = false) {
-  let result = fixture;
+  let result = (usesPropertyNames ? '#define YMCC_WINDOW_PROPERTY_NAMES\n' : '') + fixture;
   for (const [marker, production] of Object.entries(replacements)) {
     assert(result.includes(marker), 'Missing fixture insertion: ' + marker);
     let fragment = production;
+    if (mutant === 'dsu-idle-original-check' && marker === '//__PRODUCTION_DSU_DECISION__') {
+      assert(fragment.includes('dsuUiNeutral = dsuDemand && ('));
+      fragment=fragment.replace('dsuUiNeutral = dsuDemand && (','dsuUiNeutral = (');
+    }
     if (mutant === 'background-discovery-every-tick' && marker === '//__PRODUCTION_WINDOW_HELPERS__'){const from='const HWND child = foregroundClaimsParent ? customSteamLibraryWindow() : nullptr;';assert(fragment.includes(from),'Missing actual foreground precheck');fragment=fragment.replace(from,'const HWND child = customSteamLibraryWindow();');}
     if (mutant === 'dsu-native-bypass' && marker === '//__PRODUCTION_DSU_FEED__') fragment = fragment.replace('dsuFrame.semanticNeutral=dsuSubmitNeutral;', 'dsuFrame.semanticNeutral=submitNeutral;');
     if (mutant === 'background-window-owner' && marker === '//__PRODUCTION_WINDOW_HELPERS__') {
@@ -166,6 +200,8 @@ if(dsuMissing) assert(dsuMissing.status !== 0 && dsuMissing.report.cases.some(it
   && dsuMissing.report.cases.some(item=>item.name==='dsu-native-child-foreground-neutral-wire' && !item.passed), 'Tests missed native DSU foreground bypass');
 const backgroundDiscovery=selectedVariants.includes('background-discovery-every-tick')?run('background-discovery-every-tick','background-discovery-every-tick'):null;
 if(backgroundDiscovery)assert(backgroundDiscovery.status!==0&&backgroundDiscovery.report.cases.some(c=>c.name==='background-library-repeated-probes-do-zero-process-identity-work'&&!c.passed),'Repeated global discovery negative was not detected');
+const dsuIdleCheck=selectedVariants.includes('dsu-idle-original-check')?run('dsu-idle-original-check','dsu-idle-original-check'):null;
+if(dsuIdleCheck)assert(dsuIdleCheck.status!==0&&dsuIdleCheck.report.cases.some(c=>c.name==='dsu-idle-skips-window-probes-and-fresh-subscription-honors-child'&&!c.passed&&c.error==='Idle DSU still checks foreground ownership'),'Idle DSU ownership regression was not detected');
 const sourceStable = preparationInputs.every(row=>createHash('sha256').update(fs.readFileSync(path.join(repo,row.relative))).digest('hex')===row.sha256 && createHash('sha256').update(fs.readFileSync(row.snapshot)).digest('hex')===row.sha256) && expanded.inputs.every(row => createHash('sha256').update(fs.readFileSync(row.file)).digest('hex') === row.sha256)
   && expanded.manifest.inputs.every(row => createHash('sha256').update(fs.readFileSync(row.snapshot)).digest('hex') === row.sha256)
   && fs.readFileSync(expansionHelper).equals(helperBytes)
@@ -178,6 +214,7 @@ const report = {...(current?.report??{allPassed:null,caseCount:0,cases:[]}),sour
  msiOriginalGapDetected:msiMissing?true:null,msiUnscopedMutationDetected:msiUnscoped?true:null,
  dsuOriginalBypassDetected:dsuMissing?true:null,dsuOriginalBypassFailedCases:dsuMissing?.report.failedCount??null,virtualOriginalGapDetected:virtualMissing?true:null,
  backgroundOwnerNegativeDetected:backgroundOwner?true:null,backgroundDiscoveryNegativeDetected:backgroundDiscovery?true:null,
+ dsuIdleOwnershipNegativeDetected:dsuIdleCheck?true:null,
  dsuSourceSha256:createHash('sha256').update(fs.readFileSync(path.join(repo,'native/dsu_server.cpp'))).digest('hex'),
  childStillUsesParentSemanticInput:fullOriginalMatrix?true:null,retiredPersonasRemainRejected:fullOriginalMatrix?true:null,
  retiredExpectationReason:'Legacy DS4 rows retain original retired-admission assertions; unselected originals are NOT_RUN',outputRoot:root};

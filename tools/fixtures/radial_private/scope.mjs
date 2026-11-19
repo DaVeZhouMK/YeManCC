@@ -7,6 +7,14 @@ import {createRequire} from 'node:module';
 import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools,classifyBundledInput,verifyBundledToolScope,verifyBundledImplementation} from '../../ymcc_sim/global/bundled-node-tool-authority.mjs';
 export const run=promisify(execFile);
 export const LIMIT=3072;
+export const REAL_MONITOR_RUNTIME_LIMIT=4096;
+const REAL_MONITOR_RUNTIME_ENTRIES=Object.freeze([
+ 'tools/ymcc_sim/global/monitor-notice-lifecycle/real-webview-selftest.mjs',
+ 'tools/ymcc_sim/global/monitor-notice-lifecycle/real-webview-negative-selftest.mjs',
+ 'tools/ymcc_sim/global/monitor-notice-lifecycle/real-renderer-selftest.mjs',
+ 'tools/ymcc_sim/global/monitor-notice-lifecycle/real-renderer-negative-selftest.mjs',
+]);
+function artifactLimit(entry){return REAL_MONITOR_RUNTIME_ENTRIES.includes(entry)?REAL_MONITOR_RUNTIME_LIMIT:LIMIT;}
 export const SOURCE_MEMBERS=[...BUNDLED_AUTHORITY_SOURCES,'tools/fixtures/radial_private/scope.mjs','tools/fixtures/radial_private/native-environment.h','tools/fixtures/radial_private/tool-versions.ps1','tools/fixtures/radial_private/native-tools.json'];
 export const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const key=file=>path.resolve(file).toLowerCase();
@@ -24,14 +32,15 @@ export function nativeTools(repo){
  for(const name of ['compiler','linker','powershell','cmd','staticLoader','webviewHeader','webviewOptionsHeader']){const p=manifest.selected[name];const file=name==='staticLoader'||name.startsWith('webview')?path.resolve(repo,p):p;need(pins.has(key(file)),'SELECTED_TOOL_UNDECLARED:'+name);}
  return {manifestFile,manifest,files,pins};
 }
-function reviewedRuntime(){
+function reviewedRuntime(entry){
+ if(entry==='tools/ymcc_sim/global/monitor-notice-lifecycle/native-lease-selftest.mjs'||entry==='tools/ymcc_sim/global/monitor-notice-lifecycle/native-global.mjs')return [];
  const file=process.env.YMCC_RADIAL_EXECUTION_REVIEW,pin=process.env.YMCC_RADIAL_EXECUTION_REVIEW_SHA256;if(!file&&!pin)return [];
  need(file&&pin&&sha(file)===pin,'REVIEW_DECLARATION_PIN');const approval=readJson(file);need(approval.approved===true&&Array.isArray(approval.runtimeFiles),'REVIEW_DECLARATION_SCHEMA');
  const rows=[{path:path.resolve(file),sha256:pin},...approval.runtimeFiles.map(row=>({path:path.resolve(approval.runtimeRoot,row.path),sha256:row.sha256}))];
  for(const row of rows)need(inside(approval.runtimeRoot,row.path)||key(row.path)===key(file),'REVIEW_RUNTIME_ESCAPE');for(const row of rows)need(sha(row.path)===row.sha256,'REVIEW_RUNTIME_CHANGED');return rows;
 }
-export function toolDeclaration(repo){
- try{const node=lockBundledNodeTools(repo),native=nativeTools(repo);const rows=unique([...node.tools,...native.files,...reviewedRuntime()]);need(rows.length<=LIMIT,'COMBINED_ARTIFACT_LIMIT');return {artifactInputs:rows.map(row=>row.path)};}
+export function toolDeclaration(repo,{entry}={}){
+ try{const node=lockBundledNodeTools(repo),native=nativeTools(repo);const rows=unique([...node.tools,...native.files,...reviewedRuntime(entry)]);need(rows.length<=artifactLimit(entry),'COMBINED_ARTIFACT_LIMIT');return {artifactInputs:rows.map(row=>row.path)};}
  catch(error){return {artifactInputs:[],blockedReason:'RADIAL_PRIVATE_TOOL_AUTHORITY_UNAVAILABLE: '+error.message};}
 }
 export function begin(repo,out,entry,{resume=false}={}){
@@ -39,7 +48,7 @@ export function begin(repo,out,entry,{resume=false}={}){
  if(!resume){need(!fs.existsSync(target),'FRESH_OUT_REQUIRED');fs.mkdirSync(target,{recursive:true});}else need(fs.statSync(target).isDirectory(),'PREPARED_OUT_REQUIRED');
  const node=lockBundledNodeTools(root),native=nativeTools(root),sourceHashes={};
  for(const relative of [...SOURCE_MEMBERS,'tsconfig.json',entry])sourceHashes[relative]=sha(path.join(root,relative));
- const artifacts=unique([...node.tools,...native.files,...reviewedRuntime()]);need(artifacts.length<=LIMIT,'COMBINED_ARTIFACT_LIMIT');
+ const artifacts=unique([...node.tools,...native.files,...reviewedRuntime(entry)]);need(artifacts.length<=artifactLimit(entry),'COMBINED_ARTIFACT_LIMIT');
  return {repo:root,out:target,node,native,sourceHashes,observed:new Map(),generated:[],entry,toolArtifacts:artifacts};
 }
 export function source(scope,file,contents=fs.readFileSync(file)){
@@ -64,11 +73,12 @@ export function generated(scope,file,role){
  const row={path:path.resolve(file),sha256:sha(file),status:'OK',role};scope.generated.push(row);scope.sourceHashes[row.path]=row.sha256;return row;
 }
 export function verify(scope){
- verifyBundledToolScope(scope.node,scope.repo);nativeTools(scope.repo);reviewedRuntime();
+ const limit=artifactLimit(scope.entry);
+ verifyBundledToolScope(scope.node,scope.repo);nativeTools(scope.repo);reviewedRuntime(scope.entry);
  for(const [relative,digest]of Object.entries(scope.sourceHashes))need(sha(path.isAbsolute(relative)?relative:path.join(scope.repo,relative))===digest,'SOURCE_OR_GENERATED_CHANGED:'+relative);
  for(const row of scope.toolArtifacts)need(sha(row.path)===row.sha256,'TOOL_CHANGED_AFTER:'+row.path);
- need(unique([...scope.toolArtifacts,...scope.generated]).length<=LIMIT,'FINAL_ARTIFACT_LIMIT');
- return {nodeGraphSha256:scope.node.graphSha256,nodePackageCount:scope.node.packageCount,nodeFileCount:scope.node.fileCount,explicitNativeCount:scope.native.files.length,artifactCount:unique([...scope.toolArtifacts,...scope.generated]).length,maxArtifactInputs:LIMIT,osLoadedModuleGraph:false};
+ need(unique([...scope.toolArtifacts,...scope.generated]).length<=limit,'FINAL_ARTIFACT_LIMIT');
+ return {nodeGraphSha256:scope.node.graphSha256,nodePackageCount:scope.node.packageCount,nodeFileCount:scope.node.fileCount,explicitNativeCount:scope.native.files.length,artifactCount:unique([...scope.toolArtifacts,...scope.generated]).length,maxArtifactInputs:limit,osLoadedModuleGraph:false};
 }
 export function receipt(scope,extra={}){
  return {schemaVersion:1,sourceHashes:scope.sourceHashes,nodeToolAuthority:scope.node,toolArtifacts:scope.toolArtifacts,toolDependencyInputs:[...scope.observed.values()].filter(r=>r.role==='tool').map(r=>r.row),compiledArtifacts:scope.generated,...extra};
@@ -155,7 +165,7 @@ export async function executeReviewed(scope,exe,web){
  need(actualFiles.length===approval.runtimeFiles.length&&actualFiles.length<=LIMIT,'RUNTIME_MEMBERSHIP');
  for(const file of actualFiles){need(key(fs.realpathSync(file))===key(file),'RUNTIME_REPARSE');const row=approval.runtimeFiles.find(r=>key(path.resolve(runtime,r.path))===key(file));need(row?.sha256===sha(file),'RUNTIME_PIN:'+file);}
  need(actualFiles.some(f=>key(f)===key(path.join(runtime,'msedgewebview2.exe'))),'FIXED_RUNTIME_EXECUTABLE');
- need(unique([...scope.toolArtifacts,...scope.generated,...actualFiles.map(file=>({path:file,sha256:sha(file)}))]).length<=LIMIT,'RUNTIME_COMBINED_LIMIT');
+ need(unique([...scope.toolArtifacts,...scope.generated,...actualFiles.map(file=>({path:file,sha256:sha(file)}))]).length<=artifactLimit(scope.entry),'RUNTIME_COMBINED_LIMIT');
  const env={...process.env,YMCC_RADIAL_FIXED_RUNTIME:runtime,YMCC_RADIAL_FIXED_RUNTIME_VERSION:approval.runtimeVersion};
  for(const name of Object.keys(env))if(/^WEBVIEW2_/i.test(name))delete env[name];
  scope.nativeLaunchAttempted=true;

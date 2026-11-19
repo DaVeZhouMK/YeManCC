@@ -26,8 +26,12 @@ internal sealed class OneXFanDeviceLifecycle
     private readonly MethodInfo initialize, dispose, release;
     private object? ownedTransport;
     private bool ownsMarker, releaseReturned, cleanupPending;
+    internal object? SessionIdentity { get; private set; }
+    internal sealed record CloseRelease(object Operation, object? Session, bool? Returned, bool Current, string Detail);
+    internal CloseRelease? LastCloseRelease { get; private set; }
 
     internal bool HasResources => ownedTransport is not null || ownsMarker || cleanupPending;
+    internal bool OwnsDevice(object? target) => ReferenceEquals(device, target);
     internal bool IsOpen => ownsMarker && (bool)deviceOpen.GetValue(device)! &&
         ownedTransport is not null && ReferenceEquals(openLib.GetValue(null), ownedTransport);
 
@@ -109,6 +113,8 @@ internal sealed class OneXFanDeviceLifecycle
             // HC's base helper caches non-null even when InitializeOls returns false.
             // Keep this object's ownership local until initialization really succeeds.
             ownedTransport = Activator.CreateInstance(transportType) ?? throw Contract("OpenLib construction returned null");
+            SessionIdentity = new object();
+            LastCloseRelease = null;
             var initialized = Invoke(initialize, ownedTransport) is true;
             if (!initialized) { CleanupTransport(); return false; }
             CheckCurrent(stillCurrent);
@@ -191,24 +197,48 @@ internal sealed class OneXFanDeviceLifecycle
         if (!current()) throw new FanApiException(409, "FAN_WRITE_SUPERSEDED", "OneX fan write was superseded");
     }
 
-    internal void Close()
+    // Standalone leaf cleanup retains its original local ownership checks. Host
+    // production callers always supply their bound return operation below.
+    internal void Close() => Close(new object(), () => true);
+
+    internal void Close(object operation, Func<bool> stillCurrent)
     {
-        lock (TransportGate) CloseCore();
+        lock (TransportGate) CloseCore(operation, stillCurrent);
     }
 
-    private void CloseCore()
+    private void CloseCore(object operation, Func<bool> stillCurrent)
     {
         if (!HasResources) return;
         cleanupPending = true;
         if (ownsMarker && !releaseReturned)
         {
-            if (!IsOpen || useOpenLib.GetValue(device) is not true) throw Contract("fan release lost its owned transport");
-            // SetFanControl(false) ignores this exact EC method's bool. Preserve
-            // its 0x44a=0 command and consume the actual software write result.
-            var ec = ValidatedFanData();
-            if (Invoke(release, device, (ushort)0x44a, ec, (byte)0) is not true)
-                throw Contract("EC fan automatic return was rejected; owned transport retained");
-            releaseReturned = true;
+            bool? returned = null;
+            LastCloseRelease = new(operation, SessionIdentity, null, false, "not-dispatched");
+            try
+            {
+                CheckWriteCurrent(stillCurrent);
+                if (!IsOpen || useOpenLib.GetValue(device) is not true ||
+                    serial.GetValue(device) is not null || vendorHid.GetValue(device) is not null)
+                    throw Contract("fan release lost its owned transport");
+                var ec = ValidatedFanData();
+                returned = Invoke(release, device, (ushort)0x44a, ec, (byte)0) is true;
+                if (returned != true)
+                {
+                    LastCloseRelease = new(operation, SessionIdentity, false, stillCurrent(), "returned-false");
+                    throw Contract("EC fan automatic return was rejected; owned transport retained");
+                }
+                CheckWriteCurrent(stillCurrent);
+                if (!IsOpen || serial.GetValue(device) is not null || vendorHid.GetValue(device) is not null)
+                    throw Contract("fan release lost its owned transport after write");
+                releaseReturned = true;
+                LastCloseRelease = new(operation, SessionIdentity, true, true, "returned-true");
+            }
+            catch (Exception error)
+            {
+                if (LastCloseRelease?.Detail != "returned-false")
+                    LastCloseRelease = new(operation, SessionIdentity, returned, false, error.Message);
+                throw;
+            }
         }
         CleanupTransport();
     }
@@ -249,4 +279,88 @@ internal sealed class OneXFanDeviceLifecycle
         if (!current()) throw new FanApiException(409, "HC_RESUME_SUPERSEDED", "OneX fan initialization was superseded");
     }
     private static InvalidOperationException Contract(string detail) => new("ONEX_FAN_OPEN_CONTRACT: " + detail);
+}
+
+internal sealed partial class RealHcBackend
+{
+    private sealed record OneXReturnOwner(OneXFanDeviceLifecycle Lifecycle, object? Device,
+        object? Session, object? SessionMarker, bool Closing, long Cycle, long Epoch, long Operation);
+    private long oneXReturnOperation;
+    private OneXFanDeviceLifecycle.CloseRelease? settledOneXCloseRelease;
+    private OneXReturnOwner? oneXOemReturnOwner;
+
+    // Return authority is separate from ordinary control/duty authority. A close
+    // may return its own transport after revocation, never a replaced session.
+    private OneXReturnOwner CaptureOneXReturnOwner(OneXFanDeviceLifecycle lifecycle, bool closing = false) =>
+        new(lifecycle, device, lifecycle.SessionIdentity, sessionDeviceReference, closing, ControlCycleId,
+            Volatile.Read(ref suspendGateEpoch), Interlocked.Increment(ref oneXReturnOperation));
+    private bool OneXReturnSessionMatches(OneXReturnOwner owner) =>
+        ReferenceEquals(owner.Lifecycle, oneXFanLifecycle) && ReferenceEquals(owner.Device, device) &&
+        owner.Lifecycle.OwnsDevice(owner.Device) && ReferenceEquals(owner.SessionMarker, sessionDeviceReference) &&
+        (ReferenceEquals(owner.Device, owner.SessionMarker) || owner.Closing && owner.SessionMarker is null) &&
+        ReferenceEquals(owner.Session, owner.Lifecycle.SessionIdentity) && owner.Cycle == ControlCycleId;
+    private bool OneXReturnStillCurrent(OneXReturnOwner owner) =>
+        !operationTimedOut && OneXReturnSessionMatches(owner) &&
+        owner.Epoch == Volatile.Read(ref suspendGateEpoch) && owner.Operation == Volatile.Read(ref oneXReturnOperation);
+
+    private void ReturnOneXControl(OneXFanDeviceLifecycle lifecycle)
+    {
+        if (oneXOemReturnOwner is { } owner && ReferenceEquals(owner.Lifecycle, lifecycle))
+            lifecycle.SetControl(false, () => OneXReturnStillCurrent(owner));
+        else
+            lifecycle.SetControl(false, () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+    }
+
+    private void RestoreOneXControl(OneXFanDeviceLifecycle lifecycle)
+    {
+        if (oneXOemReturnOwner is not null)
+            throw new InvalidOperationException("OneX OEM return already owns this operation");
+        oneXOemReturnOwner = CaptureOneXReturnOwner(lifecycle);
+        try { ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false)); }
+        finally { oneXOemReturnOwner = null; }
+    }
+
+    private void CloseOneXFanDevice(OneXFanDeviceLifecycle lifecycle)
+    {
+        var owner = CaptureOneXReturnOwner(lifecycle, closing: true);
+        var hadResources = lifecycle.HasResources;
+        try { lifecycle.Close(owner, () => OneXReturnStillCurrent(owner)); }
+        finally
+        {
+            var result = lifecycle.LastCloseRelease;
+            // A Dispose retry carries the original accepted release result; it
+            // does not mint a new hardware operation or repay another session.
+            var sameAttempt = result is not null && ReferenceEquals(result.Operation, owner);
+            var retained = result is not null && ReferenceEquals(result, settledOneXCloseRelease) &&
+                result.Operation is OneXReturnOwner prior && OneXReturnSessionMatches(prior);
+            if (hadResources && result is not null && (sameAttempt || retained) && OneXReturnSessionMatches(owner))
+            {
+                settledOneXCloseRelease = result;
+                var proven = result.Returned == true && result.Current;
+                oemRestoreVerified = proven;
+                oemReleaseActionKind = proven ? "proven-by-onex-ec-release" :
+                    FanHostEngine.ReleaseActionKindName(result.Returned == false ? OemReleaseAction.Failed : OemReleaseAction.Unknown);
+                oemReleaseActionEvidence = $"onex-ec:044a=0 session-bound cycle={owner.Cycle} " +
+                    $"operation={((OneXReturnOwner)result.Operation).Operation} retained={retained} " +
+                    $"returned={result.Returned?.ToString() ?? "unknown"} current={result.Current} detail={result.Detail}";
+                oemRestoreEvidence = proven ? "onex-ec-automatic-return-true" : "onex-ec-automatic-return-unproven";
+                oemOwnershipStatus = proven ? "onex-ec-returned-physical-unknown" : "onex-ec-return-unproven-physical-unknown";
+                Diagnostic?.Invoke("restore.onex-close-release", new
+                {
+                    controlCycleId = owner.Cycle, operation = ((OneXReturnOwner)result.Operation).Operation,
+                    retained, returned = result.Returned, current = result.Current,
+                    releaseAction = oemReleaseActionKind, detail = result.Detail,
+                    physicalOwnershipConfirmed = false,
+                });
+            }
+            else if (hadResources)
+            {
+                oemRestoreVerified = false;
+                oemReleaseActionKind = FanHostEngine.ReleaseActionKindName(OemReleaseAction.Unknown);
+                oemReleaseActionEvidence = "onex-close: no current operation-bound release result";
+                oemRestoreEvidence = "onex-ec-automatic-return-unproven";
+                oemOwnershipStatus = "onex-ec-return-unproven-physical-unknown";
+            }
+        }
+    }
 }

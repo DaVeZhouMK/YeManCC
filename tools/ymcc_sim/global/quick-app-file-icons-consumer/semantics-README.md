@@ -21,7 +21,11 @@ compiling and fully rechecked afterwards; both tools and outputs retain the 3072
 artifact budget. The original 45000ms outer budget and 1000ms VM calls remain.
 Only its pinned esbuild service invocation may start a child process.
 
-Both real TypeScript modules are compiled separately on each positive/fault pass.
+The real TypeScript modules are compiled separately. The two icon faults each
+compile their own changed icon module and reuse the exact unchanged defaults
+transform from the positive arm of the same run. The case receipts record the
+actual compiler invocation and whether its transform was reused. Each case still
+initializes both modules in fresh VMs.
 quickAppDefaults has no allowed imports; quickAppIcons may require only the actual
 compiled ./quickAppDefaults module. No factory or algorithm is substituted. VM
 code generation is disabled. No process, fetch, browser, Buffer, timers, filesystem,
@@ -37,8 +41,9 @@ Name-based fallback marks do not grant a custom path default identity.
 
 Two one-statement mutations are applied only to owned in-memory source copies:
 remove slash normalization, and change the selected computer/browser variant to A.
-Each must compile both modules, initialize both VMs, then fail its named original
-assertion. Compiler errors, dependency refusals and VM startup failures never count
+Each must compile its changed module, initialize both VMs, then fail its named
+original assertion. Actual case names must match the unique selected set. Compiler
+errors, dependency refusals and VM startup failures never count
 as semantic detection. Raw inputs, transformed code/maps, calls/results and compiler
 protocol hashes are retained. The original 14 cases and 2 faults are not added to
 this consumer's counts and are not rerun by this entry.

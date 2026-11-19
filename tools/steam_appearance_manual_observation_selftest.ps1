@@ -19,7 +19,7 @@ function Get-Process {param($Name,$Id) @()}
 function Get-BackendProcesses {[pscustomobject]@{Id=42;Path=$script:BackendExe}}
 function Test-BackendOwner {$true}
 function Test-CssDesktopEditing {$script:Editing}
-function Get-AppearanceSteamSession {$script:SessionReads++;[pscustomobject]@{pid=123;birth=$(if($script:ChangedSession -and $script:SessionReads -gt 1){'457'}else{'456'});root='C:\owned-fixture-steam'}}
+function Get-AppearanceSteamSession {$script:SessionReads++;[pscustomobject]@{pid=123;birth=$(if($script:ChangedSession -and $script:DomReads -gt 0){'457'}else{'456'});root='C:\owned-fixture-steam'}}
 function Test-AppearanceRendered($Session,$Status){$script:DomReads++;if($script:EditAfterRender){$script:Editing=$true};$script:Rendered}
 function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1){throw 'OWNED_FAMILY_REQUIRED'}}
 function Initialize-PresetTargetHint {$script:HintReads++}
@@ -53,6 +53,19 @@ Reset-Case;$script:Repair=$true
 Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:DomReads -eq 0 -and $script:AppearanceFailureCode -eq 3) 'Known resource drift cannot earn resident confirmation or authorize an automatic repair'
 Reset-Case;$script:Prepared=$false
 Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:DomReads -eq 0) 'An unprepared preset cannot become Ready through verification'
+Reset-Case
+$transactionDir=Get-PresetStateDir
+New-Item -ItemType Directory -Path $transactionDir -Force|Out-Null
+$journal=Join-Path $transactionDir 'transaction.json'
+$journalText='{"version":1,"state":"unsettled-fixture"}'
+[IO.File]::WriteAllText($journal,$journalText)
+try{
+ $blocked=Reject {Invoke-AppearanceControl 'Idle'}
+ Assert ($blocked -and $script:DomReads -eq 0 -and $script:AppearanceFailureCode -eq 3) 'Unsettled preset transaction cannot earn a manual read-only receipt even with healthy flags and DOM'
+ Assert ([IO.File]::ReadAllText($journal) -ceq $journalText) 'Manual read-only refusal does not replay, clear, or rewrite the transaction'
+}finally{[IO.File]::Delete($journal)}
+Reset-Case
+Assert ((Invoke-AppearanceControl 'Idle').ok -and $script:DomReads -eq 1) 'After settlement the same read-only path confirms once without retry'
 Reset-Case;$script:Editing=$true
 Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:DomReads -eq 0 -and $script:AppearanceFailureCode -eq 15) 'Desktop editor owns the backend before any DOM observation'
 Reset-Case;$script:EditAfterRender=$true
@@ -60,7 +73,7 @@ Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:AppearanceFailur
 Reset-Case;$script:Rendered=$false
 Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:AppearanceFailureCode -eq 6) 'A missing real render acknowledgement cannot be promoted to success'
 Reset-Case;$script:ChangedSession=$true
-Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:AppearanceFailureCode -eq 9) 'A late Steam birth change invalidates a previously successful DOM query'
+Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and $script:DomReads -eq 1 -and $script:AppearanceFailureCode -eq 9) 'A late Steam birth change invalidates a previously successful DOM query'
 Reset-Case
 $base='Local\YMCC.CssUse.'+[guid]::NewGuid().ToString('N');$ReadyEvent=$base+'.ready';$IdleEvent=$base+'.idle'
 $ownedReady=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$ReadyEvent)

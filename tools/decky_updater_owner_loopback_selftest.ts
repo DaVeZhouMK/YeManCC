@@ -9,12 +9,15 @@ class FixtureEvent extends Event {detail:any;constructor(type:string,options:any
 (globalThis as any).CustomEvent=FixtureEvent;const win=new EventTarget() as any;
 win.chrome={webview:{addEventListener(_type:string,fn:typeof nativeListener){nativeListener=fn;},postMessage(r:any){if(typeof r.id!=='number')return;calls.push(r);queueMicrotask(()=>{
   const result=(value:any)=>nativeListener({data:{id:r.id,result:value}}),error=(message:string)=>nativeListener({data:{id:r.id,error:message}});
-  if(r.cmd==='app.updateState')result({phase:'idle',operationId:'',downloadActive:false});
+  if(r.cmd==='power.lifecycle')result({known:true,phase:'ready',generation:1,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:0,notificationPending:false});
+  else if(r.cmd==='app.updateState')result({phase:'idle',operationId:'',downloadActive:false});
   else if(r.cmd==='app.checkUpdate')result({version:targetVersion,sha256:mode==='--bad-manifest'?'bad-hash':sha});
   else if(r.cmd==='app.downloadUpdate'){nativeListener({data:{event:'update.progress',data:{operationId:r.args.operationId,phase:'downloading',percent:50,downloadedBytes:50,totalBytes:100,sha256:sha,version:targetVersion}}});abortDownload=()=>error('fixture cleanup');finishDownload=()=>mode==='--download-fails'?error('fixture download failed'):result('INERT VERIFIED UPDATE PATH');}
   else if(r.cmd==='app.installUpdate')mode==='--install-fails'?error('fixture install failed'):result(true);
   else throw Error('Unexpected native command '+r.cmd);
 });}}};(globalThis as any).window=win;
+// Current updateManager imports the real UI lifecycle; supply its read-only presentation port.
+const fixtureDocument=new EventTarget() as any;fixtureDocument.visibilityState='visible';win.document=fixtureDocument;(globalThis as any).document=fixtureDocument;
 const manager=await import('../src/bridge/updateManager');
 function deferred<T=any>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 async function bounded<T>(p:Promise<T>,label:string){let timer:any;try{return await Promise.race([p,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out: '+label)),6000);})]);}finally{clearTimeout(timer);}}

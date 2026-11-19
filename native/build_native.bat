@@ -50,6 +50,24 @@ for %%I in ("%WORKSPACE_ROOT%") do set "WORKSPACE_ROOT=%%~fI"
 set "OUTDIR=%WORKSPACE_ROOT%\Build\App\Native"
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
+REM Identity belongs to the actual compiled main, not a version/PID/disk JSON.
+REM Same-binary reinstall keeps it; a failed native compile cannot seal old EXE.
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\native_build_identity.mjs" prepare "%OUTDIR%"
+if errorlevel 1 goto :fail
+
+REM Explicit developer opt-in for source-matched CPU stack analysis. Preserve
+REM release optimization and linker folding; private symbols stay outside the
+REM product payload. /Z7 avoids a shared compiler PDB across translation units.
+set "NATIVE_SYMBOL_COMPILE="
+set "NATIVE_SYMBOL_LINK="
+set "NATIVE_SYMBOL_PDB="
+if defined YEMAN_NATIVE_SYMBOLS if not "%YEMAN_NATIVE_SYMBOLS%"=="0" if not "%YEMAN_NATIVE_SYMBOLS%"=="1" goto :fail
+if "%YEMAN_NATIVE_SYMBOLS%"=="1" (
+  set "NATIVE_SYMBOL_COMPILE=/Z7"
+  set "NATIVE_SYMBOL_LINK=/DEBUG:FULL /INCREMENTAL:NO /OPT:REF /OPT:ICF /PDBALTPATH:YeManCC.pdb"
+  set NATIVE_SYMBOL_PDB=/PDB:"%OUTDIR%\YeManCC.pdb"
+)
+
 REM Opening YMCC must never replay a remembered Steam mode or linked-loader use.
 REM Enforce the actual native callback boundaries before any native compilation.
 REM Ordinary exports skip fixtures; retain source selftests for explicit full acceptance.
@@ -68,23 +86,29 @@ REM compile resources (icon + version)
 rc /nologo /c65001 /fo "%OUTDIR%\app.res" app.rc
 if errorlevel 1 goto :fail
 
+REM Reject signed NTSTATUS compiler crashes as well as ordinary positive errors.
+REM Every cl command below must stop before any later compile/link on nonzero exit.
 REM compile shell: /MT static CRT + WebView2 static loader. All outputs stay in Build.
 REM dsu_server.cpp (7.50 i2, DSU/ShockEmu UDP server) compiled alongside main.cpp;
 REM each translation unit keeps its own .obj, then link produces one exe (/Fo per source).
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %SCREEN_NATIVE_INPUT_DEFINE% /DYMCC_ROG_FSE_EXPERIMENTS=0 /DYMCC_ROG_FSE_DIAGNOSTICS=0 /DYMCC_MSI_HOST_STAGE_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_DIAGNOSTIC /DYMCC_MSI_USB_NAME_ORIGIN_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_RAW_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_WAKE_DIAGNOSTIC /c main.cpp /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\main.obj"
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %NATIVE_SYMBOL_COMPILE% %SCREEN_NATIVE_INPUT_DEFINE% /DYMCC_ROG_FSE_EXPERIMENTS=0 /DYMCC_ROG_FSE_DIAGNOSTICS=0 /DYMCC_MSI_HOST_STAGE_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_DIAGNOSTIC /DYMCC_MSI_USB_NAME_ORIGIN_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_RAW_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_WAKE_DIAGNOSTIC /c main.cpp /FI"%OUTDIR%\native-build-identity.generated.h" /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\main.obj"
 if errorlevel 1 goto :fail
+if not errorlevel 0 goto :fail
 REM Original-instance Steam recovery is linked into YMCC; no helper executable.
 REM Ordinary exports skip fixtures; retain source selftests for explicit full acceptance.
 if "%YEMAN_FULL_ACCEPTANCE%"=="1" (
   "%YEMAN_NODE_EXE%" "%~dp0..\tools\steam_original_recovery_runtime_source_selftest.mjs"
   if errorlevel 1 goto :fail
 )
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE /c steam_original_recovery_engine.cpp /I"..\deps\json" /Fo"%OUTDIR%\steam_original_recovery_engine.obj"
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %NATIVE_SYMBOL_COMPILE% /c steam_original_recovery_engine.cpp /I"%~dp0." /I"..\deps\json" /Fo"%OUTDIR%\steam_original_recovery_engine.obj"
 if errorlevel 1 goto :fail
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE /c dsu_server.cpp /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\dsu_server.obj"
+if not errorlevel 0 goto :fail
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %NATIVE_SYMBOL_COMPILE% /c dsu_server.cpp /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\dsu_server.obj"
 if errorlevel 1 goto :fail
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE "%OUTDIR%\main.obj" "%OUTDIR%\dsu_server.obj" "%OUTDIR%\steam_original_recovery_engine.obj" "%OUTDIR%\app.res" /Fe"%OUTDIR%\YeManCC.exe" /link /SUBSYSTEM:WINDOWS /MACHINE:x64 "..\deps\webview2\build\native\x64\WebView2LoaderStatic.lib" "%WINDOWSAPPLIB%" user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib uuid.lib dwmapi.lib winhttp.lib advapi32.lib shcore.lib version.lib psapi.lib PowrProf.lib ws2_32.lib bcrypt.lib
+if not errorlevel 0 goto :fail
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE "%OUTDIR%\main.obj" "%OUTDIR%\dsu_server.obj" "%OUTDIR%\steam_original_recovery_engine.obj" "%OUTDIR%\app.res" /Fe"%OUTDIR%\YeManCC.exe" /link /SUBSYSTEM:WINDOWS /MACHINE:x64 %NATIVE_SYMBOL_LINK% %NATIVE_SYMBOL_PDB% "..\deps\webview2\build\native\x64\WebView2LoaderStatic.lib" "%WINDOWSAPPLIB%" user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib uuid.lib dwmapi.lib winhttp.lib advapi32.lib shcore.lib version.lib psapi.lib PowrProf.lib ws2_32.lib bcrypt.lib
 if errorlevel 1 goto :fail
+if not errorlevel 0 goto :fail
 
 REM Shell API switching is compiled into YeManCC.exe's early worker mode.
 
@@ -92,21 +116,28 @@ REM Independent recovery service. It must remain alive when YeManCC's UI thread
 REM or WebView2 renderer is wedged, so it is a separate executable.
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE recovery_service.cpp /Fo"%OUTDIR%\recovery_service.obj" /Fe"%OUTDIR%\YeManRecoveryService.exe" /link /SUBSYSTEM:WINDOWS /MACHINE:x64 user32.lib shell32.lib ole32.lib powrprof.lib
 if errorlevel 1 goto :fail
+if not errorlevel 0 goto :fail
 
 REM Mainline external visibility evidence; runtime owns the MSI/logging gates
 REM and launches this console helper hidden. No controller mode-query defines.
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE "..\tools\controller_visibility_probe.cpp" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\controller_visibility_probe.obj" /Fe"%OUTDIR%\YeManControllerVisibilityProbe.exe" /link /SUBSYSTEM:CONSOLE /MACHINE:x64 "%WINDOWSAPPLIB%" user32.lib ole32.lib dinput8.lib dxguid.lib hid.lib setupapi.lib cfgmgr32.lib
 if errorlevel 1 goto :fail
+if not errorlevel 0 goto :fail
 
 REM RTSSHooks stays in a disposable x64 helper, never in the WebView2 shell.
 cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE rtss\profile_helper.cpp /Fo"%OUTDIR%\profile_helper.obj" /Fe"%OUTDIR%\YMCCRtssProfileHelper.exe" /link /SUBSYSTEM:CONSOLE /MACHINE:x64
 if errorlevel 1 goto :fail
+if not errorlevel 0 goto :fail
 REM RTSS's documented client-plugin host is x86 even on a 64-bit OS.
 call rtss\build_bridge.bat
 if errorlevel 1 goto :fail
 
 REM MUST embed admin manifest (hard rule)
 mt.exe -manifest app.manifest -outputresource:"%OUTDIR%\YeManCC.exe";#1
+if errorlevel 1 goto :fail
+
+REM Seal only after mt.exe: the receipt SHA must match the final delivered PE.
+"%YEMAN_NODE_EXE%" "%~dp0..\tools\native_build_identity.mjs" seal "%OUTDIR%" "%OUTDIR%\YeManCC.exe"
 if errorlevel 1 goto :fail
 
 REM Build output is intentionally kept in the workspace.  Deployment to

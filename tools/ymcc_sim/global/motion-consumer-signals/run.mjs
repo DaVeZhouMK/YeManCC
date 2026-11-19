@@ -1,6 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {runProcess} from '../runner.mjs';
-import {motionConsumerInputs,REPO_ROOT} from './inputs.mjs';
+import {motionConsumerDeclarations,motionConsumerInputs,REPO_ROOT} from './inputs.mjs';
 import {PRODUCER_TIMEOUT_MS,ADAPTER_TIMEOUT_MS} from './contracts.mjs';
 import {runMatrixSupplement} from './matrix-runner.mjs';
 import {runOwnerSupplement} from './owner-runner.mjs';
@@ -9,6 +9,24 @@ import {verifyMotionOriginalCompilerTraceParallel} from './original-compiler-tra
 import {validateMotionReport} from './validation.mjs';
 import {hashFile,readJson,validateOutputRoot,verifyMotionEvidence,ownedTree} from './evidence.mjs';
 export function fingerprintRequired(files){return files.map(file=>{try{if(!fs.statSync(file).isFile())throw Error();return{path:file,sha256:hashFile(file),status:'OK'};}catch{return{path:file,sha256:null,status:'MISSING_OR_NOT_FILE'};}});}
+function probeDeclaredArtifactPresence(repo){
+ try {
+  const {sources,artifacts,tools,toolchainProblem}=motionConsumerDeclarations(repo);
+  if(toolchainProblem||!tools)return null;
+  const missing=artifacts.filter(file=>!fs.statSync(file,{throwIfNoEntry:false})?.isFile());
+  if(!missing.length)return null;
+  // Do not hide source failures. Confirm a readable file without hashing its bytes.
+  for(const relative of sources){
+   const fd=fs.openSync(path.join(repo,relative),'r');
+   try{if(!fs.fstatSync(fd).isFile())return null;}
+   finally{fs.closeSync(fd);}
+  }
+  return {checked:artifacts.length,missing};
+ }catch{
+  // Unreadable declaration or uncertain stat: preserve the original input diagnostics.
+  return null;
+ }
+}
 const changes=rows=>rows.filter(row=>{try{return hashFile(row.path)!==row.sha256;}catch{return true;}});
 function childEnvironment(out){const result={};for(const name of ['SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','ProgramFiles','ProgramFiles(x86)','ProgramData','USERPROFILE','NUMBER_OF_PROCESSORS','PROCESSOR_ARCHITECTURE'])if(process.env[name])result[name]=process.env[name];for(const [name,relative]of [['TEMP','process-temp'],['TMP','process-temp'],['LOCALAPPDATA','local-app-data'],['APPDATA','app-data']]){result[name]=path.join(out,relative);fs.mkdirSync(result[name],{recursive:true});}return result;}
 function reportInputClosure(report,sourceInputs,externalInputs){const expected=new Map([...sourceInputs,...externalInputs].map(row=>[path.resolve(row.path).toLowerCase(),row.sha256]));for(const row of ['source','before','historical','capabilityBefore','legacyCatalog','legacyOracle','catalog','msi','runner'].map(name=>report[name]).concat(report.fixtures??[])){if(!row||typeof row.path!=='string'||expected.get(path.resolve(row.path).toLowerCase())!==row.sha256)throw Error('MOTION_UNRECORDED_PRODUCER_INPUT');}}
@@ -19,6 +37,12 @@ export async function runMotionConsumers({evidenceDir}={}) {
  let sourceInputs=[],externalInputs=[];
  try {
   if(process.env.YMCC_SIM_GLOBAL_RUN!=='1')throw Error('GLOBAL_OWNED_JOB_REQUIRED');
+  const presence=probeDeclaredArtifactPresence(REPO_ROOT);
+  if(presence?.missing.length){
+   result.missingInputs=presence.missing;
+   result.inputPresence={scope:'declared-external-artifacts',checked:presence.checked,hashesCaptured:false};
+   throw Error('MOTION_REQUIRED_INPUT_MISSING');
+  }
   const inputs=motionConsumerInputs(REPO_ROOT);sourceInputs=fingerprintRequired(inputs.sources.map(file=>path.join(REPO_ROOT,file)));externalInputs=fingerprintRequired(inputs.artifacts);
   result.sourceHashes=sourceInputs.map(row=>({path:path.relative(REPO_ROOT,row.path).replaceAll('\\','/'),sha256:row.sha256}));result.externalInputs=externalInputs;
   const missing=[...sourceInputs,...externalInputs].filter(row=>row.status!=='OK');if(missing.length){result.missingInputs=missing.map(row=>row.path);throw Error('MOTION_REQUIRED_INPUT_MISSING');}

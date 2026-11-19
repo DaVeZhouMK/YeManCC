@@ -2,24 +2,40 @@
   "schema": "ymcc.steam-original-recovery-engine-sourcepins.v1",
   "files": [
     {
-      "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_record_diagnostic.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_native_record_diagnostic.h",
       "path": "vendor/steam_native_record_diagnostic.h",
-      "sha256": "0494b3771a890bc5447d5706c9a0345d7b65db9bca757b463c12fa678947d941"
+      "sha256": "12180879dd8d4077fb54cc84298d783214fc2cfebe6fcffd9eeef654187f3a4a",
+      "previousSource": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_record_diagnostic.h",
+      "previousSha256": "0494b3771a890bc5447d5706c9a0345d7b65db9bca757b463c12fa678947d941"
     },
     {
-      "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_record_win32.h",
+      "source": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/native/steam_native_record_win32.h",
       "path": "vendor/steam_native_record_win32.h",
-      "sha256": "aa431ad8e8501c57c2e5aebccba3037c8cd64cc584a33167794c0fb6931b6519"
+      "sha256": "ca3f993def453dadfba038e78b35250d0b0ea3f3c923c2cc6cc045060c64235a",
+      "previousSources": [
+        {
+          "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_record_win32.h",
+          "sha256": "aa431ad8e8501c57c2e5aebccba3037c8cd64cc584a33167794c0fb6931b6519"
+        }
+      ]
     },
     {
-      "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_app_state_diagnostic.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_native_app_state_diagnostic.h",
       "path": "vendor/steam_native_app_state_diagnostic.h",
-      "sha256": "5f59fce98693e3c6503320234cfe5cfda0c3bd72d55232a7087c3c67aae41353"
+      "sha256": "9caeac6b7b360c067cb028947200dec47f4ae3e534b9e3c0340485945615a057",
+      "previousSource": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_app_state_diagnostic.h",
+      "previousSha256": "5f59fce98693e3c6503320234cfe5cfda0c3bd72d55232a7087c3c67aae41353"
     },
     {
-      "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_app_state_win32.h",
+      "source": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/native/steam_native_app_state_win32.h",
       "path": "vendor/steam_native_app_state_win32.h",
-      "sha256": "c7c54f37372d1acb34c277d1e4920556ba0d42922818be5b6313a185e64e5bc4"
+      "sha256": "79636866406f79832649e389e6b4f958626e7f02055dd6c0495a75c1322436a7",
+      "previousSources": [
+        {
+          "source": "G:/YeManCC-Work/Docs/Research/Sleep/SteamNonSteamRecovery-20261011/NonSleep-AMD9950/CodexReview/ControlledFault/PostFaultReader/steam_native_app_state_win32.h",
+          "sha256": "c7c54f37372d1acb34c277d1e4920556ba0d42922818be5b6313a185e64e5bc4"
+        }
+      ]
     },
     {
       "source": "D:\\Codex\\2026-10-21\\steam-ai-steam-running-steam-api\\work\\observer-readiness\\query-sdk\\isteamclient.h",
@@ -69,13 +85,13 @@
     {
       "source": "running-publish-trial.cpp",
       "path": "embedded_trial.h",
-      "imageSha256": "b9f3d60715c1f42221162d9116f6e7c1bf90e709d0529e27cb583c6e505e7a4b",
+      "imageSha256": "2ee58042d7e36c26aed39b739c09ae97fb42efa1f9aefaa002c554114887b839",
       "historicalPayload": {
         "source": "D:\\Codex\\2026-10-21\\steam-ai-steam-running-steam-api\\work\\wuxia-single-recovery\\build\\wuxia-publish-trial.dll",
         "imageSha256": "1e3b9067a05c52951a4ccbb0c9dbc5370752f912f42254ec7db289c1a22b438e"
       },
       "generator": "embed-trial.mjs",
-      "trialAbi": 3,
+      "trialAbi": 5,
       "priorPayloads": [
         {
           "imageSha256": "6ab6b808b28c80cc6513bf84c42a53528bb6c4455eb1f951c36d38332abf7093",
@@ -88,6 +104,138 @@
         {
           "imageSha256": "76d8a037e82ae28001c3e1cb66a4aa164764035a74f4d0ceada99aac562c1d2d",
           "trialAbi": 3
+        },
+        {
+          "imageSha256": "b9f3d60715c1f42221162d9116f6e7c1bf90e709d0529e27cb583c6e505e7a4b",
+          "trialAbi": 3,
+          "embeddedHeaderSha256": "d45b0a333be7620e57cbc236eaf3529e1f439f0b2563ea72fa08b6e646e17c6a",
+          "dispatchLibrarySha256": "fc3b1eaaa40121ca0af24ca93aa8a796f740ba402f150faf8b62defc3358c198",
+          "sourceHashes": {
+            "running-publish-trial.cpp": "ceabc221e0c8c7f12662e7ee8eedd8371ba0d7468de3b304a1c0365759db0c45",
+            "running-publish-trial.h": "b5e2ca165e6a00dae97d95672af2b158454dced7d2ac58b1f32e7924e42cad4f",
+            "driver_port.inc": "bb921dccbb1cb48066ef00e130ae3cb149fac189df6366e188bc00ad510b9528",
+            "one_shot_dispatch.h": "ee1dee6f76d2095587f769ab79c4537ec0f3b1e4ed815b101267d93f871a7102",
+            "vendor/steam_native_app_state_win32.h": "09cfd4c1374a47d445e1f4f753207414fdfded41d87e1d75f94566955ed2c16e",
+            "vendor/steam_native_app_state_diagnostic.h": "301eba1ce795dab502f2159e423dea2219c69832ed42389b93af3c9503ec2987",
+            "vendor/steam_native_record_win32.h": "c36c275c29fc91357aaade3063a275f5940746324f219e8f8a735adac73d3515",
+            "vendor/steam_native_record_diagnostic.h": "f2ca822f1f1497073206567ac9b428291c170c9d6dc884864d351012f6b604e3",
+            "vendor/json.hpp": "d97b35abe01afd6c00ebd62538085c4b9bc76e83422a7f4ab3fef67eae2fa017",
+            "../steam_compatibility_core.h": "13ca21a5760e4b0f665670f212c073b2b44f20ab6cbea1c2e8aeb6a2c2e82ea1",
+            "../steam_compatibility_graph_core.h": "b03d194190fa31336bbff3f4dff2ac6efa79e6ce332d0a885200527c54bc14ec",
+            "../steam_compatibility_publish_contracts.h": "779827d272cf9c55dca4739ad5939d7607020243cfc59bc76e525e5aa17c24b2",
+            "../steam_compatibility_publish_graph.h": "10d6daea8d4896a29293feb7108e924aab97ddf0ceb7f779339806f38f02adba",
+            "../steam_compatibility_read_contracts.h": "6385b419225767d06b1dc73a0fcad0c63cc07b985b42a8fb958f49c6832805ff",
+            "../steam_compatibility_read_graph.h": "ad606ee684e510ae5ef5aa05f67876595787e756b78c410b67b0fcb4cf35134d",
+            "../steam_compatibility_win32.h": "336c8b257961e2e76c0a25073cc600679ab4cc4edb31bc168ac546c7af47ddba",
+            "../steam_import_target_win32.h": "c37443d1d66ddeecd9d6a8ca8cd385dbd767f8669538b3b6e3f936f5d76a2339",
+            "Build-Trial.cmd": "3728dab0dac25a47ff216f07da574e0c571db7551e256d83237198a90b433426",
+            "embed-trial.mjs": "7051b7f26d79105a7de52f46d4c021abd112564f7f3b59209f74f2ebc3feab33"
+          }
+        },
+        {
+          "imageSha256": "b438b55f27c4c8cfe9a9c8c43c8b42d31fa1e7dce2ca66502553932ecd692c89",
+          "trialAbi": 4,
+          "embeddedHeaderSha256": "7d8f006b4b0f881a8e1e686e78ec8c4cad072e49d12e567c0decca25c994abba",
+          "dispatchLibrarySha256": "9157960090599554877a332e7a23c24b1e6aaa7ec8b91d71c902004c25561218",
+          "sourceHashes": {
+            "publication_revocation.h": "178da522c5b4493a58b0ff9a7b0aff1bfbd72ba6d3442dfa600cad0ee02263e5",
+            "../sleep_power_state.h": "f70321afdce1ad43ce02cdcf8888a085868cea3fd1c2fde62de7c5cc22655ea9",
+            "../steam_native_record_layout.h": "18405da743ac9f1fc87b665103ea17104abaa8b3c472d04bc698721b3fa53971",
+            "../steam_native_publication_layout.h": "e01f76a3d6b597a210cdd484f5a6665c8bf93f671c6d4fb5a4bccc4743410500",
+            "../steam_native_app_state_diagnostic.h": "f2fb6233e577af565147e5e0bc2cfbe4e8951dc0a304e2957578c49367164584",
+            "running-publish-trial.cpp": "b75bf48795b431cb165a0698cb69221572ee1dec476eddd7025f083dadeeecfe",
+            "running-publish-trial.h": "79a55adc33fc3f097230f5b64ab5922b75e15b8849222b141d74c0615e9494f6",
+            "driver_port.inc": "615f32cb04497076de119b73946e38d27109da0795cc31b0ea48da2caae567f7",
+            "one_shot_dispatch.h": "ee1dee6f76d2095587f769ab79c4537ec0f3b1e4ed815b101267d93f871a7102",
+            "vendor/steam_native_app_state_win32.h": "09cfd4c1374a47d445e1f4f753207414fdfded41d87e1d75f94566955ed2c16e",
+            "vendor/steam_native_app_state_diagnostic.h": "9caeac6b7b360c067cb028947200dec47f4ae3e534b9e3c0340485945615a057",
+            "vendor/steam_native_record_win32.h": "c36c275c29fc91357aaade3063a275f5940746324f219e8f8a735adac73d3515",
+            "vendor/steam_native_record_diagnostic.h": "12180879dd8d4077fb54cc84298d783214fc2cfebe6fcffd9eeef654187f3a4a",
+            "vendor/json.hpp": "d97b35abe01afd6c00ebd62538085c4b9bc76e83422a7f4ab3fef67eae2fa017",
+            "../steam_compatibility_core.h": "96a03a93c9dce0d8f8f58b624982124f7cfd42d11009c270f1486c13157249a3",
+            "../steam_compatibility_graph_core.h": "430e75b6bed936845e6d7bfd8c4dbccf8383c5239e9f5d2d4efc3bcd7d202ad6",
+            "../steam_compatibility_publish_contracts.h": "1100f1920cb4ed144ca24f5de066df990a529cc596fa1133cef75327136739b6",
+            "../steam_compatibility_publish_graph.h": "cbaf7b5bce1fd8162ff529d87319398d95a060493f56745bd83dcd7a85ed5618",
+            "../steam_compatibility_read_contracts.h": "d33f861c64d5bb724aae069e075aff4755f610ae59a72a5b884b013390d3b12f",
+            "../steam_compatibility_read_graph.h": "5df9e93036905e6f0e2661f02c90055b7bd95c5be6da3bbbd844c9e84d2136dc",
+            "../steam_compatibility_owner_scoped_ui_graph.h": "646f9dbbcf895728cfbd9e37612dc05d10b4d211959ee79f80e90b0ef923d952",
+            "../steam_compatibility_owner_scoped_record_graph.h": "27139dd4ec485939322ae76362f7cb227c19b13de0f094fe6e8248516a3fe05e",
+            "../steam_compatibility_owner_scoped_publication_graph.h": "73223c67c9d7e2a505ba5aaed7950ede79fef229a157af35105f5e228425e252",
+            "../steam_compatibility_win32.h": "136c0aae78d7d687c96041a7b0144742b200c553fda724a6a0783c148fef08eb",
+            "../steam_import_target_win32.h": "e505e50d940eab543e09597a6be225035c848548a5c5e12bfd8c729bb06cc13d",
+            "Build-Trial.cmd": "3728dab0dac25a47ff216f07da574e0c571db7551e256d83237198a90b433426",
+            "embed-trial.mjs": "cff04e75154950631647f815d15019944fab02f124303957db4b5d430fed6499"
+          }
+        },
+        {
+          "imageSha256": "21483918f2d617fbb34d8f39f07f75a3401e6be15a44a3f5a04b3f447f8b9825",
+          "trialAbi": 4,
+          "embeddedHeaderSha256": "6a2355ee1d4e8abc0277dfadb995f822096f10e089f9231f3eefb7206b33f7bc",
+          "dispatchLibrarySha256": "9157960090599554877a332e7a23c24b1e6aaa7ec8b91d71c902004c25561218",
+          "sourceHashes": {
+            "publication_revocation.h": "178da522c5b4493a58b0ff9a7b0aff1bfbd72ba6d3442dfa600cad0ee02263e5",
+            "../sleep_power_state.h": "f70321afdce1ad43ce02cdcf8888a085868cea3fd1c2fde62de7c5cc22655ea9",
+            "../steam_native_record_layout.h": "18405da743ac9f1fc87b665103ea17104abaa8b3c472d04bc698721b3fa53971",
+            "../steam_native_publication_layout.h": "e01f76a3d6b597a210cdd484f5a6665c8bf93f671c6d4fb5a4bccc4743410500",
+            "../steam_native_app_state_diagnostic.h": "f2fb6233e577af565147e5e0bc2cfbe4e8951dc0a304e2957578c49367164584",
+            "running-publish-trial.cpp": "b75bf48795b431cb165a0698cb69221572ee1dec476eddd7025f083dadeeecfe",
+            "running-publish-trial.h": "79a55adc33fc3f097230f5b64ab5922b75e15b8849222b141d74c0615e9494f6",
+            "driver_port.inc": "615f32cb04497076de119b73946e38d27109da0795cc31b0ea48da2caae567f7",
+            "one_shot_dispatch.h": "ee1dee6f76d2095587f769ab79c4537ec0f3b1e4ed815b101267d93f871a7102",
+            "vendor/steam_native_app_state_win32.h": "79636866406f79832649e389e6b4f958626e7f02055dd6c0495a75c1322436a7",
+            "vendor/steam_native_app_state_diagnostic.h": "9caeac6b7b360c067cb028947200dec47f4ae3e534b9e3c0340485945615a057",
+            "vendor/steam_native_record_win32.h": "ca3f993def453dadfba038e78b35250d0b0ea3f3c923c2cc6cc045060c64235a",
+            "vendor/steam_native_record_diagnostic.h": "12180879dd8d4077fb54cc84298d783214fc2cfebe6fcffd9eeef654187f3a4a",
+            "vendor/json.hpp": "d97b35abe01afd6c00ebd62538085c4b9bc76e83422a7f4ab3fef67eae2fa017",
+            "../steam_compatibility_core.h": "96a03a93c9dce0d8f8f58b624982124f7cfd42d11009c270f1486c13157249a3",
+            "../steam_compatibility_graph_core.h": "430e75b6bed936845e6d7bfd8c4dbccf8383c5239e9f5d2d4efc3bcd7d202ad6",
+            "../steam_compatibility_publish_contracts.h": "1100f1920cb4ed144ca24f5de066df990a529cc596fa1133cef75327136739b6",
+            "../steam_compatibility_publish_graph.h": "cbaf7b5bce1fd8162ff529d87319398d95a060493f56745bd83dcd7a85ed5618",
+            "../steam_compatibility_read_contracts.h": "d33f861c64d5bb724aae069e075aff4755f610ae59a72a5b884b013390d3b12f",
+            "../steam_compatibility_read_graph.h": "5df9e93036905e6f0e2661f02c90055b7bd95c5be6da3bbbd844c9e84d2136dc",
+            "../steam_compatibility_owner_scoped_ui_graph.h": "646f9dbbcf895728cfbd9e37612dc05d10b4d211959ee79f80e90b0ef923d952",
+            "../steam_compatibility_owner_scoped_record_graph.h": "27139dd4ec485939322ae76362f7cb227c19b13de0f094fe6e8248516a3fe05e",
+            "../steam_compatibility_owner_scoped_publication_graph.h": "73223c67c9d7e2a505ba5aaed7950ede79fef229a157af35105f5e228425e252",
+            "../steam_compatibility_win32.h": "136c0aae78d7d687c96041a7b0144742b200c553fda724a6a0783c148fef08eb",
+            "../steam_import_target_win32.h": "e505e50d940eab543e09597a6be225035c848548a5c5e12bfd8c729bb06cc13d",
+            "Build-Trial.cmd": "3728dab0dac25a47ff216f07da574e0c571db7551e256d83237198a90b433426",
+            "embed-trial.mjs": "cff04e75154950631647f815d15019944fab02f124303957db4b5d430fed6499"
+          }
+        },
+        {
+          "imageSha256": "2ee58042d7e36c26aed39b739c09ae97fb42efa1f9aefaa002c554114887b839",
+          "trialAbi": 5,
+          "sourceHashes": {
+            "publication_event_export.h": "800bb35aad9146d090701d781d67a794eedfe6fa95c4afa04ce369d07fac9419",
+            "publication_revocation.h": "72443b5b9864cbfb137a7f190125f4fc0c35e71f1d7dff39c3423fcc40a25b70",
+            "../sleep_power_state.h": "f70321afdce1ad43ce02cdcf8888a085868cea3fd1c2fde62de7c5cc22655ea9",
+            "../steam_native_record_layout.h": "18405da743ac9f1fc87b665103ea17104abaa8b3c472d04bc698721b3fa53971",
+            "../steam_native_publication_layout.h": "e01f76a3d6b597a210cdd484f5a6665c8bf93f671c6d4fb5a4bccc4743410500",
+            "../steam_native_app_state_diagnostic.h": "f2fb6233e577af565147e5e0bc2cfbe4e8951dc0a304e2957578c49367164584",
+            "running-publish-trial.cpp": "aad596f2620ac3e6906dfd6fd650ce465041ecfbd068ad7d44a191f1474bc426",
+            "running-publish-trial.h": "804bcc0070c04d288ed0c58d8188d1fbb7967600aa44f482f5cb26f27531cd65",
+            "driver_port.inc": "788f63f7e3f4a8962e2f0aa6a481979e57e9ea991f8cdd0d8108b9046462941b",
+            "one_shot_dispatch.h": "ee1dee6f76d2095587f769ab79c4537ec0f3b1e4ed815b101267d93f871a7102",
+            "vendor/steam_native_app_state_win32.h": "79636866406f79832649e389e6b4f958626e7f02055dd6c0495a75c1322436a7",
+            "vendor/steam_native_app_state_diagnostic.h": "9caeac6b7b360c067cb028947200dec47f4ae3e534b9e3c0340485945615a057",
+            "vendor/steam_native_record_win32.h": "ca3f993def453dadfba038e78b35250d0b0ea3f3c923c2cc6cc045060c64235a",
+            "vendor/steam_native_record_diagnostic.h": "12180879dd8d4077fb54cc84298d783214fc2cfebe6fcffd9eeef654187f3a4a",
+            "vendor/json.hpp": "d97b35abe01afd6c00ebd62538085c4b9bc76e83422a7f4ab3fef67eae2fa017",
+            "../steam_compatibility_core.h": "96a03a93c9dce0d8f8f58b624982124f7cfd42d11009c270f1486c13157249a3",
+            "../steam_compatibility_graph_core.h": "430e75b6bed936845e6d7bfd8c4dbccf8383c5239e9f5d2d4efc3bcd7d202ad6",
+            "../steam_compatibility_publish_contracts.h": "1100f1920cb4ed144ca24f5de066df990a529cc596fa1133cef75327136739b6",
+            "../steam_compatibility_publish_graph.h": "cbaf7b5bce1fd8162ff529d87319398d95a060493f56745bd83dcd7a85ed5618",
+            "../steam_compatibility_read_contracts.h": "d33f861c64d5bb724aae069e075aff4755f610ae59a72a5b884b013390d3b12f",
+            "../steam_compatibility_read_graph.h": "5df9e93036905e6f0e2661f02c90055b7bd95c5be6da3bbbd844c9e84d2136dc",
+            "../steam_compatibility_owner_scoped_ui_graph.h": "646f9dbbcf895728cfbd9e37612dc05d10b4d211959ee79f80e90b0ef923d952",
+            "../steam_compatibility_owner_scoped_record_graph.h": "27139dd4ec485939322ae76362f7cb227c19b13de0f094fe6e8248516a3fe05e",
+            "../steam_compatibility_owner_scoped_publication_graph.h": "73223c67c9d7e2a505ba5aaed7950ede79fef229a157af35105f5e228425e252",
+            "../steam_compatibility_win32.h": "136c0aae78d7d687c96041a7b0144742b200c553fda724a6a0783c148fef08eb",
+            "../steam_import_target_win32.h": "e505e50d940eab543e09597a6be225035c848548a5c5e12bfd8c729bb06cc13d",
+            "Build-Trial.cmd": "3728dab0dac25a47ff216f07da574e0c571db7551e256d83237198a90b433426",
+            "embed-trial.mjs": "e37ee0ea844e1037916d4eab70871d3d9a9b26f7542d398d7f67f28812542a82"
+          },
+          "scope": "same DLL image before host progress deferral"
         }
       ],
       "dispatcherAbi": 1,
@@ -95,29 +243,73 @@
         "legacy-dynamic",
         "semi-static"
       ],
-      "embeddedHeaderSha256": "d45b0a333be7620e57cbc236eaf3529e1f439f0b2563ea72fa08b6e646e17c6a",
-      "dispatchLibrarySha256": "fc3b1eaaa40121ca0af24ca93aa8a796f740ba402f150faf8b62defc3358c198",
+      "embeddedHeaderSha256": "61128e79670a0d042e2ae1940d3a6df8eeabcf3f34f064578b53e2ceef40dc64",
+      "dispatchLibrarySha256": "9157960090599554877a332e7a23c24b1e6aaa7ec8b91d71c902004c25561218",
       "sourceHashes": {
-        "running-publish-trial.cpp": "ceabc221e0c8c7f12662e7ee8eedd8371ba0d7468de3b304a1c0365759db0c45",
-        "running-publish-trial.h": "b5e2ca165e6a00dae97d95672af2b158454dced7d2ac58b1f32e7924e42cad4f",
-        "driver_port.inc": "bb921dccbb1cb48066ef00e130ae3cb149fac189df6366e188bc00ad510b9528",
+        "publication_event_export.h": "800bb35aad9146d090701d781d67a794eedfe6fa95c4afa04ce369d07fac9419",
+        "publication_revocation.h": "72443b5b9864cbfb137a7f190125f4fc0c35e71f1d7dff39c3423fcc40a25b70",
+        "../sleep_power_state.h": "f70321afdce1ad43ce02cdcf8888a085868cea3fd1c2fde62de7c5cc22655ea9",
+        "../steam_native_record_layout.h": "18405da743ac9f1fc87b665103ea17104abaa8b3c472d04bc698721b3fa53971",
+        "../steam_native_publication_layout.h": "e01f76a3d6b597a210cdd484f5a6665c8bf93f671c6d4fb5a4bccc4743410500",
+        "../steam_native_app_state_diagnostic.h": "f2fb6233e577af565147e5e0bc2cfbe4e8951dc0a304e2957578c49367164584",
+        "running-publish-trial.cpp": "aad596f2620ac3e6906dfd6fd650ce465041ecfbd068ad7d44a191f1474bc426",
+        "running-publish-trial.h": "804bcc0070c04d288ed0c58d8188d1fbb7967600aa44f482f5cb26f27531cd65",
+        "driver_port.inc": "b84091b60c0eaf205f8dfafeac75c59da949eec834f6cb65205d7797698f2a5d",
         "one_shot_dispatch.h": "ee1dee6f76d2095587f769ab79c4537ec0f3b1e4ed815b101267d93f871a7102",
-        "vendor/steam_native_app_state_win32.h": "09cfd4c1374a47d445e1f4f753207414fdfded41d87e1d75f94566955ed2c16e",
-        "vendor/steam_native_app_state_diagnostic.h": "301eba1ce795dab502f2159e423dea2219c69832ed42389b93af3c9503ec2987",
-        "vendor/steam_native_record_win32.h": "c36c275c29fc91357aaade3063a275f5940746324f219e8f8a735adac73d3515",
-        "vendor/steam_native_record_diagnostic.h": "f2ca822f1f1497073206567ac9b428291c170c9d6dc884864d351012f6b604e3",
+        "vendor/steam_native_app_state_win32.h": "79636866406f79832649e389e6b4f958626e7f02055dd6c0495a75c1322436a7",
+        "vendor/steam_native_app_state_diagnostic.h": "9caeac6b7b360c067cb028947200dec47f4ae3e534b9e3c0340485945615a057",
+        "vendor/steam_native_record_win32.h": "ca3f993def453dadfba038e78b35250d0b0ea3f3c923c2cc6cc045060c64235a",
+        "vendor/steam_native_record_diagnostic.h": "12180879dd8d4077fb54cc84298d783214fc2cfebe6fcffd9eeef654187f3a4a",
         "vendor/json.hpp": "d97b35abe01afd6c00ebd62538085c4b9bc76e83422a7f4ab3fef67eae2fa017",
-        "../steam_compatibility_core.h": "13ca21a5760e4b0f665670f212c073b2b44f20ab6cbea1c2e8aeb6a2c2e82ea1",
-        "../steam_compatibility_graph_core.h": "b03d194190fa31336bbff3f4dff2ac6efa79e6ce332d0a885200527c54bc14ec",
-        "../steam_compatibility_publish_contracts.h": "779827d272cf9c55dca4739ad5939d7607020243cfc59bc76e525e5aa17c24b2",
-        "../steam_compatibility_publish_graph.h": "10d6daea8d4896a29293feb7108e924aab97ddf0ceb7f779339806f38f02adba",
-        "../steam_compatibility_read_contracts.h": "6385b419225767d06b1dc73a0fcad0c63cc07b985b42a8fb958f49c6832805ff",
-        "../steam_compatibility_read_graph.h": "ad606ee684e510ae5ef5aa05f67876595787e756b78c410b67b0fcb4cf35134d",
-        "../steam_compatibility_win32.h": "336c8b257961e2e76c0a25073cc600679ab4cc4edb31bc168ac546c7af47ddba",
-        "../steam_import_target_win32.h": "c37443d1d66ddeecd9d6a8ca8cd385dbd767f8669538b3b6e3f936f5d76a2339",
+        "../steam_compatibility_core.h": "96a03a93c9dce0d8f8f58b624982124f7cfd42d11009c270f1486c13157249a3",
+        "../steam_compatibility_graph_core.h": "430e75b6bed936845e6d7bfd8c4dbccf8383c5239e9f5d2d4efc3bcd7d202ad6",
+        "../steam_compatibility_publish_contracts.h": "1100f1920cb4ed144ca24f5de066df990a529cc596fa1133cef75327136739b6",
+        "../steam_compatibility_publish_graph.h": "cbaf7b5bce1fd8162ff529d87319398d95a060493f56745bd83dcd7a85ed5618",
+        "../steam_compatibility_read_contracts.h": "d33f861c64d5bb724aae069e075aff4755f610ae59a72a5b884b013390d3b12f",
+        "../steam_compatibility_read_graph.h": "5df9e93036905e6f0e2661f02c90055b7bd95c5be6da3bbbd844c9e84d2136dc",
+        "../steam_compatibility_owner_scoped_ui_graph.h": "646f9dbbcf895728cfbd9e37612dc05d10b4d211959ee79f80e90b0ef923d952",
+        "../steam_compatibility_owner_scoped_record_graph.h": "27139dd4ec485939322ae76362f7cb227c19b13de0f094fe6e8248516a3fe05e",
+        "../steam_compatibility_owner_scoped_publication_graph.h": "73223c67c9d7e2a505ba5aaed7950ede79fef229a157af35105f5e228425e252",
+        "../steam_compatibility_win32.h": "136c0aae78d7d687c96041a7b0144742b200c553fda724a6a0783c148fef08eb",
+        "../steam_import_target_win32.h": "e505e50d940eab543e09597a6be225035c848548a5c5e12bfd8c729bb06cc13d",
         "Build-Trial.cmd": "3728dab0dac25a47ff216f07da574e0c571db7551e256d83237198a90b433426",
-        "embed-trial.mjs": "7051b7f26d79105a7de52f46d4c021abd112564f7f3b59209f74f2ebc3feab33"
+        "embed-trial.mjs": "e37ee0ea844e1037916d4eab70871d3d9a9b26f7542d398d7f67f28812542a82"
       }
+    },
+    {
+      "path": "../steam_compatibility_owner_scoped_publication_graph.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_compatibility_owner_scoped_publication_graph.h",
+      "sha256": "73223c67c9d7e2a505ba5aaed7950ede79fef229a157af35105f5e228425e252"
+    },
+    {
+      "path": "../steam_compatibility_owner_scoped_record_graph.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_compatibility_owner_scoped_record_graph.h",
+      "sha256": "27139dd4ec485939322ae76362f7cb227c19b13de0f094fe6e8248516a3fe05e"
+    },
+    {
+      "path": "../steam_compatibility_owner_scoped_ui_graph.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_compatibility_owner_scoped_ui_graph.h",
+      "sha256": "646f9dbbcf895728cfbd9e37612dc05d10b4d211959ee79f80e90b0ef923d952"
+    },
+    {
+      "path": "../steam_native_publication_layout.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_native_publication_layout.h",
+      "sha256": "e01f76a3d6b597a210cdd484f5a6665c8bf93f671c6d4fb5a4bccc4743410500"
+    },
+    {
+      "path": "../steam_native_record_layout.h",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_native_record_layout.h",
+      "sha256": "18405da743ac9f1fc87b665103ea17104abaa8b3c472d04bc698721b3fa53971"
+    },
+    {
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_original_recovery_engine\\publication_revocation.h",
+      "path": "publication_revocation.h",
+      "sha256": "72443b5b9864cbfb137a7f190125f4fc0c35e71f1d7dff39c3423fcc40a25b70"
+    },
+    {
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\steam_original_recovery_engine\\publication_event_export.h",
+      "path": "publication_event_export.h",
+      "sha256": "800bb35aad9146d090701d781d67a794eedfe6fa95c4afa04ce369d07fac9419"
     }
   ]
 }

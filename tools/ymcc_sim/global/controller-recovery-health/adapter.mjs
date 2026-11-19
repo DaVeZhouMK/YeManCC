@@ -13,12 +13,12 @@ export const PRODUCT_INPUTS=Object.freeze([
 ]);
 export function moduleSources(){return ['adapter.mjs','run.mjs','provenance.mjs','spec.json','toolchain-inputs.json','runner.test.mjs','README.md'].map(name=>MODULE+'/'+name);}
 export function inputFiles(){return [...new Set([...moduleSources(),...PRODUCT_INPUTS,
- 'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])].sort();}
+ 'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs','tools/ymcc_sim/global/bundled-node-tool-authority.mjs','tools/ymcc_sim/global/snapshot-node-tools.mjs','tools/ymcc_sim/global/source-snapshot.mjs','tools/fixtures/battery_ui_native_recovery/snapshot-node-binding.mjs'])].sort();}
 export function toolchainSpec(repo=REPO){return JSON.parse(fs.readFileSync(path.join(repo,MODULE,'toolchain-inputs.json'),'utf8').replace(/^\uFEFF/,''));}
 export function getControllerRecoveryHealthAdapters(repo=REPO){return [{
  id:CASE_ID,domain:'controller',title:'Actual native recovery-health consumer: 47 original scenarios, diagnostics on/off and stale-source helper rejection',
  kind:'node',path:MODULE+'/run.mjs',args:['--evidence-dir','{outDir}/recovery-health'],timeoutMs:180000,
  profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['recovery-health/result.json'],
  evidenceInputs:inputFiles(),artifactInputs:toolchainSpec(repo).files.map(row=>row.path),
- boundary:'Unchanged original fixture and source-exact native Context/Source/Window/ACK/maintenance slices. Inert power, time, snapshot and validated-receipt boundaries only; no product Main, Host, SDK, pipe, actual reader, PnP, input device, recovery action, sleep or CPU acceptance.'
+ boundary:'Original47 case names and68 assertions preserved,12 current-route/wake checks, and source-exact native Context/Source/Window/ACK/maintenance slices. Inert power, time, snapshot and validated-receipt boundaries only; no product Main, Host, SDK, pipe, actual reader, PnP, input device, recovery action, sleep or CPU acceptance.'
 }];}

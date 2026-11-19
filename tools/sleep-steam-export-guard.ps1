@@ -6,6 +6,10 @@ function Get-SteamSleepExportContract([string]$ProjectRoot) {
   if (-not [IO.File]::Exists($owner) -and -not [IO.File]::Exists($recovery)) { return $null }
   $files = @('sleep_recovery_auto.h','sleep_steam_recovery.h','sleep_steam_capture.h',
     'sleep_steam_tracking.h','sleep_steam_input_context.h','sleep_steam_game_probe.h','sleep_steam_settle.h')
+  if (([IO.File]::Exists($owner) -and [IO.File]::ReadAllText($owner).Contains('#include "sleep_steam_command_attempt.h"')) -or
+      ([IO.File]::Exists($recovery) -and [IO.File]::ReadAllText($recovery).Contains('#include "sleep_steam_command_attempt.h"'))) {
+    $files += @('sleep_steam_command_attempt.h','steam_command_disposition.h')
+  }
   $linkRuntime=Join-Path $ProjectRoot 'native/steam_game_link_runtime.h'
   if([IO.File]::Exists($linkRuntime)) { $files += @('steam_game_link_runtime.h','steam_game_link_state.h','steam_live_cdp.h') }
   $feedbackHeader=Join-Path $ProjectRoot 'native/steam_native_focus_feedback.h'
@@ -60,7 +64,51 @@ function Get-SteamSleepExportContract([string]$ProjectRoot) {
       throw 'EXPORT_STEAM_ORIGINAL_HOST_IDENTITY_MISSING'
     }
     $trackerText = [IO.File]::ReadAllText($linkRuntime)
-    if (@([regex]::Matches($trackerText, 'TrackingScope::ProcessLifetime')).Count -ne 2) {
+    $trackerCode = [regex]::Replace($trackerText, $cppTokenPattern, [Text.RegularExpressions.MatchEvaluator]{ param($m) [string]::new([char]32, $m.Length) })
+    # Check the effective lifecycle scope and its actual ongoing call. The
+    # startup/current-list request is independent of this original-instance read.
+    $lifetimeBodies=@{};$groupTracking=$false;$completionTracking=$false
+    foreach($entry in @(
+      @{name='tracking';pattern='(?m)^static\s+TrackerRead\s+tracking\s*\(\s*const\s+Client\s*&\s*client\s*,\s*const\s+Game\s*&\s*game\s*,\s*TrackingScope\s+scope\s*=\s*TrackingScope::ProcessLifetime\s*(?<groupParameters>,\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy\s+groupPolicy\s*=\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy::None\s*,\s*const\s+ymcc::steamgamefacts::TrackerOwnerCurrent\s*&\s*requestCurrent\s*=\s*\{\s*\}\s*(?<completionParameter>,\s*NativeSteamTrackerFreshCompletion\s*\*\s*completion\s*=\s*nullptr\s*)?)?\)\s*\{'},
+      @{name='run';pattern='(?m)^static\s+void\s+run\s*\([^;{}]*\)\s*\{'})) {
+      $definitions=@([regex]::Matches($trackerCode,$entry.pattern))
+      if($definitions.Count -ne 1){throw 'EXPORT_STEAM_ORIGINAL_PROCESS_LIFETIME_MISSING'}
+      if($entry.name -ceq 'tracking'){$groupTracking=$definitions[0].Groups['groupParameters'].Success;$completionTracking=$definitions[0].Groups['completionParameter'].Success}
+      $start=$definitions[0].Index+$definitions[0].Length-1;$end=$start+1;$level=1
+      while($end -lt $trackerCode.Length -and $level -gt 0){
+        if($trackerCode[$end] -eq '{'){$level++}elseif($trackerCode[$end] -eq '}'){$level--};$end++
+      }
+      if($level -ne 0){throw 'EXPORT_STEAM_ORIGINAL_PROCESS_LIFETIME_MISSING'}
+      $lifetimeBodies[$entry.name]=$trackerCode.Substring($start+1,$end-$start-2)
+    }
+    $legacyLifetime=(-not $completionTracking) -and [regex]::IsMatch($lifetimeBodies.tracking,'\btrackedProcessInventory\s*\(\s*lines\s*,\s*scope\s*\)') -and
+      [regex]::IsMatch($lifetimeBodies.tracking,'(?s)\btrack\s*\([^;]*,\s*scope\s*\)')
+    # The shared facade reads both inventories. The same translated scope must
+    # select the inventory and binding; the ongoing caller still uses lifetime.
+    # Only the exact typed optional out may extend the group facade.
+    $freshReadPattern=if($completionTracking){
+      '\bconst\s+auto\s+fresh\s*=\s*nativeSteamGameTrackerReadFresh\s*\(\s*client\s*,\s*game\s*,\s*logScope\s*,\s*&\s*freshDiagnostic\s*,\s*groupPolicy\s*,\s*requestCurrent\s*,\s*completion\s*\)\s*;'
+    }elseif($groupTracking){
+      '\bconst\s+auto\s+fresh\s*=\s*nativeSteamGameTrackerReadFresh\s*\(\s*client\s*,\s*game\s*,\s*logScope\s*,\s*&\s*freshDiagnostic\s*,\s*groupPolicy\s*,\s*requestCurrent\s*\)\s*;'
+    }else{
+      '\bconst\s+auto\s+fresh\s*=\s*nativeSteamGameTrackerReadFresh\s*\(\s*client\s*,\s*game\s*,\s*logScope\s*(?:,\s*&\s*freshDiagnostic\s*)?\)\s*;'
+    }
+    $sharedLifetime=$true
+    foreach($pattern in @(
+      '\bconst\s+auto\s+logScope\s*=\s*scope\s*==\s*TrackingScope::RunningListAndProcess\s*\?\s*ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess\s*:\s*ymcc::steamgamefacts::TrackerLogScope::ProcessLifetime\s*;',
+      $freshReadPattern,
+      '\bconst\s+auto\s*&\s*parsed\s*=\s*\*fresh\.tracker->parsedSource\s*;',
+      '\bconst\s+auto\s*&\s*selected\s*=\s*logScope\s*==\s*ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess\s*\?\s*parsed\.runningList\s*:\s*parsed\.processLifetime\s*;',
+      '\binventory\.complete\s*=\s*selected\.inventory\.complete\s*;',
+      '\bfor\s*\(\s*const\s+auto\s*&\s*member\s*:\s*selected\.inventory\.members\s*\)\s*inventory\.rows\.push_back\s*\(\s*\{\s*member\.appid\s*,\s*member\.pid\s*,',
+      '\bresult\.binding\.status\s*=\s*selected\.binding\.status\s*;',
+      '\bresult\.binding\.appid\s*=\s*selected\.binding\.appid\s*;',
+      '\bresult\.gameId\s*=\s*selected\.binding\.gameIdRaw\s*;',
+      '\bresult\.primary\s*=\s*SleepSteamRecovery::nativePrimaryJoin\s*\(')) {
+      if(-not [regex]::IsMatch($lifetimeBodies.tracking,$pattern)){$sharedLifetime=$false;break}
+    }
+    if(((-not $legacyLifetime) -and (-not $sharedLifetime)) -or
+       -not [regex]::IsMatch($lifetimeBodies.run,'\btracking\s*\(\s*client\s*,\s*game\s*(?:,\s*TrackingScope::ProcessLifetime\s*(?:,\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture\s*)?)?\)')) {
       throw 'EXPORT_STEAM_ORIGINAL_PROCESS_LIFETIME_MISSING'
     }
     $files = @($files | Select-Object -Unique)

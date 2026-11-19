@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-reviewed-historical-callback-recipe",
+  "deviceClass": "HandheldCompanion.Devices.GPDWin5",
+  "upstreamCommit": "fdf0bf66a1e546d2321de9dd334a5b076828de65",
+  "sources": [
+    {
+      "file": "GPDWin5.cs",
+      "bytes": 4704,
+      "sha256": "46138518d31aecfdf0e8338b30139b2ab3c185f6f0b622afe88e9cb6b807bd5c"
+    },
+    {
+      "file": "IMUGyrometer.cs",
+      "bytes": 4635,
+      "sha256": "f29e7e019aa058cdf8523c65d73a1dd1a87b34fe494ad58459b09fc922960930"
+    },
+    {
+      "file": "IMUAccelerometer.cs",
+      "bytes": 4488,
+      "sha256": "324193c84b87481d908d6a5443c250ff52e6fda3bc7ae2de3bad6d6ab10acc53"
+    }
+  ],
+  "interpretation": "Historical callback iterates output axes, selects raw input from AxisSwap[output], then applies the sign for that output. Frozen YMCC legacy declarations were instead interpreted input-to-output.",
+  "gyro": {
+    "axis": [
+      1,
+      -1,
+      -1
+    ],
+    "outputToInput": [
+      1,
+      2,
+      0
+    ],
+    "expression": "y-neg-z-neg-x",
+    "canonicalIdentityMatrixId": "hc-06c0b954:gpd-win5:gyro:z-neg-x-neg-y"
+  },
+  "accel": {
+    "axis": [
+      -1,
+      -1,
+      1
+    ],
+    "outputToInput": [
+      0,
+      2,
+      1
+    ],
+    "expression": "neg-x-neg-z-y",
+    "canonicalIdentityMatrixId": "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y"
+  },
+  "sourceScope": "reviewed-historical-hc-callback-output-to-input",
+  "calibration": "Versioned recipe key; ambiguous device-only old offsets are retained but not applied. New stationary calibration required.",
+  "identityPolicy": "Reuse exact GPDWin5 machine identity; CPU SKU alone does not establish a distinct sensor layout.",
+  "acceptanceBoundary": "Historical source semantics and logged pitch/gravity consistency. Final game consumption and each physical hardware variant remain unverified."
+}

@@ -1,5 +1,6 @@
 #pragma once
 #include "json.hpp"
+#include "../game_application_catalog.h"
 #include <string>
 #include <stdexcept>
 #include <cstdint>
@@ -7,6 +8,25 @@
 #include <algorithm>
 
 namespace custom_steam_library {
+// These executable brands are applications, not automatic game identities.
+// Reuse the existing emulator catalog, exact observed program names and the
+// explicit SAK backend layout; generic emulator/PSP/Switch titles stay eligible.
+inline bool libraryLocalProgramExecutable(const std::wstring& executable) {
+    if (ymcc::gameApplications::classify(executable) == ymcc::gameApplications::Category::Emulator) return true;
+    const auto name = ymcc::gameApplications::base(executable);
+    if (name == L"snes9x" || name == L"mesen-s" || name == L"nsemutools" ||
+        name == L"hactoolnet" || name == L"nscb_mtp" || name == L"nscb" ||
+        name == L"sak" || name == L"guiformat" || name == L"nx optimizer" ||
+        name == L"eden-cli" || name == L"citron") return true;
+    // Squirrel is ambiguous on its own. Only the exact SAK bundled backend
+    // layout is a known utility; standalone/similarly named games stay eligible.
+    if (name != L"squirrel") return false;
+    auto path = executable;
+    std::transform(path.begin(), path.end(), path.begin(), [](wchar_t c) {
+        return c == L'\\' ? L'/' : static_cast<wchar_t>(towlower(c));
+    });
+    return path.ends_with(L"/sak_64bit/bin/squirrel.exe") || path.ends_with(L"/sak_32bit/bin/squirrel.exe");
+}
 // Permanent product policy, independent of removable user exclusions. These
 // are Steam shared prerequisites, never a game or an identity/artwork target.
 inline constexpr int steamCommonRedistributablesAppId = 228980;

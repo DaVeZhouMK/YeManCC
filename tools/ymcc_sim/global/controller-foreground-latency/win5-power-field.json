@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "canonicalTestId": "controller.native-foreground-latency",
+  "case": "field-win5-111926-notification-order",
+  "archive": {
+    "name": "YeManCC-logs-20261110-111926-Win5手柄间歇性失败.zip",
+    "bytes": 25090330,
+    "sha256": "b8930e6025774d57be6c1d1e7c5e843e2710cec9b7669e524e36a095ae54fd16"
+  },
+  "member": {
+    "name": "sleep-facts.log",
+    "bytes": 146528,
+    "sha256": "99a2f9bf736d0f9e16713f97c459768ec193eb45d1c62c7335da3912b83dfc36"
+  },
+  "writerPid": 9244,
+  "writerProcessCreation100ns": "134387514778054693",
+  "writerThreadId": 9248,
+  "clock": "Recorded UTC+08:00; replay preserves order without real sleeping",
+  "observations": [
+    {
+      "line": 92,
+      "timestampUtc": "2026-11-10T02:49:24.958Z",
+      "utcEpochMs": 1794278964958,
+      "event": 4,
+      "generation": 9892,
+      "phase": "ready"
+    },
+    {
+      "line": 97,
+      "timestampUtc": "2026-11-10T02:49:25.005Z",
+      "utcEpochMs": 1794278965005,
+      "event": 18,
+      "generation": 9893,
+      "phase": "suspending"
+    },
+    {
+      "line": 98,
+      "timestampUtc": "2026-11-10T02:49:25.006Z",
+      "utcEpochMs": 1794278965006,
+      "event": 7,
+      "generation": 9893,
+      "phase": "suspending"
+    },
+    {
+      "line": 101,
+      "timestampUtc": "2026-11-10T02:49:25.008Z",
+      "utcEpochMs": 1794278965008,
+      "event": 4,
+      "generation": 9893,
+      "phase": "resuming"
+    },
+    {
+      "line": 118,
+      "timestampUtc": "2026-11-10T03:10:19.000Z",
+      "utcEpochMs": 1794280219000,
+      "event": 18,
+      "generation": 9893,
+      "phase": "ready"
+    },
+    {
+      "line": 120,
+      "timestampUtc": "2026-11-10T03:10:19.001Z",
+      "utcEpochMs": 1794280219001,
+      "event": 7,
+      "generation": 9893,
+      "phase": "ready"
+    }
+  ],
+  "controlledBoundaries": {
+    "inputReady": "true; controlled fact, not recorded by these rows",
+    "sharedCommitTick": "unchanged; isolate raw-notification convergence",
+    "sharedPhase": "recorded observation injected into power consumer; does not execute shared main WM handler",
+    "realProcessesLaunched": false,
+    "hardwareAccess": false
+  },
+  "uncovered": "No proof of helper65423ms, downstream target creation, external game delivery or real sleep continuity"
+}

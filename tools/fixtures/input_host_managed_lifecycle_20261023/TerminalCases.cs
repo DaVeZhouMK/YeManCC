@@ -51,16 +51,49 @@ internal static partial class Program
         if(externalParentPid.HasValue&&(externalParentPid.Value<=0||mode!="shutdown"||worker!="output"||transient||beforeFixtureCleanup is null))throw new ArgumentException("External parent is restricted to the retained shutdown output fixture");
         ResetManaged();OwnedWorkers.BlockOutput=worker=="output";OwnedWorkers.BlockClock=worker=="clock";
         TerminalTestPorts.ReleaseOutputAfterTimeout=transient&&worker=="output";TerminalTestPorts.ReleaseClockAfterTimeout=transient&&worker=="clock";
-        var s=mode.StartsWith("shutdown-write-")||mode=="shutdown-parent-loss-neutral"?PersonaReady("dualsense-edge"):ManagedReady();var owner=s.Controller!;var callback=owner.CapturedOutput;
+        bool createException=mode=="cold-create-exception",admissionFailure=mode=="cold-admission-failure";
+        bool coldFailure=createException||admissionFailure;
+        var s=coldFailure?new HostSession("fake-nonce"):mode.StartsWith("shutdown-write-")||mode=="shutdown-parent-loss-neutral"?PersonaReady("dualsense-edge"):ManagedReady();
+        var owner=s.Controller;var callback=owner?.CapturedOutput;
         using var parent=externalParentPid.HasValue?Process.GetProcessById(externalParentPid.Value):StartOwnedParent();var name="ymcc-terminal23-"+Guid.NewGuid().ToString("N");await using var server=ManagedServer(name);
         Task<int>? run=null;bool pass=true;string? error=null;int? exit=null;
+        JsonElement? prepareFailure=null;object? beforePipeBreak=null;
+        var startupReplies=coldFailure?new List<JsonElement>():null;
         try
         {
             if(mode=="already-dead")await ExitOwnedParent(parent);
             var connection=mode=="connect-loss"?Task.CompletedTask:server.WaitForConnectionAsync();
             run=ExecuteMainTerminalAsync(mode=="connect-loss"?name+"-absent":name,parent.Id,s);
             if(mode!="already-dead"&&mode!="connect-loss")await connection.WaitAsync(TimeSpan.FromSeconds(3));
-            if(mode=="shutdown"||mode=="shutdown-neutral-failure"||mode=="shutdown-sdk-failure"||mode=="invalid-shutdown"||mode.StartsWith("shutdown-write-")||mode=="shutdown-parent-loss-neutral")
+            if(coldFailure)
+            {
+                async Task<JsonElement> Exchange(string command,ulong sequence)
+                {
+                    var packet=Message(command,sequence);packet["persona"]="elite";packet["profileIdentity"]="xbox-elite-v2";
+                    await server.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(packet))).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                    var buffer=new byte[16384];var size=await server.ReadAsync(buffer).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                    Assert(size>0&&server.IsMessageComplete,"missing or incomplete startup response");
+                    using var reply=JsonDocument.Parse(buffer.AsMemory(0,size));
+                    startupReplies!.Add(reply.RootElement.Clone());
+                    Assert(reply.RootElement.GetProperty("requestId").GetString()==(string)packet["requestId"]!&&reply.RootElement.GetProperty("sequence").GetUInt64()==sequence,"startup response lost request identity: "+reply.RootElement.GetRawText());
+                    return reply.RootElement.Clone();
+                }
+                Good(await Exchange("HELLO",1));
+                Assert(!s.HasController&&!s.HasContext&&Fixture.Creates==0,"HELLO created a target or context");
+                Fixture.CreateThrows=createException;Fixture.OnObserve=()=>Empty();Fixture.OnSweep=()=>Fixture.Current=Empty();
+                var rejected=await Exchange("PREPARE_TARGET",2);prepareFailure=rejected;
+                Bad(rejected,"prepare-rejected");
+                var detail=rejected.GetProperty("detail").GetString()!;
+                Assert(createException?detail.StartsWith("prepare-exception:IOException;stage=sdk-create",StringComparison.Ordinal):detail.StartsWith("target-pnp-not-admitted:",StringComparison.Ordinal),"wrong startup failure phase: "+detail);
+                beforePipeBreak=ResourceSnapshot();
+                Assert(!run.IsCompleted&&TerminalReceipts.Count==0,"failed PREPARE unexpectedly ended the pipe");
+                Assert(Fixture.Creates==1&&OwnedWorkers.All.Count==(createException?0:1),"startup fixture did not hit the expected factory boundary");
+                Assert(!s.HasController&&!s.HasContext&&!s.Pending,"failed PREPARE left local ownership");
+                AllClosed();
+                Assert(Fixture.Events.Count(x=>x=="context-dispose")==1&&World.ContextCalls==(createException?0:1),"partial ownership not returned before PREPARE reply");
+                server.Dispose();
+            }
+            else if(mode=="shutdown"||mode=="shutdown-neutral-failure"||mode=="shutdown-sdk-failure"||mode=="invalid-shutdown"||mode.StartsWith("shutdown-write-")||mode=="shutdown-parent-loss-neutral")
             {
                 Fixture.NeutralFails=mode=="shutdown-neutral-failure"||mode=="shutdown-write-failure-neutral"||mode=="shutdown-parent-loss-neutral";World.ThrowContextDispose=mode=="shutdown-sdk-failure";
                 if(mode=="invalid-shutdown") { var invalid=Message("SHUTDOWN",3);invalid["startupNonce"]="wrong-nonce";await server.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(invalid)));var badData=new byte[16384];int badLength=await server.ReadAsync(badData).AsTask().WaitAsync(TimeSpan.FromSeconds(3));using var badReply=JsonDocument.Parse(badData.AsMemory(0,badLength));Bad(badReply.RootElement,"protocol-error");Assert(!run.IsCompleted&&TerminalReceipts.Count==0&&ReferenceEquals(owner,s.Controller),"invalid SHUTDOWN became terminal"); }
@@ -87,9 +120,16 @@ internal static partial class Program
             var actualFinal=ActualLogRows().Where(row=>row.GetProperty("reason").GetString()!.StartsWith("terminal-cleanup-")).ToArray();
             Assert(actualFinal.Length==1&&actualFinal[0].GetProperty("kind").GetString()=="resource-settlement","production logger misclassified or duplicated terminal settlement");
             using(var loggedReceipt=JsonDocument.Parse(actualFinal[0].GetProperty("detail").GetString()!))Assert(loggedReceipt.RootElement.GetProperty("ManagedReleaseComplete").GetBoolean()==receipt.ManagedReleaseComplete&&loggedReceipt.RootElement.GetProperty("ExitCode").GetInt32()==exit,"actual log lost receipt result");
-            foreach(var ordered in ActualLogRows().Where(row=>row.GetProperty("reason").GetString()=="shutdown-ordered"))Assert(ordered.GetProperty("kind").GetString()=="orderly"&&!ordered.GetProperty("detail").GetString()!.Contains("ManagedReleaseComplete"),"SHUTDOWN trigger mistaken for resource completion");AssertNoReport(s,owner,callback);
+            foreach(var ordered in ActualLogRows().Where(row=>row.GetProperty("reason").GetString()=="shutdown-ordered"))Assert(ordered.GetProperty("kind").GetString()=="orderly"&&!ordered.GetProperty("detail").GetString()!.Contains("ManagedReleaseComplete"),"SHUTDOWN trigger mistaken for resource completion");
+            if(!coldFailure)AssertNoReport(s,owner!,callback);
             bool permanent=worker!="healthy"&&!transient;
-            if(mode=="shutdown-sdk-failure")
+            if(coldFailure)
+            {
+                Assert(exit==5&&receipt.SourceExitCode==5&&receipt.Reason=="read-failed"&&receipt.ManagedReleaseComplete&&receipt.ReleaseAttempts==1&&receipt.DirectReleaseAttempts==1&&!receipt.Retried,"pipe loss lost its origin or terminal return");
+                Assert(!s.HasController&&!s.HasContext&&!s.Pending&&Fixture.Creates==1&&Fixture.Events.Count(x=>x=="context-dispose")==1&&World.ContextCalls==(createException?0:1),"terminal resurrected or disposed the same target/context twice");
+                AllClosed();
+            }
+            else if(mode=="shutdown-sdk-failure")
             {
                 Assert(exit==7&&!receipt.ManagedReleaseComplete&&receipt.ReleaseAttempts==1&&receipt.DirectReleaseAttempts==0&&!receipt.Retried);
                 Assert(s.HasController&&s.HasContext&&World.ContextCalls==1&&receipt.FirstDetail.Contains("controller-dispose:"));AllClosed();
@@ -113,6 +153,7 @@ internal static partial class Program
         catch(Exception ex){pass=false;error=ex.ToString();}
         var resources=ResourceSnapshot();var receipts=TerminalReceipts.ToArray();var trace=Fixture.Events.ToArray();
         var caseResult=new Dictionary<string,object?>{["name"]=$"terminal-{mode}-{worker}-{(transient?"transient":"fixed")}",["pass"]=pass,["error"]=error,["exit"]=exit,["receipts"]=receipts,["actualProductionLogRows"]=ActualLogRows(),["beforeFixtureCleanup"]=resources,["trace"]=trace};
+        if(coldFailure){caseResult["startupReplies"]=startupReplies;caseResult["prepareFailure"]=prepareFailure;caseResult["beforePipeBreak"]=beforePipeBreak;}
         try{if(beforeFixtureCleanup is not null)await beforeFixtureCleanup(caseResult);}
         finally
         {
@@ -178,6 +219,70 @@ internal static partial class Program
         }
         catch(Exception ex){Console.Error.WriteLine("RETAINED_OWNER_CHILD_FAILED: "+ex);return 1;}
     }
+#if CLOSE_REFRESH_FIXTURE
+    private static void Accept(JsonElement response)=>Good(response);
+#endif
+    private static async Task<Dictionary<string,object?>> TerminalCloseRefreshPendingCase(string selectedName)
+    {
+#if CLOSE_REFRESH_FIXTURE
+        var phases=new List<Dictionary<string,object?>>();
+        foreach(bool active in new[]{false,true})
+        {
+            ResetManaged();TerminalTestPorts.Reset();TerminalReceipts.Clear();ActualLogStart=ReadAllActualLogRows().Length;
+            LookupEntered.Reset();AllowLookup.Reset();CycleEntered.Reset();AllowCycle.Reset();CycleCalls=0;
+            BlockLookup=!active;BlockCycle=active;
+            var session=new HostSession("fake-nonce");Good(Send(session,"HELLO",1));
+            using var parent=StartOwnedParent();var parentBirth=parent.StartTime.ToUniversalTime().Ticks;
+            var name="ymcc-close-terminal-"+Guid.NewGuid().ToString("N");await using var server=ManagedServer(name);
+            Task<int>? run=null;bool pass=false,pendingAtReturn=false,returnAfterRelief=false;int? exit=null;string? error=null;
+            int callsAtReturn=0;string stateAtReturn="";Terminal.Receipt[] receipts=Array.Empty<Terminal.Receipt>();
+            JsonElement[] logs=Array.Empty<JsonElement>();
+            try
+            {
+                var connected=server.WaitForConnectionAsync();run=ExecuteMainTerminalAsync(name,parent.Id,session);
+                await connected.WaitAsync(TimeSpan.FromSeconds(3));
+                var begin=Message("HIDHIDE_CYCLE_BEGIN",2);begin["path"]="USB\\INERT-EXACT-CLOSE";
+                await server.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(begin)));
+                var bytes=new byte[16384];var count=await server.ReadAsync(bytes).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                using(var reply=JsonDocument.Parse(bytes.AsMemory(0,count))){Good(reply.RootElement);using var detail=JsonDocument.Parse(reply.RootElement.GetProperty("detail").GetString()!);Assert(detail.RootElement.GetProperty("accepted").GetBoolean(),"actual BEGIN not accepted");}
+                Assert((active?CycleEntered:LookupEntered).Wait(2000),"actual refresh Task did not reach inert boundary");
+                if(selectedName=="terminal-close-refresh-parent-loss")await ExitOwnedParent(parent);
+                else{TerminalTestPorts.ThrowHandle=true;_msiHostStageEvidence=new Stage();await server.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Message("HIDHIDE_CYCLE_POLL",3))));}
+                exit=await run.WaitAsync(TimeSpan.FromSeconds(4));pendingAtReturn=!session.CloseWorkerFinished;
+                callsAtReturn=CycleCalls;stateAtReturn=session.CloseState;receipts=TerminalReceipts.ToArray();logs=ActualLogRows();
+                Assert(receipts.Length==1,"Main terminal must produce exactly one settlement");var receipt=receipts.Single();
+                Assert(pendingAtReturn&&!receipt.ManagedReleaseComplete,"Main reported an owned CloseRefresh Task complete");
+                Assert(receipt.FirstDetail=="close-refresh-owned-pending"&&receipt.FinalDetail==receipt.FirstDetail&&!receipt.Retried&&receipt.DirectReleaseAttempts==1,"Main lost exact refresh ownership or retried it");
+                Assert(stateAtReturn=="cancelled"&&callsAtReturn==(active?1:0),"terminal did not revoke pending refresh");
+                Assert(exit==receipt.ExitCode&&exit==(selectedName=="terminal-close-refresh-parent-loss"?7:4),"Main lost parent/fatal terminal code");
+                Assert(receipt.Reason==(selectedName=="terminal-close-refresh-parent-loss"?"parent-exited":"fatal-exception"),"Main terminal origin differs");
+                Assert(logs.Count(row=>row.GetProperty("reason").GetString()=="terminal-cleanup-failed")==1,"ordinary actual logger lost retained terminal receipt");
+                AllowLookup.Set();AllowCycle.Set();Assert(SpinWait.SpinUntil(()=>session.CloseWorkerFinished,3000),"Task not returned after explicit fixture gate relief");
+                Assert(CycleCalls==(active?1:0)&&session.CloseState=="cancelled","late refresh executed or changed its terminal result");
+                returnAfterRelief=session.ReleaseLocal(out _,terminal:true);Assert(returnAfterRelief,"returned task still owned");
+                Assert(!session.HasController&&!session.HasContext&&World.ContextCalls==0,"refresh created/disposed a virtual target");
+                pass=true;
+            }
+            catch(Exception ex){error=ex.ToString();}
+            finally
+            {
+                AllowLookup.Set();AllowCycle.Set();SpinWait.SpinUntil(()=>session.CloseWorkerFinished,3000);
+                server.Dispose();if(!parent.HasExited)await ExitOwnedParent(parent);
+                if(run is not null)try{await run.WaitAsync(TimeSpan.FromSeconds(4));}catch(Exception ex){pass=false;error+=" cleanup:"+ex;}
+                OwnedWorkers.Cleanup();
+            }
+            phases.Add(new(){["phase"]=active?"active-call":"queued-lookup",["pass"]=pass,["error"]=error,["exit"]=exit,
+                ["parentPid"]=parent.Id,["parentBirthUtcTicks"]=parentBirth,["parentNaturalExit"]=parent.HasExited&&parent.ExitCode==0,
+                ["pendingAtMainReturn"]=pendingAtReturn,["cycleCallsAtMainReturn"]=callsAtReturn,["stateAtMainReturn"]=stateAtReturn,
+                ["taskReturnedAfterExplicitFixtureRelief"]=session.CloseWorkerFinished,["releaseAfterRelief"]=returnAfterRelief,
+                ["cycleCallsAtEnd"]=CycleCalls,["receipts"]=receipts,["actualProductionLogRows"]=logs});
+        }
+        return new(){["name"]=selectedName,["pass"]=phases.All(row=>row["pass"] is true),["phases"]=phases,
+            ["realMainTerminalAndPipe"]=true,["realParentProcessHandle"]=true,["physicalPnPPort"]=false};
+#else
+        throw new NotSupportedException("CloseRefresh Main case requires its explicit inert fixture boundary");
+#endif
+    }
     private static async Task<int> Main(string[] args)
     {
         if(args.SequenceEqual(new[]{"--owned-parent"})){Console.WriteLine("READY");Console.In.ReadLine();return 0;}
@@ -201,15 +306,24 @@ internal static partial class Program
             }
             var selectedCase=args[1];
             var selectedCases=selectedCase.Split(',');
-            if(selectedCases.Length==0||selectedCases.Any(name=>name!="terminal-shutdown-healthy-fixed"&&name!="terminal-read-loss-healthy-fixed"&&name!="terminal-shutdown-output-fixed")||selectedCases.Distinct(StringComparer.Ordinal).Count()!=selectedCases.Length||(selectedCases.Contains("terminal-shutdown-output-fixed")&&selectedCases.Length!=1))
+            const string createFailureCase="terminal-cold-create-exception-healthy-fixed",admissionFailureCase="terminal-cold-admission-failure-healthy-fixed";
+            if(selectedCases.Length==0||selectedCases.Any(name=>name!="terminal-shutdown-healthy-fixed"&&name!="terminal-read-loss-healthy-fixed"&&name!="terminal-shutdown-output-fixed"&&name!="terminal-close-refresh-parent-loss"&&name!="terminal-close-refresh-fatal"&&name!=createFailureCase&&name!=admissionFailureCase)||selectedCases.Distinct(StringComparer.Ordinal).Count()!=selectedCases.Length||(selectedCases.Contains("terminal-shutdown-output-fixed")&&selectedCases.Length!=1))
             {
-                Console.Error.WriteLine("--case requires a nonempty, unique list of terminal-shutdown-healthy-fixed and/or terminal-read-loss-healthy-fixed, or terminal-shutdown-output-fixed alone.");
+                Console.Error.WriteLine("--case requires a nonempty, unique list of supported terminal scopes; terminal-shutdown-output-fixed must run alone.");
                 return 2;
             }
             var selectedRows=new List<Dictionary<string,object?>>();
             foreach(var selectedName in selectedCases)
             {
-                var row=selectedName=="terminal-shutdown-output-fixed"?await TerminalPipeCase("shutdown","output",false):await TerminalPipeCase(selectedName=="terminal-shutdown-healthy-fixed"?"shutdown":"read-loss");
+                var row=selectedName switch
+                {
+                    createFailureCase=>await TerminalPipeCase("cold-create-exception"),
+                    admissionFailureCase=>await TerminalPipeCase("cold-admission-failure"),
+                    "terminal-shutdown-output-fixed"=>await TerminalPipeCase("shutdown","output",false),
+                    "terminal-shutdown-healthy-fixed"=>await TerminalPipeCase("shutdown"),
+                    "terminal-read-loss-healthy-fixed"=>await TerminalPipeCase("read-loss"),
+                    _=>await TerminalCloseRefreshPendingCase(selectedName),
+                };
                 if(!row.TryGetValue("name",out var actualName)||actualName is not string actualCaseName||actualCaseName!=selectedName)
                 {
                     row["pass"]=false;

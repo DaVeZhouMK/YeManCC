@@ -59,7 +59,7 @@ for (const variant of selected) {
   const root = path.resolve(variant === 'r108' ? options.r108Root : options.currentRoot);
   const base = path.join(run, variant), snapshot = path.join(base, 'snapshot');
   fs.mkdirSync(path.join(snapshot, 'tools'), { recursive: true });
-  const bytes = new Map(fileNames.map(n => [n, fs.readFileSync(path.join(root, n))]));
+  const bytes = new Map([...fileNames,...(variant==='current'?['native/sleep_power_state.h']:[])].map(n => [n, fs.readFileSync(path.join(root, n))]));
   if (variant === 'r108') assert.equal(sha(bytes.get('native/msi_owned_return_runtime.h')), 'abb44867f56184b32efaedb98bb0309c1c557b437a69f1ed6f6606f5e1bb3d8f', 'Frozen R108 header pin changed');
   for (const [name, data] of bytes) {
     const dest = path.join(snapshot, name); fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, data);
@@ -86,7 +86,7 @@ for (const variant of selected) {
   }
   const policy = bytes.get('native/msi_owned_return_recovery.h').toString('utf8');
   for (const name of ['begin', 'claimRetry']) extract(policy, 'method', name, 'native/msi_owned_return_recovery.h', ranges);
-  fs.writeFileSync(path.join(snapshot, 'tools/production_types.h'), '#pragma once\n' + types + '\n');
+  fs.writeFileSync(path.join(snapshot, 'tools/production_types.h'), '#pragma once\n'+(variant==='current'?'#include "../native/sleep_power_state.h"\n':'') + types + '\n');
   fs.writeFileSync(path.join(snapshot, 'tools/production_debt_helpers.h'), '#pragma once\n' + debt + '\n');
   fs.writeFileSync(path.join(snapshot, 'tools/offline_command_io.h'), fs.readFileSync(path.join(fixtures, 'inert_win32.inc'), 'utf8') +
     '\nstatic constexpr DWORD kMsiClawWriteWaitMs=2000;\nstatic constexpr DWORD kMsiClawWriteReapMs=500;\n' + slot + '\nstatic MsiClawIoSlot g_msiClawIoSlot;\n' +

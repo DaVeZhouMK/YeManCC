@@ -1,3 +1,5 @@
+#include "../input-sources/native/log_snapshot_state.h"
+#include "../input-sources/native/sleep_recovery_record_name.h"
 #include <atomic>
 #include <cctype>
 #include <iostream>
@@ -26,9 +28,21 @@ static void appendNativeLifecycleLog(const char* kind, json data) { lifecycleLog
 static void sgRecordFact(const char* kind, const json& data = json::object()) { businessFacts.push_back({{"kind",kind},{"data",data}}); }
 struct SgSleepTarget { bool markerOwned=false; unsigned long long powerGeneration=0; };
 struct SgResumeResult { int count=0; };
-static bool sgReadSleepTarget(SgSleepTarget&) { return false; }
-static bool sgResumeSleepTargetUnlocked(unsigned long long, bool) { throw std::runtime_error("unexpected memory target resume"); }
-static SgResumeResult sgResumeTrackedAllUnlocked() { businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
+static bool memoryLeaseOwned = false;
+static int memoryLeaseReturned = 0;
+static std::vector<json> memoryLeaseResumeCalls;
+static bool sgReadSleepTarget(SgSleepTarget& target) {
+ if(!memoryLeaseOwned)return false;
+ target.markerOwned=true;target.powerGeneration=77;return true;
+}
+static SgResumeResult sgResumeSleepTargetUnlocked(unsigned long long generation, bool secondArgument) {
+ memoryLeaseResumeCalls.push_back({{"generation",generation},{"secondArgument",secondArgument}});
+ if(!memoryLeaseOwned || generation!=77 || secondArgument)
+  throw std::runtime_error("unexpected memory existing-lease helper arguments");
+ memoryLeaseOwned=false;++memoryLeaseReturned;return {1};
+}
+enum class SgDirectoryResumePurpose { ExitCleanup };
+static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose purpose) { if(purpose!=SgDirectoryResumePurpose::ExitCleanup) throw std::runtime_error("unexpected resume purpose"); businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
 static void sgCancelWakeGameRecoveryUnlocked(const char* reason) { ++cancelCalls; businessFacts.push_back({{"kind","memory-wake-cancel"},{"reason",reason}}); }
 // EXACT_CURRENT_FULL_DEFINITIONS
 static void need(bool condition, const char* text) { if(!condition)throw std::runtime_error(text); }
@@ -43,6 +57,152 @@ static json snapshot() {
 static fspath::path heldMarker() { return caseDataDir/"held-unclean.marker"; }
 static void blockMarker() { need(fspath::is_regular_file(marker()),"block requires actual existing file");fspath::rename(marker(),heldMarker());need(fspath::create_directory(marker()),"block directory not created");need(fspath::is_directory(marker()),"actual directory refusal absent"); }
 static void unblockMarker() { need(fspath::is_directory(marker()),"unblock requires owned directory");need(fspath::remove(marker()),"owned refusal directory not removed");fspath::rename(heldMarker(),marker()); }
+// Directed actions extend the original consumer fixture. All handler side effects
+// and the existing-lease helper below are memory ports; marker I/O stays actual.
+#ifndef WM_QUERYENDSESSION
+#define WM_QUERYENDSESSION 0x0011
+#endif
+#ifndef WM_ENDSESSION
+#define WM_ENDSESSION 0x0016
+#endif
+#ifndef TRUE
+#define TRUE 1
+#endif
+static std::vector<std::string> sessionHandlerPorts;
+static json sessionCancelObservations = json::object();
+static void cpuUvTrialStop(const char* reason) {
+ need(std::string(reason)=="exit", "unexpected CPU trial port reason");
+ sessionHandlerPorts.push_back("cpuUvTrialStop:exit");
+}
+namespace ymcc::screenpads {
+static void release() { sessionHandlerPorts.push_back("screenpads.release"); }
+}
+struct MemoryDeckySessionPort {
+ void requestExitFence() { sessionHandlerPorts.push_back("decky.requestExitFence"); }
+};
+static MemoryDeckySessionPort g_deckySidebarRuntime;
+static void closeScreenTouchpadsForExit(const char* reason) {
+ need(std::string(reason)=="end-session", "unexpected screen touchpad port reason");
+ sessionHandlerPorts.push_back("closeScreenTouchpadsForExit:end-session");
+}
+static void inputEvidenceFlushForExit() { sessionHandlerPorts.push_back("inputEvidenceFlushForExit"); }
+static long replayOriginalSessionHandler(unsigned message, unsigned long long w) {
+ switch(message) {
+// EXACT_CURRENT_SESSION_HANDLERS
+ default: throw std::runtime_error("unexpected private session message");
+ }
+}
+static json memoryLeaseObservation() {
+ return {{"evidenceKind","memory-helper-route-only"}, {"generation",77},
+         {"helperCalls",memoryLeaseResumeCalls}, {"returnedLeases",memoryLeaseReturned},
+         {"remainingOwnedLeases",memoryLeaseOwned?1:0}};
+}
+static json cleanupCompletionObservations() {
+ json rows=json::array();
+ for(const auto& fact:businessFacts)
+  if(fact.at("kind")=="sleep-exit-cleanup-complete")rows.push_back(fact.at("data"));
+ return rows;
+}
+static bool validActiveBootMarker(const json& state) {
+ // Exact bytes and token preserve both syntax and identity, rather than merely
+ // checking that a corrupt or empty marker does not contain ",clean".
+ return state.at("markerType")=="file" && state.at("markerBytes")=="100@100" &&
+        state.at("currentToken")=="100@100" && state.at("cleanLogs")==0 &&
+        state.at("writeFailureLogs")==0 && state.at("cleanupDone")==false;
+}
+static json runSessionFinalize(const std::string& action) {
+ need(memoryPid==100 && memoryTick==100, "directed scene requires pinned boot clock and pid");
+ const auto boot=snapshot();
+ need(validActiveBootMarker(boot), "fresh valid owned boot marker precondition failed");
+ sessionCancelObservations["boot"]=boot;
+ memoryLeaseOwned=true;
+ memoryTick=200;
+ const auto queried=replayOriginalSessionHandler(WM_QUERYENDSESSION,0);
+ const auto afterQuery=snapshot();
+ sessionCancelObservations["afterQuery"]=afterQuery;
+ json result={{"phaseGatePassed",false},{"queryReturned",queried},{"afterQuery",afterQuery}};
+ const json expectedRoute=json::array({{{"generation",77},{"secondArgument",false}}});
+ const auto queryCompletions=cleanupCompletionObservations();
+ const bool queryRecovery = json(memoryLeaseResumeCalls)==expectedRoute &&
+     memoryLeaseReturned==1 && !memoryLeaseOwned;
+ const bool queryCommitDeferred=queryCompletions.size()==1 &&
+     queryCompletions[0].contains("finalizeSession") &&
+     queryCompletions[0].at("finalizeSession")==false &&
+     queryCompletions[0].at("sessionClean")==false;
+ if(!validActiveBootMarker(afterQuery) || !queryRecovery || !queryCommitDeferred) {
+  result["failedPhase"]="query-must-recover-memory-lease-without-final-commit";
+  result["memoryLease"]=memoryLeaseObservation();
+  result["cleanupCompletions"]=queryCompletions;
+  return result;
+ }
+ memoryTick=300;
+ const auto canceled=replayOriginalSessionHandler(WM_ENDSESSION,0);
+ const auto afterCancel=snapshot();
+ sessionCancelObservations["afterCancel"]=afterCancel;
+ result["cancelReturned"]=canceled;
+ result["afterCancel"]=afterCancel;
+ if(!validActiveBootMarker(afterCancel)) {
+  result["failedPhase"]="cancel-must-preserve-valid-active-boot-marker";
+  return result;
+ }
+ result["phaseGatePassed"]=true;
+ memoryTick=400;
+ if(action=="query-cancel-end") {
+  result["endReturned"]=replayOriginalSessionHandler(WM_ENDSESSION,1);
+ } else if(action=="query-cancel-normal") {
+  // This one-argument call must obtain its default from the real declaration.
+  result["finalReturned"]=sgCleanupBeforeExit(false);
+ } else if(action=="query-cancel-pending-retry") {
+  const auto pendingDir=fspath::path(SG_SLEEP_LEASE_DIR);
+  need(fspath::create_directory(pendingDir), "owned pending directory not created");
+  const auto pendingFile=pendingDir/"77.txt";
+  { std::ofstream out(pendingFile,std::ios::binary|std::ios::trunc);
+    need(bool(out),"owned pending file open failed");out<<"memory-owned-pending";
+    out.flush();need(bool(out),"owned pending file write failed"); }
+  result["firstReturned"]=sgCleanupBeforeExit(false);
+  result["afterPending"]=snapshot();
+  // A failed semantic phase is emitted as native exit 23 by main, and is not
+  // hidden by a later successful retry or treated as a harness exception.
+  if(!validActiveBootMarker(result.at("afterPending")) || result.at("firstReturned")!=false) {
+   result["failedPhase"]="pending-marker-must-block-final-commit";
+   result["phaseGatePassed"]=false;
+   return result;
+  }
+  need(fspath::remove(pendingFile), "owned pending file not removed");
+  need(fspath::remove(pendingDir), "owned pending directory not removed");
+  memoryTick=500;
+  result["retryReturned"]=sgCleanupBeforeExit(false);
+ } else if(action=="query-cancel-write-refusal-retry") {
+  blockMarker();
+  result["firstReturned"]=sgCleanupBeforeExit(false);
+  result["afterRefusal"]=snapshot();
+  result["heldActiveBytes"]=readBytes(heldMarker());
+  const auto refused=result.at("afterRefusal");
+  const bool uncommitted = result.at("firstReturned")==false &&
+      refused.at("markerType")=="directory" && refused.at("currentToken")=="100@100" &&
+      refused.at("cleanLogs")==0 && refused.at("writeFailureLogs")==1 &&
+      refused.at("cleanupDone")==false && result.at("heldActiveBytes")=="100@100";
+  if(!uncommitted) {
+   result["failedPhase"]="actual-write-refusal-must-block-final-commit";
+   result["phaseGatePassed"]=false;
+   return result;
+  }
+  unblockMarker();
+  result["afterRestore"]=snapshot();
+  const auto restored=result.at("afterRestore");
+  need(restored.at("markerType")=="file" && restored.at("markerBytes")=="100@100",
+       "owned refusal restoration lost actual bytes");
+  memoryTick=500;
+  result["retryReturned"]=sgCleanupBeforeExit(false);
+ } else throw std::runtime_error("unknown directed session action");
+ result["final"]=snapshot();
+ result["memoryLease"]=memoryLeaseObservation();
+ result["sessionHandlerPorts"]=sessionHandlerPorts;
+ result["cleanupCompletions"]=cleanupCompletionObservations();
+ sessionCancelObservations["final"]=result.at("final");
+ return result;
+}
+
 static json run(const std::string& action) {
  if(action=="prior-unclean")seed("88@12");
  else if(action=="prior-clean")seed("88@12,clean");
@@ -51,6 +211,7 @@ static json run(const std::string& action) {
  else if(action=="prior-damaged")seed("broken@@marker");
  if(action=="boot-refused-retry") { need(fspath::create_directory(marker()),"owned boot refusal directory not created");sessionMarkerCheckAtBoot();const auto initial=snapshot();need(fspath::remove(marker()),"owned boot refusal directory not removed");memoryTick=200;sessionMarkerCheckAtBoot();return {{"initial",initial},{"final",snapshot()}}; }
  sessionMarkerCheckAtBoot();
+ if(action.rfind("query-cancel-",0)==0)return runSessionFinalize(action);
  if(action=="clean"||action=="clean-twice"||action=="missing-before-clean") { if(action=="missing-before-clean")need(fspath::remove(marker()),"owned marker missing removal failed");memoryTick=200;sessionMarkerMarkClean();if(action=="clean-twice"){memoryTick=300;sessionMarkerMarkClean();}return {{"final",snapshot()}}; }
  if(action=="clean-refused"||action=="clean-refused-retry") { blockMarker();memoryTick=200;sessionMarkerMarkClean();const auto refused=snapshot();unblockMarker();if(action=="clean-refused-retry"){memoryTick=300;sessionMarkerMarkClean();}return {{"afterRefusal",refused},{"final",snapshot()}}; }
  if(action=="cleanup") { memoryTick=200;const bool returned=sgCleanupBeforeExit(false);return {{"returned",returned},{"final",snapshot()}}; }
@@ -58,6 +219,6 @@ static json run(const std::string& action) {
  need(action=="fresh"||action=="restart"||action.rfind("prior-",0)==0,"unknown scenario action");return {{"final",snapshot()}};
 }
 int main(int argc,char** argv) {
- try { need(argc==2,"one owned config argument required");const auto configFile=fspath::path(argv[1]);need(YmccPauseBoundary::inside(configFile),"config outside owned root");const json config=json::parse(readBytes(configFile));caseDataDir=fspath::path(config.at("dataDir").get<std::string>());need(YmccPauseBoundary::inside(caseDataDir)&&fspath::is_directory(caseDataDir)&&!fspath::is_symlink(fspath::symlink_status(caseDataDir)),"data directory not owned");memoryPid=config.at("pid").get<unsigned long>();memoryTick=config.at("tick").get<unsigned long long>();SG_SLEEP_LEASE_DIR=(caseDataDir/"owned-empty-sleep-leases").wstring();SG_MANUAL_DIR=(caseDataDir/"owned-empty-manual-leases").wstring();const json actual=run(config.at("action").get<std::string>()),expected=config.at("expected");const bool passed=actual==expected;std::cout<<json({{"case",config.at("case")},{"label",config.at("label")},{"expected",expected},{"actual",actual},{"passed",passed},{"lifecycleLogs",lifecycleLogs},{"businessFacts",businessFacts}}).dump()<<std::endl;return passed?0:23;
+ try { need(argc==2,"one owned config argument required");const auto configFile=fspath::path(argv[1]);need(YmccPauseBoundary::inside(configFile),"config outside owned root");const json config=json::parse(readBytes(configFile));caseDataDir=fspath::path(config.at("dataDir").get<std::string>());need(YmccPauseBoundary::inside(caseDataDir)&&fspath::is_directory(caseDataDir)&&!fspath::is_symlink(fspath::symlink_status(caseDataDir)),"data directory not owned");memoryPid=config.at("pid").get<unsigned long>();memoryTick=config.at("tick").get<unsigned long long>();SG_SLEEP_LEASE_DIR=(caseDataDir/"owned-empty-sleep-leases").wstring();SG_MANUAL_DIR=(caseDataDir/"owned-empty-manual-leases").wstring();const json actual=run(config.at("action").get<std::string>()),expected=config.at("expected");const bool passed=actual==expected;std::cout<<json({{"case",config.at("case")},{"label",config.at("label")},{"expected",expected},{"actual",actual},{"passed",passed},{"lifecycleLogs",lifecycleLogs},{"businessFacts",businessFacts},{"sessionCancelObservations",sessionCancelObservations}}).dump()<<std::endl;return passed?0:23;
  } catch(const std::exception& error) { std::cerr<<json({{"harnessError",error.what()}}).dump()<<std::endl;return 2; }
 }

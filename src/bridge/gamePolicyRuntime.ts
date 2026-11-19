@@ -1,56 +1,156 @@
 import { watch } from 'vue';
-import { performanceConsumptionSignature, normalizeHyperThreadMode, normalizeControlPowerSchemes } from './performanceControls';
+import { performanceConsumptionSignature, normalizeHyperThreadMode, normalizeControlPowerSchemes, beginInvalidTdpRecovery, finishInvalidTdpRecovery, type InvalidTdpRecovery } from './performanceControls';
 import { isGameStatusCurrent, isCurrentGameTarget, subscribeGameTargetReadiness } from './gamedetect';
-import { powerSourceMode } from './powerSource';
+import { powerSourceMode, powerSourceBatteryPresent } from './powerSource';
 import { detectPowerMode } from './yeman';
 import { loadGlobalFrameRates, onFrameRatesChanged, dedicatedFrameRatePair, applyIndependentFrameRates } from './frameRateLimits';
-import { setFloatRtssLinked } from './autofloat';
+import { setFloatRtssLinked, getFloatInfo } from './autofloat';
+import { subscribeMonitorSnapshot, type MonitorSnapshotView } from './monitorData';
+import { monitorProofFresh } from './monitorSnapshotSignals';
 import { subscribePolicyGameStatus, getPolicyGame, gamePolicyKey, isPolicyGameInitialized } from './gamePolicyTarget';
 import { loadGameCustomConfig, loadPerformanceSchedule, restorePerformanceScheduleIfConfigured,
-  onGameCustomConfigChanged, onPerformanceScheduleChanged, onContinuousPerformanceApplied, isPerformanceScheduleBusy } from './performanceSchedule';
+  onGameCustomConfigChanged, onPerformanceScheduleChanged, onContinuousPerformanceApplied, isPerformanceScheduleBusy, reconcilePerformanceScheduleTdp, getInvalidPerformanceTdpTarget, reconcileInvalidPerformanceTdp, continuousControlsFromSchedule, continuousControlsForEntry } from './performanceSchedule';
 import { applyGameCorePolicy, clearGameCorePolicy, detectGameCorePolicy } from './gameCorePolicy';
 import { registerScheduledTask } from '@/scheduler';
 import { powerLifecycle } from './api';
+import { getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
 import { isQuickActionBusy } from './quickActionLock';
+import { createPowerResumeQueue } from './powerResume';
 
 // Resident owner: automatic dedicated policies never depend on menu/page visibility.
 let active = false;
 let epoch = 0;
 let running = false;
+const resumeQueue = createPowerResumeQueue();
+let runningCurrent: (() => boolean) | null = null;
+function retireWork(): void {
+  resumeQueue.invalidate(); running = false; runningCurrent = null;
+}
+let powerHeld = true, powerGeneration = 0;
+let powerNotificationSequence: number | undefined;
 let dirty = true;
 let appliedPerformance = '';
+let tdpAppliedIntent = '';
+let appliedCpuIntent = '';
 let appliedCore = '';
 let appliedFrames = '';
 let observedSchedule = '';
+let followsTemplateDefaults: boolean | null = null;
+let invalidTdpRecovery: InvalidTdpRecovery | null = null;
 let stops: (() => void)[] = [];
 let stopRetry: (() => void) | null = null;
+let tdpPending = false, tdpNextCheck = 0, tdpChecksRemaining = 0, tdpCeiling = 0;
+let lastWakeGeneration = 0, tdpObservedAt = 0, tdpHighSince = 0, tdpCorrectionAfter = 0;
+function resetTdpChecks(): void {
+  invalidTdpRecovery = null;
+  tdpPending = true; tdpNextCheck = 0; tdpChecksRemaining = 2;
+  tdpAppliedIntent = '';
+  tdpCeiling = 0; tdpObservedAt = 0; tdpHighSince = 0;
+}
+// Two bounded settle checks cover OEM software that writes after wake. Reuse
+// the existing resident task; healthy owners have no periodic hardware probe.
+export function requestGamePolicyTdpReconciliation(generation: number): void {
+  if (!active || !Number.isSafeInteger(generation) || generation <= lastWakeGeneration) return;
+  lastWakeGeneration = generation; epoch += 1; retireWork(); resetTdpChecks(); ensureRetry(); void reconcile();
+}
+function observeTdp(snapshot: MonitorSnapshotView | null): void {
+  if (!active || powerHeld || tdpCeiling <= 0 || invalidTdpRecovery) return;
+  const top = snapshot?.top, now = Date.now(), at = snapshot?.fps?.hardwareObservedAt || top?.ts;
+  if (!top || snapshot?.hwDown || top.hwDown || top.cpuPowerValid === false ||
+      !monitorProofFresh(top.ts, now, 6000) || !monitorProofFresh(at, now, 6000) || at! > top.ts ||
+      typeof top.tdpW !== 'number' || !Number.isFinite(top.tdpW) || top.tdpW < 0) { tdpHighSince = 0; return; }
+  if (at! <= tdpObservedAt) return;
+  const interrupted = at! - tdpObservedAt > 6000; tdpObservedAt = at!;
+  // A live float lease owns this correction. An enabled timer with an expired
+  // CPU/scene lease cannot suppress the independent saved TDP protection.
+  const float = getFloatInfo();
+  if (float.enabled && float.tdpOwnerCurrent !== false) { tdpHighSince = 0; return; }
+  if (top.tdpW <= tdpCeiling + Math.max(3, tdpCeiling * .15)) { tdpHighSince = 0; return; }
+  if (!tdpHighSince || interrupted) tdpHighSince = at!;
+  if (at! - tdpHighSince < 6000 || now < tdpCorrectionAfter) return;
+  tdpCorrectionAfter = now + 30000; tdpHighSince = 0;
+  tdpPending = true; tdpNextCheck = 0; tdpChecksRemaining = 0;
+  ensureRetry(); void reconcile();
+}
 function ensureRetry(): void {
-  if (active && !stopRetry) stopRetry = registerScheduledTask(
+  if (active && !powerHeld && (dirty || tdpPending) && !stopRetry) stopRetry = registerScheduledTask(
     'game-policy-runtime-retry', 2000, reconcile, { pauseWhenHidden: false });
 }
 function scheduleSignature(config: Awaited<ReturnType<typeof loadPerformanceSchedule>>): string {
-  return JSON.stringify([config.configured, config.enabled, config.active, config.profiles, config.controls, normalizeControlPowerSchemes(config.powerSchemes), normalizeHyperThreadMode(config.hyperThreadPolicy)],(key,value)=>key==='fpsTarget'?undefined:value);
+  return JSON.stringify([config.configured, config.enabled, config.suspended, config.active, config.profiles, config.controls, normalizeControlPowerSchemes(config.powerSchemes), normalizeHyperThreadMode(config.hyperThreadPolicy)],(key,value)=>key==='fpsTarget'?undefined:value);
 }
 async function reconcile(): Promise<void> {
-  if (!active || running || !dirty || !isPolicyGameInitialized() || !isGameStatusCurrent() || isQuickActionBusy() || isPerformanceScheduleBusy()) return;
-  running = true;
+  if (running && runningCurrent?.() === false) retireWork();
+  if (!active || powerHeld || running || (!dirty && !tdpPending) || isQuickActionBusy() || isPerformanceScheduleBusy()) return;
+  if (!dirty && tdpPending && Date.now() < tdpNextCheck) return;
+  return resumeQueue.run(powerGeneration, async ownerCurrent => {
   const generation = epoch;
+  const notificationSequence = getSharedPowerLifecycle()?.observedNotificationSequence;
   const game = getPolicyGame();
-  const current = () => active && generation === epoch && isGameStatusCurrent() &&
+  const admittedGeneration = powerGeneration;
+  const current = () => {
+    const power = getSharedPowerLifecycle();
+    return ownerCurrent() && active && !powerHeld && generation === epoch && isSharedPowerLifecycleAdmitted(power) &&
+      power?.generation === admittedGeneration && power.observedNotificationSequence === notificationSequence;
+  };
+  if (!current()) return;
+  running = true; runningCurrent = current;
+  const gameCurrent = () => current() && isPolicyGameInitialized() && isGameStatusCurrent() &&
     (game ? isCurrentGameTarget(game) : getPolicyGame() === null);
+  const reconcileInvalid = async () => {
+    const recovery = invalidTdpRecovery, now = Date.now();
+    if (!recovery || now < recovery.nextCheck || !current()) return;
+    if (getInvalidPerformanceTdpTarget() === null) {
+      // Unknown owner/range waits for its original change notification. Do not
+      // turn an unavailable cached target into repeated full settings reloads.
+      recovery.nextCheck = tdpNextCheck = now + 60000; return;
+    }
+    recovery.nextCheck = now + 60000;
+    if (now >= recovery.nextWrite) {
+      const applied = await reconcileInvalidPerformanceTdp(() => current() && invalidTdpRecovery === recovery).catch(() => false);
+      if (!current() || invalidTdpRecovery !== recovery) return;
+      finishInvalidTdpRecovery(recovery, now, applied);
+    }
+    tdpNextCheck = recovery.nextCheck;
+  };
   try {
+    // The invalid-only heartbeat consumes cached target/receipt state. It must
+    // not reload settings, CPU topology or power on every slow check.
+    if (!dirty && invalidTdpRecovery) { await reconcileInvalid(); return; }
     const lifecycle = await powerLifecycle.get().catch(() => null);
     if (!current() || lifecycle?.phase !== 'ready' || lifecycle.hardwareWritesAllowed !== true) return;
-    const config = await loadGameCustomConfig();
+    const config = await loadGameCustomConfig('ensure', { requireReady: true });
+    if (!current()) return;
     const schedule = await loadPerformanceSchedule();
     if (!current()) return;
     observedSchedule = scheduleSignature(schedule);
     const entry = game ? config.entries[gamePolicyKey(game)] : undefined;
     const enabledEntry = entry?.enabled !== false ? entry : undefined;
+    followsTemplateDefaults = !enabledEntry && schedule.templateDefaults === true;
     const identity = game ? JSON.stringify([game.pid, game.processCreated, game.path.toLowerCase(), game.identityGeneration ?? 0]) : '';
     // Input-only/display-name edits must not replay CPU/TDP/FPS or process affinity.
     const side = powerSourceMode.value;
     if (!side) return;
+    const tdpBank = enabledEntry ? continuousControlsForEntry(enabledEntry, schedule)[side] : continuousControlsFromSchedule(schedule)[side];
+    const canOwnTdp = !schedule.suspended && (enabledEntry || schedule.configured);
+    tdpCeiling = canOwnTdp ? tdpBank.tdp : 0;
+    if (!canOwnTdp) { tdpPending = false; tdpChecksRemaining = 0; invalidTdpRecovery = null; }
+    else if (tdpBank.tdpValid === false) {
+      invalidTdpRecovery ??= beginInvalidTdpRecovery(Date.now());
+      tdpPending = true; tdpNextCheck = invalidTdpRecovery.nextCheck;
+    } else invalidTdpRecovery = null;
+    const reconcileTdp = async (alreadyApplied = false) => {
+      if (invalidTdpRecovery) { await reconcileInvalid(); return; }
+      const now = Date.now();
+      if (!tdpPending || now < tdpNextCheck || !current()) return;
+      const applied = alreadyApplied || await reconcilePerformanceScheduleTdp(current).catch(() => false);
+      if (!current()) return;
+      if (!applied) { tdpNextCheck = now + 30000; return; }
+      if (tdpChecksRemaining <= 0) tdpPending = false;
+      else { tdpNextCheck = now + (tdpChecksRemaining === 2 ? 3000 : 7000); tdpChecksRemaining -= 1; }
+    };
+    if (!gameCurrent()) { await reconcileTdp(); if (current()) dirty = false; return; }
+    if (!dirty) { await reconcileTdp(); return; }
     const globalFrames = await loadGlobalFrameRates();
     const frameOwner = enabledEntry ? config.rtss?.[gamePolicyKey(game)] : undefined;
     const frames = dedicatedFrameRatePair(frameOwner, globalFrames);
@@ -70,22 +170,32 @@ async function reconcile(): Promise<void> {
       ? normalizeHyperThreadMode(enabledEntry.hyperThreadPolicyEnabled ? enabledEntry.hyperThreadPolicy : 'default')
       : normalizeHyperThreadMode(schedule.hyperThreadPolicy);
     const coreSignature = JSON.stringify([identity, hyperIntent]);
-    if (!current()) return;
-    if (performanceSignature !== appliedPerformance) {
+    let performancePending = false;
+    if (!gameCurrent()) return;
+    let bankApplied = false;
+    if (performanceSignature !== appliedPerformance && performanceSignature !== appliedCpuIntent) {
       if (isQuickActionBusy() || isPerformanceScheduleBusy()) return; // shared owner may have changed during the reads above
-      // An automatic dedicated bank is independent of the global scheduler.
-      // Passive AC/DC or resident refreshes may restore that automatic owner,
-      // but must leave a manual bank unchanged until the user adjusts it.
-      if (enabledEntry || (schedule.configured && schedule.enabled)) {
-        await restorePerformanceScheduleIfConfigured(undefined, { automaticOnly: true });
+      // Restore the current saved owner once when identity/side/bank changes.
+      // Matching writer receipts keep ordinary retries free of hardware replay.
+      if (!schedule.suspended && (enabledEntry || schedule.configured) && tdpBank.cpuValid !== false) {
+        const restored = await restorePerformanceScheduleIfConfigured(undefined, { automaticOnly: true, restoreRemembered: true, withReceipt: true });
+        if (!gameCurrent()) return;
+        if (restored.applied) { appliedPerformance = performanceSignature; bankApplied = true; }
+        else if (restored.application && restored.application.cpu !== 'unconfirmed') appliedCpuIntent = performanceSignature;
+        else performancePending = true;
       }
-      if (!current()) return;
-      appliedPerformance = performanceSignature;
+      if (!gameCurrent()) return;
     }
+    // An explicit UI/Decky writer may have completed this exact owner while
+    // the resident was waiting. Consume that receipt once; later settle checks
+    // still run, but the commit itself must not be written a second time.
+    if (tdpAppliedIntent === performanceSignature) { bankApplied = true; tdpAppliedIntent = ''; }
+    await reconcileTdp(bankApplied);
+    if (!gameCurrent()) return;
     const frameSignature=JSON.stringify([identity,side,!!enabledEntry,frameOwner?.enabled,frames[side].fps,frames[side].lastFps]);
     if(frameSignature!==appliedFrames){
-      if(!await applyIndependentFrameRates(current))return;
-      if(!active || generation!==epoch)return;
+      if(!await applyIndependentFrameRates(gameCurrent))return;
+      if(!gameCurrent())return;
       appliedFrames=frameSignature;
     }
     if (coreSignature !== appliedCore) {
@@ -93,53 +203,90 @@ async function reconcile(): Promise<void> {
       if (!capabilities) return; // failed probe is not permission to drop a lease.
       const mode = 'default';
       const hyper = capabilities.smtAvailable ? hyperIntent : 'default';
-      if (!current()) return;
+      if (!gameCurrent()) return;
       if (game && (mode !== 'default' || hyper !== 'default')) {
         const result = await applyGameCorePolicy(game, mode, hyper);
         if (!result.ok || !result.applied) return;
       } else if (!await clearGameCorePolicy()) return;
-      if (!current()) return;
+      if (!gameCurrent()) return;
       appliedCore = coreSignature;
     }
-    if (!current()) return;
-    dirty = false;
+    if (!gameCurrent()) return;
+    dirty = performancePending;
   } catch {
     // Retain state and retry; never manufacture a restore from a failed read.
   } finally {
-    running = false;
+    if (ownerCurrent()) {
+    running = false; runningCurrent = null;
     // An acknowledged policy needs no background wake-up. Busy/power/failure
     // paths leave dirty set and retain their original bounded-rate retry.
-    if (!dirty) { stopRetry?.(); stopRetry = null; }
+    if (!dirty && !tdpPending) { stopRetry?.(); stopRetry = null; }
     else ensureRetry();
+    }
   }
+  });
 }
-function invalidate(): void { epoch += 1; dirty = true; ensureRetry(); void reconcile(); }
+function invalidate(tdp = false): void { epoch += 1; retireWork(); dirty = true; if (tdp) resetTdpChecks(); ensureRetry(); void reconcile(); }
 export function startGamePolicyRuntime(): void {
   if (active) return;
-  active = true; dirty = true;
+  active = true; dirty = true; powerHeld = true; powerGeneration = 0; powerNotificationSequence = undefined;
+  followsTemplateDefaults = null;
+  resetTdpChecks();
   ensureRetry();
   appliedFrames = ''; // A stopped owner cannot acknowledge a later RTSS session.
   setFloatRtssLinked(false);
   stops = [
-    onContinuousPerformanceApplied(signature => { if (active) appliedPerformance = signature; },
-      () => { if (active) appliedPerformance = ''; }),
-    subscribePolicyGameStatus(invalidate),
+    onContinuousPerformanceApplied(signature => { if (active) { appliedPerformance = signature; tdpAppliedIntent = signature; } },
+      () => { if (active) { appliedPerformance = ''; tdpAppliedIntent = ''; appliedCpuIntent = ''; dirty = true; ensureRetry(); } }),
+    onSharedPowerLifecycle(power => {
+      if (!active) return;
+      const scopeChanged = power.observedNotificationSequence !== powerNotificationSequence;
+      powerNotificationSequence = power.observedNotificationSequence;
+      if (!isSharedPowerLifecycleAdmitted(power)) {
+        if (!powerHeld) epoch += 1;
+        retireWork(); powerHeld = true; stopRetry?.(); stopRetry = null;
+        return;
+      }
+      const previousGeneration = powerGeneration, wasHeld = powerHeld;
+      powerGeneration = power.generation; powerHeld = false;
+      if (previousGeneration > 0 && power.generation > lastWakeGeneration) {
+        requestGamePolicyTdpReconciliation(power.generation);
+      } else if (wasHeld) {
+        ensureRetry();
+        if (previousGeneration > 0) void reconcile();
+      } else if (scopeChanged && (running || dirty || tdpPending)) {
+        // Retire only interrupted work. A new observation is not another wake
+        // and cannot reset the original TDP checks, timing or completed owners.
+        retireWork(); ensureRetry(); void reconcile();
+      }
+      lastWakeGeneration = Math.max(lastWakeGeneration, power.generation);
+    }, { observeNotificationSequence: true }),
+    subscribeMonitorSnapshot(observeTdp),
+    subscribePolicyGameStatus(() => invalidate(true)),
     subscribeGameTargetReadiness((ready) => {
-      if (!ready) invalidate();
-      else { dirty = true; ensureRetry(); void reconcile(); }
+      if (!ready) invalidate(true);
+      else invalidate(true);
     }),
-    watch(powerSourceMode,invalidate),
-    onFrameRatesChanged(invalidate),
-    onGameCustomConfigChanged(invalidate),
+    watch(powerSourceMode,() => invalidate(true)),
+    // Late battery classification can change fresh AC defaults from55 to120
+    // without an AC/DC transition. Reuse the original bounded reconciliation.
+    watch(powerSourceBatteryPresent,() => { if (followsTemplateDefaults !== false) invalidate(true); }),
+    onFrameRatesChanged(() => invalidate()),
+    onGameCustomConfigChanged(() => invalidate(true)),
     onPerformanceScheduleChanged((config) => {
       const next = scheduleSignature(config);
       if (next === observedSchedule) return; // our own idempotent save is not a new policy.
-      observedSchedule = next; invalidate();
+      observedSchedule = next; invalidate(true);
     }),
   ];
 }
 export function stopGamePolicyRuntime(): void {
-  active = false; epoch += 1;
+  invalidTdpRecovery = null;
+  active = false; epoch += 1; retireWork(); powerHeld = true; powerGeneration = 0;
+  tdpPending = false; tdpCeiling = 0; tdpHighSince = 0;
+  appliedPerformance = '';
+  tdpAppliedIntent = '';
+  appliedCpuIntent = '';
   stopRetry?.(); stopRetry = null;
   for (const stop of stops) stop(); stops = [];
 }

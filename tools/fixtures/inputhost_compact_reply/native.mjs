@@ -11,7 +11,10 @@ import {calibrationToolchainPreamble} from '../hc_reviewed_calibration/toolchain
 const invocationStart=performance.now(), startedAt=new Date().toISOString();
 const here=path.dirname(fileURLToPath(import.meta.url)), repo=path.resolve(here,'../../..');
 const workspace=path.resolve(repo,'../../..');
-const allowed=path.join(workspace,'Testing/YMCC/Evidence/VirtualGamepadSteadyState-20261103/CompactFrameReply');
+const allowedRoots=[
+ path.join(workspace,'Testing/YMCC/Evidence/VirtualGamepadSteadyState-20261103/CompactFrameReply'),
+ path.join(workspace,'Testing/YMCC/Evidence/RogCpu-20261104/CompactFrameRequest/Native')
+];
 const argv=process.argv.slice(2),options={};
 for(let i=0;i<argv.length;i+=2){assert(['--out','--case-group','--budget-ledger','--sdk-first-response'].includes(argv[i])&&!Object.hasOwn(options,argv[i])&&argv[i+1],'Unknown/duplicate/missing option');options[argv[i]]=argv[i+1];}
 assert(options['--out']&&path.isAbsolute(options['--out']),'Explicit --out ABS_FRESH_DIR required');
@@ -22,14 +25,15 @@ if(options['--budget-ledger']){assert(path.isAbsolute(options['--budget-ledger']
 const started=invocationStart-priorChargedMs,deadline=started+120000;
 const out=path.resolve(options['--out']);
 const inside=(base,p)=>{const rel=path.relative(base,p);return rel!==''&&!rel.startsWith('..')&&!path.isAbsolute(rel);};
-assert(inside(allowed,out),'Output must be a fresh child of '+allowed);
+const allowed=allowedRoots.find(base=>inside(base,out));
+assert(allowed,'Output must be a fresh child of an existing compact protocol evidence family');
 assert(!/["%\r\n]/.test(out),'Unsupported shell path');
 fs.mkdirSync(allowed,{recursive:true});
 assert(inside(fs.realpathSync.native(allowed),path.join(fs.realpathSync.native(path.dirname(out)),path.basename(out))),'Output parent must exist within the evidence root');
 fs.mkdirSync(out); // Exclusive claim: an existing directory is never reused.
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const hash=f=>sha(fs.readFileSync(f));
-const save=(name,value)=>fs.writeFileSync(path.join(out,name),JSON.stringify(value,null,2)+'\n');
+const save=(name,value)=>fs.writeFileSync(path.join(out,name),JSON.stringify(value,null,2)+'\n',{flag:'wx'});
 const remaining=()=>{const n=Math.floor(deadline-performance.now());assert(n>0,'120 second total budget exhausted');return n;};
 const result={schemaVersion:1,status:'INCOMPLETE',startedAt,budgetMs:120000,out,configurations:[],performanceMeasured:false,productStarted:false,sdkOrDeviceStarted:false,newDefaultIds:0,caseGroup,priorChargedMs};
 const originals=new Map(), generated=[], fragments=[];
@@ -117,10 +121,10 @@ function runStage(name,exe,args,cwd,allowSemanticFailure=false){
  const p=spawnSync(path.join(process.env.SystemRoot||'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script],{cwd,windowsHide:true,encoding:'utf8',timeout,maxBuffer:2*1024*1024});
  fs.writeFileSync(path.join(dir,'supervisor.stdout.log'),p.stdout||'');fs.writeFileSync(path.join(dir,'supervisor.stderr.log'),p.stderr||'');
  const row={name,command:{exe,args,cwd},effectiveTimeoutMs:timeout,elapsedMs:performance.now()-stageStarted,exitCode:p.status,signal:p.signal,spawnError:p.error?{code:p.error.code,message:p.error.message}:null,stdout,stderr};
- if(fs.existsSync(receipt))row.owned=JSON.parse(fs.readFileSync(receipt,'utf8'));result.configurations.push(row);save('result.json',result);
+ if(fs.existsSync(receipt))row.owned=JSON.parse(fs.readFileSync(receipt,'utf8'));result.configurations.push(row);save(name.replaceAll('/','-')+'-progress.json',result);
  assert(!p.error&&!p.signal&&row.owned&&row.owned.error===''&&!row.owned.timedOut&&row.owned.activeAfterWait===0&&(allowSemanticFailure?(p.status===0||p.status===1):(p.status===0&&row.owned.exitCode===0)),'Stage failed: '+name+' (raw preserved)');return row;
 }
-const directedPlan={"compact":1,"compact-bad-type-value":60,"compact-empty-binding":1,"compact-float-identity":2,"compact-stale-binding":1,"compact-unbound":1,"duplicate-compact-key":10,"duplicate-compact-key-conflict":10,"duplicate-motor-DOM-invalid-sample":6,"dynamic-motor-revision-and-stop":16,"full-old-type-contract":132,"full-original-tuple-missing":14,"full-original-tuple-null":14,"invalid-expected-token":6,"invalid-prepare-old-ACK":5,"invalid-token":6,"missing-compact-key":10,"mixed-any-legacy":14,"mixed-full-compact":1,"mixed-full-marker-only":1,"mixed-full-token-only":1,"motor-range-invalid":7,"new-generation-ACK":1,"numeric-overflow":12,"old-full":1,"old-full-with-binding":1,"old-generation-ACK":1,"partial-motor-invalid-sample":6,"receipt-values":6,"revoked-token-ACK":6,"typed-motor-invalid-sample":30,"unbound-host-compact":1,"unbound-host-full":1,"version-overflow":6,"wrong-request-context":1,"wrong-sequence-context":1,"directed-full-terminal-nul":1,"directed-compact-terminal-nul":1,"directed-compact-nul-suffix":1,"directed-extension-fallback":1,"directed-extension-stale-token":1,"directed-exact-16KiB":1,"directed-over-16KiB":1,"directed-full-default-values":1,"directed-valid-unicode":1,"directed-invalid-unicode":1,"directed-invalid-utf8":1,"private-pipe-full":1,"private-pipe-compact":1,"private-pipe-backpressure":1,"private-pipe-truncated":1,"private-pipe-stale-token":1};
+const directedPlan={"compact-request-native":1,"compact":1,"compact-bad-type-value":60,"compact-empty-binding":1,"compact-float-identity":2,"compact-stale-binding":1,"compact-unbound":1,"duplicate-compact-key":10,"duplicate-compact-key-conflict":10,"duplicate-motor-DOM-invalid-sample":6,"dynamic-motor-revision-and-stop":16,"full-old-type-contract":132,"full-original-tuple-missing":14,"full-original-tuple-null":14,"invalid-expected-token":6,"invalid-prepare-old-ACK":5,"invalid-token":6,"missing-compact-key":10,"mixed-any-legacy":14,"mixed-full-compact":1,"mixed-full-marker-only":1,"mixed-full-token-only":1,"motor-range-invalid":7,"new-generation-ACK":1,"numeric-overflow":12,"old-full":1,"old-full-with-binding":1,"old-generation-ACK":1,"partial-motor-invalid-sample":6,"receipt-values":6,"revoked-token-ACK":6,"typed-motor-invalid-sample":30,"unbound-host-compact":1,"unbound-host-full":1,"version-overflow":6,"wrong-request-context":1,"wrong-sequence-context":1,"directed-full-terminal-nul":1,"directed-compact-terminal-nul":1,"directed-compact-nul-suffix":1,"directed-extension-fallback":1,"directed-extension-stale-token":1,"directed-exact-16KiB":1,"directed-over-16KiB":1,"directed-full-default-values":1,"directed-valid-unicode":1,"directed-invalid-unicode":1,"directed-invalid-utf8":1,"private-pipe-full":1,"private-pipe-compact":1,"private-pipe-backpressure":1,"private-pipe-truncated":1,"private-pipe-stale-token":1};
 if(options['--sdk-first-response'])Object.assign(directedPlan,Object.fromEntries([
  'logging-sdk-synthetic-witness','logging-sdk-coverage-only','logging-sdk-actual-full','logging-sdk-actual-compact',
  'logging-sdk-bad-request','logging-sdk-bad-power','logging-sdk-stale-binding','logging-sdk-private-pipe'].map(name=>[name,1])));
@@ -146,6 +150,7 @@ try {
   const oldOrderAttach=attach.slice(diagnosticEnd)+'\n'+attach.slice(0,diagnosticEnd)+'\n';
   const appendDiagnostic=declaration('inputHostMsiReportDiagnosticAppendOptional',false,diagnosticSource,'native/msi_virtual_report_diagnostic_runtime.h');
  const revokeLine=main.split(/\r?\n/).filter(x=>x.includes('compactReply::revokesBinding(command)'));assert(revokeLine.length===1);
+ const clearLine=main.split(/\r?\n/).filter(x=>x.trim()==='g_inputHostFrameReplyBinding.clear(); g_inputHostCompactFrameRequest = false;');assert(clearLine.length===1);
  const publish=between('token publication after original accepted prepare tuple/Host/PnP','        const auto binding = response.find("frameReplyBinding");','    if (responseOut) *responseOut = std::move(response);');
  assert(publish.trimEnd().endsWith('}'));
   const diagnosticPort=String.raw`static bool fixtureDiagnosticEnabled=false,fixtureDiagnosticAppend=false;
@@ -157,9 +162,10 @@ static void inputHostMsiReportDiagnosticExtendRequest(const char* command,std::s
   fixtureDiagnosticAppend=inputHostMsiReportDiagnosticAppendOptional(text,"msiReportChainSource",fixtureDiagnosticMetadata);
 }
 `;
-  put('generated/request_contract.hpp',appendDiagnostic+'\n'+diagnosticPort+'\n#define YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC\nstatic void actualRevoke(const char* command){\n'+revokeLine[0]+'\n}\nstatic bool actualAttach(const char* command,std::string& requestText){\n'+attach+'\nreturn requestedReplyBinding!=nullptr;}\nstatic bool oldOrderAttachNegativeControl(const char* command,std::string& requestText){\n'+oldOrderAttach+'\nreturn requestedReplyBinding!=nullptr;}\n#undef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC\nstatic void actualPublish(const json& response,const InputHostGameMotorDomKeys& gameMotorDomKeys){\n'+publish);
+  put('generated/request_contract.hpp',appendDiagnostic+'\n'+diagnosticPort+'\n#define YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC\nstatic void actualRevoke(const char* command){\n'+revokeLine[0]+'\n}\nstatic void actualClearBindingOnly(){\n'+clearLine[0]+'\n}\nstatic bool actualAttach(const char* command,std::string& requestText,bool compactRequest=false){\n'+attach+'\nreturn requestedReplyBinding!=nullptr;}\nstatic bool oldOrderAttachNegativeControl(const char* command,std::string& requestText,bool compactRequest=false){\n'+oldOrderAttach+'\nreturn requestedReplyBinding!=nullptr;}\n#undef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC\nstatic void actualPublish(const json& response,const InputHostGameMotorDomKeys& gameMotorDomKeys){\n'+publish);
  save('source-bindings.json',{method:'verbatim current source slices; environment globals are inert fixed tuple inputs',sources:[...originals.values()],fragments,excluded:'verifyAgainstDom diagnostic, actual diagnostic metadata producer/lifecycle, product process/SDK/device, performance timing',diagnosticPort:'inert controlled metadata; actual diagnostic AppendOptional and source call ordering compiled',negativeControl:'exact current attachment block moved before exact diagnostic glue to reproduce pre-fix order',domAdapter:'source tuple, identity, PnP and success predicates; ordinary exception-to-rejection adapter',frozenSource:nativeSnapshot,offsetUnit:'JavaScript UTF-16 code units; exact fragment UTF-8 SHA256 also recorded'});
  const vcvars=process.env.YMCC_VCVARS64||'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+ assert(path.isAbsolute(vcvars),'Absolute toolchain required');
  originals.set(vcvars,{original:vcvars,sha256:hash(vcvars)});
  const frozenCases=path.join(out,'inputs/tools/fixtures/inputhost_compact_reply/native_cases.cpp');
  const includesByPath=new Map();let semanticFailures=0;
@@ -167,7 +173,7 @@ static void inputHostMsiReportDiagnosticExtendRequest(const char* command,std::s
   const dir=path.join(out,mode);fs.mkdirSync(dir);const compile=path.join(dir,'compile');fs.mkdirSync(compile);
   const flags=mode==='Release'?'/O2 /MT /DNDEBUG':'/Od /MTd /RTC1 /D_DEBUG';
   const rsp=put(mode+'/compile/compile.rsp','/nologo /std:c++20 /utf-8 /EHsc /W4 /permissive- /showIncludes '+flags+' /I"'+path.join(out,'generated')+'" /I"'+path.join(out,'inputs/native')+'" /I"'+path.join(out,'inputs/deps/json')+'" "'+frozenCases+'" /Fo"'+path.join(dir,'native_cases.obj')+'" /Fe"'+path.join(dir,'native_cases.exe')+'" /link /verbose:lib advapi32.lib\n');
-  const batch=put(mode+'/compile/compile.cmd',calibrationToolchainPreamble(vcvars)+'chcp 65001 >nul\r\nset "CL="\r\nset "_CL_="\r\nset "LINK="\r\nset "_LINK_="\r\nset "VSCMD_SKIP_SENDTELEMETRY=1"\r\nset "VSLANG=1033"\r\nwhere cl.exe > selected-tools.txt\r\nwhere link.exe >> selected-tools.txt\r\ncl.exe @"'+rsp+'"\r\nexit /b %errorlevel%\r\n');
+  const batch=put(mode+'/compile/compile.cmd',calibrationToolchainPreamble(vcvars)+'chcp 65001 >nul\r\nset "CL="\r\nset "_CL_="\r\nset "LINK="\r\nset "_LINK_="\r\nset "VSCMD_SKIP_SENDTELEMETRY=1"\r\nset "VSLANG=1033"\r\nwhere cl.exe > selected-tools.txt\r\nwhere link.exe >> selected-tools.txt\r\n"%VCToolsInstallDir%bin\\Hostx64\\x64\\cl.exe" @"'+rsp+'"\r\nexit /b %errorlevel%\r\n');
   const c=runStage(mode+'/compile',path.join(process.env.SystemRoot||'C:/Windows','System32/cmd.exe'),'/d /c ""'+batch+'""',compile);
   const decode=f=>{const b=fs.readFileSync(f);const utf8=b.toString('utf8');return utf8.includes('\ufffd')?new TextDecoder('gb18030').decode(b):utf8;};const text=decode(c.stdout)+'\n'+decode(c.stderr);
   const observed=[...new Set([...text.matchAll(/^\s*(?:Note: including file:|注意:\s*包含文件:)\s*(.+?)\r?$/gm)].map(m=>path.resolve(m[1])))];assert(observed.length>20,'Actual compiler include trace absent');
@@ -185,7 +191,7 @@ static void inputHostMsiReportDiagnosticExtendRequest(const char* command,std::s
   assert(rows.length===summary.cases&&canonical(counts)===canonical(summary.groups),'Raw case count/group mismatch');
   if(caseGroup!=='all')assert(canonical(counts)===canonical(caseGroup==='request-budget-negative'?{'request-budget-negative-old-order':1}:caseGroup==='request-budget'?requestBudgetPlan:directedPlan),'Directed selected set mismatch; unselected groups must not execute');
   test.rawAudit={rows:rows.length,groups:counts,exactSelectedSet:caseGroup!=='all',casesSha256:hash(path.join(dir,'run/cases.tsv')),failuresSha256:hash(path.join(dir,'run/failures.jsonl')),summarySha256:hash(path.join(dir,'run/summary.json')),pipeSha256:hash(path.join(dir,'run/pipe.jsonl')),executableSha256:hash(path.join(dir,'native_cases.exe'))};
-  semanticFailures+=summary.failures+(summary.complete?0:1);save('result.json',result);
+  semanticFailures+=summary.failures+(summary.complete?0:1);save(mode+'-progress.json',result);
  }
  for(const x of includesByPath.values()){remaining();assert(hash(x.path)===x.sha256,'Include/tool/library changed: '+x.path);}
  result.compiledClosure=[...includesByPath.values()];result.status=semanticFailures?'FAIL':'PASS';result.semanticFailures=semanticFailures;

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -21,12 +22,16 @@ internal sealed class UsbipSetupEvidence : IDisposable
     private const string ClassRoot = @"SYSTEM\CurrentControlSet\Control\Class\";
     private const int LineLimit = 128, ProgressLimit = 64, StageLimit = 22, TextLimit = 1024, ImageLimit = 2 * 1024 * 1024;
     private const long LogLimit = 4 * 1024 * 1024;
+    private const int ReleaseDetailLimit = 4096;
+    private const string ReleaseDetailEncoding = "release-detail-zlib-v1:";
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private readonly object _gate = new();
     private readonly string _directory, _host, _run, _command, _scope = Guid.NewGuid().ToString("N");
     private readonly ulong _epoch;
     private readonly long _started = Stopwatch.GetTimestamp();
+    private string? _beginServiceDetail, _beginDiskDetail, _beginEnumDetail;
+    private readonly (string? Id, string? Binding, string? Driver)[] _beginInstances = new (string?, string?, string?)[8];
     private int _attempted, _written, _progress, _stages, _dropped, _textTruncated, _logErrors;
     private bool _disposed, _resultRecorded, _exceptionRecorded;
 
@@ -101,9 +106,9 @@ internal sealed class UsbipSetupEvidence : IDisposable
         try
         {
             object?[]? service = ReadRegistryValues(Service, "ImagePath", "Type", "Start", "ErrorControl");
-            Write("registered-service", prefix + (service is null ? "status=missing" :
-                $"status=observed type={Value(service[1])} startConfig={Value(service[2])} errorControl={Value(service[3])}") + ";registered-configuration-only");
-            try { Write("disk-image", prefix + DiskImage(service?[0] as string)); }
+            WriteSnapshotFact("registered-service", when, (service is null ? "status=missing" :
+                $"status=observed type={Value(service[1])} startConfig={Value(service[2])} errorControl={Value(service[3])}") + ";registered-configuration-only", ref _beginServiceDetail);
+            try { WriteSnapshotFact("disk-image", when, DiskImage(service?[0] as string), ref _beginDiskDetail); }
             catch (Exception ex) { Write("disk-image", prefix + "status=unavailable error=" + ex.GetType().Name); }
         }
         catch (Exception ex) { Write("registered-service", prefix + "status=unavailable error=" + ex.GetType().Name); }
@@ -112,7 +117,8 @@ internal sealed class UsbipSetupEvidence : IDisposable
             // Fixed value names only; never enumerate PnP, services, Class, or DriverStore.
             object?[]? entries = ReadRegistryValues(Service + @"\Enum", "Count", "0", "1", "2", "3", "4", "5", "6", "7");
             int? count = entries?[0] is int n && n >= 0 ? n : null;
-            Write("service-enum", prefix + $"status={(entries is null ? "missing" : "observed")} registeredCount={(count?.ToString() ?? "unknown")} limit=8 omitted={(count.HasValue ? Math.Max(0, count.Value - 8).ToString() : "unknown")}");
+            WriteSnapshotFact("service-enum", when, $"status={(entries is null ? "missing" : "observed")} registeredCount={(count?.ToString() ?? "unknown")} limit=8 omitted={(count.HasValue ? Math.Max(0, count.Value - 8).ToString() : "unknown")}",
+                ref _beginEnumDetail, allowReference: count is >= 0 and <= 8);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; entries is not null && i < Math.Min(count ?? 8, 8); ++i)
             {
@@ -125,24 +131,46 @@ internal sealed class UsbipSetupEvidence : IDisposable
         catch (Exception ex) { Write("service-enum", prefix + "status=unavailable error=" + ex.GetType().Name); }
     }
 
+    private void WriteSnapshotFact(string phase, string when, string detail, ref string? beginning, int? index = null, bool allowReference = true)
+    {
+        // Read both snapshots as before. Reference only the exact successful
+        // payload already written in this scope, never an error or a clipped row.
+        string prefix = index.HasValue ? $"snapshot={when} index={index.Value} " : "snapshot=" + when + " ";
+        bool observed = allowReference && detail.StartsWith("status=observed ", StringComparison.Ordinal);
+        if (when == "end" && observed && string.Equals(beginning, detail, StringComparison.Ordinal))
+        {
+            Write(phase, prefix + "sameAsBegin=1");
+            return;
+        }
+        bool complete = Write(phase, prefix + detail);
+        if (when == "begin" && observed && complete) beginning = detail;
+    }
+
     private void Instance(string when, int index, string id)
     {
         string prefix = $"snapshot={when} index={index} ";
+        ref var start = ref _beginInstances[index];
+        if (when == "begin") start.Id = id;
+        bool sameInstance = string.Equals(start.Id, id, StringComparison.Ordinal);
         try
         {
             object?[]? binding = ReadRegistryValues(EnumRoot + id, "Service", "Driver", "ConfigFlags", "Problem", "StatusFlags");
             bool matches = string.Equals(binding?[0] as string, "usbip2_ude", StringComparison.OrdinalIgnoreCase);
             string cmDetail = "cmStatus=service-binding-unproven started=unknown problem=unknown";
+            bool bindingHealthy = false;
             if (matches)
             {
                 try
                 {
                     var cm = ReadCmStatus(id);
+                    bindingHealthy = cm.Locate == 0 && cm.Result == 0 && (cm.Status & 8) != 0 && cm.Problem == 0
+                        && Value(binding?[3]) is "0" or "unknown";
                     cmDetail = $"locateResult={cm.Locate} statusResult={cm.Result} cmStatus={cm.Status} started={(cm.Result == 0 ? ((cm.Status & 8) != 0).ToString().ToLowerInvariant() : "unknown")} problem={(cm.Result == 0 ? cm.Problem.ToString() : "unknown")}";
                 }
                 catch (Exception ex) { cmDetail = "cmStatus=unavailable started=unknown problem=unknown error=" + ex.GetType().Name; }
             }
-            Write("registered-binding", prefix + $"status={(binding is null ? "missing" : "observed")} {cmDetail} registryService={Value(binding?[0])} driverKey={Value(binding?[1])} configFlags={Value(binding?[2])} registryProblem={Value(binding?[3])} registryStatus={Value(binding?[4])};registered-binding-and-read-only-devnode-status instanceId={Clean(id, 256)}");
+            WriteSnapshotFact("registered-binding", when, $"status={(binding is null ? "missing" : "observed")} {cmDetail} registryService={Value(binding?[0])} driverKey={Value(binding?[1])} configFlags={Value(binding?[2])} registryProblem={Value(binding?[3])} registryStatus={Value(binding?[4])};registered-binding-and-read-only-devnode-status instanceId={Clean(id, 256)}",
+                ref start.Binding, index, sameInstance && bindingHealthy && id.Length <= 256);
             if (!matches)
             { Write("registered-driver", prefix + "status=service-binding-unproven version=versionunknown"); return; }
             string? driver = binding?[1] as string;
@@ -150,7 +178,8 @@ internal sealed class UsbipSetupEvidence : IDisposable
             {
                 bool valid = driver is not null && Regex.IsMatch(driver, @"^\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}\\[0-9]{4}\z");
                 object?[]? klass = valid ? ReadRegistryValues(ClassRoot + driver, "InfPath", "InfSection", "DriverVersion", "DriverDate", "ProviderName") : null;
-                Write("registered-driver", prefix + $"status={(klass is not null ? "observed" : valid ? "missing" : "driver-key-rejected")} inf={Value(klass?[0])} section={Value(klass?[1])} version={VersionValue(klass?[2])} date={Value(klass?[3])} provider={Value(klass?[4])};registered-binding;not-loaded-memory-image");
+                WriteSnapshotFact("registered-driver", when, $"status={(klass is not null ? "observed" : valid ? "missing" : "driver-key-rejected")} inf={Value(klass?[0])} section={Value(klass?[1])} version={VersionValue(klass?[2])} date={Value(klass?[3])} provider={Value(klass?[4])};registered-binding;not-loaded-memory-image",
+                    ref start.Driver, index, sameInstance && bindingHealthy && start.Binding is not null);
             }
             catch (Exception ex) { Write("registered-driver", prefix + "status=unavailable version=versionunknown error=" + ex.GetType().Name); }
         }
@@ -282,9 +311,9 @@ internal sealed class UsbipSetupEvidence : IDisposable
         return result.ToString();
     }
 
-    private void Write(string phase, string detail, bool? available = null, bool truncatedBeforeWrite = false)
+    private bool Write(string phase, string detail, bool? available = null, bool truncatedBeforeWrite = false)
     {
-        if (_attempted >= LineLimit) { Saturate(ref _dropped); return; }
+        if (_attempted >= LineLimit) { Saturate(ref _dropped); return false; }
         ++_attempted;
         try
         {
@@ -295,12 +324,37 @@ internal sealed class UsbipSetupEvidence : IDisposable
                 scopeId = _scope, scopeHostPid = Environment.ProcessId, hostInstanceId = _host, runId = _run,
                 epoch = _epoch, command = _command, persona = "steamdeck", data = new { detail = bounded, available, textTruncated = truncated } }, Json);
             string line = Serialize();
+            // Preserve the cached endpoint description on overflow without adding a row or changing release behavior.
+            if (phase == "release-begin" && _command == "RELEASE_LOCAL" && available is null && !truncatedBeforeWrite &&
+                detail is { Length: > 0 and <= ReleaseDetailLimit } &&
+                (truncated || Utf8.GetByteCount(line) + 1 > TextLimit) &&
+                Utf8.GetByteCount(detail) <= ReleaseDetailLimit && Clean(detail, ReleaseDetailLimit) == detail)
+            {
+                string originalBounded = bounded;
+                bool originalTruncated = truncated;
+                try
+                {
+                    using var packed = new MemoryStream();
+                    using (var compressor = new ZLibStream(packed, CompressionLevel.Fastest, leaveOpen: true))
+                        compressor.Write(Utf8.GetBytes(detail));
+                    bounded = ReleaseDetailEncoding + Convert.ToBase64String(packed.GetBuffer(), 0, (int)packed.Length);
+                    truncated = false;
+                    string encoded = Serialize();
+                    if (Utf8.GetByteCount(encoded) + 1 <= TextLimit) line = encoded;
+                    else { bounded = originalBounded; truncated = originalTruncated; }
+                }
+                catch
+                {
+                    bounded = originalBounded;
+                    truncated = originalTruncated;
+                }
+            }
             while (Utf8.GetByteCount(line + "\n") > TextLimit && bounded.Length > 0)
             {
                 bounded = Clean(bounded, Math.Max(0, bounded.Length - 16)); truncated = true; line = Serialize();
             }
             if (truncated) Saturate(ref _textTruncated);
-            if (Utf8.GetByteCount(line + "\n") > TextLimit) { Saturate(ref _logErrors); return; }
+            if (Utf8.GetByteCount(line + "\n") > TextLimit) { Saturate(ref _logErrors); return false; }
             lock (XboxSdkDiagnostics.LogLock)
             {
                 Directory.CreateDirectory(_directory);
@@ -310,8 +364,9 @@ internal sealed class UsbipSetupEvidence : IDisposable
                 File.AppendAllText(path, line + "\n", Utf8);
             }
             ++_written;
+            return !truncated;
         }
-        catch { Saturate(ref _logErrors); }
+        catch { Saturate(ref _logErrors); return false; }
     }
 
     [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]

@@ -37,6 +37,30 @@ public sealed class AsusFanCapabilitySession
             return Record("apply-software-curve", receipts);
         });
 
+    // Opt-in software write admission. Keep the existing CLR entry point above.
+    // The callback may throw the caller's normal superseded exception unchanged.
+    public FanCapabilityResult ApplySoftwareCurve(double[]? points, Func<bool>? currentOperation)
+    {
+        if (currentOperation is null) return ApplySoftwareCurve(points);
+        return FanCapabilityCatalog.WithOwner(this, () =>
+        {
+            BeginOperation("apply-software-curve");
+            var receipts = Array.Empty<AsusAcpiCallReceipt>();
+            try
+            {
+                AsusFanCurveWriter.ApplySoftwareCurveObserved(
+                    AsusFanCurveWriter.ToAsusCurve(points), out receipts, currentOperation);
+            }
+            finally
+            {
+                // Actual completed/uncertain I/O remains evidence even when the
+                // post-call admission check throws. Zero I/O stays Unknown.
+                if (receipts.Length > 0) Record("apply-software-curve", receipts);
+            }
+            return LastResult!;
+        });
+    }
+
     public FanCapabilityResult RestoreDefaultCurves() =>
         FanCapabilityCatalog.WithOwner(this, () =>
         {

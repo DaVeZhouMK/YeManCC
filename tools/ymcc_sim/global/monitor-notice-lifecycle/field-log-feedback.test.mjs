@@ -4,11 +4,39 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseArgs } from '../cli.mjs';
+import { simulationCorePath } from '../release-host-environment.mjs';
 import { evaluateMonitorFieldLogFeedback, readMonitorFieldLogFeedback,
   applyMonitorFieldFeedbackVerdict, MONITOR_FIELD_FEEDBACK_SCHEMA, MAX_MONITOR_FIELD_INPUT_BYTES } from './field-log-feedback.mjs';
-const root = 'G:/YeManCC-Work/Testing/YMCC/Workspace/MonitorFieldLogConsumerIntegration-20261023';
-fs.mkdirSync(root, {recursive: true});
-const scratch = fs.mkdtempSync(path.join(root, 'controls-'));
+
+const prefix = 'ymcc-monitor-field-feedback-';
+let owned;
+function directoryIdentity(dir) {
+  const identity = fs.lstatSync(dir, { bigint: true });
+  assert(identity.isDirectory() && !identity.isSymbolicLink() && path.relative(dir, fs.realpathSync.native(dir)) === '',
+    'Redirected monitor feedback fixture directory: ' + dir);
+  return identity;
+}
+function scratchRoot() {
+  if (!owned) {
+    const parent = simulationCorePath('Workspace');
+    const parentIdentity = directoryIdentity(parent);
+    const scratch = fs.mkdtempSync(path.join(parent, prefix));
+    owned = { parent, parentIdentity, scratch, scratchIdentity: directoryIdentity(scratch), inputWritten: false };
+  }
+  return owned.scratch;
+}
+test.after(() => {
+  if (!owned) return;
+  const { parent, parentIdentity, scratch, scratchIdentity, inputWritten } = owned;
+  assert.equal(path.relative(parent, path.dirname(scratch)), '');
+  assert(path.basename(scratch).startsWith(prefix));
+  for (const [dir, expected] of [[parent, parentIdentity], [scratch, scratchIdentity]]) {
+    const identity = directoryIdentity(dir);
+    assert(identity.dev === expected.dev && identity.ino === expected.ino, 'Monitor feedback fixture directory changed: ' + dir);
+  }
+  if (inputWritten) fs.unlinkSync(path.join(scratch, 'input.json'));
+  fs.rmdirSync(scratch);
+});
 const hash = value => createHash('sha256').update(value).digest('hex');
 const archive = { sha256: 'a'.repeat(64), stable: true };
 const tuple = { pid: 2345, buildSha256: 'b'.repeat(64), nativeGeneration: 4 };
@@ -60,12 +88,15 @@ test('invalid JSON and oversized envelopes refuse without parser payloads', () =
   assert.deepEqual(codes(evaluateMonitorFieldLogFeedback({inputBytes: Buffer.alloc(MAX_MONITOR_FIELD_INPUT_BYTES + 1), sourceArchive: archive})), ['FIELD_INPUT_SIZE_INVALID']);
 });
 test('explicit regular file records actual input bytes and both consumer source identities', () => {
-  const file = path.join(scratch, 'input.json'), bytes = Buffer.from(JSON.stringify(input())); fs.writeFileSync(file, bytes);
+  const file = path.join(scratchRoot(), 'input.json'), bytes = Buffer.from(JSON.stringify(input()));
+  fs.writeFileSync(file, bytes, { flag: 'wx' });
+  owned.inputWritten = true;
   const result = readMonitorFieldLogFeedback({inputPath: file, sourceArchive: archive});
   assert.equal(result.status, 'INCOMPLETE'); assert.deepEqual(result.input, {sha256: hash(bytes), bytes: bytes.length, stable: true});
   assert.equal(result.sourceHashes.length, 2); assert(result.sourceHashes.every(row => /^[a-f0-9]{64}$/.test(row.sha256)));
 });
 test('missing file, directory, and malformed explicit path refuse', () => {
+  const scratch = scratchRoot();
   assert.deepEqual(codes(readMonitorFieldLogFeedback({inputPath: path.join(scratch, 'missing'), sourceArchive: archive})), ['FIELD_INPUT_UNREADABLE']);
   assert.deepEqual(codes(readMonitorFieldLogFeedback({inputPath: scratch, sourceArchive: archive})), ['FIELD_INPUT_NOT_REGULAR_FILE']);
   assert.deepEqual(codes(readMonitorFieldLogFeedback({inputPath: 'bad\npath', sourceArchive: archive})), ['FIELD_INPUT_PATH_INVALID']);

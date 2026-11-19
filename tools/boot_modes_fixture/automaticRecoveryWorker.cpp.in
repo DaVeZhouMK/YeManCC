@@ -1,0 +1,155 @@
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <climits>
+#include <condition_variable>
+#include <cstdarg>
+#include <deque>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "settings_baseline.h"
+#include "boot_mode_preferences.h"
+#include "sleep_steam_settle.h"
+#include "sleep_recovery_diagnostics.h"
+using json=nlohmann::json;
+enum class PowerLifecycle {Ready,Resuming,Suspending,Suspended};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<bool> g_exitRequested{false},g_sleepRecoveryAutoEnabled{true},g_sleepRecoveryAutoPending{true};
+static std::atomic<unsigned long long> g_powerGeneration{7},g_sleepRecoveryAutoConfigEpoch{5};
+static int g_poolSize=3;
+static json document;
+static std::mutex settingsMx;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/automatic-worker-settings",SG_DIR=L"owned-memory/automatic-worker-report";
+struct SettingsFileGuard {std::lock_guard<std::mutex> lock{settingsMx};};
+static std::atomic<unsigned> helperDispatches{0},inspectCalls{0},inspectLeases{0},reportWrites{0},notifications{0},facts{0},preferenceWrites{0},detaches{0};
+static std::mutex gateMx;
+static std::condition_variable gateCv;
+static unsigned gateEntered=0;
+static bool gateReleased=false,callbackReturned=false;
+static std::string gateKind;
+static bool sourceMutation=false;
+static void need(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static void gate(const char* kind){
+ std::unique_lock<std::mutex> lock(gateMx);
+ if(gateKind!=kind)return;
+ ++gateEntered;gateCv.notify_all();
+ need(gateCv.wait_for(lock,std::chrono::seconds(2),[]{return gateReleased;}),"owned worker gate deadline");
+}
+static void releaseGate(){std::lock_guard<std::mutex> lock(gateMx);gateReleased=true;gateCv.notify_all();}
+static void waitGate(unsigned count=1){std::unique_lock<std::mutex> lock(gateMx);need(gateCv.wait_for(lock,std::chrono::seconds(2),[count]{return gateEntered>=count;}),"worker did not reach selected gate");}
+static void waitCallback(){std::unique_lock<std::mutex> lock(gateMx);need(gateCv.wait_for(lock,std::chrono::seconds(2),[]{return callbackReturned;}),"actual recovery callback did not return");}
+static unsigned long long sgNowFileTime(){return 900000000000ULL;}
+static double sgNowEpoch(){return 90000;}
+static bool sgSleepRetryActive(){return false;}
+static bool steamOriginalRecoveryOwnsRunning(DWORD,unsigned long long){return false;}
+static std::string W2U(const std::wstring& value){return std::string(value.begin(),value.end());}
+static void sgRecordFact(const char*,const json&){++facts;}
+static void sgNotifyWork(){}
+static void postSleepRecoveryAutoStatus(){++notifications;}
+static bool sgEnsureMarkerDir(const std::wstring& path){need(path==SG_DIR,"unexpected report directory");return true;}
+static bool sgWriteFileAtomic(const std::wstring& path,const std::string&){need(path==SG_DIR+L"\\wake-recovery-last.json","unexpected report write");++reportWrites;return true;}
+static void inputHostCriticalDiagnosticsStartup(){}
+static void inputHostCriticalDiagnosticsClose(){}
+static void traceLog(const char*,...){++detaches;}
+// ORIGINAL_POWER_AND_POOL
+static std::string ymSettingsReadRaw(const std::wstring& path){need(path==YM_SETTINGS_FILE,"unexpected settings read");return document.dump();}
+static json ymSettingsReadUnlocked(){return document;}
+// ORIGINAL_OWNER
+static bool ymSettingsPatchSection(const char* name,const json& patch){document[name].update(patch);++preferenceWrites;return true;}
+static bool ymSettingsWriteSection(const char* name,const json&,const std::function<bool(json&,json&)>& prepare){
+ SettingsFileGuard held;auto next=document;auto section=next.value(name,json::object());if(!prepare(section,next))return false;next[name]=section;document=std::move(next);++preferenceWrites;return true;
+}
+namespace SleepSteamRecovery {
+static json report(unsigned long long gen){return {{"generation",gen},{"game",{{"pid",1234},{"created","5678"},{"identityMatches",true},{"recoveryBindingMatches",true},{"powerGenerationMatches",true}}},
+ {"suspendCapture",{{"available",true}}},{"steamSessionState",{{"status","ready"},{"ready",true}}},{"gamePause",{{"available",true},{"paused",false}}},
+ {"steamRecovery",{{"repairable",true}}},{"steamInputRecovery",{{"repairable",false}}},{"foreground",{{"role","original-game"}}},{"steamClient",{{"same",true}}}};}
+static json inspect(unsigned long long gen,const char* = nullptr){
+ struct Lease {Lease(){++inspectLeases;}~Lease(){--inspectLeases;}} lease;
+ const auto number=++inspectCalls;if(number==1)gate("inspect");return report(gen);
+}
+static json reconcile(const json&,unsigned long long,unsigned long long,const std::function<bool()>& current){
+ if(!current())return {{"accepted",false},{"reason","cancelled"}};
+ ++helperDispatches;return {{"accepted",true},{"mutated",true}};
+}
+static json resumeInputContext(const json&,unsigned long long,unsigned long long,const std::function<bool()>& current){
+ if(!current())return {{"accepted",false},{"reason","cancelled"}};
+ ++helperDispatches;return {{"accepted",true},{"mutated",true}};
+}
+static bool sameClientEvidence(const json& a,const json& b){return a==b;}
+static json capturedPauseState(unsigned long long){return {{"available",true},{"waitForSleepRelease",false}};}
+}
+namespace SleepRecoveryAuto {
+using namespace ymcc::sleeprecovery;
+static std::mutex mx,reportMx;
+static std::timed_mutex setMx;
+// ORIGINAL_STATE
+static State state;
+// ORIGINAL_KERNEL_WAKE
+static KernelWake kernelWake;
+// ORIGINAL_KERNEL_SLEEP
+static KernelSleepEntry kernelSleepEntry;
+// ORIGINAL_RUNTIME
+}
+static void steamGameLinkNotify(){}
+static std::map<std::string,std::function<json(const json&)>> handlers;
+static void ipc_on(const std::string& name,std::function<json(const json&)> fn){handlers[name]=std::move(fn);}
+// ORIGINAL_REGISTRATION
+static void barrier(){
+ auto done=std::make_shared<std::promise<void>>();auto future=done->get_future();need(poolSubmit([done]{done->set_value();}),"shared pool rejected following work");need(future.wait_for(std::chrono::seconds(2))==std::future_status::ready,"recovery callback did not return to shared pool");future.get();
+}
+static void arm(const json& defaults,const json& mode){
+ document=defaults;document["input"]=mode.at("expectedBootContext").at("input");document["extensions"]=mode.at("expectedBootContext").at("extensions");document["sleep"]["autoWakeRecovery"]=true;
+ g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;g_powerGeneration=7;g_sleepRecoveryAutoConfigEpoch=5;g_sleepRecoveryAutoEnabled=true;g_sleepRecoveryAutoPending=true;
+ {std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);SleepRecoveryAuto::state={};auto& s=SleepRecoveryAuto::state;s.generation=7;s.configEpoch=5;s.phase="waiting";s.wakeAdmission={{"status","admitted"},{"source","kernel-power-107-target-5"},{"kernelWakeConfirmed",true},{"proofFresh",true},{"eventFileTime","899999999999"},{"boundaryFileTime","899999999998"}};s.armed=s.stageSince=GetTickCount64();SleepRecoveryAuto::kernelWake={};SleepRecoveryAuto::kernelSleepEntry={};}
+ helperDispatches=inspectCalls=inspectLeases=reportWrites=notifications=facts=preferenceWrites=0;
+ {std::lock_guard<std::mutex> lock(gateMx);gateEntered=0;gateReleased=callbackReturned=false;gateKind.clear();}
+}
+static json setRequest(const json& mode,bool enabled){auto a=mode.at("request");a["enabled"]=enabled;return handlers.at("sleepRecovery.autoSet")(a);}
+static void cancel(const std::string& kind,const json& mode){
+ if(kind=="off")need(setRequest(mode,false).value("ok",false),"actual OFF setter failed");
+ else if(kind=="power-generation")g_powerGeneration=8;
+ else if(kind=="suspend")g_powerLifecycle=PowerLifecycle::Suspended;
+ else if(kind=="exit")g_exitRequested=true;
+ else need(false,"unknown cancellation");
+}
+static std::vector<HANDLE> duplicatePoolThreads(){
+ std::lock_guard<std::mutex> lock(g_poolMx);need(g_poolThreads.size()==3,"actual pool threads missing");std::vector<HANDLE> handles;
+ for(auto& thread:g_poolThreads){HANDLE handle=nullptr;need(DuplicateHandle(GetCurrentProcess(),reinterpret_cast<HANDLE>(thread.native_handle()),GetCurrentProcess(),&handle,SYNCHRONIZE,FALSE,0)!=0,"owned thread handle duplication failed");handles.push_back(handle);}return handles;
+}
+struct PoolCleanup {~PoolCleanup(){releaseGate();poolStop(2000);}};
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();PoolCleanup cleanup;
+ try{
+  need(argc==5,"defaults wire selection raw required");json defaults,wire;std::ifstream(argv[1])>>defaults;std::ifstream(argv[2])>>wire;sourceMutation=std::string(argv[3])=="worker-negative";registerAutomaticRecovery();std::ofstream raw(argv[4],std::ios::app);
+  for(const auto& mode:wire.at("modes"))for(const auto& pause:{"queued","inspect"})for(const auto& kind:{"off","power-generation","suspend","exit"}){
+   if(sourceMutation&&(mode.at("mode")!="global"||std::string(pause)!="inspect"||std::string(kind)!="power-generation"))continue;
+   arm(defaults,mode);{std::lock_guard<std::mutex> lock(gateMx);gateKind=pause;}
+   if(std::string(pause)=="queued"){for(int i=0;i<g_poolSize;++i)need(poolSubmit([]{gate("queued");}),"owned blocker rejected");waitGate(3);}
+   SleepRecoveryAuto::tick();if(std::string(pause)=="inspect")waitGate();
+   cancel(kind,mode);releaseGate();waitCallback();barrier();
+   json row={{"mode",mode.at("mode")},{"pause",pause},{"cancel",kind},{"helperDispatches",helperDispatches.load()},{"inspectCalls",inspectCalls.load()},{"inspectLeases",inspectLeases.load()},
+    {"reportWrites",reportWrites.load()},{"followingSharedWorkCompleted",true},{"callbackReturned",true},{"poolSize",g_poolSize},{"sourceMutation",sourceMutation}};
+   raw<<row.dump()<<'\n';raw.flush();rows.push_back(row);
+   need(helperDispatches==0,"expired recovery worker dispatched helper after cancellation");need(reportWrites==0,"expired recovery worker published completed report");need(inspectLeases==0,"owned inspection resource was not returned");need(inspectCalls==(std::string(pause)=="inspect"?1u:0u),"wrong actual worker gate reached");
+  }
+  if(!sourceMutation)for(const auto& mode:wire.at("modes")){
+   arm(defaults,mode);{std::lock_guard<std::mutex> lock(gateMx);gateKind="inspect";}SleepRecoveryAuto::tick();waitGate();const auto reply=setRequest(mode,true);need(reply.value("ok",false),"same-state preference save failed");releaseGate();waitCallback();barrier();
+   need(g_sleepRecoveryAutoConfigEpoch==5&&helperDispatches==1&&inspectLeases==0,"same-state save incorrectly cancelled or duplicated active worker");controls.push_back({{"mode",mode.at("mode")},{"name","same-state-preserves-worker"},{"helperDispatches",helperDispatches.load()},{"epoch",g_sleepRecoveryAutoConfigEpoch.load()}});
+  }
+  const auto threads=duplicatePoolThreads();poolStop(2000);unsigned signaled=0;for(const auto thread:threads){if(WaitForSingleObject(thread,0)==WAIT_OBJECT_0)++signaled;CloseHandle(thread);}
+  need(signaled==3&&g_poolThreads.empty()&&g_poolQ.empty()&&!g_poolStarted&&detaches==0,"actual shared pool shutdown did not join owned threads");
+  controls.push_back({{"name","actual-pool-stop-joined-threads"},{"threadsSignaled",signaled},{"threadVectorEmpty",g_poolThreads.empty()},{"queueEmpty",g_poolQ.empty()},{"detachLogs",detaches.load()}});
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 0;
+ }catch(const std::exception& error){releaseGate();poolStop(2000);std::cout<<json{{"status","FAIL"},{"error",error.what()},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 1;}
+}

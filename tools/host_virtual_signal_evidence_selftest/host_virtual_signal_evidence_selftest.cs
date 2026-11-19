@@ -36,6 +36,8 @@ internal sealed class HMController
     public HMController(HMProfile? profile=null) { Profile=profile??ProfileData.ForTarget("dualsense-edge"); }
     public long RawCalls, StateCalls;
     private readonly byte[] _extendedReportBuffer = new byte[64];
+    public byte[] IdleReport => _extendedReportBuffer;
+    public Action? OutputReader; // Inert output-reader sentinel; no SDK reader/thread is started.
     public void SeedIdleCounter(uint counter) => BinaryPrimitives.WriteUInt32LittleEndian(_extendedReportBuffer.AsSpan(4), counter);
     public readonly byte[] LastRaw = new byte[2048];
     public int LastRawLength;
@@ -70,6 +72,8 @@ internal static partial class Program
     {
         public HMContext? _context = ProfileData.CreateContext();
         public HMController? _controller = new();
+        protected HMController? _sonyRawReportOwner;
+        public HMController? SonyRawReportOwner => _sonyRawReportOwner;
         public CommandEnvelope? _tuple;
         public string _startupNonce = "fixture-nonce", _hostInstanceId = "host-fixture";
         public MsiReportChainRuntime1410? _reportChain1410;
@@ -81,6 +85,7 @@ internal static partial class Program
         public long _costHidSubmitUsSum, _costHidSubmitCount;
         public string _lastBackendDetail = "";
         protected HostSdkFirstWitness? _sdkFirstWitness;
+        protected MsiCostWindowDiagnostics? _msiCostDiagnostics;
         protected static string CostStateDir => Path.Combine(EvidenceDirectory, "unexpected-default-sink");
         protected static void RecordCostRole(string role) { }
         protected static void RecordCostFrame(long elapsed, bool rejected) { }
@@ -97,15 +102,19 @@ internal static partial class Program
         }
         public void Raw(CommandEnvelope? e, byte[] bytes, string reason = "live-frame", CommandEnvelope? canonical = null) =>
             SubmitSonyReportChain1410(_controller!, e, bytes, 123, reason, canonical);
+        public void RawFor(HMController controller, CommandEnvelope? e, byte[] bytes) =>
+            SubmitSonyReportChain1410(controller, e, bytes, 123, "live-frame");
+        public void OwnSonyRawReport() => EnsureSonyRawReportOwnership(_controller!);
         public void State(CommandEnvelope? e, HMGamepadState state, string reason = "live-frame", CommandEnvelope? canonical = null) =>
             SubmitEliteReportChain1410(_controller!, state, e, reason, canonical);
         public bool Frame(CommandEnvelope e, out string detail) => TrySubmitFrame(e, out detail);
-        public bool Neutral(CommandEnvelope? e, out string detail) => TrySubmitNeutral(out detail, e);
+        public bool Neutral(CommandEnvelope? e, out string detail, string reason = "release-neutral") => TrySubmitNeutral(out detail, e, reason);
         public void Toggle(bool enabled) { _costFlagEnabled = enabled; if (!enabled) ResetVirtualSignalEvidenceSafely(); }
         public void Rebuild(CommandEnvelope e) { CloseReportChain1410Safely("target-prepare"); _controller = new(ProfileData.ForTarget(e.ProfileIdentity)); _tuple = e; _lastSequence = e.Sequence; }
         public void Close() => CloseReportChain1410Safely("release-local");
         public void InstallClock(Func<long> clock, Action<string> sink) => _virtualSignalEvidence = new(EvidenceDirectory, clock, sink);
         public HostVirtualSignalEvidence Collector => _virtualSignalEvidence!;
+        public void InstallDeferred(MsiCostWindowDiagnostics? worker) { _msiCostDiagnostics=worker; _virtualSignalEvidence=null; }
         public void BindSdkLifetime(string ordinal,string token)=>(_sdkFirstWitness??=new()).BindLifetime(_controller,new{creationOrdinal=ordinal,lifetimeToken=token,closed=false});
         public string SdkResponse(string response="{}")=>_sdkFirstWitness?.TryAppend(response,65536)??response;
 
@@ -316,7 +325,203 @@ internal static partial class Program
             Check(actual._controller.RawCalls + actual._controller.StateCalls == 2, "throw retried SDK");
             if (enabled) Check(Last(logs).GetProperty("outcome").GetString() == "threw", "throw lost");
         }
+        QuickAccessArgumentCounts();
+        SonyRawReportOwnershipBoundaries();
         Pass("raw storage/state identity, exact values, exactly once, SDK exception object preserved; flag on/off");
+    }
+    // Diagnostic regression in the original parameter group: use the actual collector,
+    // not a separate model or a real SDK controller. Ordinals count SDK calls, not clicks.
+    private static void SignalWindowScopeVersions()
+    {
+        var all = new List<string>();
+        foreach (var persona in new[] { "dualsense-edge", "elite" })
+        {
+            Advance(10_000);
+            var logs = new List<string>(); var controller = new object(); var envelope = Env(persona);
+            var collector = new HostVirtualSignalEvidence(EvidenceDirectory, () => FakeNow, logs.Add);
+            byte[]? bytes = persona == "elite" ? null : new byte[63];
+            HMGamepadState? state = bytes is null ? BuildEliteState(ProfileData.Stock("xbox-elite-v2"), envelope) : null;
+            void BeginAndComplete(Exception? error = null, string reason = "live-frame", bool newBucket = true, ulong? tick = null)
+            {
+                if (newBucket) Advance();
+                envelope = envelope with { MonotonicTick = tick ?? (ulong)FakeNow, SampleSequence = envelope.SampleSequence + 1 };
+                var a = collector.BeginSafely("scope-fixture", controller, envelope, envelope, envelope.Sequence, true, reason, 0, bytes, state);
+                collector.CompleteSafely(a, error);
+            }
+            void Version(int expected)
+            {
+                var window = Last(logs).GetProperty("parameterWindow");
+                Check(window.GetProperty("version").GetInt32() == expected, "window used the wrong scope version");
+                Check(window.GetProperty("scope").ValueKind == (expected == 2 ? JsonValueKind.Null : JsonValueKind.String), "scope text did not match version");
+            }
+            BeginAndComplete(); Version(1);
+            BeginAndComplete(); Version(2);
+            var compact = Last(logs).GetProperty("parameterWindow");
+            Check(compact.GetProperty("attempts").GetInt64() == 1 && compact.GetProperty("sdkReturned").GetInt64() == 1 &&
+                compact.GetProperty("accepted").ValueKind == JsonValueKind.Null, "compact scope changed observations");
+            Check(compact.GetProperty("typed").ValueKind == (state is null ? JsonValueKind.Null : JsonValueKind.Object), "typed coverage changed");
+            BeginAndComplete(new IOException("SDK failure")); Version(1);
+            BeginAndComplete(); Version(1);
+            BeginAndComplete(); Version(2);
+            BeginAndComplete(reason: "release-neutral"); Version(1);
+            BeginAndComplete(); Version(2);
+            Advance(5_000);
+            BeginAndComplete(newBucket: false, tick: envelope.MonotonicTick); Version(2);
+            Check(Last(logs).GetProperty("selection").GetString() == "window-heartbeat", "healthy periodic summary not exercised");
+            var heldTick = envelope.MonotonicTick;
+            Advance(5_000);
+            BeginAndComplete(newBucket: false, tick: 0); Version(1);
+            Check(!Last(logs).GetProperty("wireTickKnown").GetBoolean(), "unknown tick control not exercised");
+            BeginAndComplete(newBucket: false, tick: heldTick);
+            var pending = JsonSerializer.SerializeToElement(collector.SnapshotPendingSafely());
+            Check(pending.GetProperty("parameterWindow").GetProperty("version").GetInt32() == 1, "pending snapshot needs full scope");
+            collector.ResetSafely(preservePendingTail: true); Version(1);
+            Check(Last(logs).GetProperty("kind").GetString() == "host-virtual-signal-tail", "tail receipt missing");
+            all.AddRange(logs);
+        }
+        File.WriteAllLines(Path.Combine(EvidenceDirectory, "parameter-scope-samples.jsonl"), all);
+        Pass("Host signal scopes: raw/typed regular returns compact; first, SDK throw, first recovery, neutral, pending and tail full");
+    }
+    private static void QuickAccessArgumentCounts()
+    {
+        Advance(10_000); var logs = new List<string>(); var e = Env("steamdeck");
+        var collector = new HostVirtualSignalEvidence(EvidenceDirectory, () => FakeNow, logs.Add);
+        var controller = new object(); var report = new byte[64];
+        report[0] = 1; report[2] = 9; report[3] = 64;
+        void Call(bool pressed, bool failed = false)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(report.AsSpan(8), pressed ? 1UL << 50 : 0);
+            var before = report.ToArray();
+            var a = collector.BeginSafely("qam-fixture", controller, e, e, e.Sequence, true, "live-frame", 0, report, null);
+            collector.CompleteSafely(a, failed ? new IOException("same-SDK-failure") : null);
+            Check(report.SequenceEqual(before), "QAM diagnostics changed actual report bytes");
+        }
+        JsonElement PendingControls() => JsonSerializer.SerializeToElement(collector.SnapshotPendingSafely())
+            .GetProperty("parameterWindow").GetProperty("controls");
+        Call(false); // First emitted sample; the next calls share one unsampled window.
+        Call(true); Call(true); Call(false); Call(true, true);
+        var controls = PendingControls(); var attempted = controls.GetProperty("attempted").GetProperty("quickAccess");
+        Check(attempted.GetProperty("pressedCalls").GetInt64() == 3 &&
+            attempted.GetProperty("firstPressedOrdinal").GetInt64() == 2 &&
+            attempted.GetProperty("lastPressedOrdinal").GetInt64() == 5, "QAM held calls/ordinal bounds were sampled away");
+        Check(controls.GetProperty("sdkReturned").GetProperty("quickAccess").GetProperty("pressedCalls").GetInt64() == 2 &&
+            controls.GetProperty("sdkThrew").GetProperty("quickAccess").GetProperty("pressedCalls").GetInt64() == 1,
+            "QAM attempted/returned/threw evidence merged");
+        collector.ResetSafely(); Advance(); e = e with { MonotonicTick = (ulong)FakeNow }; Call(false);
+        var released = Last(logs).GetProperty("parameterWindow").GetProperty("controls").GetProperty("attempted").GetProperty("quickAccess");
+        Check(released.GetProperty("pressedCalls").GetInt64() == 0 &&
+            released.GetProperty("firstPressedOrdinal").ValueKind == JsonValueKind.Null &&
+            released.GetProperty("lastPressedOrdinal").ValueKind == JsonValueKind.Null, "QAM count survived reset or invented a press");
+        Advance(10_000); var sony = e with { Persona = "dualsense-edge", ProfileIdentity = "dualsense-edge", MonotonicTick = (ulong)FakeNow };
+        var a = collector.BeginSafely("qam-fixture", controller, sony, sony, sony.Sequence, true, "live-frame", 0, new byte[63], null);
+        collector.CompleteSafely(a, null);
+        Check(Last(logs).GetProperty("parameterWindow").GetProperty("controls").GetProperty("attempted")
+            .GetProperty("quickAccess").ValueKind == JsonValueKind.Null, "Sony report acquired SD QAM semantics");
+        Advance(10_000); var typed = e with { Persona = "elite", ProfileIdentity = "xbox-elite-v2", MonotonicTick = (ulong)FakeNow };
+        var state = new HMGamepadState { Buttons = unchecked((HMButton)(1UL << 50)) };
+        a = collector.BeginSafely("qam-fixture", controller, typed, typed, typed.Sequence, true, "live-frame", null, null, state);
+        collector.CompleteSafely(a, null);
+        Check(Last(logs).GetProperty("parameterWindow").GetProperty("controls").GetProperty("attempted")
+            .GetProperty("quickAccess").ValueKind == JsonValueKind.Null, "Typed bit 50 acquired SD QAM semantics");
+    }
+    // Directed boundaries belong to the original ParametersAndExceptions group/result row.
+    private static void SonyRawReportOwnershipBoundaries()
+    {
+        var savedStops = HostControllerIdleCtsRelease.Stops;
+        var savedAllowed = HostControllerIdleCtsRelease.Allowed;
+        var savedFrameCounter = _dualSenseFrameCounter;
+        static void Rejected(Action action, string detail)
+        {
+            InvalidOperationException? failure = null;
+            try { action(); } catch (InvalidOperationException ex) { failure = ex; }
+            Check(failure?.Message == "sony-idle-handoff:" + detail, "Sony handoff rejection changed: " + failure);
+        }
+        try
+        {
+            foreach (var enabled in new[] { false, true })
+            {
+                HostControllerIdleCtsRelease.Stops = 0; HostControllerIdleCtsRelease.Allowed = true;
+                Advance(); var e = Env(); var logs = new List<string>(); var h = new HostSession(e, enabled, logs.Add);
+                var controller = h._controller!; controller.SeedIdleCounter(0x12345678);
+                var idleReport = controller.IdleReport; var idleBytes = idleReport.ToArray(); var profile = controller.Profile;
+                var raw = Enumerable.Range(0, 63).Select(n => (byte)n).ToArray(); var rawCopy = raw.ToArray();
+                var outputReads = 0; Action outputReader = () => ++outputReads; controller.OutputReader = outputReader;
+                var canonical = e; var state = BuildEliteState(ProfileData.Stock("xbox-elite-v2"), e);
+                var stateBytes = JsonSerializer.Serialize(state, new JsonSerializerOptions { IncludeFields = true });
+                var encoderCounter = _dualSenseFrameCounter;
+                h.OwnSonyRawReport();
+                Check(HostControllerIdleCtsRelease.Stops == 1 && ReferenceEquals(h.SonyRawReportOwner, controller), "first Sony proof was not cached after stop");
+                Check(controller.RawCalls == 0 && controller.StateCalls == 0 && logs.Count == 0, "ownership alone submitted or observed a report");
+                Check(ReferenceEquals(controller.IdleReport, idleReport) && idleReport.SequenceEqual(idleBytes) && raw.SequenceEqual(rawCopy), "stop mutated report storage/data");
+                Check(ReferenceEquals(controller.Profile, profile) && ReferenceEquals(e, canonical) && _dualSenseFrameCounter == encoderCounter &&
+                    JsonSerializer.Serialize(state, new JsonSerializerOptions { IncludeFields = true }) == stateBytes, "stop changed profile/canonical/state/encoder data");
+                Check(ReferenceEquals(controller.OutputReader, outputReader), "stop replaced the output reader");
+                controller.OutputReader!(); Check(outputReads == 1, "stop disabled the output reader");
+                controller.ExpectedRaw = raw;
+                controller.DuringSubmit = () => Check(HostControllerIdleCtsRelease.Stops == 1 && ReferenceEquals(h.SonyRawReportOwner, controller), "SDK submit preceded Sony stop proof");
+                HostControllerIdleCtsRelease.Allowed = false; // A cached proof must avoid a second terminal call.
+                h.Raw(e, raw); h.Raw(e, raw);
+                Check(controller.RawCalls == 2 && controller.StateCalls == 0 && controller.SameRawStorage &&
+                    controller.LastRaw.AsSpan(0, controller.LastRawLength).SequenceEqual(rawCopy) && raw.SequenceEqual(rawCopy), "Sony handoff changed raw argument/storage/data or submit count");
+                Check(h.Frame(e, out var detail) && detail == "report-submitted", "cached Sony live frame refused");
+                Check(h.Neutral(e with { Command = "SUBMIT_NEUTRAL" }, out detail) && detail == "neutral-report-submitted", "cached Sony neutral refused");
+                Check(HostControllerIdleCtsRelease.Stops == 1 && controller.RawCalls == 4, "same Sony controller stopped more than once");
+                Check(ReferenceEquals(controller.OutputReader, outputReader) && idleReport.SequenceEqual(idleBytes), "submit handoff changed output reader or idle report");
+
+                // Keep the old proof visible at this seam: the current-controller guard must run before the cache.
+                h.Rebuild(e with { Epoch = e.Epoch + 1 }); var next = h._controller!;
+                var logsBefore = logs.Count;
+                Rejected(() => h.RawFor(controller, e, raw), "controller-changed");
+                Check(HostControllerIdleCtsRelease.Stops == 1 && ReferenceEquals(h.SonyRawReportOwner, controller) &&
+                    controller.RawCalls == 4 && next.RawCalls == 0 && logs.Count == logsBefore, "stale wrapper consumed cached old proof, stopped or submitted");
+                Rejected(() => h.Raw(e, raw), "fake-clock-stop-rejected");
+                Check(HostControllerIdleCtsRelease.Stops == 2 && !ReferenceEquals(h.SonyRawReportOwner, next) &&
+                    ReferenceEquals(h.SonyRawReportOwner, controller) && next.RawCalls == 0 && next.StateCalls == 0 && logs.Count == logsBefore, "failed new-controller stop granted proof, diagnostics or SDK submit");
+                Rejected(() => h.Raw(e, raw), "fake-clock-stop-rejected");
+                Check(HostControllerIdleCtsRelease.Stops == 3 && !ReferenceEquals(h.SonyRawReportOwner, next) && next.RawCalls == 0, "failed stop was cached or submitted on retry");
+                HostControllerIdleCtsRelease.Allowed = true;
+                next.DuringSubmit = () => Check(HostControllerIdleCtsRelease.Stops == 4 && ReferenceEquals(h.SonyRawReportOwner, next), "new-controller submit preceded a fresh successful stop");
+                h.Raw(e, raw); h.Raw(e, raw);
+                Check(HostControllerIdleCtsRelease.Stops == 4 && next.RawCalls == 2 && ReferenceEquals(h.SonyRawReportOwner, next), "Sony failed-stop recovery or new-controller cache failed");
+                logsBefore = logs.Count;
+                Rejected(() => h.RawFor(controller, e, raw), "controller-changed");
+                Check(HostControllerIdleCtsRelease.Stops == 4 && ReferenceEquals(h.SonyRawReportOwner, next) &&
+                    controller.RawCalls == 4 && next.RawCalls == 2 && logs.Count == logsBefore, "old controller overwrote current proof or reached SDK submit");
+
+                // Exercise the actual live wrapper rejection/return path, not just direct exceptions.
+                var failedLive = new HostSession(e, enabled, logs.Add); HostControllerIdleCtsRelease.Allowed = false;
+                logsBefore = logs.Count;
+                Check(!failedLive.Frame(e, out detail) && detail == "submit-exception:InvalidOperationException" &&
+                    failedLive.SonyRawReportOwner is null && failedLive._controller!.RawCalls == 0 &&
+                    failedLive._controller.StateCalls == 0 && logs.Count == logsBefore && HostControllerIdleCtsRelease.Stops == 5, "live stop failure reached SDK or granted proof");
+                HostControllerIdleCtsRelease.Allowed = true;
+                failedLive._controller!.DuringSubmit = () => Check(HostControllerIdleCtsRelease.Stops == 6 && ReferenceEquals(failedLive.SonyRawReportOwner, failedLive._controller), "live recovery submitted before stop proof");
+                Check(failedLive.Frame(e, out detail) && detail == "report-submitted" && failedLive._controller.RawCalls == 1 && HostControllerIdleCtsRelease.Stops == 6, "live stop failure could not retry successfully");
+
+                // Neutral is valid without an Active-frame gate, including prepared/internal, QUIESCE and release reasons.
+                foreach (var reason in new[] { "submit-neutral-command", "quiesce-neutral", "release-neutral" })
+                {
+                    var neutral = new HostSession(e, enabled, logs.Add); var neutralController = neutral._controller!;
+                    var stopsBefore = HostControllerIdleCtsRelease.Stops; logsBefore = logs.Count;
+                    CommandEnvelope? cause = reason == "release-neutral" ? null : e with { Command = reason == "quiesce-neutral" ? "QUIESCE" : "SUBMIT_NEUTRAL" };
+                    HostControllerIdleCtsRelease.Allowed = false;
+                    Check(!neutral.Neutral(cause, out detail, reason) && detail == "neutral-exception:InvalidOperationException" &&
+                        neutral.SonyRawReportOwner is null && neutralController.RawCalls == 0 && neutralController.StateCalls == 0 &&
+                        logs.Count == logsBefore && HostControllerIdleCtsRelease.Stops == stopsBefore + 1, "neutral stop failure reached SDK or granted proof: " + reason);
+                    HostControllerIdleCtsRelease.Allowed = true;
+                    neutralController.DuringSubmit = () => Check(HostControllerIdleCtsRelease.Stops == stopsBefore + 2 && ReferenceEquals(neutral.SonyRawReportOwner, neutralController), "neutral SDK call preceded successful stop: " + reason);
+                    Check(neutral.Neutral(cause, out detail, reason) && detail == "neutral-report-submitted", "neutral stop failure could not retry: " + reason);
+                    HostControllerIdleCtsRelease.Allowed = false;
+                    Check(neutral.Neutral(cause, out detail, reason) && detail == "neutral-report-submitted" &&
+                        neutralController.RawCalls == 2 && neutralController.StateCalls == 0 && HostControllerIdleCtsRelease.Stops == stopsBefore + 2, "neutral repeated stop or phase-gated cached proof: " + reason);
+                }
+            }
+        }
+        finally
+        {
+            HostControllerIdleCtsRelease.Stops = savedStops; HostControllerIdleCtsRelease.Allowed = savedAllowed;
+            _dualSenseFrameCounter = savedFrameCounter;
+        }
     }
     private static void ActualFrameAndNeutral()
     {
@@ -736,6 +941,97 @@ internal static partial class Program
         Check(!helper.HasPending,"repeated throws refunded the same pending batch budget");
         Pass("FirstSdkWitnessLossAndBudget: first-throw-then-returned,drop-only-coverage,16-sample-batch,4-deferrals,50000 no-allocation frames");
     }
+
+    // This uses the exact production Begin/Complete/submit wrapper, not a rebuilt
+    // queue model. The SDK terminal is inert; response/driver/game proof is excluded.
+    private static void DeferredSignalWriter()
+    {
+        static JsonElement Counters(MsiCostWindowDiagnostics d) => JsonSerializer.SerializeToElement(d.SnapshotSignalLogCounters());
+        static long Number(JsonElement v,string name) => v.GetProperty(name).GetInt64();
+        void Until(Func<bool> predicate,string why) => Check(SpinWait.SpinUntil(predicate,5000),why);
+        MsiCostWindowDiagnostics Worker(string dir,Func<bool> flag,Action<string,string> sink) => new(true,flag,
+            ()=>throw new Exception("signal-only work must not sample processes"),
+            _=>throw new Exception("signal-only work must not append a cost window"),dir,sink);
+        void BeforeRelease(Action action,ManualResetEventSlim release)
+        {
+            using var done=new ManualResetEventSlim();Exception? failure=null;
+            var producer=new Thread(()=>{try{action();}catch(Exception e){failure=e;}finally{done.Set();}}){IsBackground=true};
+            producer.Start();bool returned=done.Wait(1500);
+            if(!returned)release.Set();
+            Check(producer.Join(5000),"deferred producer joined");
+            Check(returned&&failure is null&&!release.IsSet,"SDK wrapper returned while writer stayed blocked");
+        }
+        var dir=Path.Combine(EvidenceDirectory,"deferred-writer");
+        using(var entered=new ManualResetEventSlim())using(var release=new ManualResetEventSlim())
+        {
+            var writes=new System.Collections.Concurrent.ConcurrentQueue<string>();
+            using var d=Worker(dir,()=>true,(directory,line)=>{
+                if(directory!=dir)throw new InvalidOperationException("immutable worker directory");entered.Set();
+                if(!release.Wait(5000))throw new TimeoutException("controlled sink release");writes.Enqueue(line);
+            });
+            try
+            {
+                Advance(10000);var e=Env();var host=new HostSession(e,true,_=>throw new Exception("legacy sink forbidden"));
+                host.InstallDeferred(d);var raw=new byte[63];
+                BeforeRelease(()=>host.Raw(e,raw),release);Check(entered.Wait(3000),"sole worker entered injected writer");
+                Advance();e=Env();BeforeRelease(()=>host.Raw(e,raw),release);
+                Advance();e=Env();BeforeRelease(()=>host.Raw(e,raw),release);
+                var c=Counters(d);Check(Number(c,"accepted")==2&&Number(c,"rejected")==1&&Number(c,"written")==0,"one active plus one pending; full diagnostics dropped");
+                Check(c.GetProperty("discardedOnClose").ValueKind==JsonValueKind.Null,"active worker is not terminal discard proof");
+                var loss=JsonSerializer.SerializeToElement(host.Collector.SnapshotPendingSafely(),new JsonSerializerOptions{IncludeFields=true}).GetProperty("loss");
+                Check(loss.GetProperty("queuedWindows").GetInt64()==2&&loss.GetProperty("queueRejectedWindows").GetInt64()==1,"queued and rejected evidence separately recorded");
+                Check(host._controller!.RawCalls==3,"all SDK calls preserved while diagnostics back up");
+                host.Toggle(false);Check(!release.IsSet,"OFF does not wait on blocked diagnostic writer");
+                d.Dispose();Check(!release.IsSet,"diagnostic Dispose does not wait on sink");
+                Check(!d.TryWriteSignalLog("{}"),"closed queue rejects new diagnostics");
+                release.Set();Until(()=>d.QueueCounters.Stopped,"sole worker terminates after release");
+                c=Counters(d);Check(Number(c,"written")==1&&Number(c,"discardedOnClose")==1&&writes.Count==1,"pending diagnostic explicitly discarded, never replayed");
+                var first=Parse(writes.Single());Check(first.GetProperty("deferredQueueAdmission").GetBoolean(),"stored row distinguishes admission from write");
+                var calls=host._controller.RawCalls;host.Toggle(true);Advance();e=Env();host.Raw(e,raw);
+                Check(host._controller.RawCalls==calls+1&&writes.Count==1,"closed worker changes no SDK behavior and never falls back to direct write");
+            }
+            finally{release.Set();d.Dispose();Until(()=>d.QueueCounters.Stopped,"blocked-writer cleanup");}
+        }
+        Pass("deferred signal: blocked sink, SDK-return, bounded pending, OFF/closed, exact discard; no pipe or hardware claim");
+        {
+            var enabled=false;int writes=0;
+            using var d=Worker(dir,()=>enabled,(_,_)=>Interlocked.Increment(ref writes));
+            try
+            {
+                Check(d.TryWriteSignalLog("{}"),"OFF flag candidate is admitted before worker observation");
+                Until(()=>Number(Counters(d),"flagDisabled")==1,"worker observes OFF without file sink");
+                Check(writes==0&&!d.LoggingEnabled,"OFF signal cannot write or set diagnostic ON");
+                enabled=true;Check(d.TryWriteSignalLog("{\"id\":2}"),"next explicit offer accepted");
+                Until(()=>Number(Counters(d),"written")==1,"same worker continues on next flag observation");
+                Check(writes==1,"no replay of flag-disabled diagnostic");
+                Check(!d.TryWriteSignalLog("{}\n{}")&&!d.TryWriteSignalLog(new string('x',8192)),"multiline/oversize input rejected before queue");
+                Check(Number(Counters(d),"invalid")==2,"invalid losses retained");
+            }
+            finally{d.Dispose();Until(()=>d.QueueCounters.Stopped,"OFF-worker cleanup");}
+        }
+        {
+            int calls=0;
+            using var d=Worker(dir,()=>true,(_,_)=>{if(Interlocked.Increment(ref calls)==1)throw new IOException("controlled write failure");});
+            try
+            {
+                Check(d.TryWriteSignalLog("{}"),"throwing writer accepted only");Until(()=>Number(Counters(d),"failed")==1,"actual write failure counted");
+                Until(()=>d.QueueCounters.Failed==1,"original dispatcher records failure");
+                Check(d.TryWriteSignalLog("{}"),"next offer reuses sole worker");Until(()=>Number(Counters(d),"written")==1,"worker survives diagnostic failure");
+                Check(calls==2,"failed diagnostic not retried");
+            }
+            finally{d.Dispose();Until(()=>d.QueueCounters.Stopped,"failed-worker cleanup");}
+        }
+        Pass("deferred signal: worker OFF, explicit invalid losses, sink failure isolation, no replay");
+        {
+            var unexpected=Path.Combine(EvidenceDirectory,"unexpected-default-sink");Check(!Directory.Exists(unexpected),"no direct fallback directory before missing-worker control");
+            Advance(10000);var e=Env();var host=new HostSession(e,true,_=>throw new Exception("legacy sink forbidden"));host.InstallDeferred(null);
+            host.Raw(e,new byte[63]);Check(host._controller!.RawCalls==1&&!Directory.Exists(unexpected),"missing diagnostic worker never falls back to synchronous file IO");
+            var loss=JsonSerializer.SerializeToElement(host.Collector.SnapshotPendingSafely(),new JsonSerializerOptions{IncludeFields=true}).GetProperty("loss");
+            Check(loss.GetProperty("queueRejectedWindows").GetInt64()==1,"missing-worker diagnostic loss visible");
+        }
+        Pass("deferred signal: missing worker is diagnostic loss, no direct-file fallback");
+    }
+
     private static int Main(string[] args)
     {
         EvidenceDirectory = args[0]; Directory.CreateDirectory(EvidenceDirectory);
@@ -743,7 +1039,12 @@ internal static partial class Program
         if (args.Length == 2 && args[1] == "measure-profiles") return MeasureProfiles();
         try
         {
-            FirstSdkWitnessReplies(); FirstSdkWitnessLossAndBudget(); ResetOnceAndLateCompletion(); SteamDeckActualBoundary(); SteamDeckRateAndIsolation(); ParametersAndExceptions(); ActualFrameAndNeutral(); DiagnosticFailures(); RateAndWindows(); IsolationAndAllocation(); GlobalQuotaAndArmedTracker(); RotationAndLineBound(); ProfileReadyStates();
+            var directed=args.Length==2&&args[1]=="deferred-writer";
+            if(!directed&&args.Length!=1)throw new ArgumentException("Unknown case selection");
+            DeferredSignalWriter();
+            if(!directed) {
+            SignalWindowScopeVersions(); FirstSdkWitnessReplies(); FirstSdkWitnessLossAndBudget(); ResetOnceAndLateCompletion(); SteamDeckActualBoundary(); SteamDeckRateAndIsolation(); ParametersAndExceptions(); ActualFrameAndNeutral(); DiagnosticFailures(); RateAndWindows(); IsolationAndAllocation(); GlobalQuotaAndArmedTracker(); RotationAndLineBound(); ProfileReadyStates();
+            }
             File.WriteAllLines(Path.Combine(EvidenceDirectory, "sdk-parameter-samples.jsonl"), ParameterSamples);
             var result = new { pass = true, tests = Passed, sdkControllersConstructed = 0, devicesRead = 0, productDeployed = false, output = EvidenceDirectory };
             File.WriteAllText(Path.Combine(EvidenceDirectory, "result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));

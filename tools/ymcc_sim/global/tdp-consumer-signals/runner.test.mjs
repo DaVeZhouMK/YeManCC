@@ -1,16 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {parseArgs,verifyOriginalExecution} from './run.mjs';
+import {parseArgs,verifyOriginalExecution,frozenCompilerOptions} from './run.mjs';
 import {createIoBoundary,executeOriginalBundle} from './vm-io.mjs';
 import {getTdpConsumerAdapters,CASE_ID} from './adapter.mjs';
+import {simulationCorePath} from '../release-host-environment.mjs';
 const spec=JSON.parse(fs.readFileSync(new URL('./spec.json',import.meta.url),'utf8'));
+const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 function fixture(t){
- const parent=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(parent,'ymcc-tdp-contract-'));
- t.after(()=>{const resolved=fs.realpathSync(root);assert.equal(path.dirname(resolved),parent);assert(path.basename(resolved).startsWith('ymcc-tdp-contract-'));fs.rmSync(resolved,{recursive:true,force:true});});
+ const workspace=simulationCorePath('Workspace'),parent=fs.realpathSync.native(workspace);
+ assert(samePath(parent,workspace)&&!fs.lstatSync(workspace).isSymbolicLink());
+ const root=fs.mkdtempSync(path.join(parent,'ymcc-tdp-contract-')),identity=fs.lstatSync(root,{bigint:true});
+ t.after(()=>{
+  const actual=fs.realpathSync.native(root),current=fs.lstatSync(root,{bigint:true});
+  assert(samePath(actual,root)&&samePath(path.dirname(actual),parent));
+  assert(current.isDirectory()&&!current.isSymbolicLink()&&current.dev===identity.dev&&current.ino===identity.ino);
+  fs.rmSync(actual,{recursive:true,force:true});
+ });
  return root;
 }
 function execution(t){const root=fixture(t),file=path.join(root,'report.json');const raw={checks:spec.expectedNames.map(name=>({name,pass:true})),failures:0,scope:spec.originalScope,realHardwareExecuted:false};fs.writeFileSync(file,JSON.stringify(raw));return{exitCode:0,thrown:null,reportPath:file,report:raw,boundary:{denied:[],processAttempts:0,networkAttempts:0}};}
@@ -19,10 +27,25 @@ test('descriptor retains actual original source and exposes one reviewed softwar
  assert(adapter.evidenceInputs.includes('tools/tdp_frontend_static_selftest.ts'));
  assert(adapter.evidenceInputs.includes('src/bridge/yeman.ts'));
  assert(adapter.evidenceInputs.includes('tools/mock-shell.ts'));
- assert.equal(adapter.artifactInputs.length,736);assert(adapter.artifactInputs.length<=3072);assert.deepEqual(adapter.resultFiles,['tdp-consumer/result.json','tdp-consumer/output-evidence.json']);
+ assert.equal(adapter.evidenceInputs.filter(file=>file==='tsconfig.json').length,1);
+ assert(!spec.buildInputs.includes('tsconfig.json'),'compiler configuration is not a bundled module');
+ for(const file of ['src/bridge/steamInstallationFacts.ts','src/bridge/steamUi.ts']){
+  assert.equal(adapter.evidenceInputs.filter(input=>input===file).length,1);
+  assert.equal(spec.buildInputs.filter(input=>input===file).length,1);
+ }
+ assert.equal(adapter.artifactInputs.length,751);assert(adapter.artifactInputs.length<=3072);assert.equal(new Set(adapter.artifactInputs.map(file=>file.toLowerCase())).size,751);assert.deepEqual(adapter.resultFiles,['tdp-consumer/result.json','tdp-consumer/output-evidence.json']);
+});
+test('frontend compiler options use only the reviewed frozen root config',()=>{
+ const bytes=Buffer.from('{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}},"references":[{"path":"./tsconfig.node.json"}]}');
+ assert.deepEqual(frozenCompilerOptions({path:'tsconfig.json',bytes}),{tsconfigRaw:bytes.toString('utf8')});
+ assert.throws(()=>frozenCompilerOptions(),/TDP_COMPILER_CONFIG_NOT_FROZEN/);
+ assert.throws(()=>frozenCompilerOptions({path:'tsconfig.node.json',bytes}),/TDP_COMPILER_CONFIG_NOT_FROZEN/);
+ assert.throws(()=>frozenCompilerOptions({path:'tsconfig.json',bytes:Buffer.from('{')}),/TDP_COMPILER_CONFIG_JSON/);
+ assert.throws(()=>frozenCompilerOptions({path:'tsconfig.json',bytes:Buffer.from('{"compilerOptions":[],"references":[]}')}),/TDP_COMPILER_CONFIG_SHAPE/);
+ assert.throws(()=>frozenCompilerOptions({path:'tsconfig.json',bytes:Buffer.from('{"compilerOptions":{},"extends":"other.json"}')}),/TDP_COMPILER_CONFIG_EXTENDS_UNBOUND/);
 });
 test('the entire original current report contract must pass',t=>{
- const original=execution(t);assert.equal(verifyOriginalExecution(original,spec).checks,87);
+ const original=execution(t);assert.equal(verifyOriginalExecution(original,spec).checks,107);
 });
 test('missing, duplicate and renamed original cases never become full acceptance',t=>{
  for(const mode of ['missing','duplicate','renamed']){
@@ -50,12 +73,20 @@ test('compile errors or timeouts cannot be counted as a detected original consum
   assert.throws(()=>verifyOriginalExecution(original,spec,{negative:true}),/TDP_ORIGINAL_THREW_OR_TIMED_OUT/);
  }
 });
-test('fault acceptance requires the named unchanged original assertion and nonzero result',t=>{
- const original=execution(t);assert.throws(()=>verifyOriginalExecution(original,spec,{negative:true}),/TDP_FAULT_NOT_CAUGHT/);
- original.report.checks.find(row=>row.name===spec.fault.expectedFailedCase).pass=false;original.report.failures=1;original.exitCode=1;
- assert.deepEqual(verifyOriginalExecution(original,spec,{negative:true}).failedNames,[spec.fault.expectedFailedCase]);
- original.report.checks.find(row=>row.name===spec.fault.expectedFailedCase).pass=true;original.report.checks[0].pass=false;
- assert.throws(()=>verifyOriginalExecution(original,spec,{negative:true}),/TDP_FAULT_NOT_CAUGHT/);
+test('fault acceptance requires only the named unchanged original assertion and exit 1',t=>{
+ const original=execution(t),negative={negative:true},rejection=/TDP_FAULT_NOT_CAUGHT/;
+ const target=original.report.checks.find(row=>row.name===spec.fault.expectedFailedCase);
+ const unrelated=original.report.checks.find(row=>row.name!==spec.fault.expectedFailedCase);
+ const validate=(exitCode,targetPass,unrelatedPass)=>{
+  original.exitCode=exitCode;target.pass=targetPass;unrelated.pass=unrelatedPass;
+  original.report.failures=Number(!targetPass)+Number(!unrelatedPass);
+  fs.writeFileSync(original.reportPath,JSON.stringify(original.report));
+  return verifyOriginalExecution(original,spec,negative);
+ };
+ assert.deepEqual(validate(1,false,true).failedNames,[spec.fault.expectedFailedCase]);
+ for(const params of [[0,false,true],[7,false,true],[-1,false,true],[1,false,false],[1,true,false],[1,true,true]]){
+  assert.throws(()=>validate(...params),rejection,JSON.stringify(params));
+ }
 });
 test('hidden process, network and outside-file attempts invalidate an otherwise green report',t=>{
  for(const key of ['denied','processAttempts','networkAttempts']){

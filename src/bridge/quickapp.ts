@@ -5,7 +5,7 @@
 //  - 游戏识别统一走 `bridge/gamedetect`（原 quickapp 内的逻辑已迁出，RTSS 等共用）。
 //  - 启动 LS：优先 C:\SOFT\Lossless.Scaling\LosslessScaling.exe；缺失时自动回退 Steam 库。
 
-import { app, fs, shell, registry, proc, losslessRuntime, type LosslessActivation } from './api';
+import { app, fs, shell, steamInformation, proc, optiClient, losslessRuntime, type LosslessActivation } from './api';
 import { syncOptiClientGame, flushOptiClientGames } from './optiscalerClientSync';
 import { parseLsProfiles, matchLsProfile, normalizeLsPath, lsExeKey, type LsProfile } from './losslessProfiles';
 import {readLosslessRuntime, invalidateLosslessRuntime, losslessRuntimeRevision, subscribeLosslessRuntime} from './losslessRuntimeState';
@@ -29,15 +29,9 @@ export type { DetectedGame as GameProc } from './gamedetect';
 // ───────────────────────── LS 路径解析 ─────────────────────────
 
 async function getSteamPath(): Promise<string> {
-  for (const root of ['HKCU', 'HKLM']) {
-    try {
-      const v = await registry.read(root, 'Software\\Valve\\Steam', 'SteamPath');
-      if (v && typeof v === 'string' && v.trim()) return v.trim();
-    } catch {
-      /* try next */
-    }
-  }
-  return '';
+  const roots = await steamInformation.installationRoots();
+  if (roots === null) throw new Error('Steam 安装信息尚未确认');
+  return roots[0] ?? '';
 }
 
 async function parseLibraryFolders(steamPath: string): Promise<string[]> {
@@ -736,21 +730,53 @@ export async function oneClickOptiScaler(
   }
 }
 
-// 打开前只同步暂存的客户端游戏列表：不轮询、不关闭进程、不修改游戏文件。
+// 打开前沿原低速owner补库，再同步安装登记；运行中的客户端仍避让。
 export const OPTISCALER_CLIENT_DIR = 'C:\\SOFT\\OptiscalerClient';
 export const OPTISCALER_CLIENT_EXE = 'C:\\SOFT\\OptiscalerClient\\OptiscalerClient.exe';
 export const OPTISCALER_CLIENT_URL = 'https://github.com/Optiscaler-Client/Optiscaler-Client/releases';
+// Child exit code from runLibraryOptiStartupEntrypoint, forwarded by prepareCatalog.
+const OPTI_CATALOG_SCAN_UNAVAILABLE = 22;
+const OPTI_CATALOG_STEAM_ONLY = 23;
 
 export async function optiConsoleInstalled(): Promise<boolean> {
   return fs.exists(OPTISCALER_CLIENT_EXE).catch(() => false);
 }
 
-// GUI 程序必须用 shell.execute；重复点击仍然只发送打开请求。
-export async function openOptiConsole(): Promise<string> {
-  const sync = await flushOptiClientGames();
-  const opened = await shell.execute(OPTISCALER_CLIENT_EXE, []);
-  if (opened === false) throw new Error("OPT 客户端启动请求失败");
-  return sync.message;
+// Explicit Open reuses a running client. All UI entry points share one
+// in-flight promise, including preparation and the pending install-state flush.
+let optiConsoleOpening: Promise<string> | null = null;
+export function openOptiConsole(): Promise<string> {
+  if (optiConsoleOpening) return optiConsoleOpening;
+  const task = (async () => {
+    let preparationNotice = '';
+    let prepared: Awaited<ReturnType<typeof optiClient.prepareCatalog>>;
+    try { prepared = await optiClient.prepareCatalog(); }
+    catch { prepared = {status:'error'}; }
+    if (prepared?.status === 'cancelled') throw new Error('游戏库准备已取消');
+    if (prepared?.status === 'busy') throw new Error('游戏库正在补齐，请等待当前打开请求完成');
+    if (prepared?.status === 'unavailable') throw new Error('无法确认 OPT 客户端运行状态，请稍后重试');
+    const runningNotice = (focused = false) => `${focused ? '已切回 OPT 客户端' : 'OPT 客户端正在运行，可切换到现有窗口'}，游戏库补齐已暂缓；请正常关闭后从 YMCC 再次打开。`;
+    if (prepared?.status === 'running') return runningNotice(prepared.focused);
+    if (prepared?.status !== 'prepared') preparationNotice = prepared?.exitCode === OPTI_CATALOG_SCAN_UNAVAILABLE
+      ? '自定义游戏库尚无可用的扫描结果，本次未补齐游戏。'
+      : prepared?.exitCode === OPTI_CATALOG_STEAM_ONLY
+        ? '已同步 Steam 原生游戏，其他游戏待游戏库扫描后补齐。'
+        : '游戏库补齐未完成，关闭客户端后可从 YMCC 再次打开重试。';
+    const sync = await flushOptiClientGames();
+    // Observe again after the asynchronous flush. Unknown state cannot grant
+    // another launch, including when preparation failed against an older host.
+    const observed = await proc.running(['OptiscalerClient']);
+    const running = observed?.OptiscalerClient;
+    if (running === true) return [runningNotice(), sync.message].filter(Boolean).join('\n');
+    if (running !== false) throw new Error('无法确认 OPT 客户端运行状态，请稍后重试');
+    const opened = await shell.execute(OPTISCALER_CLIENT_EXE, []);
+    if (opened === false) throw new Error("OPT 客户端启动请求失败");
+    return [preparationNotice, sync.message].filter(Boolean).join('\n');
+  })();
+  optiConsoleOpening = task;
+  const clear = () => { if (optiConsoleOpening === task) optiConsoleOpening = null; };
+  void task.then(clear, clear);
+  return task;
 }
 
 // Original YMCC owner for LS imports, starts and stops. The console calls this

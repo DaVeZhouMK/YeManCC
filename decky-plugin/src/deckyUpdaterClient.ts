@@ -6,7 +6,7 @@ export interface UpdaterClientState {connected:boolean;supported:boolean;view:Up
 interface UpdaterPortSession {clientId:string;sequence:number;owner:DeckyUpdaterClient|null;}
 const portSessions=new WeakMap<Port,UpdaterPortSession>();
 export class DeckyUpdaterClient {
-  private opened=false;private sessionState:UpdaterPortSession;private state:UpdaterClientState={connected:false,supported:false,view:null,pending:false,error:''};private listeners=new Set<()=>void>();private stopExtra:(()=>void)|null=null;private stopConnection:(()=>void)|null=null;private firstTimer:{timer:ReturnType<typeof setTimeout>}|null=null;private pending:{id:number;resolve:()=>void;reject:(e:Error)=>void;timer:any}|null=null;
+  private opened:object|null=null;private sessionState:UpdaterPortSession;private state:UpdaterClientState={connected:false,supported:false,view:null,pending:false,error:''};private listeners=new Set<()=>void>();private stopExtra:(()=>void)|null=null;private stopConnection:(()=>void)|null=null;private firstTimer:{timer:ReturnType<typeof setTimeout>}|null=null;private pending:{id:number;resolve:()=>void;reject:(e:Error)=>void;timer:any}|null=null;
   constructor(private port:Port,private clientId:string,private timeout=8000){const prior=portSessions.get(port);this.sessionState=prior??{clientId,sequence:0,owner:null};if(!prior)portSessions.set(port,this.sessionState);this.clientId=this.sessionState.clientId;}
   snapshot(){return this.state;}
   subscribe(fn:()=>void){this.listeners.add(fn);return()=>{this.listeners.delete(fn);};}
@@ -26,11 +26,21 @@ export class DeckyUpdaterClient {
   }
   private failPending(message:string){const p=this.pending;if(!p)return;this.pending=null;clearTimeout(p.timer);p.reject(Error(message));}
   session(){return this.port.updaterRunId();}
-  open(){if(this.opened)return;this.sessionState.owner?.close();this.sessionState.owner=this;this.opened=true;this.stopExtra=this.port.subscribeExtra(value=>this.receive(value));this.port.setPassiveDemand('updater',true);this.stopConnection=this.port.subscribe(state=>{
+  open(){if(this.opened)return;
+    // Publish this opening's owner before closing its predecessor. A close/UI
+    // callback may open a newer page; this stack must not steal its ownership.
+    const previous=this.sessionState.owner,opening={};this.sessionState.owner=this;this.opened=opening;
+    previous?.close();
+    if(this.opened!==opening||this.sessionState.owner!==this)return;
+    this.stopExtra=this.port.subscribeExtra(value=>{if(this.opened===opening)this.receive(value);});this.port.setPassiveDemand('updater',true);const stopConnection=this.port.subscribe(state=>{
+    if(this.opened!==opening)return;
     this.cancelFirst();if(!state.connected){this.failPending('更新连接已断开，结果未确认，请查看 YMCC 状态。');this.publish({connected:false,supported:false,view:null,pending:false,error:''});return;}
     const supported=this.port.updaterSupported();this.publish({connected:true,supported,view:null,error:supported?'':'请重新打开支持兼容更新的新版 YMCC。'});if(!supported)return;
     this.requestStatus();
-  },{connectionOnly:true});}
+  },{connectionOnly:true});
+    // subscribe can immediately notify UI that closes or replaces this page.
+    // Its returned cleanup still belongs to the original open, even after close.
+    if(this.opened===opening&&this.sessionState.owner===this)this.stopConnection=stopConnection;else stopConnection();}
   private receive(raw:any){if(!this.opened)return;
     if(raw?.type==='ymcc-updater-ready'&&raw.protocol===1&&this.state.connected&&this.state.supported){this.failPending('YMCC 更新器已恢复，请查看实际状态后重新确认。');if(this.firstTimer!==null)return;this.publish({view:null,pending:false,error:''});this.requestStatus();return;}
     if(raw?.type==='ymcc-updater'){
@@ -45,10 +55,26 @@ export class DeckyUpdaterClient {
     const v=this.state.view;if(!this.opened||!this.state.connected||!this.state.supported||!v||this.pending)return Promise.reject(Error('更新器当前不可用，请稍后重试。'));
     const allowed=action==='check'?v.canCheck:action==='download'?v.canDownload:v.canInstall;if(!allowed)return Promise.reject(Error('当前状态不能执行此更新操作。'));
     if(action!=='check'&&(!expected||updateTargetKey(expected)!==updateTargetKey(v)))return Promise.reject(Error('更新包已改变，请重新确认版本。'));
-    const id=++this.sessionState.sequence;
-    return new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{if(this.pending?.id!==id)return;this.pending=null;this.publish({pending:false,view:null,error:'更新请求未确认，请在 YMCC 查看实际状态。'});reject(Error('更新请求未确认；不自动重放。'));this.port.sendUpdater('updater.status',{subscribe:true});},this.timeout);this.pending={id,resolve,reject,timer};this.publish({pending:true,error:''});
+    const opening=this.opened,id=++this.sessionState.sequence;
+    return new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{if(this.pending?.id!==id)return;this.pending=null;this.publish({pending:false,view:null,error:'更新请求未确认，请在 YMCC 查看实际状态。'});reject(Error('更新请求未确认；不自动重放。'));if(this.opened===opening&&this.sessionState.owner===this&&this.state.connected&&this.state.supported)this.port.sendUpdater('updater.status',{subscribe:true});},this.timeout);this.pending={id,resolve,reject,timer};this.publish({pending:true,error:''});
+      // Publishing pending may synchronously retire this page/request.
+      if(this.opened!==opening||this.sessionState.owner!==this||this.pending?.id!==id)return;
       if(!this.port.sendUpdater('updater.request',{id,clientId:this.clientId,action,...(action==='check'?{}:{version:v.targetVersion,sha256:v.targetHash})})){this.failPending('更新连接不可用，请重试。');this.publish({pending:false,error:'更新连接不可用，请重试。'});}
     });
   }
-  close(){if(!this.opened)return;this.opened=false;if(this.sessionState.owner===this)this.sessionState.owner=null;this.port.sendUpdater('updater.status',{subscribe:false});this.stopExtra?.();this.stopExtra=null;this.stopConnection?.();this.stopConnection=null;this.cancelFirst();this.failPending('更新页面已关闭，已接收的操作请在 YMCC 查看。');this.port.setPassiveDemand('updater',false);this.publish({connected:false,supported:false,view:null,pending:false});this.listeners.clear();}
+  close(){
+    if(!this.opened)return;
+    this.opened=null;if(this.sessionState.owner===this)this.sessionState.owner=null;
+    // Retire this opening before a transport/UI callback can open its successor.
+    // Its uncertain request is settled once and never handed to the new page.
+    this.stopExtra?.();this.stopExtra=null;this.stopConnection?.();this.stopConnection=null;
+    this.cancelFirst();this.failPending('更新页面已关闭，已接收的操作请在 YMCC 查看。');
+    this.publish({connected:false,supported:false,view:null,pending:false});
+    if(!this.opened)this.listeners.clear();
+    // The stream/demand are shared by this port's current page. A replacement
+    // can open during publication or the failed unsubscribe's disconnect.
+    if(this.sessionState.owner!==null)return;
+    this.port.sendUpdater('updater.status',{subscribe:false});
+    if(this.sessionState.owner===null)this.port.setPassiveDemand('updater',false);
+  }
 }

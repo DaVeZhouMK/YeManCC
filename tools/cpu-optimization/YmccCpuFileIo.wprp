@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0" Author="YMCC CPU optimization">
+  <Profiles>
+    <SystemCollector Id="YmccCpuFileIoCollector" Name="YMCC bounded CPU and filesystem collector">
+      <BufferSize Value="256" />
+      <Buffers Value="512" />
+    </SystemCollector>
+    <SystemProvider Id="YmccCpuFileIoProvider">
+      <Keywords>
+        <Keyword Value="CpuConfig" />
+        <Keyword Value="ProcessThread" />
+        <Keyword Value="Loader" />
+        <Keyword Value="SampledProfile" />
+        <Keyword Value="CSwitch" />
+        <Keyword Value="DPC" />
+        <Keyword Value="Interrupt" />
+        <Keyword Value="FileIO" />
+        <Keyword Value="FileIOInit" />
+      </Keywords>
+      <Stacks>
+        <Stack Value="SampledProfile" />
+        <Stack Value="FileCreate" />
+        <Stack Value="FileRead" />
+        <Stack Value="FileWrite" />
+        <Stack Value="FileQueryInformation" />
+        <Stack Value="FileSetInformation" />
+        <Stack Value="FileDirEnum" />
+        <Stack Value="FileDelete" />
+        <Stack Value="FileRename" />
+        <Stack Value="FileFlush" />
+      </Stacks>
+    </SystemProvider>
+    <Profile Id="YmccCpuFileIo.Verbose.File" Name="YmccCpuFileIo" Description="Bounded file-mode CPU samples, scheduling and filesystem operation stacks; development diagnosis only" LoggingMode="File" DetailLevel="Verbose">
+      <Collectors><SystemCollectorId Value="YmccCpuFileIoCollector"><SystemProviderId Value="YmccCpuFileIoProvider" /></SystemCollectorId></Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

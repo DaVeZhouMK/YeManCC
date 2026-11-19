@@ -1,0 +1,137 @@
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <mutex>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "input_chain_ack_evidence.h"
+#ifdef YMCC_TEST_PREVIOUS_ACK_PROJECTION
+#define inputChainAck inputChainAckReference
+#include "previous_input_chain_ack_evidence.h"
+#undef inputChainAck
+#endif
+#include "log_ai_index.h"
+#include "input_pipe_test_allocation_fault.h"
+using json=nlohmann::json;
+namespace current {
+static unsigned long long fixturePower=1,fixtureEpoch=2,fixturePowerReads=0,fixtureEpochReads=0,fixtureGateReads=0;
+static bool g_inputHostPrepared=true,g_inputHostNeutralized=true,g_inputHostActive=true,g_xinputPhysicalSourceLocked=true;
+static HANDLE g_inputHostProcess=reinterpret_cast<HANDLE>(1);
+static unsigned g_xinputConnectedMask=1,g_xinputPhysicalSourceMask=1;
+static unsigned long long g_inputCaptureBusTickGlobal=0;
+static std::atomic<int> g_physicalReleaseWindowStage{0};
+static std::vector<json> fixtureRows;
+static bool failNewSink=false;
+static unsigned long long newSinkCalls=0;
+static unsigned long long currentPowerGeneration(){++fixturePowerReads;return fixturePower;}
+static unsigned long long inputHostEpochToken(){++fixtureEpochReads;return fixtureEpoch;}
+static bool physicalReleaseWindowActive(){++fixtureGateReads;return false;}
+static void appendNativeLifecycleLog(const char* event,const json& detail){
+ SetLastError(1777);
+ if(std::strcmp(event,"wake-input-chain-first-nonneutral")==0){++newSinkCalls;if(failNewSink)throw std::runtime_error("optional sink failed");}
+ json row=detail;row["event"]=event;fixtureRows.push_back(std::move(row));
+}
+
+// ACTUAL_CURRENT_STATE
+// ACTUAL_CURRENT_COUNT
+// ACTUAL_CURRENT_BASE
+}
+namespace reference {
+static unsigned long long fixturePower=1,fixtureEpoch=2,fixturePowerReads=0,fixtureEpochReads=0,fixtureGateReads=0;
+static bool g_inputHostPrepared=true,g_inputHostNeutralized=true,g_inputHostActive=true,g_xinputPhysicalSourceLocked=true;
+static HANDLE g_inputHostProcess=reinterpret_cast<HANDLE>(1);
+static unsigned g_xinputConnectedMask=1,g_xinputPhysicalSourceMask=1;
+static unsigned long long g_inputCaptureBusTickGlobal=0;
+static std::atomic<int> g_physicalReleaseWindowStage{0};
+static std::vector<json> fixtureRows;
+static bool failNewSink=false;
+static unsigned long long newSinkCalls=0;
+static unsigned long long currentPowerGeneration(){++fixturePowerReads;return fixturePower;}
+static unsigned long long inputHostEpochToken(){++fixtureEpochReads;return fixtureEpoch;}
+static bool physicalReleaseWindowActive(){++fixtureGateReads;return false;}
+static void appendNativeLifecycleLog(const char* event,const json& detail){
+ SetLastError(1777);
+ if(std::strcmp(event,"wake-input-chain-first-nonneutral")==0){++newSinkCalls;if(failNewSink)throw std::runtime_error("optional sink failed");}
+ json row=detail;row["event"]=event;fixtureRows.push_back(std::move(row));
+}
+
+// ACTUAL_REFERENCE_STATE
+// ACTUAL_REFERENCE_COUNT
+// ACTUAL_REFERENCE_BASE
+}
+static json checks=json::array();
+static void check(bool value,const char* name){checks.push_back({{"name",name},{"pass",value}});std::cerr<<"CHECK "<<name<<" "<<value<<std::endl;}
+static json counters(const auto& c){return json::array({c.frameCalls.load(),c.frameAccepted.load(),c.frameRejected.load(),c.nonNeutralAccepted.load(),c.countPowerGeneration,c.sampledHostEpoch,c.acceptedInCurrentGeneration,c.nonNeutralAcceptedInCurrentGeneration,c.firstEmittedForCountScope,c.sustainedEmittedForCountScope,c.lastRejectDetail,c.rejectRows});}
+static std::size_t nonneutralRows(const std::vector<json>& fixtureRows){std::size_t n=0;for(const auto& r:fixtureRows)n+=r["event"]=="wake-input-chain-first-nonneutral";return n;}
+static json originalRows(const std::vector<json>& fixtureRows){json result=json::array();for(const auto& r:fixtureRows)if(r["event"]!="wake-input-chain-first-nonneutral")result.push_back(r);return result;}
+int main(int argc,char** argv){try{
+ if(argc!=2||(std::strcmp(argv[1],"necessary")&&std::strcmp(argv[1],"current")&&std::strcmp(argv[1],"optional-memory")&&std::strcmp(argv[1],"guide")))return 2;
+ current::fixtureRows.reserve(256);reference::fixtureRows.reserve(256);
+ const std::string empty,run="run-current",host="host-current",request="frame-51";const auto ack=[&]{ymcc::inputChainAck::View v;v.nativeAccepted=true;v.requestBindingCaptured=true;v.fastReceiptUsed=true;v.protocolPowerGeneration=1;v.hostEpoch=2;v.requestedSequence=51;v.runId=&run;v.boundHostInstanceId=&host;v.preparedRequestId=&request;v.parsedFastHostInstanceId=&host;return v;}();
+ auto finish=[](){unsigned failures=0;for(const auto& r:checks)failures+=!r["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failures},{"nativeCurrentRows",current::fixtureRows},{"referenceRows",reference::fixtureRows},{"productExecution",false}}.dump()<<std::endl;return failures?3:0;};
+ if(!std::strcmp(argv[1],"optional-memory")){
+ unsigned failuresCaught=0,verifiedRows=0;
+ for(int fault=0;fault<192;++fault){std::cerr<<"FAULT "<<fault<<std::endl;current::fixturePower=100+static_cast<unsigned>(fault);current::inputChainCountFrame(true,true,false,true,empty,50,ack);const auto size=current::fixtureRows.size();SetLastError(8642);ymcc::testing::allocationFault::failAfter(fault);current::inputChainCountFrame(true,true,false,false,empty,51,ack);ymcc::testing::allocationFault::failAfter(-1);if(GetLastError()!=8642||current::g_inputChain.nonNeutralAcceptedInCurrentGeneration!=1)throw std::runtime_error("optional allocation changed submission accounting or LastError");if(current::fixtureRows.size()==size)++failuresCaught;else if(current::fixtureRows.back().at("ackIdentityStatus")=="verified-local-ack"&&current::fixtureRows.back().at("ackRequestId")==request)++verifiedRows;current::fixtureRows.clear();}
+ check(failuresCaught>0&&verifiedRows>0&&failuresCaught+verifiedRows==192,"allocation faults drop the optional row or leave a complete verified tuple; accepted accounting is preserved");
+ return finish();
+ }
+ if(!std::strcmp(argv[1],"guide")){ const auto guide=ymcc::logexport::aiReadingGuide();check(guide.contains("inputChainNeutralReceipts")&&guide["inputChainNeutralReceipts"]["meaning"].get<std::string>().find("not a control-value test")!=std::string::npos,"actual compiled export guide retains neutralization and delivery limits");
+return finish();}
+ if(!std::strcmp(argv[1],"necessary")){
+  for(unsigned i=0;i<50;++i)reference::inputChainCountFrame(true,true,i==0,true,empty,i+1,ack);
+  check(reference::fixtureRows.size()==2&&reference::fixtureRows[0]["nonNeutralAcceptedInCurrentGeneration"]==0&&reference::fixtureRows[1]["nonNeutralAcceptedInCurrentGeneration"]==0,"old first and sustained events can both consist only of neutralized frames");
+  reference::inputChainCountFrame(true,true,false,false,empty,51,ack);
+  check(nonneutralRows(reference::fixtureRows)==1,"necessary original first nonneutral-path receipt is absent");return finish();
+ }
+ current::inputChainCountFrame(false,true,false,false,empty,1,ack);reference::inputChainCountFrame(false,true,false,false,empty,1,ack);
+ check(current::fixturePowerReads==0&&current::fixtureRows.empty()&&counters(current::g_inputChain)==counters(reference::g_inputChain),"not-attempted keeps original complete early return");
+ for(unsigned i=0;i<50;++i){current::inputChainCountFrame(true,true,i==0,true,empty,i+1,ack);reference::inputChainCountFrame(true,true,i==0,true,empty,i+1,ack);}
+ check(current::fixtureRows.size()==2&&nonneutralRows(current::fixtureRows)==0&&current::g_inputChain.nonNeutralAcceptedInCurrentGeneration==0,"fifty neutralized frames emit original first and sustained only");
+ SetLastError(2468);current::inputChainCountFrame(true,true,false,false,empty,51,ack);const auto edgeError=GetLastError();reference::inputChainCountFrame(true,true,false,false,empty,51,ack);
+ check(nonneutralRows(current::fixtureRows)==1&&edgeError==2468,"first nonneutral path has one optional edge and preserves LastError");
+ const auto edge=current::fixtureRows.back();
+ check(edge["acceptedInCurrentGeneration"]==51&&edge["nonNeutralAcceptedInCurrentGeneration"]==1&&edge["semanticNeutral"]==false&&edge["semanticScope"]=="submission-neutralization-flag;not-control-values-or-physical-activity","neutralization flag is explicit and never asserts nonzero controls");
+ check(edge["nonNeutralEvidenceSchema"]==2&&edge["ackIdentityStatus"]=="verified-local-ack"&&edge["ackIdentityOrigin"]=="strict-fast-validator-equality-and-parsed-host"&&edge["ackProtocolPowerGeneration"]==1&&edge["ackHostEpoch"]==2&&edge["ackWireSequence"]==51&&edge["ackRequestId"]==request&&edge["ackHostInstanceId"]==host&&edge["ackRunId"]==run&&edge["gameInputUnverified"]==true&&!edge.contains("ackIdentity"),"fast path records only the verified local tuple as scalar members");
+ check(current::nativeLifecycleEventIsBase("wake-input-chain-first-nonneutral")&&!reference::nativeLifecycleEventIsBase("wake-input-chain-first-nonneutral"),"actual complete registry admits new bounded event with detail OFF");
+ ymcc::testing::allocationFault::failAfter(0);
+ for(unsigned i=0;i<100000;++i)current::inputChainCountFrame(true,true,false,false,empty,52+i,ack);
+ const bool noAllocation=ymcc::testing::allocationFault::countdown.load()==0;ymcc::testing::allocationFault::failAfter(-1);
+ for(unsigned i=0;i<100000;++i)reference::inputChainCountFrame(true,true,false,false,empty,52+i,ack);
+ check(noAllocation&&nonneutralRows(current::fixtureRows)==1,"100000 repeated nonneutral accepted calls allocate nothing and emit no further fixtureRows");
+ current::fixturePower=reference::fixturePower=2;
+ current::inputChainCountFrame(true,true,false,true,empty,200001,ack);reference::inputChainCountFrame(true,true,false,true,empty,200001,ack);
+ current::inputChainCountFrame(true,true,false,false,empty,200002,ack);reference::inputChainCountFrame(true,true,false,false,empty,200002,ack);
+ check(nonneutralRows(current::fixtureRows)==2&&current::fixtureRows.back()["countPowerGeneration"]==2&&current::fixtureRows.back()["ackIdentityStatus"]=="unknown"&&!current::fixtureRows.back().contains("ackWireSequence"),"a mismatched fast sequence leaves only reported counts");
+ current::fixtureEpoch=reference::fixtureEpoch=3;
+ current::inputChainCountFrame(true,true,false,false,empty,200003,ack);reference::inputChainCountFrame(true,true,false,false,empty,200003,ack);
+ check(nonneutralRows(current::fixtureRows)==3&&current::fixtureRows.back()["sampledHostEpoch"]==3&&!current::fixtureRows.back().contains("ackIdentity"),"sampled host epoch segments counters while validated ACK epoch remains separate");
+ for(unsigned i=0;i<20;++i){const auto reason=std::to_string(i);current::inputChainCountFrame(true,false,false,false,reason,200004+i,{});reference::inputChainCountFrame(true,false,false,false,reason,200004+i,{});}
+ check(current::g_inputChain.frameRejected==20&&current::g_inputChain.rejectRows==20&&nonneutralRows(current::fixtureRows)==3&&current::fixtureRows.size()==reference::fixtureRows.size()+3,"rejected nonneutral frames never create accepted evidence and original reject cap remains eight");
+ check(originalRows(current::fixtureRows)==originalRows(reference::fixtureRows)&&counters(current::g_inputChain)==counters(reference::g_inputChain),"all original fixtureRows payloads ordering counters and rejection state are exact");
+ check(current::fixturePowerReads==reference::fixturePowerReads&&current::fixtureEpochReads==reference::fixtureEpochReads&&current::fixtureGateReads==reference::fixtureGateReads,"original power epoch and gate reads retain exact counts without new frame queries");
+ current::fixturePower=3;current::inputChainCountFrame(true,true,false,true,empty,300001,{});current::failNewSink=true;
+ SetLastError(6420);current::inputChainCountFrame(true,true,false,false,empty,300002,{});const auto sinkError=GetLastError();current::failNewSink=false;
+ const auto offers=current::newSinkCalls;current::inputChainCountFrame(true,true,false,false,empty,300003,{});
+ check(sinkError==6420&&current::g_inputChain.nonNeutralAcceptedInCurrentGeneration==2&&current::newSinkCalls==offers,"optional sink exception preserves accepted accounting LastError and no retry");
+ const auto wrapOffers=current::newSinkCalls;current::g_inputChain.acceptedInCurrentGeneration=~0ULL;current::g_inputChain.nonNeutralAcceptedInCurrentGeneration=~0ULL;current::inputChainCountFrame(true,true,false,false,empty,500001,{});current::inputChainCountFrame(true,true,false,false,empty,500002,{});check(current::newSinkCalls==wrapOffers&&current::g_inputChain.nonNeutralEmittedForCountScope,"fixed original-scope flag prevents optional reemission even after 64-bit count wrap");
+ json reply={{"ok",true},{"command","SUBMIT_FRAME"},{"status","frame-accepted"},{"runId",run},{"hostInstanceId",host},{"requestId",request},{"protocolVersion",1},{"powerGeneration",1},{"epoch",2},{"sequence",51}};
+ auto dom=ack;dom.fastReceiptUsed=false;dom.preparedRequestId=nullptr;dom.parsedDomReceipt=&reply;
+ current::fixturePower=4;current::inputChainCountFrame(true,true,false,false,empty,0,dom);
+ const auto& domEdge=current::fixtureRows.back();
+ check(domEdge["ackIdentityOrigin"]=="existing-validator-and-parsed-dom-reply"&&domEdge["wireSequence"]==0&&domEdge["ackWireSequence"]==51&&domEdge["ackHostEpoch"]==2&&domEdge["sampledHostEpoch"]==3&&domEdge["ackProtocolPowerGeneration"]==1&&domEdge["countPowerGeneration"]==4,"DOM uses the same validated ACK and preserves the separate count scope");
+#ifdef YMCC_TEST_PREVIOUS_ACK_PROJECTION
+ const auto projectionMatches=[](const ymcc::inputChainAck::View& v){
+  const ymcc::inputChainAckReference::View old{v.nativeAccepted,v.requestBindingCaptured,v.fastReceiptUsed,v.protocolPowerGeneration,v.hostEpoch,v.requestedSequence,v.runId,v.boundHostInstanceId,v.preparedRequestId,v.parsedFastHostInstanceId,v.parsedDomReceipt};
+  return ymcc::inputChainAck::project(v).dump()==ymcc::inputChainAckReference::project(old).dump();
+ };
+ auto badFast=ack;badFast.parsedFastHostInstanceId=&request;
+ auto rejected=ack;rejected.nativeAccepted=false;
+ check(projectionMatches(ack)&&projectionMatches(dom)&&projectionMatches(badFast)&&projectionMatches(rejected)&&projectionMatches({}),"old nested ACK payload matches the original helper for verified, unknown and rejected receipts");
+#endif
+ reply["sequence"]=52;current::fixturePower=5;current::inputChainCountFrame(true,true,false,false,empty,0,dom);
+ check(current::fixtureRows.back()["ackIdentityStatus"]=="unknown"&&!current::fixtureRows.back().contains("ackRequestId"),"a mismatched DOM ACK cannot supply an identity");
+ return finish();
+}catch(const std::exception& e){ymcc::testing::allocationFault::failAfter(-1);std::cerr<<e.what()<<std::endl;return 4;}}

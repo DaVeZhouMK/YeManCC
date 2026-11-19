@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 #include "fixture_json.hpp"
+#include "recovery_startup_handoff_unsupported.h"
 #include "steam_original_recovery_wake_watch.h"
 #include "steam_original_recovery_file_hash.h"
 #include "steam_original_recovery_storage.h"
@@ -86,7 +87,8 @@ J importReference(const J&,const Scope&,U64){throw std::runtime_error("fixture-s
 J loadCompatibleReference(const fp::path& data,const Scope& s,const Snapshot& sample,U64 account){const auto p=data/L"references"/utf16(scopeKey(s,account)+".json");if(!fp::exists(p))return nullptr;const auto ref=readJson(p);matchReference(ref,s,sample,account);return ref;}
 std::size_t ledgerCount(){std::size_t n=0;if(fp::exists(fixture.data/L"consumed"))for(const auto& e:fp::directory_iterator(fixture.data/L"consumed"))if(e.is_regular_file())++n;return n;}
 struct QueryActor {
- QueryActor(U64,const std::wstring&,RecoveryRoute=RecoveryRoute::SemiStatic,std::string={}){requireCurrent();++fixture.queries;fixture.order.push_back("query");need(ledgerCount()==fixture.priorLedger,"source-acquisition-spent-publication-budget");}
+ QueryActor(U64,const std::wstring&,RecoveryRoute=RecoveryRoute::SemiStatic,std::string={},J* =nullptr){requireCurrent();++fixture.queries;fixture.order.push_back("query");need(ledgerCount()==fixture.priorLedger,"source-acquisition-spent-publication-budget");}
+ void finish(){}
  ~QueryActor(){++fixture.queryEnds;fixture.order.push_back("query-end");}
  void waitReady(){requireCurrent();fixture.order.push_back("query-ready");}
 };
@@ -153,7 +155,7 @@ J eventFor(const fp::path& dir,const std::string& kind,const std::string& id="fi
  return e;
 }
 void reset(const fp::path& dir){fixture=Fixture{};fixture.data=dir/L"data";fixture.wake=fixture.utc;embedded::sha256=digest(embedded::image,sizeof embedded::image);}
-J invoke(const J& event){auto result=handle(event,{},[]{return fixture.current;},[]{return fixture.observed;},0);fixture.lastReceipt=result;check(!gActive.load(),"engine-active-leaked");check(!gEmit&&!gCurrent&&!gObservationCurrent&&!gOriginalSteam&&!gCleanupMode,"per-job-ports-leaked");return result;}
+J invoke(const J& event){auto result=handle(event,{},[]{return fixture.current;},[]{return fixture.observed;},0,0,0,{}, {}, {}, {}, {}, {}, {}, {}, {});fixture.lastReceipt=result;check(!gActive.load(),"engine-active-leaked");check(!gEmit&&!gCurrent&&!gObservationCurrent&&!gOriginalSteam&&!gCleanupMode,"per-job-ports-leaked");return result;}
 J baseline(J event){event["trigger"]["kind"]="startup";event["trigger"]["id"]="healthy-reference";fixture.flags=8196;auto r=invoke(event);check(r.at("status")=="healthy"&&r.at("referenceCaptured")==true,"healthy-reference-not-captured");check(ledgerCount()==0&&fixture.queries==0&&fixture.drivers==0,"healthy-capture-consumed-or-published");return r;}
 void expectSuccess(const J& r,const J& event){
  check(r.at("status")=="recovered-native"&&r.at("nativeRecovered")==true,"initial-success-path-refused");

@@ -78,6 +78,58 @@ internal sealed class NativePowerReader
     internal void Stop(){lock(gate){stopped=true;callback=null;}}
 }
 
+// Public sleep authority is separate from AC/DC facts. Layout matches the parent-owned 48-byte ABI.
+[StructLayout(LayoutKind.Sequential,Pack=8)]
+internal struct SharedSystemPowerV1
+{
+    internal uint Size,Version;
+    internal ulong Generation,PublicationRevision,ObservedNotificationSequence;
+    internal uint Phase,Flags;
+    internal ulong SuspendSerial;
+    internal readonly bool Valid=>Size==48&&Version==1&&Generation!=0&&Phase<=3;
+    internal readonly bool Known=>Valid&&(Flags&1)!=0;
+    internal readonly bool Ready=>Known&&Phase==0&&(Flags&2)!=0&&(Flags&4)==0;
+}
+internal sealed class NativeSystemPowerReader
+{
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int Callback(ref SharedSystemPowerV1 value,uint bytes);
+    readonly object gate=new();
+    Callback? callback;
+    ulong address;
+    bool stopped;
+    internal void Bind(System.Text.Json.JsonElement envelope)
+    {
+        lock(gate)
+        {
+            if(stopped)throw new IOException("公共睡眠快照已关闭");
+            System.Text.Json.JsonElement? field=null;
+            foreach(var property in envelope.EnumerateObject())if(property.NameEquals("nativeSystemPowerReader"))
+            {
+                if(field is not null)throw new IOException("nativeSystemPowerReader 不允许重复字段");
+                field=property.Value;
+            }
+            if(field is null){if(callback is null)throw new IOException("首次请求必须注册 nativeSystemPowerReader");return;}
+            ulong candidate=0;
+            bool valid=field.Value.ValueKind==System.Text.Json.JsonValueKind.Number?field.Value.TryGetUInt64(out candidate):
+                field.Value.ValueKind==System.Text.Json.JsonValueKind.String&&ulong.TryParse(field.Value.GetString(),
+                    System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out candidate);
+            if(!valid||candidate==0||candidate>(ulong)nint.MaxValue)throw new IOException("nativeSystemPowerReader 必须是有效的进程内函数指针");
+            if(callback is not null){if(candidate!=address)throw new IOException("nativeSystemPowerReader 已注册，不能切换函数指针");return;}
+            callback=Marshal.GetDelegateForFunctionPointer<Callback>((nint)candidate);address=candidate;
+        }
+    }
+    internal SharedSystemPowerV1 Read()
+    {
+        lock(gate)
+        {
+            if(stopped||callback is null)return default;
+            var value=new SharedSystemPowerV1{Size=48,Version=1};
+            try{return callback(ref value,48)==1&&value.Valid?value:default;}catch{return default;}
+        }
+    }
+    internal void Stop(){lock(gate){stopped=true;callback=null;}}
+}
+
 // Standalone compatibility only: no timer, and repeated reads (including no
 // battery/unknown) remain cached until an actual power-status/sleep event.
 internal sealed class PowerFactsCache(Func<(bool Present,bool Ac,int? Percent)> collect)
@@ -189,14 +241,18 @@ internal sealed class LenovoProvider : IChargeProvider
     public void Write(int value,Reading before){if(Read().Raw!=before.Raw)throw new IOException("养护模式已变化，请重新读取");using var output=Wmi.Call(instance,"SetFeatureValue",p=>{p["IDs"]=0x03010001u;p["value"]=value==80?1u:0u;});Wmi.CheckReturn(output);}
     public void Dispose()=>instance?.Dispose();
 }
-internal sealed class MsiProvider : IChargeProvider
+internal sealed class MsiProvider : IChargeProvider,IChargeWriteAdmission
 {
     readonly IMsiWmi? wmi;
     readonly Func<string,byte[],byte[]>? transport;
     public MsiProvider(Func<string,byte[],byte[]>? transport=null){this.transport=transport;if(transport is null)wmi=new MsiWmi();}
     internal MsiProvider(IMsiWmi wmi){this.wmi=wmi;}
     public bool CanReadLimit=>true;
-    byte[] Packet(string method,byte[] bytes)=>transport is not null?transport(method,bytes):MsiPacket.Call(wmi!,method,bytes);
+    byte[] Packet(string method,byte[] bytes,Action? requireAvailable=null)
+    {
+        if(transport is null)return MsiPacket.Call(wmi!,method,bytes,requireAvailable);
+        requireAvailable?.Invoke();return transport(method,bytes);
+    }
     public Reading Read()
     {
         var data=new byte[32];data[0]=215;var result=Packet("Get_Data",data);
@@ -205,12 +261,13 @@ internal sealed class MsiProvider : IChargeProvider
         if(percent>100||((raw&128)!=0&&percent<20))throw new IOException("MSI 充电阈值未知");
         return new((raw&128)==0?100:percent,raw);
     }
-    public void Write(int value,Reading before)
+    public void Write(int value,Reading before)=>Write(value,before,static ()=>{});
+    public void Write(int value,Reading before,Action requireAvailable)
     {
         if(before.Raw is null)throw new IOException("缺少 MSI 原始状态");
         if(Read().Raw!=before.Raw)throw new IOException("MSI 充电状态已变化，请重新读取");
         var data=new byte[32];data[0]=215;data[1]=(byte)Policy.MsiEncode(before.Raw.Value,value);
-        _ = Packet("Set_Data",data); // Set_Data has no documented status flag; Controller requires successful readback.
+        _ = Packet("Set_Data",data,requireAvailable); // Set_Data has no documented status flag; Controller requires successful readback.
     }
     public void Dispose()=>wmi?.Dispose();
 }
@@ -278,10 +335,11 @@ internal sealed class EcAccess : IEcAccess
 }
 internal sealed class EcProvider(Route route,Func<bool,IEcAccess>? accessFactory=null) : IChargeProvider,IChargeWriteAdmission
 {
+    internal const string X2MiniProRouteId="oxp-x2-mini-pro-direct-ec";
     IEcAccess Open()=>accessFactory?.Invoke(Direct)??new EcAccess(Direct);
-    bool Direct=>route.RouteId is "oxp-x1-amd-ec" or "oxp-x1-intel-ec" or "ayaneo-ceii-bypass";
+    bool Direct=>route.RouteId is "oxp-x1-amd-ec" or "oxp-x1-intel-ec" or "ayaneo-ceii-bypass" or X2MiniProRouteId;
     // CEii helper defaults its high address byte to 0xD1: ECRamDirectRead(0xD1) means 0xD1D1.
-    ushort Address=>route.RouteId switch{"ayaneo-ceii-bypass"=>0xd1d1,"ayaneo-cec-bypass" or "suiplay-cec-inheritance"=>0x1e,"gpd-win-mini-2025"=>0x1d,"oxp-acpi-ec"=>0xa3,_=>0x4a3};
+    ushort Address=>route.RouteId switch{"ayaneo-ceii-bypass"=>0xd1d1,"ayaneo-cec-bypass" or "suiplay-cec-inheritance"=>0x1e,"gpd-win-mini-2025"=>0x1d,"oxp-acpi-ec"=>0xa3,X2MiniProRouteId=>0x04e5,_=>0x4a3};
     int Pause=>Direct?1:0x55;
     int Resume=>Direct?0x65:0xaa;
     public bool CanReadLimit=>!route.Software;
@@ -295,11 +353,13 @@ internal sealed class EcProvider(Route route,Func<bool,IEcAccess>? accessFactory
     public void Write(int value,Reading before)=>Write(value,before,static ()=>{});
     public void Write(int value,Reading before,Action requireAvailable)
     {
+        if(route.RouteId==X2MiniProRouteId&&(!Policy.ValueAllowed(route,value)||before.Raw is not (>=50 and <=100)))
+            throw new IOException("X2 Mini Pro charge limit or pre-read is outside the admitted range");
         using var access=Open();
         if(before.Raw is null||access.Read(Address)!=before.Raw.Value)throw new IOException("充电状态已被其他软件改变，请重新读取");
-        // Firmware writes must recheck admission after bus acquisition and the final pre-read.
-        // Software bypass retains its existing suspend/stop restoration semantics.
-        if(!route.Software)requireAvailable();
+        // Policy writes recheck after bus acquisition and the final pre-read.
+        // The owner supplies a no-op only on its existing software release path.
+        requireAvailable();
         access.Write(Address,(byte)(route.Software?(value==1?Pause:Resume):value));
     }
     public void Dispose(){}

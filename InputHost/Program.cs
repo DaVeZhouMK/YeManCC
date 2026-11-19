@@ -103,7 +103,7 @@ internal static partial class Program
         // backButtons（bit0=M1→L5、bit1=M2→R5，native 仅 steamdeck 且开关 ON
         // 时非零）。不进 normalizedInputHash（独立字段，零哈希耦合）；缺省 0
         // ——老 native 不发该字段，白名单缺省解析回退 0，零污染。
-        , "backButtons", "touchpads", "screenButtons", "frameReplyBinding"
+        , "backButtons", "touchpads", "screenButtons", "frameReplyBinding", "compactFrameRequestVersion"
     };
     // HIDHIDE_* 命令专用字段（HC 屏蔽层 API 化：native 经 pipe 下发 hide/
     // unhide/cloak/app-reg 操作，InputHost 内以 Nefarius.Drivers.HidHide
@@ -113,6 +113,8 @@ internal static partial class Program
     {
         "path", "on", "cloak"
     };
+
+    private static HostTerminalCleanup.ProcessExit? _terminalProcessExit;
 
     private static async Task<int> Main(string[] args)
     {
@@ -167,12 +169,14 @@ internal static partial class Program
             return 2;
         }
 
+        _terminalProcessExit = new HostTerminalCleanup.ProcessExit();
         var session = new HostSession(startupNonce!, parentPid, msiStageRequested);
         IDisposable? msiCostLifetime = null;
         MsiHostStageEvidence? msiStage = null;
+        int result;
         try
         {
-            return await HostTerminalCleanup.RunAsync(
+            result = await HostTerminalCleanup.RunAsync(
                 async () =>
                 {
                     // Once session is owned, initialization failures must settle it too.
@@ -182,8 +186,8 @@ internal static partial class Program
                     _msiHostStageEvidence = msiStage;
                     return await RunPipeClientAsync(pipeName!, parentPid, session).ConfigureAwait(false);
                 },
-                (out string detail) => session.ReleaseLocal(out detail),
-                LogFatalExit).ConfigureAwait(false);
+                (out string detail) => session.ReleaseLocal(out detail, terminal: true),
+                LogFatalExit, () => _terminalProcessExit?.Begin()).ConfigureAwait(false);
         }
         finally
         {
@@ -192,6 +196,8 @@ internal static partial class Program
             try { msiStage?.Dispose(); }
             finally { msiCostLifetime?.Dispose(); }
         }
+        _terminalProcessExit?.Complete(result);
+        return result;
     }
 
     // GP-PREREQ-4: ordinary backend failures remain advisory for this prepare.
@@ -341,9 +347,12 @@ internal static partial class Program
         using var parentLifetime = ParentProcessLifetime.TryOpen(parentPid);
         if (parentLifetime is null || !parentLifetime.IsAlive)
         {
-            LogFatalExit("parent-exited", "parent-process-gone");
-            return new(0, "parent-exited");
+            return new(0, "parent-exited", DiagnosticDetail: "parent-process-gone");
         }
+        // The parent wait must also cover a synchronous SDK handler, which
+        // pipe cancellation alone cannot interrupt.
+        using var parentExitRegistration = parentLifetime.ExitToken.Register(
+            static () => _terminalProcessExit?.Begin());
         var codec = new MessageCodec();   // GP-CPU2 P2/P3：会话级缓冲（每 Host 会话一份）
         await using var pipe = new NamedPipeClientStream(
             ".",
@@ -357,46 +366,42 @@ internal static partial class Program
         }
         catch (OperationCanceledException) when (!parentLifetime.IsAlive)
         {
-            LogFatalExit("parent-exited", "parent-process-gone");
-            return new(0, "parent-exited");
+            return new(0, "parent-exited", DiagnosticDetail: "parent-process-gone");
         }
         catch (Exception ex) when (ex is TimeoutException or IOException)
         {
-            LogFatalExit("connect-failed", ex.GetType().Name);
-            return new(4, "connect-failed");
+            return new(4, "connect-failed", DiagnosticDetail: ex.GetType().Name);
         }
 
         while (parentLifetime.IsAlive)
         {
             // The bound parent exit cancels even a pipe held open by another
             // process. Release remains serialized after the pending IO ends.
-            string? request;
+            ReadOnlyMemory<byte>? request;
             // R3 补充：管道读侧计时（门控内；含等待，见 RecordCostPipeRead 注释）。
             var costReadStarted = session.CostEnabledForRead ? Stopwatch.GetTimestamp() : 0L;
             try
             {
                 _msiHostStageEvidence?.BeginRead();
-                request = await codec.ReadAsync(pipe, parentLifetime.ExitToken).ConfigureAwait(false);
-                _msiHostStageEvidence?.EndRead(request?.Length ?? 0);
+                request = await codec.ReadUtf8Async(pipe, parentLifetime.ExitToken).ConfigureAwait(false);
+                _msiHostStageEvidence?.EndRead(request is { } read ? Encoding.UTF8.GetCharCount(read.Span) : 0);
             }
             catch (OperationCanceledException) when (!parentLifetime.IsAlive) { break; }
             catch (Exception ex)
             {
-                LogFatalExit("read-failed", ex.GetType().Name);
-                return new(5, "read-failed");
+                return new(5, "read-failed", DiagnosticDetail: ex.GetType().Name);
             }
 
             if (!parentLifetime.IsAlive) break;
             if (request is null)
             {
-                LogFatalExit("read-failed", "null-message");
-                return new(5, "read-failed");
+                return new(5, "read-failed", DiagnosticDetail: "null-message");
             }
             if (costReadStarted != 0)
                 session.RecordCostPipeRead((long)(Stopwatch.GetElapsedTime(costReadStarted).TotalMilliseconds * 1000.0));
 
             _msiHostStageEvidence?.BeginHandle();
-            var response = session.Handle(request, out var shutdown);
+            var response = session.HandleUtf8(request.Value, out var shutdown);
             var shutdownResult = shutdown || HostTerminalCleanup.IsFailedShutdownResponse(response)
                 ? HostTerminalCleanup.ShutdownResult(response) : (HostTerminalCleanup.LoopResult?)null;
             _msiHostStageEvidence?.EndHandle();
@@ -408,24 +413,21 @@ internal static partial class Program
             }
             catch (OperationCanceledException) when (!parentLifetime.IsAlive)
             {
-                LogFatalExit("parent-exited", "parent-process-gone");
-                return new(0, "parent-exited", shutdownResult?.ShutdownRelease);
+                return new(0, "parent-exited", shutdownResult?.ShutdownRelease, "parent-process-gone");
             }
             catch (Exception ex)
             {
                 // A native timeout/disconnect makes the owner unprovable.
                 // Release locally and exit; never keep a background writer.
                 // X1：宿主死因落盘（CREATE_NO_WINDOW 丢弃 stderr，见 LogFatalExit 头注释）。
-                LogFatalExit("write-failed", ex.GetType().Name + ": " + ex.Message);
-                return new(6, "write-failed", shutdownResult?.ShutdownRelease);
+                return new(6, "write-failed", shutdownResult?.ShutdownRelease, ex.GetType().Name + ": " + ex.Message);
             }
 
-            if (shutdownResult is { } terminal) { LogFatalExit("shutdown-ordered", "shutdown-command"); return terminal; }   // 2026-09-23 W3 批 100（跨线共报 #2）：有序 SHUTDOWN 与"父进程消失"必须可区分；旧文案让 5 次正常收尾看起来像 5 次父进程死亡（实测 20:19/20:21/20:22 三次 App 并未退出）。
+            if (shutdownResult is { } terminal) return terminal; // Preserve the ordered SHUTDOWN reason through the single terminal settlement.
         }
 
         // Parent crash/exit is terminal, never an automatic rearm condition.
-        LogFatalExit("parent-exited", "parent-process-gone");
-        return new(0, "parent-exited");
+        return new(0, "parent-exited", DiagnosticDetail: "parent-process-gone");
     }
 
 
@@ -444,6 +446,14 @@ internal static partial class Program
 
         public async Task<string?> ReadAsync(PipeStream pipe, CancellationToken cancellationToken)
         {
+            var bytes = await ReadUtf8Async(pipe, cancellationToken).ConfigureAwait(false);
+            return bytes is { } value ? Encoding.UTF8.GetString(value.Span) : null;
+        }
+
+        // The caller must finish synchronous parsing before the next read.
+        // Borrow only the existing body buffer; retain message fragments and limits.
+        public async Task<ReadOnlyMemory<byte>?> ReadUtf8Async(PipeStream pipe, CancellationToken cancellationToken)
+        {
             _readBody.SetLength(0);
             do
             {
@@ -452,7 +462,7 @@ internal static partial class Program
                 _readBody.Write(_readBuffer, 0, count);
                 if (_readBody.Length > MaxMessageBytes) throw new InvalidDataException("message-too-large");
             } while (!pipe.IsMessageComplete);
-            return Encoding.UTF8.GetString(_readBody.GetBuffer(), 0, checked((int)_readBody.Length));
+            return _readBody.GetBuffer().AsMemory(0, checked((int)_readBody.Length));
         }
 
         public async Task WriteAsync(PipeStream pipe, string message, CancellationToken cancellationToken)
@@ -1461,9 +1471,13 @@ internal static partial class Program
 
     private sealed class HostSession
     {
+        // Scratch borrowed only by the synchronous Elite submit under _lifecycleGate.
+        private Dictionary<HMAxis, float>? _eliteSubmitAxes;
         private readonly object _lifecycleGate = new();
         private HMContext? _context;
         private HMController? _controller;
+        // The raw Edge writer owns sequencing after the SDK input clock is joined.
+        private HMController? _sonyRawReportOwner;
         private readonly PsEndpointOwnership _psEndpointOwnership = new();
         private readonly HostGameOutputObservation _gameOutputObservation = new();
         private HMController? _gameOutputController;
@@ -1478,7 +1492,7 @@ internal static partial class Program
         // After an exception a second no-op Dispose is not completion evidence.
         private string _sdkDisposeFailure = "";
         private bool LocalReleasePending => _steamDeckReleasePending || _outputReleasePending || _idleCtsReleasePending ||
-            _sdkDisposeFailure.Length != 0;
+            _sdkDisposeFailure.Length != 0 || HasCloseRefreshPending();
         // R39: host-local SDK object lifetime diagnostics; no OS or frame reads.
         private readonly TargetCreationLifetimeEvidence? _targetCreationLifetime = TargetCreationLifetimeEvidence.TryCreate();
         private HostSdkFirstWitness? _sdkFirstWitness;
@@ -1510,8 +1524,12 @@ internal static partial class Program
         private bool _targetPnpAdmitted;
         private MsiSteamDeckReleaseFence1726? _msiSteamDeckReleaseFence1726;
         private readonly bool _msiNonSdReleaseDiagnosticRequested;
-        // R13: existing known-MSI detailed-log launch authority only. Failure to
-        // start diagnostics must not fall back to synchronous work in SUBMIT_FRAME.
+        // Shared Host timing contract (field-113158, command 5353802): cost
+        // sampling, SDK observation and disk writes must not delay frame ACKs.
+        // Keep the existing bounded dispatcher/lifetime for every family. The
+        // historical MSI names remain for existing fixtures/diagnostic readers;
+        // they grant no MSI release or device-operation authority. Failure to
+        // start diagnostics must never fall back to synchronous frame work.
         private readonly bool _msiCostDeferredRequested;
         private readonly MsiCostWindowDiagnostics? _msiCostDiagnostics;
         internal IDisposable? CostDiagnosticLifetime => _msiCostDiagnostics;
@@ -1576,16 +1594,39 @@ internal static partial class Program
         private string _closeRefreshRunId = "";
         private ulong _closeRefreshEpoch;
         private ulong _closeRefreshPowerGeneration;
+        private Task? _closeRefreshTask;
+        private bool _closeRefreshCancelled;
+        private bool _closeRefreshTerminal;
+
+        private bool HasCloseRefreshPending()
+        {
+            lock (_closeRefreshGate) return _closeRefreshTask is { IsCompleted: false };
+        }
+
+        private bool TryCancelCloseRefresh(bool terminal, out string detail)
+        {
+            lock (_closeRefreshGate)
+            {
+                _closeRefreshTerminal |= terminal;
+                if (_closeRefreshTask is not { IsCompleted: false }) { detail = ""; return true; }
+                _closeRefreshCancelled = true;
+                _closeRefreshState = "cancelled";
+                _closeRefreshDetail = detail = "close-refresh-owned-pending";
+                // Lookup and a synchronous PnP call both remain owned until the
+                // actual Task completes. Cancellation is not completion proof.
+                return false;
+            }
+        }
 
         public HostSession(string startupNonce, int parentPid = 0, bool msiReleaseDiagnosticRequested = false)
         {
             _startupNonce = startupNonce;
             _reportChainParentPid1410 = parentPid;
             _msiNonSdReleaseDiagnosticRequested = msiReleaseDiagnosticRequested;
-            _msiCostDeferredRequested = msiReleaseDiagnosticRequested;
+            _msiCostDeferredRequested = true;
             if (_msiCostDeferredRequested)
             {
-                try { _msiCostDiagnostics = new(_costFlagEnabled, CostStateDir); }
+                try { _msiCostDiagnostics = new(_costFlagEnabled, CostStateDir, HostVirtualSignalEvidence.WriteBounded); }
                 catch { /* optional diagnostics unavailable; never block frame receipts */ }
             }
             // 批129：宿主身份进死因上下文（可与 native 侧回执的 hostInstanceId 对齐）。
@@ -1601,12 +1642,24 @@ internal static partial class Program
                 return HandleLocked(message, out shutdown);
         }
 
-        private string HandleLocked(string message, out bool shutdown)
+        public string HandleUtf8(ReadOnlyMemory<byte> message, out bool shutdown)
+        {
+            lock (_lifecycleGate)
+                return HandleLocked(string.Empty, out shutdown, message);
+        }
+
+        private string HandleLocked(string message, out bool shutdown, ReadOnlyMemory<byte>? utf8Message = null)
         {
             shutdown = false;
             // R3（2026-09-17 需求单）：命令解析耗时（门控缓存；关时零累加）。
             var costParseStarted = _costFlagEnabled ? Stopwatch.GetTimestamp() : 0L;
-            if (!TryParseEnvelope(message, out var envelope, out var parseError))
+            // Only a current prepared controller may lend its validated tuple.
+            // Parsing stays under the original lifecycle gate; all original
+            // nonce/sequence/phase/content gates still run on the fresh envelope.
+            var compactTuple = _phase is (Phase.Prepared or Phase.Neutralized or Phase.Active) ? _tuple : null;
+            var compactBinding = compactTuple is not null && _compactFrameReplies.TryGetToken(_controller, out var currentBinding)
+                ? currentBinding : null;
+            if (!TryParseEnvelope(message, out var envelope, out var parseError, compactTuple, compactBinding, utf8Message))
                 return Error(null, "protocol-error", parseError);
             // Parsed metadata is diagnostic evidence, never tuple/admission proof.
             var stageEnvelope = envelope!;
@@ -1660,9 +1713,9 @@ internal static partial class Program
                 // 批次A（评审10 §3）：能力协商——HELLO 回执 detail 广告本宿主支持
                 // 精简状态查询。旧 native 不解析 detail（无行为差）；新 native 据此
                 // 决定周期核对用 HIDHIDE_QUERY_STATE，否则回退完整 HIDHIDE_QUERY。
-                return Ack(envelope, "host-hello", _msiCostDeferredRequested
+                return Ack(envelope, "host-hello", _msiNonSdReleaseDiagnosticRequested
                     ? "{\"hidhideStateQuery\":true,\"msiCostWindowDeferred\":true,\"msiCostWindowDeferredAvailable\":" + (_msiCostDiagnostics is not null ? "true" : "false") + "}"
-                    : "{\"hidhideStateQuery\":true}");
+                    : "{\"hidhideStateQuery\":true,\"costWindowDeferred\":true,\"costWindowDeferredAvailable\":" + (_msiCostDiagnostics is not null ? "true" : "false") + "}");
             }
 
             if (envelope!.Command == "HELLO") return Error(envelope, "protocol-error", "hello-already-received");
@@ -1804,6 +1857,7 @@ internal static partial class Program
                     }
 
                 case "SHUTDOWN":
+                    _terminalProcessExit?.Begin();
                     var shutdownReleaseOk = ReleaseLocal(out var shutdownDetail, envelope);
                     _phase = LocalReleasePending ? Phase.Quiesced : Phase.Released;
                     shutdown = !LocalReleasePending;
@@ -1847,11 +1901,18 @@ internal static partial class Program
             if (string.IsNullOrWhiteSpace(path))
                 return Ack(envelope, "hidhide-cycle-begin",
                     "{\"accepted\":false,\"reason\":\"false-empty-path\"}");
-            if (Interlocked.CompareExchange(ref _closeRefreshInFlight, 1, 0) != 0)
-                return Ack(envelope, "hidhide-cycle-begin",
-                    "{\"accepted\":false,\"reason\":\"in-flight\"}");
+            var bindingPath = path;
+            var bindingRunId = envelope.RunId;
+            var bindingEpoch = envelope.Epoch;
+            var bindingPowerGen = envelope.PowerGeneration;
             lock (_closeRefreshGate)
             {
+                if (_closeRefreshTerminal)
+                    return Ack(envelope, "hidhide-cycle-begin", "{\"accepted\":false,\"reason\":\"terminal\"}");
+                if (_closeRefreshTask is { IsCompleted: false })
+                    return Ack(envelope, "hidhide-cycle-begin", "{\"accepted\":false,\"reason\":\"in-flight\"}");
+                _closeRefreshCancelled = false;
+                _closeRefreshInFlight = 1;
                 _closeRefreshState = "in-flight";
                 _closeRefreshDetail = "";
                 _closeRefreshStartedTick = Environment.TickCount64;
@@ -1860,20 +1921,16 @@ internal static partial class Program
                 _closeRefreshRunId = envelope.RunId;
                 _closeRefreshEpoch = envelope.Epoch;
                 _closeRefreshPowerGeneration = envelope.PowerGeneration;
-            }
-            var bindingPath = path;
-            var bindingRunId = envelope.RunId;
-            var bindingEpoch = envelope.Epoch;
-            var bindingPowerGen = envelope.PowerGeneration;
-            _ = Task.Run(() =>
+            _closeRefreshTask = Task.Run(() =>
             {
                 // 后台只做该物理刷新（与同步 HIDHIDE_CYCLE 同一 Nefarius CyclePort 语义）；
                 // 不碰虚拟目标/控制器，不写管道，不取 HidHideLock（HIDHIDE_* 命令不被拖住）。
                 var t0 = Environment.TickCount64;
-                string state;
-                string detail;
+                string state = "cancelled";
+                string detail = "close-refresh-cancelled";
                 try
                 {
+                    lock (_closeRefreshGate) { if (_closeRefreshCancelled) return; }
                     var device = FindPhysicalDevice(bindingPath);
                     if (device is null)
                     {
@@ -1883,6 +1940,10 @@ internal static partial class Program
                     else
                     {
                         var usb = device.ToUsbPnPDevice();
+                        // Revalidate after both potentially delayed lookups.
+                        // Admission is serialized with cancellation; after this
+                        // boundary the synchronous call remains an owned Task.
+                        lock (_closeRefreshGate) { if (_closeRefreshCancelled) return; }
                         usb.CyclePort();   // void；不抛 = 成功（HC PnPDetails.cs:143-144）
                         state = "done";
                         detail = "true";
@@ -1893,14 +1954,18 @@ internal static partial class Program
                     state = "failed";
                     detail = "false:" + ex.GetType().Name;
                 }
-                lock (_closeRefreshGate)
+                finally
                 {
-                    _closeRefreshState = state;
-                    _closeRefreshDetail = detail;
-                    _closeRefreshElapsedMs = Environment.TickCount64 - t0;
+                    lock (_closeRefreshGate)
+                    {
+                        _closeRefreshState = _closeRefreshCancelled ? "cancelled" : state;
+                        _closeRefreshDetail = _closeRefreshCancelled ? "close-refresh-cancelled" : detail;
+                        _closeRefreshElapsedMs = Environment.TickCount64 - t0;
+                        _closeRefreshInFlight = 0;
+                    }
                 }
-                Interlocked.Exchange(ref _closeRefreshInFlight, 0);   // 动作已结算：允许下一次
             });
+            }
             return Ack(envelope, "hidhide-cycle-begin",
                 JsonSerializer.Serialize(new
                 {
@@ -1918,11 +1983,20 @@ internal static partial class Program
             string payload;
             lock (_closeRefreshGate)
             {
+                // Worker finally publishes its result before Task completion.
+                // One conservative snapshot owns every field in this receipt;
+                // no caller may treat a still-owned Task as terminal success.
+                var pending = _closeRefreshTask is { IsCompleted: false };
+                var state = pending && (_closeRefreshState is "done" or "failed")
+                    ? "in-flight" : _closeRefreshState;
                 payload = JsonSerializer.Serialize(new
                 {
-                    state = _closeRefreshState,
-                    ok = _closeRefreshState == "done",
-                    inFlight = Volatile.Read(ref _closeRefreshInFlight) != 0,
+                    state,
+                    ok = !pending && state == "done",
+                    inFlight = pending,
+                    retained = pending,
+                    phase = _phase.ToString(),
+                    resourceDisposition = pending ? "owned-pending" : "settled",
                     detail = _closeRefreshDetail,
                     elapsedMs = _closeRefreshElapsedMs,
                     totalMs = _closeRefreshStartedTick == 0
@@ -2230,7 +2304,7 @@ internal static partial class Program
             }
         }
 
-        public bool ReleaseLocal(out string detail, CommandEnvelope? releaseRequest = null)
+        public bool ReleaseLocal(out string detail, CommandEnvelope? releaseRequest = null, bool terminal = false)
         {
             // R101: bounded release-only evidence. Internal cleanup and frame
             // paths do not allocate a collector or inherit a previous receipt.
@@ -2244,6 +2318,16 @@ internal static partial class Program
                 _releaseTimingBinding = timing is null ? null : releaseRequest;
                 try
                 {
+                    // Terminal settlement includes parent loss even with no
+                    // controller. Ordinary no-target cleanup preserves the
+                    // legitimate close-return refresh requested afterwards.
+                    if ((terminal || releaseRequest?.Command is "SHUTDOWN" or "RELEASE_TARGET") &&
+                        !TryCancelCloseRefresh(terminal || releaseRequest?.Command == "SHUTDOWN", out detail))
+                    {
+                        _phase = Phase.Quiesced;
+                        timing?.Complete(false);
+                        return false;
+                    }
                     var ok = ReleaseLocalLocked(out detail, timing);
                     timing?.Complete(ok);
                     return ok;
@@ -2334,6 +2418,11 @@ internal static partial class Program
 
         private bool ReleaseLocalLocked(out string detail, HostReleaseTimingEvidence? releaseTiming = null)
         {
+            if ((_controller is not null || _context is not null) && !TryCancelCloseRefresh(false, out detail))
+            {
+                _phase = Phase.Quiesced;
+                return false;
+            }
             _compactFrameReplies.Revoke();
             _psEndpointOwnership.Invalidate("release-started");
             var gameOutputDetachDetail = DetachGameOutputObservation();
@@ -2454,6 +2543,7 @@ internal static partial class Program
                 }
                 _controller = null;
                 ResetVirtualSignalEvidenceSafely();
+                _sonyRawReportOwner = null;
                 if (!TryCompleteIdleCtsRelease(out var idleCtsDetail))
                 {
                     errors.Add("controller-idle-cts-release:" + idleCtsDetail);
@@ -2717,6 +2807,7 @@ internal static partial class Program
                 try{(_sdkFirstWitness??=new HostSdkFirstWitness()).BindLifetime(_controller,_targetCreationLifetime?.Capture());}catch{}
                 CaptureMsiSdkDeclaredIdentityDiagnostic();
                 LogUsbipTransportLifecycleSafely("target-created");
+                _sonyRawReportOwner = null;
                 _screenPadOwnsReport = false;
                 _screenPadPacketCounter = 0;
                 ScreenPadSubmissionEvidence.Reset();
@@ -2968,7 +3059,9 @@ internal static partial class Program
                 var first=(_sdkFirstWitness??=new HostSdkFirstWitness()).Begin(_hostInstanceId,controller,binding,canonical,
                     cause?.Sequence??_lastSequence,cause is not null,reason,encoderIndex,report,state);
                 if (!_costFlagEnabled) return new HostVirtualSignalEvidence.Attempt(){SdkFirstWitness=first};
-                var evidence = _virtualSignalEvidence ??= new HostVirtualSignalEvidence(CostStateDir);
+                var evidence = _virtualSignalEvidence ??= new HostVirtualSignalEvidence(CostStateDir,
+                    tryWrite: _msiCostDiagnostics is { } signalWriter ? signalWriter.TryWriteSignalLog : static _ => false,
+                    writeCounters: _msiCostDiagnostics is { } counterSource ? counterSource.SnapshotSignalLogCounters : null);
                 return evidence.BeginSafely(_hostInstanceId, controller, binding, canonical,
                     cause?.Sequence ?? _lastSequence, cause is not null, reason, encoderIndex, report, state) with {SdkFirstWitness=first};
             }
@@ -2985,9 +3078,22 @@ internal static partial class Program
             catch { }
         }
 
+        private void EnsureSonyRawReportOwnership(HMController controller)
+        {
+            // Called under the existing lifecycle gate. A new controller needs a new
+            // stop proof; a failed stop must never reach either live or neutral submit.
+            if (!ReferenceEquals(_controller, controller))
+                throw new InvalidOperationException("sony-idle-handoff:controller-changed");
+            if (ReferenceEquals(_sonyRawReportOwner, controller)) return;
+            if (!HostControllerIdleCtsRelease.TryStopInputClock(controller, out var detail))
+                throw new InvalidOperationException("sony-idle-handoff:" + detail);
+            _sonyRawReportOwner = controller;
+        }
+
         private void SubmitSonyReportChain1410(HMController controller, CommandEnvelope? cause, byte[] report,
             long encoderIndex, string reason, CommandEnvelope? canonical = null)
         {
+            EnsureSonyRawReportOwnership(controller);
             var attempt = BeginVirtualSignalEvidenceSafely(controller, cause, canonical ?? cause, reason, encoderIndex, report, null);
             MsiPersonaReportChain20261012? tracker = null; MsiReportChainFrame20261012? frame = null;
             try { PrepareReportChainInvocation1410(cause, encoderIndex, reason, out tracker, out frame); }
@@ -3006,6 +3112,18 @@ internal static partial class Program
                 CompleteVirtualSignalEvidenceSafely(attempt, null);
             }
             finally { try { _reportChain1410?.AfterBackendSafely(); } catch { } }
+        }
+
+        // Current locked SDK/default Elite profile has no input clock and does not retain state.
+        // Signal diagnostics snapshot synchronously; no borrowed state may escape this submit window.
+        private HMGamepadState BuildEliteStateForSubmit(HMProfile profile, CommandEnvelope envelope)
+        {
+            // The only SDK state-retention branch is _idleThread != null. Read the current
+            // controller every time; unknown metadata or a clock-enabled profile gets fresh state.
+            var mayBorrow = false;
+            try { mayBorrow = _controller is not null && EliteStateIdleThreadField is { } field && field.GetValue(_controller) is null; }
+            catch { }
+            return mayBorrow ? BuildEliteStateCore(profile, envelope, ref _eliteSubmitAxes) : BuildEliteState(profile, envelope);
         }
 
         private void SubmitEliteReportChain1410(HMController controller, HMGamepadState state, CommandEnvelope? cause,
@@ -3056,7 +3174,7 @@ internal static partial class Program
                     switch (envelope.Persona)
                     {
                         case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, envelope, _costFlagEnabled, signalSession: this, signalCause: envelope); break;
-                        case "elite": SubmitEliteReportChain1410(_controller, BuildEliteState(profile, envelope), envelope, "live-frame"); break;
+                        case "elite": SubmitEliteReportChain1410(_controller, BuildEliteStateForSubmit(profile, envelope), envelope, "live-frame"); break;
                         case "dualsense-edge":
                         {
                             var frameIndex = _dualSenseFrameCounter++;
@@ -3136,7 +3254,7 @@ internal static partial class Program
         {
             if (!_costFlagEnabled)
             {
-                // MSI's background reader may notice logging re-enabled. No
+                // The background reader may notice logging re-enabled. No
                 // flag file or process query is performed by this polling call.
                 if (_msiCostDeferredRequested) MaybeEmitCostWindow();
                 return;
@@ -3421,7 +3539,7 @@ internal static partial class Program
                 {
                     case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, neutral, _costFlagEnabled, isNeutralCommand: true,
                         signalSession: this, signalCause: diagnosticEnvelope, signalReason: diagnosticReason); break;
-                    case "elite": SubmitEliteReportChain1410(_controller, BuildEliteState(profile, neutral), diagnosticEnvelope, diagnosticReason, neutral); break;
+                    case "elite": SubmitEliteReportChain1410(_controller, BuildEliteStateForSubmit(profile, neutral), diagnosticEnvelope, diagnosticReason, neutral); break;
                     case "dualsense-edge":
                     {
                         var frameIndex = _dualSenseFrameCounter++;
@@ -3591,7 +3709,7 @@ internal static partial class Program
             if (ok && status == "target-prepared" && envelope?.Command is ("PREPARE_TARGET" or "RECREATE_TARGET") &&
                 _compactFrameReplies.TryGetToken(_controller, out var replyBinding))
             {
-                var suffix = ",\"frameReplyBinding\":" + JsonSerializer.Serialize(replyBinding) + "}";
+                var suffix = ",\"compactFrameRequestVersion\":1,\"frameReplyBinding\":" + JsonSerializer.Serialize(replyBinding) + "}";
                 if (Encoding.UTF8.GetByteCount(response) + Encoding.UTF8.GetByteCount(suffix) - 1 <= MaxMessageBytes)
                     response = response[..^1] + suffix;
             }
@@ -3729,14 +3847,119 @@ internal static partial class Program
         return profileName.Length != 0 && profileIdentity == profileName;
     }
 
-    private static bool TryParseEnvelope(string message, out CommandEnvelope? envelope, out string error)
+    // Reuse known ASCII names without decoding a new string on each frame.
+    // Escaped, unknown and future names retain JsonProperty.Name semantics;
+    // this is not an allowlist and does not change duplicate/error ordering.
+    private static string ReuseEnvelopeFieldName(JsonProperty property)
+    {
+        var name = System.Runtime.InteropServices.JsonMarshal.GetRawUtf8PropertyName(property);
+        switch (name.Length)
+        {
+            case 2:
+                if (name.SequenceEqual("lt"u8)) return "lt";
+                if (name.SequenceEqual("lx"u8)) return "lx";
+                if (name.SequenceEqual("ly"u8)) return "ly";
+                if (name.SequenceEqual("on"u8)) return "on";
+                if (name.SequenceEqual("rt"u8)) return "rt";
+                if (name.SequenceEqual("rx"u8)) return "rx";
+                if (name.SequenceEqual("ry"u8)) return "ry";
+                break;
+            case 3:
+                if (name.SequenceEqual("imu"u8)) return "imu";
+                if (name.SequenceEqual("raw"u8)) return "raw";
+                break;
+            case 4:
+                if (name.SequenceEqual("path"u8)) return "path";
+                break;
+            case 5:
+                if (name.SequenceEqual("cloak"u8)) return "cloak";
+                if (name.SequenceEqual("epoch"u8)) return "epoch";
+                if (name.SequenceEqual("ltRaw"u8)) return "ltRaw";
+                if (name.SequenceEqual("rtRaw"u8)) return "rtRaw";
+                if (name.SequenceEqual("runId"u8)) return "runId";
+                break;
+            case 7:
+                if (name.SequenceEqual("buttons"u8)) return "buttons";
+                if (name.SequenceEqual("command"u8)) return "command";
+                if (name.SequenceEqual("persona"u8)) return "persona";
+                break;
+            case 8:
+                if (name.SequenceEqual("sequence"u8)) return "sequence";
+                if (name.SequenceEqual("targetId"u8)) return "targetId";
+                break;
+            case 9:
+                if (name.SequenceEqual("requestId"u8)) return "requestId";
+                if (name.SequenceEqual("touchpads"u8)) return "touchpads";
+                break;
+            case 10:
+                if (name.SequenceEqual("configHash"u8)) return "configHash";
+                break;
+            case 11:
+                if (name.SequenceEqual("backButtons"u8)) return "backButtons";
+                break;
+            case 12:
+                if (name.SequenceEqual("startupNonce"u8)) return "startupNonce";
+                break;
+            case 13:
+                if (name.SequenceEqual("monotonicTick"u8)) return "monotonicTick";
+                if (name.SequenceEqual("ownerIdentity"u8)) return "ownerIdentity";
+                if (name.SequenceEqual("screenButtons"u8)) return "screenButtons";
+                break;
+            case 14:
+                if (name.SequenceEqual("configRevision"u8)) return "configRevision";
+                if (name.SequenceEqual("sampleSequence"u8)) return "sampleSequence";
+                break;
+            case 15:
+                if (name.SequenceEqual("powerGeneration"u8)) return "powerGeneration";
+                if (name.SequenceEqual("profileIdentity"u8)) return "profileIdentity";
+                if (name.SequenceEqual("protocolVersion"u8)) return "protocolVersion";
+                break;
+            case 17:
+                if (name.SequenceEqual("frameReplyBinding"u8)) return "frameReplyBinding";
+                if (name.SequenceEqual("motionPairProofId"u8)) return "motionPairProofId";
+                break;
+            case 19:
+                if (name.SequenceEqual("normalizedInputHash"u8)) return "normalizedInputHash";
+                break;
+            case 20:
+                if (name.SequenceEqual("msiReportChainSource"u8)) return "msiReportChainSource";
+                break;
+            case 24:
+                if (name.SequenceEqual("msiReportChainDiagnostic"u8)) return "msiReportChainDiagnostic";
+                if (name.SequenceEqual("msiSteamDeckReleaseFence"u8)) return "msiSteamDeckReleaseFence";
+                if (name.SequenceEqual("physicalDeviceInstanceId"u8)) return "physicalDeviceInstanceId";
+                break;
+            case 26:
+                if (name.SequenceEqual("compactFrameRequestVersion"u8)) return "compactFrameRequestVersion";
+                break;
+            case 31:
+                if (name.SequenceEqual("physicalBaseContainerInstanceId"u8)) return "physicalBaseContainerInstanceId";
+                break;
+        }
+        return property.Name;
+    }
+
+    private static bool TryParseEnvelope(string message, out CommandEnvelope? envelope, out string error, CommandEnvelope? compactFrameTuple = null, string? compactFrameBinding = null, ReadOnlyMemory<byte>? utf8Message = null)
     {
         envelope = null;
         error = "invalid-json";
-        if (string.IsNullOrWhiteSpace(message) || (message.Length > MaxMessageBytes / 3 && Encoding.UTF8.GetByteCount(message) > MaxMessageBytes)) return false;
+        if (utf8Message is { } rawMessage)
+        {
+            if (rawMessage.Length > MaxMessageBytes) return false;
+            // Preserve the old codec's replacement decoding and byte-count guard
+            // for malformed UTF8; valid bytes borrow the existing read buffer.
+            if (!System.Text.Unicode.Utf8.IsValid(rawMessage.Span))
+            {
+                message = Encoding.UTF8.GetString(rawMessage.Span);
+                utf8Message = null;
+            }
+        }
+        if (utf8Message is null && (string.IsNullOrWhiteSpace(message) || (message.Length > MaxMessageBytes / 3 && Encoding.UTF8.GetByteCount(message) > MaxMessageBytes))) return false;
         try
         {
-            using var document = JsonDocument.Parse(message, new JsonDocumentOptions { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow });
+            using var document = utf8Message is { } utf8
+                ? JsonDocument.Parse(utf8, new JsonDocumentOptions { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow })
+                : JsonDocument.Parse(message, new JsonDocumentOptions { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow });
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) { error = "root-not-object"; return false; }
             // GP-CPU2 P1（裁决：保守方案——保留 JsonDocument，只优化合法帧路径的字典/LINQ）。
@@ -3751,11 +3974,12 @@ internal static partial class Program
             var sourceMetadataDuplicate1410 = false;
             foreach (var property in root.EnumerateObject())
             {
-                if (!properties.TryAdd(property.Name, property.Value))
+                var name = ReuseEnvelopeFieldName(property);
+                if (!properties.TryAdd(name, property.Value))
                 {
-                    if (property.Name == MsiReportChainProtocol1410.PrepareField) { prepareMetadataDuplicate1410 = true; continue; }
-                    if (property.Name == MsiReportChainProtocol1410.SourceField) { sourceMetadataDuplicate1410 = true; continue; }
-                    error = "duplicate-field:" + property.Name; return false;
+                    if (name == MsiReportChainProtocol1410.PrepareField) { prepareMetadataDuplicate1410 = true; continue; }
+                    if (name == MsiReportChainProtocol1410.SourceField) { sourceMetadataDuplicate1410 = true; continue; }
+                    error = "duplicate-field:" + name; return false;
                 }
             }
             if (!TryReadString(properties, "command", 32, out var command)) { error = "invalid-command"; return false; }
@@ -3780,24 +4004,55 @@ internal static partial class Program
             }
             if (unknownFieldSeen) { error = "unknown-field"; return false; }
             if (!TryReadUInt64(properties, "protocolVersion", out var version) || version != ProtocolVersion) { error = "protocol-version"; return false; }
-            if (!TryReadString(properties, "requestId", 160, out var requestId) ||
-                !TryReadUInt64(properties, "sequence", out var sequence) || sequence == 0 ||
-                !TryReadString(properties, "runId", 160, out var runId) ||
-                !TryReadUInt64(properties, "epoch", out var epoch) || epoch == 0 ||
-                !TryReadUInt64(properties, "powerGeneration", out var powerGeneration) || powerGeneration == 0 ||
-                !TryReadString(properties, "targetId", 160, out var targetId) ||
-                !TryReadString(properties, "ownerIdentity", 160, out var ownerIdentity) ||
-                !TryReadString(properties, "persona", 64, out var persona) ||
-                !TryReadString(properties, "profileIdentity", 96, out var profileIdentity) ||
-                !TryReadString(properties, "startupNonce", 160, out var startupNonce) ||
-                !TryReadUInt64(properties, "configRevision", out var configRevision) || configRevision == 0 ||
-                !TryReadString(properties, "configHash", 64, out var configHash) || !IsSha256(configHash))
+            string requestId, runId, targetId, ownerIdentity, persona, profileIdentity, startupNonce, configHash;
+            ulong sequence, epoch, powerGeneration, configRevision;
+            var compactRequest = properties.TryGetValue("compactFrameRequestVersion", out var compactRequestVersion);
+            if (compactRequest)
+            {
+                if (command != "SUBMIT_FRAME" || compactRequestVersion.ValueKind != JsonValueKind.Number ||
+                    !compactRequestVersion.TryGetUInt64(out var requestVersion) || requestVersion != 1)
+                { error = "compact-frame-request-version"; return false; }
+                if (compactFrameTuple is null || compactFrameBinding is null ||
+                    !properties.TryGetValue("frameReplyBinding", out var requestBinding) ||
+                    requestBinding.ValueKind != JsonValueKind.String || !requestBinding.ValueEquals(compactFrameBinding))
+                { error = "compact-frame-request-binding-mismatch"; return false; }
+                // Never combine caller-supplied identity with inherited identity.
+                // Optional physical metadata belongs to full commands, too.
+                if (properties.ContainsKey("runId") || properties.ContainsKey("epoch") ||
+                    properties.ContainsKey("powerGeneration") || properties.ContainsKey("targetId") ||
+                    properties.ContainsKey("ownerIdentity") || properties.ContainsKey("persona") ||
+                    properties.ContainsKey("profileIdentity") || properties.ContainsKey("configRevision") ||
+                    properties.ContainsKey("configHash") || properties.ContainsKey("physicalBaseContainerInstanceId") ||
+                    properties.ContainsKey("physicalDeviceInstanceId"))
+                { error = "compact-frame-request-mixed-identity"; return false; }
+                if (!TryReadString(properties, "requestId", 160, out requestId) ||
+                    !TryReadUInt64(properties, "sequence", out sequence) || sequence == 0 ||
+                    !TryReadString(properties, "startupNonce", 160, out startupNonce))
+                { error = "invalid-base-field"; return false; }
+                runId = compactFrameTuple.RunId; epoch = compactFrameTuple.Epoch;
+                powerGeneration = compactFrameTuple.PowerGeneration; targetId = compactFrameTuple.TargetId;
+                ownerIdentity = compactFrameTuple.OwnerIdentity; persona = compactFrameTuple.Persona;
+                profileIdentity = compactFrameTuple.ProfileIdentity;
+                configRevision = compactFrameTuple.ConfigRevision; configHash = compactFrameTuple.ConfigHash;
+            }
+            else if (!TryReadString(properties, "requestId", 160, out requestId) ||
+                !TryReadUInt64(properties, "sequence", out sequence) || sequence == 0 ||
+                !TryReadString(properties, "runId", 160, out runId) ||
+                !TryReadUInt64(properties, "epoch", out epoch) || epoch == 0 ||
+                !TryReadUInt64(properties, "powerGeneration", out powerGeneration) || powerGeneration == 0 ||
+                !TryReadString(properties, "targetId", 160, out targetId) ||
+                !TryReadString(properties, "ownerIdentity", 160, out ownerIdentity) ||
+                !TryReadString(properties, "persona", 64, out persona) ||
+                !TryReadString(properties, "profileIdentity", 96, out profileIdentity) ||
+                !TryReadString(properties, "startupNonce", 160, out startupNonce) ||
+                !TryReadUInt64(properties, "configRevision", out configRevision) || configRevision == 0 ||
+                !TryReadString(properties, "configHash", 64, out configHash) || !IsSha256(configHash))
             {
                 error = "invalid-base-field";
                 return false;
             }
 
-            if (!TryGetVirtualOutputProfile(persona, profileIdentity, out _))
+            if (!compactRequest && !TryGetVirtualOutputProfile(persona, profileIdentity, out _))
             {
                 error = "persona-not-admitted";
                 return false;
@@ -3926,7 +4181,16 @@ internal static partial class Program
                 if (padsPresent && ((persona is not ("steamdeck" or "dualsense-edge")) || !TryReadScreenPads(padsElement, out padLeft, out padRight)))
                 { error = "invalid-touchpads"; return false; }
                 string? frameReplyBinding = null;
-                if (properties.ContainsKey("frameReplyBinding"))
+                // The compact branch already matched this command's JSON token under
+                // the lifecycle gate. Keep its grammar check, but reuse the owned string
+                // so parsing and later Matches calls do not allocate/compare it again.
+                if (compactRequest)
+                {
+                    if (!IsSha256(compactFrameBinding!))
+                    { error = "invalid-frame-reply-binding"; return false; }
+                    frameReplyBinding = compactFrameBinding;
+                }
+                else if (properties.ContainsKey("frameReplyBinding"))
                 {
                     if (!TryReadString(properties, "frameReplyBinding", 64, out var token) || !IsSha256(token))
                     { error = "invalid-frame-reply-binding"; return false; }
@@ -4199,10 +4463,38 @@ internal static partial class Program
 
     // Keep Elite's SDK State encoding, unsigned stick domain and separate Z/Rz triggers.
     // The USB profile's report size remains SDK-derived.
+    private static readonly System.Reflection.FieldInfo? EliteStateIdleThreadField = BindEliteStateIdleThreadField();
+    private static System.Reflection.FieldInfo? BindEliteStateIdleThreadField()
+    {
+        try
+        {
+            if (typeof(HMController).Assembly.ManifestModule.ModuleVersionId.ToString("D") != LockedCoreMvid) return null;
+            var field = typeof(HMController).GetField("_idleThread", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            return field?.FieldType == typeof(System.Threading.Thread) && field.DeclaringType == typeof(HMController) ? field : null;
+        }
+        catch { return null; }
+    }
+
     private static HMGamepadState BuildEliteState(HMProfile profile, CommandEnvelope envelope)
+    {
+        // Standalone callers retain a fresh dictionary owned by their returned state.
+        Dictionary<HMAxis, float>? axes = null;
+        return BuildEliteStateCore(profile, envelope, ref axes);
+    }
+
+    private static HMGamepadState BuildEliteStateCore(HMProfile profile, CommandEnvelope envelope,
+        ref Dictionary<HMAxis, float>? reusableAxes)
     {
         if (profile.Id != "xbox-elite-v2")
             throw new InvalidOperationException("elite-profile-not-admitted:" + profile.Id);
+        var axes = reusableAxes ??= new Dictionary<HMAxis, float>(6);
+        // The stock Elite encoder consumes its six axes synchronously in the unsigned report domain.
+        axes[HMAxis.X] = UnitStickAxis(envelope.Lx);
+        axes[HMAxis.Y] = UnitStickAxis(-envelope.Ly);
+        axes[HMAxis.Rx] = UnitStickAxis(envelope.Rx);
+        axes[HMAxis.Ry] = UnitStickAxis(-envelope.Ry);
+        axes[HMAxis.Z] = envelope.LtRaw;
+        axes[HMAxis.Rz] = envelope.RtRaw;
         var buttons = HMButton.None;
         if ((envelope.Buttons & 0x1000) != 0) buttons |= HMButton.A;
         if ((envelope.Buttons & 0x2000) != 0) buttons |= HMButton.B;
@@ -4221,22 +4513,7 @@ internal static partial class Program
         {
             Buttons = buttons,
             Hat = octant == 8 ? HMHat.None : (HMHat)(octant + 1),
-            Axes = new Dictionary<HMAxis, float>(6)
-            {
-                // The current SDK State encoder consumes its
-                // standard stick values in the unsigned 0..1 report domain,
-                // even though the canonical B frame is signed -1..1. Empirical
-                // XInput readback is the contract here: 0.5 is center; passing
-                // signed zero produces (-32768,+32767) full-scale output.
-                // Preserve HC's Y direction convention before conversion.
-                [HMAxis.X] = UnitStickAxis(envelope.Lx),
-                [HMAxis.Y] = UnitStickAxis(-envelope.Ly),
-                [HMAxis.Rx] = UnitStickAxis(envelope.Rx),
-                [HMAxis.Ry] = UnitStickAxis(-envelope.Ry),
-                // Preserve the raw trigger values without a canonical deadzone.
-                [HMAxis.Z] = envelope.LtRaw,
-                [HMAxis.Rz] = envelope.RtRaw,
-            }
+            Axes = axes
         };
     }
 

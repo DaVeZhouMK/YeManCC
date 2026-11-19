@@ -61,3 +61,62 @@ static BOOL GetOverlappedResult(HANDLE h,OVERLAPPED* ov,DWORD* bytes,BOOL wait) 
 static DWORD WaitForSingleObject(HANDLE h,DWORD timeout) { inert::require(inert::events.count(h)==1 && (timeout==2000 || timeout==500),"wrong inert wait");++inert::waits;return inert::plan.firstWait; }
 static BOOL CancelIoEx(HANDLE h,OVERLAPPED* ov) { inert::require(h==inert::oldHandle && ov==inert::oldOv,"cancel wrong inert owner");++inert::cancels;return TRUE; }
 static bool msiCrashRecoveryBeforeModeWrite(BYTE,const MsiClawHidDiag&,bool) { ++inert::durableGuards;return true; }
+constexpr DWORD WAIT_FAILED=0xffffffff;
+// Legacy fake-IO suites provide one permanently healthy read-only public port.
+// Sleep/revocation and real HANDLE return are tested by the Native power suite;
+// this seam only preserves these older suites' original scripted IO boundaries.
+#ifndef YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#define YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#include <memory>
+namespace ymcc::sleeppower {inline bool powerAdmitted(bool value)noexcept{return value;}}
+namespace ymcc::inputHost::sharedPower {
+enum class Use{Input,Lifecycle};
+class Scope final {
+public:
+    template<class Reader,class Mirrors>static std::shared_ptr<Scope> create(Reader,Mirrors&,bool,Use){return std::make_shared<Scope>();}
+    bool current()const noexcept{return true;}
+    bool power()const noexcept{return true;}
+    HANDLE event()const noexcept{return reinterpret_cast<HANDLE>(std::uintptr_t(0x5f20));}
+};
+}
+[[maybe_unused]] static int readSharedSystemPower(){return 0;}
+[[maybe_unused]] static int g_sharedPowerRevocations=0;
+[[maybe_unused]] static std::shared_ptr<ymcc::inputHost::sharedPower::Scope> t_inputHostRequestPower;
+[[maybe_unused]] static bool t_inputHostRequestHardwareRequired=false;
+struct InputHostRequestPowerScope {
+    std::shared_ptr<ymcc::inputHost::sharedPower::Scope> previous;
+    bool previousHardware;
+    explicit InputHostRequestPowerScope(std::shared_ptr<ymcc::inputHost::sharedPower::Scope> scope,bool hardware=false)
+        :previous(std::move(t_inputHostRequestPower)),previousHardware(t_inputHostRequestHardwareRequired){
+        t_inputHostRequestPower=std::move(scope);t_inputHostRequestHardwareRequired=hardware;}
+    ~InputHostRequestPowerScope(){t_inputHostRequestPower=std::move(previous);t_inputHostRequestHardwareRequired=previousHardware;}
+};
+[[maybe_unused]] static DWORD WaitForMultipleObjects(DWORD count,const HANDLE* handles,BOOL all,DWORD budget){
+    if(count!=2||all||!handles||handles[1]!=reinterpret_cast<HANDLE>(std::uintptr_t(0x5f20)))throw std::logic_error("invalid-legacy-public-wait-set");
+    return WaitForSingleObject(handles[0],budget);
+}
+#endif
+
+// Read-only public transport ports for this legacy inert business fixture.
+// SharedPowerV1 is the real Native48 declaration; this transport is controlled,
+// and cannot prove real notification, cancellation or device-return behavior.
+#ifndef YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#define YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#include <memory>
+namespace ymcc::sleeppower {inline bool powerAdmitted(bool value)noexcept{return value;}}
+namespace ymcc::inputHost::sharedPower {
+class Scope final {public:bool current()const noexcept{return true;}bool power()const noexcept{return true;}};
+}
+[[maybe_unused]] static std::shared_ptr<ymcc::inputHost::sharedPower::Scope> t_inputHostRequestPower;
+#endif
+#ifndef YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+#define YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output)noexcept{
+    output={};output.generation=currentPowerGeneration();output.flags=ymcc::sleeppower::kKnown;
+    if(hardwareWriteAllowed())output.flags|=ymcc::sleeppower::kHardwareAllowed;
+    return ymcc::sleeppower::powerAdmitted(output);
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{
+    return ymcc::sleeppower::powerAdmitted(value)&&value.generation==currentPowerGeneration()&&hardwareWriteAllowed();
+}
+#endif

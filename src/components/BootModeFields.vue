@@ -117,12 +117,10 @@ const fields = computed<Field[]>(() => {
             return [];
         return [s('调度模式', prefix + 'mode', [{ value: 'auto', label: '自动模式' }, { value: 'manual', label: '手动模式' }]), r('TDP 上限', prefix + 'tdpCeiling', 3, 150, 1, ' W'), r('TDP 功耗', prefix + 'tdp', 3, Math.max(3, bank.tdpCeiling), 1, ' W'), ...(bank.mode === 'auto' ? [r('GPU 倾向（0% 为 CPU 优先）', prefix + 'auto.bias', 0, 100, 5, '%'), s('浮动节能', prefix + 'auto.saving', [{ value: 'none', label: '无浮动' }, { value: 'small', label: '小幅' }, { value: 'medium', label: '中幅' }, { value: 'large', label: '大幅' }, { value: 'aggressive', label: '激进' }]), s('3–' + bank.auto.coreSplit + ' W', prefix + 'auto.coreLow', cores), s(bank.tdp <= bank.auto.coreSplit ? '高功耗段（当前无区间）' : (bank.auto.coreSplit + 1) + '–' + bank.tdp + ' W', prefix + 'auto.coreHigh', cores), r('核心切换瓦数', prefix + 'auto.coreSplit', 3, Math.min(25, Math.max(3, bank.tdp)), 1, ' W')] : powerScheme.value === 'yeman' ? [r('CPU 频率', prefix + 'manual.frequencyMHz', 800, 6500, 100, ' MHz'), r('积极性', prefix + 'manual.aggressiveness', 0, 100, 1, '%'), t('睿频', prefix + 'manual.turbo'), t('不限频率', prefix + 'manual.unlimited'), s('大小核心', prefix + 'manual.coreMode', cores)] : []), r('目标帧率', 'frames.' + side.value + '.fps', 0, 300, 1, ' FPS')];
     }
-    if (props.module === 'fan')
-        return [t('启用风扇控制', 'enabled'), s('风扇预设', 'preset', [{ value: 'soft', label: '静音' }, { value: 'balanced', label: '均衡' }, { value: 'aggressive', label: '散热优先' }])];
     if (props.module === 'charge')
         return [t('随模式设置充电上限', 'enabled'), s('充电上限', 'limit', options([...new Set([...Array.from({ length: 11 }, (_, i) => 50 + 5 * i), ...(props.support.charge?.choices || [])])]).map(item => ({ ...item, label: item.label + '%' })))];
     if (props.module === 'input')
-        return [s('虚拟手柄', 'persona', personas), s('模拟鼠标', 'mouse', [{ value: 'off', label: '关闭' }, ...(data.value.persona === 'steamdeck' ? [] : [{ value: 'microsoft', label: '微软鼠标' }, { value: 'joyxoff', label: 'JoyXoff' }]), { value: 'steamdeck', label: 'SteamDeck 鼠标' }]), t('外置优先', 'ownership.externalControllerPriority')];
+        return [s('虚拟手柄', 'persona', personas), s('模拟鼠标', 'mouse', [{ value: 'off', label: '关闭' }, ...(data.value.persona === 'steamdeck' ? [] : [{ value: 'microsoft', label: '微软鼠标' }, { value: 'joyxoff', label: 'JoyXoff' }]), { value: 'steamdeck', label: 'SteamDeck 鼠标' }])];
     if (props.module === 'gyro') {
         const steering = data.value.motion?.motionInput === 'joystick-steering';
         const triggers = [{ value: '', label: '未设置' }, ...options(['LT', 'RT', 'LB', 'RB'])];

@@ -93,6 +93,7 @@ static void fullPipeOffLifecycleCase(const std::string& variant){
    g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;g_startEntrySeam.hidHideRestoreResult=true;fullPipeQuarantineProbe();
    check(!g_inputHostReleaseQuarantined&&!g_inputHostPrepared&&!g_inputHostNeutralized&&!g_hidHideVisibilityJournal.active&&!g_msiSteamDeckReleaseDebt.required()&&g_inputHostStartBlocked&&fullPipeRestoreCount()==restores+1,"official quarantine retry fully returns ownership while retaining its real StartBlocked fence");
    bool restored=false;for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-quarantine-cleared")restored=restored||event["detail"].value("status","")=="physical-restore-readback-confirmed";check(restored,"real quarantine log proves physical restore and retired ownership before OFF success");
+   fullPipeRogObserveReturnedSource(closing.requestId);
    advance(11000);fullPipeVerificationStep();fullPipeCheckUniqueOffFinal(closing.requestId,true);
    check(g_virtualStartProtection.view(startProtectionClock).phase=="success"&&fullPipeOffFinalCounts(closing.requestId)==std::make_pair(1u,0u)&&g_inputHostStartBlocked&&fullPipeSpawnCount==spawns+1&&!g_inputHostProcess,"fully returned ROG OFF succeeds with StartBlocked retained and no automatic Start");
   }
@@ -107,3 +108,205 @@ static void fullPipeOffLifecycleCases(){
  // process-equivalent seed or broad cleanup can erase its failure evidence.
  fullPipeOffLifecycleCase("MSI-return-unproven");
 }
+
+#if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
+
+// Opt-in parameters of the ORIGINAL SD OFF/target-return consumer. Real private
+// Host/pipe, BeforeHide reservations, file CAS and quarantine lifecycle execute.
+// Only the physical inventory, HidHide end and shared-Reader event inputs below
+// are controlled. In particular sourceMask0 is an incident input, not a claim
+// that this case ran physical-source reconfirmation or real hardware sleep.
+namespace fixtureSdOffSourceLost {
+static bool active=false,readbackKnown=true,fired=false;
+static unsigned settled=0,interruptAfter=0;
+static std::string edge,variant;
+static std::vector<std::wstring> inventory,hidden;
+static std::map<std::wstring,unsigned> unhideCalls;
+static json observations=json::array();
+static constexpr const char* root="USB\\VID_045E&PID_028E\\FIXTURE-SD-OFF-111700";
+}
+static bool fixtureSdOffSourceLostActive(){return fixtureSdOffSourceLost::active;}
+// Defined by the existing runner's shared Native Reader adapter, never by a new
+// power clock/provider here. Unknown event names must fail, not become Ready.
+static void fixtureSdOffSharedPowerEdge(const std::string&);
+static bool fixtureSdOffSourceLostSnapshot(HidHideVisibilitySnapshot& snapshot){
+ using namespace fixtureSdOffSourceLost;snapshot={};snapshot.valid=readbackKnown;snapshot.cloaking=true;
+ snapshot.hidden=hidden;return readbackKnown;
+}
+static bool fixtureSdOffSourceLostCli(const std::wstring& command,std::string* output,DWORD* code){
+ using namespace fixtureSdOffSourceLost;if(output)output->clear();if(code)*code=ERROR_SUCCESS;
+ const std::wstring prefix=L"--dev-unhide \"";
+ if(command.starts_with(prefix)&&command.ends_with(L"\"")){
+  const auto target=command.substr(prefix.size(),command.size()-prefix.size()-1);
+  if(std::find(inventory.begin(),inventory.end(),target)==inventory.end())throw std::logic_error("sd-off-CLI-not-exact-owned-path");
+  ++unhideCalls[target];hidden.erase(std::remove(hidden.begin(),hidden.end(),target),hidden.end());
+  observations.push_back({{"leaf","exact-private-HidHide-unhide"},{"path",W2U(target)}});return true;
+ }
+ ++forbiddenIo;throw std::logic_error("sd-off-unexpected-CLI-command:"+W2U(command));
+}
+static ymcc::targetReturn::physicalPath::Result fixtureSdOffSourceLostPath(const std::string& expected,const std::string& target){
+ using namespace fixtureSdOffSourceLost;
+ struct Reader {
+  std::wstring rootId,child;bool known=false;
+  CONFIGRET locate(PDEVINST out,DEVINSTID_W id,ULONG){
+   if(!id){*out=3;return CR_SUCCESS;}if(rootId==id){*out=1;return CR_SUCCESS;}
+   if(known&&child==id){*out=2;return CR_SUCCESS;}return CR_NO_SUCH_DEVNODE;
+  }
+  CONFIGRET deviceId(DEVINST node,PWCHAR out,ULONG count,ULONG){
+   const std::wstring tree=L"HTREE\\ROOT\\PRIVATE-SD-OFF";
+   const auto* value=node==1?&rootId:node==2&&known?&child:node==3?&tree:nullptr;
+   if(!value)return CR_NO_SUCH_DEVNODE;if(count<=value->size())return CR_BUFFER_SMALL;
+   std::copy(value->begin(),value->end(),out);out[value->size()]=0;return CR_SUCCESS;
+  }
+  CONFIGRET parent(PDEVINST out,DEVINST node,ULONG){
+   if(node==2){*out=1;return CR_SUCCESS;}if(node==1){*out=3;return CR_SUCCESS;}return CR_NO_SUCH_DEVNODE;
+  }
+ } reader{U2W(root),U2W(target),std::find(inventory.begin(),inventory.end(),U2W(target))!=inventory.end()};
+ const auto result=ymcc::targetReturn::physicalPath::verify(expected,target,reader);
+ observations.push_back({{"leaf","actual-private-CM-ancestry-verifier"},{"target",target},
+  {"state",ymcc::targetReturn::physicalPath::stateName(result.state)}});return result;
+}
+static void fixtureSdOffSourceLostObserve(const char* event,const json& detail){
+ using namespace fixtureSdOffSourceLost;if(!active||!event||!detail.is_object())return;
+ if(std::strcmp(event,"input-host-target-return-record")==0&&detail.value("phase","")=="physical-path-settled"){
+  ++settled;observations.push_back({{"stage","actual-path-CAS-returned"},{"ordinal",settled},
+   {"path",detail.value("pathInstanceId","")},{"revision",detail.value("revision",0ULL)}});
+  if(!fired&&interruptAfter&&settled==interruptAfter){
+   fired=true;
+   if(edge=="intent")g_inputHostVirtualIntentRevision.fetch_add(1,std::memory_order_acq_rel);
+   else fixtureSdOffSharedPowerEdge(edge);
+  }
+ }
+ if(!fired&&variant.starts_with("post-log-")&&std::strcmp(event,"hidhide.p-hid-restore")==0&&
+    detail.value("ownedSdPostDurableCurrent",false)){
+  fired=true;if(edge=="intent")g_inputHostVirtualIntentRevision.fetch_add(1,std::memory_order_acq_rel);
+  else fixtureSdOffSharedPowerEdge(edge);
+ }
+}
+static void fullPipeSdOffSourceLostCase(const std::string& selected){
+ namespace f=fixtureSdOffSourceLost;namespace duty=ymcc::targetReturn;
+ seed();fixtureFullPipe=true;fullPipeFault="none";fixturePcPowerCapabilities=true;
+ g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+ g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.manufacturer="FIXTURE-PC";g_machineIdentity.product="SD-OFF-common-consumer";
+ g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;
+ g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+ fixtureSdOffSharedPowerEdge("ready");
+ f::active=false;f::readbackKnown=true;f::fired=false;f::settled=0;f::interruptAfter=0;f::edge.clear();f::variant=selected;
+ f::observations=json::array();f::unhideCalls.clear();
+ f::inventory={U2W(f::root),L"HID\\VID_045E&PID_028E&IG_00\\PRIVATE-SD-OFF-0",
+  L"HID\\VID_045E&PID_028E&IG_01\\PRIVATE-SD-OFF-1",L"HID\\VID_045E&PID_028E&IG_02\\PRIVATE-SD-OFF-2"};
+ f::hidden.clear();
+ cases.push_back({{"name","OFF-LIFECYCLE/SD-source-lost/"+selected},{"subvariantOf","OFF-LIFECYCLE"},
+  {"controlledFamily","common SD OFF consumer with GPD incident device shape"},{"realManagedChild",true},
+  {"physicalDeviceIo",false},{"sourceReconfirmExecuted",false},{"realSleepExecuted",false}});
+ const auto spawns=fullPipeSpawnCount;const auto observers=fullPipeChildObservers.size();
+ const auto base=targetDocument("disabled",0),on=targetDocument("steamdeck",1),off=targetDocument("disabled",2);
+ check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump())&&writeTarget(base,on).value("ok",false),"SD OFF case uses original private settings IPC ON admission");
+ inputCaptureRefreshRealStickSettings(true);check(inputHostQueueLifecycleWork("initial-target-admission"),"SD OFF queues original target lifecycle");fullPipeDrainQueuedLifecycle();
+ check(fullPipeSpawnCount==spawns+1&&g_inputHostProcess&&g_inputHostPrepared,"SD OFF owns one actual prepared managed SD Host");
+ if(!g_inputHostProcess)throw std::logic_error("sd-off-real-managed-Host-setup-failed");
+ HANDLE oldObserver=nullptr;check(DuplicateHandle(GetCurrentProcess(),g_inputHostProcess,GetCurrentProcess(),&oldObserver,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"SD OFF retains exact old process observation through return");
+ if(!oldObserver)throw std::logic_error("sd-off-old-observer-duplicate-failed");
+ fixtureRuntimeRecoveryOldHost=oldObserver;fixtureRuntimeRecoveryOldOwner=inputHostTargetReturnCaptureOwner(g_inputHostProcess);
+ fixtureRuntimeRecoveryOsEnabled=true;fixtureRuntimeRecoveryCensus="absent";fixtureRuntimeRecoveryCensusCalls=0;
+ struct Scope {
+  HANDLE observer,denial=nullptr;~Scope(){fixtureSdOffSourceLost::active=false;fixtureRuntimeRecoveryOldHost=nullptr;
+   fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;if(denial)CloseHandle(denial);if(observer)CloseHandle(observer);}
+ } scope{oldObserver};
+ const auto originalEpoch=g_inputHostEpoch;const auto originalRun=g_inputHostRunId;
+ // The actual reservation algorithm records every reached fake hide. No state
+ // session, origin or persisted obligation is fabricated by this scenario.
+ HidHidePhysicalIdentity physical;physical.resolved=true;physical.sourcePath="fixture://sd-off-physical";
+ physical.deviceInstanceId=W2U(f::inventory[1]);physical.baseContainerDeviceInstanceId=f::root;
+ physical.vendorId=0x045e;physical.productId=0x028e;physical.usagePage=1;physical.usage=5;
+ physical.physicalIdentity=physical.deviceInstanceId+"|"+physical.baseContainerDeviceInstanceId+"|vid_1118|pid_654";
+ f::active=true;
+ {std::lock_guard<InputHostMutex> host(g_inputHostMx);
+  HidHideVisibilitySnapshot baseline;baseline.valid=true;
+  g_hidHideVisibilityJournal={};auto& journal=g_hidHideVisibilityJournal;
+  journal.transactionId=originalRun;journal.physical=physical;journal.physicalSources={physical};journal.before=baseline;journal.active=true;
+  for(const auto& target:f::inventory){bool reserved=false;
+   const bool admitted=inputHostTargetReturnBeforeHideLocked({physical},baseline,baseline,W2U(target),originalRun,&reserved);
+   check(admitted&&reserved,"real BeforeHide reserves one exact owned physical path in the private Session before fake hide");
+   if(!admitted||!reserved)throw std::logic_error("sd-off-real-physical-reservation-rejected");
+   journal.hiddenByUs.push_back(target);f::hidden.push_back(target);
+  }
+ }
+ const auto pathCount=[](){std::size_t count=0;const auto& session=ymcc::inputHost::targetReturnRuntime::state.session;
+  if(!session||!session->record())throw std::logic_error("sd-off-no-actual-record");
+  for(const auto& group:session->record()->obligations)count+=group.paths.size();return count;};
+ check(pathCount()==4,"four actual durable owned-path reservations exist before incident OFF");
+ f::active=false;fullPipeWaitForPlayerLock(on,off);
+ // Recorded incident: physical slot is online while its admission was lost.
+ g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=0;g_xinputConnectedMask=1;g_xinputAdmittedMask=0;
+ g_startEntrySeam.hidHideRestoreResult=false;
+ check(writeTarget(on,off).value("ok",false),"original IPC admits player OFF after original ON lock");inputCaptureRefreshRealStickSettings(true);
+ const auto close=g_virtualStartProtection.view(startProtectionClock);fullPipeDrainQueuedLifecycle();
+ const auto child=fullPipeChildOutcome();cases.back()["managedReceipt"]=child;
+ check(child.value("nativeObservedProcessExit",false)&&child.value("finalCleanupOk",false)&&!g_inputHostProcess&&
+  g_inputHostReleaseQuarantined&&g_hidHideVisibilityJournal.active&&pathCount()==4,"actual Stop exits its private Host and retains unreturned physical duty and quarantine");
+ f::active=true;g_startEntrySeam.active=false;
+ fixtureRuntimeRecoveryCensus=selected=="PnP-present"?"present":selected=="PnP-unknown"?"unknown":"absent";
+ f::readbackKnown=selected!="readback-unknown";
+ if(selected=="publication"){f::interruptAfter=1;f::edge="publication";}
+ if(selected.starts_with("CAS")){
+  if(selected.size()<7||selected[3]!='-'||selected[4]<'1'||selected[4]>'4')throw std::logic_error("sd-off-invalid-CAS-selector");
+  f::interruptAfter=static_cast<unsigned>(selected[4]-'0');f::edge=selected.substr(6);
+ }
+ if(selected.starts_with("post-log-"))f::edge=selected.substr(9);
+ if(selected=="record-write-denied"){
+  scope.denial=CreateFileW(fixtureTargetReturnRecordPath().c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+  check(scope.denial!=INVALID_HANDLE_VALUE,"actual private record no-delete-sharing handle provides a real durable-commit denial");
+  if(scope.denial==INVALID_HANDLE_VALUE){scope.denial=nullptr;throw std::logic_error("sd-off-private-file-denial-setup-failed");}
+ }
+ fullPipeQuarantineProbe();
+ const bool negative=selected!="absent"&&selected!="publication";
+ if(negative){
+  check(g_inputHostReleaseQuarantined&&g_hidHideVisibilityJournal.active&&g_inputHostEpoch==originalEpoch&&
+   g_inputHostRunId==originalRun,"absent proof, readback or final scope failure retains the exact old return owner");
+  if(f::interruptAfter||selected.starts_with("post-log-")){
+   check(f::fired,"requested interruption was reached at actual path-CAS/log boundary");
+   check(f::settled==(f::interruptAfter?f::interruptAfter:4u)&&pathCount()==4-f::settled,
+    "real committed paths survive interruption and only remaining duties stay on disk");
+  }else check(f::settled==0&&pathCount()==4,"unproven census/readback cannot consume any real path duty");
+  const auto alreadySettled=f::settled;const auto callsBefore=f::unhideCalls;
+  if(scope.denial){check(CloseHandle(scope.denial)!=FALSE,"private commit denial is returned before original retry");scope.denial=nullptr;}
+  fixtureRuntimeRecoveryCensus="absent";f::readbackKnown=true;fixtureSdOffSharedPowerEdge("ready");
+  // New intent is a controlled publisher edge, not a UI ON request. OFF remains
+  // the configured target and must never be silently reopened by cleanup.
+  fullPipeQuarantineProbe();
+  for(const auto& row:f::observations)if(row.value("stage","")=="actual-path-CAS-returned"&&row.value("ordinal",0u)<=alreadySettled){
+   const auto target=U2W(row.value("path",std::string{}));
+   check(f::unhideCalls[target]==callsBefore.at(target),"already durably settled paths do not receive another unhide on continuation");
+  }
+ }
+ check(!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active&&!g_inputHostProcess&&
+  !g_inputHostPrepared&&!g_inputHostNeutralized&&pathCount()==0&&f::settled==4,"original lifecycle finishes actual four-path durable return and clears the old tuple only after proof");
+ check(fullPipeSpawnCount==spawns+1&&fullPipeChildObservers.size()==observers&&inputHostConfiguredPersona()=="disabled",
+  "OFF continuation creates no Host and preserves the player's disabled target");
+ check(fixtureRuntimeRecoveryCensusCalls>0,"stale-mask OFF reaches the actual complete target census, not an absence flag");
+ if(selected=="publication")check(f::fired,"pure diagnostic publication advanced at the actual first path-CAS boundary");
+ startProtectionClock+=11000;fixturePowerClockOffset+=11000;fullPipeVerificationStep();
+ check(fullPipeOffFinalCounts(close.requestId)==std::make_pair(1u,0u),
+  "original OFF publishes exactly one success after actual cleanup without renewing the request deadline");
+ cases.back()["pathObservations"]=f::observations;cases.back()["censusCalls"]=fixtureRuntimeRecoveryCensusCalls;
+ cases.back()["unhideCalls"]=json::object();for(const auto& item:f::unhideCalls)cases.back()["unhideCalls"][W2U(item.first)]=item.second;
+ cases.back()["finalProtection"]=fullPipeProtectionState();cases.back()["nativeEvents"]=fixtureEvents;
+ fixtureFullPipe=false;g_startEntrySeam.active=true;
+}
+static std::vector<std::string> fixtureSdOffSourceLostVariantNames(){
+ std::vector<std::string> variants={"absent","PnP-present","PnP-unknown","readback-unknown","record-write-denied","publication"};
+ for(unsigned path=1;path<=4;++path)for(const auto* event:{"notification","generation","intent"})
+  variants.push_back("CAS-"+std::to_string(path)+"-"+event);
+ for(const auto* event:{"notification","generation","intent"})variants.push_back(std::string("post-log-")+event);
+ return variants;
+}
+static void fullPipeSdOffSourceLostCases(const std::string& only={}){
+ const auto variants=fixtureSdOffSourceLostVariantNames();
+ if(!only.empty()&&std::find(variants.begin(),variants.end(),only)==variants.end())throw std::invalid_argument("unknown-sd-off-source-lost-variant");
+ for(const auto& selected:variants){if(!only.empty()&&selected!=only)continue;
+  fullPipeSdOffSourceLostCase(selected);if(!failures.empty())return;
+ }
+}
+
+#endif // explicit optional SD OFF source-loss consumer only

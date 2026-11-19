@@ -58,12 +58,21 @@ static std::map<std::string,std::function<json(const json&)>> handlers;
 template<class F>static void ipc_on(const std::string& name,F callback){handlers[name]=callback;}
 // The lower provider regression keeps policy scheduling as an explicit IO
 // boundary. The actual production policy Runtime is exercised independently.
+// LED async routing is an unrelated hardware leaf of ipc_cmd_async.
+static const char* ymccFamilyName(YmccFamily){return "owned-memory";}
+#include "settings_baseline.h"
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/yeman-settings.json";
+struct SettingsFileGuard {};
+static std::string ymSettingsReadRaw(const std::wstring&){return "{}";}
+static bool ymSettingsWriteDocumentUnlocked(const std::string&,long long*,const json*,json*,bool,long long,bool*,bool*,bool){throw std::runtime_error("boot storage is outside lower ordinary-provider fixture");}
+struct GamepadSerialEvent {struct ConfigurationWrite {explicit ConfigurationWrite(bool){}};};
 static json mouseModeGetState();
 static json mouseModeApplyState(std::optional<bool>,const std::string&,const std::function<bool()>&);
 static json mousePolicyGet();
-static json mousePolicySet(const std::string& mode){return mouseModeApplyState(mode=="on",std::string{},{});}
+static json mouseModeRequestExpired();
+static json mousePolicySet(const std::string& mode,bool=false,const std::function<bool()>& valid={},const json* bootContext=nullptr){if(bootContext)throw std::runtime_error("boot scheduling requires actual Runtime fixture");if(valid&&!valid())return mouseModeRequestExpired();return mouseModeApplyState(mode=="on",std::string{},valid);}
 static json mousePolicyCycle(){return mouseModeApplyState(std::nullopt,std::string{},{});}
-struct PolicyScheduleBoundary {json receipt=json::object();int current(){return 0;}json set(int){return mouseModeGetState();}json refresh(){return mouseModeGetState();}json state(){return receipt;}
+struct PolicyScheduleBoundary {json receipt=json::object();int current(){return 0;}json set(int){return mouseModeGetState();}json refresh(const std::function<bool()>& valid={}){if(valid&&!valid())return mouseModeRequestExpired();return mouseModeGetState();}json state(){return receipt;}
 json acceptBackendReadback(json observed){++readbackAdmissions;
  for(const auto* key:{"mode","scene","policyReason","requestedOn","pending","sequence","observedAt","foregroundPid","foregroundCreated","foregroundWindow"})if(receipt.contains(key))observed[key]=receipt[key];
  if(receipt.contains("ok")&&!receipt.value("ok",true)){observed["ok"]=false;for(const auto* key:{"error","reason"})if(receipt.contains(key))observed[key]=receipt[key];}return observed;
@@ -132,7 +141,7 @@ int main(){try{
  reset();switchToSdOnStart=joyStopFails=true;state=mouseModeApplyState(true);need(!state.value("ok",true)&&state.value("on",false)&&state.value("reason",std::string{})=="steamdeck_cleanup_failed","failed-sd-withdrawal-remains-visible");
  reset();state=handlers.at("mouseMode.set")(json{{"on","yes"}});need(!state.value("ok",true)&&writes==0,"invalid-explicit-state-rejected");
  reset();state=mouseModeApplyState(true,std::string{},[]{return false;});need(!state.value("ok",true)&&joyStarts==0,"changed-foreground-prevents-enable");
- reset();int observations=0;state=mouseModeApplyState(true,std::string{},[&]{return ++observations<2;});need(!state.value("ok",true)&&!joyRunning&&joyStops==1,"changed-foreground-withdraws-late-enable");
+ reset();state=mouseModeApplyState(true,std::string{},[]{return !joyRunning;});need(!state.value("ok",true)&&!joyRunning&&joyStops==1,"changed-foreground-withdraws-late-enable");
  reset();g_mousePolicy.receipt={{"ok",false},{"error","owned-stop-failed"},{"mode","auto"},{"scene","ymcc"}};state=mousePolicyGet();need(!state.value("ok",true)&&state.value("error",std::string{})=="owned-stop-failed","refresh-preserves-policy-failure");
  reset();state=mouseModeSetBackend("bad");need(!state.value("ok",true)&&writes==0&&saves==0,"invalid-provider-rejected");
  reset();joyRunning=true;state=mouseModeSetBackend("steam");need(!state.value("ok",true)&&state.value("reason",std::string{})=="steam-desktop-mouse-retired"&&g_mouseBackend=="joyxoff"&&joyRunning&&reads==0&&writes==0&&saves==0,"retired-steam-backend-cannot-touch-working-provider");

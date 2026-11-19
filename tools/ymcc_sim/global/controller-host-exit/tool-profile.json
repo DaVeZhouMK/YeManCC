@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "kind": "controller-host-exit-tool-profile",
+  "nativeAuthoritySha256": "aa9cfbf1174bcfa747e7bf655f90d62083e22ef311337e5895a4b0ed5c6fe2c3",
+  "supplementSha256": "beed8537551b8d1155e4230976540baf1c6943327adc2450a194eb84f32a1b06",
+  "pythonChanges": {
+    "DLLs/_bz2.pyd": "0a3fde0a080a517eda131e07d66d0408b3ea836a50c79bff69a555ecebae5e10",
+    "DLLs/_hashlib.pyd": "0e75e25857d30903f4d50435ce48e6dd923dbc0ea7813e86e82ed7a2c38c683c",
+    "DLLs/_lzma.pyd": "5b45aafc29c975f855f47502996856e3e3dd4aec992ed7d737aa4d39efb22d06",
+    "python.exe": "1da8f2782fd63cdfca8b0da1a46778f48c28aa9eda3ddcd852957ec60813157b",
+    "python3.dll": "0f7c61c1be605f78f90b6b544d7dc6387916b338d13eb7f72fbe981d0dc6a7ec",
+    "python312.dll": "5a2191a79850eda0a57693b13a1e8b2e1ee11e20f7234b4f8538a2ff0f55a290"
+  },
+  "pythonAdditional": {
+    "DLLs/_uuid.pyd": "2f1e87e0496a7047d6ccd887c257429b0023916df2aa99d57459daa8b42fb138",
+    "DLLs/libcrypto-3-x64.dll": "8d5a1636754a9529030166f34480f74f5347ba9a57d39d2f4420493140e25b14",
+    "Lib/uuid.py": "fe357bff7241e9fd6f86ee81567fd20aeec2e17460428ea9b7924bebf57301fc"
+  },
+  "checkedLibraries": [
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcmtd.lib",
+      "sha256": "7d1880ae41c16fe1b4adb5a5918885d616641c4c4963b4ee742392b2a63a0049"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcpmtd.lib",
+      "sha256": "73754a696e50c5594032b60bb7f164134f41aa8ddb575f6e528bf8c66ed2e743"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libvcruntimed.lib",
+      "sha256": "3a9bb38e1577ccb87e8a7f9038195a2b56fd6cfc1e7dd3adedf3e791eaaebbc0"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\libucrtd.lib",
+      "sha256": "97eed5a1d36490ab8671bd0f9b7de722ef0ce4362667c1524c34934b834c8ed6"
+    }
+  ]
+}

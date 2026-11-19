@@ -1,4 +1,6 @@
 #include <condition_variable>
+#include <chrono>
+#include <deque>
 #include <thread>
 #include <functional>
 #include <atomic>
@@ -13,6 +15,9 @@
 #include <system_error>
 #include <vector>
 #include "json.hpp"
+#include "startup_resume_delivery.h"
+#include "sleep_recovery_record_name.h"
+#include "sleep_power_observation.h"
 using json=nlohmann::json;using DWORD=unsigned long;using ULONGLONG=unsigned long long;using HANDLE=unsigned long;using LONG=long;
 constexpr bool FALSE=false;constexpr DWORD PROCESS_SUSPEND_RESUME=1,PROCESS_QUERY_LIMITED_INFORMATION=2,STILL_ACTIVE=259,ERROR_ACCESS_DENIED=5,ERROR_INVALID_PARAMETER=87;
 const std::wstring SG_SLEEP_LEASE_DIR=L"memory\\sleep",SG_MANUAL_DIR=L"memory\\manual";
@@ -54,13 +59,75 @@ void Sleep(DWORD ms){++memoryWaits;op("memory-wait",{{"ms",ms}});}
 std::string sgReadFile(const std::wstring& p){auto i=files.find(p);const bool ok=i!=files.end()&&!readDenied.count(p);op("memory-legacy-file-read",{{"path",narrow(p)},{"opened",ok},{"partialFailure",readFailsPartway.count(p)>0}});return !ok?std::string{}:readFailsPartway.count(p)?i->second.substr(0,7):i->second;}
 template<class...T>void traceLog(const char*,T...){}
 void sgRecordFact(const char* name,const json& facts=json::object()){op(name,facts);}
-void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG,ULONGLONG){++focusCalls;}
-static SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool=true);
+void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&){++focusCalls;}
+namespace ymcc::sleepLegacyResume {
+struct Paths {std::wstring dir;DWORD pid;};
+static Paths paths(const std::wstring& dir,DWORD pid){return {dir,pid};}
+enum class Result { None,Cleaned,Pending };
+struct ResumeLease {
+ Result result=Result::Pending;ULONGLONG completedBirth=0;
+ template<class Current> bool current(const Current& check)const{return result==Result::None&&check();}
+};
+}
+namespace ymcc::sleepStartupResume {
+using Records=std::optional<std::string>;
+using Inventory=std::map<DWORD,Records>;
+enum class Match { Matching,Changed };
+static Records readRecordVersions(const sleepLegacyResume::Paths& p){const auto it=files.find(key(p.dir,p.pid));return it==files.end()?Records{}:it->second;}
+static Match compareRecordVersions(const Records& old,const Records& now){return old==now?Match::Matching:Match::Changed;}
+static bool collect(const std::wstring& dir,Inventory& out,DWORD self){
+ try {for(auto& entry:fspath::directory_iterator(dir)){const auto pid=sleepRecoveryRecords::pidForName(entry.path().filename().wstring());if(pid&&pid!=self)out.emplace(pid,readRecordVersions({dir,pid}));}return true;}
+ catch(...){return false;}
+}
+static bool settled(const std::wstring& dir,const Inventory& scope){for(const auto& [pid,original]:scope){if(original&&original==readRecordVersions({dir,pid}))return false;}return true;}
+}
+template<class Current> static ymcc::sleepLegacyResume::ResumeLease sgAcquireResumeFiles(
+ const std::wstring& dir,DWORD pid,const Current& current,ULONGLONG=0,
+ const std::function<bool(const ymcc::sleepLegacyResume::Paths&)>& local={}){
+ const auto& peer=dir==SG_MANUAL_DIR?SG_SLEEP_LEASE_DIR:SG_MANUAL_DIR;
+ if(!current()||existsErrors.count(dir)||existsErrors.count(peer)||files.count(key(peer,pid))||(local&&!local({dir,pid})))return {};
+ return {ymcc::sleepLegacyResume::Result::None,0};
+}
+template<class Current> static ymcc::sleepLegacyResume::ResumeLease sgAcquirePauseFiles(
+ const std::wstring& dir,DWORD pid,const Current& current){return sgAcquireResumeFiles(dir,pid,current);}
+enum class SgDirectoryResumePurpose { Ordinary,ExitCleanup };
+static SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool=true,json* = nullptr,
+ const std::function<bool()>& = {},const ymcc::sleepStartupResume::Inventory* = nullptr,SgDirectoryResumePurpose = SgDirectoryResumePurpose::Ordinary);
+static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose = SgDirectoryResumePurpose::Ordinary);
+static bool sgReleaseConflictingPauseLeaseUnlocked(DWORD,const std::function<bool()>& = {});
+namespace WakeGameResume {
+struct ThreadState {bool known;unsigned total;bool running;bool allRunning()const{return known&&total&&running;}};
+static ThreadState queryThreads(DWORD pid){const auto it=procs.find(pid);const bool alive=it!=procs.end()&&it->second.alive;return {alive,alive?1u:0u,alive&&it->second.depth==0};}
+}
+namespace Shared=ymcc::sleeppower;
+using Power=Shared::SharedPowerV1;
+static std::optional<Power> memoryPower;
+static std::atomic<bool> g_exitRequested{false},g_startupResumeEnabled{true};
+enum class PowerLifecycle { Ready,Resuming };
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static ULONGLONG currentPowerGeneration(){return memoryPower?memoryPower->generation:0;}
+static bool sgSleepRetryActive(){return false;}
+static int readMemoryPower(Power* output,std::uint32_t size)noexcept{if(!output||size!=sizeof(Power)||!memoryPower)return 0;*output=*memoryPower;return 1;}
+static int __cdecl readSharedSystemPower(Power* output,std::uint32_t size)noexcept{return readMemoryPower(output,size);}
+static bool captureSharedPowerLifecycle(Power& output)noexcept{return Shared::capturePower(&readMemoryPower,output);}
+static bool sharedPowerLifecycleCurrent(const Power& captured)noexcept{return Shared::powerCurrent(&readMemoryPower,captured);}
+struct MemoryPowerCancellation{Power captured;bool admitted;bool event()const{return admitted;}bool cancelled()const{return !sharedPowerLifecycleCurrent(captured);}};
+static MemoryPowerCancellation observeSharedPowerRevocation(const Power& captured){return {captured,sharedPowerLifecycleCurrent(captured)};}
+struct SgWorkItem{unsigned long long generation=0;};
+static std::mutex g_sgWorkMx;
+static std::condition_variable g_sgWorkCv;
+static std::deque<SgWorkItem> g_sgWorkQ;
+static bool g_sgWorkStop=false;
+static unsigned long long g_sgWorkWakeRevision=0;
+static std::atomic<bool> g_sgEntryHandoffPending{false},g_sgWakeRecoveryPending{false},g_sleepRecoveryAutoPending{false};
+static ULONGLONG GetTickCount64(){return 1000;}
+static ULONGLONG sgWakeGameRecoveryWaitMs(ULONGLONG){return ~ULONGLONG{0};}
+static ULONGLONG sleepRecoveryAutoWaitMs(ULONGLONG){return ~ULONGLONG{0};}
+static bool sgRetainedWorkDeliveryPendingLocked(){return false;}
+static bool sgTakeWorkDeliveryLocked(SgWorkItem&){return false;}
 std::mutex g_sgOpMtx;
-constexpr DWORD INFINITE=0xffffffffu;
 std::atomic<bool> g_sgCleanupDone{false};std::atomic<bool> g_sgInSuspend{false};
-int sessionCleanMarks=0,wakeCancelCalls=0;std::vector<json> ownedJoinReceipts;
-bool joinThreadBoundedForExit(std::thread& thread,DWORD timeout,const char* reason){const bool joinable=thread.joinable();if(joinable)thread.join();ownedJoinReceipts.push_back({{"joined",joinable},{"timeout",timeout},{"reason",reason}});return true;}
+int sessionCleanMarks=0,wakeCancelCalls=0;
 void sgCancelWakeGameRecoveryUnlocked(const char* reason){++wakeCancelCalls;op("memory-cancel-wake-recovery",{{"reason",reason}});}
 bool sessionMarkerMarkClean(){++sessionCleanMarks;op("memory-mark-session-clean");return true;}
 static bool sgReadSleepTarget(SgSleepTarget&);
@@ -68,9 +135,25 @@ static bool sgSleepLeaseOwnedByGeneration(unsigned long long);
 static void sgClearSleepTargetIfMatches(const SgSleepTarget&);
 // EXACT_STARTUP_EXIT_CONSTANTS
 // EXACT_STARTUP_EXIT_FUNCTIONS
+static std::vector<json> workerJoinReceipts;
+static void collectStartup(){std::lock_guard<std::mutex> op(g_sgOpMtx);sgCollectStartupResumeScopeUnlocked();}
+static void publishPower(ULONGLONG generation,ULONGLONG revision,bool admitted=true){
+ Power power;power.generation=generation;power.suspendSerial=generation;power.publicationRevision=revision;
+ power.observedNotificationSequence=revision;power.flags=Shared::kKnown|(admitted?Shared::kHardwareAllowed:Shared::kNotificationPending);
+ memoryPower=power;sgOfferStartupResume(power);
+}
+static size_t startupFacts(const char* kind){return std::count_if(operations.begin(),operations.end(),[&](const auto& fact){return fact.value("kind",std::string{})==kind;});}
+static bool runStartupWork(bool* duplicateHeld=nullptr){
+ if(!g_startupResumeDelivery.runnable())return false;
+ bool took=false;
+ std::thread worker([&]{SgWorkItem item;std::optional<Power> power;if(!sgWaitForWork(item,power)||!power)return;took=true;
+  if(duplicateHeld){sgRequestStartupResume();sgOfferStartupResume(*power);*duplicateHeld=!g_startupResumeDelivery.runnable();}
+  sgServiceStartupResume(*power);
+ });worker.join();workerJoinReceipts.push_back({{"waitDelivered",took},{"joined",!worker.joinable()}});return took&&!worker.joinable();
+}
 int groups=0,failedGroups=0;
-void record(const char* label,json expected,json actual,bool passed){++groups;if(!passed)++failedGroups;std::cout<<json({{"case",label},{"passed",passed},{"expected",expected},{"actual",actual},{"resumeReceipts",resumeReceipts},{"trace",operations},{"ownedJoinReceipts",ownedJoinReceipts}}).dump()<<std::endl;}
-void reset(){if(g_startupResumeThread.joinable())joinStartupResumeThread();readDenied.clear();readFailsPartway.clear();existsErrors.clear();iteratorErrors.clear();typeQueryErrors.clear();iteratorIncrementErrors.clear();existsErrorValue=false;readHandles.clear();nextFileHandle=200000;files.clear();directories.clear();nonRegular.clear();procs.clear();procs[100]={};procs[101]={5678,1,true,true,true,false,2};handles.clear();nextHandle=10000;operations.clear();resumeReceipts.clear();ntAttempts=ntSuccesses=openCalls=identityCalls=focusCalls=memoryWaits=0;birthRaceOnOpen=false;currentSessionKnown=true;identityAvailability.clear();fnNtResume=countedNtResume;memoryLastError=0;g_sgSleepTarget={};g_manualPausedPid=0;g_sgCleanupDone=false;g_sgInSuspend=false;sessionCleanMarks=wakeCancelCalls=0;ownedJoinReceipts.clear();}
+void record(const char* label,json expected,json actual,bool passed){++groups;if(!passed)++failedGroups;std::cout<<json({{"case",label},{"passed",passed},{"expected",expected},{"actual",actual},{"resumeReceipts",resumeReceipts},{"trace",operations},{"workerJoinReceipts",workerJoinReceipts}}).dump()<<std::endl;}
+void reset(){g_startupResumeDelivery={};g_startupResumeScope={};memoryPower.reset();g_sgWorkStop=false;g_exitRequested=false;readDenied.clear();readFailsPartway.clear();existsErrors.clear();iteratorErrors.clear();typeQueryErrors.clear();iteratorIncrementErrors.clear();existsErrorValue=false;readHandles.clear();nextFileHandle=200000;files.clear();directories.clear();nonRegular.clear();procs.clear();procs[100]={};procs[101]={5678,1,true,true,true,false,2};handles.clear();nextHandle=10000;operations.clear();resumeReceipts.clear();ntAttempts=ntSuccesses=openCalls=identityCalls=focusCalls=memoryWaits=0;birthRaceOnOpen=false;currentSessionKnown=true;identityAvailability.clear();fnNtResume=countedNtResume;memoryLastError=0;g_sgSleepTarget={};g_manualPausedPid=0;g_sgCleanupDone=false;g_sgInSuspend=false;sessionCleanMarks=wakeCancelCalls=0;workerJoinReceipts.clear();}
 void seed(const std::wstring& dir=SG_SLEEP_LEASE_DIR,DWORD pid=100,ULONGLONG birth=1234,bool suspended=true){directories.insert(dir);files[key(dir,pid)]="pid="+std::to_string(pid)+"|created="+std::to_string(birth)+"|state="+(suspended?"suspended":"pending")+"|generation=7";}
 json snapshot(){return{{"cleanupDone",g_sgCleanupDone.load()},{"sessionCleanMarks",sessionCleanMarks},{"cancelCalls",wakeCancelCalls},{"inSuspend",g_sgInSuspend.load()},{"ntAttempts",ntAttempts},{"ntSuccesses",ntSuccesses},{"filesRemaining",files.size()}};}
 int main(){
@@ -79,10 +162,10 @@ int main(){
  reset();g_sgSleepTarget={100,1234,11,7,true,true};{const bool matching=sgSleepLeaseOwnedByGeneration(7),wrong=sgSleepLeaseOwnedByGeneration(8);g_sgSleepTarget.markerOwned=false;const bool unowned=sgSleepLeaseOwnedByGeneration(7);g_sgSleepTarget={100,1234,11,0,true,true};const bool zero=sgSleepLeaseOwnedByGeneration(0);record("generation-owner-requires-nonzero-captured-owned-generation",{{"matching",true},{"wrong",false},{"unowned",false},{"zero",false}},{{"matching",matching},{"wrong",wrong},{"unowned",unowned},{"zero",zero}},matching&&!wrong&&!unowned&&!zero);}
  reset();g_sgSleepTarget={100,1234,11,7,true,true};{sgClearSleepTargetIfMatches({101,1234,11,7,true,true});const bool pidKept=g_sgSleepTarget.captured;sgClearSleepTargetIfMatches({100,5678,11,7,true,true});const bool birthKept=g_sgSleepTarget.captured;sgClearSleepTargetIfMatches({100,1234,11,6,true,true});const bool generationKept=g_sgSleepTarget.captured;sgClearSleepTargetIfMatches({100,1234,11,7,true,true});record("compare-clear-cannot-erase-newer-pid-birth-or-generation",{{"pidKept",true},{"birthKept",true},{"generationKept",true},{"exactCleared",true}},{{"pidKept",pidKept},{"birthKept",birthKept},{"generationKept",generationKept},{"exactCleared",!g_sgSleepTarget.captured}},pidKept&&birthKept&&generationKept&&!g_sgSleepTarget.captured&&g_sgSleepTarget.pid==0);}
  reset();seed();seed(SG_MANUAL_DIR,101,5678);{const auto r=sgResumeAll(true);record("sleep-only-wrapper-cannot-consume-manual-lease",{{"resumed",1},{"manualRetained",true},{"manualDepth",2}},{{"resumed",r.count},{"pids",r.pids},{"manualRetained",files.count(key(SG_MANUAL_DIR,101))>0},{"manualDepth",procs[101].depth}},r.count==1&&r.pids==std::vector<DWORD>{100}&&files.count(key(SG_MANUAL_DIR,101))&&procs[101].depth==2&&ntSuccesses==1);}
- reset();seed();seed(SG_MANUAL_DIR,101,5678);{const auto r=sgResumeTrackedAll();record("tracked-wrapper-actually-resumes-distinct-sleep-and-manual-leases",{{"resumed",2},{"ntSuccesses",3},{"filesRemaining",0}},{{"resumed",r.count},{"pids",r.pids},{"ntSuccesses",ntSuccesses},{"filesRemaining",files.size()}},r.count==2&&r.pids==std::vector<DWORD>({100,101})&&ntSuccesses==3&&files.empty());}
- reset();seed(SG_MANUAL_DIR);{startStartupResumeThread();joinStartupResumeThread(7);const auto starts=std::count_if(operations.begin(),operations.end(),[](const auto& x){return x.value("kind",std::string{})=="sleep-orphan-recovery-start";}),ends=std::count_if(operations.begin(),operations.end(),[](const auto& x){return x.value("kind",std::string{})=="sleep-orphan-recovery-complete";});record("actual-startup-owned-thread-runs-consumer-and-joins",{{"starts",1},{"ends",1},{"resumed",1},{"joined",true},{"timeoutForwarded",7}},{{"starts",starts},{"ends",ends},{"resumed",ntSuccesses},{"joined",!g_startupResumeThread.joinable()},{"timeoutForwarded",ownedJoinReceipts.back().at("timeout")}},starts==1&&ends==1&&ntSuccesses==1&&!g_startupResumeThread.joinable()&&ownedJoinReceipts.back().at("timeout")==7);}
- reset();seed(SG_MANUAL_DIR);{startStartupResumeThread();startStartupResumeThread();joinStartupResumeThread();const auto joined=std::count_if(ownedJoinReceipts.begin(),ownedJoinReceipts.end(),[](const auto& x){return x.at("joined")==true;}),starts=std::count_if(operations.begin(),operations.end(),[](const auto& x){return x.value("kind",std::string{})=="sleep-orphan-recovery-start";});record("second-startup-launch-joins-predecessor-before-thread-replacement",{{"starts",2},{"joinedThreads",2},{"ntSuccesses",1}},{{"starts",starts},{"joinedThreads",joined},{"ntSuccesses",ntSuccesses}},starts==2&&joined==2&&ntSuccesses==1&&!g_startupResumeThread.joinable());}
- reset();seed(SG_MANUAL_DIR);procs[100].queryKnown=false;{startStartupResumeThread();joinStartupResumeThread();const bool kept=files.count(key(SG_MANUAL_DIR));const int first=ntSuccesses;procs[100].queryKnown=true;startStartupResumeThread();joinStartupResumeThread();record("startup-unknown-owner-retains-marker-then-owned-thread-retry-resumes",{{"firstResumed",0},{"markerKept",true},{"secondResumed",1}},{{"firstResumed",first},{"markerKept",kept},{"secondResumed",ntSuccesses}},first==0&&kept&&ntSuccesses==1&&!files.count(key(SG_MANUAL_DIR))&&!g_startupResumeThread.joinable());}
+ reset();seed();seed(SG_MANUAL_DIR,101,5678);{const auto r=sgResumeTrackedAllUnlocked();record("tracked-wrapper-actually-resumes-distinct-sleep-and-manual-leases",{{"resumed",2},{"ntSuccesses",3},{"filesRemaining",0}},{{"resumed",r.count},{"pids",r.pids},{"ntSuccesses",ntSuccesses},{"filesRemaining",files.size()}},r.count==2&&r.pids==std::vector<DWORD>({100,101})&&ntSuccesses==3&&files.empty());}
+ reset();seed(SG_MANUAL_DIR);{collectStartup();sgRequestStartupResume();publishPower(7,1,false);const bool pending=!g_startupResumeDelivery.runnable()&&ntSuccesses==0;publishPower(7,2);const bool joined=runStartupWork();const auto ends=startupFacts("sleep-orphan-recovery-complete");record("actual-startup-waits-for-public-ready-and-joins",{{"pendingWithoutReady",true},{"ends",1},{"resumed",1},{"joined",true}},{{"pendingWithoutReady",pending},{"ends",ends},{"resumed",ntSuccesses},{"joined",joined}},pending&&ends==1&&ntSuccesses==1&&joined);}
+ reset();seed(SG_MANUAL_DIR);{collectStartup();publishPower(7,1);sgRequestStartupResume();bool activeDuplicateHeld=false;const bool joined=runStartupWork(&activeDuplicateHeld);publishPower(8,2);sgRequestStartupResume();const bool settledNoRestart=!g_startupResumeDelivery.runnable();record("second-startup-request-cannot-replace-active-or-reopen-settled-work",{{"activeDuplicateHeld",true},{"settledNoRestart",true},{"joined",true},{"ntSuccesses",1}},{{"activeDuplicateHeld",activeDuplicateHeld},{"settledNoRestart",settledNoRestart},{"joined",joined},{"ntSuccesses",ntSuccesses}},activeDuplicateHeld&&settledNoRestart&&joined&&ntSuccesses==1);}
+ reset();seed(SG_MANUAL_DIR);procs[100].queryKnown=false;{collectStartup();publishPower(7,1);sgRequestStartupResume();const bool firstJoined=runStartupWork();const bool kept=files.count(key(SG_MANUAL_DIR));const int first=ntSuccesses;procs[100].queryKnown=true;publishPower(7,1);const bool sameReadyIgnored=!g_startupResumeDelivery.runnable();publishPower(8,2);const bool secondJoined=runStartupWork();record("startup-unknown-owner-retains-marker-until-new-public-ready",{{"firstResumed",0},{"markerKept",true},{"sameReadyIgnored",true},{"secondResumed",1}},{{"firstResumed",first},{"markerKept",kept},{"sameReadyIgnored",sameReadyIgnored},{"secondResumed",ntSuccesses}},firstJoined&&secondJoined&&first==0&&kept&&sameReadyIgnored&&ntSuccesses==1&&!files.count(key(SG_MANUAL_DIR)));}
  reset();{const bool missing=sgHasMarkerFiles(SG_MANUAL_DIR);seed(SG_MANUAL_DIR);nonRegular.insert(key(SG_MANUAL_DIR));const bool onlyNonregular=sgHasMarkerFiles(SG_MANUAL_DIR);nonRegular.clear();const bool regular=sgHasMarkerFiles(SG_MANUAL_DIR);record("marker-scan-distinguishes-known-missing-nonregular-and-regular",{{"missing",false},{"nonregular",false},{"regular",true}},{{"missing",missing},{"nonregular",onlyNonregular},{"regular",regular}},!missing&&!onlyNonregular&&regular);}
  reset();g_sgInSuspend=true;{const bool first=sgCleanupBeforeExit(false),second=sgCleanupBeforeExit(false);record("empty-cleanup-confirms-clean-once-and-is-idempotent",{{"first",true},{"second",true},{"cleanMarks",1},{"cancels",1},{"inSuspend",false}},{{"first",first},{"second",second},{"cleanMarks",sessionCleanMarks},{"cancels",wakeCancelCalls},{"inSuspend",g_sgInSuspend.load()}},first&&second&&sessionCleanMarks==1&&wakeCancelCalls==1&&!g_sgInSuspend.load()&&g_sgCleanupDone);}
  reset();seed(SG_MANUAL_DIR);g_sgInSuspend=true;{const bool done=sgCleanupBeforeExit(false);record("cleanup-resumes-manual-marker-before-marking-session-clean",{{"done",true},{"cleanMarks",1},{"ntSuccesses",1},{"filesRemaining",0}},{{"done",done},{"state",snapshot()}},done&&sessionCleanMarks==1&&ntSuccesses==1&&files.empty()&&!g_sgInSuspend.load());}
@@ -101,6 +184,5 @@ int main(){
  reset();seed(SG_SLEEP_LEASE_DIR);files[SG_SLEEP_LEASE_DIR+L"\\000-subdir"]="nonregular";nonRegular.insert(SG_SLEEP_LEASE_DIR+L"\\000-subdir");iteratorIncrementErrors.insert(SG_SLEEP_LEASE_DIR);{bool first=false,raised=false;try{first=sgCleanupBeforeExit(false);}catch(const std::system_error&){raised=true;}const bool kept=files.count(key(SG_SLEEP_LEASE_DIR)),pending=!g_sgCleanupDone;const int firstMarks=sessionCleanMarks;iteratorIncrementErrors.clear();const bool second=sgCleanupBeforeExit(false);record("cleanup-sleep-increment-query-exception-cannot-confirm-clean",{{"first",false},{"raised",false},{"kept",true},{"pending",true},{"firstMarks",0},{"second",true},{"finalMarks",1},{"actualRetryResumed",1}},{{"first",first},{"raised",raised},{"kept",kept},{"pending",pending},{"firstMarks",firstMarks},{"second",second},{"finalMarks",sessionCleanMarks},{"actualRetryResumed",ntSuccesses},{"state",snapshot()}},!first&&!raised&&kept&&pending&&firstMarks==0&&second&&sessionCleanMarks==1&&ntSuccesses==1&&!files.count(key(SG_SLEEP_LEASE_DIR)));}
  reset();seed(SG_MANUAL_DIR);typeQueryErrors.insert(key(SG_MANUAL_DIR));{bool first=false,raised=false;try{first=sgCleanupBeforeExit(false);}catch(const std::system_error&){raised=true;}const bool kept=files.count(key(SG_MANUAL_DIR)),pending=!g_sgCleanupDone;const int firstMarks=sessionCleanMarks;typeQueryErrors.clear();const bool second=sgCleanupBeforeExit(false);record("cleanup-manual-type-query-exception-cannot-confirm-clean",{{"first",false},{"raised",false},{"kept",true},{"pending",true},{"firstMarks",0},{"second",true},{"finalMarks",1},{"actualRetryResumed",1}},{{"first",first},{"raised",raised},{"kept",kept},{"pending",pending},{"firstMarks",firstMarks},{"second",second},{"finalMarks",sessionCleanMarks},{"actualRetryResumed",ntSuccesses},{"state",snapshot()}},!first&&!raised&&kept&&pending&&firstMarks==0&&second&&sessionCleanMarks==1&&ntSuccesses==1&&!files.count(key(SG_MANUAL_DIR)));}
  reset();seed(SG_MANUAL_DIR);files[SG_MANUAL_DIR+L"\\000-subdir"]="nonregular";nonRegular.insert(SG_MANUAL_DIR+L"\\000-subdir");iteratorIncrementErrors.insert(SG_MANUAL_DIR);{bool first=false,raised=false;try{first=sgCleanupBeforeExit(false);}catch(const std::system_error&){raised=true;}const bool kept=files.count(key(SG_MANUAL_DIR)),pending=!g_sgCleanupDone;const int firstMarks=sessionCleanMarks;iteratorIncrementErrors.clear();const bool second=sgCleanupBeforeExit(false);record("cleanup-manual-increment-query-exception-cannot-confirm-clean",{{"first",false},{"raised",false},{"kept",true},{"pending",true},{"firstMarks",0},{"second",true},{"finalMarks",1},{"actualRetryResumed",1}},{{"first",first},{"raised",raised},{"kept",kept},{"pending",pending},{"firstMarks",firstMarks},{"second",second},{"finalMarks",sessionCleanMarks},{"actualRetryResumed",ntSuccesses},{"state",snapshot()}},!first&&!raised&&kept&&pending&&firstMarks==0&&second&&sessionCleanMarks==1&&ntSuccesses==1&&!files.count(key(SG_MANUAL_DIR)));}
- if(g_startupResumeThread.joinable())joinStartupResumeThread();
- std::cout<<json({{"terminal","native startup and exit cleanup ownership"},{"groups",groups},{"failedGroups",failedGroups},{"status",failedGroups?"FAIL":"PASS"},{"realFileOps",false},{"realResume",false},{"onlyOwnedFixtureThreads",true},{"genericExitJoinPortIsMemory",true}}).dump()<<std::endl;return failedGroups?23:0;
+ std::cout<<json({{"terminal","native startup and exit cleanup ownership"},{"groups",groups},{"failedGroups",failedGroups},{"status",failedGroups?"FAIL":"PASS"},{"realFileOps",false},{"realResume",false},{"onlyOwnedFixtureThreads",true},{"startupWaitAndScopeConsumptionActual",true}}).dump()<<std::endl;return failedGroups?23:0;
 }

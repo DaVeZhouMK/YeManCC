@@ -14,10 +14,21 @@ param(
   [string]$CustomSteamLibrarySource = '',
   [switch]$TestExport,
   [switch]$FullAcceptance,
-  [switch]$FastRelease
+  [switch]$FastRelease,
+  [string]$ProductRoot='',
+  [string]$SteamGuardSuccessorReceipt=''
 )
 
 $ErrorActionPreference = 'Stop'
+$packageImplementationTools=$PSScriptRoot
+$packageProductTools=$PSScriptRoot
+if($ProductRoot -or $SteamGuardSuccessorReceipt){
+  if(-not $ProductRoot -or -not $SteamGuardSuccessorReceipt -or $FullAcceptance -or $FastRelease){throw 'EXPORT_GUARD_SUCCESSOR_ORDINARY_EXPLICIT_SCOPE_REQUIRED'}
+  . (Join-Path $packageImplementationTools 'export-steam-guard-successor.ps1')
+  if(-not $WorkspaceRoot){$WorkspaceRoot=[IO.Path]::GetFullPath((Join-Path $ProductRoot '../..'))}
+  $null=New-YmccSteamGuardSuccessorContext $SteamGuardSuccessorReceipt $ProductRoot $WorkspaceRoot
+  $packageProductTools=Join-Path (Get-YmccGuardFullPath $ProductRoot) 'tools'
+}
 # Export execution mode: ordinary export never implicitly runs fixtures.
 if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
 if ($FastRelease -and ($FullAcceptance -or $TestExport)) { throw 'FastRelease is separate from TestExport and FullAcceptance.' }
@@ -25,13 +36,13 @@ $TestExport = -not [bool]$FullAcceptance
 $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
 $fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
 # End export execution mode.
-. (Join-Path $PSScriptRoot '..\native\decky_package_maintenance.ps1')
-. (Join-Path $PSScriptRoot '..\native\module_package_maintenance.ps1')
-. (Join-Path $PSScriptRoot 'module_payload_packaging.ps1')
-. (Join-Path $PSScriptRoot 'settings-baseline-contract.ps1')
-. (Join-Path $PSScriptRoot 'hc-export-source-contract.ps1')
-. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
-. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
+. (Join-Path $packageProductTools '..\native\decky_package_maintenance.ps1')
+. (Join-Path $packageProductTools '..\native\module_package_maintenance.ps1')
+. (Join-Path $packageProductTools 'module_payload_packaging.ps1')
+. (Join-Path $packageProductTools 'settings-baseline-contract.ps1')
+. (Join-Path $packageProductTools 'hc-export-source-contract.ps1')
+. (Join-Path $packageProductTools 'ymcc-shared-runtime\shared-runtime.ps1')
+. (Join-Path $packageProductTools 'hc-device-runtime\verify-runtime.ps1')
 
 # ---- module-path self-heal ----------------------------------------------------------
 # Same measured remedy as tools/ymcc_sim/lib/sim_core.ps1 (2026-09-22) and
@@ -308,7 +319,7 @@ $hcSlimSharedFallbackHashes = [ordered]@{
 }
 $hcSlimSizeOrderRetainedHashes = [ordered]@{
   'Microsoft.Windows.SDK.NET.dll' = 'C37D2E6B66889551D7DE218AA726E90DE6E6DD5B794069485F3B23524028E102'
-  'HandheldCompanion.dll' = '08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583'
+  'HandheldCompanion.dll' = '4CD3DEA283E26DB52E10F36E3DE74B2514972D6B5E4E99E1EF952A0A277AA13C'
   'iNKORE.UI.WPF.Modern.dll' = '12BC0A3E060D57B24FCFB2C9C17660929EC903EB993D943051A8A849C83BD331'
 
 }
@@ -504,14 +515,14 @@ function Move-ExistingReleaseItem([string]$Path, [string]$BackupRoot) {
   Move-Item -LiteralPath $Path -Destination (Join-Path $BackupRoot $item.Name)
 }
 
-$ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
+$ProjectRoot = Get-FullPath (Split-Path -Parent $packageProductTools)
 $settingsBaselineContract = Read-YmccSettingsBaselineContract -ProjectRoot $ProjectRoot
 # Reject unreviewed HC expansion/source drift before any packaging build or copy.
 $hcReferenceSource = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $ProjectRoot 'PowerControl\handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1')
-. (Join-Path $PSScriptRoot 'monitor-hud-export.ps1')
+. (Join-Path $packageProductTools 'monitor-hud-export.ps1')
 # Read-only V2 path/payload preflight before staging/Release rotation.
-& (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
-& (Join-Path $PSScriptRoot 'verify-source-release-inputs.ps1') -ProjectRoot $ProjectRoot
+& (Join-Path $packageProductTools 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
+& (Join-Path $packageProductTools 'verify-source-release-inputs.ps1') -ProjectRoot $ProjectRoot
 $versionInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $packageInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = [string]$versionInfo.version
@@ -526,7 +537,11 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath $WorkspaceRoot
 }
 
-. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+if($SteamGuardSuccessorReceipt){
+  . (Join-Path $packageImplementationTools 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $SteamGuardSuccessorReceipt -GuardProductRoot $ProjectRoot -GuardWorkspaceRoot $WorkspaceRoot
+}else{
+  . (Join-Path $packageImplementationTools 'release-export-identity.ps1')
+}
 $exportWorkspaceLock = Enter-ExportWorkspaceLock $WorkspaceRoot
 try {
 $BuildRoot = Join-Path $WorkspaceRoot 'Build'
@@ -568,19 +583,19 @@ $preMainBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -Wo
 
 # Capture current compiler inputs in fresh directories, then validate without
 # modifying the declared file/source fingerprints. No legacy lab synchronization.
-. (Join-Path $PSScriptRoot 'custom_steam_library_build_guard.ps1')
+. (Join-Path $packageProductTools 'custom_steam_library_build_guard.ps1')
 Assert-CustomSteamLibraryMainlineIdentity -ProjectRoot $ProjectRoot
 # CSL_PREMAIN_SELECT_BEGIN
 $preMainWorkerReference = $null
 $preMainSelection = Get-CslWorkerForPackage $preMainBuildIdentity $ProjectRoot $WorkspaceRoot
 # CSL_PREMAIN_SELECT_END
-& (Join-Path $PSScriptRoot 'build-custom-steam-library-host.ps1') `
+& (Join-Path $packageProductTools 'build-custom-steam-library-host.ps1') `
   -OutputDirectory (Join-Path $WorkspaceRoot 'Build\CustomSteamLibrary') -Publish
 # CSL_PREMAIN_CONSUME_BEGIN
 if($preMainSelection){
   $preMainWorkerReference = Use-CslWorkerForPackage $preMainSelection $ProjectRoot $WorkspaceRoot
 } else {
-  & (Join-Path $PSScriptRoot 'build-custom-steam-library-worker.ps1') `
+  & (Join-Path $packageProductTools 'build-custom-steam-library-worker.ps1') `
     -OutputDirectory (Join-Path $WorkspaceRoot 'Build\CustomSteamLibrary') -Publish
 }
 # CSL_PREMAIN_CONSUME_END
@@ -629,6 +644,7 @@ $requiredBuild = @(
   (Join-Path $BuildWeb 'assets'),
   (Join-Path $BuildWeb 'app.config.json'),
   (Join-Path $BuildNative 'YeManCC.exe'),
+  (Join-Path $BuildNative 'native-build-identity.json'),
   (Join-Path $BuildNative 'YeManRecoveryService.exe'),
   (Join-Path $BuildNative 'YeManControllerVisibilityProbe.exe'),
   (Join-Path $BuildNative 'YMCCRtssProfileHelper.exe'),
@@ -691,6 +707,7 @@ New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl,
 
 Copy-DirectoryContents $BuildWeb $StagingYeManCC
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManCC.exe') -Destination (Join-Path $StagingYeManCC 'YeManCC.exe') -Force
+Copy-Item -LiteralPath (Join-Path $BuildNative 'native-build-identity.json') -Destination (Join-Path $StagingYeManCC 'native-build-identity.json') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManRecoveryService.exe') -Destination (Join-Path $StagingYeManCC 'YeManRecoveryService.exe') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManControllerVisibilityProbe.exe') -Destination (Join-Path $StagingYeManCC 'YeManControllerVisibilityProbe.exe') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YMCCRtssProfileHelper.exe') -Destination (Join-Path $StagingYeManCC 'YMCCRtssProfileHelper.exe') -Force
@@ -708,24 +725,24 @@ function Assert-FanHostMainlinePayload([string]$payloadRoot) {
   # re-pinned verifier is the single source of truth for the expected hashes;
   # anything that cannot be proven to be the mainline export must fail closed
   # here instead of shipping an ambiguous package (drift prevention).
-  $verifier = Join-Path $PSScriptRoot 'verify-r5v9-fan-host-payload.ps1'
+  $verifier = Join-Path $packageProductTools 'verify-r5v9-fan-host-payload.ps1'
   if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
     throw "Fan Host mainline payload verifier missing: $verifier"
   }
   & $verifier -PayloadRoot $payloadRoot
 }
 # GP-PREREQ-2: build redist setup and pure tests only; never install drivers during packaging.
-& (Join-Path $PSScriptRoot 'build-gamepad-prerequisites.ps1') -ProjectRoot $ProjectRoot
+& (Join-Path $packageProductTools 'build-gamepad-prerequisites.ps1') -ProjectRoot $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw 'Gamepad prerequisites payload build failed.' }
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Assert-HcSlimSourcePolicy $sourcePowerControl
-. (Join-Path $PSScriptRoot 'lighting-build-contract.ps1')
+. (Join-Path $packageProductTools 'lighting-build-contract.ps1')
 Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot (Join-Path $sourcePowerControl 'light-setter') | Out-Null
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
 $hcReferenceStage = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $StagingPowerControl 'handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1')
 $settingsBaselineBinding = Assert-YmccSettingsBaseline -ProjectRoot $ProjectRoot -StagingPowerControl $StagingPowerControl
 Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot (Join-Path $StagingPowerControl 'light-setter') | Out-Null
-. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+. (Join-Path $packageProductTools 'steam-appearance-export.ps1')
 Assert-SteamAppearanceExport $sourcePowerControl $StagingPowerControl | Out-Null
 # Use the plugin captured beside this build, never a cached source dist.
 Copy-DirectoryContents $BuildDecky (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar')
@@ -848,7 +865,7 @@ Copy-Item -LiteralPath $tdpRuntimeManifestPlan.ManifestPath -Destination (Join-P
 # END TDP_RUNTIME_MANIFEST_PACKAGE
 Assert-MonitorHudWebExport $StagingYeManCC $BuildWeb | Out-Null
 Assert-MonitorHudDeckyExport (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar') $BuildDecky | Out-Null
-$requiredProgram = @('YeManCC.exe', 'YeManRecoveryService.exe', 'YeManControllerVisibilityProbe.exe', 'YMCCRtssProfileHelper.exe', 'YMCCOverlayBridge.dll', 'index.html', 'hud-output.html', 'notice-output.html', 'app.config.json', 'version.json', 'YeMan-Support.html', 'update-manifest.json', 'decky-package.json')
+$requiredProgram = @('YeManCC.exe', 'native-build-identity.json', 'YeManRecoveryService.exe', 'YeManControllerVisibilityProbe.exe', 'YMCCRtssProfileHelper.exe', 'YMCCOverlayBridge.dll', 'index.html', 'hud-output.html', 'notice-output.html', 'app.config.json', 'version.json', 'YeMan-Support.html', 'update-manifest.json', 'decky-package.json')
 foreach ($name in $requiredProgram) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingYeManCC $name) -PathType Leaf)) { throw "Release program file is missing: $name" }
 }
@@ -1289,7 +1306,7 @@ try {
 }
 # Verify the shipped ZIP itself, not only the source dist checked above.
 # Locked loader source + compiled plugin -> staging -> ZIP must match all seven assets.
-. (Join-Path $PSScriptRoot 'decky-release-identity.ps1')
+. (Join-Path $packageProductTools 'decky-release-identity.ps1')
 $hcReferenceArchive = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $completeStaging "PowerControl\handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1") -ArchivePath $packagePath
 $deckyExportReceipt = Assert-DeckyExportPayload -ReleaseZip $packagePath -SourcePowerControl $sourcePowerControl -BuiltPluginRoot $BuildDecky -StagedPowerControl (Join-Path $completeStaging 'PowerControl') -RequireManagedManifest
 $deckyReceiptDirectory = Join-Path $BuildRoot 'Validation\DeckyExport'
@@ -1302,7 +1319,7 @@ $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $Wor
 if ($TestExport) {
   Write-Output 'FIXTURE_VALIDATION=NOT_RUN: install/recovery fixtures skipped; complete payload identity and HC checks remain required.'
 } else {
-  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Package -WorkspaceRoot $WorkspaceRoot -CandidatePackage $packagePath
+  & (Join-Path $packageProductTools 'decky_update_release_gate.ps1') -Stage Package -WorkspaceRoot $WorkspaceRoot -CandidatePackage $packagePath
   if($LASTEXITCODE -ne 0){throw ('FULL_RELEASE_PACKAGE_FIXTURE_FAILED exit='+$LASTEXITCODE)}
 }
 # Every source/build/stage/archive check passed; now publish transactionally.
@@ -1400,14 +1417,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Archive lane/identity gate: no legacy path can receive PACKAGE_OK.
-& (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -ReleaseZip $packagePath | Out-Null
+& (Join-Path $packageProductTools 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -ReleaseZip $packagePath | Out-Null
 # Compare the published ZIP directly with a fresh in-memory Decky compilation.
 # The gate also works when auditing an archive copied from a different workspace.
 $deckyCurrentSourceReceipt = Assert-DeckyCurrentSourceExport -ReleaseZip $packagePath -ProjectRoot $ProjectRoot
 $deckyCurrentSourceReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $deckyReceiptDirectory 'CURRENT-SOURCE-ZIP.json') -Encoding UTF8
 # Late edits cannot receive PACKAGE_OK or leave a mixed release.
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
-& (Join-Path $PSScriptRoot 'write-battery-runtime-receipt.ps1') -ReleaseRoot (Split-Path -Parent $ReleaseYeManCC) -BuildId $exportBuildIdentity.buildId
+& (Join-Path $packageProductTools 'write-battery-runtime-receipt.ps1') -ReleaseRoot (Split-Path -Parent $ReleaseYeManCC) -BuildId $exportBuildIdentity.buildId
 Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 Write-Output "Release YeManCC:      $ReleaseYeManCC"
 Write-Output "Release PowerControl: $ReleasePowerControl"
@@ -1419,6 +1436,7 @@ Write-Output "Assets:               $($assetSources.Values -join ', ')"
 # CSL_PREMAIN_VALIDATE_BEGIN
 if($preMainSelection){Assert-CslWorkerPackageReference $preMainSelection $ProjectRoot $WorkspaceRoot}
 # CSL_PREMAIN_VALIDATE_END
+if($exportGuardSuccessorContext){Assert-ExportVerifierSuccessor $ProjectRoot $WorkspaceRoot $exportBuildIdentity.verifierSuccessor -CheckBinding}
 $publishStarted = $true
 Write-Output 'PACKAGE_OK'
 } catch {

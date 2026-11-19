@@ -1,4 +1,4 @@
-import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools,verifyBundledImplementation,classifyBundledInput,bundledArtifacts,verifyBundledNodeReceipt,verifyBundledToolScope} from './bundled-node-tool-authority.mjs';
+import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools,verifyBundledImplementation,classifyBundledInput,bundledArtifacts,verifyBundledNodeReceipt,verifyBundledToolScope,consumeRunnerBundledReceipt} from './bundled-node-tool-authority.mjs';
 import {normalizeCompletionContract,verifyExecutionCompletion} from './execution-completion/index.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,11 +6,25 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { StringDecoder } from 'node:string_decoder';
 
 export const SCHEMA_VERSION = 1;
 const MAX_OUTPUT = 2 * 1024 * 1024;
 // The reviewed InputHost compiler/runtime closure has 572 members; keep a finite bound.
 export const MAX_ARTIFACT_INPUTS = 3072;
+// Only the two registered real monitor runtime roles have a larger combined closure.
+// Receipt rows carry source; adapter declarations carry path. Conflicting aliases reject.
+export function artifactInputLimit(item) {
+  const entries={
+    'lifecycle.monitor-notice-real-webview':'tools/ymcc_sim/global/monitor-notice-lifecycle/real-webview-global.mjs',
+    'lifecycle.monitor-notice-real-renderer':'tools/ymcc_sim/global/monitor-notice-lifecycle/real-renderer-global.mjs',
+  };
+  const entry=entries[item?.id];
+  return entry && item.domain==='lifecycle' && (item.kind===undefined || item.kind==='node') &&
+    (item.path??item.source)===entry && (item.source===undefined || item.source===entry)
+    ? 4096 : MAX_ARTIFACT_INPUTS;
+}
+
 const KINDS = new Set(['node', 'typescript', 'powershell']);
 const SCOPES = new Set(['behavioral-mock', 'source-contract', 'host-mock']);
 const hash = data => crypto.createHash('sha256').update(data).digest('hex');
@@ -33,7 +47,7 @@ export function validateAdapters(adapters, repoRoot) {
     ids.add(item.id);
     if(item.completionContract!==undefined)normalizeCompletionContract(item.completionContract);
     if(item.blockedExitCodes!==undefined && (!Array.isArray(item.blockedExitCodes)||item.blockedExitCodes.length>8||new Set(item.blockedExitCodes).size!==item.blockedExitCodes.length||item.blockedExitCodes.some(code=>!Number.isInteger(code)||code<1||code>255)))throw new Error(`ADAPTER_BLOCKED_EXITS_INVALID:${item.id}`);
-    if(item.artifactInputs!==undefined && (!Array.isArray(item.artifactInputs)||item.artifactInputs.length>MAX_ARTIFACT_INPUTS||item.artifactInputs.some(value=>typeof value!=='string'||!path.isAbsolute(value)||/[\0\r\n]/.test(value))))throw new Error(`ADAPTER_ARTIFACT_INPUTS_INVALID:${item.id}`);
+    if(item.artifactInputs!==undefined && (!Array.isArray(item.artifactInputs)||item.artifactInputs.length>artifactInputLimit(item)||item.artifactInputs.some(value=>typeof value!=='string'||!path.isAbsolute(value)||/[\0\r\n]/.test(value))))throw new Error(`ADAPTER_ARTIFACT_INPUTS_INVALID:${item.id}`);
     if(item.referenceInputs!==undefined && (!Array.isArray(item.referenceInputs)||item.referenceInputs.some(value=>typeof value!=='string')))throw new Error(`ADAPTER_REFERENCE_INPUTS_INVALID:${item.id}`);
     if (!KINDS.has(item.kind) || !SCOPES.has(item.scope) || !Array.isArray(item.profiles) || !Array.isArray(item.evidenceInputs)) throw new Error(`ADAPTER_SCHEMA_INVALID:${item.id}`);
     if (!Number.isInteger(item.timeoutMs) || item.timeoutMs < 100 || item.timeoutMs > 3600000) throw new Error(`ADAPTER_TIMEOUT_INVALID:${item.id}`);
@@ -97,6 +111,7 @@ export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit 
   return new Promise(resolve => {
     const started = Date.now();
     let stdout = '', stderr = '', outputBytes = 0, truncated = false, timedOut = false, launchError = null;
+    const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
     // Only the exact original baseline caller supplies this recorder. Other calls retain no raw buffers.
     const raw = baselineLaunch ? { stdout: [], stderr: [], observed: {stdout:0,stderr:0} } : null;
     if (baselineLaunch) Object.assign(baselineLaunch, {
@@ -106,6 +121,8 @@ export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit 
       outputCaptureLimitBytes: outputLimit,
     });
     const finish = (outcome, terminalObservation, finished) => {
+      outcome.stdout += decoders.stdout.end();
+      outcome.stderr += decoders.stderr.end();
       if (baselineLaunch) {
         Object.assign(baselineLaunch, {
           pid: outcome.pid ?? null, finishedAt: new Date(finished).toISOString(), elapsedMs: outcome.durationMs,
@@ -148,7 +165,7 @@ export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit 
         raw.observed[kind] += data.length;
         if (retained.length) raw[kind].push(Buffer.from(retained));
       }
-      const text = retained.toString('utf8');
+      const text = decoders[kind].write(retained);
       if (kind === 'stdout') stdout += text; else stderr += text;
     };
     child.stdout.on('data', data => append('stdout', data));
@@ -167,7 +184,7 @@ export function runProcess(executable, args, { cwd, env, timeoutMs, outputLimit 
 function cleanEnvironment(env, caseDir, payloadRoot) {
   const result = { ...env, YMCC_SIM_GLOBAL_RUN: '1', YMCC_SIM_EVIDENCE_DIR: caseDir };
   // No legacy fixture switch or payload override may silently change this run.
-  for (const key of Object.keys(result)) if (/^YMCC_AC\d|^YEMAN_SIM_PAYLOAD_ROOT$|^YEMAN_SIM_/i.test(key)) delete result[key];
+  for (const key of Object.keys(result)) if (/^YMCC_AC\d|^YEMAN_SIM_PAYLOAD_ROOT$|^YEMAN_SIM_|^YMCC_SIM_CASE_DEADLINE_EPOCH_MS$/i.test(key)) delete result[key];
   if (payloadRoot) result.YEMAN_SIM_PAYLOAD_ROOT = payloadRoot;
   return result;
 }
@@ -216,11 +233,13 @@ export function checkStructuredEvidence(caseDir, adapter, repoRoot) {
   return { paths, missing: problems.length > 0, missingPaths: problems, failed: paths.some(item => item.failed) };
 }
 export async function executeAdapter(adapter, { repoRoot, runDir, powershell = 'pwsh.exe', payloadRoot, env = process.env, remainingMs } = {}) {
+  const artifactLimit=artifactInputLimit(adapter);
   let baselineLaunch = null;
+  let bundledScopeClosed=false,bundledClosingError=null;
   const caseDir = path.join(runDir, 'cases', adapter.id);
   fs.mkdirSync(caseDir, { recursive: true });
   const result = {
-    id: adapter.id, domain: adapter.domain, title: adapter.title, scope: adapter.scope, status: 'BLOCKED',
+    id: adapter.id, domain: adapter.domain, kind: adapter.kind, title: adapter.title, scope: adapter.scope, status: 'BLOCKED',
     startedAt: new Date().toISOString(), source: adapter.path, evidenceDir: caseDir,
     claims: { physicalHardwareValidated: false, operatingSystemSleepPerformed: false, installedApplicationExercised: false },
   };
@@ -261,7 +280,7 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       verifyBundledImplementation(repoRoot);
       result.bundledToolAuthority = lockBundledNodeTools(repoRoot, {env, limit:MAX_ARTIFACT_INPUTS});
       result.explicitAdapterArtifacts = result.candidateArtifacts ?? [];
-      result.candidateArtifacts = bundledArtifacts(result.bundledToolAuthority, result.explicitAdapterArtifacts, [], MAX_ARTIFACT_INPUTS);
+      result.candidateArtifacts = bundledArtifacts(result.bundledToolAuthority, result.explicitAdapterArtifacts, [], artifactLimit);
       const require = createRequire(path.join(repoRoot, 'package.json'));
       const esbuild = require('esbuild');
       const outfile = path.join(caseDir, 'entry.mjs');
@@ -281,7 +300,7 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       result.toolDependencyInputs = [...loadedTools.values()].sort((a,b) => a.path.localeCompare(b.path));
       result.bundle = { path: outfile, sha256: sha256File(outfile), esbuildVersion: esbuild.version };
       result.bundledOutputs = [outfile, outfile + '.map'].map(file => ({path:file, sha256:sha256File(file), status:'OK'}));
-      result.candidateArtifacts = bundledArtifacts(result.bundledToolAuthority, result.explicitAdapterArtifacts, result.bundledOutputs, MAX_ARTIFACT_INPUTS);
+      result.candidateArtifacts = bundledArtifacts(result.bundledToolAuthority, result.explicitAdapterArtifacts, result.bundledOutputs, artifactLimit);
       args.unshift(outfile);
     } else if (adapter.kind === 'node') args.unshift(entry);
     else {
@@ -293,10 +312,16 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', helper, '-ScriptPath', entry, '-ArgumentsPath', argumentsPath];
     }
     args = args.map(arg => arg.replaceAll('{outDir}', caseDir));
+    const allocationEpochMs=Date.now();
     const remaining=remainingMs?remainingMs():adapter.timeoutMs;
     if(remaining<=0){result.status='NOT_RUN_BUDGET';result.reason='PARENT_WALL_BUDGET_EXHAUSTED';fs.writeFileSync(path.join(caseDir,'result.json'),JSON.stringify(result,null,2));return result;}
     let timeoutMs=Math.min(adapter.timeoutMs,remaining);result.executionBudget={originalTimeoutMs:adapter.timeoutMs,effectiveTimeoutMs:timeoutMs};
     const childEnv = cleanEnvironment(env, caseDir, payloadRoot);
+    if(adapter.inheritExecutionDeadline===true){
+      const deadlineEpochMs=allocationEpochMs+timeoutMs;
+      result.executionBudget.deadlineEpochMs=deadlineEpochMs;
+      childEnv.YMCC_SIM_CASE_DEADLINE_EPOCH_MS=String(deadlineEpochMs);
+    }
     if (adapter.id === 'plugins.decky-update-recovery' && adapter.kind === 'node' &&
         slash(adapter.path) === 'tools/ymcc_sim/global/decky-update-recovery/run.mjs') {
       const {baselineEnvironment} = await import('./decky-persistent-lifecycle/baseline-environment.mjs');
@@ -341,7 +366,7 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
       result.candidateArtifactChanged=JSON.stringify(result.candidateArtifacts)!==JSON.stringify(toolsAfter);
       if(baselineLaunch)baselineLaunch.toolArtifactsAfter=toolsAfter;
     } else if(baselineLaunch)baselineLaunch.toolArtifactsAfter=[];
-    if(result.bundledToolAuthority)result.bundledToolProof=verifyBundledNodeReceipt(result,repoRoot,caseDir,{limit:MAX_ARTIFACT_INPUTS});
+    const consumeEvidence=()=>{
     if(adapter.completionContract!==undefined)result.completionProof=verifyExecutionCompletion({...result,stdout,stderr},adapter.completionContract);
     const evidence = checkStructuredEvidence(caseDir, adapter, repoRoot);
     result.structuredEvidence = evidence.paths;
@@ -349,13 +374,23 @@ export async function executeAdapter(adapter, { repoRoot, runDir, powershell = '
     result.requiredEvidenceFailed = evidence.failed;
     const explicitBlockedExit = Array.isArray(adapter.blockedExitCodes) && adapter.blockedExitCodes.includes(result.exitCode) && !result.sourceChanged && !result.outputTruncated;
     result.status = !result.timedOut && !result.candidateArtifactChanged && ((adapter.kind === 'powershell' && result.exitCode === 10) || explicitBlockedExit) ? 'BLOCKED' : evaluateResult(result);
+    };
+    if(result.bundledToolAuthority){
+      const checked=consumeRunnerBundledReceipt(result,repoRoot,caseDir,consumeEvidence,{limit:artifactLimit});
+      bundledScopeClosed=true;bundledClosingError=checked.closingError;
+      if(checked.authorityAfter)result.bundledToolAuthorityAfter=checked.authorityAfter;
+      const first=checked.receiptError??checked.callbackError;
+      if(first){result.status='FAIL';result.buildError=true;result.reason=String(first.message).slice(0,1600);}
+      if(checked.status==='PASS')result.bundledToolProof=checked.proof;
+    }else consumeEvidence();
   } catch (error) {
     result.status = 'FAIL'; result.buildError = true;
     result.reason = String(error.message ?? error).slice(0, 1600);
   }
   if(result.bundledToolAuthority) {
     try {
-      result.bundledToolAuthorityAfter=verifyBundledToolScope(result.bundledToolAuthority,repoRoot,{limit:MAX_ARTIFACT_INPUTS});
+      if(bundledScopeClosed){if(bundledClosingError)throw Error(bundledClosingError.message);}
+      else result.bundledToolAuthorityAfter=verifyBundledToolScope(result.bundledToolAuthority,repoRoot,{limit:MAX_ARTIFACT_INPUTS});
       result.candidateArtifactChanged ||= JSON.stringify(result.bundledToolAuthority)!==JSON.stringify(result.bundledToolAuthorityAfter);
       result.sourceChanged ||= JSON.stringify(inputs)!==JSON.stringify(fingerprintInputs(repoRoot,inputs.map(row=>row.path)));
       if(result.candidateArtifactChanged||result.sourceChanged)result.status='FAIL';

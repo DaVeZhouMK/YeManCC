@@ -17,3 +17,25 @@ for(const [name,source,pattern] of [
 ])test(name+' is rejected before a value can authorize compilation',()=>assert.throws(()=>parseLifecycleLogData(source,spec),pattern));
 test('wrong pin, length, producer path or row name cannot grant a value',()=>{for(const bad of [{...spec,decodedUtf8Sha256:'0'.repeat(64)},{...spec,decodedUtf8Bytes:1},{...spec,relative:'../other.mjs'},{...spec,key:'other'}])assert.throws(()=>parseLifecycleLogData(row,bad),/CURRENT_LOG_/);});
 test('filesystem reader remains within the explicit producer path and does not import it',()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'ymcc-log-data-'));fs.mkdirSync(path.join(root,'tools'));const marker=path.join(root,'unexpected.txt');fs.writeFileSync(path.join(root,LIFECYCLE_LOG_PRODUCER),'throw Error("do not run");\n'+row);assert.equal(readLifecycleLogData(root,spec).body,body);assert.equal(fs.existsSync(marker),false);assert.throws(()=>readLifecycleLogData('.',spec),/ABSOLUTE_ROOT/);});
+
+import {parseLifecycleLogDataV2} from './lifecycle-log-data.mjs';
+const v2Hash=value=>createHash('sha256').update(value).digest('hex');
+function v2Sample(){
+ const conditional="['appendNativeLifecycleLog','directedOnly();']";
+ const source='throw Error("must never execute");\n'+row+';\nif(directed){'+conditional+';}';
+ const literals=[row,conditional].map((text,index)=>({role:index===0?'base-default':'sd-off-source-lost-only',sourceUtf8Byte:Buffer.byteLength(source.slice(0,source.indexOf(text))),sourceUtf8Bytes:Buffer.byteLength(text),rowSha256:v2Hash(text),decodedUtf8Bytes:index===0?Buffer.byteLength(body):15,decodedUtf8Sha256:v2Hash(index===0?body:'directedOnly();')}));
+ return {source,spec:{schemaVersion:2,relative:LIFECYCLE_LOG_PRODUCER,key:'appendNativeLifecycleLog',selectionContract:'default-core-no-directed-sd-v1',expectedLiteralRows:2,selectedLiteral:0,bytes:Buffer.byteLength(source),sha256:v2Hash(source),decodedUtf8Bytes:Buffer.byteLength(body),decodedUtf8Sha256:v2Hash(body),literals}};
+}
+test('version2 default selection verifies both literals without evaluating producer and preserves version1 refusal',()=>{
+ const value=v2Sample(),proof=parseLifecycleLogDataV2(value.source,value.spec);
+ assert.equal(proof.body,body);assert.equal(proof.producerExecuted,false);
+ assert.equal(proof.selectedDataRole,'base-default');assert.equal(proof.verifiedConditionalLiteral,value.spec.literals[1].decodedUtf8Sha256);
+ assert.throws(()=>parseLifecycleLogData(value.source,spec),/EXACTLY_ONE/);
+});
+test('version2 rejects whole source drift wrong role selected conditional and either literal identity',()=>{
+ const value=v2Sample();
+ assert.throws(()=>parseLifecycleLogDataV2(value.source+';',value.spec),/PRODUCER_PIN_CHANGED/);
+ for(const mutate of [s=>s.selectedLiteral=1,s=>s.expectedLiteralRows=1,s=>s.selectionContract='arbitrary',s=>s.sha256='0'.repeat(64),s=>s.literals.pop(),s=>s.literals[0].role='sd-off-source-lost-only',s=>s.literals[1].sourceUtf8Byte=0,s=>s.literals[0].rowSha256='0'.repeat(64),s=>s.literals[1].rowSha256='0'.repeat(64),s=>s.literals[1].decodedUtf8Sha256='0'.repeat(64)]){
+  const bad=structuredClone(value.spec);mutate(bad);assert.throws(()=>parseLifecycleLogDataV2(value.source,bad));
+ }
+});

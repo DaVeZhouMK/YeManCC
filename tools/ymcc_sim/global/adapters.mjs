@@ -405,13 +405,15 @@ const gyroPresetSaveInputs = [
 
 
 const performanceOwnershipInputs = [
+  'src/bridge/bootModeGlobalPreferences.ts',
+  'src/bridge/inputConfigHash.ts', 'src/bridge/settingsBaseline.ts', 'PowerControl/settings-baseline.json',
 
 
   'package.json', 'src/App.vue', 'src/bridge/controllerPersona.ts',
   'src/bridge/settingsSnapshot.ts',
 
 
-  'src/bridge/frameRateModel.ts', 'src/bridge/gamePolicyRuntime.ts',
+  'src/bridge/frameRateModel.ts', 'src/bridge/gamePolicyRuntime.ts', 'src/bridge/powerLifecycleState.ts',
 
 
   'src/bridge/performanceControls.ts', 'src/bridge/performanceSchedule.ts',
@@ -1031,6 +1033,9 @@ const gameLibraryMediaShortcutsInputs = [
 
 
   "src/bridge/sharedGameMedia.ts",
+  "src/bridge/steamUi.ts",
+  "src/bridge/yeman.ts",
+  "src/bridge/powerLifecycleState.ts",
 
 
   "src/bridge/steamHttp.ts",
@@ -1040,6 +1045,8 @@ const gameLibraryMediaShortcutsInputs = [
 
 
   "src/bridge/steamMediaSource.ts",
+  "src/bridge/steamInstallationFacts.ts",
+  "tools/fixtures/steam_installation_consumer_flight.mjs",
 
 
   "src/bridge/uiLifecycle.ts",
@@ -1242,6 +1249,96 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
 
 
       'tools/boot_modes_selftest.mjs', [
+        "src/bridge/performanceSchedule.ts",
+        "src/bridge/frameRateLimits.ts",
+        "tools/continuous_performance_selftest.mjs",
+        "tools/boot_modes_fixture/performancePreferences.mjs",
+        "tools/boot_modes_fixture/performanceResident.mjs",
+        "tools/continuous_float_runtime_selftest.mjs",
+        "src/bridge/gamePolicyRuntime.ts",
+        "src/bridge/powerResume.ts",
+        "src/bridge/powerLifecycleState.ts",
+        "tools/boot_modes_fixture/preparation.mjs",
+        "src/components/BootModeWorkbench.vue",
+        "tools/boot_modes_fixture/legacyOrigin.mjs",
+        "src/bridge/inputApplicationReceipt.ts",
+        "src/bridge/inputConfigHash.ts",
+        "native/input_application_receipt.h",
+        "tools/boot_modes_fixture/inputReceipts.mjs",
+        "tools/boot_modes_fixture/softwareOwner.mjs",
+        "tools/boot_modes_fixture/softwareOwner.cpp.in",
+        "tools/boot_modes_fixture/preferenceOwner.mjs",
+        "tools/boot_modes_fixture/modeSaveNative.mjs",
+        "tools/boot_modes_fixture/diskSettings.mjs",
+        "tools/boot_modes_fixture/activePublicationOwner.mjs",
+        "tools/boot_modes_fixture/monitorGeneration.mjs",
+        "tools/boot_modes_fixture/explicitSectionIntent.mjs",
+        "tools/boot_modes_fixture/optionalOwner.mjs",
+        "tools/boot_modes_fixture/brightnessOwner.mjs",
+        "tools/boot_modes_fixture/shellOwner.cpp.in",
+        "tools/boot_modes_fixture/gameDetectionPower.mjs",
+        "tools/boot_modes_fixture/gameDetectionPower.cpp.in",
+        "native/monitor_identity.h",
+        "native/game_rule_literal.h",
+        "tools/fixtures/steam_original_recovery_valve_guard/concurrency-cases.cpp.in",
+        "native/steam_native_launch.h", "native/steam_launch_path.h", "native/sleep_power_dispatch.h", "native/sleep_power_state.h", "native/sleep_power_observation.h", "native/sleep_power_revocation.h", "native/sleep_cancel_ready.h",
+        "tools/boot_modes_fixture/displayOwner.mjs",
+        "tools/boot_modes_fixture/displayOwner.cpp.in",
+        "tools/boot_modes_fixture/monitorOwner.mjs",
+        "native/gyro_telemetry_record.h",
+        "tools/boot_modes_fixture/cssNativeOwner.mjs",
+        "tools/boot_modes_fixture/cssNativeOwner.cpp.in",
+        "tools/boot_modes_fixture/cssSettingsWake.cpp.in",
+        "native/steam_cssloader_use.h",
+        "tools/boot_modes_fixture/appearanceOwner.mjs",
+        "tools/boot_modes_fixture/appearancePsTransactions.mjs",
+        "tools/steam_appearance_robustness_selftest.ps1",
+        "tools/fixtures/appearance_boot_transactions.ps1",
+        "tools/fixtures/appearance_boot_transaction_worker.ps1",
+        "PowerControl/steam-appearance.ps1",
+        "PowerControl/steam-appearance/preset.ps1",
+        "PowerControl/steam-appearance/resident.ps1",
+        "PowerControl/steam-appearance/idle.ps1",
+        "PowerControl/steam-appearance/manifest.json",
+        "tools/boot_modes_fixture/automaticRecoveryOwner.mjs",
+        "tools/boot_modes_fixture/automaticRecoveryOwner.cpp.in",
+        "tools/boot_modes_fixture/automaticRecoveryWorker.mjs",
+        "tools/boot_modes_fixture/automaticRecoveryWorker.cpp.in",
+        "tools/boot_modes_fixture/automaticRecoveryTransport.mjs",
+        "tools/boot_modes_fixture/automaticRecoveryTransport.cpp.in",
+        "native/sleep_recovery_auto.h",
+        "native/sleep_steam_settle.h",
+        "native/sleep_steam_input_context.h",
+        "native/sleep_recovery_diagnostics.h",
+        "src/bridge/sleepRecovery.ts",
+        "tools/boot_modes_fixture/wakePasswordOwner.mjs",
+        "tools/boot_modes_fixture/sleepGuardOwner.mjs",
+        "tools/boot_modes_fixture/sleepGuardOwner.cpp.in",
+        "native/sleep_steam_preferences.h",
+        "tools/boot_modes_fixture/wakePasswordOwner.cpp.in",
+        "tools/boot_modes_fixture/wakePasswordFailures.cpp.in",
+        "tools/boot_modes_fixture/wakePasswordRegistry.cpp.in",
+        "native/sleep_wake_password.h",
+        "tools/sleep_wake_password_selftest.cpp",
+        "src/bridge/monitorOutput.ts",
+        "src/bridge/monitorOutputCoordinator.ts",
+        "src/bridge/monitorHudModel.ts",
+        "src/bridge/fxSound.ts",
+        "native/fxsound_control.h",
+
+        "src/bridge/bootModePlatform.ts",
+        "src/bridge/api.ts",
+
+        "src/bridge/bootModeGlobalPreferences.ts",
+          "src/views/SleepGuardView.vue",
+          "tools/boot_modes_fixture/sleepTimeouts.mjs",
+          "src/bridge/steamAppearance.ts",
+          "src/bridge/steamAppearanceDraft.ts",
+        "native/boot_mode_preferences.h",
+        "native/screen_touchpad_profile_store.h",
+        "src/App.vue",
+        "src/bridge/settingsRepository.ts",
+        "tools/fixtures/settings_baseline.mjs",
 
 
         "native/main.cpp",
@@ -1640,6 +1737,32 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
 
 
       'tools/boot_modes_file_ui_selftest.mjs', [
+        "src/bridge/ipc.ts",
+        "tools/boot_modes_fixture/legacyOriginUi.mjs",
+        "tools/boot_modes_fixture/preparation.mjs",
+        "tools/boot_modes_fixture/softwareOwnerUi.mjs",
+        "tools/boot_modes_fixture/legacyOrigin.mjs",
+        "src/bridge/inputApplicationReceipt.ts",
+        "src/bridge/inputConfigHash.ts",
+        "native/input_application_receipt.h",
+        "tools/boot_modes_fixture/inputReceipts.mjs",
+
+        "tools/boot_modes_fixture/touchProfilesNative.mjs",
+        "tools/boot_modes_fixture/touchProfilesFileCases.mjs",
+        "native/screen_touchpad_profile_store.h",
+        "native/boot_mode_preferences.h",
+        "native/screen_touchpads.h",
+        "native/screen_control_glyphs.h",
+        "native/touch_haptic_dispatch.h",
+        "native/screen_touchpad_display_policy.h",
+        "native/screen_touchpad_input_surface.h",
+        "native/screen_touchpad_cursor.h",
+        "native/screen_touchpad_cursor_visibility.h",
+        "native/screen_standalone_special.h",
+        "native/screen_touchpad_press_visual.h",
+        "native/screen_touchpad_contact_visual.h",
+        "native/screen_button_overlay.h",
+        "native/screen_touchpad_auto_hide.h",
 
 
         "PowerControl/settings-baseline.json",
@@ -1976,6 +2099,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
         "tools/boot_modes_fixture/diskApiPort.ts",
 
 
+        "native/gyro_telemetry_record.h",
         "tools/boot_modes_fixture/diskSettings.mjs",
 
 
@@ -2013,7 +2137,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make('lifecycle.ui-power-recovery','lifecycle','UI power mirror recovers a missed commit without hardware or input restart','node',
 
 
-      'tools/ui_power_recovery_selftest.mjs',['package.json','src/bridge/uiLifecycle.ts','src/bridge/api.ts','src/App.vue'],
+      'tools/ui_power_recovery_selftest.mjs',['package.json','src/bridge/uiLifecycle.ts','src/bridge/api.ts','src/App.vue','src/bridge/powerLifecycleState.ts','tools/fixtures/ui_shared_power_cases.mjs'],
 
 
       {args:['--out-dir','{outDir}'],resultFiles:['ui-power-recovery.json']}),
@@ -2027,11 +2151,18 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
 
       ["native/main.cpp", "native/sensor_virtual_link_wake.h", "native/input_frame_submission.h",
        "native/input_host_recovery_health.h", "native/virtual_output_status.h", "native/virtual_switch_verification_runtime.h",
-       "native/sensor_thread_mailbox.h", "native/sensor_device_change.h", "native/sensor_inventory_cache.h",
+       "native/msi_legacy_sensor.h", "native/sensor_thread_mailbox.h", "native/log_snapshot_state.h",
+       "native/input_host_shared_power.h", "native/sleep_power_observation.h", "native/sleep_power_state.h", "native/sleep_power_revocation.h",
+       "native/sensor_device_change.h", "native/sensor_inventory_cache.h",
        "native/sensor_inventory.h", "native/windows_motion_submission.h", "native/sleep_notification_evidence.h", "deps/json/json.hpp",
 
 
        "tools/ymcc_sim/global/sensor-power-consumer/fixture.cpp.in",
+       "tools/ymcc_sim/global/sensor-power-consumer/provider-stop.mjs", "tools/ymcc_sim/global/sensor-power-consumer/provider-stop.cpp.in", "tools/msi_sensor_adapter_selftest.cpp",
+       "tools/ymcc_sim/global/sensor-power-consumer/power-wake.mjs", "tools/ymcc_sim/global/sensor-power-consumer/power-wake.cpp.in",
+       "tools/ymcc_sim/global/sensor-power-consumer/cadence.mjs", "tools/ymcc_sim/global/sensor-power-consumer/cadence.cpp.in",
+       "native/input_shortcut_toggle.h", "native/input_startup_policy.h", "native/controller_persona_settings.h", "native/game_input_override.h", "native/controller_persona.h",
+       "tools/fixtures/msi_owned_return_retired_io/source-binding.mjs", "native/sleep_power_dispatch.h",
 
 
        "tools/fixtures/legion_motion_consumer/extract_main.mjs", "tools/lib/hc_controller_motion_fixture.mjs",
@@ -2064,7 +2195,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make("controller.mouse-native", "controller", "Mouse backend direct process control and SteamDeck admission", "node",
 
 
-      "tools/mouse_mode_native_selftest.mjs", ["src/bridge/ipc.ts", "src/bridge/uiLifecycle.ts", "native/process_basic_candidates.h", "native/process_inventory.h", "src/bridge/steamDeckMouse.ts", "src/bridge/gameproc.ts", "native/main.cpp", "native/mouse_mode_com_apartment.h", "native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "tools/mouse_mode_policy_selftest.cpp", "tools/mouse_mode_policy_selftest.mjs", "native/mouse_backend_process.h", "native/process_efficiency.h", "native/process_efficiency_inventory.h", "native/shortcut_feedback_native.h", "tools/mouse_mode_control_fixture.cpp", "tools/mouse_backend_fixture.cpp", "tools/mouse_backend_process_selftest.cpp", "tools/mouse_backend_settings_show_selftest.cpp", "tools/mouse_backend_settings_show_selftest.mjs", "tools/mouse_mode_bridge_selftest.mjs", "tools/mouse_status_hint_selftest.mjs", "src/bridge/mouseStatusHint.ts", "src/bridge/mouseModeState.ts", "src/bridge/desktopHudProtocol.ts", "src/bridge/mouseModePresentation.ts", "src/bridge/monitorHudModel.ts", "src/bridge/shortcutActionFeedback.ts", "tools/fixtures/legion_motion_consumer/extract_main.mjs", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
+      "tools/mouse_mode_native_selftest.mjs", ["native/settings_baseline.h", "tools/fixtures/mouse_boot_owner.mjs", "tools/mouse_mode_boot_owner_fixture.cpp", "PowerControl/settings-defaults-v1.json", "src/bridge/ipc.ts", "src/bridge/uiLifecycle.ts", "native/process_basic_candidates.h", "native/process_inventory.h", "src/bridge/steamDeckMouse.ts", "src/bridge/gameproc.ts", "native/main.cpp", "native/mouse_mode_com_apartment.h", "native/mouse_mode_policy.h", "native/mouse_mode_foreground.h", "native/mouse_mode_foreground_rules.h", "tools/mouse_mode_policy_selftest.cpp", "tools/mouse_mode_policy_selftest.mjs", "native/mouse_backend_process.h", "native/process_efficiency.h", "native/process_efficiency_inventory.h", "native/shortcut_feedback_native.h", "tools/mouse_mode_control_fixture.cpp", "tools/mouse_backend_fixture.cpp", "tools/mouse_backend_process_selftest.cpp", "tools/mouse_backend_settings_show_selftest.cpp", "tools/mouse_backend_settings_show_selftest.mjs", "tools/mouse_mode_bridge_selftest.mjs", "tools/mouse_status_hint_selftest.mjs", "src/bridge/mouseStatusHint.ts", "src/bridge/mouseModeState.ts", "src/bridge/desktopHudProtocol.ts", "src/bridge/mouseModePresentation.ts", "src/bridge/monitorHudModel.ts", "src/bridge/shortcutActionFeedback.ts", "tools/fixtures/legion_motion_consumer/extract_main.mjs", "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"],
 
 
       {args:["{outDir}"],resultFiles:["mouse-mode-native-result.json"],timeoutMs:60000}),
@@ -2151,7 +2282,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make('controller.lossless-toggle-owner', 'controller', 'Shared per-game Lossless configuration switch and exact stop-before-profile-removal under Xbox UIA failure', 'node',
 
 
-      'tools/lossless_toggle_owner_selftest.mjs', ['src/bridge/losslessProgramState.ts','src/bridge/quickapp.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/decky_sidebar_diagnostics.h','native/lossless_runtime.h','native/process_basic_candidates.h', 'native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','native/main.cpp','tools/lossless_launch_selftest.cpp','tools/lossless_scaling_selftest.mjs','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/decky_task_paths.mjs'],
+      'tools/lossless_toggle_owner_selftest.mjs', ['src/bridge/steamInstallationFacts.ts','tools/fixtures/lossless_steam_installations.mjs','src/bridge/losslessProgramState.ts','src/bridge/quickapp.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/decky_sidebar_diagnostics.h','native/lossless_runtime.h','native/sleep_power_state.h','native/sleep_power_observation.h','native/sleep_power_revocation.h','tools/lossless_runtime_power_fixture.h','tools/fixtures/lossless_runtime_power.mjs','tools/fixtures/lossless_runtime_watch_dispatch.inc','tools/fixtures/lossless_runtime_watch_cases.inc','tools/fixtures/lossless_uia_ports.h','tools/fixtures/lossless_uia_client_stubs.inc','tools/fixtures/lossless_uia_element_stubs.inc','tools/fixtures/lossless_uia_cases.inc','tools/fixtures/lossless_runtime_read_fixture.h','tools/fixtures/lossless_runtime_read_cases.inc','tools/ymcc_sim/global/decky-update-recovery/native-source-admission.mjs','native/process_basic_candidates.h', 'native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','native/main.cpp','tools/lossless_launch_selftest.cpp','src/bridge/powerLifecycleState.ts','tools/lossless_scaling_selftest.mjs','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/decky_task_paths.mjs'],
 
 
       {args:['{outDir}'],resultFiles:['lossless-owner-result.json'],timeoutMs:60000}),
@@ -2205,7 +2336,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
         'native/screen_touchpad_cursor_visibility.h', 'native/screen_touchpad_display_policy.h',
 
 
-        'native/screen_touchpad_input_surface.h', 'native/screen_touchpad_owner.h',
+        'native/screen_touchpad_input_surface.h', 'native/screen_touchpad_owner.h', 'native/screen_touchpad_resume.h',
 
 
         'native/screen_touchpad_press_visual.h', 'native/touch_haptic_dispatch.h', 'deps/json/json.hpp',
@@ -2250,7 +2381,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make("steam.shared-mode-source", "steam", "Shared Steam UI observer source wiring contract", "node",
 
 
-      "tools/steam_ui_mode_shared_source_selftest.mjs", ["native/main.cpp", "native/steam_ui_mode_observer.h"], {"scope":"source-contract"}),
+      "tools/steam_ui_mode_shared_source_selftest.mjs", ["native/main.cpp", "native/steam_ui_mode_observer.h", "native/decky_sidebar_recovery.h", "tools/fixtures/hc_onex_x2_application/extract.mjs", "native/steam_ui_mode.h", "tools/fixtures/steam_mode_read/producer_read.mjs", "tools/fixtures/steam_mode_read/producer_read.inc"], {"scope":"source-contract"}),
 
 
     make('steam.boot-focus', 'steam', 'Existing BAT consumers: first Steam window and current virtual-ready milestones, at most two Steam-only requests, shared bounded tail and foreground readback; inert terminals only', 'node',
@@ -2478,7 +2609,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make("screen.standalone-actions", "display", "Screen standalone Steam menu actions in an isolated receiver VM", "node",
 
 
-      "tools/screen_standalone_special_actions_selftest.mjs", ["native/main.cpp", "native/steam_live.js"]),
+      "tools/screen_standalone_special_actions_selftest.mjs", ["native/main.cpp", "native/steam_live.js", "tools/fixtures/steam_menu_composition/cases.mjs", "tools/fixtures/steam_menu_composition/navigation.mjs", "tools/fixtures/steam_menu_composition/official-methods.json"]),
 
 
     make("game-tools.trainer-foreground", "game-library", "Decky interactive desktop Shell launch, no replay after uncertain dispatch", "node",
@@ -2490,7 +2621,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make("game-tools.trainer-background", "game-library", "Production trainer preparation, ownership and launch state with inert IPC", "node",
 
 
-      "tools/game_trainer_background_selftest.mjs", ["src/bridge/gameTrainer.ts", "src/bridge/gameTrainerAuto.ts", "tsconfig.json"], {"timeoutMs":60000}),
+      "tools/game_trainer_background_selftest.mjs", ["src/bridge/gameTrainer.ts", "src/bridge/gameTrainerAuto.ts", "src/bridge/trainerLifecycle.ts", "tsconfig.json"], {"timeoutMs":60000}),
 
 
     make("performance.game-profile-editor", "performance", "Game profile performance/input isolation and stale edits", "node",

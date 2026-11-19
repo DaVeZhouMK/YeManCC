@@ -60,8 +60,10 @@ if($Publish){
   }
   if(-not $manifest.sourceBuild){$manifest | Add-Member -NotePropertyName sourceBuild -NotePropertyValue ([pscustomobject]@{}) -Force}
   $manifest | Add-Member -NotePropertyName backgroundMediaProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundSharedSleepProtocol -NotePropertyValue 1 -Force
   $manifest | Add-Member -NotePropertyName backgroundCatalogProtocol -NotePropertyValue 1 -Force
   $manifest | Add-Member -NotePropertyName backgroundIdentityProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundSteamSourceProtocol -NotePropertyValue 1 -Force
   $manifest | Add-Member -NotePropertyName backgroundVideoQualityPolicy -NotePropertyValue 3 -Force
   $manifest | Add-Member -NotePropertyName backgroundManualProtocol -NotePropertyValue 1 -Force
   $manifest | Add-Member -NotePropertyName backgroundVideoSelectionProtocol -NotePropertyValue 1 -Force

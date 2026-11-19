@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {begin,source,generated,verify,receipt,sha,save,readJson,run,inside} from '../../../fixtures/radial_private/scope.mjs';
 import {MODULE,NATIVE_ID,NATIVE_INPUTS,NATIVE_QUOTE_SOURCES} from './native-adapter.mjs';
@@ -56,30 +57,50 @@ export function validateNativeResult(raw,execution,mutation=null){
 function pin(file){return {path:file,sha256:sha(file)};}
 function ownedFile(root,file){assert(inside(root,file)&&inside(fs.realpathSync(root),fs.realpathSync(file)),'RUN_EVIDENCE_ESCAPE');return file;}
 function validateReceipt(scope,dir,state,graph){
+ const main=path.join(scope.repo,'native/main.cpp'),slice=state.exactHandlerSlice,helper=state.exactDiagnosticHelperSlice;
+ // This synchronous receipt check shares each observation by exact path. Each
+ // native arm and the final scope verification still read live bytes separately.
+ const textFiles=new Set([main,slice?.generated,helper?.generated]),observed=new Map();
+ function observe(file){
+  if(!observed.has(file)){
+   const bytes=fs.readFileSync(file),sha256=createHash('sha256').update(bytes).digest('hex');
+   observed.set(file,{sha256,text:textFiles.has(file)?bytes.toString('utf8'):undefined});
+  }
+  return observed.get(file);
+ }
  assert.equal(state.out,path.resolve(dir));
  assert.equal(graph.pass,true);assert.equal(state.exe.path,graph.executable);
- assert.equal(sha(ownedFile(dir,state.exe.path)),state.exe.sha256);
+ assert.equal(observe(ownedFile(dir,state.exe.path)).sha256,state.exe.sha256);
  assert.equal(state.exe.sha256,graph.executableSha256);
  assert.deepEqual(state.receipt.toolArtifacts,scope.toolArtifacts,'ORIGINAL_TOOL_DECLARATION_CHANGED');
  for(const [name,digest] of Object.entries(state.receipt.sourceHashes)){
   const file=path.isAbsolute(name)?ownedFile(dir,name):path.join(scope.repo,name);
-  assert.equal(sha(file),digest,'ORIGINAL_RECEIPT_SOURCE_CHANGED:'+name);
+  assert.equal(observe(file).sha256,digest,'ORIGINAL_RECEIPT_SOURCE_CHANGED:'+name);
  }
  const declared=new Set(NATIVE_QUOTE_SOURCES),before=new Map(state.beforeNativeInputs.map(row=>[fs.realpathSync(row.path).toLowerCase(),row]));
  for(const row of state.beforeNativeInputs){
   if(inside(dir,row.path)){ownedFile(dir,row.path);}else assert(declared.has(path.relative(scope.repo,row.path).replaceAll('\\','/')),'UNDECLARED_QUOTED_SOURCE:'+row.path);
-  assert.equal(sha(row.path),row.sha256,'BEFORE_COMPILE_SOURCE_CHANGED');
+  assert.equal(observe(row.path).sha256,row.sha256,'BEFORE_COMPILE_SOURCE_CHANGED');
  }
  for(const row of graph.nativeInputs.filter(row=>row.role==='source')){
   const original=before.get(fs.realpathSync(row.path).toLowerCase());assert(original,'SOURCE_NOT_BOUND_BEFORE_COMPILE');assert.equal(original.sha256,row.sha256);
  }
- const slice=state.exactHandlerSlice,main=path.join(scope.repo,'native/main.cpp'),text=fs.readFileSync(main,'utf8');
+ const {text,sha256:mainSha256}=observe(main);
  const first=text.indexOf('    ipc_on("monitorNotice.reserve"'),last=text.indexOf('    ipc_on("monitorNotice.frame"',first);
- assert(first>=0&&last>first);assert.equal(slice.source,main);assert.equal(slice.sourceSha256,sha(main));
+ assert(first>=0&&last>first);assert.equal(slice.source,main);assert.equal(slice.sourceSha256,mainSha256);
  assert.equal(slice.start,first);assert.equal(slice.end,last);
- assert.equal(fs.readFileSync(ownedFile(dir,slice.generated),'utf8'),text.slice(first,last),'HANDLER_SLICE_NOT_VERBATIM');
- assert.equal(sha(slice.generated),slice.sha256);
- const helper=state.exactDiagnosticHelperSlice,marker='// Fixed diagnostic state shared by every template instantiation; no resource ownership.';assert.equal(text.split(marker).length,2);const helperStart=text.indexOf(marker),helperTemplate=text.indexOf('template <typename BuildFields>',helperStart),helperEnd=text.indexOf('\n}',helperTemplate)+2;assert(helper&&helperTemplate>helperStart&&helperEnd>helperTemplate,'EXACT_DIAGNOSTIC_HELPER_GROUP_REQUIRED');assert.equal(helper.source,main);assert.equal(helper.sourceSha256,sha(main));assert.equal(helper.start,helperStart);assert.equal(helper.end,helperEnd);assert.equal(fs.readFileSync(ownedFile(dir,helper.generated),'utf8'),text.slice(helperStart,helperEnd),'DIAGNOSTIC_HELPER_GROUP_NOT_VERBATIM');assert.equal(sha(helper.generated),helper.sha256);
+ const handler=observe(ownedFile(dir,slice.generated));
+ assert.equal(handler.text,text.slice(first,last),'HANDLER_SLICE_NOT_VERBATIM');
+ assert.equal(handler.sha256,slice.sha256);
+ const marker='// Fixed diagnostic state shared by every template instantiation; no resource ownership.';
+ assert.equal(text.split(marker).length,2);
+ const helperStart=text.indexOf(marker),helperTemplate=text.indexOf('template <typename BuildFields>',helperStart),helperEnd=text.indexOf('\n}',helperTemplate)+2;
+ assert(helper&&helperTemplate>helperStart&&helperEnd>helperTemplate,'EXACT_DIAGNOSTIC_HELPER_GROUP_REQUIRED');
+ assert.equal(helper.source,main);assert.equal(helper.sourceSha256,mainSha256);
+ assert.equal(helper.start,helperStart);assert.equal(helper.end,helperEnd);
+ const diagnostic=observe(ownedFile(dir,helper.generated));
+ assert.equal(diagnostic.text,text.slice(helperStart,helperEnd),'DIAGNOSTIC_HELPER_GROUP_NOT_VERBATIM');
+ assert.equal(diagnostic.sha256,helper.sha256);
  assert.equal(state.toolProof.maxArtifactInputs,3072);assert(state.toolProof.artifactCount<=3072);
  assert.equal(state.toolProof.nodeGraphSha256,scope.node.graphSha256);
 }

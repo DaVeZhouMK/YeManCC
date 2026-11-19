@@ -14,28 +14,37 @@ let compatibleLoadedBridge = false;
 let requireWindowsConfigRead = false, rejectWrite = false, staleWrite = false, configDisappears = false, ignoreWrite = false;
 let failReload = false, reloadWritesBack = false;
 let atomicReplyHook: null | (() => Promise<void>) = null;
+let rtssOwnerReplyHook: null | ((cmd:string,args:any)=>Promise<void>) = null;
 let completedReloads = 0;
 let omitZoomOnReload = false, blockReload: Promise<void> | null = null, configOperationActive = 0, configOperationMax = 0;
 // Exercise the real IPC timeout/cleanup code with accelerated test timers.
 const realSetTimeout = globalThis.setTimeout;
 const nativeEvents = new EventTarget();
+const documentEvents = new EventTarget();
+(globalThis as any).document = {visibilityState:'hidden',createElement:()=>({content:{}}),addEventListener:documentEvents.addEventListener.bind(documentEvents),removeEventListener:documentEvents.removeEventListener.bind(documentEvents)};
 (globalThis as any).setTimeout = (fn: (...args: any[]) => void, ms?: number, ...args: any[]) =>
-  realSetTimeout(fn, ms === 15000 || ms === 6000 ? 40 : ms, ...args);
+  realSetTimeout(fn, ms === 15000 || ms === 6000 || ms === 10000 ? 40 : ms, ...args);
 let text = '[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\nSMART=0\r\n[Other]\r\nLayout=untouched.ovl';
 const calls: Array<{cmd: string; args: any}> = [];
 let handler: ((e: {data: unknown}) => void) | null = null;
 let active = 0, maxActive = 0;
+let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
 (globalThis as any).window = {
   chrome: {webview: {
     addEventListener: (_type: string, fn: typeof handler) => { handler = fn; },
     postMessage: (message: any) => {
       calls.push({cmd: message.cmd, args: message.args});
+      if(rtssOwnerWireContext&&(['rtss.prepareOverlay','rtss.loadOverlay','rtss.reloadProfiles','fs.writeTextFileAtomic'].includes(message.cmd)||message.cmd==='shell.run'&&(message.args.program==='cmd'||message.args.program==='powershell.exe'&&message.args.args.includes('-File')))){
+        assert.deepEqual(message.args.bootContext,rtssOwnerWireContext,'Actual API must forward this request owner at '+message.cmd);rtssOwnerNativeWireChecks++;
+      }
       if ((message.cmd === 'rtss.prepareOverlay' && dropPrepareReply) ||
           (message.cmd === 'rtss.loadOverlay' && dropLoadReply)) return;
       void (async () => {
         let result: unknown;
         switch (message.cmd) {
-          case 'shell.run': result = {exitCode: 0, stdout: rtssInstalled ? dir : '', stderr: ''}; break;
+          case 'shell.run': if(message.args.program==='powershell.exe'&&message.args.args.includes('-File'))running=true;result = {exitCode: 0, stdout: rtssInstalled ? dir : '', stderr: ''}; break;
+          case 'shell.hidden': running = true; result = {exitCode:0,stdout:'',stderr:''}; break;
+          case 'proc.identities': result = {known:true,processes:[],reason:'',error:0}; break;
           case 'fs.exists': result = rtssInstalled; break;
           case 'proc.running': result = {RTSS: running}; break;
           case 'rtss.prepareOverlay': result = {ok: !failPrepare, error: 'prepare-failed',
@@ -59,6 +68,7 @@ let active = 0, maxActive = 0;
           case 'rtss.reloadProfiles': completedReloads++;configOperationActive++;configOperationMax=Math.max(configOperationMax,configOperationActive);if(blockReload)await blockReload;configOperationActive--;if(omitZoomOnReload)text='[Other]\r\nZoomRatio=5\r\n';if(reloadWritesBack)text=setRtssIniValue(text,'OSD','ZoomRatio','2');result={ok:!failReload,error:'reload-unconfirmed'};break;
           default: throw new Error(`unexpected IPC ${message.cmd}`);
         }
+        if(rtssOwnerReplyHook)await rtssOwnerReplyHook(message.cmd,message.args);
         handler!({data: {id: message.id, result}});
       })();
     },
@@ -69,6 +79,69 @@ let active = 0, maxActive = 0;
 };
 
 async function main() {
+  const scopes=['--boot-output-owner-only','--bridge-readiness-only','--atomic-reload-cancellation-only'].filter(flag=>process.argv.includes(flag));
+  assert(scopes.length<=1,'Choose one explicit RTSS scope');
+  assert(!process.argv.some(value=>value.startsWith('--rtss-owner-'))||process.argv.includes('--boot-output-owner-only'),'RTSS owner selectors require their explicit scope');
+  if(process.argv.includes('--boot-output-owner-only')){
+    const bridge:any=await import('@/bridge/yeman'),{captureBootPreferenceWrite,assertBootPreferenceOwner}=await import('@/bridge/bootModeGlobalPreferences');
+    const output=process.env.YEMAN_RTSS_AWAIT_TEST_OUT;if(!output)throw Error('OWNED_TEST_OUTPUT_REQUIRED');mkdirSync(output,{recursive:true});
+    const choose=(name:string)=>process.argv.find(value=>value.startsWith('--rtss-owner-'+name+'='))?.split('=').slice(1).join('=');
+    const modes=['global','xbox','steam','xbox-steam'],kinds=['revision','hash','mode','result','observed','ack','unrelated','current'];
+    const plans=[{name:'toggle-on',stages:['directory','prepare','launch','running']},{name:'toggle-off',stages:['stop']},{name:'online',stages:['directory','prepare','running','load','zoom-exists','zoom-read-1','zoom-write','reload','zoom-read-2']},{name:'online-off',stages:['directory','prepare','running','load']},{name:'saved',stages:['directory','prepare','running','layout-exists','layout-read','layout-write','layout-readback']},{name:'queued',stages:['queued-entry']},{name:'pre-entry',stages:['pre-entry']}];
+    const selected={mode:choose('mode'),scenario:choose('scenario'),stage:choose('stage'),kind:choose('kind')};
+    for(const [name,values]of Object.entries({mode:modes,scenario:plans.map(p=>p.name),stage:[...new Set(plans.flatMap(p=>p.stages))],kind:kinds}))assert(!selected[name as keyof typeof selected]||values.includes(selected[name as keyof typeof selected]!), 'Unknown RTSS owner '+name);
+    const defaults=JSON.parse(readFileSync('PowerControl/settings-defaults-v1.json','utf8')),rows:any[]=[],ordinary:any[]=[];
+    let settings:any,ownerReads=0,readCounts:Record<string,number>={};
+    const reset=(mode:string,scenario:string)=>{bridge.setPowerControlDir('C:/TestYMCC/PowerControl');settings=structuredClone(defaults);settings.input.revision=7;settings.extensions={bootModes:{schema:1,revision:3,current:mode}};running=scenario!=='toggle-on'&&scenario!=='saved';rtssInstalled=true;calls.length=0;ownerReads=0;readCounts={};rtssOwnerWireContext=undefined;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nZoomRatio=5\r\n';return captureBootPreferenceWrite({origin:'boot-mode',bootContext:{input:structuredClone(settings.input),extensions:structuredClone(settings.extensions)}});};
+    const mutate=(kind:string)=>{if(kind==='revision')settings.input.revision++;if(kind==='hash')settings.input.diagnostics.inputLoggingEnabled=!settings.input.diagnostics.inputLoggingEnabled;if(kind==='mode')settings.extensions.bootModes.revision++;if(kind==='result')settings.extensions.bootModesStartupResult={schema:1,revision:99};if(kind==='observed')settings.input.startupObservedBoot='other-boot';if(kind==='ack')settings.input.hostAcknowledgedRevision=17;if(kind==='unrelated')settings.extensions.peer=true;};
+    const label=(cmd:string,args:any)=>{if(cmd==='rtss.prepareOverlay')return 'prepare';if(cmd==='rtss.loadOverlay')return 'load';if(cmd==='rtss.reloadProfiles')return 'reload';if(cmd==='shell.hidden')return 'launch';if(cmd==='shell.run')return args.program==='cmd'?'stop':args.program==='powershell.exe'&&args.args.includes('-File')?'launch':'directory';if(cmd==='proc.running')return 'running';if(cmd==='fs.exists')return args.path===cfg?'layout-exists':args.path===dir+'\\Profiles\\Global'?'zoom-exists':'directory';if(cmd==='fs.writeTextFileAtomic')return args.path===cfg?'layout-write':'zoom-write';if(cmd==='fs.readTextFile'){const n=readCounts[args.path]=(readCounts[args.path]??0)+1;return args.path===cfg?(n===1?'layout-read':'layout-readback'):'zoom-read-'+n;}return cmd;};
+    const effects=(list:typeof calls)=>list.filter(c=>['rtss.prepareOverlay','rtss.loadOverlay','rtss.reloadProfiles','shell.hidden','fs.writeTextFileAtomic'].includes(c.cmd)||c.cmd==='shell.run'&&(c.args.program==='cmd'||c.args.program==='powershell.exe'&&c.args.args.includes('-File'))).map(c=>c.cmd);
+    const run=(scenario:string,current?:any)=>{rtssOwnerWireContext=current?.bootContext;return scenario==='toggle-on'?bridge.toggleRtss(true,current):scenario==='toggle-off'?bridge.toggleRtss(false,current):bridge.setOverlayLayout(scenario==='online-off'?'off':'L',scenario==='online'?4:undefined,current);};
+    const append=(row:any)=>writeFileSync(output+'/rtss-owner-observations.jsonl',JSON.stringify(row)+'\n',{flag:'a'});
+    writeFileSync(output+'/rtss-owner-observations.jsonl','',{flag:'wx'});
+    const wait=async(promise:Promise<any>,label:string)=>{let timer:ReturnType<typeof realSetTimeout>|undefined;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=realSetTimeout(()=>reject(Error('RTSS fixture boundary not reached '+label)),1200);})]);}finally{if(timer)clearTimeout(timer);}};
+    try{
+      for(const mode of modes)for(const plan of plans)for(const stage of plan.stages)for(const kind of kinds){
+        if(Object.entries(selected).some(([key,value])=>value&&value!==({mode,scenario:plan.name,stage,kind} as any)[key]))continue;
+        const options=reset(mode,plan.name),allowed=['ack','unrelated','current'].includes(kind);let changed=false,at=0,result:any,error='';
+        const current=async()=>{ownerReads++;assertBootPreferenceOwner(settings,options);return true;};Object.defineProperty(current,'bootContext',{value:structuredClone(options.bootContext)});
+        if(plan.name==='queued'){
+          let enter:()=>void=()=>{},release:()=>void=()=>{};const entered=new Promise<void>(r=>enter=r),hold=new Promise<void>(r=>release=r);rtssOwnerReplyHook=async cmd=>{if(cmd==='rtss.prepareOverlay'){rtssOwnerReplyHook=null;enter();await hold;}};
+          const first=bridge.ensureRtssOverlayInstalled();let second:Promise<any>|undefined;
+          try{await wait(entered,'first preparation');second=run('online-off',current).then((value:any)=>({value}),(error:any)=>({error:String(error)}));await Promise.resolve();changed=true;at=calls.length;mutate(kind);release();await first;const settled=await second;result=settled.value;error=settled.error??'';}
+          finally{release();await first.catch(()=>{});if(second)await second;}
+        }else{
+          rtssOwnerReplyHook=async(cmd,args)=>{const found=label(cmd,args);if(!changed&&found===stage){changed=true;at=calls.length;mutate(kind);}};
+          if(plan.name==='pre-entry'){changed=true;at=0;mutate(kind);}
+          try{result=await run(plan.name==='pre-entry'?'online':plan.name,current);}catch(e){error=String(e);}
+        }
+        rtssOwnerReplyHook=null;const row={mode,scenario:plan.name,stage,kind,allowed,changed,error,result,lateEffects:effects(calls.slice(at)),ownerReads};append(row);assert(changed,'RTSS owner boundary not reached '+JSON.stringify(row));
+        if(allowed){assert(!error,JSON.stringify(row));if(!plan.name.startsWith('toggle'))assert.equal(result?.mode,plan.name==='saved'?'saved':'live',JSON.stringify(row));}
+        else{assert.equal(row.lateEffects.length,0,'Expired RTSS request reached later command '+JSON.stringify(row));assert.match(error,/BOOT_PREFERENCE_REQUEST_EXPIRED|RTSS_OUTPUT_REQUEST_EXPIRED/,'Expired RTSS request returned success '+JSON.stringify(row));}
+        rows.push(row);
+      }
+      assert(rows.length,'Empty RTSS owner selection');
+      for(const plan of (process.argv.includes('--rtss-owner-defer-ordinary')?[]:plans.filter(p=>p.name!=='queued'&&p.name!=='pre-entry'))){reset('global',plan.name);await run(plan.name);assert.equal(ownerReads,0);ordinary.push({scenario:plan.name,ownerReads:0});}
+      const result={status:'PASS',nativeWireChecks:rtssOwnerNativeWireChecks,actualRows:rows.length,expectedAllRows:modes.length*kinds.length*plans.reduce((n,p)=>n+p.stages.length,0),selected,plans,ordinary,scope:'Actual yeman/API/IPC and real BootPreference owner assertion; original in-memory WebView transport; no native, filesystem, process or RTSS operation. Already-dispatched native admission remains OPEN.'};writeFileSync(output+'/rtss-owner-result.json',JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({status:result.status,actualRows:result.actualRows,ordinary:ordinary.length}));
+    }finally{rtssOwnerReplyHook=null;}
+    return;
+  }
+  if(process.argv.includes('--bridge-readiness-only')){
+    const {toggleRtss,setOverlayLayout,setPowerControlDir}=await import('@/bridge/yeman');
+    setPowerControlDir('C:\\TestYMCC\\PowerControl');rtssInstalled=true;running=false;
+    const results:any[]=[];
+    await toggleRtss(true);
+    const launch=calls.find(c=>c.cmd==='shell.hidden');
+    const startIndex=launch?.args.args.indexOf('-RtssDirectory')??-1;
+    results.push({name:'startup script uses exactly the already resolved RTSS directory',ok:startIndex>=0&&launch?.args.args[startIndex+1]===dir,launch});
+    for(const [code,state] of [['RTSS_BRIDGE_UNAVAILABLE','enabled_not_loaded'],['RTSS_BRIDGE_INCOMPATIBLE','loaded_incompatible'],['RTSS_BRIDGE_ACCESS_DENIED','access_denied']]){
+      const before=text,start=calls.length;failLoad=true;loadFailure={error:'bridge not ready',errorCode:code,bridgeState:state};let message='';
+      try{await setOverlayLayout('L');}catch(error){message=String(error);}
+      const relevant=calls.slice(start);results.push({name:code+' keeps original layout and sends no duplicate Load or restart',ok:text===before&&message.includes(code)&&relevant.filter(c=>c.cmd==='rtss.loadOverlay').length===1&&!relevant.some(c=>c.cmd==='shell.hidden'||c.cmd==='rtss.reloadProfiles'||c.cmd==='fs.writeTextFileAtomic'),message});
+    }
+    failLoad=false;loadFailure=null;const start=calls.length;await setOverlayLayout('L');results.push({name:'later explicit selection recovers the same serial queue',ok:rtssIniValue(text,'Settings','Layout')==='YeManOBS-L-1.ovl'&&calls.slice(start).filter(c=>c.cmd==='rtss.loadOverlay').length===1});
+    const ok=results.every(c=>c.ok);if(process.env.YMCC_RTSS_CONFIG_RESULT)writeFileSync(process.env.YMCC_RTSS_CONFIG_RESULT,JSON.stringify({ok,cases:results},null,2),{flag:'wx'});console.log(JSON.stringify({ok,cases:results}));assert(ok,'bridge startup routing regression');return;
+  }
   if(process.argv.includes('--atomic-reload-cancellation-only')){
     const {setRtssLimit,setPowerControlDir}=await import('@/bridge/yeman');
     setPowerControlDir('C:/TestYMCC/PowerControl');rtssInstalled=true;

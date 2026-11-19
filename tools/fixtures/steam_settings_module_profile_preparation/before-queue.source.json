@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "kind": "pinned-original-steam-settings-queue",
+  "sourceRelative": "native/steam_settings_runtime.h",
+  "sourceBytes": 26517,
+  "sourceSha256": "2897939150cfc020b9be54e9af64040e2cdcb15e2f23ced8293c7ef79d7ca737",
+  "extractorRelative": "tools/fixtures/legion_motion_consumer/extract_main.mjs",
+  "function": "steamSettingsQueue",
+  "functionBytes": 1714,
+  "functionSha256": "73ab31e6e8262936c72e85ae68f484a2470cb5606998d79497f13f59a75500a1",
+  "resourceRelative": "tools/fixtures/steam_settings_module_profile_preparation/before-queue.inc",
+  "resourceBytes": 1715,
+  "resourceSha256": "835331802bab120d8fada11c9bf99d1e6ca93430706cfdab59740ccfc9cb0f62",
+  "provenance": "Verbatim original queue held before the session module-profile bridge; no dependency on a sibling checkout."
+}

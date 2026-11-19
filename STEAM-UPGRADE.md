@@ -1,12 +1,1980 @@
+<!-- STEAM-BOUNDED-API-DESCRIPTOR-CURSOR-20261118 -->
+公共Steam原有两个固定元数据操作已收紧并source-only联合导入：diagnostics.apps.api.read/contract.read，不新增任意eval/endpoint/reader/常驻扫描或Observer。固定Apps/User/GameSessions/ProcessMonitor最多四namespace、两层prototype，每处16输出/64实际名字访问、全局64/256。root/namespace/method/函数length只取descriptor，不直接执行getter或候选method；原GetAccountID账号read和busy标记保，Proxy trap间接效果及ownNames整数组分配仍UNKNOWN。
+
+api仅可选cursor整数0..255；按每namespace真实消费末位nextCursor续接，row cap不漏段。反射失败sticky UNKNOWN，即使后来预算标签覆盖reason也返回nextCursor/hasMore=null。contract拒cursor，额外names/script/PID/URL不接；truncated/hasMore只表示受限枚举，catalogComplete恒false。名字和length0不当native签名、登记/健康/角色/发布权限。
+
+当前原held33528/Steam21596/game33208实际四read47ms；同tuple续读只3笔62ms，Apps24→42→87→131并新增47条筛选描述符，无原0/contract重读。ProcessMonitor在两层内未确认，不推不存在。账号只端点等值，ABA/account-generation action和跨请求原子性不成立。原Node8、fair1、cursor2、throw1分epoch；旧fixed-page方案因缺口未采用、原raw全保，不拼完整父。两产品JS/header+原Node/cursorinc4源精确CAS，policy/.cpp/Main/Engine/I包未改、不重包部署。
+
+仅metadata SourceReady，不登记、不spawn、不改目标primary，也未恢复游戏。当前磁盘普通调用点与API名字均未提供合法“full type2ID+held原PID+当前CUser/account epoch→正常创建目标record”合同；不猜参调用或删strict gate。默认夹具NOT_RUN，无CPU收益、手柄/触摸/睡眠或长稳结论。原首字段路径失败/SDK39前hash缺口、后继338实编及全部费用分列保。BAT提前resident仍不改，整体ACTIVE。
+
+原件：Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/PostR258-20261117/HistoricalExitedParentPrivate-20261118/FixedApiDescriptors/Cursor-r3/UnknownContinuation-r2/{SOURCE_READY,CURRENT-BOUND-CURSOR-NATIVE-INDEPENDENT-INTAKE,JOINT-ROOT-IMPORT-INDEPENDENT-INTAKE}.json。后发文档不追已固定I或单独构包。
+<!-- /STEAM-BOUNDED-API-DESCRIPTOR-CURSOR-20261118 -->
+
+<!-- STEAM-HISTORICAL-EXITED-PARENT-SOURCE-20261118 -->
+公共父对象事实层已补通用普通自动识别路径与父尚活的首次 CREATE：沿原 WindowProcessCache 已持 child、已初始化内存 name/exclude 预筛收候选，不额外要求白名单/custom，不读规则文件、不新增扫描或选 target。公共 ProcessParentEvidenceOwner 一次持有真实父对象，即使父仍活；后续只用同一 held 对象核出生/真实退出/session/native image，才签独立 HistoricalExitedParentEvidence。双方路径独立，旧 live proof 与原唯一 GameValve 的工作集/资格/选择保持。
+
+原 TrackerOwner 最多四组，满槽先拒新 duplicate/parent Open。未绑定候选 15 秒资格只在原 CREATE/消费检查，不是定时清理；原 fresh 完整来源与真正 selected child、父出生/path/fullID 精确匹配后可保 pending 跨慢初始化，但父活时仍无 historical、健康或动作权。历史 removed 不冒 current tracked；所有 native role/healthyRef/publisher/current/账户电源和预算资格独立。
+
+六 stage 固定64 PID槽的默认小内存诊断只在原事件/读边界记录，原 trackerRead.log.startupCapture 输出 dropped/readBusy/evictions；无新 poller/thread/timer、reader或每callback写盘。PID槽不证 birth，缺项不能当零执行。四个未过期 GUI 候选可挡唯一早期游戏 CREATE，TTL 不能追回已丢事件；memory unknown/trylock竞争仍有早期拒绝边界，不冒通用全稳。
+
+后继公共6改1新+消费GameLink1改已联合8file CAS导入并核固定 RLA18I 选定八源。81/12/26必要定向分epoch核收，不拼119整父；日志ReadTail/原选择等受控叶明确。新增13 owned为9自然+4声明编译器工具收尾，全Job关前0；三strict成功图336/343/336 source各10库，首WX私有测试失败保。独审发现的分配失败裸HANDLE风险已先以栈RAII修正。原八场景38/39/39/36/23/63/63/28、原32记录31+1和旧N2 UNKNOWN分列保。
+
+前驱RLA18H真实main/Engine/relay完整包270.0055408秒已编译部署，但实际Judgment 8/20/45秒仍unqualified/fullID absent、Engine0，是原失败，不冒修复。RLA18I首包Typecheck工具0xC0000005及私有recipe解析失败保；同固定源guarded tail已完成main/Engine/relay普通完整包260.6151489秒，Native77afd39..d47e。恢复负责人正常部署新33528/b134394378909099633并核85B marker，一次正常空参URI新child33208/b134394379250997250与parent36568/b134394379249744512/exit134394379251014285、source5824/fullID9725623966294343680在8/20/45秒两route真实进入Engine，公共源缺边限域闭合。仍拒original-native-association-unavailable：分类B=原typed nativeRecord可读但目标记录count0/not-observed，UI可读flags4/runningfalse；driver/publisher/consumed/mutationCommit均未动，repairAccepted=false，不是A死父记录或UNKNOWN读失败。sourceReady=false，目标记录正常creator和独立startup basis继续；没有CPU、输入/触摸/Continue/睡眠或全稳定结论。只由恢复负责人操作应用、Steam、部署；本文后发不追固定H/I重编。BAT提前常驻主进程按用户决定不改。
+
+原件：Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/PostR258-20261117/HistoricalExitedParentPrivate-20261118/{REPORT-r2.zh-CN.md,RLA18H-COMPLETED-BUILD-AND-FAILED-SOURCE-SCENE-INDEPENDENT-INTAKE.json,SuccessorCandidate/QUALIFIED-INTAKE.json,SuccessorCandidate/FINAL-CAS-HANDOFF.json,SuccessorCandidate/JOINT-ROOT-AND-FIXED-SOURCE-INDEPENDENT-INTAKE.json,SuccessorCandidate/AVAILABILITY-LIMITS-FORWARD-AMENDMENT.json}。全部旧失败/UNKNOWN和累计费用保，统一进出与长期CPU目标ACTIVE。
+最新核收为同证据根 REPORT-r3.zh-CN.md 和 SuccessorCandidate/{ACTUAL-COMPLETE-COMBINED-BUILD-INDEPENDENT-INTAKE,ACTUAL-SOURCE-INGRESS-AND-NATIVE-B-CLASSIFICATION-INDEPENDENT-INTAKE}.json；上文源准备/旧场景失败按原epoch分列，不把新来源闭合当整体修复。
+<!-- /STEAM-HISTORICAL-EXITED-PARENT-SOURCE-20261118 -->
+
+<!-- STEAM-RUNNING-LINK-TYPED-GROUP-20261118 -->
+普通 GameLink 的双 PID 观察现与公共 Steam 层配套：已选游戏始终来自唯一游戏阀；显式请求原 TrackerOwner 捕获真实两成员组。旧 console 的 nativePrimaryVerified/originalAllowed 原值不改，组候选只可进入等待；只有公共 MainRunningGroupRoleIssuer 使用已有 nativeSteamOriginalReadRoles 同次 typed 读、实际 issuedFor ReadScope、完整账号/GameID、唯一 record 和当前组角色后，才产生不可由 JSON 构造的 RunningLinkNativeRoleObservation。同轮角色结果单列 VerifiedOriginalGroup，允许真实 root/root 与 child/root，原单 PID Exact/currentRecord 保持。
+
+角色结果只证明本次原生读取与 held scope/对象/请求关联，current() 不重新读取 native tuple，不授 healthyRef、动作、发布或重放权限。UI Read 的真实来源仍由原 liveRequest/bracket 外层保证；消费端回调以弱 Control 和值捕获身份/选择/规则/配置/电源，proof 不入历史或跨轮缓存。Ready/loss 仅发原 advisory，Engine 独立验收权限。源与消费已联合限域导入；真实自动恢复、输入触摸睡眠和 CPU 收益仍需现场验收。
+
+原件：Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/PostR258-20261117/GenericShellMainlineIntegration-20261118/PUBLIC-ROLE-FACTORY-SOURCE_READY-r2.json；实际 issuer 定向35+25、私有main1714/Engine377。Win32目标内存、UI/唯一选择和power reader在定向中有明确内存叶，不冒整Native SDK或安装。普通完整构建与现场由恢复负责人统一执行，后发文档不追固定RLA18G。
+<!-- /STEAM-RUNNING-LINK-TYPED-GROUP-20261118 -->
+
+<!-- STEAM-GENERIC-SHELL-COORDINATOR-20261118 -->
+通用 shell.open / shell.execute 中显式 steam: URI、叶名 steam.exe 或省略扩展名的 steam，现进入同一公共 Coordinator 的不带目标身份占位。原 URI、路径、参数、verb、目录和显示方式保持，真正 Shell 调用前仍核原 SourceOwner::Read、退出/取消、原请求条件及当前共享电源。占位仅协调 Mutation，不能伪造 PID/birth、绑定 child、借 typed/remote Steam 动作权限；Busy 不派发、不自动重试。
+
+源码阶段的范围为原72检查引用、后继直接分类/实际协调34检查、同一 Coordinator 布局的私有 main/Engine 编译。普通组未运行，未据此签当前完整 Native、链接、安装、Steam 实效或 CPU 收益；任意 cmd/PowerShell/.lnk 等间接 wrapper 不由直接名称分类器覆盖。BAT 提前启动常驻 YMCC 按用户决定保持不改。来源与导入见 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/PostR258-20261117/GenericShellMainlineIntegration-20261118；仅下一自然匹配 Native+Engine/runtime/source-PDB，不追 RLA18E。
+<!-- /STEAM-GENERIC-SHELL-COORDINATOR-20261118 -->
+
+<!-- STEAM-RUNNING-COMMAND-COORDINATION-r254 -->
+运行中 Steam 的命令占位由普通 Native 主进程的一份 `steamcommand::Coordinator` 管理。手动 set/stop/show、已安装库 Shutdown、GamingHome Show/Focus、主进程 CDP 写操作和原恢复 child 共用占位；同一请求显式借用，独立新请求不得借别人的票。占位不授予身份、动作权限或成功回执。Busy 明确未派发，本次调用结束，不作身份变化、恢复失败或自动重试依据。含 `menuGame` 的潜在别名写也参与协调；原轻量 gamepad-lease 独立通道和只读事实保持。
+
+恢复在原内存／持久化预约之前取得占位，Runtime 在原 closeOwned／层级推进之前取得；大屏关闭、读回、打开、读回沿同一个父事务。实际副作用仍在原调用／认证同映像 child，原 source、process、user、session、account、power、current、deadline 和最终一次消耗性准入保持。动作与事实共用原认证管道的一份 reader 和连续序号，事实回复不授动作权限。取消、未知许可或关闭失败不凭超时抹掉准确 child 债；后续原入口可在已有事实执行器请求原清理，准确归还才退休，无新增常驻线程、轮询、服务或 EXE。
+
+本能力证据范围为私有原消费者的定向组件与对象编译，不等于默认／完整 Native、安装版、实体 Steam UI／手柄／触摸／睡眠或 CPU 收益。BAT 和提前启动主进程的拓扑按用户决定继续待定，不能据本能力宣称全部开机路线或全图唯一出口已验收。原失败、分 epoch 回执与未覆盖项保留；仅下一次自然构建配套，不追包部署。
+<!-- /STEAM-RUNNING-COMMAND-COORDINATION-r254 -->
+
+<!-- STEAM-MANUAL-COMMAND-SOURCE-READ-r235-20261117 -->
+手动 Steam 切换／退出（显示大屏经 set）现持有原 SourceOwner::Read 至原固定命令返回；原 raw dispatch、token/进程/identity 顺序、单次 admit 和 accepted/异常语义保持。Library/Home 已有租约、认证 child recovery 仍走原 raw，不叠加第二层登记。
+
+来源见 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/ColdBootMainOwner-20261116/CommandOwned-r235/SOURCE_READY-r235.json；PendingSources/SteamManualCommandSourceRead-r235.json 只接下一自然匹配 Native/runtime/source-PDB。七来源参数＋三原参数通过，旧必要失败和核收失败保留；冻结整 main object 已编，后发日志修改经原生成器核完整消费者 CPP 相等，不冒称完整当前 main 已编。无部署、实机或 CPU 收益证明，永久同步 Shell 阻塞和整体目标仍 OPEN；BAT 提前主进程不改。
+<!-- /STEAM-MANUAL-COMMAND-SOURCE-READ-r235-20261117 -->
+
+<!-- STEAM-MAIN-EGRESS-SOURCE-READ-r233-20261117 -->
+公共 Steam 的普通、绑定、手动修复和 UI 读取四个主入口，现持有原 SourceOwner::Read 至原请求返回；来源撤销后不能在旧请求仍在途时提前放行新来源。原 run 正文、认证委托 child 两入口和已发送不确定写入结果保持，无新 reader/poller/线程、权限或重试。
+
+限域原件见 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/ColdBootMainOwner-20261116/RequestOwned-r233/SOURCE_READY-r233.json；PendingSources/SteamMainEgressSourceRead-r233.json 只接下一自然 Native/runtime/source-PDB。六定向和三受影响原参数已过，九份最终提取片段逐字相等；当前完整 main 仅 object 编译，默认/完整组 NOT_RUN，准备及必要失败保持。永久阻塞同步 OS 调用的有界退出、loaded、实体输入/睡眠和 CPU 收益仍 OPEN。BAT 提前主进程方案按用户决定不改。
+<!-- /STEAM-MAIN-EGRESS-SOURCE-READ-r233-20261117 -->
+
+<!-- STEAM-DISCOVERY-CALLER-CANCEL-r226-20261116 -->
+公共 run 现将已有纯 ownerCurrent 传入既有 listener/checkpoint，并与继承限制取交集；旧源已在原 main-shared-identity 消费者复现取消后仍继续 TCP 取表。六边界35检查通过，健康保原三次所有权核对/一次派发，无新 reader/poller/线程或权限。
+
+来源见 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/ColdBootMainOwner-20261116/DiscoveryCancel-r226/SOURCE_READY-r226.json，PendingSources/SteamDiscoveryCallerCancellation-r226.json 只接下一自然 Native/runtime/source-PDB。旧必要失败、原编译警告和各 epoch 保留；最终行尾配套只补编译，不重跑35检查。完整 main/link、loaded、实机及整机CPU未验收；本项没有修改直接出站的 source-drain 租约。
+<!-- /STEAM-DISCOVERY-CALLER-CANCEL-r226-20261116 -->
+
+<!-- STEAM-COMPLETED-WORKER-RESTART-r224-20261116 -->
+公共 Observer 的原显式 start 现在只在线程 HANDLE 已结束时回收失败 worker；尾回调仍在途立即拒绝，CloseHandle 失败保留原事件并阻止替换。没有新常驻扫描、线程、计时器或自动重试入口，BAT 提前主进程方案保持不改。
+
+限域来源见 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/ColdBootMainOwner-20261116/RetiredWorker-r224/SOURCE_READY-r224.json。原严格 Observer 消费者四参数分 epoch 共66检查通过；默认 CPP 正文完整保留，新增 tools/fixtures/steam_source_owner_cases.inc 与精确 publication epoch 必须配套。完整 main/link、loaded、实机输入/睡眠及长期 CPU 未验收，旧失败和工具收尾事实保持。PendingSources/SteamObserverCompletedWorkerRestart-r224.json 只接下一自然匹配 Native/runtime/source-PDB；不追包、部署或增设发布门。
+<!-- /STEAM-COMPLETED-WORKER-RESTART-r224-20261116 -->
+
+<!-- STEAM-FINITE-DOCUMENT-CHANNEL-r218-20261116 -->
+公共 Steam 共享文档读取已配套唯一来源和原同映像有限请求：主进程的既有 Observer/ListenerExecutor 负责拓扑；child 仅网络读取、无扫描回退。原 SourceRead、身份/电源/取消代次和 4000ms 保持；请求同槽保留 Owner/reader/通知事件，未确认清理时拒绝新 child，关闭错误不当健康。CDP 回复编号、文档 partial 一致性及最终期限均显式核对。
+
+SourceReady 仅该源码范围：G:\YeManCC-Work\Testing\YMCC\Evidence\SteamUnifiedChannel-20261112\RemainingReaders\ColdBootMainOwner-20261116\DocumentMainlineIntake\r218\SOURCE_READY-r218.json；下一自然 Native/runtime/source-PDB 登记 G:\YeManCC-Work\Build\Exports\PendingSources\SteamFiniteDocumentSharedChannel-r218.json，必须包含两个新增内部头。已编完整 main TU/原严格消费者，不代表完整 link、loaded、实体输入或 CPU 收益。原默认夹具 NOT_RUN；不追旧包或部署，BAT 提前主进程方案按用户决定不改。
+<!-- /STEAM-FINITE-DOCUMENT-CHANNEL-r218-20261116 -->
+
+<!-- DECKY-ACTUAL-RUNTIME-THREAD-CPU-COST-20261116 -->
+Decky r144只补actual线程成本证据，0产品/正式fixture/Pending写：同current仅baseline逆除r139 Client2+r140 Runtime4语句，普通allocator无fault宏。2campaign11pair含old-old、88固定样本+2预热原192payload body全过，cycle中位比.9837986/.9754188、wins8/11和10/11；old-old1.0042837/1.0073637过预设门，无重测/筛样。非整机CPU%/空闲或实机收益。
+2实际图/90native/3outer自然Job0，29 CPU粒度零/65迁核均保。parent错ACTUAL文件名及64位birth经JS精度消费FAIL保，只续同raw；主度量safe integer精确、原native birth十进制另保，不把舍入摘要作身份。SOURCE_READY-r144=false仅无新源码，r139/r140 Ready保持，无新ID/minimum/发布门。
+权威原local-automatic-bpm-20261113/{RUNTIME-CPU-VERDICT-r144.json,RUNTIME-CPU-QUALIFIED-INTAKE-r144.json,REPORT-r144.zh-CN.md}；verdict3739B/SHA891f821168ae09f80c5b3e3eccce7fa4e9c6431596f30380d483a57fb237b916。仍下一自然配套不追包/部署；ROG/长稳CPU、r106/冷+5/有限永久债OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-RUNTIME-THREAD-CPU-COST-20261116 -->
+
+<!-- DECKY-ACTUAL-OBSERVATION-HANDOFF-ERROR-20261116 -->
+Decky r143主线SourceReady：原观察child/pipe duplicate8、reader event8及拒绝5/实Owner取消995统报6已复现；两Owner copy与reader attach可选error输出，Client同栈首错即停/仅prewrite8接原retry，5/995/OFF/准入不放宽，非空pipe先adopt。旧无参消费者源码兼容，不签其整运行。
+3compile含原C4389/WX FAIL保、2成功图/12native=5旧必要FAIL+7候选过，3outer自然Job0=2success1rawfalse；153或147相等/资源全0，11private marker逆除。5文件11hunk/5share0 87.7163ms/5HANDLE还，Owner/3fixture接r142、Client接r141，Runtime/stop/IO/预算/官方Loader保持，无新ID/minimum/永久资源。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r143.json,HANDOFF-ERROR-QUALIFIED-INTAKE-r143.json,MAINLINE-IMPORT-r143.json,REVERSE-REVIEW-r143.json,REPORT-r143.zh-CN.md}；SR8373B/SHA93b104c2f99d025a82aab2431474a495bb22919d594346216ca7f372457c9ccf。PendingSources/DeckyObservationHandoffErrors-r143.json只下一自然Native/runtime/source-PDB，不追包/部署；r106/冷+5/永久债/ROG睡眠离线和长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-OBSERVATION-HANDOFF-ERROR-20261116 -->
+
+<!-- DECKY-ACTUAL-OWNER-CREATION-FIRST-ERROR-20261116 -->
+Decky r142主线SourceReady：原Owner changed/cancel注入8后真实后续成功API清0、最终31漏retry已复现；Job仍保8但多create1，port原正例。只初始四create失败即时存既有error并停，getter仅未存时fallback，原stop/IO/externalcancel/budget字节保持，未移私有finite接口。
+2图/11native分epoch=3旧必要FAIL+1旧正例+7候选过，2outer自然Job0；候选四故障原8/0后续create且原2plan/1write，OFF/准入/5不放宽。4文件10hunk/4share0 14.3713ms/4HANDLE还，Owner等r141 protected前像/3fixture接r141；Client/Runtime/官方Loader保持。mixedEOL/copy目的地两准备FAIL和两prelaunch拒绝保，0额外编译；无效网络引用撤回仅actual API/source依据。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r142.json,CREATION-ERROR-QUALIFIED-INTAKE-r142.json,MAINLINE-IMPORT-r142.json,REVERSE-REVIEW-r142.json,REPORT-r142.zh-CN.md}；SR7876B/SHA701633d0c3de618dc00b5687353c830b1aeb1632c2f54d9b35b293e334d87f3f。PendingSources/DeckyOwnerCreationFirstError-r142.json只下一自然Native/runtime/source-PDB不追包/部署。其它API错误归属/r106/有限永久债/ROG睡眠离线及长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-OWNER-CREATION-FIRST-ERROR-20261116 -->
+
+<!-- DECKY-ACTUAL-PREWRITE-RESOURCE-RETRY-20261116 -->
+Decky r141主线SourceReady：实际完成事件注入8及Owner start真实80B失败/已归还error8旧5秒不retry已复现；Client仅两处code分类接原notStarted/error8，Owner须fullyDestroyed且无IO，整个Client cleanup/intent/准入/OFF/窗口仍原。候选两恢复各2plan/1write，OFF/准入各1plan/0write，NamedPipe5不入memory retry；实际资源0/153或147相等。
+2图/7native分epoch含2旧必要FAIL、2outer自然Job0，无新ID/minimum/default宏关。4文件8hunk/4share0 9.4506ms/4HANDLE还；8private marker逆除等产品，Client接r139、3fixture接r140，Runtime/Owner/recovery/transports/官方Loader保。注入API失败不当真实kernel耗尽，phase7默认Owner字段不授已知。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r141.json,PREWRITE-RESOURCE-QUALIFIED-INTAKE-r141.json,PREWRITE-RESOURCE-FAILURE-MAP-r141.json,MAINLINE-IMPORT-r141.json,REVERSE-REVIEW-r141.json,REPORT-r141.zh-CN.md}；SR7905B/SHA86db6c46a7b6789b1f99832646daa0c0545ca67c97e3e54b041bac627fbf4766。PendingSources/DeckyPrewriteResourceRetry-r141.json仅下一自然Native/runtime/source-PDB不追包/部署。原Win32错误归属几处SOURCE_ONLY_OPEN、r106/有限债/真实ROG和长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-PREWRITE-RESOURCE-RETRY-20261116 -->
+
+<!-- DECKY-ACTUAL-RUNTIME-DETAIL-TRANSFER-20261116 -->
+Decky r140主线SourceReady：Runtime四原语句完成local detail链，initial const引用保后续结果读，watch取kind后move detail、原retain后move给不改body的by-value诊断。原194envelope/192payload实际selection1654new/1663880B及watch参数1251new/1644280B均→0，scope互不重叠；不是整路径/CPU/RSS零成本。
+3图/3native原live-watch body均过、2旧成本断言FAIL保，3outer自然Job0；原身份/trace脱敏/退出/153→153全回收。5文件8hunk/5share0 12.5494ms/5HANDLE还，Runtime接r138、4fixture接r139；6private Runtime观察marker逆除等产品/default macro关无新ID或minimum，Client r139及恢复/transport/官方Loader保。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r140.json,RUNTIME-DETAIL-QUALIFIED-INTAKE-r140.json,MAINLINE-IMPORT-r140.json,REVERSE-REVIEW-r140.json,REPORT-r140.zh-CN.md}；SR8500B/SHAcef613bb7c75fd5b1367948677788fb17e21a8c99f8a5a1de285014d0167946b。PendingSources/DeckyRuntimeDetailTransfer-r140.json只下一自然匹配Native/runtime/source-PDB，不追包/部署；ROG睡眠离线/长期CPU、r106/冷+5/有限永久债仍OPEN，目标ACTIVE。
+<!-- /DECKY-ACTUAL-RUNTIME-DETAIL-TRANSFER-20261116 -->
+
+<!-- DECKY-ACTUAL-PACKET-PUBLICATION-MOVE-20261116 -->
+Decky r139主线SourceReady：仅Client解析局部去const/成功返回move两行，原实际192x8192B连续包在交接处copy192→0、new3948→0、累计请求1797224B→0；不是CPU/RSS或整路径零分配。原Runtime live-watch body两次均通过，before必要零copy成本断言FAIL保，153→153/Client全0/CEF活。
+2实际图/2native/2outer自然Job0，无重计时/工具强收；原3私有观察marker跨Client/Runtime逆除全字节，default macro关/无新caseID或minimum。5文件8hunk/5share0 84.2939ms/5HANDLE还，4源接r138/CPP接r137；原Runtime/recovery/transports/官方Loader保持。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r139.json,PACKET-PUBLICATION-QUALIFIED-INTAKE-r139.json,MAINLINE-IMPORT-r139.json,REVERSE-REVIEW-r139.json,REPORT-r139.zh-CN.md}；SR8356B/SHA97df59a5d5dd4661c9942fe133649409a81ea2ce276871893fbeaffb195d49d2。PendingSources/DeckyPacketPublicationMove-r139.json仅下一自然匹配Native/runtime/source-PDB，不追包/部署；ROG睡眠离线输入/r106/有限永久债和长期CPU仍OPEN，目标ACTIVE。
+<!-- /DECKY-ACTUAL-PACKET-PUBLICATION-MOVE-20261116 -->
+
+<!-- DECKY-ACTUAL-CLIENT-PREWRITE-RECOVERY-20261116 -->
+Decky r138已主线SourceReady：实际dump32/parse1分配失败旧5秒不retry已复现；同Client在writeFrame入口前标记，bad_alloc只在未尝试写入返回原notStarted/error8，已尝试保持systemError/uncertain不重放。Runtime仅改边界注释，cleanup/intent/准入/OFF/原窗口保持。实际payload547同恢复，7候选+原构造direct同EXE通过；删写标记真实2write原不重放断言FAIL保。
+3编译图/11native分epoch含3必要FAIL，4outer自然Job0，无工具强收；原EOL消费者误断言和修复脚本语法FAIL保，只续消费不重跑。5文件8hunk/5share0 31.2213ms/5HANDLE还，六fixture markers逆除等产品、官方Loader/原transport保持。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r138.json,CLIENT-PREPARATION-QUALIFIED-INTAKE-r138.json,MAINLINE-IMPORT-r138.json,REVERSE-REVIEW-r138.json,REPORT-r138.zh-CN.md}；SR8469B/SHAdced5cc2d77986592d9d2d9785511d682436a71814a5b54904106c858faa7545。PendingSources/DeckyClientPreparationRecovery-r138.json接r137五源下一自然匹配Native/runtime/source-PDB，不追包/部署；非ROG现场根因或CPU收益，r106/私有有限债/ROG睡眠离线和长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-CLIENT-PREWRITE-RECOVERY-20261116 -->
+
+<!-- DECKY-ACTUAL-CLIENT-CONSTRUCTION-RECOVERY-20261116 -->
+Decky r137已主线独立SourceReady：实际Client发布前Session504分配异常旧逃出、Runtime旧5秒1plan不入局部retry已复现；仅catch bad_alloc→既有notStarted/error8，原Runtime识别并记录未写入、cleanup成功才接原重试。保current/nonce/请求代数/intent/准入/OFF及全部原期限；新路径实297ms/2plan恢复，OFF/拒准入各1plan，153或147handles相等/实际Client0，不签现场CPU。
+4实际编译图/8native分epoch/2旧源必要FAIL+1夹具Owner代数误判FAIL保，5Job自然0=4成功1rawfalse。原正式可选参数+2inc/默认macro关、错误selector两控制0构建；产品不含probe。6文件10hunk鲜读4share0+2CreateNew/17.4890ms/6返回，原Owner/recovery/transports/官方3.3.1保。私有r132-r136仍非Ready，未混导。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r137.json,CLIENT-CONSTRUCTION-QUALIFIED-INTAKE-r137.json,MAINLINE-IMPORT-r137.json,REVERSE-REVIEW-r137.json,REPORT-r137.zh-CN.md}；SR6224B/SHAb5e494e080924fbb4a65773aec158aba4a998f079a4e36224e1afe3f50d39e8d。Build/Exports/PendingSources/DeckyClientConstructionRecovery-r137.json交下一自然Native/runtime/source-PDB含两新增inc，不追包/部署；实际ROG/sleep/offline与长期CPU、r106/冷+5/有限永久债OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-CLIENT-CONSTRUCTION-RECOVERY-20261116 -->
+
+<!-- DECKY-PRIVATE-PREISSUE-CREATION-FAILURES-20261116 -->
+Decky r136原私有头未改：State832/reserve32/Io/buffer/Event五创建故障实测归还，构造前无handles，preissue typed8/8/5不封健康流，同State重试echo/最后IO Job0。首容量131076误作new尺寸未命中FAIL保，实际MSVC131115已核；只续buffer/event。仅去catch reap反例返回Io1/多1handle/close0，后snapshot归还也仍原断言exit1。3编译图/7native分epoch/3Job自然0=2成功1rawfalse原父FAIL，无工具强收/不拼父。
+候选全byte等r135/主线两头未变，0产品正式fixture/Pending/部署/SOURCE_READY。实际Client构造在try前、两generic/start reason不入局部retry闭集仅SOURCE_ONLY新线索，原三头已捕获，下一实际Client/Runtime复现。有限caller/永久债/r106/冷+5/ROG和长期CPU仍OPEN。
+权威原local-automatic-bpm-20261113/{PREISSUE-QUALIFIED-INTAKE-r136.json,CLIENT-CONSTRUCTOR-SOURCE-FOLLOWUP-r136.json,REPORT-r136.zh-CN.md,CLOSING-r136.json}；intake26551B/SHAeca2891304b8f545d65f0f840b6f08c5f99a28388b241de838f4b6692f6d5eac。整体ACTIVE。
+<!-- /DECKY-PRIVATE-PREISSUE-CREATION-FAILURES-20261116 -->
+
+<!-- DECKY-PRIVATE-REAL-FRAME-ERROR-MATRIX-20261116 -->
+Decky r135私有5hunk：真实0帧旧判error24、坏帧后原read/write仍pending两缺陷已复现；现恢复原合法空wire/不改JSON准入，坏/partial/EOF与首次issue失败seal原State。原copy64坏分配实际逃异常，现typed error8/cancel、不重放；Reset5亦封新IO。空后续帧/三EOF/零与过期准入/同Owner unique_ptr归caller共9唯一边界；真实close6债同State地址由outer收回、不新API，但实际菜单caller/永久失败归属未闭，SOURCE_READY=false。
+5compile=4实际图+1C4389原FAIL，14native=10正向含一次有因空帧复测+4必要语义FAIL，5Job自然0=4worker成功1rawfalse编译失败，无工具强收。不拼父/ID/minimum；3+2hunk逆补与最终正反fixture全同/全声明鲜哈，主线两头/产品正式fixture/Pending/部署0写，旧失败费用保持。r134 retained+1/其他构造竞争/r106/冷+5/真实ROG与长期CPU继续OPEN。
+权威原local-automatic-bpm-20261113/{FRAME-ERROR-QUALIFIED-INTAKE-r135.json,PUBLIC-FINITE-OWNER-ERROR-AND-CALLER-HANDOFF-r135.json,REPORT-r135.zh-CN.md,CLOSING-r135.json}；intake46824B/SHA84daf00d2d0cc400f484c19cd7cd1f342dd0fdff04179869c828b3fc3375f2c8；实现Workspace/FS135/candidate-b。原r27稿核同未写，磁盘handoff未当消息交付，整体ACTIVE。
+<!-- /DECKY-PRIVATE-REAL-FRAME-ERROR-MATRIX-20261116 -->
+
+<!-- DECKY-PRIVATE-FINITE-ABSOLUTE-WAIT-CAP-20261116 -->
+Decky r134私有8hunk让同State startFinite失败/stop/析构共用absolute wait end，默认0保持；start真实挂起child注入Resume5已归还，stall350窗实359ms返回欠账，析构到期0ms但原retained实际+1，只有fixture另等退出+原一次retry才收回，明确不是产品有限终态。真实protected CloseHandle错6、原Owner保1句柄并可恢复重试；初猜5两FAIL及首control Job通知竞争FAIL保留。只去clamp最终原断言exit1、stop1672ms/end超1322ms。
+5实际编译图/8native分epoch/5Job自然0=2worker成功3rawfalse失败，无工具强收，不拼父。源/工具鲜哈、8hunk逆补及最终仅clamp控制均核；主线两头/产品正式fixture/Pending/部署0。旧本机raw8496 birth匹配但5 CSS无r126七指标，不签当前loaded/UI/CPU。SOURCE_READY=false，失败State可操作出口/菜单caller/剩余API矩阵、r106/冷+5/ROG长期CPU继续OPEN。
+权威原local-automatic-bpm-20261113/{FINITE-DEADLINE-QUALIFIED-INTAKE-r134.json,PUBLIC-FINITE-OWNER-WAIT-CAP-HANDOFF-r134.json,LOCAL-CSS-AVAILABILITY-CORRECTION-r134.json,REPORT-r134.zh-CN.md,CLOSING-r134.json}；intake29222B/SHA46f85ff2539fea0d165c20d500f660b855e0782aa6b3417ccc1066e34360d518。实现Workspace/FS134/candidate-c；App读MCP失败，磁盘handoff未当已交付，整体ACTIVE。
+<!-- /DECKY-PRIVATE-FINITE-ABSOLUTE-WAIT-CAP-20261116 -->
+
+<!-- DECKY-PRIVATE-STEP-REQUEST-LOCAL-REUSE-20261116 -->
+Decky r133仅私有同State双slot复用：128实际小帧事件256→2、回复capacity131076→64，原stop归还；partial/echo/背压取消及旧bounded混用保持。只去lifetime guard原断言exit1；另实际变长写扩容184329/总315405推翻旧准备上限，最终beginStep exact replacement六轮每slot≤131076/总≤262152，只签固定MSVC容量。两必要FAIL原件保，0线程/整机CPU收益声明。
+5成功编译图/10native分epoch/5outer自然root0 Job0，原measured源未后写；7hunk+容量修复逆补全bytes、mainline两头未变。SOURCE_READY=false/0产品正式fixture/Pending/部署；start/析构1500尾/失败State出口、菜单caller与其余失败矩阵及r106/冷+5/真实ROG和长期CPU仍OPEN。初1800+事前900秒续测/原费用和deadline保持，无新永久资源。
+权威原local-automatic-bpm-20261113/{STEP-REUSE-QUALIFIED-INTAKE-r133.json,PUBLIC-FINITE-OWNER-REUSE-HANDOFF-r133.json,REPORT-r133.zh-CN.md,CLOSING-r133.json}，intake22088B/SHA8fb68cefcaa9ef05075889d969fc5128aa436ef71268d13ce498dec53c7a3cda；候选Workspace/FS133/candidate-bound/native/decky_binding_process_owner.h。磁盘handoff未当消息已交付，整体ACTIVE。
+<!-- /DECKY-PRIVATE-STEP-REQUEST-LOCAL-REUSE-20261116 -->
+
+<!-- DECKY-PRIVATE-SINGLE-OWNER-FRAME-STEPS-20261116 -->
+Decky r132已消费菜单r27落盘稿，仅私有同Owner/pipe/operations begin/harvest双向帧与借用event/child；reserved保真实completion和未消费帧跨原ACK/snapshot reap，原cancel后实际归还，final不rearm。原pending-read/write三参数Warm72→72/State IO/Job0，128KiB pending write stop156ms；只去reserved guard对照原断言exit1。无新增EventReader/duplicate/永久线程/队列。
+4compile含私有ASCII/WX FAIL、3成功图、6native分epoch，5outer Job自然0。cold新step73→78/原Owner-only65→70均+5但归属未知、全部FAIL保；不签冷全进程无漏。旧private路径变动已用事前exact before重核同raw，不伪称路径仍未变。0主线产品/fixture/Pending/部署，start/析构1500尾及唯一finish deadline/失败State出口仍OPEN，SOURCE_READY=false；每帧Io/event/buffer成本未测，不签CPU收益。
+权威原local-automatic-bpm-20261113/{OWNER-STEP-QUALIFIED-INTAKE-r132.json,PUBLIC-FINITE-OWNER-STEP-HANDOFF-r132.json,REPORT-r132.zh-CN.md,CLOSING-r132.json}，intake23909B/SHA9922832fb686ad7f2c7ad2cb03f6197a9e92a8129e4cbfbf29519408c9ca3ba5；实现Workspace/FS132/candidate/native/decky_binding_process_owner.h。App MCP发送失败未当交付，具体有限caller/其余失败边界/ROG与CPU继续OPEN，总目标ACTIVE。
+<!-- /DECKY-PRIVATE-SINGLE-OWNER-FRAME-STEPS-20261116 -->
+
+<!-- DECKY-REAL-RUNTIME-BOOTSTRAP-CHAIN-20261116 -->
+Decky r131补固定软件整链：原Runtime/Harness→Client/Owner→实际worker/injectBootstrap/watch自有HTTP/WS，C正常及close拒5原child exit2/Client0先于typed重试、E真2fragment在途OFF1plan无先失败/16ms、G实际attached后reset自动2plan2result2attached且同原Loader/15ms，所选各父IO/Job0、weak归还/152→152。非浏览器JS/Steam/ROG/默认父或CPU证明。
+7编译含首W4WX FAIL、6实际图、10native选择分epoch；7Job0=5自然+2准确vctip/rawfalse。B未校准句柄失败未知、C片段先失败后OFF旧raw PASS已剔资格、D/F注入阶段FAIL及所有费用保；仅续受影响项。原CNG校准139→143非豁免，原工具策略request≠实际cleanup的核收FAIL已前向纠正同raw。0产品/主线fixture/新ID/minimum/Pending/部署，SOURCE_READY-r131不授。
+权威原local-automatic-bpm-20261113/{ACTUAL-BOOTSTRAP-QUALIFIED-INTAKE-r131.json,REPORT-r131.zh-CN.md,CLOSING-r131.json}，intake187109B/SHAe969f5bef9e5ddcd373b95491dbb61bad95bf3aaff02e73e5fbe8e4f02aa6f1f。r130有限parent失败归属仍等具体接口、r106同步取消/资源、真实ROG睡眠离线输入及长期CPU继续OPEN；两协同发送MCP失败未当已交付，总目标ACTIVE。
+<!-- /DECKY-REAL-RUNTIME-BOOTSTRAP-CHAIN-20261116 -->
+
+<!-- DECKY-NATURAL015709-SCOPED-INTAKE-20261116 -->
+Decky r130独立核自然015709：r109/r125/r126实际入runtime/source-PDB，17唯一source成员CRC/bytes/SHA、6实际include、5plugin成员及r126整函数、Native全文/唯一compiled与实际PDB4ffa7d50…/1已核；两ZIP全哈，worker bootstrap include唯一。r129晚于capture明确未含，留下一自然；r130 parent仅合同审查0共享头写/非Ready，无新Pending。不追编/部署/loaded，普通fixtures NOT_RUN。
+原C1001 producer38780/root1/Job0及package续29948/root0/Job0各保准确vctip/rawfalse；本消费者错键/错叶路径两FAIL保留，仅复读同raw，0新业务/编译。权威原local-automatic-bpm-20261113/{NATURAL015709-DECKY-PACKAGE-INTAKE-r130.json,FINITE-PARENT-MINIMUM-CONTRACT-r130.json,REPORT-r130.zh-CN.md,CLOSING-r130.json}，intake11791B/SHAdeb20915f5a31f71d486f6bf547f7d04d336197830f2cd1ac919d7131b6c9a42。
+重复ROG115123 archive及9raw核同r89/r105：旧锁忙误断5146ms已按原后继处理，不当新版复现。有限parent析构追加等待/无reaper retained不拿Job0冒签，不以全r106/CPU为本scope门；具体同栈拓扑/实际Runtime全bootstrap整链、真实ROG输入睡眠离线/长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-NATURAL015709-SCOPED-INTAKE-20261116 -->
+
+<!-- DECKY-ACTUAL-BINDING-REUSE-DIAGNOSTIC-20261116 -->
+Decky r129仅原connection-recovery/global-connection加typed bindingReused，直接消费既有reuseFreshBinding；保attempted原阶段含义和全部动作/次数/期限。原fresh-handshake四参数通过、旧源必要断言拒绝，fresh保持原binding、watch替换/到期升阶/OFF归还均保持，153→153/实际Client0。首深TEMP206 FAIL保留，旧编译EXE只续未达负例；2编译3native选择/3Job0=2自然+1准确vctip收尾/rawfalse分列，不拼默认父。
+3文件5hunk share0 84.0916ms/3HANDLE归还，runtime/CPP接r125、diag接r126原字节；无main/UI/recovery或公共transport/官方Loader改动。权威原local-automatic-bpm-20261113/{SOURCE_READY-r129.json,BINDING-REUSE-QUALIFIED-INTAKE-r129.json,MAINLINE-IMPORT-r129.json,REVERSE-REVIEW-r129.json,REPORT-r129.zh-CN.md}，SR6113B/SHAf33c440f79921d7c7a2e67ecb3709254cd622f5bdc3e9ad8d63b0ee91a7486f1。PendingSources/DeckyBindingReuseDiagnostic-r129.json仅下一自然Native/runtime/sourcePDB，不追包/部署/实体或CPU收益。
+Win5 184416原writer13556实际唤醒原Loader2336未重启、约1.7s peer/5.6s双通道确认；仅软件现场事实非实体输入。r127延迟回收反证保持，r106资源/同步取消/ROG输入睡眠离线/长期CPU继续OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-BINDING-REUSE-DIAGNOSTIC-20261116 -->
+
+<!-- DECKY-WINHTTP-DELAYED-RETURN-OBSERVED-20261116 -->
+Decky r127仅自有回环真实API排除：257session禁globalpool与默认warm增长均107；257末session通知全signal/测试event全关仍+192，257顺序协议close成功仍+164，纯HTTP与不设timeout也增长。各简易改法均未入产品，不删除产品deadline或增加永久session owner。
+关键新反证：65纯HTTP/195显式close后1/20/60/125秒handles279/279/193/193、Event107/107/29/29，20→60秒确有86句柄/78Event延迟归还；不能将r10620秒不降当永久泄漏。冷155到残余193尚无创建栈归因，也不冒签产品无漏/CPU收益。8自有Job自然0含1root1 postpayload10054原FAIL，cold4type UNKNOWN及后置intake误要求unknown0 FAIL保留，只消费同raw不重跑。
+权威原Decky local-automatic-bpm-20261113/{SESSION-RESOURCE-INTAKE-r127.json,REPORT-r127.zh-CN.md,CLOSING-r127.json}。本段0产品/编译/默认夹具/Steam或部署，SOURCE_READY-r127=false且不注册Pending；r125/r126独立Ready保持。下一按自然配套后的r126原请求CPU/handles日志定因，shared同步取消/ROG输入睡眠离线/长期CPU继续OPEN，整体ACTIVE。
+<!-- /DECKY-WINHTTP-DELAYED-RETURN-OBSERVED-20261116 -->
+
+<!-- STEAM-MOUSE-ENQUEUE-SHARED-IDENTITY-20261115 -->
+普通鼠标排队入口steamDeckMouseSet改消费公共immutable identity与同root target解析，读取/保存前pure current拒绝PID/birth/account/root后继，不再直接registry/initial inventory；原持久化→事件→beginWindow→applyRequested→queue→返回尾逐字保持。与已导display/apply/reconcile共享唯一来源，默认fresh目标分支及最终offline写门保留，不以死分支计活跃CPU。4文件11块share0精确合入/4HANDLE归还；原6定向/旧主函数必要FAIL和offline4分epoch，3实际图6Job0/工具rawfalse分列，非法空selector拒生成，不拼默认父。本差异parent反推核，不冒签独审。权威RemainingReaders/MouseEnqueue-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SR4033B/SHAbadcb2439fb7396d208dbe57380a8750792814fb53f411dcc2860437d90848b8，PendingSources/SteamMouseEnqueueSharedIdentity.json只下一自然Native/runtime/source-PDB，须带新enqueue_identity_cases.inc。普通fixturesNOT_RUN，无部署/实体/CPU收益；R5与numericPID长期证明和整体目标ACTIVE。
+<!-- /STEAM-MOUSE-ENQUEUE-SHARED-IDENTITY-20261115 -->
+
+<!-- STEAM-MOUSE-APPLY-SHARED-IDENTITY-20261115 -->
+普通鼠标apply持唯一公共immutable identity贯穿GET/SET/原20×50ms落盘等待，未知不offline；GET后换owner不发SET、SET后换owner不确认，末PID只用原held PID。reconcile复用抽取的纯sameIdentity比较；末次原target resolver核同选择/路径/group，并以该次scalar决定persisted，旧值不能清错。原durable live-inflight先存/失败不发SET、备份和offline fresh presence/file门保持，0新reader/worker/timer。7文件29块share0鲜读导入/7HANDLE归还；原12/15/最终16、reconcile11、offline4与三必要旧源FAIL各epoch保持，不拼默认父。9实际图18Job0/工具rawfalse分列；首root转义FAIL和有限独审85.438秒/75目标及未核pin不冒签。权威RemainingReaders/MouseApply-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,import-r3/MAINLINE-IMPORT.json,REPORT.zh-CN.md}，SourceReady4947B/SHAf451a4f244532e5eb50c544f622c194e70bc4453088ddfbba8e7b4a56b96a244。新apply_identity_cases.inc/apply_offline_cases.inc随下一自然Native/runtime/source-PDB，普通fixtures NOT_RUN；无部署/追旧包。R5公共transport、numericPID长期复用证明及ROG/CPU仍OPEN，总目标ACTIVE。
+<!-- /STEAM-MOUSE-APPLY-SHARED-IDENTITY-20261115 -->
+
+<!-- DECKY-CSS-REQUEST-COST-DIAGNOSTICS-20261116 -->
+Decky r126仅原steam-css-read documents单请求日志补实际TID/birth及线程CPU100ns、整个Native handles前后。identity成功0新增采样；采样失败/出生变化/倒退分别knownfalse且省略数字，类型/范围严格。process counts有并发噪声，不签归属/泄漏；线程不含WinHTTP/CEF/GPU，计数0不当零成本。原返回/身份/重试/期限/权限保持，无新reader/worker/timer/EXE。
+原read-diagnostics候选65检查及旧源必要断言exit1已核，actual main/filter/live-busy和6明确API错误边界，无真实Steam/CSS。2编译图/2Job关前0均准确vctip工具收尾，rawfalse保持。首extractor EEXIST失败保留，只加path.normalize seen去等价路径，原publication独立重建；4文件7块share0 103.9778ms/4HANDLE归还，保其它main字节及r109/r125原diag。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r126.json,READ-COST-QUALIFIED-INTAKE-r126.json,MAINLINE-IMPORT-r126.json,REVERSE-REVIEW-r126.json,REPORT-r126.zh-CN.md}；SR3866B/SHAe72a7368587386ce879e23320c2038ae0acd076be796db4325a55b5c80017e52，PendingSources/DeckyCssReadCost-r126.json仅下一自然Native/runtime/sourcePDB，不追固定包、不部署/loaded/CPU收益或ROG实体声明。r125独立Ready/r106会话资源与同步取消/ROG输入睡眠离线/长期CPU仍OPEN，整体ACTIVE。
+<!-- /DECKY-CSS-REQUEST-COST-DIAGNOSTICS-20261116 -->
+
+<!-- STEAM-MOUSE-RECONCILE-UNIQUE-IDENTITY-20261115 -->
+只读不确定结果回核已接公共immutable identity：纯第四current贯穿GET，返回后核PID/birth/root/account及epoch/读状态，末次用原observed-root解析器核同选择/路径/完整文件；livePid只用原身份，离线0。删除本处私读registry/进程扫描，不新reader/worker/timer/SET或VDF写，原offline fresh写门不动。原9/旧PID FAIL与r2受影响11/旧selector FAIL、原read24分epoch，不拼父；5实际图/10Job0及工具rawfalse分列。5文件15块share0鲜读精确合入/5HANDLE归还，独审有限107.469秒/90目标保持；R2目标尾由本方实证核收。权威RemainingReaders/MouseReconcile-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,import-r2/MAINLINE-IMPORT.json,REPORT.zh-CN.md}，SourceReady3829B/SHA030fdd8ebca237bbb42b8be422314351ac1e365392cafb4d7dacec57100c4dbf。仅下一自然Native/runtime/source-PDB，新reconcile_identity_cases.inc必须在源码包，普通fixtures NOT_RUN；不追固定包/无部署。R5、普通apply末PID私读/长期数值PID复用证明、ROG/CPU仍OPEN，总目标ACTIVE。
+<!-- /STEAM-MOUSE-RECONCILE-UNIQUE-IDENTITY-20261115 -->
+
+<!-- DECKY-FINITE-CHILD-SOURCE-READY-20261116 -->
+Decky r125前向接续r118/r119/r120/r121：所选有限binding child源码已精确入主线，非继续私有状态。6 native+2原CPP+1新include+2既有清单共36hunk/1CreateNew，鲜读share0同持48.9791ms/11HANDLE归还，63依赖无漂移；实际独立六头复核46引用和原read-only export index1829项/新include唯一绑定已核。原业务分epoch引用，本段0编译/0业务重跑，不拼默认父。
+callback持真实父、HTTP显式单次retire，cleanup失败终止原有限child；只有mutated=false且原stop成功才接既有revalidation。constructor债可留到有限child终态、ABI尾不冒签；不动长期公共sync transport/原恢复200ms取消及2500ms期限/次数/官方3.3.1字节，无新常驻资源。原准备/工具/错误auditor FAIL及rawbusinessSucceeded=false保留，未增无关父门。
+权威原local-automatic-bpm-20261113/{SOURCE_READY-r125.json,MAINLINE-IMPORT-r125.json,FINITE-SOURCE-EXECUTION-INTAKE-r125.json,REVERSE-REVIEW-r125.json,REPORT-r125.zh-CN.md}；SR6396B/SHA3603a6d56997d542e0b26f11a73bdef1bebfb419e1bd52b1b4a737ff6587b3d2，PendingSources/DeckyFiniteChildCleanup-r125.json仅下一自然Native/runtime/source-PDB，不追固定180522/155943。无构建部署/loaded/实体成功，globalSourceApprovalGranted=false。r109独立Ready、r106长期资源/共享同步取消、ROGpad-touch/sleep-offline与长期CPU仍OPEN，整体ACTIVE。
+<!-- /DECKY-FINITE-CHILD-SOURCE-READY-20261116 -->
+
+<!-- STEAM-MENU-PURE-FEATURE-OWNER-20261115 -->
+2026-11-15 菜单原纯game/Host/power/foreground归属已接入唯一公共steamLiveRequest第四可选ownerCurrent，原nativeCurrent逐门合取且异常拒绝。旧第三参admitAction仍只交原最终发送准入，不重复消费；qualified初次及原350ms/4秒同请求接续传同纯谓词，fallback/read/dispose及空第四参旧语义保持。无新增reader、worker、timer、焦点操作或一般Ready要求。
+7配套文件11精确hunk含1新支持文件已鲜读排他导入，143.2304ms/7HANDLE归还；main只核所改函数，保并行字节和换行。原8项6通过2回执字段期待FAIL保留，仅续原2项4检查；实际旧主函数首归属断言FAIL，原native尾部仅2场景，非法/空选择4条拒绝。4实际编译图、13有终态Job关前0已核，准确工具收尾/raw businessSucceeded=false分列；另原包装器准备拒绝无终态单列，不拼默认父。
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/MenuBrowserViewBinding-20261115/pure-feature-owner/{SOURCE_READY.json,FINAL-INTAKE.json,fresh-cas/MAINLINE-IMPORT.json,independent-review-r117/REVIEW.json,SEAL-HISTORICAL-PATH-CORRECTION.json,REPORT.zh-CN.md}。SOURCE_READY4243B/SHAa12c81b3389981d296b24707dfdee7eb4fd0bdbd2d6ba3144f8c63ec3af37848，仅此软件守卫/globalSourceApprovalGranted=false；审查before历史路径现用原保存副本逐字核，原核收FAIL保留不重跑业务。PendingSources/SteamMenuPureFeatureOwner.json只交下一自然Native/runtime/source-PDB，不追180522/155943。有限BrowserView provider/异步资源仍私有，ROG三点pad/touch/游戏抑制/关闭返回及睡眠、全消费/V2/长期CPU均OPEN，总目标ACTIVE；无本后继构建部署/loaded/实体证明。
+<!-- /STEAM-MENU-PURE-FEATURE-OWNER-20261115 -->
+
+<!-- DECKY-PRIVATE-FINITE-CALLER-SCOPE-20261115 -->
+Decky r113只推进私有caller归属：AsyncState可选parentLifetime保真实session/connection，CloseHandle拒绝5后request+parents由原HTTP调用栈move回caller，原200ms取消/2500ms期限保持，拒新IO且close一次；真实末通知后允许确认归还但保closeAccepted=false/error5。原case正例1与仅去parent赋值反例1分别实际执行，2Job关前0/工具收尾/rawbusinessSucceeded=false分列，不拼全typed父。反例fixture独立安全lease不计产品归属，清理末通知及weak归还均真；没有靠process-exit保孤儿。
+现盘async_http/live_cdp/document三头未改；私有constructor先持strong再发布地址、registration成功后无新fallible步骤，但constructor失败close债/真实main caller终态/多fragment-power退出竞争未闭。literal WinHTTP外框ABI-tail不冒签，final callback局部keep仅保护实际最后访问。SOURCE_READY-r113=false，不注册Pending/不构建部署；r109首连日志独立Ready。准备mixedEOL FAIL、被拒未执行control草稿/空失败原件和成本保留。
+权威原Decky local-automatic-bpm-20261113/{FINITE-SCOPE-INTAKE-r113.json,FINITE-SCOPE-REVERSE-REVIEW-r113.json,SOURCE_READY-r113.json,REPORT-r113.zh-CN.md,CLOSING-r113.json}。永久不归还的main scope如何有界终态仍需原owner裁定，不新永久manager/worker/poller或无限quarantine；r106HTTP session资源/ROG实机输入睡眠离线和长期CPU仍OPEN，目标ACTIVE。无Steam游戏设备/真实睡眠或安装控制。
+<!-- /DECKY-PRIVATE-FINITE-CALLER-SCOPE-20261115 -->
+
+<!-- DECKY-PRIVATE-ASYNC-CANCEL-RESOURCE-OWNER-20261115 -->
+Decky r110确认CSS documents经原inventory callback在长期YMCC Native执行；单请求已有1session/多document共享，跨请求新session。r106 WinHTTP资源寿命仍OPEN。原同步BoundedSocket watchdog在途CloseHandle存在官方并发合同风险，非现场根因已证；同步WebSocketClose同样不能并发替换。
+r111仅自有回环真实async叶：原echo/stall有效前缀，partial先回1字节/type3导致父FAIL保留；仅续partial剩余receive再cancel，16/16handle final通知/2自然Job0，不拼整父；callback/buffer持到进程末，不签literal ABI尾退。
+r112复用现有AsyncRequest私有retire：原HTTP/WS两direct200ms与单独close-denied5欠账边界通过，4Job关前0/工具强收和rawbusinessSucceeded=false分列；旧control漏crypt32图INCOMPLETE、auto编译/EOL准备FAIL保留。现盘async_http/live_cdp/document三个头均未改，SOURCE_READY-r112=false，不注册Pending/不导出部署。caller销毁close-failed对象会丢可操作句柄归属，constructor失败归还/完整caller集成及r106资源项继续OPEN；不得拿fixture独立cleanup代产品成功。r109首连诊断独立主线Ready不受影响。
+原Decky local-automatic-bpm-20261113/{RESOURCE-OWNERSHIP-INTAKE-r110.json,ASYNC-CANCEL-INTAKE-r111.json,ASYNC-TRANSPORT-DESIGN-r111.json,PRIVATE-CORE-INTAKE-r112.json,PRIVATE-CORE-REVERSE-REVIEW-r112.json,SOURCE_READY-r112.json,REPORT-r112.zh-CN.md}。全目标ACTIVE；无Steam游戏设备睡眠/安装控制或本轮CPU采样。
+<!-- /DECKY-PRIVATE-ASYNC-CANCEL-RESOURCE-OWNER-20261115 -->
+
+<!-- STEAM-MENU-WIN5-STRICT-REVIEWED-20261115 -->
+184416严格接收者后继已获实际独立复核：review14851B/SHA56603774c4966acb71c927d7ccde48852d310122e7b11f600daa424eb7709e6d，主线4源/private strict-r3/import after全字节核同，仅关闭两局部strict语义。最终Reviewed SOURCE_READY7837B/SHA1e0bd4a77fcbea0b73761441f0a63621927b83be862e00346f2e3138ab0e3540；原7022/6269与PENDING/FAIL按历史保留，非全局或实体批准。原16自然Job0/4rawFAIL/最终r3分epoch保持，无重跑。
+原件FieldLogReview-20261115-184416-Win5/{DISPATCH-PHASE-STRICT-REVIEWED-SOURCE_READY.json,consultant-review/DISPATCH-PHASE-STRICT-R3-INDEPENDENT-REVIEW.json}。准确nativeview绑定仍OPEN；bound-unload-proposal仅以原CDP/V8/Valve pin推导registered bound handler可读BoundThis方向，未实采Steam/未SOURCE_READY，不新私有reader。只下一自然匹配包，固定180522不追。总目标ACTIVE，ROG实体仍OPEN。
+<!-- /STEAM-MENU-WIN5-STRICT-REVIEWED-20261115 -->
+
+<!-- STEAM-MENU-WIN5-184416-STRICT-RECEIVER-20261115 -->
+184416 phase独立实审抓到两observer非strict会转换null/primitive this；现仅两局部strict无参数+arguments，原class语义保持，不全script切strict。原actualActivation夹具factory也补局部strict，官方方法text不变。必要旧sloppy-null在原断言实际exit2/FAILED；首callback内assert被原动作catch及首consumer错期待EXITED/sourceAfter role均保留并前向修，不改raw。
+最终r3分1/106、4/92、1/6与生成配对5Job自然0；全epoch16自然Job0含4rawFAIL，不拼默认父或唯一场景。4文件18hunk Windows排他同持108.1975ms/4HANDLE归还，mode/light字节不变。原6269B诊断Ready只作历史；新所选SOURCE_READY7022B/SHAfc318dd087b7872ea905354b9dc6c20a9ca0152f75516b4e4b63e4ab547089af，globalSourceApprovalGranted=false，修后独立终审按实际待回执。
+权威FieldLogReview-20261115-184416-Win5/{DISPATCH-PHASE-STRICT-SOURCE_READY.json,DISPATCH-PHASE-STRICT-EXECUTION-INTAKE.json,dispatch-phase-strict-import/MAINLINE-IMPORT.json,DISPATCH-PHASE-STRICT-REPORT.zh-CN.md}。公共MenuBrowserViewBinding合同e90e8ac…确认QAM准确holder仍缺，overlay browserId/sleep焦点不能替用；parent childBrowserViews仅线索不授资格。仅下一自然完整匹配Native/runtime/sourcePDB，不追180522、无本后继部署loaded。ROG方向/A/B、触摸、游戏抑制/关闭返回OPEN，9950仅辅助，总目标ACTIVE。
+<!-- /STEAM-MENU-WIN5-184416-STRICT-RECEIVER-20261115 -->
+
+<!-- STEAM-MENU-WIN5-184416-DISPATCH-PHASE-20261115 -->
+Win5新184416执行13556/birth134392124036916571确属180522，4次alias QAM原tree/context后缀与原订阅已到；四窗无ClientUI769切换，但用户只给附件，实体菜单结果UNKNOWN，不代签ROG。虚拟旧空账18:33:27已结算，首Host sourcePending到30秒失败；睡眠后18:40:06原slot0断、slot1可读但未准入，Host继续中立帧，虚拟owner续其原身份绑定，不能归为菜单唯一根因。
+菜单当前只在原single-game alias QAM同次OnActivate作用栈，临时观察两held原Dispatcher.Dispatch并区分context调用阶段。callback数组/Jr注册身份保持，原this/args/返回/异常透传；finally先禁用清held引用，再full-descriptor CAS恢复，异主属性保持UNKNOWN。阶段只是enclosing dispatch，不能唯一Tr/BrowserView或native输入ACK；临时属性反射代价明确。无新增焦点/按键/延时/reader/timer/worker，mode/light字节不变。
+3文件22hunk排他同持105.49ms/3HANDLE归还，原selector分1/47、4/92、1/6，业务3+生成配对2 Job自然0，不拼默认父/唯一145场景。首intake sourceAfter角色字段假设FAIL保留，修消费同raw不重跑；所有旧FAIL/UNKNOWN/费用按epoch保持。仅诊断SOURCE_READY6269B/SHA0ba98c96b2198bf5dfa83a66a4116a85569e42d640184f9d84685245df2f72d0，globalSourceApprovalGranted=false；专家候选终审无可消费回执，不冒签。
+权威SteamUnifiedChannel-20261112/FieldLogReview-20261115-184416-Win5/{DISPATCH-PHASE-SOURCE_READY.json,DISPATCH-PHASE-EXECUTION-INTAKE.json,DISPATCH-PHASE-REVERSE-REVIEW.json,dispatch-phase-import/MAINLINE-IMPORT.json,DISPATCH-PHASE-REPORT.zh-CN.md}。公共层正核准确popup/DOM到native view绑定；仅下一自然完整Native/runtime/source-PDB，不追固定180522，普通fixtures NOT_RUN。未本后继构建/部署/loaded/实体，9950仅辅助；ROG方向/A/B、触摸、游戏抑制/关闭返回继续OPEN，总目标ACTIVE。
+<!-- /STEAM-MENU-WIN5-184416-DISPATCH-PHASE-20261115 -->
+
+<!-- STEAM-ORDINARY-MONITOR-SHARED-IDENTITY-20261115 -->
+2026-11-15 普通steamMonitorSet及原160ms队列Live attempt改消费公共immutable IdentitySnapshot，await贯穿同epoch/PIDbirth/account/root和原可读非零注册PID门。Unknown不当offline、不借目录fallback换账户；未新reader/worker/queue/poller。原GET/bootApplyOwned/queue正文不改，offline三freshPresence/两freshTarget及backup/原文CAS/atomic/readback逐字保持。
+Live提交前原设置锁内完整预像CAS消费pendingfalse，终态保存失败不复活。重挂pending或Live成功终态仍在原锁核同epoch；失效后false/unknown终结允许，旧完成不覆盖后继用户意图。普通整文档保存保native monitor整值/absence，正常backup读写及实际bounded恢复仅降SteamMonitor许可/proof，正式restartRequiredfalse、未知restart/desired/account/path及其它模块保持。
+8配套文件25hunk freshWindows share0正逆导入201.2971ms，8HANDLE归还；main保并行字节。原ordinary29/133与锁/离线7/27各51→51分epoch，不拼36父；root原8/71仅opaque精确保留范围，r3错误restart字段1/41及childSourceReady已拒，父formal1/50和actualbounded1/24及各必要旧源FAIL分列。49Job关前0=29自然/19限定vctip/1准备空Job拒绝，19实际图核同，不冒称全自然或全业务父通过。
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/MonitorOrdinaryWrite-20261115/{SOURCE_READY.json,COMBINED-INTAKE.json,FINAL-INTAKE.json,COMBINED-REVERSE-REVIEW.json,combined-import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}。SOURCE_READY9463B/SHA6a957318ef0faa12d2148d69594a74563a40e62b3bbf441506e5db7f1f7afbae；PendingSources/SteamMonitorOrdinaryWriteSharedIdentity.json接续所选重叠源，其余不改。仅下一自然Native/runtime/source-PDB，不追固定180522/155943；普通default只编译，实际rootIO为原memoryport，无完整Native/部署/loaded/设置或Steam设备动作。全消费/V2/ROGpad-touch-sleep/长期CPU、HTTP会话寿命和同步watchdog并发close风险继续OPEN，总目标ACTIVE。
+<!-- /STEAM-ORDINARY-MONITOR-SHARED-IDENTITY-20261115 -->
+
+<!-- DECKY-FIRST-CLIENT-STARTUP-TIMING-20261115 -->
+Decky r109仅补首次transport需求至原snapshot首send的8字段诊断，分bootstrap等待/socket打开/计数及已安排退避（含cancel，非实等）；插件首次send后一次、原native broker回调一次，坏输入丢弃不改请求。原退避/ready/业务/自愈权限不动，无额外timer/worker/reader/EXE/网络动作。
+3产品+2原fixture17hunk鲜读share0正逆导入74.9171ms/5HANDLE归还，EOL仅新增片段修正且归一化全源等实跑。原missing-bootstrap1case、旧源必要FAIL、native原startup-only89检查及71实际类型输入已核；5Job关前0，2限定vctip工具收尾/raw businessSucceeded=false保。首局部Json别名编译FAIL/费用及原准备EOL保持，不重跑已过client，不拼默认父或新ID/minimum。
+权威原Decky local-automatic-bpm-20261113/{SOURCE_READY-r109.json,EXECUTION-INTAKE-r109.json,MAINLINE-IMPORT-r109.json,REVERSE-REVIEW-r109.json,REPORT-r109.zh-CN.md}；SourceReady3282B/SHA23fd001ed0ef9bc04f081517fdba0c5c64037f538b63b6be4fdf13c4fcf5fb02，PendingSources/DeckyFirstClientStartupTiming-r109.json。只下一自然配套plugin+Native/runtime/source-PDB，180522不含不追编；未部署/loaded/实体或CPU验收。boot-mode5秒归原四模式owner，4.5秒prepeer根因仍UNKNOWN；旧本机155943 disk/VM_READ5和r106 WinHTTP会话寿命继续OPEN，整体ACTIVE。
+<!-- /DECKY-FIRST-CLIENT-STARTUP-TIMING-20261115 -->
+
+<!-- DECKY-MATCHED180522-AND-ROG-STARTUP-BOUNDS-20261115 -->
+Decky r107已独立核最终180522-matched所选交付：11源码ZIP成员CRC/SHA、5实际Native头、完整Native运行成员/唯一compiled8c22725d…、5plugin成员和官方v3.3.1原bytes。runtime ae053b5c…；最终source/PDB98c06d25…。producer正确root0/Job0，准确43640vctip工具收尾/rawbusinessSucceeded=false保；不消费初始错引155943producer或冒签整图/PE-PDB重parse。此前r106仅capture项前向关闭所选配套包，未部署/loaded，fixtures NOT_RUN。
+最新ROG163751执行18708确属155943：14阶段Hostready5809ms，bootmode await区5000、performance85；Nativebootstrap63ms但injected→firstpeer4524ms，时间重叠不能相加或认定跳boot即瞬连。1retained/1peer无后续close；具体IPC/queue、前端重试原因仍UNKNOWN，27qam检查非实体输入证明。四模式owner已收到原件且在原检查补诊断；不提前ready/缩timeout或越权改其逻辑。权威原Decky local-automatic-bpm-20261113/{PACKAGE180522-MATCHED-INTAKE-r107.json,ROG163751-DECKY-INTAKE-r107.json,ROG-STARTUP-CAUSE-BOUNDARIES-r107.json,REPORT-r107.zh-CN.md}。r106会话寿命资源项不丢，官方后台/实际主题/ROG输入睡眠离线及长期CPU仍OPEN，总目标ACTIVE。本轮0产品/测试/构建/部署/实机动作。
+<!-- /DECKY-MATCHED180522-AND-ROG-STARTUP-BOUNDS-20261115 -->
+
+<!-- STEAM-DOCUMENT-REQUEST-PROCESS-HANDLES-20261115 -->
+2026-11-15 公共document请求内只复用原held Steam父及所选listener子进程HANDLE，仍逐次查询child→parent映像、公共fresh拓扑、完整双栈表、exposed/端点上限与全部准入；bind后同对象，退出/未知拒绝，不回退PID重开。无跨请求cache、常驻reader/timer/worker。反推发现最后owner回调可撤进程，最终Wait已放回调之后，旧tail反例实际拒绝。
+
+4配套文件14唯一上下文hunk fresh Windows share0正逆导入123.3289ms/4HANDLE归还。原r1 13/67及修后尾部3/17、两个必要旧源控制、popup1/14分epoch；不拼默认16整父。listener父预筛与84/600兼容子组实际执行，后者选择偏宽、重复成本保留，无新唯一覆盖。默认TU仅编译，普通整组未跑。21Job关前0=11自然/9限定vctip/1旧residual FAIL，原控制双头路径重定义、准备/干演算FAIL及费用均保留。8实际图与独立反推已核。
+
+最终候选9950实际5docs/3类只读与原baseline对照OpenProcess/Close77→4、TCP调用152不变、image77→79实时，HTTP15/15全归还；耗时31/32ms不签CPU/速度改善。原57→197等句柄delta未解释，长期资源仍OPEN。身份连续仅child bind起，不追溯discovery；父映像项模拟查询失败，不冒签成功异路径。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DocumentPopupSource-20261115/live-sp-provenance-20261115/request-process-witness/{SOURCE_READY.json,INTAKE.json,FINAL-INTAKE.json,REVERSE-REVIEW-r2.json,import-r2/MAINLINE-IMPORT.json,REPORT.zh-CN.md}。SOURCE_READY6718B/SHA74ecdf08bdd82406c1376fadd86d8016cd9bab256e9071541e72d66fa9195162，PendingSources/SteamDocumentRequestProcessHandles.json前向接续所选重叠来源。只下一自然Native/runtime/source-PDB，不追固定包，无本轮产品构建/部署/loaded证明。ROG三点pad/touch/游戏抑制/关闭返回、普通SET/V2/全消费/长期CPU仍OPEN，总目标ACTIVE。
+<!-- /STEAM-DOCUMENT-REQUEST-PROCESS-HANDLES-20261115 -->
+
+<!-- DECKY-ACTUAL-HREF-AND-CLIENT-SESSION-RESOURCES-20261115 -->
+Decky r106独立核公共actual-href最终SOURCE_READY4970B/SHA97e8cc891e3f3f2aa565682f9cc097c378fb911f4d7104816346861cd1a4eb09、两文件4精确hunk逆补及原17自然Job0，原20/102+popup1/14与r2aux6/32分epoch。r104parser逐字保持；自然180522两selected源码已固定，完整包/部署不代签或追编。当前5888到18:03:13一peer/223mode verified、原日志前缀保持，3只读HANDLE归还；非ROG实体验收。
+资源仅自有回环实际WinHTTP：分进程server257次始终182handles；client每次新session warm260/299/331/376，显式1028全close后372保持20s；单变量共享session同257请求514帧，warm228/228/228/230，显式772全close后215保持20s。7自有Job自然0含原准备exit1保留；不将其签产品泄漏根因/资源通过/CPU收益，不改公共产品或加fixtureID。已实际送公共owner评估原transport寿命，旧CPU任务归档消息拒绝保留。权威原Decky local-automatic-bpm-20261113/{PUBLIC-ACTUAL-HREF-SOURCE-INTAKE-r106.json,WINHTTP-RESOURCE-INTAKE-r106.json,INSTALLED-CONTINUITY-r106.json,NATURAL180522-SOURCE-CAPTURE-r106.json,REPORT-r106.zh-CN.md}。官方后台/产品资源寿命与真实主题输入睡眠离线/长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-HREF-AND-CLIENT-SESSION-RESOURCES-20261115 -->
+
+<!-- STEAM-MENU-163426-MATCHED180522-DELIVERY-20261115 -->
+163426诊断selected12已进入唯一自然180522-matched完整运行/源码PDB包；独立ZIP CRC/bytes/SHA、241312B完整JS/compiled各唯一、实际PE/PDB3152f7d2-0d71-41b7-a341-cef718209cb0/1已核。runtime112631390B/SHAae053b5cb443332ab9719ae7104a71ba4699a08c615c6adbe41e3e0f240a6e3a；Native22560256B/SHA0509455af2465c431923d1464a030e8a62d7c01323c1e9ad611f42b381ccd808；compiled8c22725d9f64d5a023b803e76a0fe69393c88f53ec15b17cb8e0029fef04bb56。producer准确vctip工具收尾/root0/Job0，rawbusinessSucceeded=false；初交付误引155943 producer已保原件并前向纠正，只消费-matched。无重编/追包，普通fixtures NOT_RUN。
+权威FieldLogReview-20261115-163426/matched-delivery/{INTAKE.json,DELIVERY-SUCCESSOR.json}及local9950/AUTHORIZED-DEPLOYMENT-PLAN.json。用户要求先9950，仅辅助不计ROG成功；旧5888/34716仍运行，正常退出请求待用户完成，会话缺技能要求node_repl，不造UI/input替代helper。尚未本后继部署/loaded/菜单实测，ROG pad/touch/游戏抑制/关闭返回仍OPEN，目标ACTIVE。此前SOURCE_READY/19定向Job/所有FAIL/UNKNOWN/费用各按原epoch保持，本后继仅关闭所选软件包交付项。
+<!-- /STEAM-MENU-163426-MATCHED180522-DELIVERY-20261115 -->
+<!-- STEAM-DOCUMENT-RESOURCE-OBSERVATION-20261115 -->
+2026-11-15 公共document固定4次同进程readStyles实际均5docs成功，31/16/16/15ms；cold57，等待后185/188/191/192，不能称plateau/纯一次初始化/产品泄漏原因。另两次真实OS叶旁账各15HINTERNET和77OpenProcess全部Close成功/remaining0/无失败，证明仅本有限执行的直接持有归还；未mock真实API或替换产品算法，不签进程内部kernel资源/长期无泄漏、CPU收益或ROG。
+两个实际图456/355出现及各11库核同，4Job关前0=2业务自然+2准确PID/birth/path/SHA的声明vctip工具收尾；编译raw businessSucceeded=false保持。原57→197资源FAIL、准备文件名错和核收误要求工具自然的FAIL均保留，仅续原raw消费，不重跑4call。无产品修改/部署、新常驻reader或永久ID，旧ActualHref源码Ready/包要求不改。
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DocumentPopupSource-20261115/live-sp-provenance-20261115/handle-lifetime/{INTAKE.json,REPORT.zh-CN.md,lifetime.raw.json,direct-audit.raw.json}。下一成本候选为owned→stillOwned每次重新完整listeners及processImage；实际77open不等于已归因全部成本，须保原最终拓扑/双栈完整/loopback/暴露排除、PID birth/current/发送前后门后才优化。普通SET、V2全消费、ROG输入睡眠/主题生效/长期资源和CPU仍OPEN，整体ACTIVE。
+<!-- /STEAM-DOCUMENT-RESOURCE-OBSERVATION-20261115 -->
+
+<!-- STEAM-MENU-163426-SYNCHRONOUS-DIAGNOSTICS-20261115 -->
+163426确认155943仍为ROG潜行者2手柄FAIL：request1原回调前归属变化拒绝，request5原OnActivate已提交仍失败；首次inputContext.after非followup ACK。SDK存在按钮returned且无新中立覆盖，消费端仍UNKNOWN。当前只补原公共alias单游戏QAM的51项首失败码、同同步context后缀临时槽观察及<=64原Jr订阅只读计数；无新焦点/按键/延时/reader/timer/worker。初审descriptor完整CAS/保存引用迟到计数两洞已修，变更保UNKNOWN；临时属性写入及外部saved引用限制明确，不签native/实体ACK。
+4文件27hunk鲜读share0同持115.98ms已精确导入，4HANDLE归还。原guard5+suffix14执行19Job自然0，最后分epoch1/45、1/6、4/71及三必要旧源拒绝保留，不拼默认父。最新r2/r3独立补审无最终回执，不冒签；所有原FAIL/UNKNOWN/费用保留。SOURCE_READY仅诊断8329B/SHA9e2f248d4c25c7c1c0268dfde54b8ebf9284047f95fbb1f36fbaa6702854aec5，globalSourceApprovalGranted=false。权威原FieldLogReview-20261115-163426/{SOURCE_READY.json,ANALYSIS.json,RELATED-INTAKE.json,CONTEXT-SUFFIX-EXECUTION-INTAKE.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}及mainline-import/MAINLINE-IMPORT.json。
+用户最新要求9950辅助先测，已请求一次自然完整Native/runtime/source-PDB；不追155943、不冻结其他任务。尚无本后继包/部署/loaded/实体证明，fixtures NOT_RUN。9950绝不计ROG修复成功；ROG pad/touch/游戏抑制/关闭返回继续OPEN，目标ACTIVE。会话无node_repl，不能代按/观察或造输入helper绕过。
+<!-- /STEAM-MENU-163426-SYNCHRONOUS-DIAGNOSTICS-20261115 -->
+<!-- STEAM-DOCUMENT-ACTUAL-HREF-20261115 -->
+2026-11-15 实际held Steam/owned CDP来源证明target列表保creation locator而页面已导航：SP实际Steam index，QAM实际routes/apprunning。最终公共reader只对原严格SP/已识别popup locator接受已验证actualSteam href；原aux exactlocator兼容，非Steam/任意blank不放行。精确origin、初末actualhref/timeOrigin、process/listener/current/finaltarget集合保持，sourceUrl返回actualhref；r104候选parser/expression/evaluate逐字保持，无额外eval/reader/worker/timer或写入。
+
+2文件4上下文hunk fresh Windows share0正逆合入41.7026ms，两句柄归还。原20case102与popup1/14按r1保，实际r1 readStyles在导航QAM失败后仅续aux6/32及r1必要反例，不拼26整父/不重跑r104形状组。最终候选一次实际readStyles在9950读到5文档/3类且ok/complete/sequential；只查无害property，不签CSS生效/完整main power组合或ROG菜单实体输入睡眠。
+
+source-fix17自然Job0/7实际图已核；另原provenance2Job原件独立核。原采样exit1/handles57→197资源FAIL及后续135/138/142句柄delta保诊断，长期资源闭合不签，Job0不当无泄漏。原r1实际失败、诊断摘要误标SUCCEEDED及前向纠正、准备路径/inline提取/whole友元witness/未声明control编译等FAIL保留，仅续未到达控制或元数据，不重跑原业务。Observer privatefriend逆除全字节等产品，不导入adapter。独立源审184s/150s、r2窄审71s/115s区间与现场核收401s/180s成本如实保持，不双计父子重叠。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DocumentPopupSource-20261115/live-sp-provenance-20261115/{LIVE-INTAKE.json,source-fix/SOURCE_READY.json,source-fix/FINAL-INTAKE.json,source-fix/PARENT-INTAKE.json,source-fix/import-r2/MAINLINE-IMPORT.json,source-fix/REPORT.zh-CN.md}；SOURCE_READY4970B/SHA97e8cc891e3f3f2aa565682f9cc097c378fb911f4d7104816346861cd1a4eb09。PendingSources/SteamDocumentActualHref.json后继r104及targetdiagnostic两个重叠源，其他4文件/main诊断保持。只下一自然Native/runtime/source-PDB，不追155943/134733、不部署；全消费/V2资源/物理/CPU仍OPEN，总目标ACTIVE。
+<!-- /STEAM-DOCUMENT-ACTUAL-HREF-20261115 -->
+
+<!-- DECKY-ROG115123-PUBLIC-SOURCE-PROVENANCE-20261115 -->
+Decky r105只读复核同115123 ZIP9成员及26当前菜单原字节回执，0业务重跑/编译/probe/采样/部署。writer300确属111602，live-busy→owner-stop制造5146ms中断已由r90修；两个精确改动区当前已交付155943均唯一存在，loaded仍引用r103原内存marker。旧ROG首ready7292ms不借桌面Host1439ms签提速，桌面performance→tray整段1233ms只定位await区域。9次菜单焦点回调未提交，不把accepted当实体手柄可用，不代改控制器屏蔽。
+公共原owner实际证明target creation locator与actualSteamhref不同；r2原readStyles现有5文档/SP1+MainMenu2+QAM2、ok/complete、root0/自然Job0已独立消费，不签主题已生效/长寿命资源/ROG物理。r104仅candidate，receipt/finalhref/sourceUrl由公共后继负责，本方无重叠产品写。57→197原FAIL、r1失败/错误摘要及公共CORRECTION均保，菜单核收换行SHA消费FAIL另留。权威原Decky local-automatic-bpm-20261113/{FIELD-AND-PROVENANCE-INTAKE-r105.json,MENU-BOUNDARY-INTAKE-r105.json,PUBLIC-R2-LIVE-INTAKE-r105.json,REPORT-r105.zh-CN.md}。后继最终SOURCE_READY/自然交付按原owner，155943不追编；官方后台/ROG输入睡眠离线/长期CPU与总目标仍OPEN/ACTIVE。
+<!-- /DECKY-ROG115123-PUBLIC-SOURCE-PROVENANCE-20261115 -->
+
+<!-- DECKY-SP-BPM-BLANK-CANDIDATE-20261115 -->
+Decky r104修实机5888的SP/discovery/blank-variant123五次拒绝：仅识别实际Steam SP BPM固定about:blank创建形状（3有界ASCII数字+pid0/browser-1/type3/Gamepad agent），让它进入原来源表达式；候选范围多此一类，真实origin/href/timeOrigin/current/process/listener/finaltargets不放宽。expression起完整11193B后缀逐字保持，无新reader/worker/timer/EXE/业务写入；裸SPblank/aux作为SP/异源和变代仍拒绝。
+1产品native/steam_document_read.h+1原tools/fixtures/steam_document_popup_cases.inc共8hunk已fresh Windows share0正逆导入，整源等最后候选，其它fresh字节保持。旧Header fieldshape123首case必要FAIL；候选失败父有效前10/51保留，optional累计send观测修后只续失败未跑14/82；不拼完整24父PASS。最后同binary原popup1/诊断8及unknown2拒绝核同，默认组不跑，无新ID/minimum。3真实编译图385输入/9库均predeclared，3编译+6业务9Job自然关前0；原friend adapter未导入/旧standalone生成menuJS不在document-only执行路径，限定范围不签当前全main/menu。准备目录冲突、首计数FAIL与历史原输入pin拒绝全部保留，同SHA旧copy消费不重跑前缀。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-SP-r104.json（3540B/SHAc2058d61a190ef1b7febc5de89b7a1e631e601c40eae36b2bcac97c56d6f25ee）、MAINLINE-IMPORT-SP-r104.json、SP-INDEPENDENT-INTAKE-r104.json、REPORT-r104.zh-CN.md，已工具送达公共/导出owner。明确后继原DocumentTargetSourceDiagnostics组readerheader及popupcase两重叠，另4文件/main诊断片段、listener及r100/r97保持独立；只下一自然配套Native/source，已部署155943不含且不追编。实际继承origin/主题生效与ROG实体仍OPEN，不把9950软件核对计修复成功。
+另当前已loaded155943固定5888+20820两持句柄30秒OS CPU计数实跑1次：31样本/30区间/32逻辑，首基线不当0；Native全模块均值0.06510305%、共享SteamUI0.01953091%，非Decky独占或可比A/B。原两日志前缀保持，仅追加1389B两mode事实无peer/recovery；两HANDLE归还、观察Job自然0。CPU原件CPU-AND-CONTINUITY-INTAKE-r104.json，外部制作观察不打包自启。总目标ACTIVE，未完整App构建/部署/Steam设备睡眠动作。
+<!-- /DECKY-SP-BPM-BLANK-CANDIDATE-20261115 -->
+
+<!-- STEAM-BOOT-MONITOR-APPLY-SHARED-IDENTITY-20261115 -->
+2026-11-15 boot-mode监控ApplyOwned已消费同一Observer身份和epoch，原boot current、文件目标重选、公共Live最终admission及SET→单次GET确认保持。消费自身不再private registry/PID/fresh全表；admission仍可读文件/boot归属，不是纯ownerCurrent；受控重复gate不是实机调用频率或CPU测量。无新reader/poller/worker/queue/retry，原GET/普通SET/pending/offline写门正文逐字保留。
+
+独立审查抓到r1漏注册PID原门，r1未导入；现核同发布registeredPid可读非零且由epoch覆全程，不新加等于verified PID策略。原35case200check与旧birth反例保留，修后只4case26check及r1零注册实际反例，不拼39整父。7实际图、17实际Job均自然关前0，默认/read两类型按r1保留，仅修后受影响默认类型续验；原35/旧20/默认业务不重跑。审查约389s对240s目标的超时成本与修后105.5s独立记录，旧BLOCKED/FAIL/UNKNOWN不改。
+
+1产品4配套5文件25hunk fresh Windows share0正逆导入60.7337ms，5句柄归还，全源等最后候选；官方owned prepare修后21输入，原read准备20/类型配套。旧MonitorLive Pending四个重叠源由SteamMonitorOwnedApplySharedIdentity.json前向后继，旧SOURCE_READY/raw保历史。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/MonitorOwnedApply-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,REPAIR-INTAKE.json,import/MAINLINE-IMPORT.json,review/REVIEW.json,review/REPAIR-REVIEW.json,REPORT.zh-CN.md}。SOURCE_READY4810B/SHAe18f3f4372a5402c475c246e8fcbac0331449bf47a38ffbcdbc1b2132b1abf44。
+
+只下一自然匹配Native/runtime/source-PDB，不追155943/134733，无本轮编包部署或Steam游戏设备睡眠动作。实际producer未发布OS变化/同epoch文件对象/最终使用竞争、完整boot handler/全消费/V2资源、ROG菜单实体输入睡眠和CPU收益仍OPEN，总目标ACTIVE。
+<!-- /STEAM-BOOT-MONITOR-APPLY-SHARED-IDENTITY-20261115 -->
+
+<!-- DECKY-155943-LOADED-SP-BLANK-CAUSE-20261115 -->
+Decky r103独立消费菜单owner正式部署/85字节实际内存marker及stdout，5888/birth134392040162851515确载自然155943 compiledff0e09a8…，installedNative38e7cf46…同包；当前两个实际只读进程HANDLE身份/出生/映像复核且归还。本方无部署/应用Steam设备睡眠动作。16:13:37.400起仅1retained计划/1peer/0恢复步骤；原binding→peer49ms、→完整ready1232ms，首peer→完整ready1183ms未误重绑，Host ready1439ms；日志至16:26:43.028。本机9950仅辅助链路复核，绝不计ROG/实体修复成功或S0/S3/CPU验收。
+新loaded诊断五次固定SP/discovery/blank-variant/urlLength123/query真/fragment假，document-source-unconfirmed/documents0。当天Steam webhelper原44051行11:08:06同19592创建SP BPM_uid0 blankURL123、browserType=3，与元数据形状吻合。已沿实际compiled targets核：URLbrowserType3选BigPicture，再blank全拒，evaluate前整次discovery退出；创建URL不是live href/origin证明，不给blank信任/修复成功。公共owner已工具实际收到此新证据，继续原document消费者；无新reader/poller或权限。
+权威原Decky local-automatic-bpm-20261113/LOADED155943-STARTUP-AND-TARGET-SOURCE-r103.json（29692B/SHA37a26cf810cde405c29f947af74b8450deb84b516ac2f18d7b502fe570419666）、SP-BLANK-CANDIDATE-CAUSE-r103.json（7369B/SHA623b8c83c2531bde12c7b42fbff1799e6c74c833a9786cd764cb2b830794b650）及REPORT-r103.zh-CN.md。首临时parser误截含空格标题SP BPM的FAIL保留，只消费同原raw修正；r102/首次r103通讯失败不改，后继两消息已送达但不冒称peer完成。前向关闭本机加载观察项，不改旧未部署epoch；官方后台仍不健康、CSS实因/来源实际回执/ROG物理/睡眠离线输入与长稳CPUOPEN，总目标ACTIVE。
+<!-- /DECKY-155943-LOADED-SP-BLANK-CAUSE-20261115 -->
+
+<!-- STEAM-MONITOR-LIVE-SHARED-IDENTITY-20261115 -->
+2026-11-15 监控GET的Live消费已捕获唯一Observer身份，root/account/presence及PID birth来自同发布；原配置路径两次选择保持，同epoch predicate交原公共Live，读前/后/最终路径后核失效。unknown不当offline，只请求原refresh。GET不执行pending，原SET/Apply/boot/offline最终fresh写门保持；无新reader/poller/worker。原消费两次presence、两次PID注册表及两次私有config发现归零，公共CDP仍有原identity/discovery，未签CPU百分比或整个GET零OS查询。
+
+1产品3配套4文件13精确hunk已fresh Windows share0正逆导入121.7321ms，4句柄归还；当前全文件同候选。原实际getter+真实Observer发布20case99check及handles51→51、旧PID birth首必要FAIL/非法selector、正式prepare/现存/冲突拒绝已核。默认memory叶仅配类型，原完整CPP+实际main kick /Zs通过，默认业务不跑。三图307/307/298出现，9/9/0库，9实际Job全部自然关前0。
+
+旧LF锚准备FAIL与MJS严格原字节核收FAIL保留；后继只恢复原物理LF，正式执行CRLF副本/旧MJS与旧CPP作历史来源，未重跑业务。独立审查无可证新阻断，约180s目标实际215.59s/超35.59s保留；初始文件展示跨代归属、同epoch文件对象/未发布OS变化、最后检查后使用及整App/实际transport不扩签。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/MonitorLiveRead-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,PARENT-INTAKE.json,import/MAINLINE-IMPORT.json,review/REVIEW.json,REPORT.zh-CN.md}。SOURCE_READY4307B/SHAdd6a64d83cf0039fac79bbeade7130cc3fa5700027477be4e1528cfa87a2a49a。只进下一自然匹配Native/runtime/source-PDB；134733与155943均不含，不追编部署。菜单155943已由原任务交付/9950 loaded，ROG alias实体pad/touch仍OPEN；聊天工具-32000未冒称送达，PendingSources已留共享回执。全消费/V2资源/实机睡眠与CPU收益仍OPEN，总目标ACTIVE。
+<!-- /STEAM-MONITOR-LIVE-SHARED-IDENTITY-20261115 -->
+
+<!-- DECKY-R100-NATURAL155943-WAKE-VERIFIED-20261115 -->
+Decky r102追加同r100已编EXE七原case：两归属S0/committed-ready各512重复、断开/唤醒交错、迟到结果、OFF、页面health真但独立watch退出含继承pipe叶、192帧单worker与终止围栏，7自然EXITED/Job0/句柄回基线。精确当前Runtime/recovery/fixture与Ready叶等编译source；零重编/新ID/minimum/默认父/产品修改/实机操作，早期driver括号FAIL保留。权威SUPPLEMENTAL-WAKE-INTAKE-r102.json与REPORT-r102.zh-CN.md，不签整个当前main或实际sleep/CPU。
+随后自然155943已完成，r100及r97配套已进入包，不再只待自然导出：11所选源码ZIP成员CRC/SHA、公共main原Base64afterHunk精确片段、5实际Native include、Native运行ZIP/唯一compiledff0e09a8660397964fadc377f4a9e00a20d74a501e141a37821228a002a42dce、5plugin成员与官方v3.3.1原bytes独立核同。runtime547ff0d6f4f933892cc535ea8257dafd4130c66215e819f045a31a8d6862cfca，Native38e7cf46add58af9dab3f4cb93d5355385881ba5b27c1b9a07ac46b3e4ef6cf4。原producer自然EXITED/root0/Job0，无工具强收尾；完整PDB/全图仍原owner范围，普通export fixtures NOT_RUN。权威原Decky local-automatic-bpm-20261113/PACKAGE155943-INTAKE-r102.json（17911B/SHA 0fcf2666f7e8d2462cb653e7348ba3b822e15e03a6f77a2494642f982abae176）。
+旧SOURCE_READY/134733及所有FAIL/UNKNOWN按原epoch保持，前向只关r100+r97和本次所选公共来源交付，不追晚于capture后继。第一次Base64计划按明文字段搜索的消费者FAIL保留，修后同原包消费、无producer重跑。本方未构建/部署或控制Steam设备；工具MCP-32000使补验/新包通知未送达，两批失败均记录，不冒称其他owner已收。真实loaded/主题targetSource现场拒绝/官方后台安全恢复、睡眠离线输入/长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-R100-NATURAL155943-WAKE-VERIFIED-20261115 -->
+
+<!-- STEAM-MENU-NATIVE-CONTINUATION-155943-DELIVERY-20261115 -->
+2026-11-15 140707同请求接续12源已进入固定155943完整运行/源码PDB包；独立核12成员CRC/bytes/SHA、Native全文、235112B完整JS与compiled marker各唯一、PE/PDB3229064a-3f8c-4102-a456-0536e66d48cb/1，两个新旧helper实际include日志及图已核。runtime112618576B/SHA547ff0d6f4f933892cc535ea8257dafd4130c66215e819f045a31a8d6862cfca；Native22523904B/SHA38e7cf46add58af9dab3f4cb93d5355385881ba5b27c1b9a07ac46b3e4ef6cf4；compiledff0e09a8660397964fadc377f4a9e00a20d74a501e141a37821228a002a42dce。原producer自然EXITED/root0/Job0/businessSucceeded=true，无工具强收；全source/tool闭包仍producer范围，不重编/跑业务，fixtures NOT_RUN，后继不追包。
+用户随后关闭YMCC并明确授权开关。本方原固定snapshot正式deploy-local-mainline已COMMITTED、全包读回/原设置presence+bytes保持；16:13:36静默启动5888/birth134392040162851515，原只读工具持句柄实际读回同compiled marker，两HANDLE归还。潜行者26216/Host10040原实例未变，无Steam/游戏/设备/真实睡眠动作。
+新三方对照：9950 Alt+2实际YMCC shortcut button5及ROG小猫均exact-gameid-confirmed，无windowFocus补交；ROG潜行者为native-registration-alias，原popup提交仍失败。此差异不是根因证明。用户最新明确9950只可辅助复现/行为核对，绝不计入修复成功，ROG方向/A/B、触摸、游戏抑制和关闭返回继续OPEN，目标ACTIVE。
+权威原FieldLogReview-20261115-140707/matched-delivery/{INTAKE.json,ACTUAL-HELPER-INCLUDES.json,DELIVERY-SUCCESSOR.json}、local-deployment155943及local9950-normal-comparison/COMPARISON.json；successor5316B/SHA1b5727004d593ba578befe8029e9a8a6ce1dffdce381e111b311106880fdec3c。SOURCE_READY与旧FAIL/UNKNOWN/费用按原epoch保持，仅前向关闭所选匹配包/本机loaded项，不签实体修复。
+<!-- /STEAM-MENU-NATIVE-CONTINUATION-155943-DELIVERY-20261115 -->
+
+<!-- STEAM-MENU-SAME-ACTION-NATIVE-CONTINUATION-20261115 -->
+2026-11-15 菜单140707现场134733仍失败：潜行者QAM原OnActivate已提交，不能再归因未调用；小猫有ClientUI焦点切换而潜行者没有，BasePanel181警告仅相关性。当前后继将原显式single-short QAM的一次按键接成两次公共求值：JS暂存原held树/receiver及13字段，Native仍在原run栈持同power/game/Steam/Host/前台准入，原首次send起4秒内最多一次既有350ms observe；消费原ticket后复核挂载和所有者，再同步一次原OnActivate。只合并activation叶，不再发键、不新reader/manager/timer/worker/raw焦点。公共调用仍有既有identity/discovery读，不称零TCP/CDP成本。
+JS3+Native5共8改、另4匹配不改、2CreateNew，fresh Windows同持12 share0句柄正逆导入37.3928ms，12全归还。所选JS原1/41与inactive1/5、Native实际最终后缀22/120及handles51→51、必要旧源反例/selector/正式PrepareOnly已核，分epoch不拼默认父。Native8Job分5自然3限定vctip，raw businessSucceeded=false保持；编译缺iostream/字符串准备/stale pin拒绝、所有旧FAIL/UNKNOWN及费用保留。额外官方React19.1.1隔离实际commit时序仅补充，不签Steam/CEF或实体输入。
+权威原FieldLogReview-20261115-140707/{SOURCE_READY.json,REVERSE-REVIEW.json,matched-import/MAINLINE-IMPORT.json,DELIVERY-REQUIREMENT.json}；SOURCE_READY 26800B/SHA8c4e81b3904140831a69552534c7d627371a9912fea03958c4fc86bcaed60e55。原JS/native HANDOFF、实际源图与source-label后继保持；仅所选软件SourceReady/globalSourceApprovalGranted=false。新native/steam_menu_popup_continuation.h与配套夹具进入下一自然完整Native/runtime/source-PDB；固定134733不追，普通fixtures NOT_RUN，无peer冻结。
+9950已开游戏，仅进程/Host基线可读；当前会话缺技能要求node_repl/Computer Use，尚无代按/画面观察。9950与ROG的方向/A/B、触摸、游戏输入抑制/关闭返回及实机睡眠继续OPEN，总目标ACTIVE，未部署/loaded/实体修复声明。
+<!-- /STEAM-MENU-SAME-ACTION-NATIVE-CONTINUATION-20261115 -->
+
+<!-- DECKY-VERIFIED-FAULT-RETIRES-HANDSHAKE-20261115 -->
+Decky r100为r97握手修复的反向边界：完整当前health.connected后立即归还boundStarted等待资格，之后真实新故障不能误借旧7秒。仅原Runtime一处清零+原fixture可选--retained-verified-fault-only；不改变时长、恢复权限、原owned37秒、线程/timer/worker/EXE或官方v3.3.1。1产品+1原fixture共7hunk已Windows share0鲜读正逆写回，整源等执行；最后fixture内h6按原retainedBindingHandshake作用域，另owned函数同文行保持。
+旧Runtime已完整健康后真实新fault1547ms未升级/1绑定FAIL保留；候选63ms进入原no-owned-loader及受控失败后的rebuild-ui-document，3绑定/153→153，不能称完整恢复63ms。同一最后二进制不重编另实跑原first-peer fresh/watch/deadline/OFF四项1/2/期限7015ms/1，各147→147，外部惰性context保持且自有子资源归还。默认父/其它已过组未重跑，无新ID/minimum。
+3实际编译图与原raw逐引用核收，3Job均准确vctip工具收尾/raw businessSucceeded=false分列；补验业务Job自然EXITED/0。漏EXE工具pin启动前拒绝（无business/Job0）、临时声明顺序FAIL、原C++输出parent_path消费失败及初import终态/局部锚拒绝均保留，同raw消费不重跑。只新执行一个四边界原case，无完整main/部署/Steam设备睡眠操作。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r100.json（2903B/SHA fdd3c4978ca9f21f0663c2a9030c95e408d7f5f5391b02033ee1a43e8f379605）、MAINLINE-IMPORT-r100.json、COMPILE-AND-RAW-INTAKE-r100.json与REPORT-r100.zh-CN.md；已工具送达导出owner。r100仅后继r97重叠Runtime/fixture，r97 recovery header仍必需；下一自然配套Native/source包，不追固定134733。原115123的本地busy误断已由r90及公共后继分源修复，真实CSS来源拒绝/官方后台独立恢复/ROG5秒公共busy接续/实机睡眠输入和长期CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-VERIFIED-FAULT-RETIRES-HANDSHAKE-20261115 -->
+
+<!-- STEAM-DOCUMENT-TARGET-SOURCE-DIAGNOSTICS-20261115 -->
+2026-11-15 公共document-source-unconfirmed只补原targets→readStyles失败回执→main finish→Decky过滤的targetSource固定7字段。记录SP/MainMenu/QuickAccess、discovery/final-targets、固定urlClass、截断4097长度及前4096字符的query/fragment布尔；无raw URL/账户/路径/CSS。旧reason、发现终止、来源/继承origin/精确href/timeOrigin/current/final-targets保持，无新reader/worker/poller/retry或blank放宽。
+
+3产品+3既有夹具6文件14hunk已fresh Windows share0正逆精确合入，109.2114ms；main并行后继保留且所测共享函数逐字相同。原producer8case80检查、实际main到日志22检查、必要旧源首1caseFAIL与unknown selector拒绝已核。main测试仅将document read叶替换为原producer首项回执；实际Observer发布正文保持、friend仅私有夹具适配，不签整App/真正CDP。
+
+旧generic IPv6 mock返回ERROR_NO_DATA导致首2检查FAIL保留，现仅修成功空表size/header；consumer driver缺advapi32链接FAIL保留，原COFF对象仅重链，未重跑已过8case或重编该对象。4实际图/10Job关前0分5自然与5精确vctip工具收尾，原businessSucceeded=false保持；所有准备/原件/费用不重置。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DocumentPopupSource-20261115/target-source-diagnostics/{SOURCE_READY.json,FINAL-INTAKE.json,PARENT-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SOURCE_READY8635B/SHA58df08834d1f3242e9350bdb2505174e29be2936c630b33d286b765ab962b140。旧Popup/Listener的3+1重叠所选文件由新PendingSources明确后继，旧SOURCE_READY/raw不改。下一自然匹配Native/source/PDB，不追固定134733。该现场实际来源拒绝/完整gameID原生恢复/实体三点pad-touch-sleep/全构建与CPU收益仍OPEN，总目标ACTIVE。
+<!-- /STEAM-DOCUMENT-TARGET-SOURCE-DIAGNOSTICS-20261115 -->
+
+<!-- DECKY-FIRST-PEER-FULL-PROOF-GRACE-20261115 -->
+Decky r97修当前33196首peer→完整UI proof间的误重绑：14:27:42.408 retained附着，43.948首peer时旧client proof仍false，立即no-owned-loader并再绑定；43.962原peer16ms即owner-stop，44.010回接，44.020首完整ready。该writer执行Native hash未独立观测，不转借旧8712 loaded证明；当前旧Runtime必要控制真实复现4绑定。
+仅Runtime原同intent/generation实际存活child/context把原绑定绝对开始时间交原ConnectionRecoveryWindow，peer true也等原7000ms，不授完整健康/账户/新启动，不新加时间/线程/timer/worker/EXE；原owned cold37s、watch/OFF/真实deadline保持。2产品头+1原fixture共9hunk fresh Windows share0正逆导入，整源等执行，其它并行字节保留。
+原native.typed-ready-rebind可选--retained-first-peer-only复用4原fresh/watch/deadline/off子场景，候选绑定1/2/期限7015ms/1，各153→153句柄；旧fresh4绑定FAIL前缀保持，默认/此前无peer组不重跑，无新ID/minimum。2实际编译图/Job关前0，限定vctip收尾/raw businessSucceeded=false分列，不签完整main或实机。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r97.json（2990B/SHA bdf5d03e110a232f3bee600c5e9e6326f21f5b3011be16ad8f907c9f9950b888）、MAINLINE-IMPORT-r97.json与REPORT-r97.zh-CN.md；已实际送达导出owner，下一自然配套Native/source包，固定134733不含不追编；本方未部署/控制Steam设备。r96一次只读CPU观察因旧8712已消失87而0区间/FAIL自然Job0，不当0占用或复跑，新writer字段源已用来定位本缺口。公共主题5次新拒绝仍归原owner，官方后台/离线睡眠输入/长稳CPUOPEN，总目标ACTIVE。
+<!-- /DECKY-FIRST-PEER-FULL-PROOF-GRACE-20261115 -->
+
+<!-- STEAM-LISTENER-COMPLETE-TABLES-20261115 -->
+2026-11-15 公共listeners两族TCP表必须size probe/实际成功/实际size与count边界都完整后才进入原process映像授权；不完整兄弟表不能视为缺席。原拓扑/映像顺序/loopback/外露排除/16端点/stillOwned及transport后缀保持，无新增reader/轮询/重试，正常仍4次TCP调用，两表同时最多32MiB，不宣称CPU收益。
+
+3配套文件6hunk已fresh Windows share0正逆精确导入，120.0352ms，保留并行字节。原84case600检查与旧header仅安全第二族denied反例、原兼容12/68、6selector保留；CREATE_NEW输出后继只续原首1/6及原文件拒绝，不拼新84整父。3实际图各385 include出现/351唯一文件/9库，原r3图错指前置receipt由实际编译参数/deps/link stdout前向核正。17自有Job关前0，15actual/2前置UNKNOWN；14自然与1精确vctip工具收尾分列，原raw businessSucceeded=false不改。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ListenerCompleteTables-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,PARENT-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}。SOURCE_READY3029B/SHA045033218e022a01dc40d91027d2ea8c03b2b15e4c4ef08bd947aa0128f413e5。原准备/编译/selector前置/后置reader与两次父核收失败、恢复间隙和原费用均保留；同raw核收，无业务/编译重跑。
+
+下一自然匹配Native/source/PDB，固定134733不含且不追编；未部署/loaded/物理pad-touch-sleep/CPU验收。当前134733 document-source-unconfirmed与游戏身份/输入交接仍OPEN，globalSourceApprovalGranted=false，总目标ACTIVE。
+<!-- /STEAM-LISTENER-COMPLETE-TABLES-20261115 -->
+
+<!-- DECKY-NATURAL134733-LOADED-STARTUP-20261115 -->
+Decky r95前向核收自然134733：r90/r92及公共ModeLocalContention/DocumentPopupSource共21所选源ZIP成员CRC/字节/SHA，5实际Native include，运行Native唯一UTF8 marker、Web12阶段调用点及插件5成员独立核同。runtime ZIP be9c83d7…/source da6f78fd…，Native6afbee147138025077e5c72b31880dd942d35705e224de147b379dcdd8367e13/compiled f0fb9a73…；官方v3.3.1 Loader未改。完整PDB/编译图仍原producer范围，root0/Job0且限定vctip收尾/raw businessSucceeded=false分列；无业务/编译重跑。权威原Decky local-automatic-bpm-20261113/PACKAGE134733-INTAKE-r95.json（28468B/SHA 389acabec5f6b48a331b6939f2b3e3f6d801ea7ea3be9c10f3b494ffb874850f）。本段前向关闭所选r92/公共后继“下一自然包”交付项，旧122321及旧SOURCE_READY按原epoch保持，不追编；晚于capture的r94可选fixture不在此包。
+CPUowner已独立授权部署134733，其原loaded内存marker8712/birth134391959887127222及本方只读持句柄PID/birth均核：新14/14 startup-phase实际收到，Host ready1097ms，其中performance→tray939ms（原整段，不签单IPC根因），首完整ready13:59:51.204；一次retained绑定/一次peer连接，无当前owner Loader启动记录。此桌面单次恢复不是ROG7292ms的A/B或睡眠/输入验收。
+加载了新popup谓词后，当前writer仍5次document-source-unconfirmed/documents0，不能称主题已修复；新raw/loaded/包证据已通过工具实际送达公共owner，继续其原producer分支定位，不扩大blank许可。固定1337内核IPv4/6当次0监听，镜像client verified/hooks仍真；旧3436在11:58:23以runtime-stop31ms归还，只证明当次受管退出，不能解释所有历史官方断开。官方v3.3.1无已核backend-only入口，不为独立后台缺席盲目重启健康页面。
+本方未部署/控制应用、Steam/游戏/设备/真实睡眠或发网络请求；两只读进程HANDLE归还，无新sampler/EXE/worker。原件LOCAL134733-STARTUP-CSS-BACKEND-INTAKE-r95.json、COORDINATION-r95.json与REPORT-r95.zh-CN.md；真实主题/官方后台恢复、ROG慢启动、离线睡眠/输入/长稳CPU继续OPEN，总目标ACTIVE。
+<!-- /DECKY-NATURAL134733-LOADED-STARTUP-20261115 -->
+
+<!-- DECKY-ACTUAL-SHARED-BUSY-COMPOSITION-20261115 -->
+Decky r94以原native.typed-offline-current-ui-account-consumers的可选--retained-local-busy组合真实ModeObserver/Runtime/Client与原main提取admission/health/changed/QAM；只原fixture1文件8hunk，产品未改、无新ID/minimum/默认父门。最后5次busy同source/原绑定1/broker stop0/恢复步骤0，正常读接续，外来session、显式invalidate、真实失败撤source及OFF且CSS仍开均核，句柄153→153。
+旧Runtime首busy实际FAIL；首候选5轮保留有效前缀，随后夹具1ms最小gap烧尽原三读入30000ms退避导致FAIL。仅可选参数改原可配置gap500ms后续受影响原case，不改产品频率/额度；原FAIL/成本与read-only终态pin缺bytes消费者FAIL保留，消费修正不重跑业务。3实际图各493include/15库/3自有Job关前0，全部限定vctip收尾，原业务exit0与raw businessSucceeded=false分列，不称整Job自然。
+fresh Windows share0正逆导入，整fixture等已执行来源，其它并行字节保留。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r94.json（2566B/SHA 9f3a16439143ede05b09885130fdb1336df0587aa9d111209a72c1586b8118ef）、MAINLINE-IMPORT-r94.json及REPORT-r94.zh-CN.md；原r90产品/配套包、r92日志各自epoch保持，不追固定122321。
+公共popup SOURCE_READY/13direct authority/3所选源与guard原raw仅核收，expression/receipt/evaluate/readStyles后缀逐字保持，未重跑其测试。115123原ZIP/9raw及索引重新核pin，仍5146ms误断。现场popup href/origin、官方后台、本机长期稳定和真实睡眠/输入/CPU收益继续OPEN；无部署或Steam/设备动作，总目标ACTIVE。
+<!-- /DECKY-ACTUAL-SHARED-BUSY-COMPOSITION-20261115 -->
+
+<!-- STEAM-DOCUMENT-AUXILIARY-POPUP-SOURCE-20261115 -->
+2026-11-15 共享主题document读取仅补MainMenu/QuickAccess固定about:blank?browserviewpopup=1&requestid=<1..20ASCII数字>&parentpopup=<1..20ASCII数字>原顺序兼容，原裸blank保持，BigPicture不接受blank。完整expression/receipt/evaluate/readStyles原后缀逐字不变：真实origin、exact href/timeOrigin/ready、Steam/listener/loopback目标、取消及最终targets仍严格，无新reader/worker/timer或权限。
+
+3文件9hunk已fresh Windows share0逆向精确合入，117.5608ms保并行。原68case404检查、旧header popup-three在document-source-unconfirmed必要FAIL、5selector拒绝；补guard后仅原popup-three1/14实跑，不拼新68整父。非document完整Windows叶/Od、/Zc:inline-、/Gy-及/OPT:NOREF实际链接，非整个默认TU/业务。4实际图384/384/308/384输入、9/9/10/9库、13自有Job关前0，准确vctip工具收尾分列。旧CPP来源由原preguard副本41ded810回核，原raw不覆盖；首compile/父reader字段FAIL、恢复中断与所有费用保留。
+
+权威SteamUnifiedChannel-20261112/DocumentPopupSource-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,PARENT-INTAKE.json,FIELD-SOURCE-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}，SOURCE_READY2963B/SHAe7af36b62434bb3d24bf35886337daf88c95d904628c0c0f12e85c04fa19a863。36条官方创建URL逐行SHA核同、20+5次原document-source-unconfirmed已核，但创建URL不是live CDP href/origin，现场完整原因/CSS成功仍OPEN。
+
+下一自然匹配Native/source包，固定122321不含不追编，未部署/loaded/实体pad/touch/sleep或CPU证明，globalSourceApprovalGranted=false，总目标ACTIVE。
+<!-- /STEAM-DOCUMENT-AUXILIARY-POPUP-SOURCE-20261115 -->
+
+<!-- DECKY-STARTUP-PHASE-DIAGNOSTICS-20261115 -->
+Decky r92只补7292ms首完整ready前缺少阶段耗时：原Host经原mirrorDiagnostic记录最多14个固定startup-phase，带elapsedMs/previousStage/previousMs；App仅插12个原await前观察点，原初始化/恢复顺序、ready/命令/电源准入不动，无timer/worker/缓存/EXE。重复/退后/未知阶段及ready后均安静，日志发送异常隔离，不记路径/账户/自由文本。
+3产品+3原fixture共24hunk fresh Windows share0正逆精确导入，整源等执行；原JS first-demand定向1（含1000重复和诊断失败）、Native原过滤可选39断言、200实际类型输入及App SFC/setup语法核收，非整App类型或完整Native。4Job关前0分2自然成功/1缺esbuild FAIL/1限定vctip收尾，不拼默认父。旧父截止准备拒绝/555615ms越界、权限创建symlink/GBK准备及后置junction路径比较FAIL和费用保留，后续只续受影响/未到达，不重跑已过业务。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r92.json（3064B/SHA 8d9aa67ec0841c6d6086058031828a57f73869ced68de43fca3da15492d178aa）、MAINLINE-IMPORT-r92.json、REPORT-r92.zh-CN.md；仅下一自然配套Web/Native/source，不追已封122321，无部署或实体操作，尚无新增日志实机耗时。公共ModeLocalContention原335/来源证据仅引用核收，popup URL问题仍由公共DocumentPopupSource后继；跨聊天工具错误未冒称送达，全部共享原件可读，总目标ACTIVE。
+<!-- /DECKY-STARTUP-PHASE-DIAGNOSTICS-20261115 -->
+
+<!-- STEAM-LIBRARY-122321-SELECTED-PACKAGE-20261115 -->
+2026-11-15 库冷启动13文件后继已进入自然122321完整Native/Host/Worker与匹配source包。所选13源码ZIP成员实际解码CRC/字节/SHA等原import after，主Native与Host/Worker三runtime成员内容全SHA匹配；Host52/Worker32原sourceIndex包含共用A锁header。此前“下一自然包”仅就这13来源前向关闭，111602缺失/历史原件保留，不宣称更晚并行源皆入包。
+
+父权威LibraryColdStartAdmission-20261115/PACKAGE122321-SELECTED-INTAKE.json9237B/SHA30e1c176500ec86e8403fd459a3cda416db738bb971da7417df21202adc5f240；原SOURCE_READY9300B/36040866与import25hunk及全部FAIL/费用保持。两个ZIP全SHA实际核同：runtime3eb28f5b01db96dc77c8ecdd758c76c55a2ffdf1358d5ffdc80682d261b1e94c、source88e5b149a3b3295db89584717dea3addad2c72ad9e61d434ae5c92ca3523db38；Native ce096c0d57b2399b47715208a15c3771f37717208439f7de42f44fb2fb62b340，compiled8b3366e7050cd7360dcefed2587f4d4ebd6415fc311afbd098b1dd1c082ec286。
+
+原producer1514include/55lib与完整10081source-PDB归原producer证明范围，父未重核其全闭包。root0/Job0但EXITED_WITH_TOOL_CLEANUP/businessSucceeded=false，准确vctip工具收尾分列，不称整Job自然。没有业务/编译重跑、部署/loaded/实体证明，fixture NOT_RUN。稍后ModeLocalContention两产品头与包内旧SHA实际不同，明确不含该后继，继续下一自然包不追编。所有实体pad/touch/sleep/CPU及完整公共进出目标仍ACTIVE。
+<!-- /STEAM-LIBRARY-122321-SELECTED-PACKAGE-20261115 -->
+
+<!-- STEAM-MODE-LOCAL-CONTENTION-RETENTION-20261115 -->
+2026-11-15 原生readMutex try_lock miss携精确localReadBusy pending7字段；原ModeObserver仅same session/no in-flight invalidation/已有未撤source时保原凭据，cached/delivered仍pending unknown，无新健康/账户/启动许可。原renderer/CDP live-busy无native标记继续invalid撤销，真实hint/进程/账户/demand/退出/owned取消保持；原有限read-window预算和常驻工作不变。
+
+2产品头+7原canonical/支持共9文件13hunk已fresh Windows share0精确合入，逆补保其它字节，138.606ms窗口；当前源等实际执行私有来源。原CPP定向7case335检查、旧Observer首保持断言必要FAIL、未知选择器拒绝、2图各312输入9库与5自然Job0独立核收。真实完整read只适配Observer类型，两线程/native mutex与原OS事件实跑，identity/CDP为叶，不签全main。派生raw字节核同；原steam.shared-mode-source增加freshness检查与strict选择，后继1正3负source-only新Job自然0，不重编不重跑7case。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ModeLocalContention-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,PARENT-FIXTURE-INTAKE.json,SOURCE-RESULT.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}，SOURCE_READY5555B/SHA3474b14ff9c259bfc6196fc4ea8e34f6f6b0d890a6795e901604c78241e886f1。原worker494855ms及其r2零Job/NOT_RUN、70089ms越界、各准备FAIL与父首次过期额度前置拒绝全部保留，原账不重置。父确认0handle接管source-only3.86秒；所有编译/业务旧原件不覆盖。
+
+仅所选SOURCE_READY，globalSourceApprovalGranted=false；下一自然Native/匹配source包，不追已固定包或部署。完整V2/资源/默认父/主产品编译链接、真实loaded/三点pad/touch/sleep/长期CPU收益仍OPEN，总目标ACTIVE。
+<!-- /STEAM-MODE-LOCAL-CONTENTION-RETENTION-20261115 -->
+
+<!-- DECKY-R90-MATCHED-PACKAGE-122321-20261115 -->
+Decky r90已进入自然122321完整Native/source包：3所选源码ZIP成员CRC/字节/SHA均与原SOURCE_READY整文件相同，原admission片段、实际Runtime include、Native运行ZIP成员及唯一UTF8 compiled8b3366e7…独立核同。Native SHA ce096c0d57b2399b47715208a15c3771f37717208439f7de42f44fb2fb62b340；官方v3.3.1 Loader未改。权威原Decky local-automatic-bpm-20261113/PACKAGE122321-INTAKE-r91.json（302654B/SHA daf1ec8cb6390e34c22c8beb602b2e62f333e6b299fed224e0a5a4a84339345a）。完整PDB/源图仍属原producer scope，root0/Job0与EXITED_WITH_TOOL_CLEANUP/raw businessSucceeded=false分列，两个本方只读编码假设FAIL保留，无producer重跑。
+此段前向关闭r90“下一自然包”交付项，不改变旧SOURCE_READY/历史索引，也不代表已部署或实体通过。另原115123 CSS20/20与本机5/5原readReason均document-source-unconfirmed，唯一producer为document target URL谓词；同日36条官方菜单创建URL有about:blank?browserviewpopup=1参数而旧aux仅准裸about:blank。证据FIELD115123-CSS-CAUSE-TRACE-r91.json已交公共owner；创建URL非稳定CDP href，不把未验补丁或4主题终态宣称修复。首完整ready7292ms的单步耗时仍未证，本轮不新增日志或产品改动，总目标ACTIVE。
+<!-- /DECKY-R90-MATCHED-PACKAGE-122321-20261115 -->
+
+<!-- DECKY-RETAINED-LOCAL-BUSY-20261115 -->
+2026-11-15 Decky r90：115123实际111602 writer300在唤醒后1841ms接回，随后live-busy→owner-stop产生5146ms中断。仅原Runtime同intent/已附着context保留精确busy，原Decky launchAdmission在account0解析前区分此pending；不增launch/account授权、worker/timer/EXE或恢复窗口。已知mode不读取无关reason，真正失败/desktop/OFF仍清理。
+2产品+1原fixture共15精确hunk，fresh Windows share0逆补保并行main；原native.typed-offline-current-ui-account-consumers的retained-busy参数最后5次busy均原1计划/0 broker stop，desktop/真实失败/OFF和153→153句柄核收。旧两控制FAIL/首候选FAIL保留，后继只续受影响原用例，不拼默认整父；5实际Job关前0，限定vctip工具收尾另列，不称全自然。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r90.json（3080B/SHA 9b1a700ee2499bfefe889abfba925a6521f027f7c49e1b7f2015b45d623262b6）、MAINLINE-IMPORT-r90.json、FIELD115123-INTAKE-r89.json与REPORT-r90.zh-CN.md。仅下一自然配套Native/source包，不追已封111602/114458；本机现由CPU owner部署114458并有原loaded marker，不能算r90已部署。public busy/source撤销由公共owner独立后继；官方后台/CSS DOM/首完整UI ready及实体睡眠输入仍OPEN，总目标ACTIVE。
+<!-- /DECKY-RETAINED-LOCAL-BUSY-20261115 -->
+
+<!-- STEAM-LIBRARY-COLD-START-PAIRED-ADMISSION-20261115 -->
+2026-11-15 公共冷启动与库离线写入已配套导入13文件/25hunk：原shortcut-writer Mutex A由共用非拷贝steamoffline::Guard持有，primary创建suspended child前到resume/处置后，fallback最终absence/Shell前取A；Host/native写与回滚A→原data事务B，B后A归还再媒体/快照，Worker保原10秒/恢复0秒。abandoned只授互斥，无新reader/poller/worker/电源权威。
+
+当前13字节、严格11唯一raw source pins和4未改canonical来源独立核同；原Kernel7/37、clean NoIO3/30、membership14、Host26+9/Worker4和delete-unknown后继保持各自epoch，不拼默认整父。canonical既有PID隔离经transitive头确认，无新增夹具补丁；Host仅/Zs、Worker原竞争正文实际执行。误判隔离、过严新文件断言、编译/reader FAIL及原UNKNOWN/费用全部保留；build-guard历史前像由逆hunk证明，不误读当前路径作旧来源。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryColdStartAdmission-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,combined-import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SOURCE_READY9300B/SHA36040866d6b76210a3fc5ce122e207e29fc13eb13c692e8e06ce6e1979db471e。fresh Windows share0导入167.6945ms保并行字节，本后置仅四索引精确增量与新头source-map登记。无业务/编译重跑或部署，globalSourceApprovalGranted=false。
+
+固定111602不含该13文件后继，不追编；下一自然Native/Host/Worker/匹配source须含公共头。独立BAT/外部Steam启动者、完整V2/资源/默认父/全构建与loaded/实体三点pad/touch/sleep/CPU收益仍OPEN，总目标ACTIVE。
+<!-- /STEAM-LIBRARY-COLD-START-PAIRED-ADMISSION-20261115 -->
+
+<!-- DECKY-R85-MATCHED-PACKAGE-111602-20261115 -->
+Decky r85已随自然111602完整Native/Web/source包交付，不再待下一包：两所选源码/符号ZIP成员CRC+SHA、实际runtime头include、Native运行ZIP成员与唯一compiled21c5e896…均独立核同；Native SHA272198e87cfe87704814e065ee7dfed23f09eb6a6e1ffd18420a2cb3520b732a。原producer完整10078成员/PE-PDB/图按原scope引用，root0/Job0及vctip工具收尾与raw businessSucceeded=false分列；本方无重编或业务重跑。权威原Decky local-automatic-bpm-20261113/PACKAGE111602-INTAKE-r87.json，7105B/SHAe687820a1e213b16a210564769f504f86715056921d3a312c7da2e2514f46138。原SOURCE_READY-r85和旧“下一自然包”按历史epoch保留；当前未部署/loaded/真实睡眠验收，总目标ACTIVE。
+<!-- /DECKY-R85-MATCHED-PACKAGE-111602-20261115 -->
+
+<!-- STEAM-PUBLIC-111602-SELECTED-PACKAGE-INTAKE-20261115 -->
+2026-11-15 新111602自然固定包所选源/Native已交付：LegacyStopSharedOutlet原5918B SOURCE_READY、当前UnusedSleepLocal 2778B SOURCE_READY及101730/focus-handoff 16828B SOURCE_READY均已进入此固定包。本段仅前向关闭这三selected source原nextNatural/current包缺口；旧094805、旧索引/SOURCE_READY/raw/FAIL/UNKNOWN及费用按原epoch保留，不宣称当前全部并行源已入包。父本地处理库gate配套由父方继续，本侧不重复。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/UnusedSleepLocal-20261115/PACKAGE111602-PUBLIC-INTAKE.json，6020B/SHA 6a19a821446eb06ec50550f601d3465b8f54e0067ca9d8bee20737210381339f；菜单同父FieldLogReview-20261115-101730/focus-handoff/matched-delivery/DELIVERY-SUCCESSOR.json，7607B/SHA 26d7bac382982921882399d23a46b113d15ec7d60652e22d080dd60af551923e。LegacyStop SR SHA 23a317f909bc8710f629670c59dd7e7be9eae76ce620820abe59fb7dfde634a8；UnusedSleepLocal SR SHA cdd841ee6832ef3d247e4657c2b7d46976377331385c5a0392d54013c9c0be5d；focus-handoff SR SHA 9f989df7b6859d89c7cf5b74ac56b74afc98daa3c4fc1c894ebf28b00d9d3cfb。
+
+引用父原selected ZIP/Native/实际cdp include/10成员事实，不重检ZIP、producer或完整compiler图。Runtime ZIP 279059e905fb84e4cdd6f3685eea0742f73f66d824da53962f32e99937a2459a；source ZIP 911d3661b235bf5b98a65dfb731d5838dba495552949d7a3077bcff8a9ecce10；Native 272198e87cfe87704814e065ee7dfed23f09eb6a6e1ffd18420a2cb3520b732a；compiled 21c5e896c1e435da020eb77b655228e8dca833a1a9d8d278caf44569c2a4a2be。实际cdp为31808B/SHA 511c7d295f1608c2111a123477f03a12f8e222fe80d57c87e2c4fac353f2fc99；原完整220511B menuJS仅一处内嵌。PE/PDB及完整10078成员/compiler图保持原owner证据范围，本侧未重parse。
+
+producer原root0/Job0，但EXITED_WITH_TOOL_CLEANUP、businessSucceeded=false、wholeJobNatural=false；准确vctip PID30764/birth134391862279250123/path/SHA限定工具收尾，不称整Job自然，不豁免产品。fixtures NOT_RUN，producer/业务/编译均未重跑，未部署。库gate私有后继明确不入111602，不改库产品或父Field分析。
+
+LegacyStop无已知当前caller，入包不证明实际stop/完整退出或CPU收益。ROG物理三点pad/touch、loaded、sleep及完整唯一进出仍OPEN，总目标ACTIVE。仅四索引fresh Windows FileShare.None短窗口插入/JSON增量，重复marker拒绝，逆补还原全部其它fresh字节；证据同UnusedSleepLocal-20261115/package-index-111602/{IMPORT.json,REPORT.md}。本侧scope预算300000ms含准备封存，父r86原账不重置。
+<!-- /STEAM-PUBLIC-111602-SELECTED-PACKAGE-INTAKE-20261115 -->
+
+<!-- DECKY-RETAINED-FRESH-HANDSHAKE-20261115 -->
+Decky r85仅补保留Steam页面重开YMCC的首握手重复重绑：retained成功后记原开始tick/intent/client代次/PID，沿原存活借用句柄继续同一7秒窗口，不重置retained尝试。旧源2计划反例与候选fresh1/watch2/deadline7031ms/OFF1四界实跑，153→153句柄，原owned/default不重跑；无新ID/minimum/轮询/权限/EXE。
+1产品+1原fixture两文件9hunk fresh share0逆补，整源等候选。公共CDP未用变量两编译FAIL与后置路径大小写FAIL保留；原实际before/after图及公共owner修后当前typed对象已核，五Job关前0，非完整main/link。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r85.json、MAINLINE-IMPORT-r85.json、TYPE-INTAKE-r85e.json和REPORT-r85.zh-CN.md。仅下一自然Native/source包，无本轮部署/现场；官方后台完整健康、真实输入/离线睡眠/长稳CPU仍OPEN，总目标ACTIVE。
+<!-- /DECKY-RETAINED-FRESH-HANDSHAKE-20261115 -->
+
+<!-- STEAM-PUBLIC-094805-MATCHED-PACKAGE-INTAKE-20261115 -->
+2026-11-15 公共核收首个自然094805固定包：鼠标展示共享IdentitySnapshot与菜单params修复的所选Native/source配套已完成。此段前向取代这两项旧nextNatural/current包缺口；旧SOURCE_READY及索引原条目按原源码/测试epoch保留，不再把其“下一自然包”当成所选修复当前交付状态，也不宣称当前并行整源均入包。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/MouseDisplaySharedIdentity-20261115/ROG094805-PACKAGE-INTAKE.json，8472B/SHA ea38b1f157c086115d6a4ec62c1cca26b2e27eb1fb12c2764e16f86b934ccb81；本次核其原件及SourceReady/直接证据pins，引用原核收，不重查ZIP成员或producer。runtime ZIP 5fc7bbe4f699f7e5f290b5d2edd9fd1a84b031986e7e8415e32919d7490bdd74、source ZIP dfc0c2052bfd51a34e23d1c285529c461162e345cadf68c0c4d20b61db4bf2a2固定；Native 57fc181e326aac117445e332e0adb258ab00145e8707a014b13171e05520da8f、compiled 7f3abdcc15c1d811c1bcd9634185540e624548138730ea45e59ad0cacf93ac85。
+
+原5 mouse支持+7 menu支持/产品selected成员CRC/SHA及main runtime b7f1ac4fc3463911dad51fd9419cc93bde6b1717efdf6d9d1b79e8397700d424、原Observer 639721f366174e36e3e5ce5fb4fdae110cddcc016881babcdd76ce08022b2d87绑定原Build.sources/compiled proof；完整209905B新menuJS在PE仅1处。PE/PDB只引用原菜单matched-delivery/INTAKE.json及DELIVERY-SUCCESSOR.json，本方未新parse；producer完整10077成员/完整compiler图仍限其原证据scope，不扩成本方重核。
+
+原root0/Job0，但terminal=EXITED_WITH_TOOL_CLEANUP、businessSucceeded=false；仅原准确PID/birth/path/SHA的vctip工具限定收尾，不称整Job自然、不豁免产品。PACKAGE094805-SEAL-SUPPLEMENT.json保留原Native路径选择失败，原失败/费用与SOURCE_READY不改；源修复原6case/156检查及mouse24断言不重跑、不计本轮PASS。
+
+固定包未部署，loaded/物理input/CPU未验；完整Observer/OS/transport与其它全消费仍OPEN，总目标ACTIVE。LegacyStopSharedOutlet-20261115后继不在094805，继续下一自然Web/匹配source，不追编固定包。本方仅四索引短暂FileShare.None fresh插入/逆向字节证明；封存同目录package-index-094805/IMPORT.json与REPORT.md。游戏库最终写/冷启动审查由父方负责，本方不重复。
+<!-- /STEAM-PUBLIC-094805-MATCHED-PACKAGE-INTAKE-20261115 -->
+
+<!-- STEAM-LEGACY-STOP-PUBLIC-OWNER-20261115 -->
+2026-11-15 旧steamStop name-based taskkill出口已转交原steamUi.shutdown，签名必须精确displayed state+userInitiated:true；原手动/实例/ACK/错误统一准入，lazy import不新增顶层初始化边，无新reader/query/poller/worker/cache或fallback/replay。当前426源未见旧导出调用者，收敛残留能力，不冒称常驻CPU收益。正常运行中未知UI mode但精确实例仍由原stop规则决定，旧unbound running拒绝。
+
+1产品1原fixture2文件3hunk fresh Windows share0正逆合入，整源同执行、原shared owner不变。实际legacy声明+完整steamUi/IPC-shell受控叶6case，旧名称kill控制在公共调用数0!=1拒绝，未知选择器业务前拒绝；3Job自然关前0。原default service/live组体逐字保持/未跑，无新ID/minimum；canonical原steam.ui-mode-service，draft误ID前向更正。实跑前VM dynamicimport/跨realm适配draft保留，独立review201.89秒超180费用照录，无可证新bug，不签完整app加载/类型/bundle/Native或实体退出CPU。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LegacyStopSharedOutlet-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,FINAL-INTAKE.json,CANONICAL-ID-CORRECTION.json,review/review.json,review/SEAL.json,REPORT.zh-CN.md}。只交下一自然Web/匹配source，094805包不含，不追编部署或现场。全唯一进出/剩余BAT/V2资源与真实手柄触屏/sleep/CPU继续OPEN，总目标ACTIVE。
+<!-- /STEAM-LEGACY-STOP-PUBLIC-OWNER-20261115 -->
+
+<!-- STEAM-ROG091856-PUBLIC-PARAMS-INTAKE-20261115 -->
+2026-11-15 公共核091856原33shared raw/ZIP及已声明availability仅内存SHA/CRC：running marker911eeb83绑定writer11072/birth134391787469183881，不只disk，也不签其它writer/所有loaded。30completed全accepted，当前19中Stalker10次typed proof与原Host inspection同game11644/birth134391789056253759、Steam16056/birth134391787622004429、Host1732/birth134391789145888995/browser1441797，logical/short/registered三域保持；Kitty4/无routing5及旧writer分列。公共history09:15:20.825为running[4064044731]/raw1/primary11644，但首菜单09:15:18.690更早，不倒授准入或代每call的UI running.length；09:17:20退出后root为Kitty。
+
+九composition全sameTupleInputReassert=false/nativeRequestSubmitted=false且source tuple matched，队列[game,769]不是双游戏，不能称原生补交无效。固定官方sp/library解名证明ownData(params,'appid')不兼容observable getter，现场descriptor仍未知。菜单owner已修：只捕获原qualified registeredAppid primitive，原game.current live对象/值与single-game/identity/cache/once/uncertain保持，通用ownData不放宽。当前JS76b25745/H50720586和原fixture三来源同实际候选，正文嵌入只读逐字核、mode/light不变。
+
+原候选6case156检查/旧源首getter模型FAIL前缀37独立、4Job自然关前0已核；921/922只为声明输入，实际dynamic closure未知，不拼默认父/完整Native。独立review291450/300000ms，首嵌入读取器把JS分号当声明结尾及后继误把before角色字段与after身份字段整对象比较FAIL前向保留，只读修消费者、无producer重跑；首次交互误出request环境由原review留事故，交付仅pins不复制值。原准备/post/强收封存成本保持。
+
+原件FieldLogReview-20261115-091856/public-state-intake/{PUBLIC-STATE-INTAKE.json,PARAMS-SOURCE-INTAKE.json,REPORT.zh-CN.md,params-source-review/INTAKE-r2.json}及原params-admission/SOURCE_READY.json；专家原consultant-review/OBSERVABLE-PARAMS-CONTRACT-REVIEW.json。只交下一自然匹配Native/source，071202不含，未本轮构建部署/现场或重跑默认。物理手柄触屏/真实sleep/CPU及全消费继续OPEN，整体ACTIVE。
+<!-- /STEAM-ROG091856-PUBLIC-PARAMS-INTAKE-20261115 -->
+
+<!-- SCREENPADS-NATIVE-CURSOR-ONLY-20261115 -->
+2026-11-15 ROG 091856 证实策略18仍有SD抑制补画/形状桥接/离手保留。现策略19完全撤下SD软件鼠标显示，直接Mouse原补偿保持；无新光标观察/轮询，也不全局隐藏Steam原生鼠标。原生产头53检查通过、旧头31条拒绝，自有Job关前0；未完整Native构建或部署。当前说明 docs/screen-touchpad-deck-force-visible-20261021.md，原件 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/sd-cursor-owner-20261115/SOURCE_READY.json。此前[保留SD抑制补偿]按旧epoch保留。
+<!-- /SCREENPADS-NATIVE-CURSOR-ONLY-20261115 -->
+
+<!-- STEAM-MOUSE-DISPLAY-SHARED-IDENTITY-20261115 -->
+2026-11-15 灵敏度只读展示已消费原唯一Steam Observer IdentitySnapshot：root/account/presence与registered PID均由同次快照，缺发布只请求原refresh；Unknown不选offline，文件/可选Live读取后用原sameIdentityEpoch撤掉旧展示。展示自身直接registry/process读0，不声称完整Live transport零读或实际Observer producer已组合。默认fresh target可完整重建，Set/Apply/Reconcile与最终VDF/Live门逐字不变；无虚拟手柄/陀螺仪/设备实现变化。
+
+1产品5原配套6文件16hunk fresh Windows share0正逆合入，当前runtime等执行体，保并行main。原read-observation定向24断言/22标签（三种unknown共标签）、完整runtime/VDF及原IdentitySnapshot/current方法实际执行，OS/publication/Live受控叶；旧完整source在首私有读断言拒绝。两图各188输入7库，8Job关前0分5自然/3准确vctip工具收尾；旧receipt storm/default/整main编译链接及实体CPU未跑，无新ID/minimum。
+
+首fixture缺namespace alias编译FAIL、import非main equality误用变量的元数据与seal消费者换行归一化FAIL均保原件，后两者只读前向纠正、无业务重跑。独立review无可证bug，限定已发布身份；不签同身份文件原子性/未发布外部变化。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/MouseDisplaySharedIdentity-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,MAINLINE-IMPORT.json,IMPORT-METADATA-CORRECTION.json,SEAL-SUPPLEMENT.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。SOURCE_READY 13442B/SHA8af5829388ebd29a8922332d8a9c141f085a1e503805e7fb62334d150b164101；下一自然Native/匹配source包，不追固定包，无本轮部署/现场。其余URI/BAT/V2资源/全消费与真实手柄触屏/睡眠/CPU实益继续OPEN，总目标ACTIVE。
+<!-- /STEAM-MOUSE-DISPLAY-SHARED-IDENTITY-20261115 -->
+
+<!-- STEAM-BOOT-BAT-FINAL-SETTINGS-SUBMISSION-20261115 -->
+2026-11-15 独立BAT捕获相邻设置路径/选择模式/原preparation revision+observedBoot；原Local设置Mutex最多2000ms内重读核同请求，持锁实际Process.Start，日志/等待锁外。新选择或准备请求拒绝，普通theme/global/runtime/input ACK及同prep步骤推进保持，显式null不借generic；冷请求和迟到Show同门且失效停旧流。保无YMCC IPC的独立bootstrap、原flags/URI/观察，无新常驻reader/poller/worker。
+
+1产品1原fixture共2文件10hunk share0鲜读正逆导入，整源等执行体；默认原Start AST只配套CaptureRequest，定向边界沿同flow-selftest.ps1 -CaseGroup入口，原run/default/ID/minimum不扩。r1原16/23有行为观察但父FAIL保留：惰性cmd带Steam参数留交互进程，本方Job强收cmd/conhost且关前0，6实际managed DLL漏before声明不倒填。r2仅惰性执行argv改有限exit并记录原argv/事前配套工具，只续healthy+late-show两项3断言，不重跑其它15；删锁/删request key各真实错误本方child启动1并被原断言拒。4Job=3后继自然+1原失败强收均关前0，837唯一来源/工具身份核收，3实际managed/module图，native-loader未知；独立审阅无可证阻断，不拼默认16父PASS。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/BootBatFinalAdmission-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,FINAL-INTAKE.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。仅签配置→OS提交，legacy无prep同值ABA、跨提权/不遵锁写者、完整bootstrap/所有focus、standalone Native power/V2/共享Steam receipt/唯一observer与实体输入/睡眠/CPU仍OPEN。下一自然PowerControl/匹配source，不追固定包，无本轮部署/真实Steam游戏设备睡眠，整体ACTIVE。
+<!-- /STEAM-BOOT-BAT-FINAL-SETTINGS-SUBMISSION-20261115 -->
+
+<!-- STEAM-BOOT-SELECTED-DECLARATION-ORDER-20261115 -->
+2026-11-15 CPU1完整私有main /Zs暴露BootSelected helper提前引用后方g_poolCancel，前轮片段夹具前置stub确实漏声明顺序，原SOURCE_READY/FAIL保历史。仅把同一原static atomic定义前移至g_exitRequested后，初值/load/store保持，2fresh share0精确hunk保并行；未新加取消变量或删门。
+CPU1同一固定完整私有main带其FIFO/subset与匹配两头仅续/Zs exit0/55.014秒，1657 include appearances逐项预声明；本方核实际Execute.py AST调用+参数/source/tool/Job0及vctip限定工具收尾，当前六Steam main span/两头同源，整main后继不同不签全主线已编/link/包。原档案全哈及精确indexed provider只读核，缺原路径准备FAIL保留，无恢复大目录或重跑。
+原BootSelectedLaunch-20261115/DeclarationOrder-20261115/{SOURCE_READY.json,TYPE-INTAKE.json,MAINLINE-IMPORT.json,REPORT.zh-CN.md}。下一自然Native/source配套，不追固定包，无新业务/部署或实机声明，总目标ACTIVE。
+<!-- /STEAM-BOOT-SELECTED-DECLARATION-ORDER-20261115 -->
+
+<!-- STEAM-SHORTCUT-APP-LAUNCH-20261115 -->
+2026-11-15 手柄快捷动作app.launchQuickApp已消费原launchSteamAddon，明确Steam.exe保选中路径进原唯一steam.ui.launch/在途门，原checkpoint随入；ordinary程序和不透明脚本保shell boolean。helper返回boolean，Steam true只表示typed启动请求接受，不是进程Running/实体输入/新权限。原claim、one-shot去重、配置成员、power/ready、回执和释放保持，无Native输入/设备/其它action改动。
+
+2产品2原配套4文件7hunk fresh Windows share0正逆导入、整源同执行，原coordinator不改。完整原runtime+原coordinator+公共launch桥内存叶定向8case：100重复请求去重、普通程序脚本/false失败、移除、电源变化、等待作废、共享在途、负/失ack均核；旧runtime单变控制在实际公共dispatch计数0!=1原断言拒绝，原普通addon仅受影响1项另核。三个独立Job均自然关前0；post stack列偏移消费期望FAIL保留，只消费同raw纠正，未重跑业务。raw.scope继承旧Vue通用标签，本方不据此签其它action/Vue整组；默认/native/Web整编/type与物理均NOT_RUN，无新ID/minimum/默认门。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ShortcutSteamLaunch-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,FINAL-INTAKE.json,REPORT.zh-CN.md}。下一自然Web/匹配源码包，不追固定包，无部署/现场。独立BAT最终配置→Process.Start窗口另只读确认，建议原Local设置Mutex锁内绑定同请求且保无YMCC bootstrap；未修/未实跑，不混本闭合。原RemainingChannelAudit-20261115/BAT-FINAL-ADMISSION-REVIEW-20261115.json。
+
+剩余URI/generic消费者、未调用旧name-based stop export、BAT、完整V2/全资源及实体三点手柄触屏/睡眠/CPU实益仍OPEN，整体ACTIVE。
+<!-- /STEAM-SHORTCUT-APP-LAUNCH-20261115 -->
+
+<!-- STEAM-BOOT-SELECTED-LAUNCH-20261115 -->
+2026-11-15 自动模式明确选中Steam.exe已接原公共启动事务，独立BootSelected来源/原receipt和40秒自动围栏，保plain空参数；不伪造userInitiated、不消费logon grant、不走manual fallback或联动级联。原设置锁核activeSnapshot和当前quickApps成员后调用唯一resume叶；原WindowsPorts最后fresh公共census后复核Native48 current，修实际census内电源撤销仍Resume漏洞。publication-only仍可继续；Kernel成功不被gate后false/异常抹掉，清理锁外。其它程序、独立GamingHome/BAT、Manual/Logon保持。
+
+3产品9配套共12文件28精确hunk鲜读Windows share0正逆导入，6实际main span等执行体；整main有其它并行后继，首whole-hash封存拒绝原件保留，导入体由原fresh bytes+同hunk精确重建，不覆盖或签并行代码已编。原NoIO adapter未改，3源pins/新include依赖和manual-timed-ban两原mutation锚配套，无新ID/minimum/默认门。
+
+backend31/116；实际WindowsPorts+main+原设置锁+Native48 r2为19/206、16自有child归还（4运行12拒绝终止）。最终r3仅续census撤销及publication-only各1/11，不拼默认整父；settings/power/census三实际错误Resume控制保FAIL。10实际图/485唯一path身份核收，19Job关前0=13自然+6准确vctip限定工具收尾。普通软件/FxSound generator仅type/object已核，原4个MD库预声明缺失FAIL保留不签完整link，216业务/默认NoIO/整产品均NOT_RUN，不为核收重跑。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/BootSelectedLaunch-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,FINAL-INTAKE.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。下一自然Native/匹配源码包，不追固定包；本轮无部署或真实Steam游戏设备睡眠。用户联合开关游戏/部署新版YMCC/必要提权关闭YMCC授权已广播相关owner，不重复请示，现场由菜单任务协调；真实睡眠/设备/驱动另界。renderer预排队代次/完整V2资源/剩余URI及独立BAT最终动作/实体三点手柄触摸/睡眠与CPU实益仍OPEN，整体ACTIVE。
+<!-- /STEAM-BOOT-SELECTED-LAUNCH-20261115 -->
+
+<!-- DECKY-RETIRED-DISPLAY-OBSERVER-20261115 -->
+Decky r77修实际Host旧观察回调退订后迟到：旧schedule使重开read失败，旧power11→13再250ms→15/monitor11→13，旧controller2→3和旧timer1；仅observe内复用observing入口标记16精确变更，副作用/fresh/排timer前拒退役回调，原Native/账户/执行/时间保持，无新worker/timer/cache/EXE。
+候选schedule有效前缀保原失败父（后续夹具id错误），只续power/monitor/controller各100旧通知0额外读，当前监控save/apply各1、原30000故障期限和controller原1000显示deadline保持；不拼四项整父。controller before finally1!=0覆盖早期断言的原FAIL另列，不冒称named-negative PASS，未重跑求绿。199types/129当前依赖同源、9自然Job关前0，原FAIL/费用保留。
+1产品1原fixture12hunk fresh share0逆补、整源同最终候选、句柄归还；observe外命令/完成/执行逐字保持，原r76另4文件同源。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r77.json、INTAKE-r77.json、MAINLINE-IMPORT-r77.json、REPORT-r77.zh-CN.md。下一自然匹配Web/源码包，不追封包/部署或现场动作；旧日志同根因/真实睡眠离线/实体输入/长稳CPU实益OPEN，目标ACTIVE。
+<!-- /DECKY-RETIRED-DISPLAY-OBSERVER-20261115 -->
+
+<!-- DECKY-READ-INVALIDATION-SOURCE-DIAGNOSTIC-20261115 -->
+Decky r76仅原低频作废读取日志加18值invalidatedBy，原41匹配记录缺类别不反推旧close原因。普通标签沿原demandEpoch回调，fresh原参数保持；多类multiple/未知unspecified，peer/demand优先、接受后续不继承。复用原trace无额外每read scope对象，无新读/恢复/重启/权限/timer/poller/worker/EXE。
+7实际Relay/Host来源边界及原1000健康刷新0额外日志，原Native两过滤29检查/合法source才容33、原无资格33和34拒绝。199types/128当前依赖同源；Native r2头/CPP逐字同最终r3复用，JS因省scope对象重验次数/费用保留，不拼整父。7Job关前0分5自然Node/2准确路径SHA成员vctip限定回收，无产品豁免。猜case锚准备FAIL、实跑前直达invalidate会绕scope的候选纠正及旧FAIL/费用保留。
+3产品2原fixture20hunk鲜读share0逆补、全源同执行/5句柄归还；Native main只核原IPC/日志调用span，历史controller头pin已在本轮前不同，不盲刷历史合同。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r76.json、INTAKE-r76.json、TOOL-FINALIZATION-INTAKE-r76.json、MAINLINE-IMPORT-r76.json和REPORT-r76.zh-CN.md。仅下一自然配套Web/Native/源码包，不追封包/部署/现场动作；旧断连根因/实体输入/离线睡眠/长稳CPU实益OPEN，目标ACTIVE。
+<!-- /DECKY-READ-INVALIDATION-SOURCE-DIAGNOSTIC-20261115 -->
+
+<!-- STEAM-QUICKAPP-LAUNCH-20261115 -->
+2026-11-15 快捷应用明确Steam.exe按钮已复用公共launchSteamAddon→steam.ui.launch，保原选中路径/空参数及跨入口在途门；普通程序和脚本保持plain动作。busy/未就绪/无条目零IO，拒绝/失ack不走generic重放；提示为“已发送启动请求”，不把回执当进程已就绪。
+
+1产品2原fixture共8精确hunk持Windows排他句柄fresh正逆导入，文件同候选，模板/几何逐字不变。实际QuickApp launchApp AST+原公共桥6场景、旧view绕行控制已核；原browser mock现消费真实公共桥片段，build-only只编译实际页面，55实际文件/12虚拟输入闭包已核，无浏览器/默认UI组。首漏settings-baseline合同bundle FAIL/raw/费用保持，补缺后只续该bundle；4实际Job均自然关前0，不重跑已过6或旧控制。共享bridge/Native未改，前驱Native13/43与addon6只引用。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/QuickAppSteamLaunch-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,REPORT.zh-CN.md}。下一自然Web配套包，不追旧包，无部署/现场Steam游戏设备睡眠。已存Steam URI、自动boot来源最终动作、独立BAT/V2/全资源及实体菜单输入/睡眠/CPU收益仍OPEN，整体ACTIVE；自动来源不能伪造userInitiated。
+<!-- /STEAM-QUICKAPP-LAUNCH-20261115 -->
+
+<!-- DECKY-AUDIO-NOTIFY-CAPPED-FAULT-20261115 -->
+Decky r75修原Host配置持续故障封顶等待时，实际FxSound接受状态变化会把独立控件灰掉。仅原audioObservation通知的invalidate→现有invalidateFresh默认false；原完整状态dedup/在途native Promise复用/audioPending和power fence保持，原故障timer/attempt/deadline不重置，无新cache/poller/timer/worker/EXE或重连。
+实际旧源必要FAIL；候选native audio1读/partial原两power读，100相同原观察0额外Host读/无新增audio读、unknown仅禁audio、下一观察恢复、新OFF写1/旧意图拒、原30000期限及同attach/隐藏0。199types/129当前依赖同源，3自然Job关前0；仅原readonly新audio子范围，不重跑r74或其它已过组、不拼整父。历史FAIL/费用和越窗保持。
+1产品1原fixture2hunk fresh share0逆补、整文件同实跑/句柄归还，原FxSoundOwner不改。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r75.json、INTAKE-r75.json、MAINLINE-IMPORT-r75.json、REPORT-r75.zh-CN.md。r74/r71/r72保持，交下一自然Web/匹配源码包，不追041048/部署或现场Steam设备睡眠；不据此归因上传日志或签CPU百分比，离线/睡眠/实体输入/长稳仍OPEN，目标ACTIVE。
+<!-- /DECKY-AUDIO-NOTIFY-CAPPED-FAULT-20261115 -->
+
+<!-- DECKY-MONITOR-COMMIT-CAPPED-FAULT-20261115 -->
+Decky r74已修原Host持续配置故障封顶等待时，真实monitor enabled变化把独立控件整片灰的问题：完整通知与最后实际private monitor admission相同则不失效；真实enable边缘沿原invalidateFresh(false)，其它prefs沿原invalidate。原timer/attempt/deadline不重置，动作fresh校验/配置权限保持，无新cache/poller/worker/EXE或重连权限。
+旧源readyfalse实证，候选100等价通知0额外读、旧命令拒绝/新save与apply各1、原30000ms恢复/同attach/隐藏0；删等价guard必要控制在原ready断言拒绝。199type固定候选/5自然Job关前0；128当前依赖同源，yeman仅公共Steam启动尾部后继分列，不签当前整主线类型。准备models缺失、负例准备3!=2后调用方错误续跑实际100通知、并行typed拒绝及导入1!=2均保FAIL/费用，无第二负例追跑/不拼默认父。
+1产品1原fixture2hunk鲜读share0逆补，全文件等实跑，句柄归还。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r74.json、INTAKE-r74.json、MAINLINE-IMPORT-r74a.json及REPORT-r74.zh-CN.md。r72/r71保持，交下一自然Web/匹配源码包，不追041048或部署。215306现场仍为菜单preflight拒绝独立首因，不冒称本修复已治现场；物理输入/睡眠离线/长稳CPU实益OPEN，目标ACTIVE。
+<!-- /DECKY-MONITOR-COMMIT-CAPPED-FAULT-20261115 -->
+
+<!-- STEAM-SELECTED-ADDON-LAUNCH-20261115 -->
+2026-11-15 Steam页自定义/固定联动明确选中Steam.exe时已接原steam.ui.launch，同一在途门与原Native receipt/最终absence。selectedExecutable只约束原安装源，变化拒绝而不替换；保空参数/不级联其它联动，原默认flags/addons和logon授权保持。任意脚本/快捷方式不猜内容，失败不借generic shell重放，无新扫描/registry reader/poller。
+
+4产品2原fixture共17精确hunk持Windows排他句柄fresh导入，正逆核并行字节、完整文件同候选。前端6/原生13场景43断言及旧view/删path guard必要控制实跑；fixture只续受影响普通程序1及未知selector，不重算覆盖。两图499输入7库，8已准入Job关前零分2限定vctip/6自然；早期未准入UNKNOWN及UTF8/EOL准备拒绝/费用保持，空Job0不代业务。2原NoIO审查清单配套只推进3源pins，adapter/原断言保留，默认整组NOT_RUN；独立review无具体bug，不冒称实机。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SelectedAddonLaunch-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,NOIO-SOURCE-REVIEW-SUCCESSOR.json,REPORT.zh-CN.md}。下一自然Web/Native配套包，不追旧包，本轮无部署/现场Steam游戏设备睡眠。QuickAppView显式启动、bootModes自动联动、独立BAT最终准入与完整V2/全资源/实体菜单输入/睡眠/CPU实益仍OPEN，整体ACTIVE；不得伪造自动来源userInitiated。
+<!-- /STEAM-SELECTED-ADDON-LAUNCH-20261115 -->
+
+<!-- STEAM-SOURCEJOB-SETUP-RETURN-20261115 -->
+2026-11-15 SourceJob在State已创建后的Job/IOCP/SetInfo失败已接原finalize/retained账本；不再直接delete跳过关闭确认。原清理线程在子树/无child归还后先beginClose并结束临时继承窗口，再允许其它线程原reap。已seal Export短接原状态，避免重复Kernel继承位清除；原error字符串/取消/预算保持。
+
+2产品3hunk持锁fresh配套导主线，整头等实跑候选。原9场景111断言通过：健康及4种create/setup错误clean/protected，错误返回受控但Job/IOCP/保护/Close/mutex真实；4次保原资源和租约、其它线程实际续归还。旧源必要控制与仅删beginClose单guard均实际拒绝，后者实证继承锁留原线程。3图410输入8库、6实际Job关前0，2编译限定vctip/4自然分列；前驱144不重跑、不拼跨epoch父PASS。wire/通用Handle/Imported与drain/自有close保持，无新产品thread/timer/poller。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SourceLeaseConsumerClosure-20261115/SetupOwnedReturn/{SOURCE_READY.json,REVERSE-REVIEW.json,RESULT-before.json,RESULT-guard-control.json,RESULT-candidate.json,REPORT.zh-CN.md}。临时诊断仍仅Evidence/Workspace，无新canonical/minimum/默认发布门。State分配前失败、Standalone Export/capture、Imported泛用句柄与双重inherit-clear/Close失败隔离仍OPEN；不签全资源、实机或CPU收益，整体ACTIVE。交下一自然Native/库匹配包，不追包/部署，无实际Steam游戏设备睡眠，普通导出fixtures NOT_RUN。
+<!-- /STEAM-SOURCEJOB-SETUP-RETURN-20261115 -->
+
+<!-- STEAM-COMPLETED-EXPORT-RETURN-20261115 -->
+2026-11-15 公共Steam完成Export归还后继已导主线2产品3hunk：成功构造的SourceJob在原子树及自身句柄归还后，逐一确认三事件/provider/只读mapping五专用副本关闭。失败保同State/Export/SourceLease，原reap续归还；开始关闭及inheritance seal失败均sticky拒绝current，不新建worker/timer/reader，不重放业务。
+
+真实受保护event旧源控制exit1保留；候选12场景144断言、2本方child自然退出，覆盖五slot分别失败、全保护分批归还、未seal早退、原root债再副本债与撤销后清理。两图各402源8库、4Job实际关前0，2编译准确vctip限定收尾与2业务自然分列。两头均逐字等实跑候选，wire/通用Handle/Imported及原Job drain/constructor保持；前驱53不重跑、不拼跨epoch父PASS。临时诊断仍仅Evidence/Workspace，无新canonical/minimum/默认发布门。
+
+SOURCE_READY只签本完成/无child清理路径；Standalone Export/capture准备失败、SourceJob allocation/setup失败、子端Imported/通用Handle关闭债及inherit-clear与Close双失败时的继承隔离仍OPEN，本轮只注入真实PROTECT_FROM_CLOSE且核正常清继承位。正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SourceLeaseConsumerClosure-20261115/ExportOwnedReturn/{SOURCE_READY.json,REVERSE-REVIEW.json,RESULT-before.json,RESULT-candidate.json,REPORT.zh-CN.md}。
+
+交下一自然匹配Native/库包，不追旧包，不把前驱历史头SHA当当前来源；全Steam统一进出/全资源/实机与CPU收益仍OPEN，整体ACTIVE。无部署或实际Steam游戏设备睡眠，普通导出fixtures NOT_RUN。
+<!-- /STEAM-COMPLETED-EXPORT-RETURN-20261115 -->
+
+<!-- DECKY-DISPLAY-PROFILE-COPY-REUSE-20261115 -->
+Decky r72同次展示原getGameCustomConfig完整复制无游戏2→1/游戏4→2，下一fresh展示同值；只readFrames(false)供已读profile及最后源围栏已确认副本供同同步段profile receipt。两次实际getter/全JSON源检查保留，默认true动作忽略display参数，外改FPS105可见/110后旧命令拒绝，漏配置通知旧ready0/恢复专属TDP32。
+1产品1原fixture7hunkfresh排他逆补、整源等实跑；原readonly新子范围、删JSON护栏单反例/199types/4自然Job关前0，未重跑r71已过组/默认父。混换行准备及少LF导入预拒绝/原FAIL和费用保留；无跨read已结算cache、额外timer/worker/EXE/恢复权限或Native/Loader/plugin dist变化，原硬件cache只读核已存在。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r72.json、INTAKE-r72.json、MAINLINE-IMPORT-r72a.json及REPORT-r72.zh-CN.md。r71故障隔离保持，其旧pin按原epoch；本后继只交下一自然Web/匹配源码包，不追041048/部署或现场。复制次数不当物理分配/CPU百分比，离线睡眠/长稳/原生输入和CPU实益OPEN，目标ACTIVE。
+<!-- /DECKY-DISPLAY-PROFILE-COPY-REUSE-20261115 -->
+
+<!-- DECKY-CONFIG-READ-INDEPENDENT-CONTROLS-20261115 -->
+Decky r71已实证修复schedule/profile读取拒绝导致全页灰：仅Host故障分支给原monitor/audio/touchpads/fan独立owner事实，game/performance/frames/global拒绝，不造默认配置。原partial单timer与封顶退避保持，原readLease/settings/game/schedule和最终fresh Native/ACDC复核拒旧，无新transport/BPM恢复、worker/EXE。
+1产品2原fixture6hunk鲜读排他逆补，全文件等实跑。首schedule候选在有效恢复前缀后因attach总数1夹具期望FAIL；修为基线差只续4未到达mode，另原健康TDP/实际Client1socket/最终guard单反例/199types核收，7自然Job关前0。不拼五项或默认父，原准备/后置/导入FAIL与费用保持；原canonical/minimum不增。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r71.json、INTAKE-r71.json、CLIENT-WIRE-INTAKE-r71.json、MAINLINE-IMPORT-r71.json及REPORT-r71.zh-CN.md。历史033035未证明此首因；仅下一自然Web/匹配源码包，不追041048，无Native/Loader/plugin dist变化、部署/现场动作。真实broker/输入/离线睡眠/长稳CPU收益OPEN，目标ACTIVE。
+<!-- /DECKY-CONFIG-READ-INDEPENDENT-CONTROLS-20261115 -->
+
+<!-- STEAM-SOURCEJOB-OWNED-RETURN-20261115 -->
+2026-11-15 公共Steam SourceJob关闭失败丢账已修：原drain成功后，member/thread/process/port/job各checkedClose，失败保同State/Export，原reap续归还；物理子树已归还标记独立于部分关闭，不再访问已关Job/port。1产品4hunkfresh排他导入，完整头等实跑候选；原drain/constructor字节保持，无新poller/timer/线程。
+
+原真实保护Job旧源exit3保留，不当产品PASS；候选5场景53断言、3本方child自然退出，保护Job/退出process/退出thread的3失败同账保源，解保护后同reap实际关句柄并释放源。两图各402源8库，4Job实际关前0，2编译限定vctip收尾与2业务自然分列；临时诊断只Evidence/Workspace，无新canonical/minimum/默认发布门。
+
+同时复读core12及壁纸11共23原Job：main factory确已安装，壁纸跨child/HANDLE_LIST原7/109证据存在，不将旧OPEN解释成未接线。当前core仅原NativePowerAccess逐字类型抽取后继，main只核原生命周期span。壁纸7/14文件当时同原件，其余后继分列；不借旧epoch签当前完整main/资源终态。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SourceLeaseConsumerClosure-20261115/{SOURCE_READY.json,EXISTING-SOURCE-INTAKE.json,PROBE-RESULT.json,FIX-RESULT.json,REPORT.zh-CN.md}。SOURCE_READY仅SourceJob自有句柄归还；Export专用句柄自身Close失败、constructor早期清理、全消费者/配套Native库包和实机仍OPEN，整体ACTIVE。下一自然匹配包消费，不追包；无部署/实际Steam游戏设备睡眠，CPU实益未知，普通导出fixtures NOT_RUN。
+<!-- /STEAM-SOURCEJOB-OWNED-RETURN-20261115 -->
+
+<!-- STEAM-PUBLIC-UI-READ-OWNER-20261115 -->
+2026-11-15 普通Steam UI读取的取消接线已补主线：steam.uiState强制/无共享owner兜底及共享快照投递、showBigPicture内部read，消费原Native48 capture/current和退出/隔离归属。仅publicationRevision前进不取消健康读；原最终固定typed输出/额度保持。capture从原生handler开始，不签renderer排队前代次绑定。
+
+2产品+4原入口支持共10hunk已fresh排他精确导入；原transport实际14场景31断言、旧main与旧show两个必要控制及3图各394输入/9库已核。原源码父门先在旧Decky静态断言FAIL，两个受影响原断言经明确selector实际通过；不拼默认20或完整Native父。漏支持编译FAIL、重复Node pin准入UNKNOWN、摘要process引用纠正和源门CRLF等价原件保留，不为封存重跑；10实际Job归零，4次编译vctip限定收尾单列。最终Kernel动作在本读测试为受控叶，不作动作Kernel证明。
+
+独立泛用路由审计19当前span/6历史原件已核：自定义联动条件可选Steam.exe/脚本走generic shell；独立boot BAT入口验证后仍有最终准入时间窗。未读安装配置或执行竞争，不签已发生绕行；合法GamingHome/前owner独立启动保留。审计封存越窗如实保留。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingChannelAudit-20261115/{SOURCE_READY.json,GENERIC-ROUTE-INTAKE.json,REPORT.zh-CN.md}。
+
+本后继交下一自然Native/匹配包，030440固定快照不含，不追编或新增部署。全SourceLeaseV2 main/remote、其余consumer/资源与完整配套及实体三点手柄触摸、睡眠和CPU收益仍OPEN，整体目标ACTIVE。本层无现场Steam/游戏/设备/睡眠动作，普通导出fixtures NOT_RUN。
+<!-- /STEAM-PUBLIC-UI-READ-OWNER-20261115 -->
+
+<!-- DECKY-RTSS-SHARED-DISPLAY-20261115 -->
+Decky r67同次展示RTSS section原2读→1：Host只共享当前read Promise给FPS/monitor；首次失败monitor仍独立fresh重读。两原owner读函数可选readRtss仅为当前展示端口，省参动作/普通调用保持fresh。无新cache/timer/worker/EXE、权限或恢复额度，Native/官方Loader/plugin dist未改。
+原readonly canonical内三新边界normal/fault/source-change定向核收，外改FPS105/monitorfalse、默认两读不等在途display、旧投递0/隐藏0写；删monitor fallback的必要反例只选fault正确FAIL，199类型--jitless/3自然Job关前0。两私有准备锚FAIL/混换行及原r66缺闭包FAIL费用保持，不拼完整canonical/默认父或物理CPU。3产品2原fixture12hunk鲜读排他逆补，5文件全字节等实跑；原consumer spec只补2产品/1原fixture依赖，ID/case/fault/上限不改，完整父闭包及整父未验。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r67.json、INTAKE-r67.json、MAINLINE-IMPORT-r67.json和REPORT-r67.zh-CN.md。只交下一自然Web/匹配源码包，不追030440或安装版，无部署/现场Steam设备睡眠。bootstrap Observer+IdentityDelegation与broker per-message公共SourceLeaseV2全图分立，后者未签闭；长稳/离线睡眠/物理输入及CPU百分比仍OPEN，目标ACTIVE。
+<!-- /DECKY-RTSS-SHARED-DISPLAY-20261115 -->
+
+<!-- STEAM-DESKTOP-READ-AND-PASSIVE-ACTIVATION-20261115 -->
+2026-11-15 公共Steam后继：桌面鼠标同次展示缺ActiveUser时presence调用2→1，局部optional不跨请求；原唯一processInventory的fresh0、未知按running、默认mutation与最终写前检查保持。1产品+4原配套10hunk精确fresh导入；最终原完整鼠标runtime/实际presence的21断言及旧源必要控制已核，188输入/7库两图。r2漏库导致来源不完整、准备/准入FAIL及独立审查越窗保留，后继r3同范围续验；两epoch42成功断言仅21唯一覆盖，8生产Job+1准入拒绝Job均0，其中1次限定vctip归还单列。高频触发/CPU百分比未知，无新poller/cache服务/worker。正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DesktopMouseReadObservation-20261115/SOURCE_READY.json。
+
+原菜单owner的被动activation观察已由本公共层独立核23原引用/6当前及最终私有源码/9实际Job0，内存独立重建embed全字节相等，UiMode/Light保持。r2八case77与最终受影响单case22按epoch分列，旧FAIL/两必要控制保留，不拼最终整8父PASS。仅原qualified alias显式按键前一次订阅、精确Host与logical/registered AppID、16总callback/10秒语义窗；原bound callback不改。原returned.unregister保持receiver，未知/异步/非void归还保token与全局slot阻断再注册，无新timer/worker/设备或focus动作；安静10秒不冒称绝对归还。定位信息不授输入许可或证明实体手柄/触摸修复。正式原件FieldLogReview-20261115-021152/menu-intake/activation-observation/SOURCE_READY.json，公共核收同Field/public-state-intake/ACTIVATION-OBSERVATION-INTAKE.json。
+
+两项交下一自然配套Native/link/包；旧013316均不含此后继，不追编旧包。本层无部署或现场游戏/Steam/设备/睡眠动作；整体统一Steam目标ACTIVE，三点实体输入、睡眠及全链仍OPEN，普通导出fixtures NOT_RUN。
+<!-- /STEAM-DESKTOP-READ-AND-PASSIVE-ACTIVATION-20261115 -->
+
+<!-- DECKY-INFLIGHT-DISPLAY-PARALLEL-20261115 -->
+Decky r62已实证修正r61热刷新等待顺序退步：历史control挂起原schedule时capability先启动，r61实际不启动；现Host同次schedule/profile/FPS原Promise与独立性能能力并行，readonly helper结算复制，plain仍立即复制，默认YMCC/action不消费展示数据。cold现代无游戏设置端口仍1、模板2，保游戏custom根准备与专属32/全局43边界，无新cache/timer/worker/EXE/恢复额度。
+早期FPS失败仍沿原消费者报错，去掉提前rejection观察的必要反例已核；等待中gen变化拒旧、隐藏旧投递0/重开fresh1、默认动作不等展示Promise及198类型--jitless核收。7自然Job关前0，原准备/compile/语义FAIL和费用保留；只选warm/error/shared与独立async子范围，不拼完整canonical或默认父。2产品1原fixture6hunk fresh排他逆补保并行，当前全文件等最终实跑，typed产品输入逐字同源。
+唯一原件Decky local-automatic-bpm-20261113/SOURCE_READY-r62.json、INTAKE-r62.json、MAINLINE-IMPORT-r62.json、REVERSE-REVIEW-r62.json及REPORT-r62.zh-CN.md。下一自然Web/匹配包，无Native/公开Loader/plugin dist变化，无部署/现场Steam设备睡眠；实机CPU/时延/离线睡眠与历史backend首因OPEN，目标ACTIVE。
+<!-- /DECKY-INFLIGHT-DISPLAY-PARALLEL-20261115 -->
+
+<!-- DECKY-SHARED-FRESH-SCHEDULE-20261115 -->
+Decky r61仅展示同事务共享新鲜schedule：Host每次原load一次并在等待前绑定generation/原source，readonly helper同步复制该schedule；默认YMCC/action忽略display参数仍fresh。现代无游戏原settings端口2→1，模板默认4→2；游戏保留原custom-root读，专属32W不受全局43W覆盖。无新cache/timer/worker/EXE/恢复额度，Native/官方Loader/plugin dist不变。
+原readonly canonical失败父有效前缀与后继3组合+专属分epoch核收，198类型--jitless/8自然Job关前0；准备与错误计数FAIL/费用保持，不拼完整canonical或默认父。2产品1原fixture6hunk鲜读排他逆补保并行，当前整文件等实测候选。唯一原件Decky local-automatic-bpm-20261113/SOURCE_READY-r61.json、INTAKE-r61.json、MAINLINE-IMPORT-r61.json和REPORT-r61.zh-CN.md。下一自然Web/匹配包，无部署/现场Steam设备睡眠，长期CPU/离线睡眠实机OPEN，整体ACTIVE。
+<!-- /DECKY-SHARED-FRESH-SCHEDULE-20261115 -->
+
+<!-- DECKY-MANUAL-SOURCE-CLOSE-ANCHOR-20261115 -->
+2026-11-15 Decky r59仅原manual源码门1hunk跟随closeOwned固定诊断参数，不删关闭先于归属/receipt或自动UI断言。完整原static gate及两个原后缀必要反例已核，1真实Job自然关前0；不当native业务。主线并行main6实际消费片段同私有，原r58失败保留。原件同Decky local-automatic-bpm-20261113/SOURCE_READY-r59.json、INTAKE-r59.json及REPORT-r59.zh-CN.md，无产品/部署/追编。
+ROG002519原50菜单行与Decky需求关联：7游戏QAM打开均subscribe+ready，queued至ready96~265ms，14check全ready、该窗口peer断开0；6关闭退订。第17退订后实际sleep peer变化单列，旧过宽只读关联FAIL保留。后台/ready不代实体输入，不增恢复。r58下一自然Native匹配包及全目标ACTIVE。
+<!-- /DECKY-MANUAL-SOURCE-CLOSE-ANCHOR-20261115 -->
+
+<!-- DECKY-ENVIRONMENT-SHARED-ROOT-20261115 -->
+2026-11-15 Decky r58环境只读IPC消费原Observer registryRoot/rootReadError，缺发布/读失败为steam-session-unconfirmed，不推未安装；freshRoot显式保repair/retained最终注册表读，prepare/早于ObserverStart不变，无新poll/timer/worker/EXE/恢复额度。实际caller非健康高频，不签CPU百分比。
+原setup实际main函数/完整inspect受控叶13边界核收，旧源必要反例及4Job关前0；原manual源门fresh断言后因既有closeOwned唯一锚FAIL保留，只续原binding stub2调用，不重跑业务/不拼整main。1产品+3原配套6hunkfresh逆补保并行，函数等实跑。权威同Decky local-automatic-bpm-20261113/SOURCE_READY-r58.json、MAINLINE-IMPORT-r58.json及REPORT-r58.zh-CN.md；下一自然Native/link/匹配包，无部署/现场动作。ROG002519复用raw最后wake ready2090ms，仅镜像非实体输入证明；全目标ACTIVE。
+<!-- /DECKY-ENVIRONMENT-SHARED-ROOT-20261115 -->
+
+<!-- DECKY-AUDIO-NOTIFICATION-READ-HANDOFF-20261114 -->
+2026-11-14 Decky r55音质后续变化通知native读2→1：原timer读到变化后Host快照又读；现仅Host借通知时原在途Promise及power事实给紧接的一次snapshot，开读即取走、power不同走fresh；显式demand/退订换peer/pending清slot。动作原fresh read/准入/native generation保持，无新timer/cache服务/worker/EXE或恢复额度。
+原可见性canonical六边界在失败父保持，最后公开错误字符串预期纠正后只续原动作新鲜性及198类型--jitless；隐式外改拒绝写0，未知恢复/显式刷新/隐藏/power边界保持。真实Edge+Broker通知read1、额外client探测0，无变化tick不推；新显式音质写1且fresh read1，四delivery accepted。5真实Job自然关前0，before/预期FAIL费用保留，不拼默认父/实机。
+1产品Host/1原controls34共13hunkfresh锁内逆补保并行，私有各epoch不回写。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r55.json、MAINLINE-IMPORT-r55.json、REPORT-r55.zh-CN.md，下一自然Web匹配包；Native/官方Loader/plugin dist未改，不追旧包或现场，中央sleep总JSON未访问。官方后台/其它首因/物理长稳CPU实益OPEN，整体ACTIVE。
+<!-- /DECKY-AUDIO-NOTIFICATION-READ-HANDOFF-20261114 -->
+
+<!-- DECKY-FIRST-AUDIO-READ-DEDUPLICATION-20261114 -->
+2026-11-14 Decky r54首开音质读取2→1：原observe retain先tick读，native power前置后Host再读；现仅Decky首原read启动后同步retain共flight。beginAudioObservation属当前订阅、退订只清自己，不改音质owner/原1500ms timer/动作API；无新cache/worker/timer/EXE或恢复额度。
+实际Edge/原Broker冷开音质2→1、input/monitor各1零写；换run首状态当前/max并发1/音质写0，显式monitor各1。原visibility及198类型--jitless、Ready失败父前缀和权威power后继2边界分列；7真实Job自然关前0，不拼整父。原r53计数/过窗后置、legacy Ready边界FAIL及准备Parse/费用保持。历史fixture逆hunk只存原raw SHA相同副本，不覆盖原件。
+1产品Host/1原controls34共6hunkfresh锁内逆补保并行。权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r54.json、MAINLINE-IMPORT-r54.json、REPORT-r54.zh-CN.md，下一自然Web/匹配包；Native/官方Loader/plugin dist未改，不追旧包/现场，中央sleep总JSON未访问。后续音质通知整批重读、官方后台/历史首因/物理长稳CPU实益OPEN，整体ACTIVE。
+<!-- /DECKY-FIRST-AUDIO-READ-DEDUPLICATION-20261114 -->
+
+<!-- DECKY-AUDIO-REOPEN-FRESH-OBSERVATION-20261114 -->
+2026-11-14 Decky r51音质快关快开：原实际owner已退役read仍被新需求共享，旧源1读/timer1对立即补读断言失败。现flightEpoch等待旧read归还后仅当前需求补新read，observation与mutation epoch分立；旧tick不为新订阅排timer，设置后正常可见timer保持。
+原可见性canonical单飞/再次隐藏/连续重开并发/旧读失败/设置在途均核，最大并发native读取1、业务零重放、退订timer0；198类型--jitless、3自然Job关前0。1产品/1原fixture8hunkfresh逆补保并行，无新timer/worker/EXE/恢复额度、Native/官方Loader/plugin dist变化。原FAIL/费用/旧窗登记超时检测值保留，不拼整父/实机。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r51.json、MAINLINE-IMPORT-r51.json、REPORT-r51.zh-CN.md；215306现场菜单preflight拒绝另交公共Steam，非本修复首因。下一自然Web/匹配包，不追安装或现场Steam/设备/睡眠；中央sleep总JSON未访问。长稳/物理/CPU实益OPEN，整体ACTIVE。
+<!-- /DECKY-AUDIO-REOPEN-FRESH-OBSERVATION-20261114 -->
+
+<!-- DECKY-AUDIO-OBSERVER-ISOLATION-20261114 -->
+2026-11-14 Decky r50音质界面listener异常误报native成功：原实际FxSoundOwner设置写1但reject且后listener0，原canonical旧源反例已核。仅accept逐回调隔离；真实native失败仍拒绝、成功原receipt及后listener保持，read失败unknown后恢复、原1500ms唯一timer及退役迟到read归还保持。
+1产品fxSound/1原controls34共5hunkfresh锁内逆补，198类型--jitless、4自有Job自然关前0；原准备接线/selector与语义FAIL及费用保持，不拼整父/实机。无新timer/worker/EXE/恢复额度、Native/官方Loader/plugin载荷变化。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r50.json、MAINLINE-IMPORT-r50.json、REPORT-r50.zh-CN.md。193736现场另列：两wake首次ready入队276/1937ms，后次健康确认5739ms，无更高恢复动作，不据此新增重启。下一自然Web/匹配包，不追安装/现场Steam设备睡眠，中央sleep总JSON未访问；历史首因/长稳与CPU实益OPEN，整体ACTIVE。
+<!-- /DECKY-AUDIO-OBSERVER-ISOLATION-20261114 -->
+
+<!-- DECKY-RETIRED-MUTATION-CURRENT-DISPLAY-20261114 -->
+2026-11-14 Decky r48旧动作跨peer结算漏刷新：实际Host/FxSoundOwner揭native已true而新peer显示false，旧finally仅matches旧peer导致dirty未push。现归还busy后仅invalidate当前存活观察，不转发旧reply/重放动作或授新许可。同run/新run刷新、hidden/disposed零新IO、NonReady不读业务；音质写均1、旧reply0。
+1产品Relay+1原mutation夹具3hunkfresh锁内逆补保其它字节，整源等候选；198类型--jitless、3真实Job自然关前0。旧反例/缺脚本/patch及发布准备失败、费用保持，不拼整父/实机。无新timer/worker/EXE或恢复额度、Native/plugin载荷变化。
+权威同Decky local-automatic-bpm-20261113/SOURCE_READY-r48.json、MAINLINE-IMPORT-r48.json及REPORT-r48.zh-CN.md，下一自然Web/匹配包，不追安装版或现场Steam设备睡眠；中央sleep总JSON未访问。历史首因/真实浏览器组合/长稳离线及CPU实益OPEN，整体ACTIVE。
+<!-- /DECKY-RETIRED-MUTATION-CURRENT-DISPLAY-20261114 -->
+
+<!-- DECKY-DISPLAY-LEGACY-CPU-READ-20261114 -->
+2026-11-14 Decky r46完整新控制参数不读旧CPU档位：真实cpuProfiles+原设置端口揭旧display多读1，现仅read-only依据原global/entry转换需要读取；现代全局/专属1→0，默认YMCC/action仍eager/fresh，旧全局/专属及下一次外改3200保持。故障无关端口不再拖现代展示，默认action原失败保留；无新cache/timer/worker/EXE/恢复额度。
+原readonly canonical五新边界及原cold TDP/FPS/来源控制核收，198类型--jitless；3真实Job自然关前0，旧源FAIL/费用保持，不拼默认父/实机。1产品2原fixture5hunkfresh锁内逆补保并行，整文件等最终实际来源；Native C++/插件载荷不变。
+权威同Decky local-automatic-bpm-20261113/SOURCE_READY-r46.json、MAINLINE-IMPORT-r46.json及REPORT-r46.zh-CN.md，下一自然Web/匹配包，不追安装版或现场Steam设备睡眠，中央sleep总JSON未访问。设置调用1→0不是物理磁盘或整机CPU百分比收益，历史首因/长稳/离线/睡眠仍OPEN，整体ACTIVE。
+<!-- /DECKY-DISPLAY-LEGACY-CPU-READ-20261114 -->
+
+<!-- DECKY-DISPLAY-CUSTOM-MIGRATION-20261114 -->
+2026-11-14 Decky r43展示零隐式专属迁移：旧实际Host+完整schedule/FPS消费者在文件缺失时仅打开便file-save/settings-save各1；现display读原主/备份/legacy但不创建或清理，persisted如实false，无游戏复用当次视图。默认YMCC/动作ensure迁移、原CAS/队列/超时保持，无新worker/timer/EXE或恢复额度，读队列等待仍OPEN。
+原readonly canonical冷有/无游戏及主/备份/坏/未来核收；后继只续新冷TDP原Relay/Actions/保存链，全局/专属22W各1次内存write-ack、重复0。198类型--jitless，普通参数/整父/实机NOT_RUN；4真实Job自然关前0，旧源FAIL/准备1314失败及费用保留。2产品2原fixture11hunkfresh锁内逆补，其它字节保持，逐字等最终候选；旧raw不覆盖。
+权威同Decky local-automatic-bpm-20261113/SOURCE_READY-r43.json、MAINLINE-IMPORT-r43.json及REPORT-r43.zh-CN.md。下一自然Web/匹配包消费，Native C++/插件载荷不变，不追安装版；无部署/现场Steam设备睡眠，中央sleep总JSON未访问。非193736首因断言，历史断开/长稳/离线及CPU实益仍OPEN，整体ACTIVE。
+<!-- /DECKY-DISPLAY-CUSTOM-MIGRATION-20261114 -->
+
+<!-- DECKY-SHARED-INPUT-DISPLAY-20261114 -->
+2026-11-14 Decky r40同次input展示读取2→1：仅gyro display传host原inputRead，helper默认省参每次fresh供动作。原真实helper接线替代固定stub揭旧2读，保原source/power/动作校验，无跨请求cache/新timer/worker/EXE或恢复预算变化。全局游戏/专属follow首次1读、重开2读且新preset生效；输入失败仅相关控件禁用，原250ms读恢复可恢复。
+原独立并发canonical及2原source/error、4原gyro动作核收，199类型两epoch --jitless；普通参数/整父/整包NOT_RUN。公共default reader/eventSource后继组合只重验受影响case/类型，保公共3文件其它字节。9实际Job原子准入自然关前0；LF准备/缺原gyro文件及closing日志路径FAIL、费用旧越界保留，后置仅复读raw。4文件8hunk fresh锁内逆hunk保并行，当前整文件同最终组合源。
+权威原Decky local-automatic-bpm-20261113/SOURCE_READY-r40.json、MAINLINE-IMPORT-r40.json及REPORT-r40.zh-CN.md。下一自然Web/配套包消费，Native/plugin载荷未改，不追安装版；无部署/现场Steam设备睡眠，中央sleep总JSON未访问。历史断开首因、物理长稳和CPU百分比收益OPEN，整体ACTIVE。
+<!-- /DECKY-SHARED-INPUT-DISPLAY-20261114 -->
+
+<!-- DECKY-OPTIONAL-METADATA-REPAINT-20261114 -->
+2026-11-14 Decky optional gameSteam迟到r37不再整批重读：仅当前clean/ready、无mutation/fault/read/backoff的原cache补展示字段，保control revision/原admissions及收据；已有delivery结算后再核source/peer/demand才发送。真来源失效/隐藏/换peer/退出撤旧，不合条件沿原invalidate，共享Steam publication/revocation完全未改，无新timer/worker/EXE/权限或恢复期限变化。
+原late canonical旧源额外frame1反例、候选新增业务读0且旧控件receipt明确监控保存/应用各1；在途control不第三批与pending sender四边界核收。其余5原optional case及3完整TS/199(--jitless，普通本轮NOT_RUN)通过，4Job均原子准入自然关前0；内存传输/opaque队列port范围保持，不当物理/CPU证明。混换行准备/runner重复名Parse FAIL及费用保留，2产品/1原fixture11hunkfresh逆补保并行，不拼完整父。
+权威原local-automatic-bpm-20261113/SOURCE_READY-r37.json、MAINLINE-IMPORT-r37.json及REPORT-r37.zh-CN.md。下一自然Web/配套包消费；Native及r36插件载荷不变，不追安装版。无部署/现场Steam设备睡眠，中央sleep总JSON未访问；历史首因/长稳与CPU实益仍OPEN，目标ACTIVE。
+<!-- /DECKY-OPTIONAL-METADATA-REPAINT-20261114 -->
+
+<!-- DECKY-SNAPSHOT-TIMEOUT-CLOSE-CAUSE-20261114 -->
+2026-11-14 Decky r36仅原snapshot deadline用内部固定cause以WS4001关闭旧socket，沿既有peerClose数字事实日志；不附文本、无新读取/logger/timer/worker/EXE，不改15秒/退避/恢复额度。4001是客户端自报，不是健康/动作权威；未知帧不补造。1产品TS/2原fixture11hunk和匹配dist已精确导入，逆hunk保并行。
+原hidden-proof canonical旧源缺码反例/候选三个结束分离，原完整Broker peer-admission真实WinSock177/1000及4001/既有过滤、TS199(--jitless，普通本轮NOT_RUN)核收。原插件配方只加metafile，两原build步骤各73输入（72实+1virtual），当前66消费源及helper/官方件核同。buildcc7cd78510eb0c3afefdd16227439a3de97ef814f3ac88b2c2991add8e84a1f4，dist489446/SHAdef2fc7c7e45582b9efbc9d0b53f74a667316c90c2c1b4c0ebce4c9d1ed8c841。
+原缺build recipe准备FAIL、crypt32未前pin的首native闭包INCOMPLETE及输出目标KeyError保留；只续受影响native，client/type/plugin未重跑，输出单独前置CAS不伪造producer输入。6Job0（4自然/2限定vctip），旧费用/越界保持，不把两次177拼354。权威原local-automatic-bpm-20261113/SOURCE_READY-r36f.json、MAINLINE-IMPORT-r36e.json及REPORT-r36f.zh-CN.md；交下一自然配套包，不追旧包/安装版，无部署/Steam设备睡眠，中央sleep总JSON未访问。实际Chrome/Steam现场、旧断开首因/长稳CPU仍OPEN，目标ACTIVE。
+<!-- /DECKY-SNAPSHOT-TIMEOUT-CLOSE-CAUSE-20261114 -->
+
+<!-- DECKY-SHARED-DISPLAY-READS-20261114 -->
+2026-11-14 Decky单快照重复配置/FPS读取r35已实际组合复现并导主线2产品/3原fixture22hunk。仅内部read-only display复用当次原profileConfig/原FPS Promise，gen前后核对；普通动作忽略display输入仍fresh，无新跨请求cache/timer/worker/EXE或恢复门槛。全局/专属主文件端口和FPS owner均2→1，下一次打开重读新值，旧gen拒绝且动作不借伪显示值。原canonical内旧FPS六边界及原source-change控制通过，不当实际磁盘/CPU百分比。
+原getter错误/错预算路径准备FAIL/普通Node类型0xC0000005保留；仅同compiler/source加--jitless一次完成3完整TS/199类型，普通参数未改绿、崩溃首因未知。6实际Job均原子准入且自然关前0。唯一fixture删除计数器以固定邻接锚还原，fresh逆hunk保并行；无新ID/minimum，不拼完整父/包。
+权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r35.json、MAINLINE-IMPORT-r35.json及REPORT-r35.zh-CN.md。交下一自然Web/匹配包并继承r34 Native配套，不追安装版；无部署或现场Steam设备睡眠，中央sleep总JSON未访问。metadata真publication/revocation职责留公共Steam owner，不能同值一律忽略；现场首因/长稳/CPU收益OPEN，整体ACTIVE。
+<!-- /DECKY-SHARED-DISPLAY-READS-20261114 -->
+
+<!-- DECKY-PARALLEL-AUDIO-READ-20261114 -->
+2026-11-14 Decky音质串行前置r34已实证并精确导主线3产品/2原夹具15hunk。原Ready门后同一次audio read与控件重叠，最终仍await并走原source/peer/power围栏；普通IPC失败unknown保持，真正reject改为controls结算后上抛。原finish加固定audioMs/profileMs等待，Native仅finish容32字段、33拒，无新读取/缓存/timer/worker/EXE或恢复时限变更。
+原no-game canonical四交错及非Ready门通过；旧音质阻塞反例、原native过滤块85断言/两图和3完整TS模块199类型核收。首TS2339 FAIL保留，最终仅类型cast，原esbuild生成JS逐字等已实跑体，其余2780源相同，只续类型不业务重跑；7Job关前0（5自然/2限定vctip），旧费用/越界/epoch保持，不拼整父/整包。
+权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r34.json、MAINLINE-IMPORT-r34.json及REPORT-r34.zh-CN.md。fresh锁内逆hunk保并行，交下一自然Web+Native匹配包，不追安装r26或现场窗口。143723请求到remote-close15.808s只为相关性，全部慢读首因、重复owner/default metadata事件链与长稳CPU收益OPEN，整体ACTIVE；无部署或真实Steam/设备睡眠，中央sleep总JSON未访问。
+<!-- /DECKY-PARALLEL-AUDIO-READ-20261114 -->
+
+<!-- DECKY-DISPLAY-READONLY-FRAMES-20261114 -->
+2026-11-14 Decky面板隐式帧率保存/写队列等待r33已实证并导主线2产品/2原夹具8hunk。旧host+实际snapshot/FPS组合仅查看便写1次；现仅Decky display选read-only复用原loadGlobalFrameRates，默认动作ensure与FIFO/迁移及专属合成保持，无新缓存/timer/worker/EXE或恢复门槛改动。
+原只读6用例内核旧0/75/120、档位35/45、已存90/40及失败；真实队列持写时view先回、action仍等且仅提交一次。原performance首canonical及3完整TS模块199类型输入通过，4实际Job均自然关前0。存储/native为内存端口，不签实际磁盘/完整专属组；旧源FAIL/准备与closing失败/费用保留，后置仅复读raw不重跑。
+权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r33.json、MAINLINE-IMPORT-r33.json与REPORT-r33.zh-CN.md。fresh锁内逆hunk保并行，下一自然Web/匹配包消费，不追安装r26或冻结其它owner。无部署/现场操作，日志全部慢读首因、长稳/物理睡眠/CPU收益OPEN，整体ACTIVE；中央sleep总JSON未访问。
+<!-- /DECKY-DISPLAY-READONLY-FRAMES-20261114 -->
+
+<!-- DECKY-FRESH-BINDING-HANDSHAKE-20261114 -->
+2026-11-14 Decky唤醒新监听首个握手前重复重绑r32已精确导主线1产品/1原夹具13hunk。原typed Runtime/Client/Owner实际复现3计划；最终同intent/代次/PID且context及原wait监听存活、无独立watch故障时，认可已实际完成的绑定为首级既有尝试。原7000ms从真实绑定开始扣，非健康判定/不退款/不加grace，冷Loader原独立时钟及后级阶梯保持。快照异常回原恢复，无新timer/worker/EXE或业务写。
+四参数真实时钟fresh2/watch3/deadline约6985ms/off2，句柄153→153且原Client/Job/pendingIO归还；原owned/retained S0及ready三控制通过，复用同EXE。首候选借SYNCHRONIZE句柄GetProcessId仍3的FAIL保留，自有诊断error5实证后保持原权限修正。before/首FAIL/最终typed图各494源15库，固定main/O2对象1648输入成功；5Job0（4自然/1限定vctip），3私有observer端口等原生成体，默认父/3.2s旧组未重跑，不拼全PASS。
+权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r32d.json、MAINLINE-IMPORT-r32c.json及REPORT-r32d.zh-CN.md。fresh锁内逆hunk保并行，完整main只按固定epoch；下一自然Native/link/匹配包消费，不追改安装r26。无部署/真实YMCC/Steam设备睡眠动作，现场长稳/读取首因/CPU百分比收益OPEN，整体ACTIVE；中央sleep总JSON未碰。
+<!-- /DECKY-FRESH-BINDING-HANDSHAKE-20261114 -->
+
+<!-- DECKY-SNAPSHOT-DEPENDENCY-TIMINGS-20261114 -->
+2026-11-14 Decky快照性能读取分项日志r31已导主线4产品/3原夹具15hunk。performanceSchedule可选onTiming观察8个原Promise等待，Decky附原finish事件，普通无观察者不取时钟；回调异常隔离、原IO/准入/结果/预算保持，无新worker/timer/EXE。原native两过滤仅finish容纳固定8整数到30字段，31/坏类型/其它事件仍拒绝。等待包含owner队列/原生往返/renderer且并行重叠，不冒称拆开CPU/排队或追回历史首因。
+原实际snapshot首case值/读取计数/零写/8抛错回调、原relay4项限频/无poller/隔离、native原断言块71、实际3完整TS模块199类型输入及3必要旧源反例核收。7Job0（5自然/2限定vctip）；准备与CRLF/UTF16/顺序/CRCRLF后置FAIL/费用/旧越界保持，后置复读原raw无业务重跑，无新ID/minimum。fresh锁内逆hunk保并行；main.cpp未动。
+权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r31g.json、MAINLINE-IMPORT-r31f.json及REPORT-r31g.zh-CN.md。下一自然Web+Native匹配包消费，不追改安装r26，无现场YMCC/Steam/设备/睡眠动作。143723读取慢根因、长期稳定和CPU收益OPEN，整体ACTIVE；中央sleep总JSON未碰。
+<!-- /DECKY-SNAPSHOT-DEPENDENCY-TIMINGS-20261114 -->
+
+<!-- STEAM-CONSOLE-COMPLETE-SOURCE-20261114 -->
+2026-11-14 ROG143723睡前Console原4565493B只复制2097152B/truncated，32ms/1000且current仍真；与startup新版模块资格拒绝分列。公共唯一readTail现按source kind贯通固定Console8MiB/GameProcess原2MiB，metadata保存/完整长度及parser同合同；nativePrimaryFromSource、observeFresh/held捕获/current与全部consumer截断拒绝保持。大于8MiB继续UNKNOWN，无新reader/worker/poller/重试或读取频率，未签CPU百分比。
+4产品+1原夹具已排他fresh CAS精确导主线，逆hunk保并行main。原source22/fresh20、旧2MiB实际行为必要反例、6自有Job关前0及父1635pins已核；编译工具vctip限定收尾与业务自然归还分列。原fixture显式source-only宏仅隔离未选native-read-scope依赖，默认未改，不造trackingOriginal成功port。实际321源/10库，main读取函数扣除5个原计数/钩子后逐字同实编；不是完整main/Native/link/包证明。首编译、准入/预算方案及import准备FAIL/费用保留，原候选不重跑。
+正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-143723/console-source-completeness/{SOURCE_READY.json,DELIVERY-REQUIREMENT.json,mainline-import-r2/IMPORT-RESULT.json,REPORT.zh-CN.md}。SOURCE_READY仅本公共源，交下一自然Native/匹配包，不追旧包。新版client/UI资格仍私有拒绝；双PID睡眠、实体手柄/触摸与配套包/实机仍OPEN，整体ACTIVE。无部署或Steam/游戏/设备/真实睡眠动作。
+<!-- /STEAM-CONSOLE-COMPLETE-SOURCE-20261114 -->
+
+<!-- DECKY-BOUNDED-UPGRADE-LEAF-20261114 -->
+2026-11-14 Decky恢复拒绝叶r30已导主线3产品/2原夹具25hunk。既有预算日志只加固定可选upgradeStage，原锁外发送，原IO/current顺序和恢复额度不变，无新EXE/线程/timer。原store21前后业务/取消/双份事实相同，原budget23及settings单case147核收；初候选C1001保留，旧main/O2成功，冷store noinline后同/O2完整main/c成功，不当link/包。初库闭包缺7实际SDK工具保留INCOMPLETE，预先补pin后仅续受影响21/23，7有效图292/292/394/394/1648/1648/348及7Job0已核，旧FAIL/费用/前级越界均保留。精确逆hunk保并行字节，不冒称全当前main重编。
+原件同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r30i.json、MAINLINE-IMPORT-r30h.json与REPORT-r30i.zh-CN.md。143723 ROG现场Wake至镜像1.994s、完整健康6.024s，未见高级恢复动作；设置读8.859/15.735s与InputHost超时同窗但根因未证，CSS文档确认失败分列。交下一自然Native/link/匹配包，不追改已安装r26。无部署/现场Steam设备睡眠动作，真实保护账本组合/长稳/CPU收益仍OPEN，整体ACTIVE；中央sleep总JSON未碰。
+<!-- /DECKY-BOUNDED-UPGRADE-LEAF-20261114 -->
+
+<!-- STEAM-MODE-READ-CANCELLATION-OWNER-20261114 -->
+2026-11-14 公共mode读取取消三产品及四原配套已精确导主线。原generation/demand/stop、Steam identity和唯一Native48 capture/current进入原transport；取消不发布、不算Steam故障、不触发Decky恢复、不退款，无新worker/poller。Native capture只从原read callback入口开始，不证明排队前P1。
+原18场景/182断言、必要旧源反例及27实际Job0（23自然/4限定工具）独立核收；另一次固定完整main/c的1644实际输入/651仓库include和Job0已核，限定vctip单列。历史case/runner保存副本及正确原fixture baseline已逐字核，PS仅21个未改行EOL保持原字节；旧FAIL/UNKNOWN/费用保留。无业务重跑/重编，逆hunk保并行main。
+正式原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-111659/mode-read-intake/r2/SOURCE_READY.json、TYPE-CLOSURE-INTAKE.json及MAINLINE-IMPORT.json。下一自然Native/link/匹配包消费，固定121202包不追改，普通fixtures NOT_RUN；物理输入/双PID睡眠和CPU收益OPEN，整体ACTIVE。
+<!-- /STEAM-MODE-READ-CANCELLATION-OWNER-20261114 -->
+
+<!-- STEAM-MENU-COMPOSITION-OWNER-20261114 -->
+2026-11-14 公共Steam菜单per-browser composition最终两产品/原五配套已精确主线导入。原handler本次确实打开菜单后，仅原held alias提交一次真实mode/游戏队列/windowID；健康tuple零补发，原cache不写。按键前BrowserWindow/client/API/method及最终queue内容/长度、mode/windowID、overview身份复核；异步拒绝隔离不重试。有界cachedComposition只读，顶层明确行动scope，提交不等native ACK或物理方向/A/B/触摸。官方1794536281的sp.js逐字等原4b818primary。
+
+原6f0的22/195+2/17、Guide2/25，92988的7/65，0dca的7/40及最终a9ee的2/27分epoch核收，必要反例/旧FAIL/UNKNOWN/费用保持，不拼整父。最终JSa9ee663c/H2365b32b，来源/实际3新Job自然0及fresh锁内CAS/逆hunk原件为Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-111659/menu-source-intake/SOURCE_READY.json与DELIVERY-REQUIREMENT.json。原canonical slot配套，无新ID/minimum，普通导出fixtures NOT_RUN。
+
+111659现场Native76bb5731对应104038，源码仍ea1af452/H50969，未含本composition后继，失败仍未通过。睡前新client669fa08e/UI2dfb0a5d模块合同拒绝，角色读0次，醒后未入engine；官方精确模块已只读复现同两ref，缺失callee合同适配仍私有，不能宣称睡眠修好。本菜单交下一自然Native/link/配套包，物理手柄/触摸/原实例双PID睡眠与CPU收益继续OPEN，整体ACTIVE；本层无部署或真实Steam/游戏/设备/睡眠动作。
+
+2026-11-14 配套后继：最终a9ee/2365菜单两产品已进入121202固定完整Native/Web/ZIP与源码PDB，两ZIP/实际include/PDB/Job0均已独立核；正常source export仅交两产品，五canonical测试工具为构建snapshot核对范围，不称随包交付。匹配原件同menu-source-intake/MATCHED-PACKAGE-INTAKE.json及DELIVERY-REQUIREMENT-SCOPE.json。本机原Decky完整部署COMMIT已核，安装Native c8ae83ec、5712 --minimized与设置保留分列；不当loaded-memory SHA或物理手柄/触摸证明，Win5新模块拒绝与睡眠原缺口仍OPEN，旧111659失败按原104038 epoch保持。
+<!-- /STEAM-MENU-COMPOSITION-OWNER-20261114 -->
+
+<!-- STEAM-OUTPUT-ADMISSION-STARTUP-CONTINUATION-20261114 -->
+2026-11-14 公共Steam输出准入及Startup原请求接续四产品已精确写主线。GameSteamContext只在同一原ResultMailbox/PostMessage实际准入后消费notice；source bridge、ReReadNow、最终native event共用原最多2次补投，失败保原hint/RAII，沿既有窗口事件接续，无新poller/worker/源重读。原void/default/异常语义保持；已在途metadata hint不能撤回，原生入队不等于renderer ACK，不授Ready或动作。
+
+Startup可选typed out只取同次claim.completion；FreshSourceBusy每路线最多一次exact-flight提示，沿原worker接续原Pending，保原sequence/selection/config/rules/power/account、两ReadScope及预算，再次Busy不循环arm/退款/新请求。通知10项及必要旧void语义反例已核；Startup失败父有效5项249与后继3项162按epoch保留，不拼整父。一次固定联合main/c实际1644图记录/1433唯一输入，四完整产品等实际编译来源；19自有Job关前0，13自然与6限定vctip收尾分列。fresh锁内CAS/逆hunk保留并行字节，原FAIL/UNKNOWN/费用保持。
+
+正式原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-053138/output-startup-intake/SOURCE_READY.json、MAINLINE-IMPORT.json、PUBLIC-API-SUCCESSOR.md及DELIVERY-REQUIREMENT.json。前向关闭旧记录中startup消费者仍私有的缺口；原导出guard两工具已精确主线导入：PS5/PS7各原31项（旧21+新增10）及4次语法核收，4成功Job与1原策略拒绝Job均自然归零；原FAIL/费用保持，历史限定receipt链不改。配套原件见下级fixture-support-intake/guard-import/SOURCE_READY.json与MAINLINE-IMPORT.json。SleepOnly必要类型与真实queue取消组装仍私有，只做AST解析；旧dense/group/provider完整生成闭包保持OPEN。081632已核含菜单有界trace、未含本公共completion及本后继；下一自然Native/link/匹配包消费，不追改旧包。renderer ACK、Win5手柄/触摸/原实例双PID睡眠与CPU收益仍OPEN，整体ACTIVE；本层无部署或真实Steam/游戏/设备/睡眠动作。
+<!-- /STEAM-OUTPUT-ADMISSION-STARTUP-CONTINUATION-20261114 -->
+
+<!-- STEAM-TRACKER-ORIGINAL-FLIGHT-COMPLETION-20261114 -->
+2026-11-14 公共Steam原flight完成提示已六产品精确写主线。claim/peek同锁捕获F1 witness，Console等原工作物理归还后才给原terminal hint；消费不把成功/失败/no-read当Ready或动作。GameSteamContext真实Pending只一份Capture/RAII，32slot transport含执行/capture析构，源sink仅enqueue/PostMessage，原窗口锁外drain；未知非零tag拒绝，不混普通w=0。已有主窗口事件同notice最多补投2次，无新poller/worker/源重读；消费/取消/耗尽及注册容量/异常后空闲atomic直接返回，保same-flight tombstone。
+
+原owner16、初版consumer16、最终gate受影响6+新注册失败2、transport12/190按各自epoch；4必要语义反例、固定完整main TU/c的1644实际输入与六源命中已核，不拼整父。25自有Job关前0，限定vctip与业务自然归还分列；准备/编译/来源及封存schema FAIL、原费用保持。产品导入逐文件写锁内fresh比较，精确正反hunk保留其它并行main字节；其余五源逐字等合格来源。
+
+权威 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-053138/completion-intake/SOURCE_READY.json、MAINLINE-IMPORT.json、PUBLIC-API.md。SOURCE_READY仅签本六公共源码；final WebView ACK、startup busy恢复私有消费者、完整Native/link/包与Win5手柄/触摸/双PID睡眠仍OPEN，整体ACTIVE。063546不含此后继，交下一自然配套，不追编旧包；无部署或真实Steam/游戏/设备/睡眠动作，不签CPU百分比收益。
+<!-- /STEAM-TRACKER-ORIGINAL-FLIGHT-COMPLETION-20261114 -->
+
+<!-- STEAM-BOUNDED-INPUT-TRACE-READY-PROFILE-20261114 -->
+2026-11-14 公共Steam有界菜单输入追溯及Ready模块准备后继已精确导主线。原qualified alias内四方法/两doc/32观测、原事件检查10000ms上限；实采时长、零值UNKNOWN及原proof PID/birth/Host/browser/fullID保留，previous明确历史/current=false；不新Register、轮询、设备index、按键/触摸重放或强焦点。26/128、3/12、2/30分epoch，官方同源JS/H已核；默认回执仅源检，物理输入未代验。
+
+原Ready非sleep PrepareMutation count2复用同main模块cache，原tracking source/fullID/selected出生路径/Steam/current转交门及两scope/取消保持；睡前CacheOnly/1000ms与P/F/角色/动作门不改，无prefetch/IdentityReady、额外worker或预算退款。8/155和后继3/27分列；module缓存可在撤销时晚写，结果不采纳，不承诺中途取消时长。原FAIL/费用及fresh inverse字节证明保持。正式入口Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-053138/input-trace-intake/SOURCE_READY.json和ready-profile-intake/continuation-r2/MAINLINE-IMPORT.json，汇总同Field/successor-record/PUBLIC-SUCCESSOR.json。
+
+063546固定包含此前typed诊断等来源，本后继进入下一自然Native/包，不追编。公共完成通知F1 witness/有界transport与startup busy消费者尚私有未组合，不授Ready/动作；全部消费/权限资源/实机仍OPEN，整体ACTIVE。未部署或操作Steam/游戏/设备/真实睡眠。
+<!-- /STEAM-BOUNDED-INPUT-TRACE-READY-PROFILE-20261114 -->
+
+<!-- STEAM-FIELD-CATCHALL-CLASSIFICATION-20261114 -->
+2026-11-14 053138新日志已按writer3052/Steam13704核40菜单：10原handler回执、30 context preflight拒绝；原native输入送达未证明。官方VR catch-all可常驻非VR，现只让已核同held/mounted/active context只读already-current，拆分原hint/context/operation/catchall合并拒绝；未知catchall切换门保持，不调用/删除回调或合成输入。2产品JS/H精确写回，12场景18断言/旧源必要反例/同源官方生成核收；原准备FAIL和费用保留，未重跑默认父。
+
+原overlay日志1008个BasePanel gameID未就绪文本命中属于日志5984→游戏5936，菜单registered Host10604仍独立；不当双Host bug/全Steam身份丢失或物理输入根因。睡前组角色具体拒绝叶未知、发布pid0、醒后未入engine，startup fresh busy另列；第二cycle活组已退出。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-053138/ANALYSIS.json、REPORT.zh-CN.md及input-owner-classification/SOURCE_READY.json、MAINLINE-IMPORT.json。sourceReady仅上述分类源码；物理手柄/触屏、typed叶、公共completion消费者和匹配新包仍OPEN，整体ACTIVE。此后继未完整构建/部署或操作Steam/游戏/设备/真实睡眠，不追改044303固定包。
+<!-- /STEAM-FIELD-CATCHALL-CLASSIFICATION-20261114 -->
+
+<!-- STEAM-MENU-DUAL-PID-MATCHED-PACKAGE-20261114 -->
+2026-11-14 04:43香港时间固定的菜单/双PID恢复完整测试包已完成Native/Web/link/ZIP与源码/PDB交付。八份产品来源与原JOINT-DELIVERY精确一致；本层独立核两ZIP全SHA、源码ZIP八成员CRC/字节/SHA、冻结源码、包内Native627c825572b697a3405cf928b78bb9312f2b03104ba11fcabfa82e617ffc84de及PDB e89ec2c021452234a1836ce71689b13c74b90aff9827ae28747042abe2af5d86，原BUILD/编译图/PDB身份回执pins匹配。不是重新编译、重跑业务或全编译工具图独立重核。
+
+成品 Deliverables/YMCC-Menu-Group-TestPackage-20261114-044303/YeManCC.zip（111993788B，SHA3b094dc127f5f5d115969057755437ae797ae48b8c4c4b4ad59707f410019983），配套YeManCC-source-symbols.zip（49661623B，SHAd42094578df30aa4b914f75425ca57fdaa741cdc18c1b93b03837e495c8532c8）。build779402426bee9a70c9567effc05bf77c014d759f7d3923ce5db6a1fe6bc6c1ed；权威 MainlineMenuGroupExport-20261114-044303/DELIVERY-HANDOFF.json及SteamUnifiedChannel-20261112/FieldLogReview-20261114-015248/joint-source-intake/MATCHED-PACKAGE-INTAKE-20261114.json。六参导出guard/cross-shell后继已正式SOURCE_READY，原PS5/PS7各21和必要失败后续原件分列。
+
+本后继关闭“缺完整匹配link/包/源码/PDB”的当前交付缺口，旧记录按旧epoch保留，不追改191506Z，不覆盖FAIL/UNKNOWN/费用。默认产品fixtures NOT_RUN，未由本层部署或执行现场Steam/游戏/设备/睡眠；Win5本机方向/A/B、触摸及原实例双PID真实睡眠仍OPEN，公共completed-source提示仍OPEN，整体ACTIVE。新现场动作由原三点菜单任务独占接续，其他任务不并发触发。
+<!-- /STEAM-MENU-DUAL-PID-MATCHED-PACKAGE-20261114 -->
+
+<!-- STEAM-MENU-DUAL-PID-JOINT-SOURCE-20261114 -->
+2026-11-14 公共Steam手柄菜单优先修复与双PID恢复六consumer现已同时在主线。原GetEventTarget准备及lookup别名修复的最终JS/官方生成H保持；六consumer已导入，原CaptureRequest睡前基线1/50及动态/半静态startup/wake四项fullhandle各1084按原epoch核收，不拼整父。实际完整main TU编译PASS，1642输入；本次独立核六consumer加菜单生成H共7个实际输入字节，最新版菜单H确已进入同一次编译，JS单独核主线来源。不重跑旧组、不重编；编译使用限定vctip工具收尾，Job关前0，非纯自然。
+
+权威 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-015248/joint-source-intake/JOINT-DELIVERY.json 及恢复项目Field-20261114-015248/SOURCE_READY.json、DELIVERY-REQUIREMENT.json。旧“五私有/主线8参未接/静态wake待补”仅保留原epoch，本后继关闭六consumer导入和固定main编译缺口；不覆盖旧FAIL/UNKNOWN/费用。下一自然固定源Native/Web/YMCC包须同时消费8产品来源，不追改CPU1当前191506Z快照。tracking/fresh参数后继的精确导出guard已交原owner处理，本记录未宣称新guard通过。
+
+完整link/包/部署、Win5本机方向键及A/B、触摸和原双PID真实睡眠恢复仍OPEN；鼠标TDP成功不代验。completed-source提示仍独立OPEN，无新轮询或动作grant。无本次Steam/游戏/设备/真实睡眠操作，整体ACTIVE。
+<!-- /STEAM-MENU-DUAL-PID-JOINT-SOURCE-20261114 -->
+
+<!-- STEAM-MENU-ORIGINAL-NAV-PREPARATION-20261114 -->
+2026-11-14 公共菜单原导航context准备后继已按SOURCE_READY精确导入steam_live.js的helper及原handler前一次call，并配套同源官方生成H，共2产品文件，其他并行字节保留。只对显式qualified alias核精确原方法profile、同manager/held context/mounted、hint自有可写data且undefined、catchall空/suppression=false及原resolver恰同context；其它活focused tree保持。暂借同步hint调用原GetEventTarget(27/28,2,false)，清自有hint、最终核归属/生命周期/active后仍原handler一次；未attempted unknown保旧handler，attempted后unknown拒绝且不重放。无新索引、输入源、合成down/up、Force/FocusRoot、callback/timer/poller或恢复额度；原GetEventTarget可经原SetActive排其焦点微任务，不称无异步效应。
+
+既有15场景/44检查（源码r3，结果candidate-r4）、真实OnActivate/SetActive/manager发布2/6（源码r3，结果candidate-r7）、final守卫5/10（源码r4，结果candidate-r8）分别按epoch引用；paired-r1仅同源生成/语法及mode/light未变，业务0，不拼整父PASS。原before-r2必要反例、before/candidate-r1缺逗号fixtureFAIL、candidate-r3的dataField scope真实候选FAIL、r5/r6实际context夹具缺字段FAIL及所有准备/FAIL/UNKNOWN/费用保留；本文档零重测/编译。
+
+权威 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-015248/input-nav-preparation/SOURCE_READY.json（98e383dc2b92505829e029ececb8b5fffbc7eb5cb8f9a1a4bc373df89c460c43）及同目录MAINLINE-IMPORT.json；sourceReady=true只签本菜单准备源码/生成H，sleepRecoveryActionReady=false，不签Win5本机手柄/触屏或完整Native/包/部署。交下一自然固定源Native/YMCC包，不追改191506Z。按恢复owner新通报，双PID动态/半静态startup和动态wake实际fullhandle已过；静态wake及实际5consumer健康capture缺边仍由该owner补，本窄文档不签这些恢复后继已合入。整体ACTIVE，无本次真实Steam/游戏/设备/UI/睡眠动作。
+<!-- /STEAM-MENU-ORIGINAL-NAV-PREPARATION-20261114 -->
+
+<!-- STEAM-MENU-REGISTERED-APPID-INPUT-LOOKUP-20261114 -->
+2026-11-14 公共Steam菜单 input lookup 窄修复已精确导入 native/steam_live.js、官方生成 steam_live_script.h 与原 screen_standalone_special_actions 夹具叶3配套。logicalappid 与 registered browserAppid 不同时，仅原lookup为空且仍是同heldHost才接续单/复数查询；单数PID0/actual-game-PID不扩，复数registered集合必须严格为[w]，不筛掉歧义。原非空结果、异常及this/参数、active focused tree优先和MainUI mode4下原Force条件保持；无新focus setter/event/timer/poller或业务额度。原菜单before/after缓存inputContext只作非原子诊断，inspect仅before，不授准入。
+
+既有 candidate-r3 的14场景/54检查与 paired-r2 的原11 identity 按epoch分列引用，不拼默认整父PASS。旧before-r1必要semantic拒绝、candidate-r1夹具缺m_WindowStore导致FAIL、paired-r1的Paired脚本syntaxFAIL，以及用户已指出的输出r2目录撞名预拒绝均保留；原FAIL/UNKNOWN/重启与所有费用不覆盖、不退款，本文档收口零业务重跑/编译。
+
+权威 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-015248/input-lookup-repair/SOURCE_READY.json（SHA256 c1e7d691ad43fb48a6bc4cef0e5306dd3caa18d177c71ce0123d77e2f373d2aa）及同目录MAINLINE-IMPORT.json；sourceReady=true仅源码/生成H/既有fixture叶，不增加动作许可或完整Native/包证明。用户澄清本机物理手柄/触屏失败、UU远程鼠标TDP成功；远程鼠标不证明本地输入恢复，Win5 gamepad/touch仍未验收。双PID主线8参未接仍OPEN，整体ACTIVE；交下一自然固定源配套包，不追改旧包，无部署/Steam/游戏/设备/睡眠动作。
+<!-- /STEAM-MENU-REGISTERED-APPID-INPUT-LOOKUP-20261114 -->
+
+<!-- STEAM-TRACKER-FRESH-PROJECTION-R14-20261114 -->
+2026-11-14 公共Steam层 R14 TrackerFreshProjection 已按原 SOURCE_READY 精确导入3产品和2原配套文件。共享 fresh 未完成时，仅在已有 parsedSource 且同 scope inventory 完整时保留 binding/完整 GameID 为不完整只读投影；complete=false 不授绑定、证明或恢复动作，4消费者原 complete 门及原首拒绝 predicate 保持。首拒绝只区分 shared-tracker-read-unavailable 与确切 ID 未绑定；可选 stage/claim 诊断及 sharedFresh/trackerRead 追加异常均局部隔离，无新增 current 调用、源读取、轮询、线程、服务或 canonical ID。
+
+原候选25断言、诊断故障3断言及旧源首绑定 metadata 必要反例仅按既有原件引用，本文档收口未编译或重跑。原 observer 独立配方的 /W4 /WX shadow/unused 编译FAIL、未运行的生成 SleepOnly C++ 范围与准备/控制/后置失败继续保留，不拼完整父PASS。原P2报告保留，r2修正和独立源码复核另列；既有 normal-driver 最终退出FAIL、重启UNKNOWN及所有来源/控制费用不改。
+
+权威 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/GameProcessGroup-20261113/RoleLease/TrackerFreshProjection-20261114/SOURCE_READY.json 与同目录 MAINLINE-IMPORT.json：sourceReady=true 仅限诊断及不完整观察投影，consumerActionEnableReady/actionEnableReady=false，wholeGoalComplete=false，整体ACTIVE。35项ABI pins不变；下一自然固定来源 Native/Web 包须消费本后继并保留既有ABI6 embedded配对。本项不新增完整Native/link/包、部署或实机证明，不追改已完成包；菜单手柄、自有normal/cancel及最终动作/资源验证由原owner独立继续。
+<!-- /STEAM-TRACKER-FRESH-PROJECTION-R14-20261114 -->
+
+<!-- STEAM-REMOTE-DRIVER-COMPOSITION-PROGRESS-20261114 -->
+2026-11-14 公共Steam层原远程driver组合已实际走到一次发布：自有惰性child、原公共count2租约及PrepareMutation ReadScope，原QueryActor/getter-context、runTrial/remoteCall/Prepare/Arm/三源取消export、debugger/入口和DR还原、Disarm及SDK ReleaseUser/ReleasePipe/Shutdown均有原raw；publisher1且flags仍4。最终fixture stopAndJoin断言FAIL，因此normal整项与取消变体未核收，不能当完整handle/恢复成功。仅修私有host的已知exit0后有界Job计数等待和初末诊断；原失败保留。重启中断host-r8留下空terminal，UNKNOWN不伪补Job0；重启后仅补宿主编译链接2Job，旧已pin EXE保留，未再起fixture Steam child干扰现场。
+
+本后继累计16个有完整回执的自有Job归零/程序耗时合计116651ms，非整父墙钟；中断Job及原准备/编译/后置FAIL和预算均另保留。当前权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\SteamUnifiedChannel-20261112\GameProcessGroup-20261113\RoleLease\RemoteDriverComposition-20261113\PROGRESS-CLOSING-20261114.json`，sourceReady/actionEnableReady=false，整体ACTIVE。旧健康v2及r5配套编链由独立只读后置纠正核收，不重跑原业务。
+
+R39菜单canonical full/short修复已实际进入155729Z完整Native/Web/ZIP，其修复来源及安装磁盘配套见 `Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/QamSharedMenuAction-20261113/field-win5-225328/DELIVERY-20261114-INTAKE.json`；此前“无完整配套包”按旧epoch保留，不能当当前全局缺包。新现场重启后的PID另核，掌机/真实菜单和睡眠效果仍OPEN。本层未操作真实Steam、游戏、设备、睡眠或UI。
+<!-- /STEAM-REMOTE-DRIVER-COMPOSITION-PROGRESS-20261114 -->
+
+<!-- LIGHT-ISOLATION-RESTORED-20261113 -->
+2026-11-13用户新裁决恢复无游戏轻度隔离，覆盖当日旧退役策略。仅唯一新鲜Complete/noPID且persona关闭、旧Host/pipe/目标/隐藏债已归还可准入；原3秒/750ms及普通兜底保持，虚拟意图revision和公共power capture/current撤销旧票据，虚拟开启/自愈优先且不设Host页面等待门。原普通XUSB65秒否决未因此修复。当前实现/验证/包状态见docs/light-isolation-restored-20261113.md与Testing/YMCC/Evidence/Isolation-Recent-20261111/Field-Win5-20261113-225328/Restore-Light；旧退役和旧成功原件保留。
+<!-- /LIGHT-ISOLATION-RESTORED-20261113 -->
+
+<!-- STEAM-CANONICAL-FULL-SHORT-REGISTRATION-R39-20261113 -->
+2026-11-13 新225328现场6次Host身份/出生/路径/父进程/会话及actual/Steam PID全通过，仅命令行canonical full64与UI短AppID原数值不同被registrationFact拒绝。公共唯一函数现仅对同已持actual/Steam PID、canonical Type2 full==tracker.full、UI gameId==完整32位tracker.appid且reportedAppid==该appid或其low24新增fact4；旧fact0..3及Exact/Short/ReportedAlias原门不改，原始数字不等诊断仍false，不增加读取/重选/PID别名/重试。
+
+原screen-shortcut-same-action精确field12断言、旧头首绑定必要语义反例与原JS receiver mock5项已独立核原件；错actual/Steam/full/short/邻low24、UI不可用、取消及uncertain只送一次保持。真实受影响DLL重新编译/链接、官方embedded生成及verify和shipping引擎TU配套5Job自然关前0；不是只改receipt。公共头及两生成资源共3文件精确写回，菜单Runtime/JS无产品修改。旧核收before角色标签差异UNKNOWN保留，修后只复读原raw。权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\SteamUnifiedChannel-20261112\GameProcessGroup-20261113\RoleLease\RegistrationCanonicalShort-20261113\SOURCE_READY.json`，下一自然新固定源Native/包必含见 `G:\YeManCC-Work\Testing\YMCC\Evidence\SteamUnifiedChannel-20261112\GameProcessGroup-20261113\RoleLease\RegistrationCanonicalShort-20261113\DELIVERY-REQUIREMENT.json`，旧121815Z/125154Z/144034Z不当本修复包，不追改旧包。
+
+该SOURCE_READY仅原相同actual PID菜单规范表示路径。原23次菜单中7投影（6上述拒绝/1 UI不可用）及另16缺投影分列；实际overlay原路部分状态确认不当全部失败，Host5292告警不混Host16036。新日志睡眠P13764/F14888恢复动作另待原normal dispatcher/Prepare/Arm/三事件/资源终审，不能由菜单修复代过；异registeredHost关系仍Unavailable。无完整Native/包/部署/Steam或设备动作，未签实机菜单/睡眠/CPU收益，整体ACTIVE。
+<!-- /STEAM-CANONICAL-FULL-SHORT-REGISTRATION-R39-20261113 -->
+
+<!-- STEAM-STRICT-NATIVE-CLASSIFICATION-R38-20261113 -->
+2026-11-13 公共恢复引擎严格/分组分类后继已精确写回6个文件，权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\SteamUnifiedChannel-20261112\GameProcessGroup-20261113\RoleLease\StrictNativeClassification\SOURCE_READY.json`。候选公共组先只绑定原selected+Steam；原typed/raw样本P=F=selected冻结原v1/无group wire，真正非严格且合格count2才冻结Group/v2/全成员current，不新增读取、重选或模式切换。实际旧源原案例语义拒绝、候选selected-root+helper正常退出及四个原分组案例（含selected-primary/launcher-foreground）已核；11分类Job与4实际DLL/官方embed配套Job均自然关前0，shipping引擎翻译单元通过。新增分配移入Finish后的原异常范围；bad_alloc只源码复核，未冒称注入实跑。两个SDK未启用include准备FAIL、原语义FAIL及archive路径核收FAIL/费用均保留，未重跑63组。
+
+本SOURCE_READY仅分类及ABI6编译配套，不代新分类下完整handle/真实native健康来源、normal dispatcher/Prepare/Arm/三事件/远端资源/完整Native包或实机通过，动作仍未开放。新225328日志已独立核6次实际/Steam PID正确而full64/short注册表示拒绝，另1次UI不可用；菜单canonical表示修复独立续作，不能代睡眠恢复。原菜单unPID/Host不可当actual；原parsed命令行ID不保证完整，未知actual↔异Host关系不制造。配套与后继进入下一自然构建，不追改其他固定包。全目标ACTIVE，未部署或操作Steam/游戏/设备/睡眠。
+<!-- /STEAM-STRICT-NATIVE-CLASSIFICATION-R38-20261113 -->
+
+<!-- SCREENPADS-SHARED-OWNERS-20261113 -->
+2026-11-13 触摸板／专用键已改用公共 Steam 身份和公共 PowerLifecycle capture/current；完整共享投影交付 bit64，原 cursor4 与 Lossless32 保持。SD 触摸不再覆盖显式隐藏鼠标。源码与配套定向回执、完整main翻译单元编译已核；未完整链接／打包／部署，实机画面／睡眠／CPU收益未验收。接口和范围见 [触摸板公共归属](docs/screen-touchpad-shared-owners.md)，原件 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/shared-steam-power-20261113/SOURCE_READY.json。原FAIL及各epoch保留，不代公共Steam／睡眠项目终审。
+<!-- /SCREENPADS-SHARED-OWNERS-20261113 -->
+
+<!-- DECKY-TYPED-REMAINING-20261113 -->
+2026-11-13 Decky原typed余18场景已实际补验（17常规+1原global missed-event，原24不重跑），42原注册场景均有实际回执引用，跨epoch/定向不能拼成一次整父PASS。包括余3资源Ready/OFF/admission及原第二preflight子分支、9session拒绝/畸形mutated回包、长temp/活watch/最终准入拒绝/准备后二验/retained Ready，全部句柄与Client/Owner/reader/pendingIO归还。global原4实际Runtime回执场景核明确失败2次、成功1、uncertain2、cancel1，uncertain真实观察20031ms；通知完全漏掉后5093ms自动接续、plan2，OFF后不复活，原风暴/虚拟时钟边界及各1000轮交错入口保持；0ms字段不当零CPU。当前main03335因托盘交互与旧main64f642不同，不能借旧hash签当前整main；固定一次新源后，原生成器导出的全部489实际编译记录/410unique输入逐字相同、15库/选定编译工具和选项相同，故仅实际编译范围复用旧EXE，正式整文件身份门与global cache均不改、不冒称缓存PASS。2新原生Job自然准入/关前0，原deferred Job0/handles关0；原45秒和业务界保持，零重编/产品或fixture变更，无新增ID/minimum。输出路径斜杠比较的准备FAIL及费用保留，修后仅复读来源比较。主线Steam只读盘点818候选/0缺anchor/39待映射仅源码地图。42范围观测、整父、当前整main/配套包、实机S0/S3与视频/CPU收益分列，未部署/操作Steam或设备，目标ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/typed-remaining/EVIDENCE_READY.json、OBSERVATION-COVERAGE.json及CLOSING.json。
+<!-- /DECKY-TYPED-REMAINING-20261113 -->
+
+<!-- DECKY-EXTERNAL-INSTALLED-CPU-20261113 -->
+2026-11-13 Decky相关现有进程完成一次外部30秒只读CPU观察，无设置/启停/Steam/睡眠动作、无产品/fixture源码修改。PID36980与原日志writer的实际出生FILETIME逐字相同，约30.143秒内CPU增984.375ms，单核3.265690086%/按监测进程可见32逻辑CPU归一0.102052815%；这不是被测进程或整机affinity证明。另一YeManCC PID20180及两个已观察Loader PID15156/20532在各自约30.12秒窗口计数增量为0，只称未记到增量，不推成零CPU/无尖峰；其他PID角色或Job归属未独立证明，主进程CPU也不当Decky独占成本。自然场景/视频可见状态未知，不签idle、视频/唤醒峰值或后继性能收益。使用原owned RawProgram守卫运行临时PowerShell脚本，整个portable PowerShell树/精确Node及实际Process/Automation/CoreLib程序集前后pin，1监测Job实际准入/自然关前0；该Job只拥有监测器，不归还或控制被测产品进程。原raw保留100ns CPU/出生与单调时钟，消费端独立重算四对全部比率。无Add-Type/编译/新产品EXE/服务/轮询自启、无新canonical ID/minimum；旧安装队列观察与未部署后继分开，完整目标ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/installed-process-cpu/EVIDENCE_READY.json及CLOSING.json。
+<!-- /DECKY-EXTERNAL-INSTALLED-CPU-20261113 -->
+
+<!-- DECKY-TYPED-ADMISSION-HANDOFF-20261113 -->
+2026-11-13 Decky原typed启动许可/资源交接8个定向消费者已核收，零重编、零产品/fixture源码改动。复用同DTR13原EXE前核完整源码/工具/当前main等相同，原图489条source记录为410唯一路径、15库（前文sourceCount489是记录数，不冒充489unique）；前5资源/退出及9唤醒不重跑。四final admission核绑定成功后许可暂缺的自动/retained接续，以及OFF/终止停止；四resource handoff核超时后UI暂缺/恢复、自动与明确提示接续、hash/OFF终止，等待时原preflight仅1/plan0，恢复沿原3秒offset而不重开额度。原automatic内4边界hint-only/OFF/session/Ready各32提示，普通hint不取消准备，真实owner边界才取消/重验，重复Ready/OFF后hint拒绝、无binding。8父及4原嵌套边界句柄147→147、Client/Owner/reader/pendingIO全零，1新增原生Job实际准入/自然关前0、原45秒和所有业务时限保持。已从相同实际Runtime核cancelResourceRetry清pending/due且false时不把到期资源timer加入等待；此源码/行为证据不等于idle CPU实测或百分比收益。无新增ID/minimum/logger/probe/线程/EXE/恢复额度，不拼完整typed父、真实睡眠或配套包，无部署/Steam/设备动作，原失败/费用保留，目标ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/typed-admission-handoff/EVIDENCE_READY.json及CLOSING.json。
+<!-- /DECKY-TYPED-ADMISSION-HANDOFF-20261113 -->
+
+<!-- DECKY-TYPED-WAKE-ORDER-20261113 -->
+2026-11-13 Decky原typed唤醒通知顺序9个定向消费者已核收，零重编、零产品/夹具源码修改。完整489源15库/工具及当前main64f642和Runtime3b60ad等实际原文件身份先核相同，复用刚完成resource-stop的同EXE，不作正式global cache命中；前5资源/退出组及其他旧组未重跑。owned/retained两种S0 Ready实际main提取消费者各核原512重复信号，另各原committed no-Loader/terminal-admission子路径512重复信号；每次新代次只增一次mode read/plan，不换旧Loader。正反resume/disconnect、late result只接当前代次、OFF压过迟到结果及child exit owned/retained均通过；后两原case另含实际held endpoint后代的PID/birth/终止和不手动release子路径，不另造ID。9父case句柄147/148前后相等，2committed和2held子路径的Client/Owner/reader/pendingIO亦全归还，旧Loader/CEF保持；仅1新增原生Job真实准入/自然关前0，原45000ms/业务时限不改。两次准备FAIL（旧raw request字段名/本地process TDZ）在业务前已停止、原FAIL/费用保留，修脚本后只执行尚未开始的9项。无新增诊断schema/logger/探测/轮询/线程/产品EXE/恢复额度；不拼原完整typed父，不签真实S0/S3睡眠、游戏/Steam实机、CPU或恢复降频收益，无部署。目标ACTIVE，唯一后继同Decky恢复项目recovery-cause-trace-20261113/typed-wake-order/EVIDENCE_READY.json及CLOSING.json。
+<!-- /DECKY-TYPED-WAKE-ORDER-20261113 -->
+
+<!-- DECKY-TYPED-RESOURCE-STOP-20261113 -->
+2026-11-13 Decky原typed资源恢复/卡住退出5个定向消费者已按当前固定源码核收，无产品或夹具源码修改。三resource原case分别核临时deadline恢复、hash终止及cleanup未归还终止；同一原自有子分支另跑这三项的第二次preflight边界（不另算父ID），recover按原3秒offset恢复，hash/cleanup未通过前不再绑定/起Loader。两个stalled原case在夹具release未发出时归还，实际172/156ms，原3200ms上限保持；绑定子/后代/拥有Loader退出、late refresh/recovery拒绝，父154→154及各Client/Owner/reader/pendingIO全零。资源三项父155→155/子147→147，原deferred自有Job关前0/handles关闭0，子7094ms/父观察9766ms，原共享45000ms不改。一次/W4 /WX原编译、一图489源15库、2外层真实准入Job自然关前0；旧offline2/ready/legacy/runtime/CPU组不重跑，不拼完整typed父。主线main已变，故固定新epoch一次而未借旧EXE签当前来源；后继变化不追编。只读安装版同旧PE，保留日志中新42行中19mode三路正常、无恢复/trace行；仅保留片段，不承诺跨截断缺口连续健康、视觉或实机睡眠成功。无新增logger/探测/线程/EXE/恢复额度，无部署或设置/Steam/设备动作。原FAIL/UNKNOWN和费用保持，目标ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/typed-resource-stop/EVIDENCE_READY.json及CLOSING.json。
+<!-- /DECKY-TYPED-RESOURCE-STOP-20261113 -->
+
+<!-- DECKY-COST-ALIAS-CONTINUITY-20261113 -->
+2026-11-13 Decky成本采样known-birth共享上下文/birth0窗口别名切换已实证修复：实际main同PID两来源字段不同，旧Sampler在第二alias-canonical-missing场景重复OpenProcess触发原port拒绝；原计划6仅首场景完成、第二失败、4未到达，原native退出2/后置误预测完成5项的FAIL和全部费用保留，未重跑旧源。仅3产品hunk兼容未知birth expectation选槽/保留后续兼容槽/更新expectation；两个不同nonzero仍不直接匹配，每次实际liveness/image/session/times/birth证明片段逐字不变。候选6别名组合实跑通过，含未知转已知、上下文消失/返回、前插/满容量、路径归一及冲突birth拒绝后重建baseline；同一EXE再跑原5身份故障，6真实Job准入/关前0且均自然（含预期旧反例/selector退出2）。两个图各302源15库；普通front场景JSON及端口调用完全相同，消失/返回opens[2,0,1]，满容量仅开新1个。1产品+2原fixture精确写回，编译/写回仅声明CRLF等价，其他并行字节保留；原CPP宏未定义默认源码相同。旧8/8 target-order、own-session8及默认117/117不重跑，不拼原父；本轮首次补上alias+churn的六个明确组合，不扩大为任意组合或历史断连根因。无新增logger/轮询/线程/产品EXE/身份来源或恢复额度，未完整Native/包/部署或实机睡眠、CPU百分比、恢复降频证明，目标ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/cost-alias-continuity/SOURCE_READY.json及CLOSING.json。
+<!-- /DECKY-COST-ALIAS-CONTINUITY-20261113 -->
+
+<!-- DECKY-TYPED-OFFLINE-READY-PAIRING-20261113 -->
+2026-11-13 Decky原production typed离线与Ready重绑两个定向消费者已核收：实际main账户/准入/健康路径离线可达，Ready/重复及零Ready判定保持、重绑不换原拥有Loader；实际OS监听正例/活子进程无监听/foreign父监听三边界通过。产品资源与句柄归还（153→153、165→165），一实际图489源15库，含旧编译FAIL的3个Job关前0（1自然/2精确工具收尾）。仅导入3既有夹具接线：Observer publication严格支持旧30391与新34301两个已知SHA来源，回剥body逐字相同，旧输出/畸变/未知/二次适配/CRLF负例保持；退出CAS后仅允许精确closeSharedPowerMirrors前缀，缺CAS/错序仍拒绝；原惰性lighting stub仅maybe_unused，/W4 /WX及业务断言/时限不变。产品0修改，不新增账户保护/查询/logger/轮询/恢复额度。旧准备/编译FAIL和两次只读后处理字段错误前向保留，修后只复读成功raw，不为封存重编或重跑；原账户登录与真实Steam动作0。两个原case不签完整typed父、NativeReadScope/SuspendCapture整体验收、匹配包或实机睡眠/CPU/降低恢复频率。Steam层确认原有bounded steamFailure/action/episode/Steam PID+birth/power/recoveryBudget足够，后续依明确失败补，不重复logger。未完整产品构建/部署，整体ACTIVE。唯一后继同Decky恢复项目recovery-cause-trace-20261113/owned-ready-offline/SOURCE_READY.json与CLOSING.json。
+<!-- /DECKY-TYPED-OFFLINE-READY-PAIRING-20261113 -->
+
+<!-- DECKY-COST-TARGET-ORDER-20261113 -->
+2026-11-13 Decky成本采样目标变化缺口已复现并精确修复：旧fallback取首个未用槽，会先丢弃后续仍需要的exact目标句柄及连续CPU baseline。原canonical native_cost显式target-order8旧/8候选核旧19处速率丢失；满12前插替换旧open12/新open1且保11目标速率。另仅续5旧/5候选故障边界，旧5处其余目标断率、候选0；retained退出/映像/Windows会话/出生/CPU失败仍按原证明拒绝并可后续重建baseline。所有非handle目标查询/CPU读取次数相等，OFF句柄归还/闭门零查询；4图各302源15库、10 Job关前0（8自然含预期旧FAIL/selector负例，2精确工具收尾）。只改替换fallback一hunk，向后避开仍需的复合身份槽；正常matched/重复alias原分支逐字不动，无新timer/线程/产品EXE/跨调用身份缓存。3源精确导入；原CPP默认宏undefined条件源码逐字同，既有own-session8 helper原字节保留。默认117/117、旧wire/storm/runtime不重跑、不拼父PASS；alias+churn组合尚无本轮新实跑，按原分支未变分列。调用次数减少只为隔离端口实证，不当实机CPU收益。无整编/包/部署或设置/Steam/设备动作，整体ACTIVE。原件同Decky恢复项目recovery-cause-trace-20261113/cost-target-order/SOURCE_READY.json与CLOSING.json。
+<!-- /DECKY-COST-TARGET-ORDER-20261113 -->
+
+<!-- DECKY-DEFAULT-COST-CHECKED-20261113 -->
+2026-11-13 默认成本原Checked配置后继已核：同一冻结CPP/adapter/model/JSON，以原/Od /RTC1 /D_DEBUG /D_ITERATOR_DEBUG_LEVEL=2 /MTd、Sampler宏未定义运行，117检查实际通过；与先前Release117的参数只差预定profile和输出路径，编译器身份相同，Release及其他已过组未重跑。新增实际290源15库图、2自然Job关前0，CPU/内存仅读本方测试进程。原默认两个配置的C++消费者均各自有原件，不能拼成原Python wrapper或完整typed/legacy父的整轮PASS；先前Checked NOT_RUN按原epoch保留，以本补验更新当前范围。此段无产品源码/设置/应用/Steam/采样或部署改动，匹配整包与实机仍OPEN，整体ACTIVE。唯一后继同Decky恢复项目remaining-legacy-consumers/default-cost-checked/CHECKED_PROFILE_READY.json与CLOSING.json。
+<!-- /DECKY-DEFAULT-COST-CHECKED-20261113 -->
+
+<!-- DECKY-REMAINING-CONSUMERS-20261113 -->
+2026-11-13 Decky剩余旧消费者与默认成本入口补验完成，无产品源码修改。原crash-breaker173检查实际核五次崩溃停止、未知/重复账户观察不补次数、已知新账户按原规则再启动一次；原binding-cancel两个真实静默loopback HTTP/WS场景核1500ms原界内关闭、子进程退出、callback weak owners释放与OFF迟到请求不复活（毫秒计时0不当零耗时/零CPU）。原native_process_cost默认Release宏未定义入口117检查通过，实际CPU/内存仅读本方测试进程；Checked及两profile默认wrapper仍未整跑。三图实际313源14库/381源15库/290源15库与6 Job关前0已核（3自然/3精确工具收尾）；源/断言/内层上限未改，旧41/11、wire6、storm、Sampler8未重跑。首默认入口runner的process局部名TDZ准备FAIL保留，0编译/业务，改名后只续该未运行入口，不涉及产品。旧FAIL/各epoch、完整typed/legacy父/匹配整包/实机睡眠和CPU仍OPEN，整体ACTIVE。唯一原件沿Decky恢复项目recovery-cause-trace-20261113/remaining-legacy-consumers/EVIDENCE_READY.json及CLOSING.json；本轮未部署或操作应用/设备/Steam。
+<!-- /DECKY-REMAINING-CONSUMERS-20261113 -->
+
+<!-- DECKY-COST-OWN-SESSION-20261113 -->
+2026-11-13 Decky诊断成本采样已做有证据的小幅去重：只复用同一次Sampler调用内成功的本进程Windows session读取；失败仍对后续目标重试，每次调用重新读取，目标PID/映像/会话/出生与退出核对、OFF归还、原采样周期和JSON不改。复用原native_process_cost_selftest.cpp的显式参数/宏，8个旧源+8个候选场景输出及全部其他端口调用严格相同；12个有效目标的own-session/own-PID读取各12→1，首次失败2次后复用、持续失败后下一次调用恢复、别名/目标错误/电源/OFF边界均已核，未知参数拒绝且不跑默认组。两实际图各302源/15库、5 Job关前0（2工具收尾/3自然含预期selector退出2）；旧Runtime/wire/storm和原默认CPU/memory消费者未重跑。只写1产品头3精确hunk+原CPP/1helper；无新timer/线程/产品EXE/跨调用缓存或Steam身份来源。原8个具名CPU栈只作选点，调用去重不冒充实机CPU下降；未整编/建包/部署，整体ACTIVE。唯一原件同Decky恢复项目recovery-cause-trace-20261113/cost-own-session/SOURCE_READY.json及CLOSING.json。
+<!-- /DECKY-COST-OWN-SESSION-20261113 -->
+
+<!-- DECKY-RUNTIME-TRACE-VISIBILITY-20261113 -->
+2026-11-13 Decky旧回归入口可见性后继：原FailureTrace定义曾被owned-binding宏隐藏，而通用恢复代码仍引用，旧编译FAIL保留。现在只在原runtime头拆开两处guard，暴露同一诊断helper；正常生产条件展开逐字一致并有实际trace token突变拒绝，不冒称新生产整编。原Runtime41、health-close11实际全过，4 Job关前0（2自然、2精确工具收尾），原用例正文及超时未改、旧wire6/storm未重跑。仅1头文件2 guard精确写回；旧legacy Runtime/health-close编译缺口已闭合，其他legacy/typed完整父、配套包和实机继续OPEN。只读本机055102日志89行：启动一次页面重建后07:30:44两通道恢复，尾08:07:15无后续UI重建/重开，不是后继已部署证明。复用CPU775已解析样本，4成本Sampler/4共享ModeObserver具名栈已核原raw归属；不当CPU比例或完整采样证明，独立Decky子进程未覆盖。无新采样/业务设置/Steam/部署动作，整体ACTIVE。原件沿同Decky恢复项目recovery-cause-trace-20261113/runtime-trace-visibility/SOURCE_READY.json与CLOSING.json。
+<!-- /DECKY-RUNTIME-TRACE-VISIBILITY-20261113 -->
+
+<!-- DECKY-BUDGET-WIRE-SOURCE-RETURN-20261113 -->
+2026-11-13 Decky预算追因真实IPC后继已写主线：原共享委托/匿名管道/ManualRepair/Runtime回执核收6边界，锁外附加预算、畸形只丢可选字段、power/OFF迟到回包不成功、旧action/Steam/power11与writer12分列。并复现同Steam未知后返回漏即时健康检查，原Runtime仅ON且非stopping的正边沿置原connectionCheckRequested；负presence及episode/stage/deadline/attempt/持久额度原代码不改，不添加重启/退款/查询循环。原同一canonical case显式控制另核1000同tuple通知零新增健康读及1000 OFF返回不复活，五个已过私有边界未重跑。4图各497源/15库与11 Job关前0已核，包含精准工具收尾及一次超时兜底，不冒称全自然。旧2s/5s FAIL、collector超时、legacy宏缺FailureTrace编译FAIL及只读后置拒绝均保留。仅1产品hunk及3夹具文件；混合换行按整源CRLF归一等价核对后原字节精确写回，不改并行菜单日志。无新增timer/线程/EXE/重试/额度，未整编/建包/部署/操作Steam，实机睡眠、整机CPU及降低恢复频率仍OPEN，整体ACTIVE。原件接recovery-budget-wire/SOURCE_READY.json及CLOSING.json（同DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113项目）。
+<!-- /DECKY-BUDGET-WIRE-SOURCE-RETURN-20261113 -->
+
+<!-- DECKY-RECOVERY-BUDGET-LINEAGE-20261113 -->
+2026-11-13 Decky恢复额度来源诊断已写主线：原锁事务只捕获无分配POD事实，锁释放后随原私有回执附加recoveryBudget；父进程原结束日志沿原actionId/episode/开始Steam PID+birth/power记录，writer power仍单列。固定enum/boolean区分普通/已验证新构建补偿/未知、主备写入及回读；可选64hex仅为已读frontend build，不冒充Native安装构建。reserved不代表UI派发。原实际函数22双源返回/设置/全部IO及current调用严格相同，实际分配失败、11畸形metadata和操作错配控制通过；另仅续最后第6次归属失效1项，仍拒绝并保uncertain，不拼23项整父。4实际编译图、10Job关前0：6自然，4仅预声明PID/path/SHA正确vctip工具兜底，未豁免业务。原后置计数FAIL、并行main全hash拒绝及继承CRCRLF告警保留；主线main仅3精确hunk保留普通Steam/light退役字节。2产品+原CPP/2helper；无新增查询/日志调用/timer/线程/EXE/重试/额度，默认及旧Runtime/client不重跑。完整私有IPC/Runtime/Native配套包、部署及实机睡眠/CPU/降频仍OPEN，整体ACTIVE。唯一后继Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/recovery-budget-lineage/SOURCE_READY.json及CLOSING.json。
+<!-- /DECKY-RECOVERY-BUDGET-LINEAGE-20261113 -->
+
+
+<!-- STEAM-LIGHT-ISOLATION-RETIRED-20261113 -->
+2026-11-13用户授权根除轻隔离：原input.gamepadLease不再属于共同请求词汇，页面导航catchall实现及kLightGamepadScript已删除，原生不再选中light-no-game或发送/续期lease。以下旧轻隔离成功记录保留为历史，不代表当前策略；正式只读controller储备独立等待Steam层provider，不以lease作为读取能力。当前产品精确改动和6/10/111及Native语法范围见Testing/YMCC/Evidence/LightIsolationRetired-20261113/MAINLINE-IMPORT.json；未配套构建/部署，强制后代收尾身份UNKNOWN保留。
+<!-- /STEAM-LIGHT-ISOLATION-RETIRED-20261113 -->
+<!-- DECKY-FAN-OBSERVER-ISOLATION-20261113 -->
+2026-11-13 Decky风扇显示订阅异常隔离已由原TSX/真实MirrorClient内存消费者核收：旧源在选择、应用前、隐藏回执及取消的6处实际拒绝，最小notify隔离后同6处通过；原父FAIL中两项误要求detach销毁后继续通知已保留，只续旧源/候选各2项正确撤销检查。原风扇21项与未知/组合/空选择3项拒绝另实际通过；8个实际准入Job关前0，未拼成一个全父PASS。仅fan notify+原UI夹具精确导入，不改准入、2秒意图、恢复次数或Steam动作。源码解释显示订阅不得打断发送/结算/需求归还。现有公共有界错误码与action/episode/Steam身份链继续保留；本缺口不是历史掌机重启的已证根因。未完整Web/插件包/部署或实机睡眠、CPU与恢复降频验证；候选交下一自然构建，不追赶旧包。整体ACTIVE；唯一后继Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/fan-observer-isolation/SOURCE_READY.json。
+<!-- /DECKY-FAN-OBSERVER-ISOLATION-20261113 -->
+
+<!-- DECKY-CACHED-HEALTH-LOG-20261113 -->
+2026-11-13 Decky健康缓存日志去重已精确写主线：现场留存识别215条相同零耗时全健康记录，原force路径每次ofstream flush；现仅合并elapsedMs明确unsigned0且模式/身份/官方三路及checking全部已确认健康的重复项。实际读取耗时、未知/故障、Steam/来源变化与power边沿首条、失败写后补记和failure/action trace保持。原日志频率消费者新增同入口decky-mode-health定向选择，不增ID/minimum；真实提取的5个当前产品函数与隔离文件写入核收20项（原7 Decky控制保留），旧源20项中3个重复写负例拒绝；128相同健康调用原128行、候选1行，不能外推整机CPU收益。首次测试依赖编译FAIL/准备拒绝与成本保持，3实际Job关前0。并行main全文件漂移先拒绝，再核5函数/配套头未变，只对原日志函数精确rebase，其他并行字节保留；原default整组未跑。只导main日志函数+原Python夹具，原full Native/watch103属于各自epoch，本后继交下一自然构建，不追赶重编；未部署/现场恢复降频/CPU百分比或物理睡眠验证。执行保存账519803与写后console519804分列，额外准备开销单列补账，900000总额不重置旧失败。Steam公共root写租约/V2仍未正式，未用metadata顶替写权限。整体ACTIVE；唯一原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/cached-health-log/SOURCE_READY.json。
+<!-- /DECKY-CACHED-HEALTH-LOG-20261113 -->
+
+<!-- GAME-STEAM-JOINT-CACHE-CONSUMER-20261113 -->
+2026-11-13：共同查询与首个 Decky 侧栏消费者已配套写主线。游戏 EXE/PID/birth/规则/选择与 Steam 会话/AppID/完整 GameID 仍由两个独立唯一层提供；共同 adapter 不选游戏、不新增事实缓存。`gameSteam.context.get` 只连接内存观察，`refresh` 才提交一次明确需求；同一 canonical 进程事实共用唯一 TrackerOwner 的关联及执行 token。feature 私有配置、文档和 global selection 世代留在请求/动作 guard；显式前台 B 不借全局 A 的世代。
+
+运输复用原 GameLink worker，4 槽有界 batch 不新增线程/定时器/EXE，job-only wake 不额外触发旧恢复查询。真正 Pending 的新选择订阅持到完成，旧 A→B→新 A 不因旧票据撤销而失去唯一执行。完成仅触发 get；可见侧栏的明确需求、真实 Ready/同 target readiness 恢复、已覆盖的 Steam Session tuple 变更才 warm，重复签名合并，隐藏时不 warm。Steam 不可用或实际源失败保留独立游戏元数据，不回退旧阳性；GameID 始终为精确十进制字符串，不作为账户 SteamID 或当前动作证明。
+
+原生39、队列18及4反例、前端25及 host8保留各自原来源；后继只续 queued ABA 单行为/旧头反例、readiness 单行为、默认失效接线与受影响类型/完整 main 语法。1001 joined cache读取零进程/注册表/源文件/时钟发现，1001重叠需求仅一次物理观察。工具缺项按既有固定 global pins只读核收，原FAIL/UNKNOWN及限定工具回收不改自然退出。未完整 Native 链接/Web/包/部署、未测安装版 CPU 百分比。菜单新增750ms cold typed dispatcher仍为独立后继 OPEN，本段不声称菜单已迁移或全部 Steam 消费完成。
+
+唯一当前原件：`Testing/YMCC/Evidence/SteamGameIdentity-20261113/cache-consumption/JointConsumerCandidate/SOURCE_READY.json` 与 `MAINLINE-IMPORT.json`。此前“joint query OPEN”保留为历史 epoch；本段只关闭共同 get/refresh 与首个侧栏的范围。
+<!-- /GAME-STEAM-JOINT-CACHE-CONSUMER-20261113 -->
+
+<!-- DECKY-WATCH-FOREIGN-CONTEXT-CALLBACK-20261113 -->
+2026-11-13 Decky监听跨上下文回调后继已精确写主线：原remember会将其他页面的fatal形异常与同run信号计入32队列，最终消费却要求当前上下文；真实本地WinHTTP/CDP128回放使当前旧源误报context-event-limit。现入队前共用当前/已排队future context判据，忽略不可能消费的回调；queued future的有效connection通知、原账户marker256与后置确认均保持。当前原watch消费者103断言（原96+7）通过，旧源真实拒绝；5个实际准入Job关前0，另1次长输出路径导致未准入UNKNOWN保留，不能用空Job0替产品归还。私有源/输出MAX_PATH编译FAIL和后置时钟断言FAIL均保留，只续候选/只复读原件，未重跑旧反例。只导入watch头+原夹具，无新ID/minimum/轮询/线程/EXE/额外CDP或恢复预算变化。累计原执行账487286/600000ms（保存回执487233与稍后console487286分列），原FAIL/费用不改。此前完整Native候选为旧watch epoch，本后继进下一自然构建，不追赶重编；UI24/Runtime/bootstrap未重跑，未认定为历史现场根因、未测CPU百分比/恢复降频或部署。整体ACTIVE；唯一原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/watch-context-callback-scope/SOURCE_READY.json。
+<!-- /DECKY-WATCH-FOREIGN-CONTEXT-CALLBACK-20261113 -->
+
+<!-- DECKY-NATIVE-TRACE-INTEGRATION-20261113 -->
+2026-11-13 Decky有界源头诊断和监听噪声过滤的完整Native候选已核收：原native/build_native.bat实际135351ms，5PE，1451固定源/3027工具、1447实际include/54lib、无未声明输入，生成identity头由原generator/pending/最终PE与sealed receipt共同绑定，自有Job关前0。原编译启动器路径FAIL及电池合同stale FAIL保持。仅私有快照按原generator刷新两份battery合同，主线/managed电池未改，所以不是当前主线配套包通过，无Web/包/部署或新实机睡眠/视频/恢复降频/CPU收益证明。末次主线单次观察除声明的私有生成输出外drift0，不追赶重编；原96watch/24UI等业务仅引用原epoch，本次新增夹具0。Steam V2及安装根最终SourceLease继续等待公共层正式来源，目标ACTIVE。唯一原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/native-integration/CLOSING.json。
+<!-- /DECKY-NATIVE-TRACE-INTEGRATION-20261113 -->
+
+<!-- DECKY-WATCH-CALLBACK-NOISE-20261113 -->
+2026-11-13 Decky监听回调噪声后继已写主线：旧队列会把旧run健康标记、非fatal插件exception和未知context销毁计入32容量；实际本地WinHTTP/CDP 128混合回放使旧源误报context-event-limit。现只提前丢弃不能触发原消费动作的元数据；销毁若对应当前或已排队future context仍保留，已退休target的迟到标记不再产生health read，后续context仍能附着。原账户marker256字节、后置确认和相关事件32上限保持，200字节有效账户信号已实跑。官方V8按已登记binding名订阅，故正式回放使用本绑定旧run；此前94范围及FAIL/费用保留，当前原consumer96断言（原89+7）通过，当前4与此前4 Job关前0，各来源分列。精确导watch头+原fixture，无新timer/thread/EXE/重试或账户一致性门；UI24/Runtime/bootstrap/阶梯未重跑。未归因为历史现场、未整编/包/部署或实机CPU收益/睡眠验证。证据Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/watch-callback-noise/SOURCE_READY.json。
+<!-- /DECKY-WATCH-CALLBACK-NOISE-20261113 -->
+
+<!-- DECKY-WATCH-CONTEXT-NOISE-20261113 -->
+2026-11-13 Decky监听无关上下文风暴后继已写主线：原remember在命令等回包时将foreign-origin/isolated-world创建事件计入32容量，晚消费才忽略；实际本地WinHTTP/CDP 128无关事件回放使旧源mirror-bootstrap-context-event-limit误断链。现在仅在入队前复用原accepted-context谓词，消费共用同一谓词；128噪声仍能附着有效上下文且零无关evaluate，40相关上下文仍按原32上限拒绝。原watch消费者当前89断言（原85+补4），旧源真实拒绝、4Job关前0，精确导入watch头+原fixture。原4096packet/2500ms/7s/owner/fatal/退出规则不变，无新timer/thread/EXE；其他UI24/Runtime/阶梯未重跑。两份选定留存日志未匹配该reason，故不认定为历史现场根因；未测CPU百分比、未整编/包/部署或实机睡眠。证据Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/watch-context-noise/SOURCE_READY.json。
+<!-- /DECKY-WATCH-CONTEXT-NOISE-20261113 -->
+
+<!-- DECKY-MODE-FAILURE-CAUSE-20261113 -->
+2026-11-13 共享Steam模式探测故障溯源已接Decky：UI read在原会话失效返回前归一化现有steamFailure；实际ModeObserver.read按开始时Steam PID/birth/power写ModeRead/Observation/actionId0。旧steam-mode-read保留，晚到失败只记原身份，旧模式结果仍拒绝；成功/无源错误不伪造failure。旧源原UI receipt消费者实际拒绝，当前24断言（原12+补12）通过，覆盖原真实共享transport与精确提取的main回调、CDP/JS/WinHTTP、迟到身份/电源、诊断抛错隔离、1001缓存零额外查询及句柄归还；4个Job关前0。只2产品+原fixture/PS生成器精确导入，无新探测/轮询/线程/EXE，不改known/mode/重试/自愈预算。旧失败与原费用保留，原Decky85/47/192/阶梯未重跑；main只编实际回调，未完整main/link/包/部署或实机降频/CPU收益验证。原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/mode-read-failure-relay/SOURCE_READY.json。
+<!-- /DECKY-MODE-FAILURE-CAUSE-20261113 -->
+
+<!-- DECKY-UNCAUGHT-EVENT-FACTS-20261113 -->
+2026-11-13 Decky未捕获异常诊断后继：Runtime.exceptionThrown在原fatal分类及现有live确认后，terminal通知现保留该源事件的公共有界异常类型/行列；验证命令不再清掉源头事实。旧源以同一原watch消费者实际拒绝，新候选85项断言通过（原81保持），4个Job关前0；仅watch头与原fixture精确导入。bootstrap47与Runtime原用例只引用前epoch，不重跑或冒充合并整父。无新增动作/守卫/轮询/线程/EXE，未整编/包/部署。同期本机留存日志525次mode中524次三路正常，21:59有一次镜像断链，5812ms重连恢复；同Steam PID/birth及官方Loader出生时刻保持，无页面重建/开关大屏。它不是新版诊断或降低恢复频率的实机证明。原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/exception-event-facts/SOURCE_READY.json。
+<!-- /DECKY-UNCAUGHT-EVENT-FACTS-20261113 -->
+
+<!-- DECKY-WATCH-FAILURE-RELAY-20261113 -->
+2026-11-13 Decky 有界故障诊断后继已写主线：初次 bootstrap 与后续 watch 保留公共安全 CDP/JS 事实；父 Runtime 用原绑定 actionId/Steam PID+birth/power 归属转发，失效或缺 run 仅不记归属，不改变原操作。单次 command 事实在通知后清除，避免旧 CDP 错误串到独立 socket close。47 原初次守卫、当前 81 实际本地 watch 断言与 1 原 typed live-watch/192帧均核收；不同来源分列，原 FAIL/费用保留，自有 Job 关前为0。3 产品+3原夹具已精确导入；无新轮询/线程/EXE，不改恢复次数或时限，未整编/建包/部署/真实睡眠，未测现场降低恢复频率。原件：Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/SOURCE_READY-BOOTSTRAP-RELAY.json。此前 bootstrap/private 记录按原 epoch 保留，以此后继为当前范围。
+<!-- /DECKY-WATCH-FAILURE-RELAY-20261113 -->
+
+<!-- STEAM-REQUEST-CHANNEL-20261112 -->
+<!-- STEAM-GAME-SELECTION-CONSUMER-20261113 -->
+缓存后继已写主线：游戏层 `nativeValveReadCachedSelection` 是纯内存观察（`processValidated=false`）；GameLink 首次选择消费缓存，原精确 pin/最终门保留。54 定向及2反例通过，1001次缓存读零进程查询；唯一原件 `Testing/YMCC/Evidence/SteamGameIdentity-20261113/cache-consumption/SOURCE_READY.json`。公共 Steam peek/联合 query 接线仍 OPEN；此前37/152不改记为本后继实跑。
+用户明确：游戏识别唯一层与 Steam 唯一层独立、并列，共同服务 YMCC 消费层。本段仅为消费接入；游戏 EXE/PID、选择及广播归游戏识别层，Steam 会话/账户/Steam 游戏身份归 Steam 层。`NativeGameSelectionReceipt` 属于游戏识别层接口，Steam 关联功能消费它，不将游戏识别合并进 Steam。
+2026-11-13：游戏 EXE/PID 消费准备已写主线。GameLink 首次关联消费原唯一 valve 的 `NativeGameSelectionReceipt`，匹配 Steam 身份而不另选游戏；当前选择/原进程与 current-list/lifetime 语义分开，纯内存守卫拒绝 ABA、规则及 power 代次变化。37 定向组、2 实际反例、原 valve/publisher normal152 与7无效选择已核；未完整 Native/包/部署，后继 Observer 配套随下一自然构建。详情接 `docs/steam-request-channel.md`，唯一原件 `Testing/YMCC/Evidence/SteamGameIdentity-20261113/SOURCE_READY.json`。这不授操作权限或宣称全图迁移完成。
+<!-- /STEAM-GAME-SELECTION-CONSUMER-20261113 -->
+## Steam 统一请求入口（迁移中）
+
+`native/steam_request_policy.h` 统一 Live 操作分类，主入口和共同 CDP 传输共用；未知/失效请求在发现端口前拒绝，排队返回及实际发送前仍核当前归属。原111项离线transport及前置门负例只覆盖原范围；Decky真实消费者随后复现旧admit被提前调用的副作用，已分离最终admit与明确纯的ownerCurrent，修后核收另列；不代表完整native/包、整体CPU或真实Steam验收。恢复引擎与库Host发现已接共享owner，原Observer新增同份identitySnapshot/进程与账户epoch（55项原消费者已核，候选账号与UI/CM严格分列）；库Worker仍私有未验。公共CDP已接可选PID/birth/root租约及最终回调后复核（23+111+原Decky3/反例），Decky三调用已配套；公共纯account_facts和原Decky解析（20+2负例/22投影）已核。普通main已消费identitySnapshot+run6（30项实际边界），共同回包复核及QAM未知写不重放已补；UI只读已单份receipt/单lease（12+原23/撤销反例）。原Sleep整合/R27入口、其余账户consumer/child委托及bootstrap/URI/broker/外观跨进程租约仍待收口。后继从 `docs/steam-request-channel.md` 及 `Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/PLAN.json` 接续；保留其它任务并行修改及菜单可能写状态的不重放保护，不新增轮询/服务或扩大权限。
+<!-- /STEAM-REQUEST-CHANNEL-20261112 -->
+
+<!-- BOOT-FAN-OWNER-BOUNDARY-20261112 -->
+## 四模式共用风扇preset归属漏口（2026-11-12后继，未修复）
+
+原boot ownedBootAction加实际FanHostLifecycle/原NoIoHost已复现：owner在租约等待中失效，仍下发preset，外层只在返回后拒绝。44实际仓库依赖在worker观察与主线相同。8标签执行只有2个唯一行为，不能称四套真实模式恢复通过；旧内存fan scene组不覆盖实际内部等待。后继须连实际currentSoftwareOwner/仓库，保留原队列/重试/自愈、早期desiredCurve及新lease归还/旧已提交曲线/新手动owner边界；只在最终写前加callback不足以闭合。产品未改、未SOURCE_READY、无设备/网络/部署；整体ACTIVE。唯一原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/fan-boot-owner-20261112/CLOSING.json及HANDOFF.json。
+<!-- /BOOT-FAN-OWNER-BOUNDARY-20261112 -->
+
+<!-- BOOT-MONITOR-ACK-FINAL-WRITE-20261112 -->
+## 四模式监控ACK最终写盘（2026-11-12后继）
+
+四种模式×开/关的8项旧ACK误写已由原生真实文件消费者复现。仅原ymSettingsBootWriteMatches增加监控配置/observed boot依赖核对并精确写回主线；同一候选一次原配方编译，24项原文件事务核收：8拒绝且无写/备份、16正常及无关改动接受。原后置错误期望revision-conflict的FAIL保留，普通协议write-failed保持；只读核收复用同一raw，未重跑。原profile/AppData准备拒绝/费用及精确未消费路径排除单列，其他重定向仍严格。此前完整5项PE编译属于本修复前固定快照，此后继进入下一自然Native/包，不追赶重编。整体ACTIVE，all16/typed/底层sleep/配套包和实机仍OPEN；未部署或操作Steam/设备。唯一证据Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/monitor-ack-final-write-20261112/CLOSING.json及SOURCE_READY.json。
+<!-- /BOOT-MONITOR-ACK-FINAL-WRITE-20261112 -->
+
+<!-- BOOT-COMPLETE-NATIVE-CLOSURE-20261112 -->
+## 四模式完整原生固定快照核收（2026-11-12后继）
+
+原native/build_native.bat一次完整编译链接及5项PE已核；1425源码/2563工具、实际include/链接库图和自有Job关前零均有原件。本次含Decky启动归属等已完成后继；源码只固定一次，完成后并行变化另列，不追赶重编。仅额外精确修复2个既有Decky夹具入口的NaN截止及空/未知定向选择，原11项定义保留。首控制VM适配失败与费用保留，后继只续选择器；默认整组未重跑，不新建ID/minimum。整体ACTIVE，all16/监控ACK最终写锁假设/Web托管包/底层sleep/typed和实机仍分别OPEN；未部署或操作Steam/设备。唯一后继Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/complete-native-closure-20261112/CLOSING.json及SOURCE_READY.json。
+<!-- /BOOT-COMPLETE-NATIVE-CLOSURE-20261112 -->
+<!-- BOOT-DECKY-STARTUP-OWNER-20261111 -->
+## 四模式 Decky 启动归属（2026-11-11后继）
+
+Decky桥同步拷贝bootContext；原生明确boot来源、环境取消及原锁内写入/Runtime意图核对。只有意图发布持设置锁，停止/join在释放后执行；普通开关/故障安全关闭保持。11桥接、224实际原生边界/原安全检查1232、实际公共Runtime任务探针16/自有惰性子进程2及候选类型检查通过；旧桥/原生语义反例和准备/缺依赖FAIL保留，Job关前0。只写3产品/2原夹具；旧health-close canonical及typed映射未改，额外探针不替代完整typed binding。配套新Web/native进入下一次完整构建；旧完整main/link仍按旧epoch，未部署或操作Steam/设备。all16/底层sleep/实机仍OPEN，目标ACTIVE。唯一后继Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/decky-boot-owner/CLOSING.json及SOURCE_READY.json。
+<!-- /BOOT-DECKY-STARTUP-OWNER-20261111 -->
+
+<!-- BOOT-INPUT-OVERLAY-CAS-20261111 -->
+## 四模式基础输入与游戏专属并存（2026-11-11后继）
+
+真实仓库此前拒绝专属生效时的基础输入恢复，原内存端口漏此边界。现在仅boot-mode且有当前归属检查的原事务在队列/磁盘边界保留当前overlay，普通/runtime保护不变；原版本/hash/启动归属/native写入围栏保持，回滚也保留专属。原设置组17及40边界、实际boot+仓库四模式、原专属鼠标用例与候选类型检查通过。旧源FAIL、首集成把回执写入混计为CAS的FAIL保留；后继按revision推进严格只计一次基础CAS。只写仓库分支与原夹具边界，无native/schema/UI/engine变化，无设备/部署操作。整体ACTIVE，all16/底层睡眠/实机仍OPEN；新前端进入下一自然Web/包。唯一证据Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/active-overlay-cas/CLOSING.json及REPORT.zh-CN.md。
+<!-- /BOOT-INPUT-OVERLAY-CAS-20261111 -->
+
+<!-- BOOT-PROOFLESS-INPUT-RECEIPT-20261111 -->
+## 四模式旧输入生效记录证明边界（2026-11-11后继）
+
+旧手柄/陀螺仪typed active/disabled记录缺native proof时，读取归类saved/待确认，不丢原failed/error/其他模块，不改磁盘；合法proof仍严格核boot/revision/hash/Host。模型单函数及2个既有夹具已精确写回。原解析32边界、原native证明组、四模式旧记录后续真实ACK及候选类型检查通过；旧源FAIL、首候选误去重触发原64项断言FAIL保留，修后旧诊断不去重。无新增ID/minimum/轮询或重放，无UI几何/engine/native/schema变化。原构建快照不追改，本前端后继交下一自然Web/包。全目标ACTIVE，all16专属/底层睡眠/实机仍OPEN。证据Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/proofless-receipt/CLOSING.json及REPORT.zh-CN.md。
+<!-- /BOOT-PROOFLESS-INPUT-RECEIPT-20261111 -->
+
+<!-- BOOT-NATIVE-TOUCH-CLOSURE-20261111 -->
+## 四模式当前原生和触控补验（2026-11-11后继）
+
+固定实际来源按原native/build_native.bat完成5项PE编译链接，主构建89297ms。原后置FAIL保留：3相对include规范化；10漏列SDK头仅属于控制器检测工具，补前后pin后只重编该工具；另23漏列链接库补pin后仅重链main/恢复服务/检测工具，不重编main。当前触控43原文件场景与1个精确选择的退役ACK原断言反例已通过核收，所有自有Job关前0。原生主父FAIL不改绿，不新增默认ID/minimum；原217分段/性能173/仓库17/UI44+44按原epoch保持。
+
+本段无产品源码写入/部署或安装版操作。固定来源差异只观察一次，不追赶并行main。整体目标ACTIVE：all16实际owner/专属终审、Web/托管/包、底层睡眠和物理仍OPEN。费用/失败/220081ms暂挂保留，240秒只入账一次。唯一项目后继Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/NATIVE-TOUCH-CLOSING.json及NATIVE-TOUCH-SOURCE_READY.json。
+<!-- /BOOT-NATIVE-TOUCH-CLOSURE-20261111 -->
+
+<!-- BOOT-PREPARATION-LEASE-20261111 -->
+## 四模式准备请求的同请求接续（2026-11-11后继）
+
+普通主题/背景保存推进版本时，同一仍在preparing/waiting的Steam准备请求可以继续；换选择、请求、输入/boot/result或关闭仍拒绝，最终核对和实际写删仍共用原设置锁。仅精确导入2处原生片段及7个既有夹具/支持文件，保留并行修改。原生169正例及第151项实际竞争语义反例、原失败准备断言与28边界、后继运行suffix170/性能173/仓库17/候选类型检查已核。前47项保留于失败父组，不能拼成新整父PASS。主线11原片段及生成include与已编r4相同，本次不重跑业务。先前UI720/800各44按原epoch保持。
+
+本段补充此前启动归属记录；全16模块/专属所有权终审、完整native/link/package、底层睡眠和实机仍OPEN，目标ACTIVE。未部署或操作安装设置/Steam/设备/睡眠/重启。费用/FAIL和220081ms中断暂挂保留。唯一项目后继：Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/PREPARATION-LEASE-CLOSING.json及PREPARATION-LEASE-REPORT.zh-CN.md。
+<!-- /BOOT-PREPARATION-LEASE-20261111 -->
+
+<!-- BOOT-STARTUP-OWNER-AND-UI-20261111 -->
+## 四模式启动归属及当前双比例专项（2026-11-11后继）
+
+Steam启动写删文件与最终归属核对共用原非递归设置锁；服务等待在锁外。准备/恢复传不可变归属，普通临时虚拟手柄仍不写开机记忆。已保留监控成功ACK、按历史SD完整配方迁移触控配置。12个产品/既有夹具/配套支持文件已精确写主线，其他任务修改保留。
+
+原生101正例及1个实际旧源反例、原运行7项及3个旧源反例已核。720/800各44个原UI用例均PASS，正式engine、每高度16互转，原2500/6000/60000ms上限保持；主线类型检查另实际PASS，143项UI来源和原生生成体/归属片段核收。本段取代旧记录中“800未跑/私有监控和旧触控未导入”的当前状态，不改变历史FAIL。最终原生配套模板另实跑原第11项；默认启动consumer和NoIO pins未改，无新ID/minimum。
+
+全F1～F4/16模块整父、完整native/link/package、共享睡眠设备和实机继续OPEN，目标ACTIVE；未部署、启停或改安装设置/Steam/设备/睡眠/真实重启。中断成本220081ms仅暂挂，不伪记耗时或退款。唯一原项目证据Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/steam-startup-owner-20261111/CLOSING.json与REPORT.zh-CN.md。
+<!-- /BOOT-STARTUP-OWNER-AND-UI-20261111 -->
+
+
+<!-- BOOT-INHERITED-GLOBAL-STARTUP-20261111 -->
+## 未配置与停用场景继承全局（2026-11-11 用户最新要求）
+
+未配置四模式仍需应用已保存全局；停用某场景也回到全局，保留其草稿。模式1/全局、2/Xbox关闭并核对高级Steam启动；3/Steam、4/组合开启。旧缺文档及disabled孤立开机标记各补一次，真实本次选择/已领取或应用请求不得重放。普通页面临时虚拟手柄不记作开机偏好；原生启动与前端有效模式解析一致。坏数据保留，不以默认全局覆盖；硬件未知值不编造。原BAT在任何Steam/Xbox/网络动作前读取自身相邻设置准入，未配置/1/2/关闭或坏数据拒绝高级启动，手工Steam入口独立。
+
+7个源文件已按精确候选写入主线。当前候选类型检查、22组原运行消费者、228原生输入项、578原BAT检查及原产品源码反例已核；原30条BAT断言保持。首次原生工具闭包遗漏、PS5数组/标量边界、UTF-16解码及守卫准备错误全部保留；仅续测失败/未到达项，未重置原账。原生对象来源及182 include已核，实际重链接库已完整固定。各Job准入/关闭前归零实际核对，VCTIP工具回收单列。
+
+主线yeman.ts另有CPU厂商识别后继，已保留且不冒充联合构建。原PLAN的F1～F4、16模块/专属所有权、720父FAIL与34历史通过、800未跑、旧私有监控/触控修正、完整Native/包与实机仍OPEN，整体目标ACTIVE。本轮未部署或操作安装配置/注册表/设备/真实Steam/睡眠/重启。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/global-fallback-20261111/CLOSING.json、MAINLINE-IMPORT.json与REPORT.zh-CN.md。
+<!-- /BOOT-INHERITED-GLOBAL-STARTUP-20261111 -->
+<!-- STEAM-CONTROLLER-CURSOR-HIDE-20261111 -->
+## 手柄模式隐藏鼠标（2026-11-11）
+
+Steam 插件商店下独立默认 ON 选项，只对已确认的前台 Steam 游戏及实际手柄操作隐藏 Windows 标准光标。前60秒5秒一次、其后30秒，鼠标操作/失焦/PID退出结束本轮，唯一共享电源新水印重置；迟到/重复/倒序投影不抹掉本轮鼠标停止记录。原光标副本、前台写入前后检查及不阻塞的恢复进程就绪检查均已补强。主进程结束后独立进程立即还原；全部还原暂时失败时才临时观察鼠标事件，事件放行后重试，成功退出。正常路径复用原物理采样、鼠标观察和前台事件，无新电源订阅、输入注入或常驻扫描；确认后不重复读Steam日志，未确认目标不进入长期轮询。续作72条实际产品/恢复边界断言与主程序语法通过，原双比例UI/engine和设置合同未改并引用。10,000次重复电源投影无重设timer/读Steam；旧局部7.03us查询微测不代表安装版总CPU。旧FAIL保留；未部署或操作真实Steam/游戏/睡眠，无新发布门。详见 [实现与边界](docs/steam-controller-cursor-hide.md)；当前证据 `Testing/YMCC/Evidence/SteamControllerCursorHide-20261111/hardening/HANDOFF.json`，首轮 `SOURCE_READY-v2.json` 保留。
+<!-- /STEAM-CONTROLLER-CURSOR-HIDE-20261111 -->
+
+<!-- BOOT-MODE-UI-CURRENT-FAILURE-20261111 -->
+## 四模式候选与当前UI失败边界（2026-11-11）
+
+2026-11-11：原四模式无缺口目标继续ACTIVE。复用已完成PairedResponse包的真实冻源，不重编包或写其来源。自有候选发现并修复三处产品问题：缺失公用开机字段被normalize后误填legacy来源；监控成功ACK被重复外层检查改记失败；历史SD工厂触控配方依赖变化中的现默认值。原夹具接线补真实helper、JSON保存及内存恢复归档，原断言保留。实际173性能、136项runtime后继范围、17项设置分别有原件；原默认父FAIL不改绿，不把各suffix合成一次整父PASS。720实际34原case通过，含16个转换及实际gamepad engine，导航/策略/page错误均0；第35个custom到Steam超过原2500ms，其后抓取仍在写的temp触发EBUSY。真实业务根与原生helper自然退出，Job准入及关闭前实际零、日志和来源稳定已核。800未启动。3处产品和配套fixture尚在私有候选，未写主线、未记入旧ZIP。下一步原精确失败case+原720剩余10/800全部44的有界接续已准备；不放宽2500/6000/60000ms，不重跑Steam358/性能173，不新增ID/minimum。诊断脚本一处换行生成语法失败保留并已修正，3个JS仅syntax检查过，后继业务未启动。共享原账仅余数秒，需要明确追加才运行后继；旧费用和失败、独立sleep/normal账不动。完整16模块audit、lower sleep资源边界、当前包关系及物理验收仍分别保留。
+<!-- /BOOT-MODE-UI-CURRENT-FAILURE-20261111 -->
+
+<!-- STEAM-APPEARANCE-LISTENER-AUDIT-20261111 -->
+## Steam外观近期日志与操作开销
+
+80份11月日志按原始行去重后，确认仍有最终控制锁忙/DOM未确认和未定位的助手异常。外观五个在用端口查询改用原interop内的有界IPv4/IPv6原生表，保留鲜查询、PID和原所有权验证；进程发现仍只走YMCC共享owner。Idle只读收尾等待原互斥锁最多30秒，其他动作保持3秒，不重放主题修改。入口/resident的监听查询协议须配套，导出门拒绝旧模块。没有修改CSS资源、Steam启动/模式/前台、常驻策略或业务设置。
+
+专项监听查询每5次从1179–1261ms降至1–3ms，仅局部本机样本，不代表安装版总CPU。原失败、真实私有锁/socket、DOM定向回归及配套证据见 [详细记录](docs/steam-appearance-log-audit-20261111.md) 与 `Testing/YMCC/Evidence/SteamAppearanceLogAudit-20261111`；实际部署、物理睡眠和整包验收独立。
+<!-- /STEAM-APPEARANCE-LISTENER-AUDIT-20261111 -->
+
+<!-- BOOT-COMMON-OVERLAY-DEFAULT-CONTRACT-20261111 -->
+## 公用Steam界面默认与存储合同配套（2026-11-11）
+
+2026-11-11 Stage290：继续原完整PLAN，目标ACTIVE。CPU与虚拟手柄两任务的自然正式导出先后在原settings-baseline-contract报Frozen defaults changed：公用startupDesired.steamOverlayOnBoot默认true已在repository/UI实现，但冻结settings-defaults-v1遗漏字段。用户原规则缺省ON、四模式外公用；不回退字段、不删或放宽assert。核现有merge/repair与读写流程已经向后兼容补缺true并保留显式false/未知值，故存储revision1及schema1均保持。Stage285固定私有来源、补快照并在原settings_baseline_selftest增加单一24组合场景，Stage286仅在执行前修自有观察JSON尾部格式，旧来源保留。Stage287真实编译repository/API/IPC原消费者，严格核所有实际编译输入，精确选择这个原case；四模式×legacy/current×missing/off/on共24项实跑PASS，显式OFF经保存和清缓存重读仍OFF，mode银行与未知用户字段均未变。Job真实准入、自然归零。CPU任务在接手消息前数秒已等价补公开defaults（13ffa07bbaf6b57fd1665f82d26d5b5cd29e695c4c2097a13ec6d107459d77ad），本任务保留其键顺序，不重复写；Stage288仅CAS写回原迁移case，核心contract原a9a5c8…bf44未改，未触碰虚拟4个补丁。CPU最初临时normalize附加断言及仅聊天stdout不能包装成原门PASS；其后原块精确撤回，首次CONTRACT回调把虚拟stdin当磁盘而FAIL保留。CPU自己的R2实际完成原完整门，PASS revision1/sections18/legacyPaths21/configurationIO=false。Stage289只核收其raw/process/job/source/metafile，独立重建原import+既有onCompiled投影逐字相等，19编译输入含一个绑定原helper的虚拟stdin，1041来源当前零漂移，实际Job0；本任务没有重复完整门。实际迁移24与原合同配套见STAGE289-SETTINGS-SOURCE_READY.json，已告知CPU/虚拟主责按真实主线新捕获协调下一自然导出，未改失败冻源/重跑旧包。充电69eaee…fbf0仍按Stage282独立配套。损坏恢复显式OFF保持，未操作安装设置、Steam、设备、睡眠或重启。
+<!-- /BOOT-COMMON-OVERLAY-DEFAULT-CONTRACT-20261111 -->
+
+<!-- BOOT-MIRROR-REAL-IO-CATALOG-BATTERY-PAIR-20261111 -->
+## 睡眠镜像真实文件取消与充电目录配套（2026-11-11）
+
+2026-11-11 Stage283：继续原全局UI配置+四模式完整PLAN，目标ACTIVE。原共享45秒早已由Stage260入账，本轮不重复；人类另给原sleep60秒账追加一次45秒，Stage269记录，cap105000ms，原费用/FAIL保留且不借共享账。Stage265/266私有镜像修复复用现有atomic writer的prepare钩子，在真实per-path锁取得后、临时文件创建前重新检查退出；普通退出清理保持。Stage270原mirror72/control4及原语义反例通过、两份编译成功，但诊断路径未转义且raw父目录不符，在业务IO前拒绝，原失败/费用保留。Stage271只修诊断路径，Stage272仅重编受影响IO消费者并实跑四模式20/control1和原源码语义负例，原72与负例不重跑；真实Win32原子文件/真实path mutex/线程事件/句柄均核归还，自有Job关前0。Stage273仅将镜像函数hunk和原消费者必需shim写主线，未覆盖peer。现行timeout stop拥有UI timer/state，并非worker；abnormal生产Arm/Owned入口是保守receipt-only，不启用旧分阶段ETW引擎，不为旧todo反向激活它；其他底层资源/真实睡眠仍独立。随后CPU构建任务发现catalog STALE，核对实际只有Controller.cs/InProcessEntry.cs两条battery.provenance及catalogSha，生成C#一条hash常量跟随，所有路由/身份/准入及其他domain不变。Stage274初始白名单漏InProcessEntry拒绝且0公开写，Stage275改用Stage263原正式构建/ABI精确sourceClosure核收，Stage276候选就绪。该C#改变确实进入BatteryHost合同，不能只改catalog留旧DLL。Stage278沿原build-battery-host成功正常publish并保留原已纠正NuGet内容hash/metadata/框架剪枝/十文件载荷核收；Stage280只重编新合同ABI消费者，实际加载新DLL，原ABI32与48字节共享UNKNOWN拒绝通过，行为源码未变且不重跑native360/managed组。两个Job实际准入并自然归零。Stage281将catalog JSON、生成C#、双合同、新DLL/manifest共6文件成套写主线，其他payload同样逐项核，绝不覆盖ExpectedCatalog/main.cpp或peer来源。新sourceId69eaee428efa363294d3db92828aa3084254877137733ddd1d8af36f1444fbf0，Stage282-SOURCE_READY可供下一自然固定来源构建；原完整catalog门仍必需，未绕过/未代签。没有部署、安装版控制、Steam/设备/真实睡眠或重启操作。
+<!-- /BOOT-MIRROR-REAL-IO-CATALOG-BATTERY-PAIR-20261111 -->
+
+<!-- BOOT-CHARGE-NORMAL-PUBLISH-CURRENT-HEADER-IMPORT-20261111 -->
+## 正式充电组件及当前共享头配套写回（2026-11-11）
+
+2026-11-11 Stage264：上一轮Stage248为真实进展，本轮继续完成原正式充电组件构建与主线配套。人类新增共享60秒、再45秒分别由Stage249/260仅入账一次，累计cap1005000ms，取代Stage248旧“待答复”状态。原build-battery-host.ps1未改，固定SDK10.0.400和独立离线包源/缓存实际publish成功，正式10文件载荷逐项SHA/bytes/合同一致；没有写用户NuGet缓存。Stage251全SDK工具超过守卫3072单角色上限的preflight拒绝保留，未启动构建；Stage252按原C# Library真实入口排除未调用watch/format/F#/测试宿主，并把原构建脚本/配置与可执行程序集分别入原source/tools角色，4739项均固定，原3072/3072上限和哈希锁未放宽。Stage253只实际publish一次（5946ms），其后消费者误将框架剪枝的CodeDom当必需独立包而FAIL；Stage255又误将NuGet签名内容摘要当整个nupkg摘要而FAIL，均保留费用与原件。Stage256改调用同一固定SDK的PackageArchiveReader.GetContentHash，独立核原archive SHA256/raw SHA512、NuGet内容摘要/包元数据及精确WindowsDesktop裁剪项；Stage257只修核收并复用唯一publish，新普通DLL/原deps/runtimeconfig实际ABI32与共享UNKNOWN通过，不重编native/managed或重跑publish。Stage258写回前因同行公用Steam界面选项改变settings_baseline.h而拒绝，实际写入0，保留原件；Stage259固定这一处新增恢复OFF字段，Stage261两份原生定向编译、原native360/真实mutex72/控制6、正式新DLL ABI32及两原语义坏例通过，托管/publish未重跑，Job关前均0。Stage263保持完整header身份门后将10个实际变更文件（源码/新NativeRequestOwner/双合同/新DLL与manifest）写回主线，未变载荷同样逐项匹配正式10文件集合；原共享Ready/通知/关闭尾部、普通恢复/释放和并行main字节保留。没有布局/导航几何改动，没有部署、设置、设备、Steam或真实重启操作。整体目标仍ACTIVE，完整当前main/link/package、原16模块/F1-F4/default182/nested173终审、底层sleep/mirror IO、720/800实际engine及独立物理仍未验收。
+<!-- /BOOT-CHARGE-NORMAL-PUBLISH-CURRENT-HEADER-IMPORT-20261111 -->
+
+<!-- BOOT-CHARGE-CURRENT-NATIVE-MANAGED-ABI-20261110 -->
+## 充电当前源码原消费者与实际ABI接续（2026-11-10）
+
+2026-11-10 Stage248：追加共享60秒的人类答复已由Stage238仅入账一次，累计cap900000ms，取代Stage237“仍待答复”的旧交接状态。当前共享电源充电候选原native360（原320+退出40）、真实mutex72、控制6及原owner转发删除反例通过。6份原精确Roslyn输入编译成功；共享电源原case和7项hardening正例通过后，Stage240因私有配方漏带BATTERY_HARDENING_NEGATIVES条件符号停止，原FAIL和费用保留。Stage241只修负例测试程序集的该条件符号，复用全部6份已编译产物，不重跑前两项；Stage242原三hardening负例、owner8、release/store14及两请求/最终Store语义反例通过。Stage246使用实际native Component/hostfxr/当前Library的Invoke/Free及已解析Notify导出，32项真实cdecl借用回调、共享48字节UNKNOWN回调在创建设备域前拒绝、以及忽略callback结果的语义反例通过；实际hostfxr/coreclr模块及include/link闭包已核，自有Job均归零。Stage243私有提取锚点计数失误、Stage244准备账本指向自身的失败均前向保留，未执行业务、不退款。原60秒策略、系统Ready及共享通知/关闭源码边界保持。正常MSBuild原build-battery-host入口的99源/5550工具已固定但未运行，新DLL/deps/runtimeconfig/manifest仍未生成验收，因此本轮不提升充电runtime/合同/载荷到公共主线，不代签整包或实机。原PLAN全16模块/F1-F4/默认182与嵌套173、低层sleep/mirror IO取消、最终主程序link/package、720/800真实engine及物理证明继续OPEN；无部署、设备、Steam或真实重启操作。
+
+新增边界：游戏中启用 Steam 界面为公用开机选项，缺配置默认ON，另一AI实施，不进入四模式；本聊天只记录与后续核对归属。
+<!-- /BOOT-CHARGE-CURRENT-NATIVE-MANAGED-ABI-20261110 -->
+
+<!-- BOOT-CHARGE-CONTRACT-SHARED-POWER-20261110 -->
+## 充电合同共享电源输入与原托管消费者准备（2026-11-10）
+
+2026-11-10 Stage237：上一轮Stage232为实际进展，本轮继续修复原充电合同消费者的真实输入缺口。正式tools/battery_charge_contract_selftest.mjs已补拷贝原生成器实际读取的sleep_power_state.h/power_source_state.h，并在原stale loop保留5项、追加两项共享电源源文件变化拒绝。对精确私有共享电源充电候选运行原消费者通过，7项source拒绝及原正常合同检查均保留，自有Job归零；此选择仅Node内置模块及同一Node子进程，无C++/托管/设备操作，未借用已申请但未收到的60秒。当前新Library与普通/共享Ready/通知/关闭、原owner8、release/store14、对应语义负例的6份精确Roslyn响应文件和9组原选择已准备；只生成输入，未编译/运行。保留Stage235把旧Roslyn参数误按JSON解码的准备失败，Stage236按原响应文件文字正确解码，原flags/refs/断言未放宽。主线充电运行时代码/合同/payload仍未写入；不能把该合同消费者通过当组件ABI、正常MSBuild publish、全4模式或实机完成。原共享账继续累计，60秒申请仍待人类答复，无重复授权。
+<!-- /BOOT-CHARGE-CONTRACT-SHARED-POWER-20261110 -->
+
+<!-- BOOT-STEAM-OWNER-CHARGE-SHARED-POWER-20261110 -->
+## 四模式Steam监控写回与充电共享电源合并（2026-11-10）
+
+2026-11-10 Stage232：当前源码Steam监控的实际API8+ordinary2、原生四模式归属440（含8项最终设置读取中退出）、实际mutex72、控制4、两个旧语义反例及原普通设置358项（持久分区63项）均通过，正常前端类型检查通过；全在私有/内存终端，不操作Steam。Stage223因私有快照漏带Decky类型与GameTitlePolicy失败已保留，后继Stage224补齐真实依赖后才运行；Stage225 actual账为34813ms，stdout曾误显示前账，权威为STAGE225-SHARED-BUDGET.json，不退款不重记。Stage226已把steamSettings/monitorOutput/main/steam_settings_runtime四文件归属传递写回主线，保留并行字节。开机模式恢复的Steam设置为瞬态请求，不留下持久pending；当前原生入口复用现有前后退出复查的monitorHudBootOwnerCheck。充电已按公共共享电源接口准备49文件私有候选，完整保留Ready及之后共享电源/关闭源码，新增每请求归属在operationGate内finally清理；未在stateGate下调用借用回调。原前端充电API8+ordinary2+非法上下文拒绝已实跑通过。新合同仅私有，未建匹配Library/payload，不能写回。当前原生360（保留320、增40退出）/控制6/反例已生成，预计整组含守卫/编译/收尾15秒，余量不足，未启动。全PLAN继续ACTIVE，无部署/设置/设备/Steam/真实重启操作。
+<!-- /BOOT-STEAM-OWNER-CHARGE-SHARED-POWER-20261110 -->
+
+<!-- BOOT-MATCHED-HUD-MAIN-OBJECT-20261110 -->
+## 四模式监控合套与主线对象编译（2026-11-10）
+
+2026-11-10 Stage221：已核收Stage208追加共享180秒（只记一次）。实际晚WebView完成回调16项与原Notice10通过，其中12项由原HWND消息过程自动销毁；使用ABI替身，未建立真实WebView环境。取消发生于put_IsVisible期间时先关闭controller，不消耗渲染失败预算。合套前端类型检查通过；Stage215因node_modules真实路径登记误拒的后置核收已在Stage216纠正，原FAIL保留，未重跑已通过生产者。Stage217已将8文件监控归属/半包取消/晚回调修复写回主线并保留并行修改。Stage220对当时当前主线658个项目源和1470个工具依赖固定后，完整main.cpp按原/O2 /MT /bigobj成功生成对象，自有Job归零；仅对象编译，不是link/包/现场验收。显式开机虚拟手柄规则与RTSS退出后复查保持。充电旧候选早于公共共享睡眠电源接口，不能整套覆盖；Steam/充电及全PLAN剩余项继续ACTIVE，无部署。
+<!-- /BOOT-MATCHED-HUD-MAIN-OBJECT-20261110 -->
+
+<!-- BOOT-HUD-ACTUAL-MAIN-IPC-20261110 -->
+## 四模式监控原生入口转交与候选合套（2026-11-10）
+
+2026-11-10 Stage203：原生main HUD create(global/game)、frame(有值/空值)、close、mirrorReply实际入口与原settings owner已编译执行四模式192项；24项ordinary不读开机归属，过期/读取中退出不进终端，转交callback拒绝晚代次且不借用caller可变JSON。旧公共frame遗漏owner的反例实际失败。载体、broker、目标阀和诊断为惰性终端，不能称WebView/socket/整main验收。首次编译被新增局部kinds遮蔽全局的/WX拒绝，后继仅更名hudKinds，原FAIL及费用保留。root202已从当前主线合并8文件并逆向证明保留同伴字节，包含已验证Stage193 broker半包头，保留主线RTSS退出及显式开机手柄修复；候选仍私有，组合typecheck、实际晚WebView/自动deferred销毁及完整native/UI/实机未放行。全PLAN继续ACTIVE，无部署。
+<!-- /BOOT-HUD-ACTUAL-MAIN-IPC-20261110 -->
+
+<!-- BOOT-MONITOR-EXIT-PARTIAL-PROGRESS-20261110 -->
+## 四模式监控退出与半包取消进展（2026-11-10）
+
+2026-11-10 Stage196：RTSS 原生owner在配置读取后增加退出复核，实际12项owner/16项原IPC接收者/16项控制及旧wrapper语义反例通过，单函数hunk已写主线并逆向证明保留同伴字节。另修私有HUD broker部分帧失效后仍发尾部：改为关本方peer并停止续发；实际Winsock首send限定1字节后失效、有效半帧、ordinary半帧三场景通过，保留26协议/128旧owner检查及旧源反例。该broker头仍私有，effective后继在STAGE196-HUD-BROKER-OVERLAY.json，不能通过旧root169路径读取，也不能单独晋升；须与前端/原生IPC/载体合套。实际IPC转交、WebView晚回调/自动deferred销毁、Steam/charge/sleep整链、完整main/link/包/720/800/实机仍OPEN。没有部署或操控真实Steam/设备。虚拟手柄仍按Stage189最终规则。
+<!-- /BOOT-MONITOR-EXIT-PARTIAL-PROGRESS-20261110 -->
+
+<!-- BOOT-VIRTUAL-INPUT-EXPLICIT-STARTUP-20261110 -->
+## 虚拟手柄启动记忆的最终边界（2026-11-10）
+
+2026-11-10 用户最终规则：普通页面虚拟手柄开关只管本次使用，不进入全局开机记忆；重启启用由开机启动独立设置。修复首次开机草稿被工厂 disabled 覆盖及旧缺字段丢弃明确启动选择。四模式28组合、普通临时开关回归、28次原生重启读取和类型检查在当前主线快照通过；原生原46项及旧源语义反例原件可核。仅两处产品源码与原消费者扩展已写回主线，未部署。Stage174–179自动记忆/自动ON方案已被用户新规则取代且未导入，原费用和FAIL均保留。现场旧启动选项disabled继续尊重，Steam实体回归仍未证明。全PLAN、完整native/link/package、720/800整页门和实机仍OPEN。证据：Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE189-PROGRESS.json。
+<!-- /BOOT-VIRTUAL-INPUT-EXPLICIT-STARTUP-20261110 -->
+
+<!-- BOOT-HUD-LEAVES-STEAM-RESUME-20261110 -->
+四模式全局配置与HUD末端续作（2026-11-10，目标ACTIVE）
+
+范围是全局UI配置读写、普通/游戏专属归属和四模式联动；外观沿既有定稿。私有HUD候选补desktop/Steam pending创建、帧及迟到ACK准入，精确id/nonce清理，首次有效prepared/painted后释放瞬态约束；native取消走原deferred退还且不扣renderer failure预算，broker逐未发送帧核归属，已部分接受的WebSocket帧可完成。没有新增常驻线程或业务轮询。
+
+实际前端desktop55（新增32）、relay56（新增28）及2语义负例通过；native Carrier28、原Notice10及单门负例，broker原协议26/owner128及pre-send单门负例通过。HUD四mode标签是callback端口参数，不冒充实际boot settings resolver。真实WebView renderer、deferred清理自动派发与partial socket progress仍未验。新前端typecheck通过；公共HUD/Steam产品叶未写、未部署。
+
+复用原已编Steam EXE补实跑owner432/72真实mutex/controls4/原负例和section-only63场景273断言；presection85仅引用且原父TIMEOUT保留，没有重编/重跑前半，也不拼成一次原完整父PASS。
+
+Host整链仍UNKNOWN：旧mock缺loadSettings造成bundler FAIL，已准备补export；后继仅运行41ms即因guard启动占用剩余时窗被截止，无行为回执。原失败、费用、工具旧清单/缺include/NOMINMAX/SDK/deque闭包拒绝全部保留。原生已过组不因整理再次运行。全部自有Job关闭前归零。
+
+正常编译原240秒余1791ms，Sleep原60秒余1068ms；共享原330秒追加用户授权一次120秒为450秒。最新账及边界在Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE161-CLOSING.json、STAGE161-SHARED-BUDGET.json和STAGE161-HANDOFF.md。不借账、不重置，不执行boot_mode_identity::current()；没有安装版/Steam/游戏/设备/注册表/真实睡眠操作。宿主整链、原生IPC/真实WebView、完整当前main/link/package/UI及全PLAN仍OPEN。
+
+2026-11-10 Stage172 接续：原私有宿主 optional19/demand13、实际boot resolver16归属边界及旧源未处理异常反例通过；修复过期自动恢复请求的未处理reject，原19/13回归通过。Stage169私有主线捕获快照已完成8文件语义合并及peer原字节逆向保留证明，未编译/执行/公开晋升，不能沿用旧PASS；Stage171已准备当前源8个原消费者及普通typecheck。原准备格式选择失败和旧TIMEOUT保留。新增18:59:22档案核对：最后启动18:33:57后由legacy-startupDesired disabled覆盖SteamDeck revision2→3；四模式configured=false且无extensions.bootModes，18:51重新启用后Steam18:51:02才连接。历史清理成功不证明实体回到Steam，physicalReturnVerified/gameInputVerified仍false。此现场没有新夹具、部署或设备操作。原件 Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE172-PROGRESS.json 与 field-185922-r1/FINDINGS.json、REPORT.zh-CN.md；目标ACTIVE，原PLAN全范围保持。
+<!-- /BOOT-HUD-LEAVES-STEAM-RESUME-20261110 -->
+
+<!-- BOOT-RTSS-NATIVE-OWNER-SCOPED-20261110 -->
+## 四模式RTSS原生归属 Stage122（2026-11-10）
+
+监控当前请求→API→RTSS原生/文件/助手的bootContext已接入主线，原锁前后/副作用/成功回执处复核，ordinary保持原流程。当前RTSS864+普通5+legacy14、monitor1600+普通7、native1188唯一行/144mutex/普通7/精确去转交反例有原件，Web类型及Vite通过。既有失败及未完父回执保留；native全main/link/package/实机未验收，第三方已接受LOAD/SDK不承诺回滚，软件端口证据不冒充真实RTSS/helper操作。
+
+原共享300秒累计285435ms/余14565ms；独立正常编译原240秒累计204952ms。无部署/设备/Steam/游戏/真实睡眠/同伴冻结，peer main和TDP改动完整保留。目标ACTIVE，最新原件STAGE122-CLOSING、STAGE122-SHARED-BUDGET、STAGE122-HANDOFF，旧Stage97及之前记录仅保留历史范围。
+<!-- /BOOT-RTSS-NATIVE-OWNER-SCOPED-20261110 -->
+
+<!-- BOOT-FOUR-MODE-SHARED-CONTINUATION-20261110 -->
+## 四模式共享续测 Stage97（2026-11-10）
+
+本轮主线补fan/monitor/Decky OFF及迟到OFF回执，并修原文件UI夹具的陈旧mouse事实。3原正例/2旧源负例、充电320/64锁/6控制/负例、PS未完反例、RTSS剩余568+普通5、自动恢复64/9及实际16秒、wake失败5312/80、720/800各44实际UI均有原件。旧RTSS296只引用，非新整864父PASS；320组件惰性和实际CLR包身份分别说明。原父FAIL/TIMEOUT保留。
+
+新增共享300秒扣202625ms、余97375ms；旧各scope余量仅用于原scope，未答RTSS45秒被替代。独立正常编译原240秒累计188557ms，私有完整main对象来源核对通过，无link/完整Build/Package。所有自有Job末端0，无部署/实机操作。固定来源/同伴主线漂移/软件与物理范围分列；完整当前主线、原default182/nested173、native已派发准入及安装/物理仍未验收，目标ACTIVE。记录见Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE97-CLOSING.json、STAGE97-SHARED-BUDGET.json、STAGE97-HANDOFF.md。
+<!-- /BOOT-FOUR-MODE-SHARED-CONTINUATION-20261110 -->
+
+<!-- BOOT-PS-CONTROL-MUTEX-PARTIAL-20261110 -->
+## 四模式外观脚本锁争用 Stage81（2026-11-10）
+
+原PS dispatcher/真实Mutex WaitOne(3000)完成两个新软件边界：锁持有期间取消不写文件且自有进程signaled；正常release后实际等待159.8995ms并Apply成功。第三跳过wait语义反例未到完成观察，原父TIMEOUT，不授整组PASS，也不外推原生四模式联合或线程wait指令证明。所有自有Job活动进程0。
+
+原PS共享新增60秒累计58222ms/余1778，充电另余1195；原费用/失败不变，不跨账重试。当前源审查另见fan/monitor/Decky OFF仍进通用active回执及monitor ACK硬编码active，需按F3继续核对、准备修复与定向验证，未冒充已修。产品未部署、目标ACTIVE。当前进度PROGRESS-AFTER-STAGE81、STAGE81-CLOSING/HANDOFF。
+<!-- /BOOT-PS-CONTROL-MUTEX-PARTIAL-20261110 -->
+
+<!-- BOOT-CHARGE-COMPLETE-TUPLE-REBASE-20261110 -->
+## 四模式充电完整候选重基 Stage80（2026-11-10）
+
+当前main/API/默认消费者/原测试分支与依赖已精确汇成私有stage80-candidate-r3；配套payload复制已实编f8 Library并重算manifest，其他现行payload字节保持。原adapter中新monitor/gyro/CSS声明保留，原ID/minimum/父门不增加，公共产品未晋升。
+
+本轮API8归属与ordinary2有实际wire；native320/64-lock/negative尚未执行：首次编译因临时配方重复NOMINMAX被/WX拒绝，修配方后同源续编在共享截止TIMEOUT，无完整EXE。两个自有Job均归零，准备GBK错误及旧hunk漂移、编译FAIL和TIMEOUT原件/费用保留。新增charge共享60秒累计58805ms/余1195ms，不足再跑编译；旧两账余0，其他账不挪。新private package默认runtimeconfig身份、默认生成器实跑/完整native与安装/物理仍OPEN。原Stage79 f8 idle/identity不扩大为本候选全链通过；目标ACTIVE，最新Stage80 CLOSING/PROGRESS/HANDOFF。
+<!-- /BOOT-CHARGE-COMPLETE-TUPLE-REBASE-20261110 -->
+
+<!-- BOOT-CHARGE-IDLE-REFERENCE-CLOSING-20261110 -->
+## 充电原生/托管空闲准入检查点 Stage79（2026-11-10）
+
+Stage79补正Stage78三份编译复制引用的精确路径声明：新Tests.rsp明确绑定当前Library，218引用/10源均在运行前guard固定；只编test1、复用实际native DLL/Library，必要5叶与同保护条件负例复验。没有新增唯一场景或重复native/product编译，旧Stage78等价范围与限制不覆盖。当前实际Job0、owner/timer/events/provider归还、late callback读取0。
+
+新增充电共享60秒累计38073ms/余21927ms，旧native/paired余0，其余账独立。f8私有候选未晋升；完整main/API/default生成器/固定库、adapter叶、原60秒实际定时/安装/设备/四模式整体仍OPEN。最新PROGRESS-AFTER-STAGE79、STAGE79-HANDOFF与CLOSING；目标ACTIVE。
+<!-- /BOOT-CHARGE-IDLE-REFERENCE-CLOSING-20261110 -->
+
+<!-- BOOT-CHARGE-IDLE-ADMISSION-CONTINUATION-20261110 -->
+## 充电原生/托管空闲准入续作（2026-11-10）
+
+用户明确追加一次共享60秒，原账不重置。Stage76补完先前TIMEOUT的native字段20/最终停止反例1；Stage77私有修复请求scope清空后idle未接cached硬件准入的问题，原nativePowerReader附加known/ready位并绑定static纯native parent reader，原60秒timer不变、原值归还仍可进行。Stage77原缺口1、managed6/negative1、native6；Stage78实际cdecl native reader到Runtime/controller5和negative1、新匹配Library的native/CLR identity/停止/迟到拒绝通过。旧TIMEOUT和源epoch保留。
+
+当前私有SourceId f8c3203d7d5af63cd1db1bbb863dd22d2251db4bdc2f2ec9b784616956c71e72；公共产品未晋升、未部署。Stage78三份编译引用复制路径未精确预声明，仅事后字节等价审计，不宣称完整编译闭包。完整main/API/生成器/固定Library tuple、adapter叶、真实原60秒/安装/设备/全目标保持OPEN。新共享账累计30557ms/余29443ms，原charge60和paired90余0，其他账不借。原件 STAGE76/77/78-CLOSING、STAGE78-REFERENCE-AUDIT、PROGRESS-AFTER-STAGE78 与 STAGE78-HANDOFF；目标仍ACTIVE。
+<!-- /BOOT-CHARGE-IDLE-ADMISSION-CONTINUATION-20261110 -->
+
+<!-- BOOT-CHARGE-ABI-RELEASE-SEAL-CONTINUATION-20261110 -->
+## 充电回调 ABI、释放与封口的限定进展（2026-11-10）
+
+Stage71在b359源实跑原生owner判定→实际cdecl/CLR entry32行（20过期/12兼容）及当前返回值保护负例，原identity/shutdown约束保持；未注册nativePowerReader，故坏门也在facts/设备前拒绝。Stage72实际runtime/controller+真实Store完成release8、Store6及当前Move门负例，过期解除保留归还journal，独立shutdown清请求callback后仍完成原归还；文件临时flush后、Move前过期不覆盖原件，tmp归零。两阶段不是整模块/实机通过。
+
+Stage73实际native callback在封口后仍允许current/empty owner，捕获2缺口。Stage74仅改私有native头：reader检查seal、普通请求也借用保护且零设置读取、返回后检查seal。重新生成同版dc2f1c762ca69593d083ed96939e2952d209898f30113de6063937565f97fc00合同/Library，实际原identity/stop/late拒绝与6种seal输入及当前负例通过。C#代码字节未变，旧32/14仅保留其b359源及等价范围，不倒填新源重跑。
+
+Stage75原生整段字段转发/迟到返回20+1消费者在旧预算内编译TIMEOUT，业务0行，只有部分obj/依赖、无完整EXE；整个自有Job归零，未重启或放宽截止。原paired90秒累计88865ms/余1135ms，charge60秒累计56334ms/余3666ms；其他账不借。旧FAIL与费用保持。
+
+当前仅stage74-candidate-r1私有候选，公共产品未晋升。普通/boot字段与返回后seal整段仍未运行，idle managed tick与共享native hardware/power父准入、provider叶、main/API/生成器/固定库完整tuple以及工具/安装/实机仍OPEN；全目标ACTIVE。原件Stage71/72/73/74/75 CLOSING及STAGE74-SOURCE-QUALIFICATION。
+<!-- /BOOT-CHARGE-ABI-RELEASE-SEAL-CONTINUATION-20261110 -->
+
+<!-- BOOT-CHARGE-MANAGED-REQUEST-OWNER-20261110 -->
+## 充电托管内部请求所有权：已复现并验证私有修正（2026-11-10）
+
+当前实际编译Library在原Rig/Fake消费者中复现4行读取后过期仍写1次；同4当前控制正常。私有候选在operationGate内借用cdecl reader/context并finally清除，域ready检查请求；Controller慢读后、存储提交/删除及厂商提交前分别补准入，既有停止归还权限保持。
+
+私有实际Library通过4过期零写/零新设置日志及4当前共8行，后续ordinary不读旧callback，mock所有者/定时器/订阅/通道计数归还。当前只去掉factory请求门的语义负例由原late-effect断言拒绝/exit1，raw保留FAIL。四mode标签不冒充新native resolver集成；真实native回调ABI/匹配头和Library、释放/Store原子提交叶、厂商叶、主main/完整工具/包和实机仍OPEN。
+
+公共产品未晋升。最初gbk准备失败及缺7个非编译合同输入导致的生成失败均在compiler前保留，旧baseline不重跑。3个Raw Job末端0，原charge60秒累计37576ms/余22424ms；paired identity90秒余50616ms及PS/wake/auto独立账未动。源候选stage70-candidate-r2，SourceId b359fbf0cbf0fb6d95864d4a939e74e0f74175dc7565b87dd6177f69ac2dc765。总目标ACTIVE，原件Stage70 CLOSING/SOURCE-QUALIFICATION/READBACK。
+<!-- /BOOT-CHARGE-MANAGED-REQUEST-OWNER-20261110 -->
+
+<!-- BOOT-CHARGE-PAIR-PS-NATIVE-CONTINUATION-20261110 -->
+## 私有充电配对及四模式 PS 事务取消进展（2026-11-10）
+
+复用工作区已签名 SDK10.0.400，实际当前Library源码图以原严格Roslyn参数编译一次；原native探针只构建/执行各一次，握手、重复退出、迟到请求拒绝及实际CLR10.0.12通过。编译宿主选11预览hostfxr，原native加载器按原算法选稳定10.0.12；实际路径/签名/哈希分别核对。27个已使用SDK头和稳定hostfxr的后置遗漏已定向补核，同一producer未重复，初FAIL/重复声明拒绝保留。960成员仅私有身份配对范围，卫星/动态完整图、managed内部写入准入、公共main/载荷/安装仍OPEN，未晋升公共产品。
+
+用户明确追加一份PS/native联合共享60秒。原正常PS补齐其余三模式及恢复调用缺失负例，旧全局producer不重跑；实际shell.run与原PS worker取得四唯一模式的部分journal事务取消、原生根exit0、PS子进程signaled、Job0、8个显式句柄归还，下一Status恢复主题/owner原字节并清marker。首全局结构化PASS的旧根退出码因Start-Process为null仍UNKNOWN；前像保留后先恢复，再只补该缺证退出观察，其余三模式未重复。总5次native调用/4唯一模式、编译1次，不倒填旧回执。
+
+锁等待、单次原子调用内部中断、breakaway及native取消语义负例仍NOT_RUN。原12秒native执行范围保守累计10444.5415ms，余量不足另一完整四模式组；新增共享额度不等于每子进程重领预算，也不授权RTSS/wake/automatic换账、部署或真实Steam/设备/睡眠。原Stage47 TIMEOUT和其它全目标缺口保持，总目标ACTIVE。预算、失败及当前精确范围见Stage68/69 CLOSING与JOINT-READBACK。
+<!-- /BOOT-CHARGE-PAIR-PS-NATIVE-CONTINUATION-20261110 -->
+
+<!-- BOOT-AUTOMATIC-NATIVE-TRANSPORT-20261110 -->
+## 自动恢复下层 CDP 消费者已编译，正例未验（2026-11-10）
+
+原case可选transport范围接实际reconcile/resumeInputContext/liveRequest和完整native CDP run/HTTP RAII/BoundedSocket。产品未改；WinHTTP、身份/inspect/前台、JS及主session binder为惰性端口，不能当真实Steam网络/操作。两次实际编译中一次成功；现固定验证配方Od/C++20/W4/NDEBUG/MD，不改语义/资源/超时断言。
+
+初三次失败分别是JS重复变量、原提取器不识别inline、空默认回调名admit未归一导致liveRequest被截断；前两次未编译，第三次实际编译FAIL、均未进入native行为。现只对分析输入作等字节长签名归一并原UTF8 span输出，补完整函数体前置核对。旧raw/费用保持。
+
+同一个成功编译原件续跑了原计划的资源负例，不重编：仅去掉当前BoundedSocket析构最终close，实际原生因剩1个模拟socket而FAIL/退出1；主回执accepted=false/mutated=true，发送后失效事实保留，实际watchdog线程已join/signaled。失败测试端口再清理归零、5个Raw Job末端0。
+
+完整64正例、8普通控制和真实默认16秒超时控制全部NOT_RUN；原auto60秒累计48928ms/余11072ms容不下16秒及清理，不缩短或换账。编译成功/资源负例不是正例、整个原case、缓存或真实网络通过。Stage66的32回调和3线程归还保持原epoch；主session binder、真实阻塞inspect、完整sgWorkLoop/联合链路和物理仍OPEN。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE67-CLOSING.json、STAGE67-SOURCE-QUALIFICATION.json。
+<!-- /BOOT-AUTOMATIC-NATIVE-TRANSPORT-20261110 -->
+
+<!-- BOOT-AUTOMATIC-WORKER-CALLBACK-20261110 -->
+## 自动恢复共享池回调取消与归还（2026-11-10）
+
+原case可选worker范围已实际编译当前setter/owner/current/run/tick、三线程共享池与原bounded join。四模式×排队/inspect中×OFF/新电源代次/睡眠/退出共32行，均实际观察回调返回、inspect借用归零、后继共享任务可执行，晚helper派发和结果文件写0；四模式同状态保存各仅派发1次且epoch不变。最终3条自有线程通过独立HANDLE确认signaled、原poolStop join后队列/线程向量空、detach0。同EXE去掉current两个scope门的负例确实派发1次并原生退出1，语义FAIL原件保持。
+
+产品未改；只在原消费者加入可选范围/两leaf，旧640默认体逆向逐字保持，本轮未重跑。首次编译成功后夹具漏传已接纳wakeAdmission，实际null value()拒绝、0场景；补齐输入后原32全范围通过，初FAIL和费用不回填。两个Raw Job末端0，原auto60秒累计32325ms/余27675ms；wake2386ms及待答RTSS45s/PS60s不动。
+
+这仅证明当前回调/共享池边界：inspect/helper/settings/report均惰性端口，门释放不等于实际阻塞IO能被取消。完整sgWorkLoop、已派发native helper、Kernel/arm、兼容文件、整main/完整工具图/安装和物理唤醒仍OPEN；Stage65唤醒密码回执后继也未由此验收。未操作YMCC/Steam/游戏/设备/真实睡眠，总目标ACTIVE。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE66-CLOSING.json、STAGE66-SOURCE-QUALIFICATION.json。
+<!-- /BOOT-AUTOMATIC-WORKER-CALLBACK-20261110 -->
+
+<!-- BOOT-WAKE-PASSWORD-FAILED-RECEIPT-20261110 -->
+## 唤醒密码失败偏好回执源修正（2026-11-10）
+
+接Stage64的72个真实失败基准：实际偏好写0且ok=false，preferenceSaved初值true却被直接返回。主线现仅将该局部初值改false，成功写偏好的原分支仍按真实保存返回值赋值；原失败基准断言同时拒绝true或缺少preferenceSaved。实际电源写、取消、回滚和适配器函数不变，逆向唯一改动字节已核对。
+
+这一步是源码修正，未新编译或运行native，不把Stage64的5312/64回执当成新主线实跑。原wake60秒仍累计57614ms/余2386ms，已知下一次执行不够；不借用待答RTSS/PS额度。实际旧raw会被新增断言拒绝72条，只说明旧缺口，不能代签新源通过。完整主线/工具/安装/实机及原剩余项目仍未验，目标ACTIVE。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE65-CLOSING.json、STAGE65-SOURCE-QUALIFICATION.json。
+<!-- /BOOT-WAKE-PASSWORD-FAILED-RECEIPT-20261110 -->
+
+<!-- BOOT-WAKE-PASSWORD-ADAPTER-OWNER-20261110 -->
+## 唤醒密码原生适配器取消边界（2026-11-10）
+
+实际WindowsPowerApi在创建设置键后可能丢失开机请求所有权却继续RegSet，旧源已真实复现。本次将原bootOwner传入适配器，并在内部注册表/电源调用边界复核；取消仍无条件释放键和GUID，普通默认请求不增加设置读取。原read/apply/requireCurrent域函数逐字保持，无新线程或轮询。
+
+原失败/回滚消费者实跑5312行、80基准，按四模式/双目标/十故障/实际边界/八身份变更核对精确集合；此实跑早于适配器修复，不能写成当前全矩阵重跑。实际新适配器create→set四模式64行及普通0-owner-read控制通过；原旧源、当前仅去掉适配器绑定的负例均捕获晚RegSet。原回滚guard负例也保留。5个Raw Job末端为0，真实系统写0；普通15旧控制未重跑，整main/完整工具图/安装与实机未验。
+
+另有真实回执缺口：72个失败基准未保存偏好且ok=false，却因初值返回preferenceSaved=true；单列OPEN，未改产品或冒充真值通过。原wake60秒账累计57614ms、余2386ms，不能容纳已知下一次编译执行；其他RTSS45秒和PS60秒问题未答、不挪用。准备脚本构造器计数失败及UTF-8核收续作均单列，原业务不重复。目标ACTIVE。
+
+当前主线开机规则源核对仍是1全局/2Xbox关闭Steam高级启动、3Steam/4混合开启，全局明确清旧入口。此次仅源回读，未操作安装版设置。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE64-CLOSING.json、STAGE64-SOURCE-QUALIFICATION.json、STAGE64-RECEIPT-GAP.json。
+<!-- /BOOT-WAKE-PASSWORD-ADAPTER-OWNER-20261110 -->
+
+<!-- BOOT-PS-TRANSACTION-CONTINUATION-20261110 -->
+## 四模式外观 PS 事务的部分真实接续（2026-11-10）
+
+产品未改。原appearance case可选 --appearance-ps-transactions，复用原robustness消费者；从真实mode resolver得到四份不同配置，候选在同一自有目标依次应用，保留四状态及一恢复调用缺失负例，未新增ID/minimum/父门。初版缺共享进程空回执，修明确offline端口；之后Library在声明公共dispatcher前return，修夹具从真实AST逐字导出该函数。两次FAIL/原费用不回填，普通旧断言不删除，完整默认PS组未跑。
+
+第二次仅完成global的真实journal、两次已完成原子写、持有自有命名Mutex及强制终止。全量原件与测试状态前像保存后，未重启原写者；新实际Status消费恢复了主题、owner原字节，删pending marker、核真实状态及锁可再取。当前重新核旧PID/birth已不存活，不冒称新等到了旧进程handle signaled；旧Job终态仍0。不是单次原子系统调用中断，也没有执行native owner/Job联合取消。
+
+其余三模式及负例当前NOT_RUN，不能标四模式通过；3份PS解析及3项互斥选择拒绝通过，四个Raw Job末端active0。Stage62 source-only shell.run切片终止缩进错误另行纠正，无旧runtime PASS因此转绿。原native90s/wire60s沿账，追加60s共享联合验证额度已问用户仍待答；RTSS45s/SDK与其它缺口保持。未部署/操作真实Steam/设备或睡眠，目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE63-CLOSING.json、STAGE63-MUTABLE-BANK-TRANSITION.json。
+<!-- /BOOT-PS-TRANSACTION-CONTINUATION-20261110 -->
+
+<!-- BOOT-NATIVE-CSS-NOTIFY-SHUTDOWN-20261110 -->
+## 四模式 CSS 通知与退出的确定互斥交错（2026-11-10）
+
+本轮未改产品；原 appearance case 增加可选 settings-boundary=lifetime。完整实际 Runtime 中，通知停在真实 SetEvent 前，退出 worker 在同一 requestWakeMutex 的真实 try_lock 失败被观测到；四模式均保持句柄有效至通知完成，随后 worker、token、别名和助手归还。每模式退出后64次通知拒绝，合256次；五个自有无业务助手PID/birth均实等signaled，独立空Steam/backend保留至夹具销毁。
+
+同一EXE中把当前 notify 方法精确提取适配为自由函数，仅移除该锁的语义负例，实际遇到关闭后的原句柄，SetEvent返回ERROR_INVALID_HANDLE(6)并被检出；不冒充第二个完整变异Runtime/整main编译。五项非法选择拒绝且无native编译/业务执行，两个Raw Job末端active0。沿Stage61原native90s和wire60s接续收费，无新ID/minimum/父门、无线程/轮询产品变更，也未重跑既有64/18或前端。
+
+PS源码审计确认实际shell.run已有50ms等待片归属取消、脚本有事务和恢复；四模式锁等待、部分写入、下一owner恢复与breakaway的联合执行仍OPEN，不能把父取消源码当其通过。Stage47原TIMEOUT、RTSS额外45s待答、SDK及其它旧缺口保持。完整工具/整main/安装/实机仍未验，1/2高级启动OFF、3/4 ON未改，目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE62-CLOSING.json 与 STAGE62-POWERSHELL-OWNERSHIP-REVIEW.json。
+<!-- /BOOT-NATIVE-CSS-NOTIFY-SHUTDOWN-20261110 -->
+
+<!-- BOOT-NATIVE-CSS-SETTINGS-WAKE-20261110 -->
+## 四模式设置提交后及时撤销旧 CSS 租约（2026-11-10）
+
+仅成功持久提交且受保护归属改变时排队通知；SettingsFileGuard 释放进程内锁及命名锁后才唤醒既有 CSS worker。通知只拿独立的句柄生命周期锁，不等 Runtime 锁或助手 IO；六项 Host ACK、无关设置、失败提交和普通未限定租约不增加专属唤醒。worker 每次等待前再核归属，修复旧代次 wake 合并后漏撤销的问题，无新增线程、timer 或轮询。
+
+旧实际产品已复现提交成功但助手仍活。当前完整 Runtime 与实际设置 IO/guard/writer 已执行四模式×六写者24条、四条旧代次合并及9组控制，40次真实 SetEvent 均由另一线程证实两个设置锁已释放；四模式旧 endUse 保留后继。移除通知及移除等待前校验两条当前源负例被检出，原64互斥/18控制、原设置缓存8例98断言通过。原有 disk helper 初请求遗漏必需 CAS revision 的 FAIL 保留；补字段后复用同一未变 EXE 实跑4请求，没有重编业务消费者。
+
+初夹具 C++ 名称/显式 function 转换编译 FAIL、补充请求 FAIL 及原费用均保留，9个 Raw Job 末端active0；MSVC工具回收与业务自然退出分列。实际trace中28条失效行有助手PID/birth/signaled回执；其它控制沿原断言核归还，不扩写为41个完整PID原始回执。通知与shutdown并发竞态、PS内部事务/breakaway、整main/完整工具/安装及实机睡眠仍未验；不据此放行全四模式。1/2高级启动OFF、3/4 ON保持，未操作安装版/Steam/设备/睡眠。
+
+原件 Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE61-CLOSING.json；沿Stage60原预算接续，目标ACTIVE。
+<!-- /BOOT-NATIVE-CSS-SETTINGS-WAKE-20261110 -->
+
+<!-- BOOT-NATIVE-CSS-OWNER-20261110 -->
+## 四模式原生CSS租约与助手启动归属（2026-11-10）
+
+beginUse/ensureUse携带本次启动上下文。实际Runtime把校验绑定到租约，等原mutex后及创建、分配、恢复自有助手前后复核；过期释放立即清理助手，不继续延迟manual确认。新请求无法沿旧租约恢复启动；普通请求不加归属读取。独立CSS常驻后端与Steam保持，未新增轮询/计时器/线程。
+
+完整实际Runtime与原IPC已编译，64条真实try_lock失败后的四模式/两操作/八归属竞争通过，18控制组通过。原IsProcessInJob(NULL)只证明任意Job，另仅重验其中4条，直接记录group.assign成功且恢复前过期清理；不把4次重验算22唯一组。实际自有助手PID+birth等待退出，Runtime worker/句柄归还，住留后端/Steam保留。当前原生去门与TS调用漏参数两负例被检出；完整默认服务四模式begin/ensure/end各4、shell12和真实2s等待，原服务36断言、boot3正例/4拒绝及609前端编译通过。
+
+这仍为隔离软件证明：settings惰性，Steam/CSS是自有空进程，PS只运行自有无业务脚本。实际endUse解析handler仅编译，release核心及裸token桥接已执行。native租约交接/重叠、settings变更唤醒传递、已运行PS内部事务/写入与独立后台breakaway，以及整四模式/UI/整main/完整工具包和安装物理验收仍OPEN。本轮无安装版/真实Steam/设备/睡眠操作，1/2高级启动OFF、3/4 ON保持。
+
+原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE60-CLOSING.json；旧超时及预算保留，整体目标ACTIVE。
+<!-- /BOOT-NATIVE-CSS-OWNER-20261110 -->
+
+<!-- BOOT-APPEARANCE-AWAIT-OWNER-20261110 -->
+## 四模式美化请求的内部等待归属（2026-11-10）
+
+实际apply/reset捕获启动配置，在目录、状态、租约、准备、重载、启动等待、应用和回执之后核对；过期请求停后续操作。取得token后先登记再核对，过期也沿原释放路径恰好释放一次，普通写入不加归属读取。默认实际API已把上下文传到既有shell.run取消通道；未增加常驻轮询、线程或另一套队列。
+
+四模式1504边界与另224条Prepare/Reload/Restore边界分两个消费者epoch执行，同一产品源1728唯一元组；初额外30行中旧假回执previousRevision错误的FAIL保留，不冒充新增覆盖。移除归属门的当前源负例被检出；原服务36断言正文逐字保持，原boot3正例/1拒绝与实际默认API四模式8次wire、固定609输入前端编译通过。旧服务Apply假回执缺开关更新/普通偏好端口，修前同样FAIL；仅修端口数据，不放宽产品或原断言。
+
+上述是惰性settings/script/CSS租约端口的软件证明。native CSS begin/ensure、已启动PowerShell内部事务和真实进程取消仍OPEN，整四模式/UI/完整native工具包与安装/物理验收未放行。模式1/2高级Steam启动OFF、3/4 ON保持，本轮无部署或YMCC/Steam/游戏/设备/真实睡眠操作。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE59-CLOSING.json，目标ACTIVE。
+<!-- /BOOT-APPEARANCE-AWAIT-OWNER-20261110 -->
+
+<!-- BOOT-AUTOMATIC-RECOVERY-OWNER-20261110 -->
+## 四模式自动恢复设置归属与锁竞争证据更正（2026-11-10）
+
+实际autoSet桥捕获启动上下文；原生在串行等锁、设置提交、epoch/开关与状态发布、通知读取及返回后续核对归属。先撤销旧worker epoch再等状态锁，显式同值保存不重置或重启当前恢复。模式1/全局、2/Xbox关闭Steam高级启动，3/Steam、4/组合开启保持。
+
+修前过期后仍发布状态的FAIL保留；修后640边界（串行锁/状态锁各64直接竞争）与9控制组通过。原runtime5正例/2拒绝、四模式16转换、原authority415断言和固定609输入前端编译通过；authority旧runOne提取已对齐原runRoute，原断言正文逐字保持。其负例/嵌套组/legacy动态路线未执行，不扩大验收。
+
+前向更正Stage56/57的“64真实等锁”表述：旧first-owner-read屏障只证明锁占用交错，未直接观测申请失败。本轮各仅重验64条原mutex行，实际try_lock失败后才换归属、释放并join；旧raw、费用和失败原件不改。
+
+本轮仅主线源码和离线软件证据，无安装、YMCC/Steam/游戏/设备/真实睡眠操作；实际恢复worker与全四模式/整main/完整工具包及物理验收仍OPEN，整体目标ACTIVE。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE58-CLOSING.json。
+<!-- /BOOT-AUTOMATIC-RECOVERY-OWNER-20261110 -->
+
+<!-- BOOT-SLEEP-GUARD-STAGED-OWNER-20261110 -->
+## 四模式睡眠守护的暂存写入与归属（2026-11-10）
+
+调节入口先校验五项草稿，再由有界配置门串行提交；原设置锁内核对本次启动归属，写入确认后才在同一归属保护下发布运行字段。旧请求不能继续取消重试、更新镜像或返回成功；镜像失败明确报错。配置锁内保留唤醒密码、自动恢复、日志、静态唤醒及方案优化的最新值。原非编辑的日志/退出保存保持原有取消时序，没有新增产品线程/计时器/轮询。
+
+最终源800条边界（含64次真实互斥等待）、12控制组、原runtime5正例与1scope拒绝、固定609输入vue-tsc/Vite通过。先前源另800观察保留，不能当最终1600唯一覆盖；真实取消工作者、文件IO和睡眠端点仍为惰性端口，不据此代签完整回收/设备/实机。旧源过期后仍写配置、取消任务并返回true的FAIL保持。
+
+模式1/全局、2/Xbox关闭Steam高级启动，3/Steam、4/组合开启保持；自动恢复内层、RTSS/charge私有候选、原超时、全UI/原生/工具/包安装及物理验收仍OPEN。本轮未部署或操作真实睡眠/设备/Steam/游戏。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE57-CLOSING.json，整体目标ACTIVE。
+<!-- /BOOT-SLEEP-GUARD-STAGED-OWNER-20261110 -->
+
+<!-- BOOT-WAKE-PASSWORD-REQUEST-OWNER-20261110 -->
+## 四模式唤醒密码事务归属（2026-11-10）
+
+实际wakePassword API捕获并传递本次启动配置；原生在事务锁前/等锁后、固定方案的读写/激活/回滚继续前后核对归属，配置写入原锁内再次核对。过期请求停止后续写入、缓存和成功回执；已发生的Windows调用不冒称撤销，过期后不以旧值回滚新归属。普通调用不增加归属配置读取，既有固定GUID、读回和回滚规则保持，无新增线程/计时器/轮询。
+
+实际API、原生handler及原header以惰性Windows/设置端口通过960边界（含64次真实互斥锁等待）和6控制组，复用原15项普通算法断言；原runtime5项及1项scope拒绝、固定609输入vue-tsc/Vite通过。旧API漏字段和原生过期后仍写AC/DC、激活及保存成功的FAIL保留，不作完整安装或实机证明。
+
+模式1/全局、2/Xbox关闭Steam高级启动，3/Steam、4/组合开启保持。sleepGuard/自动恢复内层、私有charge/RTSS候选、原超时和完整主程序/工具/包安装/物理验收仍OPEN；本轮未部署或操作真实电源方案/睡眠/Steam/游戏。原件Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE56-CLOSING.json，整体目标ACTIVE。
+<!-- /BOOT-WAKE-PASSWORD-REQUEST-OWNER-20261110 -->
+
+<!-- BOOT-MONITOR-REQUEST-OWNER-20261110 -->
+## 四模式监控请求归属（2026-11-10）
+
+监控沿原队列捕获本次启动配置，出队、依赖等待及配置/应用回执发布前后核对归属；旧模式请求不得继续派发后续输出或发布成功。普通未限定请求不增加归属配置读取，没有新增线程、轮询或队列。模式1/全局、2/Xbox关闭Steam高级启动，3/Steam、4/组合开启的既有规则保持。
+
+实际monitor模块、原协调队列及真实归属断言在内存设置/Steam/RTSS/HUD端口下通过1600边界、7普通路径；原启动回执等7定向用例、模板89及桌面9项通过，固定609输入vue-tsc/Vite通过。已派发到内部Steam/RTSS/HUD的操作取消仍OPEN；不代表完整生命周期、整主程序、安装版、实物手柄或真实开机验收。原旧源语义FAIL及历史未验收保持。
+
+原件见Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE54-CLOSING.json；充电Stage53候选仍私有，缺失SDK身份未修复，整体目标ACTIVE。本轮未部署或操控YMCC/Steam/游戏/设备。
+<!-- /BOOT-MONITOR-REQUEST-OWNER-20261110 -->
+
+<!-- DECKY-LEGACY-WATCH-UPGRADE-20261110 -->
+## Decky复用完整观察器并迁移旧文档接口（2026-11-10）
+
+前轮OPEN的旧watch混用已由实际旧JS同页回放复现。新代码复用完整read/refresh/subscribe接口；旧对象仅接续通知，不执行旧缓存账户read或重复注册native hooks；订阅抛错降级现有UI读取。升级约定写进源码，接口/文档所有权不因host/build变动重建。兼容/全新观察器明确logout保持；不透明旧内部logout状态不冒充可靠信息，以真实UI空/变化读取撤销旧凭据。无新timer/轮询/订阅重试/EXE。
+
+原offline精确1case保留既有场景，额外六升级观察含两旧接口端口和四实际种子/三源码SHA；旧源三实际起点拒绝，候选全部通过。旧read0、转发最多1、完整对象身份不变；20同值读/5旧新交替/8观察器重绑，User API内存端口注册计数不增。显式旧源码manifest核SHA，默认无manifest同一case另行通过，不依赖历史路径。初预期坏订阅异常的夹具记录修正单列；四Raw Job关前active0，原900秒窗及两case60000ms预算保留，实际前17929/当前17650ms。
+
+三叶片已核读落主线，小mode生成配套；仅关闭旧watch浏览器迁移缺口。新run仍是浏览器观察器端口，真实native broker/Loader、整main/Full、Steam睡眠/CPU百分比未验，未部署。之前Mode IO候选HELD不动。原件Testing/YMCC/Evidence/DeckyAccountPolicy-20261110/watch-upgrade/SOURCE_READY.json、FIXTURE-REPAIR-RESULT.json、DEFAULT-RESULT.json、FINAL-READBACK.json、REPORT.md。持续目标ACTIVE。
+<!-- /DECKY-LEGACY-WATCH-UPGRADE-20261110 -->
+
+<!-- DECKY-ACCOUNT-READBACK-RECOVERY-20261110 -->
+## Decky账户回调丢失后可由现有读取通知恢复（2026-11-10）
+
+上轮初始化修复后，原离线浏览器消费者进一步复现read失效未通知的缺口，旧源在missing-current-hook:readbackRevokesOldBinding语义FAIL；缓存正账户值还会挡当前UI。现CurrentUser只作通知，实际UI稳定getter双读为准；现有ui.mode.get在实际UI账户变化时refresh通知旧health撤销token并发原恢复标记。明确logout保留，真实空→非空UI读取可消除丢失登录回调状态；旧凭据不可复活。无新timer/读循环/订阅重试/线程，正常同值读取不通知。
+
+原精确一case保持，五注册边界各44mode调用，覆盖旧token撤销/一次恢复标记、新run观察器健康、迟到旧回调不撤销、同值读取零噪声、明确logout和空→非空恢复。修前后Edge Raw8776/8682ms、关前active0。新run由浏览器端口安装观察器，非实际native broker/Loader连接；整main/Full/真实Steam睡眠及CPU百分比未验。三叶片内容已核落主线并同步小mode生成，未部署。
+
+旧文档已存在的watch若无refresh，本轮可选调用不负责迁移，升级混用仍OPEN；不冒充所有升级自愈完成。之前重复Mode IO优化HELD保持。原件Testing/YMCC/Evidence/DeckyAccountPolicy-20261110/watch-readback/SOURCE_READY.json、RESULT.json、FINAL-READBACK.json、REPORT.md。持续目标ACTIVE。
+<!-- /DECKY-ACCOUNT-READBACK-RECOVERY-20261110 -->
+
+<!-- DECKY-OPTIONAL-ACCOUNT-WATCH-20261110 -->
+## Decky不再因账户观察初始化缺失永久等待（2026-11-10）
+
+前轮当前UI优先仍需accountWatch.read，旧对象在注册前发布且registered/current是硬门：接口缺失、注册抛错或初始回调未到会挡住之后全部读取。本轮原offline browser case在旧JS真实复现missing-current-hook:proofAvailable失败。现在可用当前UI getter稳定二读建立证明；两个可选注册独立且各最多一次，不把初始化成功当连接前提。明确logout、已知正的账户冲突、getter对象/值变化仍拒绝；原进程/OFF/取消及资源预算不动。无新重试/轮询/timer/网络/线程。
+
+修后原精确一case通过，保留原正常离线/在线/logout/旧凭据不复活，追加五注册边界各21次mode读；hook最多一次、watch不变、不同UI账户与明确logout拒绝保留。修前后两个真实Edge Raw Job最终active0，9328/8745ms；未扩大到全health/browser、完整DLL工具闭包、原生整main/Full或实机Steam睡眠/CPU收益。实际小mode生成表达式含同一修复块，主线标准生成check通过。三叶片内容已核读落主线，未部署，菜单其他修改保留。
+
+本机只读尾部writer77056是desktop等待大屏，非新掉线证据；安装identity仍38090c2a，不冒充已含本修复。原重复Mode IO候选继续HELD。原件Testing/YMCC/Evidence/DeckyAccountPolicy-20261110/watch-initialization/SOURCE_READY.json、RESULT.json、FINAL-READBACK.json、REPORT.md。持续目标ACTIVE。
+<!-- /DECKY-OPTIONAL-ACCOUNT-WATCH-20261110 -->
+
+<!-- DECKY-CURRENT-UI-ACCOUNT-POLICY-20261110 -->
+## Decky不再被陈旧注册表账户挡住恢复（2026-11-10）
+
+用户明确要求重新评估并削弱Decky多余账户保护；菜单按钮另由触摸板任务处理。本轮Decky仅调整账户选择和重复比较：同PID/birth的当前Steam界面账户有现成CurrentUser佐证时，可覆盖0或不同的ActiveUser；绑定子进程对这个typed UI来源不再要求注册表账户相等。账户一致保持原路径，不为健康普通连接新增mandatory watch。实际文档在凭据定义前仍核对当前UI；真正换号使旧token失效并走原可恢复重绑。未去掉OS用户/Windows会话、Steam映像/出生、根路径/活进程、取消/OFF、电源代次和崩溃/清理预算；不改其他Steam设置读写门。
+
+Win5 010502末段PID3504有262次账户冲突、395条UI pending，无自有Loader/镜像连接；这与旧策略拒绝相符，不断言注册表陈旧的具体来源。用户重启新版恢复记USER_RESTART_RECOVERED，非自动自愈PASS；没有重启后的Win5精确构建证据。新增uiAccountSelected/registryMismatchIgnored布尔诊断保留差异而不暴露账户。此前writer PID+birth日志元数据已核源码，非loaded-image SHA证明、未实际执行新logger。
+
+旧产品在原lease消费者确实拒绝新要求。最终最小候选原20租约检查及2个PID语义负例通过；原typed main消费者单case通过，含12次当前账户切换/非零旧注册表重放、24次旧PID/birth拒绝，原OFF/桌面/退避与资源归还保持。原readiness诊断117及原共享源合同19通过，四个最终Raw Job均归还（lease内部另含原正例及两语义负例）；完整主程序构建、Full、实机睡眠/Steam/CPU收益未验，未部署。八叶片精确入主线，五个字节同源、另三个仅保留原行尾，内容逐字核对。
+
+准备600秒窗越期保持INCOMPLETE，不回填PASS；具体路径/缺显式输入/混合行尾准备失败、初候选和精简候选原件均保留。必要定向续作记录端到端累计和原case限制，未重开Full或新增ID/minimum/父门。此前重复Mode IO候选已私有验证但按用户“新版重启正常，仅加日志”决定HELD，未入主线；本次账户变更来自后来单独明确授权，不夹带该优化。
+
+原件：Testing/YMCC/Evidence/DeckyAccountPolicy-20261110/SOURCE_READY.json、FINAL-READBACK.json、MINIMAL-VERIFICATION-RESULT.json、REPORT.md。持续目标ACTIVE，真实唤醒由用户下次验证。
+<!-- /DECKY-CURRENT-UI-ACCOUNT-POLICY-20261110 -->
+
+<!-- DECKY-SHARED-RENEWAL-DUPLICATE-IO-20261110 -->
+## Decky慢速续读的重复IO已复现，候选未验收（2026-11-10）
+
+原typed offline消费者内，以实际main admission/health及真正ModeObserver屏障复现：health读已在途，admission再invalidate导致实际addedReads2/requests2，原case明确FAIL duplicate-shared-mode-io-after-slow-renewal-inflight-order；编译及实际include/link闭包已完成。此机制与Win5的5/25秒交替相符，不认定全部现场读取/账户冲突根因或CPU比例。两个实际消费者片段当前仍精确相同，整main并行变化分列。
+
+候选移除admission独立续读，health复用原计时器唯一拥有，保持原30s未确认/5s已准入故障与快速离线证明；只在私有源。原180秒比较账after余量不足，176524ms原Raw Job以TIMEOUT收尾，cl树被回收、obj0、不算编译成功，native NOT_RUN。before自然退出/after强制回收分列，两Job最终active0；不重置预算、不自动重跑、不写SOURCE_READY。初准备错TS路径与纠正保留；新屏障callback capture/shutdown声明顺序还须后续复核。
+
+本阶段产品/正式夹具未写主线、未部署。上一轮账户PID诊断三叶片已就绪交付保持。真实Steam/睡眠、Full、整main和CPU收益未验收，目标ACTIVE；不能把这个候选列为已交付修复或默认发布前置。原件Testing/YMCC/Evidence/DeckySharedRenewal-20261110/CANDIDATE.json、REPORT.md。
+<!-- /DECKY-SHARED-RENEWAL-DUPLICATE-IO-20261110 -->
+
+<!-- DECKY-WIN5-ACCOUNT-PROCESS-DIAGNOSTIC-20261110 -->
+## Decky新日志账户冲突与进程来源诊断（2026-11-10）
+
+用户不记得切号/离线，记UNKNOWN、不推定。当天三新ZIP选定原件/index校验，Win5 PID3504的86次大屏读全冲突：实时注册表匹配session、不匹配UI，UI回调佐证true；本段无镜像附着/自有Loader启动。尚缺注册表PID关系，不认定是旧session缓存、账户切换或官方Loader故障。Aokzoe末段desktop匹配，等待大屏不算崩溃；waiting-receiver仍属触发前，不接管输入路线。
+
+本机当前181ebfb3来自234404整包，选定EXE/公开Loader/插件=ZIP=identity，五个原账户诊断来源精确匹配；5550已是历史，不能回退。各日志native磁盘SHA相符仅是export-time、非历史loaded-image证明。本次后继只在同进程大屏账户冲突诊断多读一次注册表pid，输出known/present/matchesSession/错误码，不记原值；与ActiveUser非原子，不授身份/恢复/清理权限，健康等新增读0。
+
+三叶片SOURCE_READY。原readiness-diagnostics117检查通过，匹配/不同/零/坏类型/缺失及过滤器/健康零读均实际消费；首编译测试initializer类型错误FAIL保留并修正，两Raw Job自然退出且关前active0。原100秒consumer/修复累计72270ms，调查与文档另计；未整main/完整工具闭包/Full/实机睡眠或CPU收益验收。已交CPU1与导出任务自然后继，不冻结/追包，未部署，持续目标ACTIVE。
+
+原件：Testing/YMCC/Evidence/DeckyFieldReview-20261110/FINDINGS.json、REPORT.md、process-diagnostic/SOURCE_READY.json。
+<!-- /DECKY-WIN5-ACCOUNT-PROCESS-DIAGNOSTIC-20261110 -->
+
+<!-- LIGHT-ISOLATION-NATIVE-GRACE-20261110 -->
+## 无虚拟且无游戏的轻度隔离保留3秒尝试（2026-11-10）
+
+用户最终明确规则没有变化：有游戏直接普通隔离；仅虚拟手柄关闭且唯一识别确认没有游戏时，轻度最多尝试3秒，失败后普通隔离才进入。GameLocker呼出和返回、唯一识别及game latch十三函数与前件逐字相同。探索中的game-first改动已撤回，其旧回执不计最终验收，未交付。
+
+原窗口内的实例/传输/队列暂时失败不立即降级；重复呼出及Host/source代次不能无限刷新未建立窗口，健康回执的既有期限继续有界继承。失焦/OFF/非Ready撤销；旧persona回执无权进入新模式，virtual OFF重新建立本机3秒窗口。虚拟开启不增加3秒门，普通/虚拟归还与自愈owner保持原优先。
+
+原消费者最终512组、至少20480步，Release/Checked各34708检查及6语义负例通过；原游戏前置14/转场31、Steam JS 28组合672步和生产优先级25分别保留其来源/范围，不冒称全部同版重新执行。累计原生消费者费用253.126秒/270秒，JS与日志协作者墙钟超限如实登记。普通导出完整夹具及真实睡眠/物理手柄NOT_RUN。
+
+完整主线测试ZIP：`G:/YeManCC-Work/Deliverables/YMCC-无虚拟轻度3秒稳定性-0.0.39-20261110/YeManCC.zip`，111049768字节、617文件，SHA256 `4b7f18b3df0d353aa609926b2426dc56215b95b2aff22c5b37848e19d212669c`，BuildId `41c332e2120ce8842530c5eb4bc8bd82a6a634a1b89ee0e8e67736ef8025a8d3`。固定已完成093528主线仅叠三产品叶片，保留未完成的并行PowerHold在公共源码中，不追入本包。相较原618仅少导出说明test-export.json，载荷无额外缺项；EXE/依赖锁/ZIP逐文件和被测闭包核对通过，未部署。
+
+新Win5 111926当前PID9244有64ms取消后ACK，也有原生restore helper disable65423ms后exit6/23及虚拟工作等待；根因仍分列未知，已交归还owner，不把两者合并为轻度故障。原件/费用/规则纠正及交付核验统一在Testing/YMCC/Evidence/LightIsolation-Stability-20261110，最终回执DELIVERY-VERIFICATION.json。
+<!-- /LIGHT-ISOLATION-NATIVE-GRACE-20261110 -->
+
+<!-- LIGHT-ISOLATION-FALLBACK-20261110 -->
+## 无游戏优先轻度隔离，失败由普通隔离保底（2026-11-10）
+
+Win5 002200包中13条轻度ON均在原生Steam绑定处返回steam-instance-unavailable，13条OFF的no-steam-lease仅表示无租约可释放。用户确认两段均无虚拟手柄，普通隔离可用；具体注册表读取失败条件缺证，不能把同期其他虚拟操作认作这次失败原因。
+
+轻度租约复用既有共享Steam session observer，并沿原steamLiveRequest核对精确PID/birth/root/账户。GameLocker呼出和焦点交接、Steam JS屏蔽实现保持。共用普通屏蔽准入现在区分无游戏资格与屏蔽实际建立：第一次轻度尝试保留原3000ms有界窗口，明确失败、队列不可用或已确认租约到期交原串行隔离owner；当前可见生命周期保留保底，旧回执及设备源变化不反复撤回，实际隐藏/最小化后可重新优先轻度。活动快捷键会话和普通show/activate/foreground入口均接续；唯一游戏识别的游戏已开启锁存、设置OFF和虚拟切换/自愈优先级保持，无新线程/计时器/扫描或设备授权。
+
+原focus-shortcut-input-evidence消费者native-ui-eligibility定向Release/Checked各136检查通过，3条语义负例拒绝（删除健康轻度豁免、删除失败保底、阻断活动会话接续）。原始失败和当前源回执分开保存在Testing/YMCC/Evidence/W5LF10；其他原场景及完整夹具未据此授予通过，完整包与真机验收分别记录。
+<!-- /LIGHT-ISOLATION-FALLBACK-20261110 -->
+
+本轮完整主线测试ZIP已独立构建并逐文件核对617文件：`G:/YeManCC-Work/Deliverables/YMCC-轻度隔离修复-0.0.39-20261110/YeManCC.zip`，110996258字节，SHA256 `73c46afc85288c3210c3eb65ae217d79c78e677980ebec80ba3581323c75b102`，BuildId `497181bdf5641aa96b98ffa36e2f1a3e050adef17b73c57b0d0953ae66fc33f4`。原game-before-show-lifecycle另经Release/Checked各14检查、2负例拒绝；包内与定向原消费者闭包匹配，GameLocker八函数及原Steam JS/CDP/handoff文件与前件一致。首次完整源的ES2020 Object.hasOwn编译FAIL保留，只集成启动模式owner确认的一行等价修正，原始回执与后继分列。完整夹具/真机未验、未部署，不追入快照后继修改。详Testing/YMCC/Evidence/W5LF10/DELIVERY-VERIFICATION.json。
+
+<!-- DECKY-CURRENT-5550-INSTALLED-20261109 -->
+## Decky当前5550安装来源与缓存修复（2026-11-09）
+
+已核导出任务5550e019完整后继原源/ZIP/事务，四选中安装载荷=ZIP=identity，公开Loader原字节保持。配置缓存租约修复两源码叶片精确匹配此前SOURCE_READY，真实安装JS的AST确认唯一schedule读取点含退休租约拒绝和新缓存保留；旧业务回归未重跑。账户冲突诊断仍是后继源码，交下次自然合批。以后维护接5550原包，不回退620e/c893，保留CE tuple。当前desktop等待不算掉线；本轮无部署/业务测试/Steam/睡眠/CPU收益验收，持续目标ACTIVE。原件Testing/YMCC/Evidence/DeckyInstalled5550Intake-20261109/RESULT.json、REPORT.md。
+<!-- /DECKY-CURRENT-5550-INSTALLED-20261109 -->
+
+<!-- DECKY-ACCOUNT-CONFLICT-DIAGNOSTICS-20261109 -->
+## Decky账户冲突增加定向实时来源比较（2026-11-09）
+
+主线SOURCE_READY：仅原模式读已确认同进程大屏账户冲突时，再读一次实时ActiveUser，输出与session/UI的匹配布尔及读取错误码；不记账户值/路径，不改准入、恢复或设置，无新thread/timer。原native readiness组96检查、原静态接线19项通过，原断言完整字节保持；六私有Win32读取边界，健康/离线/桌面/未知/旧进程新增读0，Job和私有子键末端0。工具准备EEXIST与入口缺未选择指纹文件的ENOENT保留，未冒认旧产品负例；实际消费者收费18954ms/原100秒额度，不是整轮调查墙钟。
+
+Win5117次冲突根因仍UNKNOWN，未部署/实机/CPU/完整编译闭包或Full验收；27/47/2旧通过未重复。共享main按新读字节只改原调用，保留CE后继。收到620e回执但本机另见5550e019，来源核收误读及实际差异另存，未回退追包。原件Testing/YMCC/Evidence/DeckyAccountConflictDiagnostics-20261109/SOURCE_READY.json、INTAKE.json、REPORT.md，交自然合批，持续目标ACTIVE。
+<!-- /DECKY-ACCOUNT-CONFLICT-DIAGNOSTICS-20261109 -->
+
+<!-- DECKY-SCHEDULE-READ-LEASE-20261109 -->
+## Decky旧配置读取不得覆盖新需求缓存（2026-11-09）
+
+主线SOURCE_READY：原Host在旧异步loadPerformanceSchedule结束时直接写显示缓存，可能覆盖重开侧栏/新连接或较新的配置通知。正式Host/Relay与原内存输入owner已复现：当前明确意图被判原方案变化、inputSaves=0。现只修缓存提交：结束/旧租约立即丢弃，已有新通知保留；原业务source/CAS/游戏/电源校验不放宽。
+
+原settings invalidation场景修后三边界通过（换peer、暂停重开、配置通知），各仅一次明确意图保存，其他写入0，观察器/timer归零；没有新ID、父门、重试或轮询。初选错原场景的无新增边界PASS和外层FAIL、随后正确原产品FAIL及EEXIST封存拒绝均保留；原terminal直接核收，未为补封存重跑业务，旧原件未覆盖。原20秒预算未扩，含所有失败与启动收录保守收费14.701秒，详BUDGET-CLOSURE。
+
+本轮只写Host和原测试两叶片，完整原断言/无关字节逆向SHA保持。当前安装9f440885不含此后继；不反复部署、不追入他人已固定候选，交以后正常合批。Full/整编/完整Node资格/真实Steam睡眠及CPU百分比未验，目标ACTIVE。原件Testing/YMCC/Evidence/DeckyScheduleReadLease-20261109/INTAKE.json、SOURCE_READY.json、REPORT.md。
+<!-- /DECKY-SCHEDULE-READ-LEASE-20261109 -->
+
+<!-- DECKY-OBSERVER-RECOVERY-INSTALLED-20261109 -->
+## Decky订阅异常恢复已安装（2026-11-09）
+
+本机已从8c570c87接续为9f440885（0.0.39），仅纳入三个已SOURCE_READY的Decky TS产品文件及原测试后继：Host逐项清理、Updater部分注册回滚/明确状态请求重试、旧回调代次隔离。原publish整编/打包251.801秒通过；既有故障原件逐一核收，本轮Full/业务夹具NOT_RUN。原生策略、公开Loader/Steam插件字节和CE短IPC载荷保留，没有新EXE、timer或业务重放。
+
+核原进程后正常退出，canonical整包部署确认不可变读回及可变配置保留；--minimized重开PID10308，EXE59e641897bcd0acb69d7a9b00d3fa16acca1394fb3fc4c360192dcc8abdf4813。独立再读611个非可变载荷匹配，新EXE/PDB GUID+age匹配。附加核对曾误将memreduct.ini按包默认字节比较，原失败保留，现按原事务明确可变路径纠正；无覆盖配置或重复部署。
+
+当前原日志为Steam桌面等待，已初始化不等于真实面板/睡眠自愈。S0/S3、离线、多会话/Steam升级及CPU收益仍待运行证据，整体目标ACTIVE。固定原源/完整包/事务/限定范围见Testing/YMCC/Evidence/DeckyObserverRecoveryBuild-20261109/DEPLOYED-RESULT.json、REPORT.md；以后部署接此来源，不回退旧包。本轮没有直接控制Steam、游戏、设备或真实睡眠。
+<!-- /DECKY-OBSERVER-RECOVERY-INSTALLED-20261109 -->
+
+<!-- DECKY-UPDATER-SUBSCRIPTION-RECOVERY-20261109 -->
+## 首次更新状态订阅失败可回滚并重新接入（2026-11-09）
+
+更新状态首次订阅失败后的恢复已补强，当前仅主线源码就绪。
+
+服务原先先置watching，再注册观察器；注册异常后保留watching且没有取消函数，后续状态请求跳过注册。适配器在中间失败时也没有归还已获得的前半组订阅。现在只接纳完整建立的观察回调；失败时回滚已登记资源，发布禁止检查/下载/安装的有界错误状态。下一次当前页面的明确状态请求可以重新建立；健康重复请求不会再登记一组。既有原更新/安装准入业务体逐字保持，没有新自动重试或计时器。
+
+复用原readiness精确1case。修前首次state注册失败未回状态的语义FAIL保留；修后state/game/suspend/resume/manager五个失败位置×same-page/disconnect/page-reopen三条恢复路，共15条观察通过：失败后订阅0，错误状态动作全禁用，恢复后恰好4订阅，重复10次请求不增订阅，最终stop归零，真实更新动作0。两个Raw Job关闭前active0，共享20秒实际5.413秒；不把15正向边界冒充15次旧源负例。
+
+另发现可选legacy-diagnostics分组把4个新增updater恢复case混入原诊断组。只纠正分组谓词，旧诊断恢复17项；原回调和精确--case分支字节保持。单次未知case沿真实入口在prepare/callback前拒绝，业务运行0，原已通过15边界未重复；原SOURCE_READY/raw保留，后继分组来源单独登记。
+
+目前安装已由CE所有权任务更新3e00d846，原源/包/事务及EXE已独立核收；它不包含这次新修复。完整Node工具资格、主程序整编/Full、实际Steam/睡眠与CPU百分比仍未验；注册中同步撤销分支未单独实跑，也不承诺释放没有返回句柄的外部异常资源。本轮无Steam/设置/设备/睡眠/部署动作，交自然后继导出，整体目标ACTIVE。
+
+原件：INTAKE.json、SOURCE_READY.json、before/after原回执、selector/RESULT.json及三份精确补丁。
+
+<!-- /DECKY-UPDATER-SUBSCRIPTION-RECOVERY-20261109 -->
+
+<!-- DECKY-UPDATER-OBSERVER-EPOCH-20261109 -->
+## 旧更新初始化回调不得覆盖新连接提示（2026-11-09）
+
+Decky更新状态的旧初始化回调已隔离，当前仅主线源码就绪。
+
+本轮通过实际UpdaterHost中的ensureUpdateManager().then(changed)延迟完成，复现关闭再开侧栏后旧回调清掉新连接上的失败提示，并多发一条状态消息。现在订阅建立时记录代次，暂停/断连/换peer/卸载先撤销代次；旧回调不能再清提示或发布到当前连接。前轮逐项释放和异常隔离保持，UpdaterHost本轮未改。
+
+复用原readiness精确1case，覆盖pause-reopen、disconnect-reopen、peer-replacement三种边界。修前真实语义FAIL保留；修后三种延迟完成均保留失败提示、额外包0，每种随后1000次旧state/game回调无新增包或电源读取，当前合法状态事件仍显示新值。每种执行1次受控检查失败，真实网络/下载/安装/安装核验0；两个Raw Job关闭前active0，共享20秒预算实际5.240秒。
+
+没有新增轮询/线程/服务、业务动作重放或修改官方Loader。不当历史掉线根因，也不声称CPU百分比收益；主程序整编、Full、实机睡眠和标准工具完整资格仍未验。观察器首次注册失败、操作Promise跨peer完成等仍分列未验，不据本轮结果称全部恢复闭环。当前本机ec093不含这批最新源码，交后续自然导出，本轮不反复部署。整体目标ACTIVE。
+
+原件见INTAKE.json、SOURCE_READY.json、before/after原回执和两个精确补丁。
+
+<!-- /DECKY-UPDATER-OBSERVER-EPOCH-20261109 -->
+
+<!-- DECKY-UPDATER-TEARDOWN-RECOVERY-20261109 -->
+## 更新状态退出异常不再阻断下一次连接（2026-11-09）
+
+更新状态通道的退出与重连已补强，当前仅主线源码就绪。
+
+原Service先调用外部取消订阅再清引用；回调抛错会中断断连/换peer/卸载，并留住旧取消回调。现先撤销本方引用及wire缓存，再独立尝试释放，不让失败挡住后续连接。原精确消费者修前FAIL保留，修后pause/断连/换peer/dispose×正常/异常8条观察通过；重复停止不再次调用旧回调，新当前peer可取得有效状态。
+
+后继检查实际UpdaterHost发现取消State后直接串行Game/Suspend/Resume，一个异常仍会留后面的观察器。只改原释放回调为逐项尝试；实际Host+Service+extension/protocol在控制Vue/IPC/更新管理器端口下，pause/断连/stop×4故障位置及正常共15条观察通过，所有独立取消回调均执行且观察器为0，恢复订阅可用。未执行检查/下载/安装/安装核验，effects=0。
+
+两次均复用原readiness消费者精确一个case（共两个唯一case），前后各Raw Job关闭前active0；Service与Adapter独立来源原件和失败保留，合计实跑10.270秒。不把23观察写成23独立用例或全模块验收。原1000健康刷新/observer12条等前轮通过未重复执行，旧用例字节精确保持，三叶片之外不改，既有Host订阅清理helper保持。
+
+无新timer/线程/轮询、API、下载器、EXE或业务写；不认定历史现场根因，也不承诺强制释放故障回调自身外部资源。当前本机ec093未包含这次修复；交自然后继导出，本轮不反复构建部署。完整工具资格、主程序整编、Full、真实Steam/睡眠及CPU百分比收益均未验，目标ACTIVE。
+
+原件：INTAKE.json、SOURCE_READY.json、adapter/SOURCE_READY.json、各before/after原回执及三个精确补丁。
+
+<!-- /DECKY-UPDATER-TEARDOWN-RECOVERY-20261109 -->
+
+<!-- DECKY-OBSERVER-CLEANUP-FAILURE-20261109 -->
+## Decky订阅释放异常继续清理其余资源（2026-11-09）
+
+Decky 关闭侧栏后的订阅残留已在正式Host/Relay中复现并修复，当前仅主线源码就绪。
+
+原数组循环遇到一个取消订阅异常就中断；Relay虽吞掉这个退出异常，后续Host订阅没有执行释放。现有policyReadiness端口注入取消后抛错，修前pause后留IPC7、fan1、watcher1。现在逐个尝试释放，原初始化失败路径仍抛原始异常；业务逻辑、输入路线与默认健康行为保持。
+
+复用原readiness消费者精确选择2个原场景：健康1000次刷新，以及原隐藏风暴场景内新增的pause四次/断连/卸载×正常/异常共12条观察。修前只运行目标1场景，实际FAIL保留；修后所选2场景通过，无额外场景混入，全部观察器/计时器归零（host存活且暂停/断连时保留2个原全局native监听，最终stop也归零）。两Raw Job关闭前active0，共享20秒预算实际5.280秒；没有新增ID、父门、fixture或轮询。
+
+这不是历史掉线根因认定，也不证明抛错回调自己的外部资源一定已释放，仅确保它不能挡住后续独立清理；没有CPU百分比、实机睡眠或完整夹具验收。仅两叶片精确应用，原Host其余字节逆向验证保持；当前安装已由CE链从2527更新ec093，未包含本次新helper，保持既有Decky合批。交自然后继导出，不为此单叶片反复编译部署。
+
+原件见INTAKE.json、SOURCE_READY.json、before/after原回执和两个精确补丁。整体目标ACTIVE。
+
+<!-- /DECKY-OBSERVER-CLEANUP-FAILURE-20261109 -->
+
+<!-- DECKY-RECOVERY-FINAL-CURRENT-INSTALLED-20261109 -->
+## Decky当前安装底座合批接续（2026-11-09）
+
+本机 Decky 自愈加固已安装，版本仍0.0.39，构建2527de8b47fcc8c50f2d03108725e49132f6dfc7e12a9bc1df35413f5a9ce452。旧4945已正常退出，原事务完整读回、可变文件存在性和字节保留通过；新PID39628/出生134386999454633758，以--minimized运行。实际安装来源是当前4945加相同六生产/四原测试叶片，保留修改器WebView/电源代次修复。
+
+已编入账户读数短暂缺失时的崩溃额度保护、前端单调连接时钟、致命停止后的取消/派发/重入隔离，以及真实就绪结束挂起导入等待。完整原publish成功196.186秒；此前451成功200.338秒因安装在维护前变化而未部署，原身份门有效，不回退新版。19项产物变化逐项核原生产者，公开Loader原字节保持，没有新增EXE。实际bundle精确AST时钟与EXE嵌入JS核对，EXE/PDB匹配，私有PDB不入用户包。
+
+原173/47/21场景105检查等属于不同既有运行，仅引用，不合计重跑或冒充完整夹具；原语义FAIL/工具资格边界保留。桌面观察81.9秒，新增Decky模式读取0，不是CPU百分比收益。没有控制Steam/游戏/设备或真实睡眠；实体大屏睡眠唤醒仍由用户操作，离线/切号等未全覆盖，整体目标ACTIVE。
+
+最新Win5 19:27包未见Decky接收后卡死新证据，四次快照10/8/7/9ms。用户确认远程Ctrl+2与Xbox可呼出，触发前waiting-receiver交触摸owner。原件见REVIEW.json关联及本目录RESULT.json、Maintenance/RESULT.json、原部署事务。
+
+<!-- /DECKY-RECOVERY-FINAL-CURRENT-INSTALLED-20261109 -->
+
+<!-- DECKY-INSTALLED-620D-SOURCE-INTAKE-20261109 -->
+## Decky当前安装620d来源接续（2026-11-09）
+
+修改器维护链已将本机更新620d7251…/原生a23af760…，PID12180/出生134386963755190387。原源码BUILD/FINAL整包及部署完整回读事务已关联；七份Decky相关源码和选中EXE/Loader/插件匹配原件。仍沿用9537的Decky家族：已含健康读取重叠/长寿child健康证明，未含账户空读预算/单调时钟/fatal取消派发重注入/真实ready结束挂起导入等待；旧插件与精确AST原字节一致。旧9537仅为历史，不能继续称当前安装。
+
+后续PreviousArchive使用trainer-1109-retry原ZIP（SHA b5eb38d264fb499725d4a065c9baced4af58a82c1529405ad7757cd6276f3d8f）。本轮无应用/设置/Steam/设备/睡眠动作，现有SOURCE_READY不冒充已安装，物理恢复与CPU收益未验。原件Testing/YMCC/Evidence/DeckyCurrentSourceIntake-20261109/installed620d/RESULT.json、REPORT.md；目标ACTIVE。
+<!-- /DECKY-INSTALLED-620D-SOURCE-INTAKE-20261109 -->
+
+<!-- DECKY-FRONTEND-READY-HUNG-IMPORT-20261109 -->
+## Decky真实前端就绪后不再被官方导入Promise卡住（2026-11-09）
+
+原Promise.all等待importPlugin与ready：官方导入一直pending但匹配active/buildId已到时，ready早完成使10秒reject失效，本方状态/监听可永久保留。原消费者实证FAIL（phase pending/pending true/timer1/ready监听1）。现匹配ready可独立结束本方等待，保留当前授权/取消、早失败、原10秒与3次尝试；无回执/错版本/queue不冒充就绪，已交官方的import内部工作不冒称取消，无新timer/线程/轮询。
+
+原16场景及断言保持，5新增边界后21场景105检查通过，修前负例先行，两Raw Job关闭前归零，诊断约4.084秒。JS/原embed头/原消费者配套SOURCE_READY，有限工具pins不代签完整工具资格；未整main/完整父/构建部署/真实Steam睡眠，未实测CPU收益。原件Testing/YMCC/Evidence/DeckyFrontendReady-20261109/SOURCE_READY.json、REPORT.md；目标ACTIVE。
+<!-- /DECKY-FRONTEND-READY-HUNG-IMPORT-20261109 -->
+
+<!-- DECKY-ROG-FIELD-REVIEW-20261109-142151 -->
+## ROG 14:21包的Decky冷启动、主题与CPU分列（2026-11-09）
+
+选中10成员匹配原导出SHA/字节，包内3173去重Decky行跨10/31～11/09。最新YMCC10276的91行无failed/unavailable，同Steam14252/出生134386788271147036，14:20:47.254重连观察至14:20:52.257全通道连接，episode5000ms，非应用总启动耗时或物理唤醒证明。后续59保留样本均connected/loader-started，不外推连续。
+
+原CPU区间/分母/别名检查器复用：Loader15076的65.031秒保留区间整机均值0.027030%，子15908的64.031秒均值0.007626%；连通后保留行对应区间分别0.003366%/0.001683%，不作CPU收益或共享Steam/GPU归因。14:21:12.662已desktop，14:21:32.400主题DOM未确认而后端ready/配置匹配，不能当Decky掉线。旧resource-missing及27字节内部日志尾片段保留为历史/未知，不猜测改产品。
+
+无产品/设置/Steam/设备/睡眠动作、无夹具/构建部署；远端完整源码来源仍缺证。原件Testing/YMCC/Evidence/DeckyROG-FieldReview-20261109-142151/REVIEW.json、POST-CONNECTION-CPU.json、REPORT-READABLE.md；首报告JSON序列化格式失误保留并单独更正。目标ACTIVE。
+<!-- /DECKY-ROG-FIELD-REVIEW-20261109-142151 -->
+
+<!-- DECKY-FRONTEND-STOP-DISPATCH-REENTRY-20261109 -->
+## Decky 关闭后的微任务与重复接入继续收口（2026-11-09）
+
+前13场景56检查只证明timer/监听取消。新原消费者实证：停止与首import微任务之间仍可派发一次，首加载已停止后的晚回执仍重选一次；首候选后同一旧授权重注入又实证一次面板选择。原FAIL/首候选/前轮范围全部保留。最终实际import前核current/canceled，首加载晚回执与终态拒绝canceled，同一已停止stamp再注入先拒绝；新stamp保留原准入，健康current不误标取消。无官方Loader修改/新timer/线程/轮询，不冒称取消已交官方的import内部工作。
+
+最终原版本更新16场景74检查、首加载21场景通过，原负例/断言与三次尝试时序保持。5个后继Raw Job关闭前归零；含前轮实际执行约14.701秒，重复实跑分列不增唯一覆盖。JS/原embed头/两原消费者配套SOURCE_READY，未整main/完整父/正式包/部署/真实Steam睡眠，CPU收益未验。原件Testing/YMCC/Evidence/DeckyFrontendStop-20261109/dispatch-successor/SOURCE_READY-ENTRY.json、REPORT.md；目标ACTIVE。
+<!-- /DECKY-FRONTEND-STOP-DISPATCH-REENTRY-20261109 -->
+
+<!-- DECKY-RETAINED-FRONTEND-FATAL-STOP-20261109 -->
+## Decky 致命关闭不能留下旧版本更新重试（2026-11-09）
+
+明确致命错误的原生teardown会先派发ymcc-decky-health-stop，再官方dismountAll/deinit；旧版本更新分支此前不监听，排队重试可以越过关闭。原消费者原11场景通过后新增取消断言实证FAIL。现同事件立即取消本方timer/deadline/就绪监听，状态与晚回执按取消标记隔离；健康/终态归还新增监听。原三次尝试与延迟不变，官方已派发import仍归官方，本方不冒称已取消其内部工作。无新timer/线程/轮询/业务重放。
+
+原测试扩展为13场景56检查，修后通过；两次自有Job关闭前归零，实际诊断约4.159秒。源JS及原embed生成头同步，准备锚点误匹配FAIL、旧语义FAIL和有限工具资格保留。仅SOURCE_READY，未整main/父层/构建部署/真实Steam或物理睡眠；不认定全部历史掉线根因。证据Testing/YMCC/Evidence/DeckyFrontendStop-20261109/SOURCE_READY.json、REPORT.md，目标ACTIVE。
+<!-- /DECKY-RETAINED-FRONTEND-FATAL-STOP-20261109 -->
+
+<!-- DECKY-INSTALLED-EXACT-CLOCK-CORRECTION-20261109 -->
+## Decky 本机9537来源与计时误判更正（2026-11-09）
+
+原包、源码声明、发布命令和完整部署事务已关联，选中EXE/官方Loader/插件与ZIP和安装字节一致。此前按performance.now全局字符串认定本机连接时钟已修复有误；AST准确定位的MirrorClient.now仍使用Date.now。9537已含健康读取重叠、长寿命child健康证明修复，尚未含账户空读预算与单调连接时钟修复；私有当前插件包含后者，不代表已安装。旧错误结论/矩阵原件保留，以此更正接续。
+
+后续维护PreviousArchive使用trainer-1109-local原9537 ZIP（SHA afc478d4e2ab4669955ef44041f0665ddd479561454e7344374c08352368a750），实际发布入口为-TestExport。无本轮产品/部署/Steam/睡眠动作；实体唤醒、离线/切号及CPU收益未验，目标ACTIVE。原件：Testing/YMCC/Evidence/DeckyCurrentSourceIntake-20261109/INSTALL-SOURCE-CORRECTION.json、EXACT-CLOCK-METHODS.json。
+<!-- /DECKY-INSTALLED-EXACT-CLOCK-CORRECTION-20261109 -->
+
+<!-- DECKY-CURRENT-PLUGIN-INSTALL-RECONCILIATION-20261109 -->
+## Decky 实产物与安装身份接续（2026-11-09）
+
+当前快照514文件通过原插件builder，私有build4e29347a9734fb7103d193f378712dc5f3ec64f0c6d8dbf382cabf76343256ce、476680B；原7指纹/6SVG实产物检查通过，单调时钟进入真正minified产物。未重跑47/173业务，无产品/共享Build/安装写入，非整Native/包/完整父或实机验收。
+
+另一维护链已将本机更新为9537a12c4df8989e234ef4dfb03a4346a1559e5c194567fd8ae6cd7d206a6a4d，PID26900/出生134386835539176552。当前选中EXE/Loader/插件与安装声明相符，安装插件自指纹正确且含clock路径；其来源家族不同于私有产物，原包/事务/Native源归属尚UNKNOWN，已协调owner，不冒称已部署或原账户修复已纳入。旧d117仅保留为历史安装证据。11项当前要求/原件/缺证见Testing/YMCC/Evidence/DeckyCurrentSourceIntake-20261109/CURRENT-EVIDENCE-MATRIX.json、REPORT.md；实体大屏睡眠/离线/切号及CPU收益仍未验，目标ACTIVE。
+<!-- /DECKY-CURRENT-PLUGIN-INSTALL-RECONCILIATION-20261109 -->
+
+<!-- DECKY-MONOTONIC-HEALTH-20261109 -->
+## Decky 前端校时与稳定连接退避（2026-11-09）
+
+原Date.now默认时钟在连接仅1秒、墙钟前跳1小时后误退款，原消费者准确复现30秒→250ms错误。默认改用performance.now，原注入时钟优先/无API旧回退、阈值与全部退避不变。原42＋新增5共47场景通过，含前跳/回拨四组合、实测耗时、健康零额外timer/流量；共享20秒scope实际4.851秒，两Raw Job关前归零。旧语义FAIL保留。
+
+仅方法和原消费者源码SOURCE_READY，未插件构建/完整父层/标准工具全资格或部署，不追d117包。无真实校时/网络/Steam/睡眠操作、现场根因或CPU百分比宣称，目标ACTIVE。原件Testing/YMCC/Evidence/DeckyMonotonicHealth-20261109/INTAKE.json、REPORT.md。
+<!-- /DECKY-MONOTONIC-HEALTH-20261109 -->
+
+<!-- DECKY-SESSION-GAP-POLICY-EXTRACTION-20261109 -->
+## Decky 账户预算测试提取接续（2026-11-09）
+
+173业务运行后发现转发helper进入原父policy提取片段、类型缺限定；只移定义顺序并明确命名空间，wmain/断言不变。原提取边界语法旧exit2→新exit0，未重跑173。额外typed语法图44个SDK/STL事先漏声明，实际事后读回但资格保持PARTIAL，不倒签完整父层；原173图事先资格独立完整。当前测试SHA6eaa1bdefa040d75c82f58ce89810c217b07eab58c044ef71b9fd3d3a7932d95；原FAIL/来源保留，无部署/整main/物理操作，目标ACTIVE。最新入口Testing/YMCC/Evidence/DeckySessionBudget-20261109/CURRENT-SOURCE_READY.json。
+<!-- /DECKY-SESSION-GAP-POLICY-EXTRACTION-20261109 -->
+
+<!-- DECKY-SESSION-GAP-CRASH-BUDGET-20261109 -->
+## Decky 账户读数缺失与崩溃额度（2026-11-09）
+
+同一Steam的账户暂失/返回原值被自动调用方标成newSession=true，原Runtime会退款，新增12轮风暴断言已实际复现FAIL。现自动入口传observer Session：保留最后已知账户，缺失/返回/重复不续额，新有效进程或不同已知账户可续；所有原session边沿仍撤销旧binding/admission。明确ON/手动入口保持，原worker循环字节不变，无新轮询/线程。
+
+原crash-breaker173项、6惰性子进程通过；累计编译5.885/60秒、运行33.072/40秒，共享原100秒scope内；两次实际编译图事先声明、两Raw Job关前归零。legacy回调与惰性软件证据不代签整main/完整owned-binding/实际注册表或睡眠。4源码精确交付且main反向SHA保留peer字节，SOURCE_READY未部署，不追编当前d117包；目标ACTIVE。原件Testing/YMCC/Evidence/DeckySessionBudget-20261109/INTAKE.json、REPORT.md。
+<!-- /DECKY-SESSION-GAP-CRASH-BUDGET-20261109 -->
+
+<!-- DECKY-RECOVERY-BATCH-INSTALLED-20261109 -->
+## Decky 恢复合批本机接续（2026-11-09）
+
+本机已由206d正常退出更新到d117505e911fcffc19167aaf436f26a07acfcf73bc2ca6ef62d46d6301a050ad，PID44864/出生134386800815893842。原部署事务完整读回及可变字节保留通过，--minimized启动；桌面观察161.5秒无新增Decky模式读取，非CPU百分比收益。
+
+健康慢读重叠与长寿未连通Loader崩溃退款两修复实际编入；原114/133/129证据分列、旧资格边界保留。首次C1001原件未改；原7步负退出拦截及单MSVC/单冷函数局部优化绕过后，原publish201.273秒成功，16产物差异均核原生产者。Loader/插件/成员不变，符号对匹配；共享新增行换行后继不追入已装固定包。实际物理大屏睡眠/离线/切号未验，完整夹具NOT_RUN，无Steam/睡眠操作，目标ACTIVE。
+
+原件：Testing/YMCC/Evidence/DeckyRecoveryBatch-20261109/compiler-r2/RESULT.json、REPORT.md。后续部署PreviousArchive用该目录原包，SHA256=6d9d31245bf517a5c9ca68377183b7d0ffd07e27a149e942d7c89ee6e368fa68，不能再指向旧206d或更旧公共包。
+<!-- /DECKY-RECOVERY-BATCH-INSTALLED-20261109 -->
+
+<!-- DECKY-OFFICIAL-FRESHNESS-COMMUNITY-20261109 -->
+## Decky 官方身份/最新子门与社区边界复核（2026-11-09）
+
+原升级入口ReleaseGate实际约1.655秒通过：官方最新/锁定同为v3.3.1，Windows原始摘要8b7a3614…及源码提交ffd103b9…实时匹配。Loader/锁/头/许可/生产器六项来源原字节保持，未下载替换或构建部署。手工Node抓取失败原件保留，原PowerShell REST门成功；没有更改网络配置。仅本次原上游身份子门通过，不代表全YMCC/实机/未来发布；Git临发仍须实时重跑原门，不得缓存代签。
+
+官方社区#966的Linux3.2.8内部webhelper循环、#604旧PIN锁屏通知与#1001商店错误UI改进均分平台/层级审阅：通知展示不等于断链，Linux循环不当Windows根因，也不凭closed宣称修好。当前消费公开原版，无新增Windows证据就不改Loader；现无升级底座需求。实际睡眠/离线/切号/Steam更新未验。原件：Testing/YMCC/Evidence/DeckyUpstreamReview-20261109/RESULT.json、REPORT.md。目标ACTIVE。
+<!-- /DECKY-OFFICIAL-FRESHNESS-COMMUNITY-20261109 -->
+
+<!-- DECKY-CRASH-HEALTH-WITNESS-BOUNDARY-20261109 -->
+## Decky 健康证明直接参数的反向验证（2026-11-09）
+
+产品header保持前轮133功能运行来源，只扩原policy()三项：短健康不能退款、满原存活条件＋当前child健康可退款、后继无健康child不能借用旧证明。原父同边界提取的真实生产策略129项通过；仅忽略wasHealthy的私有产品负例在新稳定健康断言准确失败。四项Runtime源码接线核对通过，不代签真实30秒/完整owned-binding。执行前654工具输入与本次实际图完整核对；旧133工具partial/原FAIL保留，不倒签。累计原编译8.190秒/60秒、执行16.306秒/40秒，无新ID/minimum/父门，也未重跑整个Runtime。
+
+当前测试SHA为b5c98fb3c0185b60278a62b80c88fbd398250ab17730e8aa4ad61891a83791d5，旧edcacd运行原件继续保留。本轮仅测试扩展，无产品改动/构建部署/Steam/物理睡眠；本机206d未追写。原件：Testing/YMCC/Evidence/DeckyCrashHealthProof-20261109/POSITIVE-WITNESS-SOURCE_READY.json、POSITIVE-WITNESS-REPORT.md。目标ACTIVE。
+<!-- /DECKY-CRASH-HEALTH-WITNESS-BOUNDARY-20261109 -->
+
+<!-- DECKY-CRASH-DEBT-HEALTH-WITNESS-20261109 -->
+## Decky 长寿未连通进程的崩溃额度与 Win5 新日志（2026-11-09）
+
+原崩溃策略仅凭存活30秒清零，未连通Loader每次活过30秒便可能永远退回失败1。原消费者已复现指定语义FAIL；现仅复用当前child已有全通道loaderWasHealthy，周期清零及两个退出分支均须该证明。保持原30秒输入边界、5次熔断、显式开启/新验证会话/OFF，不加timer/重试额度。原短崩溃与资源状态检查连同长寿未证明边界133项通过，6次自有惰性子进程，编译3.490/运行16.259秒；原60/40秒上限及父原35秒不变，无新ID/minimum/父门。实际编译图发现原清单漏STL condition_variable，前置工具准入仍partial，原封存FAIL/事后SHA保留，不倒签或为登记重跑。历史legacy回调控制不代签完整owned-binding、真实30秒故障、整main或发布；SOURCE_READY尚未部署，目标ACTIVE。
+
+用户新13:13包与13:04包去重新增76条Decky记录。YMCC9988关闭后4400重开，保留同一Steam6820/出生134386739639475249；旧前端驻留按分级重连、无自有Loader跳过空重启、页面重建有真实派发回执，13:10:37.495最终全通道连通，episode17秒，没有reopen大屏阶段。之后150保留样本全connected/loader-started，当前runtime无failed/unavailable；Loader9532在155.859秒有效区间加权整机CPU0.002506%，不外推连续健康/GPU或实际视频帧。新日志不证明陀螺仪消费或物理S0/S3；也不是上述未部署熔断修正的现场验收。
+
+原件：Testing/YMCC/Evidence/DeckyCrashHealthProof-20261109/SOURCE_READY.json、REPORT.md；Testing/YMCC/Evidence/DeckyWin5-FieldComparison-20261109-131308/REVIEW.json、REPORT.md。本机仍已安装206d；本轮无构建部署/Steam或睡眠动作。
+<!-- /DECKY-CRASH-DEBT-HEALTH-WITNESS-20261109 -->
+
+<!-- DECKY-HEALTH-READ-OVERLAP-20261109 -->
+## Decky 健康检查撞上慢读取的恢复延迟（2026-11-09）
+
+原健康请求 requestRefresh(session,false) 在读取进行中仍使 hintGeneration 过期，首次有效大屏结果被丢弃。原共享observer消费者已复现：原102项通过后指定新断言失败，读取门及worker先释放。产品仅改为真正 invalidate 请求才淘汰进行中的结果；不依赖后续读取是否已经排队，确保“健康先/窗口后”也不会接受旧结果。三种顺序各1000次事件，均2读/1模式通知；同一原消费者最终114项通过，运行8.700秒/编译3.930秒，原40/20秒上限与全部旧断言保留，无新ID/minimum/父门。
+
+这是SOURCE_READY后继，本机仍206d，没有再编译部署。实际编译图核对发现原工具清单缺winternl.h；原封存FAIL及该SDK文件事后SHA保留，不能倒签完整前置准入。实际生产observer＋历史legacy回调覆盖不代签owned-binding、整main、正式发布或物理睡眠。用户下一轮选择“Steam大屏睡眠后唤醒”，仍由用户正常操作并使用普通导出；未声称旧现场根因或CPU百分比改善。目标ACTIVE，原件：Testing/YMCC/Evidence/DeckyHealthOverlap-20261109/SOURCE_READY.json与REPORT.md。
+<!-- /DECKY-HEALTH-READ-OVERLAP-20261109 -->
+
+<!-- DECKY-ACCOUNT-WAIT-LOCAL-SUCCESSOR-20261109 -->
+## Decky 账户慢读修复的本机后继（2026-11-09）
+
+本机现为206d3895… / 原生aa3fa5f0…，从已安装d876固定来源仅纳入已验证的账户长期等待准入分支及原测试2文件。原生产构建、原部署事务完整读回与可变文件保留通过，正常退出后--minimized启动；PID66444/birth134386727943709192。新进程desktop追加只读观察约161.7秒，新增mode-read0。插件退避修复此前已随d876落盘，新包与其插件/Loader字节相同；账户慢读分支本轮已实际编入并安装。
+
+这是明确来源的本机验证后继，不是所有并行主线修改的重新导出；公共Release仍旧277dc，不能当当前安装来源。下次本机部署PreviousArchive应引用本后继原包并核SHA。私有符号GUID64a96951-56cf-492b-99f7-93da259a3eec/age1已核对，未入ZIP；实际BPM/缺账户/离线/物理唤醒与CPU收益未验，完整门NOT_RUN，目标ACTIVE。原件：Testing/YMCC/Evidence/DeckyNativeSuccessor-20261109/RESULT.json、REPORT.md。
+<!-- /DECKY-ACCOUNT-WAIT-LOCAL-SUCCESSOR-20261109 -->
+
+<!-- WIN5-NATIVE-OFF-ISOLATION-RESUME-20261109 -->
+## Win5 游戏内关闭虚拟输出后的隔离接续（2026-11-09）
+
+用户本次没有日志，不能将19:27等旧包归因为本次故障。源码及原生产TU复现了独立缺口：已呼出、已锁定游戏通道的native/OFF隔离会让路给原OFF检查或设置写者，但检查结束后没有新前台事件，原生工作没有重新排队。现仅为同一power、UI edge、虚拟请求及机型保留一次待接续记录；已有maintenance在原虚拟事务结束且Host/归还责任均已结算后排回原工作一次。UI退出、切回游戏、休眠代次、开关OFF、更新虚拟意图及旧请求均作废；空闲没有新增轮询线程、计时器或设备查询。
+
+唯一游戏识别、轻度通道、reader/inverse准入、设备选择、原helper及归还协议不改。修改前NativeOff精确26项中2项未排队；修改后原完整隔离回归1003项零失败。交付固定来源的NativeOff定向独立验证，不与完整组拼作同一次结果。实体Win5及本次用户故障尚无日志/实机闭环。证据Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework/Win5-GameNativeFailure-20261109。
+<!-- /WIN5-NATIVE-OFF-ISOLATION-RESUME-20261109 -->
+
+<!-- CONTROLLER-ISOLATION-VIRTUAL-PRIORITY-20261109 -->
+## 虚拟开关、自愈优先于呼出隔离（2026-11-09）
+
+用户明确虚拟手柄开关及自愈优先。原生隔离准入现在读取现有虚拟请求锁和设置写者状态，ON/OFF执行及检查期间不新增隔离、晚到接口屏蔽或重试写入。当前OFF和强制故障清理不再跳过已持有的原生隔离归还；MSI/ROG强制故障废弃暂存的初次/换档Start，延后player/power工作保留原票据。已运行helper、未确认Enable及持久归还责任仍由原串行owner结算，post-hide仍属于原Start，未新增自愈预算或放宽MSI/ROG硬件归还协议。
+
+原生产翻译单元Release隔离回归974项零失败。定向25项覆盖ON/OFF、检查期、设置写入、归还失败、同一helper、故障覆盖及原票据过期；Checked候选25项断言零失败但进程收尾超时，保留FAIL，不作为通过或正式入口配置。修改前原22项中18项失败，新增票据测试曾误将失败后检查窗口当立即可接受新请求，原FAIL保留并修正测试时间。原件和源码身份见Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework/Isolation-VirtualPriority-20261109；完整全局、安装、真实手柄和睡眠不据此授PASS。
+最终交付来源沿原Release配方的Priority选择25项通过且来源收尾一致；原974项与本次25项分列，不合算一次完整验收。发布基于此前完整Win5主线固定来源叠加本次两处产品文件精确差异，保留主线并行后继工作。
+<!-- /CONTROLLER-ISOLATION-VIRTUAL-PRIORITY-20261109 -->
+
+<!-- DECKY-ACCOUNT-WAIT-READ-BUDGET-20261109 -->
+## Decky 账户未就绪的长期重复读取（2026-11-09）
+
+Win5 10:08:40 包的长等待与 Steam 自己登录失败一致，10:07:14 登录后 Decky 接通，不能把整段等待算成自愈失败。但原 launchAdmission 空账户分支仍绕过健康端低频节奏。现仅在原快速准入窗口内继续直接刷新；进入 admissionRecovery 后交回原低频读取，保留首次启动、账户事件、离线当前 UI 证明及全部身份/OFF 边界。
+
+复用原 native.typed-offline-current-ui-account-consumers，同时执行正式 main 准入和健康回调：修改前 25 秒 8 次刷新请求并在指定断言失败，修改后 2 次；12 次账户切换、24 次旧证明拒绝、快速启动、证明到达后立即准入、OFF 停止及句柄 175→175/自有 Job 归零通过。两处退出源码断言仅兼容已观察到的 input owner/mailbox 前缀，仍拒绝删除/调序 fence 和移除退出 CAS；6 项静态核对通过。
+
+源码封存时 main 已有并行后继修改，原失败保留；原提取器全部 4 个实际编译片段逐字节一致，其他输入未漂移，没有追编。8→2 是请求次数，不能当 CPU 降幅；整 main、安装、实际睡眠和离线登录未验。目标 ACTIVE，证据：Testing/YMCC/Evidence/DeckyAccountWait-20261109/SOURCE_READY.json。手柄准入/机器绑定记录失败另属输入问题，没有改动其逻辑。
+<!-- /DECKY-ACCOUNT-WAIT-READ-BUDGET-20261109 -->
+
+<!-- BOOT-PREPARATION-RECEIPTS-20261109 -->
+## 四模式的开机准备回执（2026-11-09）
+
+明确设定下次开机模式时，在原 bootModes 文档内记录 preparation：绑定选择修订、模式、开关及可空的已观察 Windows 启动标识；逐项保留处理中、读回确认、失败和跳过。准备成功不等于本次或下次开机已消费。每个已派发 owner 返回后核对选择归属；过期操作不派发后续 owner、不覆盖新选择，普通较新偏好也保留。没有新常驻、重试或启动权限。
+
+原 steam.startup.get 只读返回增加 file.known/exists/bytes/canonical/encoding；同一有界文件读取区分不存在、空文件、规范 UTF-8＋CRLF、旧命令及读取未知，服务仍单独核对。四模式准备要求开启时规范文件和服务就绪，关闭时确认文件不存在；旧原生缺字段会保留未确认。原日志导出已经收集 yeman-settings.json，嵌套准备回执随配置保存；不是安装、实际开机或游戏消费证明。源码及证据见 docs/steam-integration-map.json 的 bootModePreparationReceipts20261109、Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109。
+<!-- /BOOT-PREPARATION-RECEIPTS-20261109 -->
+
+<!-- CUSTOM-LIBRARY-CURRENT-CONTINUATION-20261109 -->
+## 自定义游戏库当前进度：历史问题不再阻断接续（2026-11-09）
+
+已解决的旧绑定、长临时名/深路径和临时IO等源码问题不再列作当前前置；原FAIL/UNKNOWN完整保留，只有当前改动实际依赖的未通过项影响该项放行。早期Win5停转/快速unconfirmed及WebView访问冲突根因未知，不阻断其它独立修复。
+
+本轮实际Host/WebView2导航对照：旧保存成功回执误交新request1已复现；修复版仅交付当前mediaState，旧保存仍落盘。两个隔离进程各含7个Job成员，均正常退出并在关闭前归零。正式app.js请求/响应切片直接运行；初次缺编辑版本号的夹具FAIL保留，纠正参数后续验。没有产品改动、重编、部署或新增常驻任务；崩溃/旧控制器回调、完整生产页/手柄及安装验收仍单列。
+
+本机3个程序与子包manifest重新核对，仍为统一a3ac5ebc…包；素材刷新/网络退避、静态先发布、Host导出及回执路由等后继SOURCE_READY未追写旧包。下文更早“当前277dc/待编译/长路径失败”等字样为当时快照，按本接续及各后续原件判定，不重复阻塞。继续对比日志与后台常驻成本，不要求peer停手。当前进度：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/PROGRESS-AFTER-WEBVIEW-20261109.json；真实通道原件：同目录webview-reply-routing/REAL-WEBVIEW-INTAKE.json。
+<!-- /CUSTOM-LIBRARY-CURRENT-CONTINUATION-20261109 -->
+
+<!-- CUSTOM-LIBRARY-WEBVIEW-REPLY-ROUTING-20261109 -->
+## 自定义库WebView恢复后的旧回执隔离（2026-11-09）
+
+实际前端文档请求从1重启，旧Host原样投递id，而已接受任务跨恢复继续；旧回执可撞新请求。现真实入口用进程内不复用内部编号，统一发送时仅取回当前文档原编号一次；退役只清回执，不取消/重做已接受写入。四类WebView回调及排队故障携带控制器绑定，旧绑定不作用新绑定。事件/id0兼容保持，无前端/磁盘协议、常驻任务或轮询变化。
+
+原Host显式路由18项含真实FIFO/Store落盘通过，原editor-queue11场景通过；误读旧summary文件的外层失败后直接核收原回执不重跑。随后两导航回调只补绑定检查，原编译来源经精确反向SHA核收，原业务与后继回调覆盖分开。最终Host原脚本隔离编译及8项接线通过；旧直通为原函数约束的边界对照，不冒充现场COM误收/访问冲突归因。未整main/Full/部署/真实崩溃验收。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/webview-reply-routing/SOURCE_READY.json。
+2026-11-09续查：真实WebView隔离复现，顶层导航到独立素材数据域后仍可发原生命令修改测试卡片。现WebMessageReceived先核原生Source属于原两UI来源才解析/登记/派发；非UI顶层导航Cancel，保留当前文档与已接受写入。修复后相同导航保持库页、数据不变且当前读取仍正常；两Host自有Job9/8进程自然归零。原消费者来源13、回执18及编辑队列11通过。素材域仍供子资源，无新IPC/常驻/轮询。仅隔离真实COM与原生消费者，不代签旧日志根因、完整页面/手柄/安装；来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/webview-source-admission/SOURCE_READY.json。
+2026-11-09构建接续：实际Host项目include图及Worker传递引用确认共同来源指纹漏game_library_blacklist_entries.h，原私有来源8检查中6条断言失败（变更/缺项仍被接受）。原共同清单补一项后，同一消费者默认15项通过，旧7编译错误控制保留；真实黑名单/运行代码未动。Host35→36、Worker19→20，旧包19项匹配只属旧声明范围，不能当完整当前闭包。目录/模块前置FAIL与准备超过180秒估计均原账保留，不代签完整预算/SDK/重编/安装，不为登记重跑。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/library-blacklist-source-closure/SOURCE_READY.json。
+2026-11-09页面续查：state读取失败后仅保留pending、无新焦点/事件时不再读取，实际正式页面Edge第27检查复现。现复用原刷新timer和界面单在途owner，以performance.now保留20秒故障期限，前台低频再读、风暴不缩短、后台不派发、成功/关闭停止；无效快照保留旧卡片，未重放业务写。最终同消费者47项通过，初修47也保留，删旧成功记账后才是最终来源。真实页面＋内存native/浏览器时钟，不代签安装CPU/Windows遮挡/原生FIFO/手柄；无新timer/IPC/原生改动/部署。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/visible-snapshot-recovery/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-WEBVIEW-REPLY-ROUTING-20261109 -->
+
+<!-- CUSTOM-LIBRARY-HOST-DIAGNOSTIC-EXPORT-20261109 -->
+## 自定义库Host崩溃/退出记录接入普通导出（2026-11-09）
+
+554 ZIP中央目录无这两类记录；本机实存1份WebView恢复与2份正常关闭记录，缺失不能当作没有异常。logs.exportAll现只读当前安装子目录的host-crash/host-exit，每类最多3份、单条256KiB、最多检查128目录项，越界或锁定明确partial/错误，复用原快照复制和ZIP。无常驻任务/线程/timer/新采集，不选库数据根、不启动子程序或改变设置。
+
+原负例复现缺记录，显式Host26、原默认34及原生产归档/捕获函数真实ZIP21项通过。初始混合auto编译失败、旧归档夹具误纳sleep include失败均保留；按已有Steam消费者合同修正后续验，无睡眠产品修改。仅源码/消费者，未整main/安装版/真实崩溃验收；main精确四行补丁排除peer编辑。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/host-diagnostic-export/SOURCE_READY.json。
+2026-11-09续查：554 ZIP均无界面错误成员，现有被动exportMetadata两行接入已观察媒体根state/ui-errors.jsonl，沿原16MiB打开后上限/共享快照/错误回执，不新增采集/根探测/常驻，也不改main或底层复制器。原漏导出反例保留，UI17、原默认34、Host26与真实ZIP24检查通过；缺根/缺文件仍明确缺证，锁定/超限不返旧目标，不完整JSONL原字节保留。归档首次缺内嵌Python模块路径的前置FAIL保留，改沿原runpy路径与剩余时限续验。只验证软件导出/归档，不代签新运行时UI故障、安装/CPU/完整main。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/ui-error-export/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-HOST-DIAGNOSTIC-EXPORT-20261109 -->
+
+本项交接补丁格式更正见同目录证据PATCH-FORMAT-CORRECTION.json：产品与归档测试用product-and-archive.patch，原生测试按after快照原字节接入，四文件隔离回读一致。原LF补丁失败、混合换行测试的Git归一化及后置UTF-8读取错误保留；不为这些交接问题重跑业务。并行main全文件后继已单列，实际导出Handler与编译归档消费者仍相同，不修改peer灯光空白行。
+
+<!-- CUSTOM-LIBRARY-POSTER-BEFORE-VIDEO-DISCOVERY-20261109 -->
+## 自定义库视频页失败时保留独立静态成果（2026-11-09）
+
+首次/双槽补齐在视频后备页404时会提前失败，未下载合法静态图；动态单槽也被未请求静态字段类型错误阻断。原消费者三个负例30项检查已实证。Worker先按taskSlots处理并发布静态，再读视频元数据/后备页；原视频错误、额度与选定意图保持，恢复只补视频，未请求静态字段不解析。没有新timer/线程/服务/协议或预算。
+
+首候选21场景153+13通过后，独立7项对照发现临时staticUnavailable随视频发布返回值丢失；原FAIL与首候选PASS均保留，最终局部保存至finish。最终同二进制显式22场景160外层+13原生owner检查通过，原Host脚本隔离编译通过。恢复仅加速原retryAt，不冒充20秒实等；现场原归因未知，不整main/Full/安装验收，不追写a3ac包。来源和原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/poster-before-video-discovery/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-POSTER-BEFORE-VIDEO-DISCOVERY-20261109 -->
+
+<!-- CUSTOM-LIBRARY-SLOT-SCOPED-PREPARATION-20261109 -->
+## 自定义游戏库单类素材刷新隔离（2026-11-09）
+
+原消费者实证：静态刷新因无关视频页404失败并消耗一次额度；无视频的正常页又把成功静态刷新标为no-dynamic-video/停用，并写视频24小时不可用。动态刷新缺静态元数据也误写未请求静态期限。Worker先取已取得租约taskSlots，只有dynamic需要才解析/读取视频后备；不可用回执和no-dynamic-video仅结算请求槽位。官方身份/来源、旧素材、预算与并发发布事务保持，无新timer/线程/协议或额度。
+
+旧三个负例及36项检查原样保留；最终同一二进制显式18场景（原默认10、此前定向5、新3）117外层+13原生所有权检查通过，Host原脚本隔离编译通过。日志no-video为线索，不能倒推旧请求类型/现场归因；未整main/Full/安装实测，不替换a3ac固定包，不要求peer停手或追编。来源与原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/slot-scoped-preparation/SOURCE_READY.json。
+2026-11-09续查：store-unavailable/非game的两个早返回仍同时写两种素材不可用期限，原消费者静态/动态×两分支四例40项中各实证一条越范围失败。现提前使用已取得的taskSlots，只结算实际请求素材并只在动态任务判断视频选择过期；原素材、身份门、三地区上限与24小时期限不变。最终显式13场景121外层＋13原生owner检查及原Host脚本隔离编译通过；原FAIL保留，补丁私有应用回读一致，无新常驻/协议/额度、无Full/安装。后继来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/unavailable-slot-isolation/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-SLOT-SCOPED-PREPARATION-20261109 -->
+
+<!-- CUSTOM-LIBRARY-PARTIAL-REFRESH-RESULT-20261109 -->
+## 自定义游戏库刷新失败回执与部分发布事务（2026-11-09）
+
+原Worker/WinHTTP实证静态404被旧staticReady掩盖为done，错误和退避被finish清掉。现独立保存staticFailure并在finish前结算，旧素材可用但不作为替换完成回执。另实证部分视频发布升版本后，普通及并发库存会误认为新请求退款；原Store发布与当前Queue受限回执改为同一既有根锁事务，精确会话/claim/前后版本/task/PID+birth/provenance/落盘记录共同准入，原预算不变，无效重复/旧/较新编辑拒绝且不写。没有新常驻线程、timer、数据协议字段或预算。
+
+最终显式5例44检查、原生13所有权检查及同EXE原正常/跨游戏拒绝2例7检查通过，原Host脚本隔离编译通过。旧供电夹具前置失败、旧假成功/退款/并发退款及前一未原子来源PASS均各自保留；恢复仅加速原截止，不冒充真实20秒等待或安装CPU。默认全组/整main/Full/实机未跑，本聊天未替换共享Build/ZIP/安装。
+
+peer网络识别修复保持，其独立验收不在本轮重复计数。scoped.patch只提本任务新方法，排除peer network分类/指纹hunk；after及实际编译索引保留组合来源。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/partial-refresh-result/SOURCE_READY.json。
+2026-11-09续查：无视频＋静态404、无海报＋视频404时，另一槽位失败会丢已确认缺失结论；原消费者两例14项各实证一条缺期限失败。现把已确认缺失随原fail交给同一根锁，在当前task/版本/消费者准入后仅结算实际taskSlots；实际错误、原attempt与退避不变，无先finish再fail的中间成功。最终13场景139外层＋17原生owner检查、原Host隔离编译通过；两恢复叶子只取原失败素材且缺失期限不延长。无新常驻/协议/额度、无Full/安装。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/partial-unavailable-settlement/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-PARTIAL-REFRESH-RESULT-20261109 -->
+
+<!-- WALLPAPER-IDENTITY-NETWORK-RETRY-20261109 -->
+## 动态壁纸身份查询网络退避（2026-11-09）
+
+Win5的1643320旧包中，修改器已有此ID，媒体仍为精确EXE待识别/appId0，三次unconfirmed/937ms后停止；用户随后确认正常下载，历史helper细分原件缺失，具体网络根因不作确定归因。当前原消费者另已实证：helper结构化network-unavailable被所有非零退出抹成unconfirmed，错误耗尽最后身份额度。
+
+仅消费本轮自有输出中绑定同一EXE的rounds-failed.json，复用原有界严格读取，核对网络暂不可用、可重试标志及正整数失败数。新分类进入原20秒退避，不耗身份额度、不授予AppID、不取消健康游戏。坏格式/异EXE/缺失或无证据仍按原拒绝。原前提指纹增加本次处理策略版本，旧停止任务沿原一次性恢复再试一轮，相同版本/重启/重复通知不退款。状态栏明确显示身份查询网络暂不可用；没有新timer/线程/服务/探测。
+
+最终同一二进制定向9场景74检查通过；原Supervisor→真实headless入口→Worker→自有helper自动续跑另9检查，实际20082ms且无手动wake/改retryAt；前端核心Run.ps1 -Optimized仅原game-library.media-shortcuts执行一次38检查通过。原失败和夹具准备纠正均保留。冻结22文件来源已核，后继并行queue/worker正常发布修复另列，不追编或冒称联合主线/整包/Win5安装实测。证据：Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/win5-app1643320-20261109/network-recovery/SOURCE_READY.json。
+<!-- /WALLPAPER-IDENTITY-NETWORK-RETRY-20261109 -->
+
+<!-- CUSTOM-LIBRARY-PAIRED-REFRESH-INTENT-20261109 -->
+## 自定义游戏库连续编辑的双槽刷新意图（2026-11-09）
+
+原Store消费者复现：已有两种缓存时，先选视频后刷新静态或反向操作，单一refreshSlot会覆盖前一个请求。现沿原refreshRequested/refreshSlot增加both，合并独立请求；发布/删除/无素材回执只清自己的槽位，部分发布、租约取消和本地静态导入保留另一个请求。旧可用素材先保留，旧单槽/taskSlots恢复、手动保护与bindingRevision围栏保持；无新文件/轮询/线程/预算，闲置false仍沿原短路。
+
+最终原选择消费者显式refresh-intent27项、原Store默认264项及原Host脚本隔离编译通过。初始配方编错旧consumer的参数拒绝保留为准备失败，随后原Store确切负例另有原件；前一来源25项不冒称当前结果。没有跑selection完整默认、全局Full、整main或安装实测。主程序与Host须从同一来源交付，本聊天未替换共享Build/ZIP/安装，不要求peer冻结。
+
+现场选中视频待刷新记录是需求线索，不证明导出了同一覆盖序列。Win5 App1643320另由壁纸任务核收用户后来下载成功的反馈，历史根因未证；该任务的network-unavailable后继仍独立，不纳入本补丁。来源与原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/refresh-intent/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-PAIRED-REFRESH-INTENT-20261109 -->
+
+<!-- DECKY-MALFORMED-BINDING-BACKOFF-20261109 -->
+## Decky 无效连接通知的退避与有效信息返回
+
+原MirrorClient在非空无效bootstrap通知风暴下反复清retry/attempt=0，原实际入口及客户端已在既有missing-bootstrap场景复现FAIL。现与connect共用原地址/端口/token/run验证，无效通知保留唯一重试及已花退避；waitingForBootstrap只记录信息不可用，使原有效绑定返回也能立即接续，普通同绑定通知仍保留网络退避。OFF/撤销、隐藏卸载、晚回调及用户写不重放保持，无新timer/worker/协议/业务权限。
+
+原场景内48个序列覆盖4需求、冷/撤回、6坏输入及各档128通知。最终原客户端整组77项通过，前一单选不另加算覆盖；原失败、首次候选未立即接回、Windows导入路径错误及首次构建漏列来源均保留。原plugin构建后固定88实际输入续原构建，字节相同，主线dist按CAS配套8f64d58e…，其它元数据不改。未追写CPU1固定包或安装，真实CPU/Steam/睡眠仍未验收；最新Win5新增160条无新runtime失败，不能倒推本缺陷现场归因。证据：Testing/YMCC/Evidence/DeckyIdleAdmission-20261109/malformed-binding-backoff/SOURCE_READY.json。
+<!-- /DECKY-MALFORMED-BINDING-BACKOFF-20261109 -->
+
+<!-- DECKY-STATIC-FALLBACK-INSTALL-FOLLOWUP-20261109 -->
+## 静态保底串图修复的本机资源接续
+
+Art Hero 的 OffScreen opacity:0 修复已在当前主线及本机安装包，53个非配置资源均匹配源和manifest；CSSLoader实际主题目录仅这个CSS仍旧。当前Steam在桌面，CSS guard等待confirmed Big Picture，未自动操控Steam。安装版原纯文件元数据确认已有owner、差异可修复、备份有效、无外来活动主题，七个个人配置SHA保持；这不是后端/渲染就绪证明。直接独立Status缺原生私有inventory通道的FAIL保留，不解除生产身份门。
+
+原owned-upgrade ReplayOnly补齐现有共享进程查询的隔离内存边界，并在同一场景检查Art Hero旧文件及精确修复替换；16项通过，原备份/事务/单次重读/所有配置逐字节保持。初始夹具FAIL保留，累计执行9416ms。原52项浏览器证据的CSS/消费者/捕获输入仍字节相同，仅作历史引用，不登记本轮重跑。没有新增产品改动、timer、默认门或安装写入；真实大屏接入后的文件同步与切图画面仍待确认。证据：Testing/YMCC/Evidence/DeckyWallpaper-StaticSelection-20261108/followup-20261109/SOURCE_READY.json。
+<!-- /DECKY-STATIC-FALLBACK-INSTALL-FOLLOWUP-20261109 -->
+
+<!-- CUSTOM-LIBRARY-SHORTCUT-READ-IO-20261109 -->
+## 自定义游戏库快捷方式暂不可读的错误分类（2026-11-09）
+
+新Win5 02:15:24保留16个新RE2旧绑定冲突会话/106110ms，67个队列任务与01:00:41不变；继续由既有精确缓存纠偏修复负责，不叠补丁或声称现场已更新。新媒体记录有新增静态素材，详见新包REPORT-CORRECTION.json，不把队列不变等同媒体不变。
+
+另由原消费者实证shortcutCurrent缺陷：当前账户VDF暂被独占时仍误报no-longer-current，2次识别额度被扣到3次停止。仅media-shortcuts-unavailable/media-shortcuts-changed改走原media-storage-unavailable20秒退避，已确认任务的同类错误也在Worker逐项结算，不取消健康任务；账户/EXE不符、可读删除、重复ID与坏VDF仍拒绝，原官方身份缓存和当前账户校验不放宽。没有新读取、timer、线程、注册表写或预算。
+
+原identity-cache-io扩展51项通过，原default140及原Host脚本隔离编译通过。首次夹具漏官方缓存导致type_error、默认前宽清单因未消费虚拟手柄头漂移拒绝均原样保留；只补实际输入/消费闭包后有界续验，不重跑已证业务。历史同名错误具体根因仍需现场证据；本批未替换共享Build/ZIP/安装、未整main/Full或实机验收。来源与原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/shortcut-read-io/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-SHORTCUT-READ-IO-20261109 -->
+
+<!-- CUSTOM-LIBRARY-PROGRESS-20261109 -->
+## 自定义游戏库当前进度与历史阻碍更新（2026-11-09）
+
+当前源码工作无历史阻塞。旧绑定/路径/缓存IO问题及旧夹具准备失败保留原FAIL与后续修复证据，已解决项不再阻断独立修复；未知现场根因继续标UNKNOWN，不以补测试父门或要求并行任务停手拖住后续。
+
+本机主程序、自定义库Host、识别助手和子包manifest已只读核对，匹配统一构建a3ac5ebc固定包。固定来源包含旧绑定纠偏、队列深路径IO、缓存短临时名、缓存IO前置退避及快捷方式暂不可读分类；旧277dc包描述仅属历史。后继双槽刷新意图、刷新失败结算/原子发布及peer网络识别退避仍在源码，未进入该固定包。最新SOURCE_READY六个代码输入与全部原证明再次核对；不追入已封包来源或为更新状态重编/部署。
+
+原库存110份去重OPT回执均为结束的idle，最新两个Win5包保留相同client-not-configured回执、记录CPU时间0；历史单次最高250ms不是常驻CPU百分比。当前完成/停止队列事件等待、隐藏页面暂停快照及OPT一次性串行任务未确认新空转缺陷，不新增轮询或预算。此轮未改产品、未重跑业务测试或测安装CPU；Win5历史根因、后继包安装效果及物理验收各自保留边界，持续目标ACTIVE。
+
+当前交接入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/PROGRESS-CONTINUATION-20261109.json及同名md；前次PROGRESS-UPDATE和各批SOURCE_READY保持原件，细分见同目录DELIVERY-INTAKE-20261109.json与BACKGROUND-RECEIPTS-20261109.json。
+<!-- /CUSTOM-LIBRARY-PROGRESS-20261109 -->
+
+<!-- DECKY-PROOF-AND-EXIT-20261109 -->
+## Decky 身份诊断与结束会话的恢复停止（2026-11-09）
+
+继续核对同包/同PID后，原四条Loader退出中三条在session-clean-exit后20/163/169ms，且同PID有exitEntry=end-session的触控归还记录。它们带有确认结束Windows会话的上下文，不能直接当普通断连。另一条在115ms后已retained-frontend-connected，但没有完整官方后端/Hook健康闭环。Win5另有accountPresent=true而pid/birth缺失的记录，旧steam-session-unconfirmed不能直接裁成账户watch故障。
+
+仅Decky Runtime新增原子requestExitFence：实际正常退出、WM_ENDSESSION的w=true及主窗口WM_DESTROY封住新的启动、重绑、准备、健康/高阶恢复；WM_QUERYENDSESSION、结束取消及普通托盘隐藏不封。UI边界只置位，不等待、不先声称归还；原owner shutdown继续取消并join。原wait完成后先核终态，再判断子进程退出，避免Windows先结束子进程时记成故障并续作。原高阶恢复的exiting/current准入也读取同一fence，保留在途取消与归还责任，没有新增线程/服务/EXE、业务设置或Steam操作授权。
+
+既有steam-mode-read只投影已读快照，新增受限proofStage及布尔字段，区分pid/birth/root、mode身份、账户缺失/watch未确认/账户冲突；保留PID/birth关联，不记录账户值/路径/凭证，不多读Steam。原诊断/稳定模式消费者65项当前源码通过，来源接线19通过。原typed-live-watch192帧及句柄/线程检查保留；在真实自有Job惰性Loader上回放原1073807364退出码，显式shutdown前已清退且故障发布0、新plan0、句柄175→175/Job0。忽略终态及移除wait后终态检查两个语义反例在原断言准确拒绝。未运行真实结束会话、Steam/设备或整main编译/安装。证据分别为Testing/YMCC/Evidence/DeckyIdleAdmission-20261109/proof-diagnostics和exit-fence，原失败、旧来源与后继验收分开；持续目标仍ACTIVE。
+<!-- /DECKY-PROOF-AND-EXIT-20261109 -->
+
+<!-- DECKY-IDLE-ADMISSION-20261109 -->
+## Decky 桌面空转及未准入重复读（2026-11-09）
+
+本机四个进程的保留日志共630次已确认desktop读取，反复在desktop和shared-mode-pending之间切换；11月7日至9日九包与本机日志按完整行合计去重13697条（九包独立11770条），Win5一进程有1896次bigpicture读取但账户/准入仍未确认。修正原launchAdmission：已确认desktop先于账户证明停下重试，普通模式/窗口事件仍唤醒原owner；未知模式和账户继续原慢速恢复。原connectionHealth仅对已通过当前会话/账户大屏证明且断连使用5秒取证，未准入采用原30秒，健康及桌面政策保持。没有新timer、线程、Steam控制、业务重放或放宽账户准入。
+
+复用原native.typed-offline-current-ui-account-consumers，实际提取并编译main的准入及健康lambda。改前25秒刷新6次、desktop retry=true，原断言失败；改后25秒1次，30秒仍续读，已准入断连5秒保持。虚拟一小时desktop无准入deadline；真实Runtime的原模式事件15ms到原preflight，12次账户交替及24次旧证明拒绝保持，退出句柄归还。原共享observer/Runtime组102项及来源接线18、启动边界28项通过；不是实际大屏/睡眠或整main编译。原诊断UI整组仍在无关旧源码断言status>toggle失败，未删除或放宽；首次工具缺include、工具漏传ownedBinding及并发来源漂移均分开保存，不冒充产品失败或整体通过。
+
+最终原case来源门无漂移通过，证据Testing/YMCC/Evidence/DeckyIdleAdmission-20261109。全项目自愈目标仍ACTIVE：Win5账户证明未确认根因、四条Loader退出后缺同进程健康闭环、先前create-process-with-token错误2147942487及安装版/物理睡眠/整机CPU效果仍未证。读耗时是墙钟，不作为CPU百分比。静默维护授权不扩大到Steam或设备控制；本轮未部署、未控制真实Steam/游戏/设备。
+<!-- /DECKY-IDLE-ADMISSION-20261109 -->
+
+<!-- STEAM-STATIC-BACKGROUND-SELECTION-20261108 -->
+## Steam 首页静态保底串图（2026-11-08）
+
+用户反馈 Decky 动态壁纸无素材时，当前游戏背景短暂正确，随后被第一个或上一个游戏覆盖。本机只读取得的 Valve Home 组件按 active、inactive、preload 渲染；inactive 图排在 active 后，原本由 OffScreen 退场动画最终降至 opacity:0。Art Hero 的静态减负已取消该动画，却把旧图留在 opacity:1，真实浏览器复现第二张与第一张同时可见。
+
+修正仅在现有 Art Hero/shared.css 中为原 OffScreen 图保留 opacity:0!important，不恢复动画、滤镜或常驻任务，不改 Decky 选中项、素材缓存或 YMCC 业务。原内容标记生成器只更新该 CSS 及 manifest 对应 SHA/bytes/contentProperty，保留个人配置。沿用 steam_appearance_stable_focus_selftest.mjs，加入捕获的原生背景 CSS 和两尺寸、双方向、首张/连续切换/返回的16个图层状态；旧 CSS 原断言失败，修正后52项通过，视频元素未被静态规则隐藏。此浏览器回放不证明安装版 Steam 的动态解码及视觉验收；本轮未部署、未重启或操控 Steam/YMCC。证据 Testing/YMCC/Evidence/DeckyWallpaper-StaticSelection-20261108。
+<!-- /STEAM-STATIC-BACKGROUND-SELECTION-20261108 -->
+
 <!-- LIGHT-GAMEPAD-NAVIGATION-LEASE-20261106 -->
 ## 无游戏呼出时的轻型手柄隔离（2026-11-06，软件定向通过，未实机验收）
 
-单改前台焦点不能阻止 Steam 手柄导航派发。input.gamepadLease 借用现有导航 manager 的 catch-all，临时拦截按钮、左摇杆方向及连发；不会隐藏或刷新原设备。资格仍仅用原唯一游戏识别，主窗口真实持有前台才续租，轮盘/子程序独立 owner 和有游戏隔离保留。
+前台变化可能影响 XInput 应用是否继续接收手柄，但不能仅凭前台成功证明所有 Steam 输入消费者已停止。input.gamepadLease 借用现有导航 manager 的 catch-all，临时拦截按钮、左摇杆方向及连发；不会隐藏或刷新原设备。资格仍仅用原唯一游戏识别，主窗口真实持有前台才续租，轮盘/子程序独立 owner 和有游戏隔离保留。
 
-原 UI 手柄事件/50ms 后备心跳只做廉价到期判断，750ms 通过原 pool 与进程/出生身份/账户绑定的 CDP 续租；同一文档内租约最长3000ms并单次定时解除，退出/失焦/设置/资格撤销主动归还。该期限是四个续租间隔的故障保护设计，不是实机恢复耗时保证。传输或API不可用保留失败诊断，不用旧隐藏流程冒充轻型成功。右杆原始轴、触摸板模拟量及独立原生消费者未由这个导航入口证明覆盖；软件定向验证与真机验收分开。证据 Controller-NonGame-LightIsolation-20261105/LightRework。
+GameLocker v2.9.5（a15488ae5230e3bae2f5c8affcd84d69238b3503）前台接管接续：轻型首次、render-ready与重试统一禁用Alt兜底，正常前台成功立即通知Steam租约。正常激活失败时，每个轻型呼出代次至多一次原pool任务；使用同一YMCC映像的短时私有子进程执行临时AttachThreadInput/SetForegroundWindow，主UI不连接外部输入队列。精确父/前台身份、原HWND、资格、期限和取消共同准入；独立Job承担超时与退出回收，结果还须原会话和设备代次有效且实际已前台才能接续WebView焦点。隐藏、返回、用户切走与标准激活先成功均取消；不新增常驻线程或独立发布程序。第三方许可随PowerControl/licenses/GameLocker-MIT.txt提供。本轮实现及有界定向验证状态见原LightRework下GameLocker-Implementation-20261106，实机结果仍单独验收。
+
+原 UI 手柄事件/50ms 后备心跳只做廉价到期判断，750ms 通过原 pool 与进程/出生身份/账户绑定的 CDP 续租；同一文档内租约最长3000ms并单次定时解除，退出/失焦/设置/资格撤销主动归还。释放尾巴沿用最后一次ON的总截止，OFF及releasing回执不延长；迟到旧disabled不得清新绑定或结算新intent。同一会话单份期限不是实机恢复耗时保证，归还未确认也不能报已释放。传输或API不可用保留失败诊断，不用旧隐藏流程冒充轻型成功。右杆原始轴、触摸板模拟量及独立原生消费者未由这个导航入口证明覆盖；软件定向验证与真机验收分开。证据 Controller-NonGame-LightIsolation-20261105/LightRework。
 
 临时自有派发wrapper保留原this/参数，仅给catch-all提供原source/controller/button身份。呼出前已观察held的真实UP自然放行，不合成输入；本次拦截DOWN按控制器记账，续租和重入不重新分类。收起后新操作立即放行，只对仍按住的已拦键保留有界释放尾巴，最后真实UP清账后精确注销自有hook/wrapper；未知传输不提前写已归还。63项完整生产JS/Valve消费者定向通过，两个语义负例能抓导航泄露与UP失衡；native尾巴5场景68断言通过。不是原始轴或真机全覆盖证明。
 <!-- /LIGHT-GAMEPAD-NAVIGATION-LEASE-20261106 -->
+
+### 2026-11-07 轻型隔离生命周期补强
+
+用户初步反馈有效，继续保留不隐藏原手柄的路线。本次从快速重入、丢弃排队任务、设置OFF、来源/电源撤销、父进程丢失、命令行边界及外部Steam hook所有权反推。前台接管取消后保留原pending责任，只有确认完成且reclaimed才允许下一worker；未知归还不抢建，但普通前台路径保持可用。pool丢弃未执行任务也形成明确未启动/已归还回执，排队和分配异常不逃出UI。实际派发前再次核原atomic proof、OFF/exit与代次；设置回调只发布atomic状态和原UI消息，不跨后台进入租约UI owner。
+
+私有worker创建时使用PROC_THREAD_ATTRIBUTE_JOB_LIST加入独立Job，消除创建成功至绑定间父丢失空窗；临时继承取消副本在创建后立即关闭。私有命令按参数边界和转义引号识别，路径中的同名文字不再误拒普通启动。Steam后台租约guard不运行UI owner观察；poolSubmit异常重置queued；Dispose按完整数据描述符恢复自有wrapper，不执行或覆盖外部后来安装的getter/描述符。范围不扩大到新手柄读取器、设备隐藏或原始轴过滤。
+
+原件及各源码epoch验证在Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework/GameLocker-Lifecycle-20261107；原失败与定向续测分列。完整主线构建/最终ZIP身份和实机结果仍分开登记，初步口头反馈不冒充所有机型及睡眠覆盖。
+
+### 2026-11-09 Win5 呼出入口复核
+
+Win5最新三包同为PID12232、导出磁盘EXE SHA256 6ac844c0d32d8595dd6936ef6659ced4d7068d75068d08709ac03d2e0047062f；普通日志未保留轻型选择/租约回执，不能据此断定加载映像缺少代码。旧PID的virtual-ui-output记录不能作为本次虚拟输出成功证据。当前PID反复报告record-invalid-or-foreign-machine及归还刷新未确认；导出时的active:null、空obligations不反证故障发生时记录有效，也不授予清空责任的权限。writer解码根因由虚拟手柄原任务独立处理。
+
+正式入口已修正：无活动呼出会话时，托盘/普通窗口恢复及原前台观察事件在实体屏蔽准入前，先以原唯一完整无游戏观察建立输出隔离票据。只在主窗真实可见、非最小化且实际前台并开启屏蔽时成立；失焦、关闭、过期、设备/电源/规则变化即撤销。不会创建焦点归还会话、注册游戏或增加手柄读取者。轮盘/子窗口和已识别游戏继续原owner策略；Win5末段有dd2运行，不因游戏失焦改成无游戏。
+
+原消费者保留旧入口失败，并执行Release/Checked各377检查与20个语义负例；随后仅续验窗口显示、激活及系统前台回调的真实接线。Steam导航原JS消费者68项通过，普通完整夹具与安装/实体手柄验收另列。原件及实际来源见Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework/Win5-SummonPolicy-20261109。
+
+租约队列另修复已接受却未执行的任务被丢弃后queued永久占用：同一共享责任哨兵只归还一次，析构不重排；后续原UI事件可续接ON/OFF。已完成旧closure或提交失败不能清掉replacement的queued。原实际header消费者Release/Checked各14场景105断言通过，保留6项旧语义失败及错误析构负例；这不是Win5 writer或实际睡眠故障归因，也不新增线程/计时器/设备操作。
+
+### 2026-11-09 Win5 游戏内无虚拟输出的隔离接续
+
+用户两次明确现场在游戏内。100840包当前PID8056保留6次light-no-game选择、Steam导航租约回执及7次CLI writer的record-machine-binding-mismatch/命令admission170；末段本机输出窗口明确virtualTargetEnabled=false、Host不存在。包内game-target为pid0/complete，保留前台主要是Steam大屏/YMCC，不能据此否定用户游戏现场，也不能把Steam导航ACK当游戏隔离成功。旧DD2记录不冒充当前游戏；具体游戏漏识别的现场因果仍未知。
+
+独立实际消费者已复现普通前台票据撤销后的原owner仍停留旧desired=false：唯一识别新发现游戏、发现pending、资格到期及后台先清票据时，窗口焦点不变便没有原实体隔离接续。现原UI recheck以已有g_msiNativeForegroundDesiredUi与当前准入比较，只在变化时通知原owner；游戏结束的新无游戏证明也能归还原owner。没有新增识别源、状态owner、线程、timer、设备扫描或直接硬件写，原Host/持久归还/电源/唯一PnP准入仍是实际执行门。
+
+原focus消费者新增同组接续场景，旧源码在game transition left original physical isolation owner stale原断言失败；修复后Release/Checked各416检查、24原场景及30轻型场景通过，24个语义负例拒绝。底层空历史账的机器绑定阻塞由虚拟手柄原负责人独立修复，不能由这三行绕过，交付需绑定双方实际source-ready；普通全局夹具、安装/实体游戏输入和真睡眠仍分别记录。原件：Testing/YMCC/Evidence/Controller-NonGame-LightIsolation-20261105/LightRework/Win5-InGame-NativeIsolation-20261109。
+
+用户随后明确呼出生命周期：先询问唯一识别的游戏开启状态，再切换YMCC前台；已开游戏直接走原隔离。现快捷键与普通showWindow入口在显示/恢复和任何前台交接前读取原唯一观察，已开游戏锁存到本次可见生命周期结束。前台被YMCC取得、后续空观察或focus-session清理不能把此通道降为轻型；显示前旧可见/最小化状态、延迟首帧与重复恢复同样保留。关闭/收起/最小化明确结束，下一次呼出重新询问；已有轻型会话也不能绕过新游戏状态。没有另建游戏扫描或根据前台猜游戏，UNKNOWN仍不作为无游戏证明。原416与中间428结果分源码epoch保留，最终接线/生命周期证据见同目录Final-Ordered-Lifecycle。
+
+底层原负责人已在6个记录层文件修复合法零责任历史的foreign binding阻塞：原exclusive owner锁下只接纳明确空账的历史提示，读时不改盘/不循环重写；第一次登记新责任前按当前机器身份写前记录，非空外来责任、损坏/IO/未知仍拒绝。不把空账当设备已归还，当前PnP/readback与实际hide门保持。其原消费者22新场景311断言、145原场景2655断言与8项旧语义失败保留，来源及换行纠正见Testing/YMCC/Evidence/VC-Win5-AllRoutes-20261109/DELIVERY.json和integration；本任务完整包须逐字绑定这6个实际来源。
+
+<!-- DECKY-RECENT-LAUNCH-POLICY-REVIEW -->
+## Decky 近期日志对比与确定性启动拒绝
+
+对比日志标记11月3日至6日的35包，按完整JSON行SHA去重为21262条Decky记录，排除61997条重复导出行。OP3共有60条独立shell-token-elevated/错误5记录，后续包仍持续；ROG 11月5日09:50:29及G3E 11月6日23:34:11有decky-channels-connected回执。GPD/AYA末尾会话/模式未确认保留UNKNOWN；资源超时、Loader退出、旧版唤醒失联与实际LosslessScaling scaling-paused分别看待，不以bootstrap ok或受管Loader标签代替官方后端和镜像连接，也不以命令可达推出功能应用成功。
+
+Runtime仅对原启动器明确返回shell-token-elevated且ERROR_ACCESS_DENIED停下无效高级恢复，保留launchStage具体原因。借原worker在原idle30s节奏只读观察普通权限来源，或独立恢复的已验证健康通道；恢复后仍由原启动/retained准入重验。重复事件不追加探测/启动或延长期限，OFF仍可达，显式开启或新Steam实例沿用既有epoch重核。未改UAC、注册表、系统权限、公开Loader或正常断连恢复阶梯，未加线程/服务/发布EXE。UI优先显示权限原因，避免旧恢复状态覆盖。
+
+当前原组件174、下拉18、专属UI18、连接8以及各原业务owner通过；真实Winsock current-peer消费者159断言覆盖全部18个线协议命令和未登记命令拒绝，原生client→broker→host/relay→原store链12场景通过。Runtime原worker的launch/probe/clock端口定向验证2000事件、单观察、环境恢复、独立retained恢复与OFF，删除阻断的语义反例被原断言拒绝；当前生产非legacy Runtime头已编译，未冒充整个YMCC主程序构建。小黄鸭原组46通过：原旧“两次后零timer”用例按既定单observer封顶持续恢复合同同步，并强化风暴/每批读数/恢复停止/迟到回调；两窗口截断反例拒绝。旧绝对触控呼出enum与无硬件ACK却要求TDP applied=true的两处夹具按现行业务合同同步，原失败保留。
+
+本轮Edge在页面建立前退出，浏览器实跑为环境FAIL，不能报PASS；上一实际React DOM8项的全部源SHA与当前匹配，明确仅作历史等价引用。插件仅describe内存编译，产品payload不改；未部署、未整包导出、未驱动真实Steam/物理按键或硬件写。证据Testing/YMCC/Evidence/DeckyRecentLogs-ButtonReachability。
+<!-- /DECKY-RECENT-LAUNCH-POLICY-REVIEW -->
 
 <!-- DECKY-TDP-ENTRY-FOCUS-20261105 -->
 ## Decky 打开YMCC侧栏默认落在TDP行（2026-11-05）
@@ -28278,3 +30246,3780 @@ mediaSelectVideo现与原mediaEdit/mediaImport一样映射预览URL；前端兼�
 
 任务操作和配置持久化串行，导入后核对任务存在状态，失败不记成功；保存失败在同一配置代次回退本次任务变化，配置读取降级时不自动更改任务。页面消费变更事件并拒绝迟到刷新覆盖。实际 owner 与 settingsRepository 的 11 项隔离内存验证及 vue-tsc --noEmit 通过；未操作本机安装版、真实任务或重启登录。证据：Testing/YMCC/Evidence/NetworkAccelerationStartupDefault-20261105/114635-587953/RESULT.json。
 <!-- /NETWORK-ACCELERATION-STARTUP-DEFAULT-20261105 -->
+
+
+### 2026-11-08 Win5 旧识别失败的条件恢复
+
+10月24/26归档的四个Steam快捷方式以media-identity-worker-unavailable耗尽预算；11月8日395机型包还实际重试同错，不能只当旧缓存。原错误同时覆盖识别组件和目标EXE不可用，现分成helper-unavailable/target-unavailable；旧错误仍兼容显示。Supervisor复用原启动/清单/策略wake，只有旧identityPending技术失败已停止、两个文件均可读且元数据指纹不同，才为这一环境恢复原有界预算。旧无指纹记录在条件可用时获一次恢复；失败保存当次环境，重开/重复事件不退款。组件或EXE更换/恢复后可以继续，不新增轮询、线程、服务、文件内容hash或游戏启动。文件指纹仅决定重试，身份仍须原官方核验、当前账号/快捷方式与队列所有权检查。
+
+原shortcut原生消费者经校准已退役的来源优先级断言和当前共享电源测试端口后140项通过，包括生产Supervisor wake、真实自有识别子进程、恢复后晋升/退休、重复40次零队列写、重开不退款、OFF/暂停及DC启动门；真实文件/账号端口明确为隔离夹具，不代替实机。核心Optimized原game-library.media-shortcuts实际36项通过，独立Host原脚本编译成功。初始旧优先级/缺电源fixture/回执形状断言失败和一次测试端口noexcept编译失败均保留。未替换canonical原生载荷或sourceBuild，主程序和Host须下次原构建共同消费；未部署、未动Win5数据，不把恢复重试当成全部SteamID已正确。证据 Testing/YMCC/Evidence/CustomLibrary-Win5-Identity-20261108/recovery-fix/REPORT.md。
+
+
+### 2026-11-09 Win5 旧绑定冲突与恢复通知
+
+跨552个ZIP取155包媒体状态，按所选成员字节去重。Win5 11月8日21:14导出保留16个worker会话/63.028秒；re2.exe新AppID883710与旧媒体别名281610冲突，Store.begin异常原先越过单任务try，导致全局重启且attempts保持0。现仅以同一精确EXE的有效官方身份缓存授权纠正别名，旧AppID素材/个人设置保留且撤销旧发布租约；未经缓存证明的冲突仍拒绝，并计入该任务原有重试预算，不取消其他任务。Supervisor把内层消耗的wake合并为待检查标志，不新增线程/轮询。队列满10000时身份晋升以同一写入替换自己的精确当前占位，未准入则保留源任务，不提高上限。
+
+实际原消费者来源下默认140、绑定前两例27、定向第三例4、wake3及owner10场景/10040检查通过；各次原件和选择范围分别保留，不拼作一次整组PASS。第三例原准备路径导致266字符临时文件名超过卷255字符分量上限，原整组FAIL保留；仅短独立根续测。owner原编译前索引遗漏消费者CPP本身，后验补录已明确标记。复核提出的旧lease失败结算P2经原候选12检查通过而撤回：install按值改verified，Store.begin/publish返回持久记录，不向失败结算传播该局部标记；27份现场媒体共806条记录亦无verified字段。未合入为此准备的额外guard。
+
+统一构建期间曾将三个未readyhunk精确迁出并保留反正向SHA见证，冻结释放后依据上述实际证据CAS接回原候选，并在原消费者补一条旧lease失败不得改绑/写入的断言。当前安装包buildId277dc8f1…仍为CPU1冻结来源，不包含后继三个hunk；本聊天未修改已装程序、Build或ZIP。采样结束后的当前消费者/独立Host编译仍待执行，未声称安装CPU、真实睡眠或全部游戏ID已验证。证据与最新状态：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/binding-repair/resolution-and-reintegration。
+
+
+### 2026-11-09 身份缓存长文件名修复及当前收口
+
+现场唯一media-write-failed占位EXE长217字符，正式缓存名222字符；当前commit把nonce后缀附在全名上，临时名269/损坏备份272，超过本卷255字符分量上限。原消费者在204字符边界实际失败；仅把临时/备份改为同目录短nonce名，保留正式缓存协议、原230字符key边界、官方身份、快照、并发、flush、发布和读回。原身份消费者43场景/587检查通过，含204/217/230长度及损坏原字节保全；原Store264通过。历史现场错误只作为线索，当前缺陷由原消费者直接复现，不据旧错误文本倒推确切旧调用点。
+
+当前源码下shortcut默认140通过，绑定前两例28通过；独立短根第三例4及wake3通过，owner10场景/10040检查通过，实际Host原脚本隔离编译成功。长根的原整组仍为FAIL：队列checkpoint临时路径达260字符，旧未扩展Win32路径IO失败；原件保留，另列深数据目录后继，不把短根续测拼成一次整组PASS。额外P2 guard未合入。当前消费者新增场景仍归原选择入口，无新ID/minimum/父门；未跑全局整轮。此批仅主线源码与隔离Host产物，未替换当前Build/ZIP/安装；SOURCE_READY及完整原件位于上项证据的resolution-and-reintegration目录。
+
+
+### 2026-11-09 深数据目录的队列检查点IO
+
+前批保留的队列临时路径260失败现在有专门原消费者边界：逻辑路径超过260后，旧checkpoint::write甚至在未转换的父目录创建即失败。read/preserve/write统一在实际文件IO处使用现有ioPath；逻辑路径、JSON、原备份名、版本/大小/不安全文件拒绝、创建独占、flush/replace和异常临时清理保持原合同，无新线程/轮询/预算/owner协议或10000上限变动。修复后长路径14项及原broken/future/disk-full/replace/status-retry控制29项通过。
+
+原ordinary旧夹具未提供当前子进程要求的父共享电源回执，最初completed worker断言FAIL保留；只给夹具根发布固定AC回执后原默认115+2项通过，真实子进程和故障回收仍执行，完成队列一秒观察无文件/资源轮询（仅隔离进程，不是安装CPU证明）。旧shortcut深根下伪身份子进程manifest临时路径260亦独立复现；仅测试producer用实际IO路径写完并核close，父进程仍在子进程退出后核验真实文件。默认140通过，直接旧失败叶子也通过，没有放宽产品身份/供电准入。
+
+当前产品来源下binding完整3例32项、wake3、owner10场景/10040项及Host原脚本隔离编译通过。随后测试helper叶子修改未被binding/wake消费，保存对应函数字节等价，不冒称又运行一遍。原整组/前置断言失败与新分组原件分别保留。此前checkpoint260缺陷已修复，不继续作为本批阻碍；全局Full和安装版未验收，不替换CPU1冻结Build/ZIP/安装。当前完整来源与证据见Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/checkpoint-long-root/SOURCE_READY.json。下一项继续核对导出中唯一旧worker-stalled状态，不把25份重复状态当25次新故障。
+
+
+### 2026-11-09 识别缓存临时IO失败不再误耗尽身份额度
+
+原identifyShortcut忽略rememberIdentity的cacheError，缓存被分享占用或临时写失败时，合法resolver观察被算成media-identity-unconfirmed。原真实自有helper负例复现：已有2次身份失败的任务仅因缓存被锁就到3次停止。现只识别9个精确缓存IO错误；仍遍历其他候选manifest，若无可复用的有效身份且存在IO故障，沿原media-storage-unavailable退避，不计新增身份次数/累计耗时。未来schema、外来EXE绑定、损坏/不匹配观察和未知错误维持原严格拒绝，未经验证的数值/标题仍不能给AppID。无新timer/线程/协议/次数或时限。
+
+原消费者显式identity-cache-io19项通过：占用期间保留原2次/1234ms，别的任务正常完成；解除占用后相同helper/EXE经原20秒退避（夹具仅加速deadline）继续、精确核验并退休占位，原坏文件字节保全；未来/外来缓存仍unconfirmed且字节不变。原默认140也在当前来源下实际通过，Host原脚本隔离编译成功。首次候选的可选autoStopped字段断言错误、长根夹具cache文件输入准备失败及旧代码实际失败均保留，不将修正夹具输入当产品权限豁免。来源/原件见Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-cache-io/SOURCE_READY.json。
+
+新Win5包中Stalker2在937ms内耗尽3次unconfirmed仍缺cacheError/观察记录，不能据本修复倒推出现场根因。原RE2旧绑定持续失败由既有绑定修复负责，不叠第二份实现。本次只写主线源与维护索引，不替换共享Build/ZIP/安装；全局Full、联合主程序链接和现场更新效果仍未由本批验收。
+
+
+### 2026-11-09 自定义库后台下载通知与持续进展
+
+原下载Watcher回调每次读完整队列并复制刮削状态，即使页面已经后台暂停绘制。现以独立advisoryMediaProgressProtocol:1协商：新页面后台只收当前文档变更提示，恢复前台沿原单所有者合并读；前台与旧页面仍收完整媒体进度。换页/退出撤销能力并拒绝旧代消息，没有新线程、轮询器或IPC操作。真实256任务/32回调原路径544次读、1756352字节，后台新投影0次/0字节；消息703744降至3840字节。此范围仅回调投影，不代表Watcher偏好刷新或整个安装进程零IO/CPU。
+
+原生22项、实际Edge正式页面59项及既有回复路由18项通过，原Host脚本隔离编译成功。真实绘制还复现完整快照成功后因完成数变化再发一次冗余读取；两个完整快照绘制入口明确currentSnapshot，原进度事件补读不变。混合换行的部分准备失败、浏览器旧计数替身造成的首轮失败及真实冗余读取失败各自保留；最终四文件补丁私有应用逐字节一致。来源与原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/background-media-notice/SOURCE_READY.json。
+
+已解决的历史源码阻碍按各SOURCE_READY推进；旧崩溃、worker-stalled/Stalker2归因与实机联合验收保持UNKNOWN/NOT_RUN，不再阻断独立修复。当前目标ACTIVE，未改动安装版/共享Build/ZIP，交CPU1在后续统一来源收录，不要求追改已固定包或暂停其他任务。
+
+
+### 2026-11-09 媒体供电偏好与不可读状态恢复
+
+现有设置owner已拥有进程偏好时，refreshMediaPowerPreference不再先读整份队列再被consume忽略；独立库副本仍读持久ON/OFF并沿共享供电回执门控。原256任务/32刷新544次读、2140288字节，设置owner新路径0次/0字节；仅该helper范围，不外推整个进程或独立库零IO/CPU。下载Watcher偏好读取与changed分开异常隔离，真实独占锁读取失败仍发不可读状态，解除锁后同一观察线程继续且队列原字节不变。
+
+实际页面原来把无版本recoveryRequired回执过滤，冷启动又误报下载关闭。现单独显示读取错误并保留最后有效进度版本/进度条，旧健康回执不清当前错误；沿原20秒定时器前台慢速只读复查，后台取消、成功空闲，不重放手动下载/保存/Steam写。无新timer/线程/IPC/协议字段、缓存owner或重试预算。原生旧负例2项共10检查复现；最终三个定向场景20项、原设置写失败保留电池保护5项、实际Edge正式页面71项及原Host脚本36输入隔离编译通过。六文件精确补丁私有应用读回一致，70项前版与71项最终来源各保留原件。
+
+证据与当前入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/power-preference-notice/SOURCE_READY.json。当前目录554 ZIP元数据另存LOG-INDEX.json，沿用已分析的历史内容，不称本轮全ZIP重验。未部署、未改共享Build/ZIP/Steam/设备或睡眠；主程序整链与安装CPU仍由后续统一来源负责，不要求追改已固定包。历史UNKNOWN不阻塞独立修复，目标ACTIVE。
+
+
+### 2026-11-09 自定义库完整媒体快照与旧页面回执隔离
+
+实际页面原消费者独立复现：旧完整快照先替换mediaDownloads，清掉当前不可读提示；退出前发出的mediaDownloadStatus在恢复页面后也能覆盖当前媒体进度。完整快照桥接/应用与进度事件现共用原lastMediaDownloadDisplay版本判定，在替换前选择媒体字段，其他当前快照字段正常接续。状态读取复用原silentRefreshEpoch，旧页面代次不能更新；保留唯一在途请求直到结束或原5秒超时，当前需求沿原20秒慢复查接续，没有取消/重放原生任务或新增轮询、timer、线程、IPC、协议字段、版本owner/预算。
+
+原两个定向负例分别在第1/2检查失败；最终实际Edge正式HTML/CSS/JS91项通过（原71+两边界各10），含两种全快照入口、旧回执/超时、较新回执恢复及禁止业务写重放。默认与定向互斥且精确选择，未知选择在输出目录/浏览器创建前实际拒绝。首个夹具声明漏插导致的准备错误及缺failure.json事实保留，不当作产品证明；前版91与最终91分列，不累加覆盖。最终两文件补丁私有应用逐字节读回。
+
+来源与当前入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-read-ordering/SOURCE_READY.json。554 ZIP元数据与上一轮无变化，复用既有内容分析。JS内存传输/可控时钟不代替安装WebView、原生FIFO/实际时间或实体/CPU验收；没有本轮原生改动或重编，原36输入编译只作历史匹配引用。未部署或改共享Build/ZIP/Steam/设备/睡眠；交后续统一来源，不追改已固定包。历史UNKNOWN不阻塞，目标ACTIVE。
+
+
+### 2026-11-09 自定义库后台保存绘制与卡片失败状态
+
+实际编辑器消费者复现后台saveEditor完成后仍经rebaseSavedEditor完整刷新菜单，一次24个可观察DOM变更、两类身份候选各重建一次。renderEditDraft现沿原libraryRenderAllowed和卡片待刷新标记暂停展示，提交模型照常接回；后台观察变更/候选重建均0，前台各呈现一次。仅菜单DOM观测范围，两个输入value仍可同步基线，不代表所有属性写或整个WebView/CPU为0。
+
+保存失败原来只进短时通知、任务随后被finally删除；现原editorSaveTasks保留failed并释放running状态，原草稿可明确重试，成功只清对应任务。finally校验任务对象，避免清后继；同卡Steam排队/执行进度优先，完成后未解决的保存失败仍可见。后台不立即消耗短时错误提示，前台原提示保留；无自动重试/重放保存或Steam写，无新timer、线程、轮询、IPC/协议字段或状态owner。
+
+最终六个定向保存场景21检查和原单卡加入Steam/Back独立5检查通过；首次五场景16检查属前版来源，负例与各阶段原件分列。两文件补丁私有应用逐字节一致。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-save-background/SOURCE_READY.json。554 ZIP元数据未变，复用既有内容分析。失败重试仅证明仍保留的当前草稿，不证明关窗/强杀/断电后找回失败值；本轮JS-only，不重编原生/全局，不把旧91回执算新通过。未部署或改共享Build/ZIP/Steam/设备/睡眠，交后续统一来源，不追改已固定包；历史UNKNOWN不阻塞，目标ACTIVE。
+
+
+### 2026-11-09 自定义库深目录媒体文件IO
+
+原Store/容量/素材Server在310字符以上自有数据根实际复现索引误读空库、来源容器误判、目标目录创建失败、旧素材服务404及缓存统计未知。read/atomicWrite/容器识别、发布与清理、缓存检查、静态相对引用、素材Server和容量遍历现仅在实际IO处复用既有ioPath；元信息错误不冒充空索引。canonical核对所属根后返回普通逻辑路径，原父目录越界拒绝、媒体schema/身份/租约/版本/额度/调度保持。无新轮询、线程、服务或路径缓存。
+
+五个定向场景34项与原默认Store264项通过，含索引保全、长来源/目标、静态覆盖引用、实际loopback GET/HEAD/Range、token和越界拒绝、缓存容量/枚举上限；原Host脚本36输入隔离编译成功。首次夹具多传Server.expose参数的编译FAIL保留；后一次编译本已成功，核收仅路径大小写误判，逐文件大小/SHA一致后复用同EXE，未重编求绿。最终四文件补丁私有应用逐字节一致，未把首版未编译候选当PASS来源。
+
+来源与原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-storage-io/SOURCE_READY.json。554 ZIP元数据未变，复用已分析内容；本轮为本地卷、自有路径、固定AC端口、合成媒体头与真实HTTP字节，不代替真实解码/UNC/安装/物理睡眠。主程序整链链接未由本批执行；capacity新增包含现有路径头，Host公共指纹已覆盖，发布继续原依赖核对。未部署或改共享Build/ZIP/Steam/设备/睡眠，交后续统一来源，不追改已固定包；历史UNKNOWN不阻塞，目标ACTIVE。
+
+
+### 2026-11-09 深媒体目录真实解码补充验证
+
+复用未修改的原生playback_probe、正式Store/Server和WallpaperPlayers，已有真实视频/图片在130字符短数据根与341字符深数据根（深源同样超过320）均通过真实Edge解码、播放/帧推进、seek后续播、静态图及stop释放，共24条定向断言；实际206 Range及图片200回执保留。拥有的20进程子树自然退出0，Job关闭前活动0。私有AC头包含顺序及首次浏览器缺局部本地网络许可的失败分别保留，修正仅测试准备，不倒推现场原因；原600秒阶段未重置，无新增永久ID/minimum/父门。原五处IO修复来源和SOURCE_READY不改，本次只补后继证据，历史已解决路径问题不再阻碍继续工作。隔离AC/前台/网络授权不代替安装版、Steam WebView、CPU/功耗或真实睡眠；本聊天未部署或复查安装身份，持续目标ACTIVE。详见Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-storage-io/real-decode/REPORT.md。
+
+
+### 2026-11-09 独立库下载进度的偏好重复读取
+
+原实际Watcher在256任务、冷读后32次进度通知中仍完整读取持久队列544次/2141088字节。观察器现仅记住一次成功文件元信息，复用既有identityFileStamp/ioPath；同大小/同修改时间原子替换由文件ID识别，读取前后不同、缺失或失败不登记。原无队列锁等待读取及无条件changed回调保留，设置owner仍零读取，无新timer/线程/轮询/协议/全局缓存owner。相同32次实际事件数据读取0次/0字节，元信息其他IO128次，不等于整个进程零IO/CPU。
+
+最终原四个精确场景95检查及原Host脚本36输入隔离编译通过，含ON/OFF、共享AC/DC、文件占用/损坏/缺失/恢复、相同元信息替换、原队列互斥占用下读取已保存设置、空闲无轮询、句柄归还和晚到事件。旧负例41检查失败、前两个候选与修正配方原件分别保留，不合并算最终覆盖；最终移除了候选新增的锁等待。两文件补丁私有应用逐字节一致。554 ZIP元数据未变，复用历史内容分析；未部署或改共享Build/ZIP/安装，未复查安装身份。普通完整主链/全局Full、安装CPU/功耗/实体/真实睡眠未验收；后续由CPU1统一来源收录，不追改已固定包或要求其他任务停手。历史UNKNOWN不阻塞，持续目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/preference-watch-observation/SOURCE_READY.json。
+
+
+### 2026-11-09 编辑保存后返回重开的草稿接续
+
+原实际编辑器复现返回重开丢失提交值、失败任务只剩标签、重开后基线未推进，以及不同目录卡片共用EXE时误用草稿。现原editorSaveTasks保留提交草稿对象，只有同卡片key及原始/当前EXE匹配才接续；原捕获操作、rebase和明确重试保留，无自动保存重放。openEdit对所有卡片同时核对key。恢复时只接回同媒体key且更高bindingRevision的已知记录，延迟预览/保存回执不得回退新壁纸设置。
+
+最终原十三个精确浏览器场景36检查通过，含六个新增边界及原后台保存/重试/Back/后续编辑/媒体版本/Steam加入控制；最终自有13进程子树自然退出0、Job关闭前活动0。原三场景及共用EXE负例、首候选12场景34项与媒体边界失败分别保留，未合计为最终覆盖。旧增强消费者的事后重建逐字节符合原运行SHA，明确非当时源码副本；九项UI/既有缓存素材输入和两文件补丁私有应用读回已核对。没有新增原生接口、持久存储、timer/线程/轮询或永久ID/minimum/父门，JS-only未重编原生/全局Full。接续限同一页面文档内，未实现/声称重载、整窗关闭、强杀或断电后的失败草稿找回。
+
+554 ZIP元数据无增删改，复用已有内容分析；历史UNKNOWN不阻碍此可复现修复。未部署或改共享Build/ZIP/安装，未复查安装身份，交CPU1后续统一来源，不追改固定旧包或要求其他任务停手，持续目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-save-reopen/SOURCE_READY.json。
+
+
+### 2026-11-09 编辑保存回执按卡片与EXE归属
+
+原persistEditDraft仅按EXE寻找保存后刷新行，实际复现普通同启动器、刚改主程序为共享EXE、原卡缺失及原卡EXE已变化四例串卡。现只从接受提交时同卡片key且同目标EXE的行推进草稿基线；无精确匹配则保留当前编辑上下文，不借用邻卡、不自动重放写操作，不把缺失卡片最新基线当作已恢复。产品仅一处查找条件，无原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门变动。
+
+最终原十八个精确浏览器场景43项通过，含四边界、原主程序捕获及前批十三返回/重试/后续编辑/媒体版本/Steam加入控制。四负例原件保留，自有子树前版自然退出1、最终13进程自然退出0，Job关闭前活动均0；两次运行前均保存实际产品/增强消费者原字节，九项UI/缓存素材输入及两文件精确补丁私有应用读回已核对。JS-only未重编原生/全局Full，原native-memory夹具不代替真实配置/Steam/设备/安装CPU验收。554ZIP元数据无增删改，复用历史选定内容分析，不将旧Win5身份/worker-stalled/WebView AV归因为此；历史UNKNOWN不阻碍，持续目标ACTIVE。未部署或改共享Build/ZIP/安装，未复查安装身份，交CPU1后续统一来源，不追改固定旧包或要求停手。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-save-card-receipt/SOURCE_READY.json。
+
+
+### 2026-11-09 卡片写入结果与显示异常隔离
+
+原实际编辑器在提交前状态投影抛错时未发保存却留下running；成功回执后的卡片/编辑器绘制异常又被改标保存失败。共用单卡Steam路径同样复现commit成功被绘制错误改标失败。现原cardOperation投影单独捕获、保留原待显示标记与uiError；成功保存先接回模型/基线，rebase不直接重画，finally原状态刷新只绘一次。保存/Steam共用卡片绘制投影，显示故障不能决定业务结果，也不自动补发写操作。真实请求失败沿原failed任务处理。
+
+最终原25个精确场景56项及独立真实业务拒绝控制1场景4项通过；后者证明Steam准入拒绝的原原因在绘制失败/恢复中仍可见且无重放。原三保存负例、首22场景51项及Steam候选失败分别保留，不合计为同次覆盖。最终自有13进程、独立控制11进程均自然退出0，Job关闭前活动0；5根运行约19.49秒，整阶段及准备成本另记，原900秒账不重置。全部运行前实际源码副本、九项UI/缓存素材与原件核收，追加独立控制后仅该代码块剔除即恢复final25原字节，未冒称新整组26例。两文件精确补丁私有应用读回一致。
+
+JS-only无新原生接口、持久存储、timer/线程/轮询/状态owner或永久ID/minimum/父门，未重编原生或全局Full；显示恢复限原正常可见刷新，不保证永久绘制故障自愈。554ZIP元数据无增删改，复用历史内容分析，不将旧Win5身份/worker-stalled/WebView AV归因此处。未部署或改共享Build/ZIP/安装、未复查安装身份，交CPU1后续统一来源，不追改固定包/要求停手。历史UNKNOWN不阻碍，持续目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-save-presentation-result/SOURCE_READY.json。
+
+
+### 2026-11-09 撤回失败修改后的原任务结算
+
+原实际编辑器复现失败后把分类恢复原值、明确保存时operations为空却一直保留failed任务。现仅同key、phase=failed且任务草稿对象就是submitted时，显式无改动保存清掉这份旧失败并重算running标记、沿原展示更新；不同草稿/EXE失败、其他卡片running和Steam进度不改，后台保留原待显示需求。没有新原生写或自动补发。此为撤回当前内存失败意图的状态结算，不声称撤销未知的部分原生写入或重新确认磁盘。
+
+原两残留负例分别实际失败且自然退出1；最终原11个精确场景28项通过，含撤回/重开、另卡保存/Steam/后台标记、不同EXE草稿保护、无改动零IPC及原真实失败明确重试/Back/显示异常/Steam拒绝控制。最终自有13进程自然退出0、关闭Job前活动0，无强制回收。两次运行前产品/增强消费者实际副本、九项UI/缓存素材、工具和原件核收；两文件精确补丁私有应用读回一致。原900秒阶段未重置，两根实际约5.63秒，准备/分析另计。JS-only无原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门变动，未重编原生/全局Full。
+
+554ZIP元数据无增删改，复用历史内容分析，不推断旧Win5身份/worker-stalled/WebView AV根因。未部署或改共享Build/ZIP/安装、未复查安装身份，交CPU1后续统一来源，不追改固定包或要求停手。历史UNKNOWN不阻碍，持续目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-save-reverted-failure/SOURCE_READY.json。
+
+
+### 2026-11-09 媒体合并拒绝确认AppID冲突的旧EXE关联
+
+原mergedGames仅按排序取EXE或AppID首匹配，实际复现旧570记录的EXE指向确认620卡时抢走真正570卡素材，以及旧记录覆盖620当前素材后失去独立展示；普通确认/原生Steam卡均覆盖。现复用同步索引已计算的确认AppID，拒绝矛盾EXE候选，兼容候选按原顺序；无匹配沿原mediaOnly独立卡保留，不删除/重绑旧记录或写配置。未确认数值候选不形成权威冲突，不因媒体获得正式身份；无AppID本地导入保留。
+
+原两负例分列保留，最终原9个精确场景19项通过，另独立素材编辑1场景4项通过，旧570编辑只针对自身key/AppID，当前620卡/记录不变。原80/160缓存库planMap各1次，路径规范化6008到11683、历史路径6248到12163，保持原线性断言；非安装CPU证明。最终自有13进程及独立控制11进程自然退出0、各Job关闭前活动0；两文件精确补丁私有应用读回一致，九项UI/缓存输入和全部前置源副本核收。后加独立控制删除仅自身块可还原原9消费者，不冒称10例同次整组或新缓存通过。原900秒阶段未重置，3根约6.81秒，准备/分析另记。
+
+只读复取Win5 2026-11-08 21:14包game-media并存SHA；该包缺同期library-scan/steam-plan，不能将本UI缺陷当历史Win5身份/worker-stalled/AV既定原因，原生有缓存授权的别名修复独立保留。554ZIP元数据无增删改，复用历史内容和此一个成员，不称全包新审计。JS-only无新原生/别名/存储/timer/线程/轮询/owner或永久ID/minimum/父门，未重编原生/全局Full、未部署或改Build/ZIP/安装/Steam/设备，未复查安装身份，交CPU1后续统一来源，不追固定包/要求停手。历史UNKNOWN不阻碍，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-card-identity-conflict/SOURCE_READY.json。
+
+
+### 2026-11-09 下载临时分片与深目录IO
+
+原实际Worker在深数据根复现视频校验、有效断点识别、临时空间计数、孤儿收集、预算裁剪和退出者文件/标记清理六故障，真实WinHTTP HLS还在创建缓存目录失败。现只在Worker分片/sidecar/下载/拼接/校验/保全/空间/回收及Queue临时标记与根核对的实际IO处复用已有ioPath，逻辑路径/文件名/schema、来源/身份/租约/重解析保护、容量和调度/重试预算不变。
+
+六个通过叶23项分为初修校验4、后继断点/计数/孤儿/预算15、最终退出者清理4，不拼同次整六PASS。初始未来版本夹具误期望false而原函数应抛UpgradeRequired，仅修夹具；后继实证part删完而空marker残留，再修最后删除边界，原FAIL均保留。最终当前源真实WinHTTP6例27项通过（337字符根慢MP4/HLS、342根截断拒绝及三短根控制）；原断点消费者2例11项在347/355根实际Range+If-Range续传131072字节、坏sidecar不续写且最终内容hash一致。原临时坏/未来与checkpoint两控制16项通过，Host原脚本36输入隔离编译成功。行为子树真实归属且各根自然预期退出、关闭Job前活动0。五文件精确补丁私有应用读回一致，早期已通过叶范围字节等价单列，非新执行/缓存命中。
+
+原900秒阶段内完成上述行为与Host编译，但来源核收未在上限内结束，首次seal在写前拒绝，原阶段保持INCOMPLETE_AT_DEADLINE，不重新领额度或重跑。超时后只核已有raw/字节和私有补丁，SOURCE_READY明确post-deadline read-only intake，不冒充原限时整轮通过。本地真实IO/WinHTTP和合成容器结构不代替解码/UNC/整主程序/安装CPU/实体/真实睡眠，本IO修复不修改当前并发/限速策略。554ZIP元数据未变，复用历史内容，不倒推worker-stalled/Win5旧错误。未改共享Build/ZIP/安装或复查安装身份，交CPU1后续统一来源，不追固定包/要求停手，历史UNKNOWN不阻碍，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/worker-staging-io/SOURCE_READY.json。
+
+
+### 2026-11-09 Steam计划按卡片目录归属
+
+原planMap以EXE后写覆盖、mergedGames优先EXE，正式页面复现共用启动器的不同目录卡片串用确认AppID/壁纸，以及没有自身计划的卡片借用外部目录身份。现有目录的计划仅索引目录、无目录旧计划保留EXE回退；自身目录与当前EXE兼容时优先，旧目录缺EXE兼容，改主程序后不借旧EXE。无读修写入、原生接口/持久存储/timer/线程/轮询/owner或永久ID/minimum/父门变动。
+
+旧两负例实际失败保留；首修原12场景11例22条业务检查通过，剩余场景身份拒绝已通过，但夹具误在待加入页寻找已归未分类的卡片。只修该分类前置后单独1例4检查通过，原12根26检查FAIL保留，不拼写同次全12PASS。当前产品与11个通过叶字节等价核收，未为登记重跑；大小写/斜杠/旧格式/两种排序、壁纸归属与原80/160大库线性检查保留。三根实际约7.77秒、各自Job先赋属再恢复、预期自然退出且关闭前活动0；九项UI/缓存输入、各次源副本及两文件私有补丁应用读回已核。准备路径文字语法失败原件保留，未将其当产品负例。
+
+554 ZIP元数据无增删改，复用已选内容分析，不能把此缺陷认定为旧Win5身份错误既定原因。历史UNKNOWN继续保留且不阻挡独立当前修复，前批worker-staging-io限时未完成账保持。未编译原生/全局Full、未部署或改共享Build/ZIP/安装，未复查安装身份；不代签Steam/设备/实体睡眠或CPU收益，交CPU1后续统一来源、不追固定包/要求停手。持续目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/steam-plan-card-ownership/SOURCE_READY.json。
+
+
+### 2026-11-09 手动视频选择返回后的回执接续
+
+原mediaSelectVideo已接受选择，却先因current要求候选窗仍开而丢弃回执，随后finally删掉submitting反馈。实际两负例分别在候选返回及编辑器关闭复现。现已提交写回执独立于旧画廊展示结算，校验原媒体key/AppID/有效版本，只接仍存在、未删除且无更高binding的当前记录；原snapshot/请求表保留queued，只有同卡同EXE匹配上下文接回编辑器，其他画廊不关闭/夺焦点。真实拒绝保留error，返回不重放选择。
+
+首修原15定向14叶21条业务断言通过；唯一另卡焦点测量在原画廊初始requestAnimationFrame前抓基线，只修该前置后独立1例4项通过并证initialFocusMoved、回执前后焦点/另卡媒体/画廊保持。原15根25检查FAIL及wrapper计划分组顺序拒收保留；只读精确集合/原消费者登记顺序核收，没有为顺序重新生产。14叶/产品字节等价单列，不称同次整15PASS。覆盖两种返回、另卡、较新binding/删除/整条移除/错误AppID/真实拒绝/正常前台与原后台搜索、退休/脱离DOM、卡片身份、缓存释放及线性控制。三根实际约10.63秒，自有Job先赋属再恢复、各自然预期退出/关闭前活动0，九项UI/缓存输入和两文件私有补丁应用读回已核。
+
+554ZIP元数据无变化，复用已分析内容，不把此UI时序定为旧Win5/worker-stalled/AV原因，历史UNKNOWN不挡独立修复。JS-only无新原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门，下载并发/弱网策略不变。未编译原生/全局Full、未部署或改共享Build/ZIP/安装，未复查安装身份，不代签安装WebView/网络下载/CPU/实体；交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/video-selection-back-receipt/SOURCE_READY.json。
+
+
+### 2026-11-09 视频选择后单条状态刷新保护
+
+原mediaState只与最初选择回执比版本、未核AppID，缺条目又回填最初next。正式页面复现新完整快照被迟到状态回退、同key错误AppID替换、删除/整条移除被旧read复活三类负例。现单条read同时核原key/AppID/有限版本及当前snapshot仍存在、未删除、无更高binding；无效/缺项不恢复最初选择回执。独立下载progress保持原对象代次与版本筛选，正常新状态可接回，旧编辑器token/退出边界与busy结算保留，无写重放。
+
+原3负例FAIL保留；最终同源原18个精确场景26项全过，含7新边界及11原返回/拒绝/正常选择、后台/退休/脱离DOM和线性控制。两根约10.84秒，自有12/13进程先赋属Job再恢复、预期自然退出且关闭前活动0；九项UI/缓存输入、各次实际源码副本及两文件精确补丁私有应用读回已核。关闭绘制断言只测晚到read不再调renderLibrary，不称整个DOM/CPU为0。
+
+554ZIP元数据未变，沿用选定内容分析，不倒推Win5/worker-stalled/AV历史原因；UNKNOWN不阻挡独立修复。JS-only无新原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门，不改下载并发/弱网/资源策略；未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，安装WebView/真实下载/CPU/实体仍未验。交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/video-selection-state-fence/SOURCE_READY.json。
+
+
+### 2026-11-09 共享壁纸写入与显示异常隔离
+
+正式页面原进度DOM绘制在选择try前抛错，会卡sharedWallpaperBusy且未派发mediaSelectVideo；mode按钮预绘制也会挡明确保存，成功mode回执后的editor/library绘制又把返回改false。现progress/editor绘制异常只记原待显示标记及uiError，mode明确派发、模型接回、busy/原playback队列结算继续；保存/导入/选择/选择后read卡片展示复用原安全投影。真实业务拒绝仍失败，无自动写重放/新轮询。
+
+正确健康Host诊断合同下原4负例FAIL保留；同源原32场景52项全过，另独立focus恢复1例4项证明待绘标记由原前台机制消费、保存仍仅一次；后加控制字节等价单列，不称同次整33。最初同步注入window.error漏捕使root无raw；后缓存H5错误回复id0 uiError又污染模式观察，按正式健康Host追加日志后不回执合同修局部测试port才取得具体负例，两个原FAIL/缺raw和费用均留。5根实际约22.99秒，最终32自有13进程、恢复10进程及各旧根均先Assign后恢复、预期自然退出、关Job前active0。九项UI/缓存输入、前置源副本及两文件私有精确补丁读回已核，原900秒账未重置。
+
+554ZIP元数据无变化、复用已选内容，不倒推Win5/worker-stalled/AV历史原因；UNKNOWN非当前阻塞。JS-only无新原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门，不改下载并发/弱网/资源策略，未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，安装WebView/真实下载/CPU/实体未验。交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/wallpaper-write-presentation/SOURCE_READY.json。
+
+
+### 2026-11-09 壁纸临时模式结算与新增Win5媒体记录
+
+原mode临时预览choice在成功/拒绝后都不清，失败显示static但存储仍dynamic，随后素材操作会走错槽；delete又无条件true。现只结算本次捕获choice对象，原编辑epoch/同卡key/同EXE仍匹配才补画，后台用原待绘标记/focus。媒体模型重新权威，删除直接返回真实结果、busy不释放其他操作，原playback队列单次接续。旧3负例FAIL、最终原21场景33项及独立成功delete1例4项通过；后加控制字节等价，不称同次整22。
+
+首before因测试从page.evaluate返回held Promise、无法注入拒绝而90秒TIMEOUT/124，无raw；原runner期限后未Query的ACCOUNT默认0不能当归零，最终树accounting未证原样保留。修测试后正式负例12进程、最终13、独立控制11均先Assign后Resume、预期自然退出且关前active0。4根约104.53秒计入同900秒账，无退款/重置；九项UI/缓存输入、前置源副本及两文件私有精确补丁应用读回已核。
+
+本次日志目录实际555ZIP，新增Win5 2026-11-09T10:08:40一包，已固定新旧两包SHA并比较六个选定成员。仍67任务，8任务/3媒体变化；潜行者2和RE2均done、错误空、静动态均ready，导出workerPid0，旧binding-conflict历史尾段后已有completed。另6条file任务为4目标不可用/1身份未确认/1旧快捷方式，缺同期scan/plan不能判路径现场事实或重试扩权。原REPORT日志数量硬编码旧554已用只读FIELD-UPDATE后继纠正，封存字节不改；当前交接入口SOURCE_READY-CORRECTION.json。日志版号不证明安装后继源码，手柄故障原因未由本范围证实。
+
+JS-only无新原生接口/存储/timer/线程/轮询/owner或永久ID/minimum/父门，不改并发/弱网/资源策略；未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，安装WebView/真实删除/CPU/实体未验。历史UNKNOWN不挡独立修复，交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/wallpaper-mode-rejection/SOURCE_READY-CORRECTION.json。
+
+
+### 2026-11-09 壁纸编辑与导入回执的当前媒体归属
+
+原mediaEdit/mediaImport回执直接覆盖媒体模型，实际3负例复现编辑/导入已接受后迟到回执覆盖较新完整快照、把已删除/整条移除记录带回。现两写共用同步settle检查提交key、捕获key/AppID/有效整数版本、原dataRoot及当前记录归属。保留当前更高binding并接给原owner/排队播放基线；原生已成功但被后续更新取代仍返回true，不恢复删除或跨根旧模型，也不补读/重放写。首次尚无key创建兼容，编辑器已换其他媒体key不被重新绑定。
+
+旧3负例FAIL保留；同源原24场景41项全过，含8新边界及16原导入/背景/真正失败/队列/模式/显示异常/视频返回/状态保护。两根累计约13.48秒，自有12/13进程先Assign后Resume、自然预期退出、关Job前active0；九项UI/缓存输入、运行前实际源码副本及两文件精确补丁私有应用读回已核，同900秒专项账不重置。只有正式页面/真实Edge/原native-memory传输，不代签真实Store磁盘写、配置根切换、安装或功耗。
+
+日志目录555ZIP，本次新增/变动/移除0/0/0，沿用既有选定内容和前批Win5六成员比较，不称新全包审计。JS-only无新原生接口/持久化/timer/线程/轮询/owner或永久ID/minimum/父门，不改下载并发/弱网/资源策略；未编译Native/全局Full、未部署或改共享Build/ZIP/安装，未复查安装身份。历史UNKNOWN非当前阻塞，交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/wallpaper-write-receipt-fence/SOURCE_READY.json。
+
+
+### 2026-11-09 编辑器媒体准备回执与首次注册
+
+原prepareSharedWallpaperPreview只比编辑器旧值、缺key/AppID/版本/页面代次保护且first-create仅接编辑器未接snapshot。3负例实际复现忽略较新完整媒体快照、错误身份和首次创建缺记录。现复用原shared owner/settle，保留edit epoch并核silent page epoch/closed/root/卡片/EXE/媒体关联；较新同身份编辑器记录也与snapshot接齐，首次注册后下一次明确保存可用。preview URL仅不可变asset描述符逐字节相同才沿用，背景直接记原待绘标记等focus；退休页成功/失败不影响恢复页面。
+
+旧3负例FAIL保留；首修原22根21例PASS中，changed-asset输入因helper把省略URL字段又从完整receipt合回而FAIL，旧Host兼容PASS亦未实测缺字段。只修这两响应构造后独立2例4项通过，其余20叶30业务检查及默认helper/产品字节等价，不拼同次整22PASS。3根实际约16.56秒，自有13/13/12进程先Assign后Resume、各预期自然退出、关前active0。九项UI/缓存输入、各次前置实际源副本及两文件精确私有补丁应用读回已核，同900秒账不重置。
+
+日志555ZIP，本轮新增/变动/移除0/0/0，复用已有选定内容及Win5六成员比较，不称新全包审计。JS-only无新增原生请求、协议/持久化/timer/线程/轮询/owner或永久ID/minimum/父门；原mediaCreate仍是注册功能而非声称完全无写读取，不改下载并发/弱网/资源策略。未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，真实Store/网络/安装WebView/CPU/实体未验。历史UNKNOWN非当前阻塞，交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/wallpaper-preview-preparation/SOURCE_READY.json。
+
+
+### 2026-11-09 壁纸下载反馈与当前素材版本
+
+原失败request不保留当时asset/revision，实际成功导入后仍显示旧选择错误；feedback又把asset变化直接当完成，即使有当前pending替换任务。现原请求表默认沿用既有revision/assetId字段，明确新asset使旧local error退出投影并按当前媒体版本过滤较旧per-game队列回执；同asset播放修改不清真实失败，done必须无动态pending。纯同步显示判断，无原生任务重放或资源/限速/弱网策略变化。
+
+旧2负例FAIL保留；同源原17定向27项通过，另未修改原manual-quality默认消费者在1280x720/800共161项全过（每视口19选择边界及17反馈投影），两消费者分列，不合并唯一业务检查或物理手柄验收。3根约30.66秒，自有12/13/15进程先Assign后Resume、自然预期退出、关Job前active0；各九项UI/消费者/缓存输入、前置实际源副本、原件和两文件精确私有补丁应用读回核，原manual源pin保持。同900秒专项账不重置。
+
+日志555ZIP，本次新增/变动/移除0/0/0，沿用既有选定内容及前批Win5六成员，未称全包新审计。JS-only无新native/协议/持久化/timer/线程/轮询/owner或永久ID/minimum/父门，未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，真实网络/Store/安装WebView/CPU/设备仍未验。历史UNKNOWN非当前阻塞，交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/wallpaper-download-feedback/SOURCE_READY.json。
+
+
+### 2026-11-09 普通全库快照的媒体版本保护
+
+原媒体较新版本保留只在saveEditor生效，普通桥接/normalize/apply及visible silent state赋值可覆盖已接受的新媒体。两正式负例复现后，复用同一preserve函数并显式传previous；仅同root/key/AppID较高binding保留。只遍历incoming成员，较新记录/删除/空entries/移除仍权威，其他新库/配置字段不被旧媒体拖住，输入不原地改；不新增tombstone/cache owner或读写。
+
+旧2负例FAIL保留；同源原19精确场景37项通过，含7新边界及12原准备/写/导入/保存重开/删除/缓存/线性控制。silent实际拦原WebView state消息后接受mode写，再沿原请求ID/reverseEmit交旧完整响应，读1次/写1次且非媒体新字段接入；不把软件时序回放当现场native FIFO乱序证据。背景DOM observer无卡片变更，原80/160两库render线性控制仍过，非CPU数值证明。
+
+两根约12.65秒，自有11/13进程先Assign后Resume、自然预期退出、关前active0；各九项UI/消费者/缓存输入、前置实际源副本、原件及两文件精确私有补丁应用读回核，同900秒专项账不重置。日志555ZIP，本次新增/变动/移除0/0/0，沿用选定内容和前批Win5比较，不称新全包审计。
+
+JS-only无新native/协议/持久化/timer/线程/轮询/owner或永久ID/minimum/父门，原生FIFO/并发/弱网/资源策略不改。未编译Native/全局Full、未部署或改共享Build/ZIP/安装、未复查安装身份，真实Store/网络/安装WebView/CPU/设备未验。历史UNKNOWN非当前阻塞，交CPU1后续统一来源、不追固定包/要求停手，目标ACTIVE。证据Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-full-snapshot-fence/SOURCE_READY.json。
+
+
+### 2026-11-09 FSR 客户端首次补库与显式打开接续
+
+本机OptiscalerClient 1.0.8同commit仍沿原Roaming/games.json数组、Steam0/Manual8/CoverImageUrl；实际过滤均false，旧09:49补库早于11:06客户端目录初始化，故跳过且不再接续。现检测已安装客户端后，原单次自动启动任务也创建缺失数据目录并补库；新增optiClient.prepareCatalog沿同一1% CPU/1500ms串行owner在显式打开前接续，首次无目录也创建。未安装不盲补，运行中不改写且界面解释关闭再开；原备份/并发/游标/取消及自动仅一次保持，无新常驻轮询/偏好或注入写入。
+
+最终原Native18、前端同步24、惰性main IPC leaf6项及Vue类型检查通过；原失败、前一来源及成本保留。补丁私有九文件精确读回，main排除peer其它范围。未完整main/整包/安装或实际客户端显示验收；现场由CPU1唯一维护owner核对，不追写旧固定包。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/opti-client-108/SOURCE_READY.json。
+
+
+### 2026-11-09 FSR 本机真实补库与取消、旧模式接续
+
+本机1.0.8缺失games.json已通过同一正式原生消费者一次性恢复：14条（Steam8、已归属非Steam6）、14本地封面已回读，config、安装程序/manifest和原库标识/扫描/计划字节不变。工具只在Evidence运行且退出，1%Job、逐项1500ms，实际22.406秒/CPU375ms；没有控制YMCC/FSR/Steam/游戏/设备或安装新程序，客户端画面尚未重新打开观察。主线自动首次建目录及打开前接续仍待后续同源安装，不把数据修复当安装更新。
+
+新取消锁修复的原4生命周期场景已实跑，旧挂起子进程在cancel返回时仍活、随后stop归还；同源原18补库兼容性及前端24/IPC6各保留来源。另旧模式0会在原Opti判断之前提前同步返回，精确原生谓词旧12检查1失败，新加门前强制后台判断后12全过，原兼容分支保留。累计三补丁私有应用后8文件字节一致，main拥有代码仅LF/CRLF等价，正式整文件身份门保持，不能当整main/Full或所有测试同源整轮通过。原时限/准备拒绝及各账保留，封存分析超时另列，不重写原件或重复已通过组。
+
+日志增至556包，新Win5 11:27导出只含4条旧媒体任务、无活动worker；两个视频已缓存而静态仍有旧网络失败。未证明新游戏库故障或与前一67任务包同机同根，不扩大归因。已打开编辑器同步媒体的原27场景45检查源码交付也保留。当前总入口接续已更新，最新源指针Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/opti-async-mode-zero/SOURCE_READY.json，现场数据恢复见opti-live-backfill/RESULT.json，持续目标ACTIVE。
+
+
+### 2026-11-09 FSR 已运行客户端复用与真实游戏网格核对
+
+实际FSR1.0.8原生游戏网格已读出全部14条（Steam8/Manual6），客户端自行归一化持久化，原14封面仍匹配；只读无障碍观察无输入/启停/设置变更，DWM关闭致截图不可用，不代签像素/实物验收。补写前原字节仅观测digest未复制，CLIENT-CONSUMPTION-CORRECTION.json后继纠正旧字段，不覆盖原件。
+
+另复现原quickapp收到running仍执行shell.execute。现仅显式prepareCatalog入口复用固定路径/当前用户与会话、持有活进程句柄的窗口，正在运行直接返回且保留待登记队列；未知不授权另启。补库期间出现客户端再查询，flush后最终已知未运行才启动。后台自动补库不调用窗口助手，首次建缺目录/串行1500ms/1%Job及原owner预算不变。独立外部启动与最后观察之间仍存在非合作竞争，不承诺系统级唯一实例。
+
+旧1!=0负例保留；当前源原JS27项、精确helper策略11项、真实IPC lambda惰性12项与Vue类型检查通过，SDK后端编译链接未操作实际窗口。各根Assign后Resume、自然预期退出且关Job前active0。私有五文件补丁读回，main只拥有include/IPC段且LF归一化，不作正式cache或整main证明。封存首次文本换行和Git autocrlf准备拒绝均保留，未重跑已过业务；900秒专项内完成。未部署/整main/Full/设备/Steam操作，交CPU1同源配套来源。旧18/取消4/async12分别引用，不合计为当前整轮；持续目标ACTIVE。最新源入口Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/opti-existing-client/SOURCE_READY.json。
+
+
+### 2026-11-09 原生 FSR 补库的正式 Steam 身份冲突
+
+第557包Win5 12:30导出的game-media与前11:27字节一致、仍4任务且worker/active0；queue变化限revision/time及电源容量准入历史，未证明新播放问题，不因文件夹/标题断定同机或归因陀螺仪。旧UNKNOWN保留，当前独立源码修复继续。
+
+原OPT merge用EXE/AppID联合索引及目录回退，不同正式Steam AppID共用启动器/目录时复现串封面/漏项，有正确AppID行又被矛盾EXE行造成多匹配跳过。现仅候选原生SteamID与Platform0正数字AppID冲突时拒绝该行参与匹配；旧条目/用户设置留原样，正确ID优先，其余旧兼容、只补缺字段和串行节奏保持。未改身份确认、Steam写入、自动调度、1%Job/1500ms/预算或客户端控制。
+
+旧生产header+原Memory/边界片段实际负例退出1；最终原Host/catalog消费者41场景同源全过，含同EXE/目录/正确ID/完整错行四参数以及原备份、实际隔离IO、幂等、取消/预算控制。36源码输入经原脚本编译前后核对，Host翻译单元编译链接通过，不代签完整YMCC/Headless/性能/Full/安装CPU或实体。两根Assign后Resume、自然预期退出且关Job前active0，两文件私有补丁字节读回，900秒专项内完成；未新增ID/minimum/父门、未部署/启停程序或操作Steam/设备/配置。交CPU1后续统一配套来源，之前27/11/12等各保留原来源。持续目标ACTIVE，最新入口Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/opti-catalog-identity/SOURCE_READY.json。
+
+
+### 2026-11-09 手动视频选择的数据目录归属
+
+原视频搜索/选择/后续read只校卡片、EXE/key/AppID/revision，切换dataRoot且新根有同key时，五个正式页面负例复现旧候选回填/点击派发、已提交回执改新根、后续状态替换媒体和下载进度、旧submitting显示到新根。现原ownerCurrent/selectionCanSettle同核捕获dataRoot；局部请求记原根/EXE且仅匹配当前根/EXE时展示。已接受的同根Back/关闭操作继续，不取消或重放；下载并发、弱网、后台调度与原生接口不变。
+
+原编辑器消费者当前27场景38检查通过，覆盖五新边界及原正常/返回/关闭/另卡/真实拒绝、较新/删除/移除/错AppID、进度版本、后台/退休/脱离DOM和大库线性控制。旧五负例7检查FAIL保留；两根各13进程Assign后Resume、自然预期退出且关Job前active0，九项实际输入和两文件私有补丁逐字读回，900秒内封存。没有新ID/minimum/父门，也未整Native/Full/安装WebView/真实下载/CPU/实体或部署；安装身份本阶段未复查，不代签其他维护owner的当前状态。
+
+557ZIP元数据无增删改，复用上批Win5选定内容，不称重审全包或把根时序当历史现场原因。前FSR41/27等分别保留来源；旧UI原live同步函数体不变而整app已变，索引后继明确字段边界，不倒填旧回执。交CPU1统一配套来源，不追旧固定包，目标ACTIVE。入口Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/video-selection-data-root/SOURCE_READY.json。
+
+
+### 2026-11-09 完整快照与全局下载进度的目录归属
+
+七正式页面负例复现旧根高revision压新根、缺项回退借旧根卡片/配置、坏队列显示旧根进度、恢复/status与silent state回读和明确补齐回执跨根，以及后台接数却不登记进度待绘。现normalizer只同根回退，缺root字段沿旧上下文；原lastDisplay记根并同根比较版本，切根不借旧进度。读/明确补齐回执和错误核捕获根，旧写不重放；defer快照仍接原进度owner登记数据/待绘，背景停绘且focus恢复。同根旧版本/坏数据保护保留，无新native/timer/线程/持久owner/下载/弱网政策。
+
+旧七负例FAIL保留。初28组26叶通过、两夹具前置失败；两控制alias通过而后台仍失败，实证缺pending；补产品后23组22叶通过，唯一后台错误断言忽略enabled=false应显示关闭，实际已400/2000且旧名消失。只修该断言单独1例3检查通过，其余22不重跑；当前app字节相同、消费者除该一例块外一致，九输入对应核收。原28/2/23组仍FAIL，不拼同次整23/28PASS或正式cache。五根自然预期退出、Assign后Resume且关Job前active0，全部费用与向前更正保留；两文件私有补丁与前UI精确基线核收，同900秒专项内封存。
+
+日志至558ZIP，新Win5 13:04与前10:08的67job导出比较：媒体153414字节同hash、67job内容一致（61done/6unavailable），worker/active0。六旧路径/身份/shortcut错误及两个ready=false旧条目继续保留，无scan/plan不能确认当时文件存在；不把另4job导出误作同机丢库，也不由done代签实际解码。FSR原receipt34候选idle/0写，CPU78.125ms/elapsed313ms仅该pass，无常驻CPU结论。
+
+JS-only未整Native/Full/安装WebView/真实网络/CPU/设备/睡眠或部署，安装身份本阶段未复查。交CPU1统一来源，不追旧包；前FSR41与视频目录27等各保留原范围，持续目标ACTIVE。入口Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-progress-data-root/SOURCE_READY.json。
+
+
+### 2026-11-09 编辑保存与单卡 Steam 回执的数据目录归属
+
+七正式页面负例复现保存/加入成功直接接旧根整快照，旧编辑器换根仍派新写，旧失败通知/运行草稿/已知Steam进度跨根。现接受任务捕获规范化root，成功继续结算但只原根接快照/rebase；失败留原任务不冒新根。新提交核编辑器root，保留草稿并提示重开，零派写；openEdit/卡片状态只取当前根任务。同路径运行中仍原串行防撞，跨根点击给等待原因；既有Steam进度原对象保留已知owner，未增native字段/命令/身份协议，无owner旧外部事件仍原当前上下文，不代签任意跨进程来源认证。
+
+当前原编辑器33场景64检查同源全过，含七新边界/root别名及原Back/失败重试/另卡/共享EXE/改primary/后台/草稿rebase/较新壁纸/Steam去重/绘制失败和真实拒绝控制。七原负例9检查FAIL保留；两根各13进程Assign后Resume、自然预期退出且关Job前active0，九项实际输入、二文件私有补丁及前UI精确基线核收，同900秒内封存。不新增ID/minimum/父门、native/协议/timer/线程/持久schema或下载/弱网策略。
+
+日志至559ZIP，新Win5 13:13媒体记录与13:04字节相同，67job无增删且结果61done/6unavailable、worker/active0；仅Skyrim的前置签名/恢复原因/耗时账变化（14675→10532），最终三次耗尽仍未确认。保留未确认，不强填SteamID，也不据此断定每次尝试或现场路径原因，缺scan/plan仍UNKNOWN。JS-only无整Native/Full/实际Steam写入/下载/CPU/实体/部署，安装身份未复查；前进度根28/2/23 FAIL与22+1证据不被本33覆盖。交CPU1统一来源不追旧包，目标ACTIVE，入口Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/card-write-data-root/SOURCE_READY.json。
+
+
+## 自定义游戏库普通日志补齐既有扫描/加入计划（2026-11-09）
+
+Win5 13:13包仍六条旧路径/身份/快捷方式失败，原被动导出未选择Host已有的扫描及加入计划。现沿当前进程已经观察的dataRoot，原exportMetadata允许列表追加state/library-scan.json、state/steam-add-plan.json、state/library-steam-add-plan.json。只在显式日志导出读取已有文件，沿原打开句柄16MiB上限、临时发布及逐文件错误；不创建库根、不发现/扫描或检测游戏路径、不解析修复原数据，无新线程/timer/轮询。历史缓存不是当前路径存在或身份已确认的证明。
+
+原消费者新增定向选择在旧导出器实际拒绝；修后同一C++消费者4组96检查通过（缓存19/原默认34/UI17/Host26），14项实际编译输入无漂移。原普通ZIP消费者34检查另行通过，验证三文件精确打包字节、锁定扫描拒绝而两计划保留及原导出范围。首次ZIP因嵌入Python缺兄弟导入路径在业务/编译前失败，原件/费用保留；只用显式sys.path+runpy修正执行环境，沿原900秒账续跑ZIP，四个已过原生组未重跑，不把初次固定驱动改写成整轮PASS。全部实际工作先Assign后Resume、自然退出、关Job前active0，三文件私有补丁精确读回。
+
+无整main/Host/Full、安装、实际播放/游戏路径/输入归还或CPU实测，本轮未部署，六条旧失败不称已修。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/cached-library-log-export/SOURCE_READY.json；持续目标ACTIVE。
+
+
+## 共享媒体后台通知复用原UI消息投递（2026-11-09）
+
+源码确认gameMedia.watch的changed/inventoryChanged回调和gameMedia.background的下载快照回调来自独立Watcher线程，却直接ipc_emit。仅将两处注册中的三个调用改走gamepadSerialPostEvent，沿既有ResultMailbox复制载荷和WM_GAMEPAD_SERIAL_EVENT的UI消费者；事件、数据、原广播保持，无新线程/timer/轮询、全局发射器或Watcher/下载政策修改。普通通知仍是零动作上下文，不受无关输入配置/电源动作门阻断。Win5的50条投递失败各自事件归属仍UNKNOWN，不倒推已定位全部现场来源。
+
+原controller_axis_calibration_delivery_selftest增加显式--media-watchers复用原消费者，精确编译main三回调、事件类型/post/UI case及ResultMailbox；真实私有Windows消息泵，发射器为明确线程检查端口、回调由受控joined线程调用。旧16检查FAIL/后台直发36，修后16检查PASS/后台直发0，覆盖载荷复制、来源FIFO、零动作通知、缺HWND、Post失败、退出、真实窗口销毁及迟到回调归还；两个自有56进程子树先Assign后Resume、自然退出、关Job前active0，七项声明输入无漂移，三文件私有补丁精确读回，main仅三调用及注释。
+
+未重跑原owner/config/power其他选择，未整main/安装/实际Watcher停止重开/WebView2 COM/CPU实测；只有上述定向软件证据，本轮未部署，交CPU1统一构建。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-watcher-ui-delivery/SOURCE_READY.json。前缓存导出及历史FAIL/UNKNOWN保持独立，持续目标ACTIVE。
+
+<!-- CUSTOM-LIBRARY-ROG-MISSING-ROOT-STARTUP-20261109 -->
+## ROG 缺目录记录的启动阻断与账户误报（2026-11-09）
+
+用户图片明确 missing-root-record 和账户检测结果无效。Host普通启动清理在原Worker初始化前被目录准入拦住；账户命令返回只读诊断，前端误作账户结果。因此未执行账户扫描不能推断Steam账户有问题。仅原启动清理获固定Worker/命令/选定目录的有界初始化入口，原10秒与健康/坏记录保护保留；Worker统一绿色包/开发目录解析并在原初始化前核expected-data-root。UI显示目录未就绪、账户尚未检测。原Host67、Worker65、账户UI38项通过；Host受控Worker端口与真正Worker CLI进程内验收分列，592/507实际输入收尾一致，七文件私有补丁准确读回。首次账户消费者旧提取器不兼容既有第二参数的准备FAIL保留，登记同步原案例顺序/SHA/负例行号，没有新增ID或父门。现场根记录缺失来源未知；旧48个502不归作本次新下载失败。本聊天未部署，交CPU1成对构建；整main/真实账户/安装/CPU/完整门未验，目标ACTIVE。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/rog-missing-root-startup/SOURCE_READY.json；现场：rog-142151-intake/SCREENSHOT-FINDINGS.json。
+<!-- /CUSTOM-LIBRARY-ROG-MISSING-ROOT-STARTUP-20261109 -->
+
+<!-- CUSTOM-LIBRARY-DOWNLOAD-UNREADABLE-PRESENTATION-20261109 -->
+## 下载队列不可读状态不再被旧进度遮住（2026-11-09）
+
+前端曾在已有正revision后丢弃原生revision0的queue-unreadable/检查点需升级诊断，同revision健康结果也不能清本地host-unavailable。现保留原生最高revision和读取准入观测，只投影确切不可读状态；迟到错误不盖新进度，健康同revision可恢复，保留剩余计数且不假完成或借诊断重写开关。原media-recovery消费者旧32例99检查的5个FAIL保留，当前32例116检查通过，72实际消费输入、两树各5进程自然归零；前置依赖junction识别失败另留，修正仅证据驱动，同900秒额度续验。没有原生/下载策略/重试/新resident或轮询改动，未部署或证明现场502已解决。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/download-unreadable-ui/SOURCE_READY.json；该项与ROG缺目录记录分列。
+<!-- /CUSTOM-LIBRARY-DOWNLOAD-UNREADABLE-PRESENTATION-20261109 -->
+
+<!-- CUSTOM-LIBRARY-ROOT-RECORD-LOG-EXPORT-20261109 -->
+## 目录身份及迁移债务接入普通日志（2026-11-09）
+
+当前560份ZIP中央目录均无data-root.json/data-migration.json，只能证明未收录，不能证明现场源文件不存在。ROG启动修复已另交；本轮沿原exportMetadata允许列表仅加当前已观察根的data-root.json及state/data-migration.json，原打开句柄16MiB/逐文件快照/错误回执保持，不选根、不创建源、不解析修复/签认债务、无扫描或后台成本。
+
+原C++消费者root-records新选择旧源实际在遗漏回执断言FAIL，原stderr保留；修后19项及原默认34项通过，285实际输入收尾一致。原普通ZIP消费者42项通过，417实际编译输入收尾一致；仅给其生成batch注入/sourceDependencies记录，业务harness及原配方语义不变。验证未知/坏格式原字节、未观察/缺失/占用/超限/旧目的副本/伪目录，原媒体/UI/Host/缓存计划及凭证视频排除仍执行。六个实际编译/运行Job均Assign后Resume、自然退出且关前active0；原负例退出2分列，三文件私有补丁准确读回，同900秒预算无新失败或复跑已过组。
+
+无main/Host/Worker业务改动、完整门、安装、群友后续日志或CPU证明；未部署，交CPU1统一接入，目标ACTIVE。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/root-record-log-export/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-ROOT-RECORD-LOG-EXPORT-20261109 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-DOWNLOAD-FEEDBACK-20261109 -->
+## 手动补齐的准备状态不再借用旧完成回执（2026-11-09）
+
+ROG历史耗尽已有requestSupplement(true)手动入口，普通recheck不退预算；本轮不改原生恢复。独立发现主downloadDescription先用旧remaining0短路完成，两端旧CPU暂停又盖住手动已接受状态。现仅自动轮次用完成短路，手动投影忽略原允许的CPU busy/unknown/recovering及game-running软暂停，仍保留不可读/电源/启动/节电/低电/磁盘保护。新清单准备期间不借旧49/49，库页及SteamView原进度条改不定准备，清单确认/期限结束后回原进度；无新timer/线程/IPC/原生策略。
+
+旧主消费者和实际Edge页分别在命名断言复现错误，原件保留。初修51/17/116通过后截图暴露旧计数和满条，继续同900秒账；最终原主52项（63输入）、原media-recovery32例116项（72输入）、原库恢复浏览器显式manual-status19项通过，其他ordering选择未运行。SteamView原computed及:value表达式另由真实Vue ref/computed做9项，整SFC/模板编译无错；不是完整挂载/手柄/安装。九树均Assign后Resume/自然active0，初修与负例费用原账保留；五文件私有补丁精确，实际输入收尾一致。截图账户无效来自原内存fixture的非合同not-running，不当真实账户回归。
+
+只有SOURCE_READY，未部署或测真实下载/整main/Full/CPU；前目录导出、ROG启动修复各自范围保留，目标ACTIVE。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-download-status/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-DOWNLOAD-FEEDBACK-20261109 -->
+
+<!-- CUSTOM-LIBRARY-EDITOR-MANUAL-NAME-CLEAR-20261109 -->
+## 编辑卡片清空名称不再返回假成功（2026-11-09）
+
+日志560份无增改；独立续查发现同步草稿删name后，persistEditDraft只排非空名称，空名称保存true却不落盘。现仅原手动名存在且新值为空时排原saveManualName携clearName:true；Host显式布尔清除只删name，无标记空值及矛盾新值仍拒绝。原saveEditor/FIFO、EXE/根准入、备份/原子写保持，其他身份/壁纸/未知字段/其他EXE保留；重复清除不重写。无新命令、timer/线程/轮询或网络Worker。
+
+原Host editor-queue12场景通过（592实际输入）；实际Edge页4清除边界＋5原保存控制精确9场景19检查通过（9项UI/consumer/fixture素材输入），覆盖Back重开、后来改名、失败显式重试和无操作不写。旧UI假成功与旧Host拒绝空值负例均保留。原浏览器外层把计划声明顺序当执行源码顺序而FAIL，实际九项齐全且全过；前向核原来源、顺序、SHA与退出/Job原件，不重跑、也不把原wrapper改PASS。后置封存读中文负例因默认GBK失败保留，改UTF8只核已生成补丁并继续未建报告，原件未覆盖。
+
+六树Assign后Resume/自然active0、四文件私有补丁精确读回，同900秒账。只有成对Host/UI SOURCE_READY，未部署/整main/完整门/真实Steam、手柄或CPU；不倒推旧ROG根因。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/editor-clear-name/SOURCE_READY.json及SEAL-CONTINUATION-READBACK.json。目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-EDITOR-MANUAL-NAME-CLEAR-20261109 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-ENRICHMENT-INTENT-20261109 -->
+## 晚到识别结果不再重放旧名称选择（2026-11-09）
+
+日志560份无增改。原identifyOne已保存选择，后台startManualIdentifyTask却再给Worker --save-name/--save-id，ID单独识别完成又写item.name=正式名，能覆盖后续改名/清空或把自动名变手动。现后继仅用原--name/--steam-id/--igdb-id查询，保留原初次显式保存；完成只更新formalName/原身份字段，不触手动name或缺失意图。编辑框优先同卡片正式元数据，显式名称仍优先，未改保存不生成手动名；无新命令、timer/线程/轮询/重试或Worker产品更改。
+
+原Host editor-queue16场景通过，4新竞态旧源均失败、修后通过，12原场景仍执行；592实际编译输入稳定。真实后台/子进程/Job/pipe和Host写者，4个Worker为明确受控manifest/持久化指令端口，原Worker实际写分支仅做源码绑定，不能称真实识别/网络验收；原跟进由已有队列忙门隔离。UI旧预填负例保留；六场景初跑1新断言误把预览命令算名称保存而FAIL、5控制通过共12检查。只改新断言作用域，其他字节精确相等；仅续跑1场景5检查通过，旧六组FAIL不改、不重跑5控制。首浏览器准备因native-only计划缺子限在进程前KeyError，补90秒前向子限沿原900秒账。
+
+七树Assign后Resume、自然active0、四文件私有补丁准确；无部署/整main/Full/真实Steam、手柄或CPU。来源：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-enrichment-intent/SOURCE_READY.json。成对Host/UI交CPU1自然后继，目标ACTIVE，不倒推旧日志根因。
+<!-- /CUSTOM-LIBRARY-MANUAL-ENRICHMENT-INTENT-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-ROG-ACTUAL-ROUNDTRIP-CLOSEOUT-20261109 -->
+## ROG 账户误报的实际进程验证边界（2026-11-09）
+
+用户可正常启动Steam与已定位源码一致：缺根记录时Host在Worker初始化前拦截，steamAccounts只返回目录诊断，UI再误作账户结果无效；扫描尚未执行，不能据此判Steam登录损坏。此前ROG七文件SOURCE_READY及Host67受控端口、Worker65进程内、账户UI38原证据保持各自范围。
+
+补充实际Host→实际Worker的有界900秒阶段仅完成两次原配方编译（492/592实际输入、15507.5358/17861.0968ms、6/4进程均自然退出active0）；续接时原累计期限已过，probe没有执行，不重置额度、补写PASS或扩大为实机验收。未执行的新增消费者要求私有Worker环境，会破坏默认root-admission组，已连同补丁封存到私有证据并逐字恢复此前已验证消费者；产品修复和其他任务改动保留。本阶段无产品修改、部署或实际账户恢复结论。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/root-worker-roundtrip/CLOSEOUT.json；原ROG SOURCE_READY仍交CPU1自然后继，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-ROG-ACTUAL-ROUNDTRIP-CLOSEOUT-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-ACCOUNT-OBSERVATION-PRIVATE-20261109 -->
+## 账户读取忽略本次回执的独立缺陷（2026-11-09，私有候选）
+
+日志仍560份、无增改。源码发现readSteamAccounts只看Worker退出0；原Worker在读取/发布未知时故意保留旧文件并输出ACCOUNTS_WRITE_CONFIRMED:false及STEAM_ACCOUNTS_STATUS:unknown，Host会把旧账户重新当作本次观察。该缺陷与ROG根目录初始化先后问题分列，未倒推现场物理原因。
+
+私有候选消费原current/write逐行唯一回执并校验读回，保留旧文件；原Host消费者单场景旧源复现，候选9异常逐次恢复及2健康空结果通过，真实Host/子进程/pipe/Job、Worker回执为受控端口。两个592输入编译根自然退出0，但VCTIP残留触发原180秒所有权FAIL；后续业务运行在900秒原期限外，另建runtime计划未授权退款，前向记录该执行偏差，不能计原阶段通过或SOURCE_READY。旧/新业务分别4/42进程自然active0；原失败和成本不改。两文件候选、精确补丁及闭包已保存，公共源码按CAS逐字恢复此前已交来源，其他修复保留；本轮未部署/真实Steam/网络/完整门/CPU。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/account-observation-receipt/CLOSEOUT.json，目标ACTIVE，不重放已过期阶段。
+<!-- /CUSTOM-LIBRARY-ACCOUNT-OBSERVATION-PRIVATE-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-IMMUTABLE-ACCOUNT-REPLY-20261109 -->
+## 账户检测消费本次进程回执，避免共用缓存覆盖（2026-11-09）
+
+原账户读取仅凭退出0读共用文件；即使补current/write门，后继扫描仍可在Worker完成后替换此文件。本轮新协议来源让Worker在原账户发布确认后输出STEAM_ACCOUNTS_JSON，Host只消费该进程唯一current/write/JSON回执并校验形状、状态及readError，不再把共用缓存当本次结果。unknown、缺/重复/冲突/坏JSON、截断和非零均返回error；下次成功可恢复。原缓存writer/保护与无output的CLI表现保留，无新resident/timer/线程/扫描/重试。
+
+原Host消费者显式新场景通过：3种后来缓存、9错误逐次恢复、非零及2健康空；Host实际进程/pipe/Job，Worker回执为受控端口。原datachain显式新场景实际CLI进程内3次通过（正常/健康空/未来输出保护），网络/外部进程/优先级/盘符发现均0；592/507实际编译输入核回。初次新参数stdout撞CRT宏编译FAIL，改名后仅重建受影响Host，原失败保留；该次VCTIP由原RawProgram精确归属/路径/SHA策略回收并观察active0，后继两编译/两业务均自然active0，未改共享工具策略。首次封存Git默认转换Worker行尾的失败另留；关闭autocrlf后同原补丁精确回读，不重跑业务。旧receipt阶段越期与FAIL不改，本轮为不可变JSON替代共享文件的新来源，900秒内完成。
+
+四文件配套SOURCE_READY已在主线，须Host/Worker成对构建，缺新版回执明确error；本聊天未部署，不称实际封装Worker整链、整main/Full、真实账户或CPU验收。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/account-immutable-payload/SOURCE_READY.json，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-IMMUTABLE-ACCOUNT-REPLY-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-BATCH-ACCOUNT-ERROR-DETAILS-20261109 -->
+## 批量操作保留账户检测错误（2026-11-09）
+
+日志560份无增改。批量加入、删除与刷新Steam图标把readSteamAccounts的error取为空数组，虽未继续写，却丢掉本次权限/占用/Worker失败原因，误报未发现用户。三处改复用steamAccountTargetsForWrite，error保留原原因并停止；确认健康空账户/未安装仍保留各操作原空结果提示。原阻写行为、既有账户扫描次数不变，无新timer/线程/重试/接口。
+
+原Host消费者仅一个新场景：旧源实际在原因丢失断言FAIL，当前源覆盖三操作×三失败及逐次健康空恢复、三未安装控制，共21次实际Host/受控账户Worker观察，未执行真实Steam写。旧缓存及无成功回执断言通过，Host其它process/network/shell端口0；前后各592实际输入、四树自然active0、负例退出1分列。驱动初始目录多拼一级的进程前ENOENT保留，修父解析后才编译；同900秒账，私有两文件补丁精确回读并保留未改源字节。
+
+SOURCE_READY依赖前immutable账户回执配套Host/Worker来源，仅交CPU1自然后继；未部署/整main/Full/真实Steam或CPU验收。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/account-write-error-details/SOURCE_READY.json。目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-BATCH-ACCOUNT-ERROR-DETAILS-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-STEAM-ADD-UNCONFIRMED-CLI-20261109 -->
+## Steam加入计划未确认不再退出成功（2026-11-09）
+
+日志560份无增改。原build/commit在plan未确认时保护旧输出并返回inactive结果，但CLI仍退出0；Host单卡及全账户预检/commit的requireSuccess无法区分，可能继续旧结果或报完成。仅原Steam add-plan/add-commit命令在planWriteConfirmed:false时输出原discoveryState.reason并返回2。原数据保护、CLI诊断及确认的健康空计划/无需新增commit退出0保持，无新命令/扫描/并发/重试/timer/线程。
+
+原datachain仅一个新场景：旧CLI在返回成功断言实际FAIL，当前两入口×future-scan/future-output/实际写失败及逐次恢复，共12次实际Worker CLI进程内调用通过；旧plan/receipt/fake VDF字节保持，空commit仍nothing-ready-to-add/committed:false，原网络/外部进程/优先级/盘符发现0。前后各507实际输入、四树自然active0、负例退出1单列。两文件补丁精确回读；后置封存模板host/worker字段KeyError前向改验同一原件，不重跑业务，同900秒账。Host三处requireSuccess的非零阻断仅核源码接线，未执行真实Host/WebView/Steam加入。
+
+Worker+原datachain SOURCE_READY已交CPU1自然后继，前账户读取配套来源保留，未部署/整main/Full/真实Steam/CPU验收。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/steam-add-cli-unconfirmed/SOURCE_READY.json，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-STEAM-ADD-UNCONFIRMED-CLI-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-STEAM-DELETE-UNCONFIRMED-CLI-20261109 -->
+## Steam删除计划未确认不再退出成功（2026-11-09）
+
+原delete-plan/delete-commit在保护旧输出并返回inactive时仍退出0，与加入链路同类。仅该CLI分支在planWriteConfirmed:false时附实际discoveryState.reason并返回2，Host单目标及全账户requireSuccess可沿原错误路径停止；实际删除、只读预览和目标不存在拒绝保持。无新命令/扫描/并发/重试/timer/线程，不操作真实Steam。
+
+原datachain仅一个新场景：旧CLI实际在返回成功断言FAIL；当前两入口×future-scan/future-output/真实文件写故障及逐次恢复通过，另查确认删除只移除选中fake行并保留其他行、确认not-found拒绝且保留前次成功receipt/VDF。实际15次CLI进程内调用：6次故障exit2、6次恢复exit0、3次not-found exit1；网络/外部进程/优先级/盘符发现0。前后各507输入、四树自然active0、负例退出1保留。两文件私有补丁精确应用读回，同900秒账，无额外业务复跑。Host三个requireSuccess仅源码绑定，非实际Host/UI删除验收。
+
+Worker+原datachain SOURCE_READY交CPU1自然后继，前加入及账户修复保留，未部署/整main/Full/真实用户VDF/CPU验收。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/steam-delete-cli-unconfirmed/SOURCE_READY.json。目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-STEAM-DELETE-UNCONFIRMED-CLI-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-192710-REVIEW-20261109 -->
+## Win5 19:27新日志与13:13对比（2026-11-09）
+
+目录新增Win5虚拟触摸按键呼出困难ZIP，总561，原560元数据无改。自定义库选定原件与13:13导出逐项比较：队列67项=59done+8unavailable，导出时worker/active0、remaining0；6个旧身份/路径缺口保留。新增两项Steamworks组件/store-unavailable、FM26 Demo/not-game-or-no-video前后都无asset，当前attempts/automaticElapsed0；媒体其他entry逐项不变、invalidSlots空，未观察到已完成视频丢失，不当成8个新下载错误。
+
+新包已含schema/layout2的data-root.json，D根与观察根/计划一致。扫描55主程序ready不等于Steam身份已全确认；计划仍11月8日18:50的56项，仅MyLittlePony2为额外旧目录，共有目录EXE全相同。缺实时账户和精准安装来源，不因历史计划账户与旧shortcut队列账户不同推断串账户。OPTI一轮idle/considered34/写0，CPU62.5ms/elapsed187ms仅该进程记录，不外推常驻CPU或客户端UI库存。包无child crash/exit/ui-errors及选定主日志无库事件，不宣称从未崩溃，不归因触摸按键到游戏库。
+
+本次无产品改动/测试复跑/部署或设置操作，前SOURCE_READY保持。6个旧缺口与实际安装/账户/播放继续未验；旧560历史盘点不覆盖改写。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/new-win5-192710/FINDINGS.json及REPORT.md，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WIN5-192710-REVIEW-20261109 -->
+
+
+<!-- SCREEN-SD-DIRECT-MENUS-20261109 -->
+## SD 屏幕 Steam／三个点改走直接接收入口（2026-11-09）
+
+本次用户要求将 SD 虚拟手柄档位的屏幕 Steam／三个点按键也改为直接触发。两键都在有效 UP 后进入原 `standaloneDispatch → nativeScreenStandaloneSubmit → menu.button`，分别调用 Steam 自身 `OnHomeButtonPressed()`／`OnQuickAccessButtonPressed()`；不再产生屏幕 SD 菜单位。`buttonSnapshot()` 额外过滤旧的低两位，避免与直接调用重复；实体手柄的原始报告、触摸板滑动、背键、PS5／Xbox 的虚拟按键均保持各自原链路。
+
+SD 直接动作沿原配置代次／可用目标门准入，取消、切档、OFF／退出仍撤销 pending。丢 UP 的 SD 触点保留 3 秒期限，仅新 DOWN 时回收；期限不会发送虚拟 UP／DOWN。三个点从有效 UP 创建与无输出相同的直接票据，沿现有 3 秒、750ms 有界补发；不再在 SD DOWN 启动等待虚拟 receiver 的旧观察票据。未知结果／无 Steam 不发键盘或抢焦点。SD 设置页面也显示原直接动作失败状态。
+
+Win5 19:27 包中，原生详情 210～330 行的 24 条 screen-qam-followup 覆盖 19:26:50.997～19:27:05.249，全部 waiting-receiver；导出时 SD active/applied 一致、按键输入及视觉 mask=7、error=0、直接动作计数为 0。这证明本段走旧 SD 观察链而未记录到接收边缘，不证明 Host／物理手柄或 Steam 全局坏死。判定位于 steam_live.js 的 entry.previous/event 与票据起始时间比较；没有将此状态直接归为驱动故障。
+
+本轮只有源码修正及静态复核。隔离消费者准备计入原 900 秒预算，首次生产器启动前已到期并拒绝，实际编译／运行数为 0。新增未验证消费者留在私有证据，不接入默认门；原有消费者的 SD 预期随行为更新，未称其通过。未构建安装版、部署或操作 Steam／设备。证据：Testing/YMCC/Evidence/Touchpad-SD-DirectMenus-20261109。
+
+<!-- /SCREEN-SD-DIRECT-MENUS-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-CURRENT-SHORTCUT-RETURN-20261109 -->
+## 当前账户快捷方式恢复后的旧任务接续（2026-11-09）
+
+新Win5保留的media-shortcut-no-longer-current任务暴露恢复缺口：helper/EXE未变时，回到原账户和原快捷方式也不重开。现仅既有owner/inventory唤醒对该原因读取实际ActiveUser、shortcut AppID和精确EXE，并在原队列锁下再核后沿原有界reset；移除/异账户/不可读/变化均不恢复。未确认身份不强填AppID、重复唤醒不退额度，无新timer/线程/轮询或下载并发修改；不称六条旧现场失败已解决。
+
+原Queue/Supervisor C++消费者旧源实际拒绝；最终定向1场景25检查通过，327实际编译输入及工具收尾一致。初修在原owner接续后被测试末尾错误的缺workerPid默认1误拦，仅改该断言为产品默认0，原FAIL和六个编译/执行终态均保留。各树真实Assign后Resume、自然退出且关Job前active0；三文件私有补丁字节读回，同原900秒内封存。WORKER-READBACK由旧驱动继承的Worker CLI范围文字已在FINAL/REPORT向前纠正，实际没有执行Worker CLI。原其他binding场景未重跑，不新增ID/minimum/父门。
+
+用户报告Steam正常启动与ROG原截图相符：源码及日志支持先由缺目录记录拦住、账户扫描尚未执行却显示账户无效，不能据此认定账户异常。该启动/提示修复及成对账户回执修复各沿原SOURCE_READY，现场仍待同源构建验证。当前项未整main/Host/实际Worker/Full、安装/Steam/设备/CPU或部署；交CPU1统一构建，持续目标ACTIVE。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/membership-return/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-CURRENT-SHORTCUT-RETURN-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-REMOVE-UNCONFIRMED-CLI-20261109 -->
+## 自定义库移除未确认不再退出成功（2026-11-09）
+
+日志仍561份，继续源码核对发现--remove-library-game在原扫描未知/不可读或移除结果未确认时仅打印false却退出0，Host的removeGame随后requireSuccess会继续重扫。现只将原四个未确认退出改2，并以ERROR_LIBRARY_REMOVE_UNCONFIRMED保留实际原因；原成功移除、恢复发现与原数据保护流程保持，无新命令/扫描/并发/重试/timer/线程。本次不倒推为ROG/Win5已有现场症状根因。
+
+复用原datachain audit-remove-protect七参数，增锁/真实写故障/观察到发布变化三边界；旧十场景均在假成功断言FAIL，当前十场景通过。实际21次原Worker CLI进程内调用=10拒绝、10修复后移除、1恢复发现，失败保留配置/覆盖/持久素材/安装文件，成功只移除选定元数据且保留恢复备份、其他行/覆盖和安装文件。每epoch507实际输入、工具/原日志核收，四树先Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回。包括本轮初始只读调查的原900秒账内完成，无新增ID/minimum/父门或无关复跑。
+
+Host requireSuccess到后续扫描的阻断仅源码接线，未执行真实Host/UI、整main/Full、安装/Steam/CPU或部署；交CPU1统一构建，旧现场身份/路径/网络缺口仍独立未验，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/remove-cli-unconfirmed/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-REMOVE-UNCONFIRMED-CLI-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-SCAN-UNCONFIRMED-CLI-20261109 -->
+## 自定义库扫描未完成不再退出成功（2026-11-09）
+
+日志561ZIP路径/大小/mtime与前560盘点加已知Win5新包一致，最新包SHA匹配，无新增内容分析。继续源码检查发现--scan-library在受保护/不可读旧清单、持久或任务输出发布未确认时退出0；Host原打开pipeline据此可能发scan-complete并继续plan/scrape。现仅两个原拒绝分支退出2，以ERROR_LIBRARY_SCAN_UNCONFIRMED保留实际原因；原LIBRARY_STATE_COMMITTED保留部分主记录已确认状态，不回滚已写数据、不退款重试、无新命令/扫描/并发/timer/线程。
+
+复用原scan族14与job-observed1，旧12场景在假成功断言FAIL、3健康/重建PASS保持；当前15场景通过。原Worker CLI进程内29次=12拒绝+17成功（明确重试/生命周期/损坏重建），含2个partial-state true拒绝；原ACL/锁/原字节/变化来源/恢复债务和生命周期断言保留。两编译各507实际输入、工具/原日志核对，六树Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回。共享原CRLF在未配置diff检查被当尾空白，前向记录后以CR-aware核对通过，未改源行尾取绿。原900秒含初始调查/准备/负例/当前/封存，无新增case/ID/minimum/父门或无关复跑。
+
+Host在complete/plan/scrape前的非零拒绝仅源码接线，未actualHost/UI、整main/Full、封装Worker整链、安装/真实Steam/CPU或部署。本次源缺陷不倒推为ROG/Win5已有现场原因，旧未验项保留。交CPU1统一构建，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scan-cli-unconfirmed/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-SCAN-UNCONFIRMED-CLI-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-VERIFIED-SHORTCUT-RETURN-20261109 -->
+## 已确认身份快捷方式恢复后的壁纸任务接续（2026-11-09）
+
+原恢复首门仅identityPending，已确认canonical任务同样会由Worker报media-shortcut-no-longer-current并耗尽，返回原账户/快捷方式却不能恢复。现沿既有owner/inventory唤醒，对该原因的canonical shortcut须当前精确account/shortcut/EXE、EXE存在及同AppID已验证文件缓存，锁下再核membership与身份后沿原有界reset。canonical不依赖/创建/启动识别helper，pending原helper/EXE前置保持；不猜ID、不重播写或新增timer/线程/轮询/并发/重试政策。
+
+原shortcut C++消费者真实调用Worker三次复现耗尽，旧源在已确认身份恢复断言FAIL。当前新场景42检查及原pending场景25检查同次编译通过，含错/移除/占用/末端变化membership、缺EXE、缓存占用/更正/末端更正、无helper、重复wake不退额度、OFF/政策/无关网络债务、实际Supervisor唤醒和元数据保持。初修28项后因夹具cache长路径锁未用既有ioPath失败，仅修自有锁前置；原FAIL保留。同原900秒含调查/准备/初错/续验/封存，七树真实Assign后Resume、自然退出且关Job前active0，327实际输入/工具核对，二文件私有补丁字节读回，无新自动ID/minimum/父门或无关复跑。
+
+实际为Queue/Worker/Supervisor软件消费者，非Worker CLI/封装Worker整链、整main/Full、安装/真实Steam/游戏/设备/CPU或部署；未将源码遗漏倒推旧现场原因。前pending恢复、scan/remove/账户配套SOURCE_READY及旧UNKNOWN保持，交CPU1统一构建，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/verified-membership-return/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-VERIFIED-SHORTCUT-RETURN-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-VIDEO-REQUEST-OWNER-20261109 -->
+## 当前手动视频选择不再借用旧快捷方式账户（2026-11-09）
+
+已接受官方视频选择复用canonical队列时仍保留catalogSource=steam-shortcut，Worker原先先因旧shortcut账户拒绝而未进入下载。现新增一次只读核对：仅当前manual session/key/claim起始/provenance、已接受目标revision、selectionToken/AppID和Store当前binding/selected/pending dynamic全匹配，才按这次明确媒体请求处理。自动/取消/过期/后续编辑/无token/错AppID仍原shortcut门；持久来源不改，无新persistent字段/timer/线程/轮询/重试/并发政策。
+
+原C++消费者生产选择helper/Queue/Worker旧负例复现；当前新场景59检查及原verified-membership42同编译通过，12次实际Worker进程内调用。只有当前选择到达自有WinHttpOpen拒绝端口，保留原4次弱网尝试和network-open真实错误；0 HTTP session、0实际视频下载，此处只证明准入接线。五树Assign后Resume、自然退出且关Job前active0，实际编译输入/工具核对，三文件私有补丁精确读回，同原900秒含初始调查/准备/实跑/封存。驱动PENDING-CONTROL文件名实际选择verified-membership，raw命名已在REPORT明确，不称原pending路径重跑。无新增自动ID/minimum/父门或无关复跑。
+
+未CLI/封装Host-Worker整链、整main/Full、安装UI/真实Steam/CPU或实际下载验收，旧现场缺口继续独立；交CPU1统一构建，持续目标ACTIVE。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-video-shortcut-owner/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-VIDEO-REQUEST-OWNER-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-VIDEO-RETRY-WINDOW-20261109 -->
+## 手动视频弱网重试保留原期限与额度（2026-11-09）
+
+原Worker首轮network失败即清manualUntil，未用完原3次/累计6分钟/15分钟窗口却丢手动owner。现仅同一当前scoped选择的已结算瞬态网络失败、原retry可在原期限内且Store绑定/选择仍匹配时保留原窗口；不改requestId/截止/次数/耗时/退避。取消/paused/到期/后续编辑/403/耗尽仍停止；调度迟于backoff时也不提前结束。自有部分发布沿原Store回执只同步推进匹配manualTargetRevisions，不退款或新授权。
+
+原C++消费者真实3次Worker网络失败，旧源首轮后在窗口断言FAIL。当前新40+原request-owner59同编译通过，含原退避/幂等/额度/三次停止及取消/暂停/期限/编辑/403/退避已过和真实Store+Queue部分发布；12次当前Worker进程内调用、16次自有WinHttpOpen拒绝、0 HTTP session/视频下载。初修36+59留原件，补两边界后同原900秒续验，不重置账。八树真实Assign后Resume、自然active0，330实际输入/工具及二文件私有补丁核收。无新persistent字段、线程/timer/轮询/并发/自动ID/minimum/父门。控制文件PENDING-CONTROL实际选择request-owner场景，REPORT已按raw说明。
+
+未外部下载/CLI/封装Host-Worker/整main/Full/安装UI/真实Steam/CPU验收或部署，旧现场缺口保持；交CPU1统一构建，持续目标ACTIVE。来源Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-video-retry-window/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-VIDEO-RETRY-WINDOW-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-VIDEO-PARTIAL-ACK-20261109 -->
+## 手动视频部分发布后的重复确认（2026-11-09）
+
+选定视频的海报先发布后，Store与已接受队列回执会推进超过catalog+1；原选择helper把同一次重复确认误报成设置已改变。现只在当前canonical任务、原catalog token、当前已接受revision与Store选定视频全部匹配时，沿原catalog校验与只读已接受回执返回；缺回执、换候选、取消和其他编辑仍拒绝。不重复写入/入队、不重开请求或延长预算，无新持久字段/线程/timer/轮询/网络。
+
+原C++消费者旧源在部分发布后重复确认断言FAIL，修后45项与原request-owner59项通过；未改的原selection consumer108项通过。实际编译输入330/319，七树Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回。原900秒含调查准备、旧负例、当前与原消费者及封存；SOURCE_READY在652312ms完成。原PENDING-CONTROL命名实际为request-owner场景，保留raw。
+
+未实际IPC/WebView确认、外部HTTP/视频下载、封装Host-Worker、整main/Full、安装UI/Steam/CPU验收或部署。旧现场缺口保持，交CPU1自然后继，无冻结或重复构建要求，持续目标ACTIVE。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-video-partial-ack/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-VIDEO-PARTIAL-ACK-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-VIDEO-FINAL-ACK-20261109 -->
+## 手动视频最终发布后的重复确认（2026-11-09）
+
+最终视频发布会清refreshRequested，原Worker因此未同步Queue绑定和已接受revision，同一次失回执确认被误判旧设置。现每次发布交原owned-claim核对；部分发布沿原路，最终发布仅当前manual scope、已接受revision和selected token/值相同才推进。原task/PID出生/session/provenance/实际Store资产守卫保留。普通自动最终发布不新增写；明确选定最终发布只加一次原Queue有界保存，重复ACK只读，无新字段/线程/timer/轮询/重试退款。
+
+旧原消费者49项到最终回执断言FAIL；初修54/59及原108保留。收紧后当前56+同编译原request-owner59通过，未改原selection消费者108在当前来源通过，实际输入330/319。13树真实Assign后Resume、自然退出且关Job前active0，三文件私有补丁字节读回。同原900秒含调查/准备/初修/收紧/实跑/封存，SOURCE_READY在793528ms。两处继承旧输出路径分别在producer前和原consumer入口被拒，保留原失败，只在新路径执行未启动/未到断言对照，不重编或重跑已过主项。
+
+未真实IPC/UI、外部HTTP/视频下载、封装Host-Worker、整main/Full、安装/Steam/CPU验收或部署。合成媒体不算解码验收，旧现场缺口保持，交CPU1自然后继，不冻结/追包。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-video-completion-ack/SOURCE_READY.json，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-MANUAL-VIDEO-FINAL-ACK-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-PENDING-CACHED-IDENTITY-RETURN-20261109 -->
+## 已验证缓存修复后的旧身份占位任务接续（2026-11-09）
+
+原identifyShortcut先用当前verified精确EXE缓存再要求helper，但停止的pending任务恢复仍要求helper存在，已修复缓存也可能留下旧失败。现仅既有owner/inventory唤醒，在当前EXE存在、缓存AppID已验证且当前账户/shortcut匹配时可进入原有界reset；队列锁下再核完整旧job、当前membership和同一缓存AppID。AppID只作临时证明，不新增持久字段、不猜ID；原helper修复、canonical同ID和无关错误守卫保持，无新线程/timer/轮询或helper启动。只对符合条件的停止身份项增加缓存读取，不称CPU收益。
+
+原C++消费者旧源52项到无helper缓存恢复断言FAIL；当前59+同编译原pending-return25通过，包含真实原Worker消费缓存并退休占位项，当前共4次Worker进程内调用，缓存接续helper/网络尝试0。缺/占用缓存、异/移除账户、末端缓存ID变化和membership变化、重复wake及原OFF/政策守卫保持。330实际输入/工具、7树Assign后Resume、自然退出且关Job前active0、二文件私有补丁字节读回。同原900秒含调查准备/初错/续验/封存，SOURCE_READY在677053ms。初夹具漏retryAt导致原标准化加0使JSON比较失败，仅补自有seed；旧43FAIL及准备锚点拒绝保留，修正负例与当前夹具字节相同，不退款。
+
+日志仍561份，六条旧现场缺口为4目标不可用+1身份未确认+1旧membership，缺现场当前缓存/文件证明，不宣称已解决。未封装Worker CLI/整main/Full/安装/真实Steam账户/网络下载/设备/睡眠/CPU验收或部署。交CPU1自然后继，不冻结/追包，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/pending-cached-identity-return/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-PENDING-CACHED-IDENTITY-RETURN-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-ID-CLEAR-ENRICHMENT-20261109 -->
+## 清空SteamID后撤销同游戏旧识别（2026-11-09）
+
+原clearManualSteamId有idCleared防直接填回，但旧手动enrichment仍current，能在清空后写缓存/ready等状态。现原清空持久保存成功后，沿既有cancelBackgroundJobs仅撤销同EXE任务；保存失败不撤销。成功/部分失败manifest写缓存均加原task boundary并在锁内再核current，堵住检查与写入间跨清空。无新代次/持久字段/命令/线程/timer/轮询/重试或常驻工作。
+
+原Host editor消费者旧源真实复现清空后状态改写；相同夹具在当前源精确3case通过：接受清空保留原提交override和cache字节、失败清空保留已接受识别完成、仅后改名正常保存正式metadata。真实Host后台任务/子进程/pipe/Job和config写者，Worker为受控发布端口，不是真实识别网络。592实际输入/工具核收，6树Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回；SOURCE_READY在原900秒内640632ms封存。原semantic FAIL保留；可选editor精确选择器沿原group，无新全局ID/minimum/父门。其他游戏取消和各partial时序仅源码复核，未单独实跑。
+
+日志仍561份，无新包内容分析，不倒推ROG/Win5旧根因。未整main/Full、封装Host-Worker/安装UI/真实Steam账户/网络下载/设备/睡眠/CPU验收或部署。交CPU1自然后继，不冻结/追包，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-id-clear/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-ID-CLEAR-ENRICHMENT-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-IDENTITY-ACK-20261109 -->
+## 手动识别完成须消费已确认的正式身份（2026-11-09）
+
+缓存writer拒绝旧/冲突proof或未确认发布时，原manual enrichment仍忽略bool回执，仅凭数值ID和steam-verified字串改写SteamID/ready。现回调复用原verifiedSteamIdentityMatch且必须实际cache ACK成功才提升正式身份；拒绝结果保留用户已选ID作候选、状态待确认及原cache字节，名称hint仍可用。原current job/清空tombstone/task boundary/弱网和后继素材合同保持，无新schema/字段/命令/线程/timer/轮询/网络调用。
+
+原Host消费者旧源5语义FAIL=旧resolver/offline label/AppID冲突/缺provider/cache拒ACK，合法v2原控制PASS保持。当前同编译精确7路径通过，含5拒绝及合法v2/v4；末端独立读原v4 observed核ready/ID620/后改名一致，不重跑。592实际输入/工具核收，15树Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回，负例/当前夹具同字节。原900秒含调查准备及混合行尾锚点拒绝、误调未创建驱动的module拒绝；均未启动compiler/业务producer，成本不重置。SOURCE_READY在529486ms封存。
+
+真实Host线程/子进程/pipe/Job与config/cache写者，Worker为受控manifest端口，不是真实识别网络。日志仍561份，无新包内容分析，不倒推旧Win5/ROG根因。未整main/Full、封装Host-Worker/安装UI/真实Steam账户/HTTP下载/设备/睡眠/CPU验收或部署。交CPU1自然后继，不冻结/追包，持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-identity-ack/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-IDENTITY-ACK-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-AOKZOE-221647-REVIEW-20261109 -->
+## Aokzoe 22:16新日志自定义库检查（2026-11-09）
+
+新增第562ZIP、73成员，版本资源0.0.39.0不等于精确Host/Worker/来源。选定12原件/hash和全目录元数据索引保留，只新分析本包选定内容。Queue/progress版本18一致：jobs/active/total/remaining/failed/unavailable皆0、idle、末端pause/resource为空；workerPid字段缺失，不冒充实进程盘点。保留4条capacity-unavailable和启动/电源/游戏准入历史均有后续清除，未见持续下载卡住或失败；空总数不证明已扫描/下载所有游戏。
+
+导出shared-media仅4文件范围，game-media和last-opti缺失且明确not-created-or-not-retained；无root record/scan/plan/account清单，不能验证账户读取/目录准入/卡片库存/播放。选定主日志无库事件不证明无child活动。与Win5 67项属不同机器，虽安装D路径同名，不据空队列判Win5素材丢失；未找到旧Aokzoe命名包，不等于此前所有设备身份已核实。
+
+主程序EBWebView在22:07:46.938记录browser崩溃，crashpad元数据22:07:46.955列RTSSHooks64.dll/0xc0000005，22:07:48.098软件模式render/recovery完成，间隔1160ms。这是app.localhost/main profile证据，不是库child崩溃或模块根因定论，交主程序owner参考，不改RTSS/设备设置。
+
+本新包未支持新库产品改动，原SOURCE_READY保持原范围。无业务测试复跑、部署/启停/Steam游戏/设置/设备/睡眠/CPU操作或收益结论；持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/new-aokzoe-221647/FINDINGS.json及REPORT.md。
+<!-- /CUSTOM-LIBRARY-AOKZOE-221647-REVIEW-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-SCRAPE-BUSY-FOLLOWUP-20261109 -->
+## 忙队列保留手动识别后的补图接续（2026-11-09）
+
+旧manual完成后调用startScrapeQueue(false)，若已有automatic批次便丢请求。现仅仍current的manual完成传内部continueAfterBusy；一枚进程内bool与queue-state mutex合并请求并串行准入/收尾，成功结束后接一次原automatic pass。普通重复打开不请求接续；取消/退出/异常清理不自动重开，原显式manual force保持。无新持久字段/网络/下载并发/常驻线程/timer/轮询。
+
+原生产queue在自有空库存、真实history发布门处运行，旧源复现丢请求。当前20请求合并成总2个completed automatic批次，原运行job未取消；普通打开/取消/退出各总1批次且owner归还，原健康manual控制通过，共5精确case。592实际输入/工具核收，11树Assign后Resume、自然退出且关Job前active0，二文件私有补丁字节读回，旧FAIL保留。当前夹具补收原start注册的后继线程，原负例/控制断言不变、不为收尾复跑。原900秒含调查准备/负例/当前/封存，SOURCE_READY在826545ms。
+
+队列场景媒体项0，证明调度/归还，不证明真实素材传输；manual调用接线为源码复核，实际媒体并发到达未实跑。日志仍562，无新包内容分析，不倒推旧现场根因。未整main/Full/封装Host-Worker/安装UI/真实Steam账户/网络下载/设备/睡眠/CPU验收或部署。交CPU1自然后继，不冻结/追包，目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-scrape-followup/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-SCRAPE-BUSY-FOLLOWUP-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-225250-REVIEW-20261109 -->
+## Win5 22:52新日志与19:27对比（2026-11-09）
+
+第563ZIP、187成员，选定19原件/hash保留，整目录仅元数据索引。队列仍67=59done+8unavailable，workerPid/active0、remaining0，phase completed/pause game-running；progress completed67为已处理、不等于成功下载67。唯一job变化为Skyrim file-3ae04f62f7a0d7fb：identity-unconfirmed变shortcut-no-longer-current，耗时26104→176ms、prerequisite stamp变化；22:24:24.792/44.932、22:25:05.099三次结算，无新/删除job。65媒体entry及整个文档逻辑全同、revision11747、invalidSlots空，未见新素材metadata丢失，实文件/解码未验证。
+
+Steam历史connection最后21:38:18仍[U:1:89250578]，与旧shortcut账户相同，但22:24/25拒绝前后120秒无对应marker；不是同期HKCU ActiveUser或shortcut内容证明，不能认定错读账户。无root/scan/plan/account导出，缺失不等于文件删除。两包均资源版本0.0.39.0，但export-time native disk SHA由0069ec63…变e28a9ae1…；不代表loaded-image、child Host/Worker或精确源码，原SOURCE_READY不冒充已安装。
+
+OPTI一轮idle/considered34/写0/cpu78.125ms/elapsed234ms，非常驻CPU或UI库存验收。前端错误为19:58 trainer prepare及22:50七条CE-handshake，交对应owner，不归因游戏库、不绕原CE所有权或启动CE。主日志无库事件、child crash/exit未留文件均不证明没有child历史故障。
+
+本新包无足够证据支持新增库产品修复，六旧身份/路径缺口保持。无业务复跑、部署/启停/设置/Steam游戏/设备/睡眠/CPU动作；本来计划的带数据queue补验因新现场优先而延期，未记执行。持续目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/new-win5-225250/FINDINGS.json及REPORT.md。
+<!-- /CUSTOM-LIBRARY-WIN5-225250-REVIEW-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-SHORTCUT-REFUSAL-OBSERVATION-20261109 -->
+## 快捷方式拒绝保留同次原读取诊断（2026-11-09）
+
+Win5原generic media-shortcut-no-longer-current无法区分账户读失败/空/不同、Steam根读取失败、shortcut移除/EXE变化、读取中切号或坏VDF。现原读取可选回传有界原因/已知account/第二读account/错误码，bool入口保持；Worker识别原function-pointer provider复用该次读取，自定义provider仅原一次调用并明确provider-refused。既有Queue result保存一条白名单诊断lastShortcutObservation，含observedAt/expectedAccount/provenanceRevision；无账户读成功不虚构0，不提供身份/恢复授权。原generic错误/次数/存储IO backoff保持，其他当前result清旧诊断。无新文件/IPC/schema版本/额外读取/网络/线程/timer/轮询。
+
+旧原消费者3检查到丢原观测断言FAIL；当前132检查=20次原Worker进程内调用（pending/canonical×10），原账户读取次数1/实际切号2/opaque provider0，保留99及17→99和Win32码2/3。原explicit-video request-owner59和未改原identity-cache/VDF IO51同编译通过，分立范围不合成全父。330实际输入/工具、6树Assign后Resume、自然退出且关Job前active0、四文件私有补丁字节读回，负例/当前夹具同字节。PENDING-CONTROL文件实际为raw所指request-owner。原900秒含调查准备/旧负例/当前/原IO/封存，SOURCE_READY在625985ms。
+
+账户/VDF/cache为自有软件端口，未读真实Steam账户。日志仍563，不据本诊断认定或修复历史Skyrim根因；待同源现场导出。未整main/Full/封装Host-Worker/安装UI/真实Steam账户/网络下载/设备/睡眠/CPU验收或部署。交CPU1自然后继，不冻结/追包，目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/shortcut-refusal-observation/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-SHORTCUT-REFUSAL-OBSERVATION-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-DATA-BEARING-QUEUE-20261109 -->
+## 自定义游戏库原队列带数据回归（2026-11-09）
+
+原 Host 的三个队列场景实际通过：识别失败后补图、身份冷却期补图、手动刷新排除已加入 Steam；每个场景含两个惰性游戏记录，只有一项入队，原 Worker runs 为 2/1/2，无 ID 项三张预览且仍待 Steam 身份核验。一次原编译 592 实际输入；六棵编译/业务/拒绝控制 Job 均恢复前准入、自然期望退出、关闭前 active0。原有效断言和 15 秒期限保持，精确补丁私有应用逐字核对。
+
+仅原测试文件增加三个原 ID 的默认组精确选择及与主入口一致的受管 Evidence 路径；未知/不支持组合在创建目录前拒绝，默认整组不变，无新 ID/minimum/父门或产品修改。素材及 Worker 端口受控，不证明真实网络/解码/播放；带实际数据的 busy-followup/手动强制取消仍未运行。账户图示故障已核实为 YMCC 目录准入挡住检测及前端误报；本轮只复核既有主线修复来源，未重复账户生产者、未部署或宣称群友验收。历史失败与未知保留，持续目标 ACTIVE。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scrape-data-regression/SOURCE_READY.json、FINAL-READBACK.json、REPORT.md。最新产品来源仍为 shortcut-refusal-observation；此条只是后继原队列验证及测试源码接续，不追包或要求其他任务停手。
+<!-- /CUSTOM-LIBRARY-DATA-BEARING-QUEUE-20261109 -->
+
+
+<!-- CUSTOM-LIBRARY-FAILED-FOLLOWUP-GUARD-20261110 -->
+## 自定义游戏库失败批次的自动接续保护（2026-11-10）
+
+实际旧源 missing-worker 带游戏数据场景连开两次 failed，末尾接续现要求本批成功，原显式 manual retry 优先级保持；同一精确候选在真实受控子进程/原 Host 中只一轮 failed、任务归还，592 实际编译输入读回一致，仅此保护软件范围有证据。
+
+更广 busy-coalesces 仍 FAIL：已有完整图片后多跑四次身份识别；冷却标记候选未解决，已撤回，旧大小写与规范化路径键并存待继续核查。其余 manual-force/cancel/shutdown 等 NOT_RUN，不称七边界通过。全部八棵实际 Raw Job 关前 active0，原失败/源码保留。原900秒整次账未重置，但 SOURCE_READY 封存实际932007ms，明确越期且整个 phase 未验收；HANDOFF 单列，不冒充通过。无部署/整main/Full/真实Steam网络或CPU收益。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scrape-busy-data/SOURCE_READY.json、HANDOFF.json、REPORT.md。仅交精确失败后接续保护，整体目标 ACTIVE。
+<!-- /CUSTOM-LIBRARY-FAILED-FOLLOWUP-GUARD-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-IDENTITY-COOLDOWN-ALIAS-20261110 -->
+## 自定义游戏库后台身份冷却不再被旧别名遮住（2026-11-10）
+
+自动尝试读取优先使用含尝试时间的规范化键，缺该记录才沿原查找；手动名称/壁纸 alias helper 逐字未改。当前批次将 cooldown skip 与真实失败区分：缺图仍走原补图，已有完整图片不再把跳过排为重试。无新配置字段/迁移/磁盘读/网络/timer/常驻线程，真实失败重试和显式 manual force 保留。
+
+原 canonical 旧源两轮5个Worker的FAIL保留；新legacy/canonical两种布局都仅首轮2个，次轮0。normal-open、两种manual-force、cancel/shutdown、两种冷却期缺图补齐、已加入Steam排除及原manual alias均通过，11观察/4原ID；两次592实际输入编译，14棵Raw Job恢复前准入、自然期望退出、关前active0。两文件精确补丁私有应用读回一致。旧scrape-busy-data失败/撤回/越期不改为通过；当前新缺陷来源独立验证，无整main/Full/部署/实机Steam网络播放或CPU百分比验收。
+
+日志已564，新增Win5 20261110-000114原包先固定SHA，内容单独续查。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-cooldown-alias/SOURCE_READY.json、FINAL-READBACK.json、REPORT.md。交CPU1自然后继，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-IDENTITY-COOLDOWN-ALIAS-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-000114-20261110 -->
+## Win5 00:01包补齐游戏库静态来源（2026-11-10）
+
+564包中的Win5 20261110-000114新增导出root记录、55 ready扫描及56项旧加入计划。67个queue job与整份65项媒体文档对前包逻辑相同，无新增失败/媒体丢失证据；旧四缺目标/两成员身份缺口仍保留。缓存plan.account22202、createdAt2026-11-08T10:50:10.952Z；queue历史owner89250578。无实时ActiveUser/shortcuts.vdf/账户报告，不据缓存差异断定当前账户读错。源码复核当前账户显式Worker回执、选择目标缓存匹配、写入前再发现与独立共享media成员门；这不是实际Host启动/现场验证。预选择缓存等待新回执的显示边界仍需继续核查。OPT单次34候选0写入idle，不代表常驻CPU或客户端画面。
+
+本日志不触发猜测性产品改动或部署；原ZIP和9选中成员在new-win5-000114/INTAKE.json，比较FINDINGS.json及ACCOUNT-CACHE-SOURCE-REVIEW.json，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WIN5-000114-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-ACCOUNT-ERROR-PLAN-INCOMPLETE-20261110 -->
+## 账户检测错误后仍计划的原负例已留证，候选未交付（2026-11-10）
+
+实际原Host快照在账户unknown/文件占用回执后仍调用plan一次并清steamPlanError，软件旧失败已复现。候选门源码保留，但原900秒剩余将编译裁到约26秒并超时，无EXE/正向业务；不是完整180秒或C++语义失败。自有cmd/cl/conhost由原Job终止、关前active0，原失败不覆盖/不退款。未验证产品改动已精确撤回，当前仍e80a3324上轮已测冷却修复；默认原测试不变的可选诊断后继保留。此条非SOURCE_READY，旧phase INCOMPLETE且封存越期单列，不重命名重开。
+
+日志566：Win5 00:22共享jobs/media/scan/旧plan/root同00:01，无新库失败；Aokzoe00:13已1done/1media rev5，非播放或真实UI证明。两选中比较原件new-win5-002200/FINDINGS.json、new-aokzoe-001334/FINDINGS.json。候选及失败证据在account-plan-error-gate/HANDOFF.json、REPORT.md。无部署/设备/Steam/睡眠，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-ACCOUNT-ERROR-PLAN-INCOMPLETE-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-ACCOUNT-ERROR-PLAN-VERIFIED-20261110 -->
+## 账户检测失败后保留卡片和具体错误（2026-11-10）
+
+强制账户发现为error时只保留匹配缓存/本地回退显示与本次具体steamPlanError，不启动后续默认账户plan；明确重试成功后恢复原流程。六条错误边界(all-account/初始空target×文件占用、Worker非零、损坏回执)均plan0且缓存不变，每条后恢复恰好1；两个健康空结果、原fallback与三账户/安装匹配通过。总5实跑/4原ID、8账户观察，不当全模块验收。
+
+续测原180秒编译实际33.132秒，592输入，6棵Raw Job恢复前准入/自然0/关前active0；精确两文件补丁私有应用读回一致。此前原900秒INCOMPLETE、30.072秒余量裁切的编译超时、旧负例及封存越期保持；本轮在持续产品修复授权下仅续未完成验证，600秒窗及端到端累计成本独立记载，不宣称旧900秒内通过。准备默认GBK错误已单列且在producer前停止，后继显式UTF8。
+
+源码SOURCE_READY未整main/Full/部署/真实Steam账户或网络/CPU验收，不据软件负例认定Win5/ROG根因。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/account-plan-error-gate/continuation/SOURCE_READY.json、FINAL-READBACK.json、REPORT.md；旧HANDOFF原件仍在，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-ACCOUNT-ERROR-PLAN-VERIFIED-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-PLAN-CONTENT-RECEIPT-20261110 -->
+## 只读Steam计划回执绑定本次发布内容（2026-11-10）
+
+原Host接受同账户后继共享文件为本次结果的真实负例已保留。Worker原plan-only确认发布后从原内存文档输出95字节SHA256回执，Host用原读入doc核内容与唯一回执后才认本次成功；缺失/重复/损坏/变化保留缓存显示与明确错误，commit CLI保持。新共享header不额外读文件/扫描/联网/timer/常驻，也不放宽4MiB输出保留。须Host/Worker配套，旧Worker缺回执明确未确认，不降级认新成功。
+
+Host六拒绝/恢复、5,245,043字节计划、原账户错误/默认fallback通过；原Worker同一case的12次CLI中确认plan-only回执与保存doc一致，未确认不输出。4实跑/2原ID，Host593/Worker508实际输入，8棵Raw Job恢复前准入/自然期望退出/关前active0。5文件私有补丁在禁用行尾转换后逐字读回；首转换差异/旧summary变量错误/准备LF断言都保留，不为封存重跑业务。
+
+仅SOURCE_READY，无整main/Full/部署/真实Steam账户或下载播放/CPU验收，不归因群友历史。日志567最新仅先固定原SHA待另核内容。原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/plan-publication-receipt/SOURCE_READY.json、FINAL-READBACK.json、REPORT.md。目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-PLAN-CONTENT-RECEIPT-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-010502-20261110 -->
+## Win5 01:05包的游戏库选中数据无新变化（2026-11-10）
+
+567包最新原ZIP d74af46d…已固定。对00:22，67个queue job、整份65项media及扫描/旧plan/root/OPT逻辑相同；59done/8unavailable，worker/active/remaining0，无新增库失败或媒体丢失证据。旧路径/成员身份缺口保留，缓存account22202仍非实时登录证明；不认定最新软件回执修复已在现场部署。原件new-win5-010502/FINDINGS.json、REPORT.md；无本日志触发产品改动或部署，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WIN5-010502-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-SHIPPING-PLAN-PROCESS-20261110 -->
+## 正式Worker与原Host的计划回执进程联测（2026-11-10）
+
+原Worker builder/batch/resource按noPublish/noSelfTests构建，原Host一个fallback参数变体通过实际SteamArtworkLab.exe进程/pipe/Job消费计划与账户。隔离空库存/假Steam1001/VDF：五次plan正常、future-output拒绝、明确修复恢复、future-scan拒绝、明确修复恢复；第六次显式假根账户读取恰好1001。原件/手工规则/假Steam字节保持，活动slot归还。
+
+生产Worker488/Host593实际C++输入，原builder五个实际工具before/after匹配本轮pins，三棵producer Job恢复前准入/自然0/关前active0；单test文件补丁私有应用逐字核对。无产品修改、新ID/minimum/父门或共享包/安装写。只补当前plan-receipt空库存实际进程证据，不重开旧root-worker/account过期范围，不当真实游戏、账户登录、下载/UI/物理输入/睡眠或CPU验收。生产source-ready仍plan-publication-receipt；本轮仅测试来源接续，目标ACTIVE。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/plan-shipping-worker-roundtrip/SOURCE_READY.json、ACTUAL-READBACK.json、FINAL-READBACK.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-SHIPPING-PLAN-PROCESS-20261110 -->
+
+
+<!-- SCREEN-MENU-NO-ACCOUNT-GATE-20261110 -->
+## 2026-11-10：菜单功能键解除账户一致性门
+
+用户明确要求移除 Steam／三个点菜单触发的账户保护。原生 `steamLiveRequest` 与 JS `checkAccount` 对固定七项菜单操作（menu.button/toggle/inspect、menu.qam.prepare/observe/retry/dispose）不再读取／要求 ActiveUser 与 UI 账户一致，原生也不向菜单脚本传账户绑定。QAM 记录器按 SteamUIStore／原接收器／原点击票据归属，不因请求账户变化重置。账户缺失、注册表/UI 冲突或账户读取不可用，不再挡住菜单键。
+
+这项固定菜单范围不能由调用方的 skip 标记扩大；设置、鼠标配置、睡眠/输入租约等账户数据操作仍走原门。原 Steam PID/根路径前后变化检查、已有 action admission、电源／退出／取消、锁屏/VR和3秒750ms补发停止条件保留。没有添加键盘、抢焦点、Steam重启或轮询。JS源及原生成头同步。
+
+原JS消费者旧源实际在“main functional key ignores registry account 43”失败；候选前65项通过后，一条静态片段断言因新allowlist误匹配到checkAccount而失败，精确锚定原菜单分支后只续测该项及未到达项37项，合计102个唯一通过项。覆盖菜单账户缺失/不一致/不可读、原其他账户门、取消/无Steam/上下文替换及补发边界。不是一轮完整发布门。
+
+原生 wrapper 的私有端口消费者首次编译因未声明既有 `steamreturnevidence::bounded` 辅助而FAIL；没有执行原生业务或编译完整产品，原生通过未确认。最初两次Raw准备分别在环境Path/PATH重复、缺launcher/helper pin时拒绝，均在业务启动前；原始失败、已执行成本和900秒原预算保留，没有重开额度。generated脚本的 --check 在源码生成时通过，未完成后续Raw选择。
+
+主线改动已落，未部署；证据 Testing/YMCC/Evidence/Touchpad-Menu-NoAccountGate-20261110，完整原生构建和Win5实机仍需单列。此前93次preflight拒绝是本轮触发依据，不倒判192710旧SD waiting-receiver已经修复。
+
+<!-- /SCREEN-MENU-NO-ACCOUNT-GATE-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-ADD-COMPLETION-READBACK-20261110 -->
+## 自定义游戏库加入 Steam 完成回执核对（2026-11-10）
+
+Host原退出0后读请求计划、Worker零新增不更新请求文件，两个原消费者实际语义FAIL已保留。现commit输出完成内容摘要，Host只接受当前库/账户/Steam路径/完成模式与同一摘要，原请求失效时只读原账户及全局回执，全部不确定明确提示刷新核对勿重复加入；不重放写入。零新增也发布完成结果，诊断增长不改变业务摘要。原Host10边界、Worker12次原CLI及1次真实模拟完成后发布故障通过，593/508输入、8棵自然Job关闭前active0、五叶片精确二进制补丁读回一致。
+
+原1800秒阶段编译前余量准入拒绝保持INCOMPLETE；授权续验证原件分列，原180/45秒上限未改。文本混合行尾补丁拒绝与Worker c0路径核收误写均保留，仅修封存消费者，无业务重跑。SOURCE_READY仅主线，需Host/Worker/共享头配套；整main/Full/安装/真实Steam与CPU未验。当前继续接Win5 02:05新日志与用户8项UI/分类问题，不把未完候选追入本次固定来源。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/add-completion-readback/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-ADD-COMPLETION-READBACK-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-EIGHT-FIXES-20261110 -->
+## Win5游戏库八项界面与数据修复（2026-11-10）
+
+按用户新图/02:05包修复左栏手柄focus可视、卡片焦点/悬停亮度所有权、标准与紧凑X编辑提示、Steam动作不换行及刷新移搜索右侧；注册原生Steam库独立于自定义根，原生共享媒体不再落需处理且内置工具/删除记录不补游戏卡。手动选择EXE沿原单次配置保存持久锁定，重叠根保留手动来源；有同目录主程序且PE重复文件名的_xlate/_translator不抢自动主程序，独立正式PE名称不降级。旧错误自动选择更新后需手动刷新一次。
+
+原Win5日志当前UI实函数回放已加入34/等待16/原生10/需处理12，非远端新扫描或完整配置证明。原snapshot53项、原Worker primary1/Host fallback1通过，实际720/800/1080三浏览器参数场景覆盖标准/紧凑与悬停冲突，另2来源/错误观察，不计五业务case；593/508输入核对，8叶片二进制私有补丁字节一致。当前浏览器树自然归零；历史归零兜底FAIL、字幕滤镜动画观察、原选择准备后误跑、旧VM helper缺线、局部预算到期及封存pin字段比较错误均保留，不重写旧PASS或完整门。编译vctip仅原声明工具归还，不冒充自然或产品豁免。
+
+源就绪依赖前件加入回执配套头，UI/Host/Worker一起合批；没有新常驻/定时器/并发下载/Steam写权限，无部署/真实Win5手柄/完整工具资格、Full或CPU收益验收。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/win5-library-ui-020508/SOURCE_READY.json、REPORT.md，整体目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WIN5-EIGHT-FIXES-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-MANUAL-ADD-ADMISSION-20261110 -->
+## 单独添加保存前复用排除与原生归属检查（2026-11-10）
+
+原新EXE锁定入口只核文件/路径，选中Steam.exe可保存成功但后续扫描排除而不可见。原primary拒绝消费者实际FAIL保留；现仅明确选EXE时，在写原配置前复用现有排除和原生安装清单reader，错误明确且原配置/扫描字节保留，正常选择继续原保存。一个原case共5次CLI进程内核对旧编辑器排除/未来库存、手动排除/原生归属、合法添加；508输入，两业务树自然退出，两编译树仅原声明同SHA vctip收尾，四Job关前active0，两叶片精确补丁私有读回一致。
+
+首次打开已只读确认会启动原异步扫描，无新ZIP（568）。前件8项源就绪/历史失败保持，未重复其UI或当当前Whole模块通过。无新常驻/字段/Steam权限、无部署/真实Steam或Full/CPU验收；交CPU1自然合批。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-add-admission/SOURCE_READY.json、REPORT.md，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-MANUAL-ADD-ADMISSION-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-WIN5-020508-COMPARISON-20261110 -->
+## Win5自定义游戏库02:05日志对照（2026-11-10）
+
+01:05→02:05所选原成员与导出索引大小/SHA一致。扫描55→56新增Zelda但仍误选totk_xlate，原生Steam仍0，均对应前轮已修复问题；8个最终源码叶片仍匹配原SOURCE_READY，本轮未重跑旧测试。媒体65→71无删除；六新登记无error/invalidSlots且Zelda静态就绪，missing不等于下载失败。队列仍67，实际59done/8unavailable；仅旧Skyrim任务前提恢复后重试仍身份未确认，具体helper原因缺证。末态worker/active0及三wm-close不当整个会话健康证明。前端三CE错误与旧包逐字一致，计划亦是未变缓存，不能判当前Steam账户。OPT单次idle/34候选/0写入不当常驻CPU收益。
+
+本轮无新产品修改、部署、Steam/游戏/设备操作或新测试通过声明；Win5新版/实物手柄仍待验。只读报告：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/new-win5-020508/COMPARISON-010502-020508.md及同名JSON。保留前轮源就绪与历史失败/UNKNOWN，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WIN5-020508-COMPARISON-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-FAILED-IDENTITY-RECEIPT-IO-20261110 -->
+## 自定义库身份失败回执临时不可读不再耗尽识别次数（2026-11-10）
+
+沿Win5旧identity-unconfirmed路径独立复现：真实自有助手退出后回执文件被共享锁占用，旧读取吞IO异常，原Worker将attempts2→3并自动停止。现仅按既有storageFailure精确列表交原media-storage-unavailable/20秒退避，保留attempts2和automaticElapsedMs1234；无新线程/计时器/网络、重试额度或历史退款。它不是Win5具体根因证明。
+
+原--identity-network九场景83检查通过，解锁后同文件恢复、健康任务继续及原外部/坏/缺失/非网络/无证据/类型/标志拒绝均保留。两epoch各330真实编译输入，四个Raw Job均自然退出且关前active0；旧语义FAIL、混合行尾准备失败与预编译修正保持。两源码叶片精确补丁私有应用字节一致，写回共享identity_worker头及原消费者，其他来源保留。完整主程序、安装Win5/实物、Steam/设备/睡眠和CPU收益未验，有限工具pins不代签完整工具环境资格，交CPU1自然合批。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/failed-receipt-io/SOURCE_READY.json、REPORT.md。持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-FAILED-IDENTITY-RECEIPT-IO-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-RECOVERED-QUEUE-STATUS-20261110 -->
+## 游戏库已恢复的新任务不再被历史损坏提示盖住（2026-11-10）
+
+AYA 1106-200848旧队列3384字节全零已核原件；损坏原因未知，进度副本不授权恢复身份/次数。现有队列可保全坏文件并处理新确认任务，但recoveryRequired历史债使原游戏库一直显示不可读。Queue.snapshot复用原durable读附临时checkpointReadable，观察字段不入持久文件、无额外读；真坏读/版本拒绝为false。游戏库与YMCC当前进度正常显示并加“部分历史记录待确认”，真读失败仍优先且保留先前进度；历史债/坏文件/blocked keys不清除。
+
+原broken-json16检查/339实际编译输入、原浏览器identical-projection1场景5检查及主TS修正受影响1场景5检查/72输入通过。首次原生新增夹具访问private getter的编译FAIL、TS初全32中新边界带capacity pause却要求50%的FAIL保留，原31未再跑；仅修输入定向1，不能宣称同次全32通过。原浏览器/TS语义反例保留，临时选择器不入正式消费者。实际11Job含失败均自然active0。六叶片二进制精确补丁私有应用逐字相等，当前源CAS写回，前失败回执IO/其余任务修改保留。
+
+不新增持久schema/IPC操作/读线程/定时器/重试或历史退款；有限工具pins非完整环境资格。无整主程序、远端安装/实物/Steam设备睡眠或CPU收益验收；交CPU1自然合批。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/recovered-queue-status/SOURCE_READY.json、REPORT.md。持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-RECOVERED-QUEUE-STATUS-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-DOWNLOAD-WRITE-IO-20261110 -->
+## 下载分片/发布写入失败沿用存储退避（2026-11-10）
+
+ROG四旧ZIP逐原件核同一media-write-failed/attempts3任务，不是四新失败；其当时identityPending，不据此断言分片写入现场根因。当前Worker独立真实part共享写拒绝复现attempts2→3停止。现只在后台Worker将明确media-write-failed/media-publish-failed转原media-storage-unavailable，包括失败记录保存再次同类拒绝；原共享错误立即退出素材候选，复用原20秒存储退避。Queue/Store协议、原并发/弱网/预算及历史债不变，无新增常驻读/线程/timer/schema/IPC操作或退款。
+
+part真实写拒绝及20秒恢复、下载EOF后内存Win32端口单次索引替换拒绝/不切备用视频及20秒恢复、HTTP404/视频完整性原有限次数控制均已观察；两个整体FAIL的已完成片段按相同产品SHA保留，后继只续未到原sidecar满盘故障7检查PASS，不宣传同次全扩展case通过。326实际编译输入，全10Job含失败自然active0，两叶片二进制精确patch私有应用逐字一致并CAS写回。原缺共享AC端口/故障注入时机/计数器污染FAIL和费用保留。静态保留计数45含1个check声明，真实原调用44，另见向前CORRECTION，不当运行检查数量。
+
+默认扩展storm成本未测，不新增发布门。无完整主程序、安装、远程故障因果、实机满盘/ACL、持续索引拒绝后真实子进程退出恢复、视频解码、设备Steam睡眠或CPU收益验收；交CPU1自然合批。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/download-write-io/SOURCE_READY.json、PASSING-SCOPES.json、REPORT.md。前已恢复队列提示/身份回执IO修复保留，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-DOWNLOAD-WRITE-IO-20261110 -->
+
+
+<!-- CUSTOM-LIBRARY-PERSISTENT-INDEX-OWNER-20261110 -->
+## 持续索引拒写的真实下载进程退出恢复补验（2026-11-10）
+
+无新增产品改动，上一download-write-io当前Worker字节保持。原storage-health disk-full只增加显式owned-process参数，默认storm不添阶段。正式Supervisor复制固定私有worker并走backgroundEntrypoint/父PID birth及真实父电源共享通道；EOF后父夹具持真实索引共享句柄，直至首子进程已自然退出才释放。原生MoveFileEx实际拒绝2次，错误5/5，发布和失败记录均未替换。首进程exit0/内存传输句柄0，任务attempts2/time1234、静态资源字节和旧PID/birth租约保留。原20秒后owner自动起第二进程，无手动清租约/退款，动态完成、第二exit0/拒绝0/传输句柄0，只启动2worker。
+
+当前31检查PASS，328实际编译输入及19产品/JSON输入与主线相符。前29仅退出接续、缺OS双写次数的范围不回填，为该缺证只复查同case；预编译异类auto声明修正未运行错误候选。两轮4Raw Job自然active0。一个原测试叶精确patch私有应用一致并CAS入主线，旧产品回执的测试叶由新测试回执接续，产品本体无需因本轮重编。无新canonical ID/minimum/父门/发布门/默认阶段，原失败历史保留。
+
+本轮补上相同当前产品的持续索引拒写真实进程恢复边界，不改旧SOURCE_READY当时的NOT_PROVED，也不证明ROG/Win5历史根因。无完整主程序/安装、内存映像SHA、实际视频解码、满卷/ACL修改、真实Steam设备睡眠或常驻CPU收益验收。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/persistent-index-owner/SOURCE_READY.json、REPORT.md。持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-PERSISTENT-INDEX-OWNER-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-FAILURE-OBSERVATION-20261110 -->
+## 自定义游戏库保留后台身份识别失败摘要（2026-11-10）
+
+Win5 02:05原队列Skyrim的identity-unconfirmed仍缺具体助手失败原因，保持UNKNOWN。非零退出助手现在在原临时结果清理前，沿原有的一次有界失败回执读取提取退出码/读取状态/目标一致的已知类别与合法计数，随原Queue.result及session/provenance门保存。摘要不含provider原文、URL、候选ID，不授身份或重试权限；零退出无合格manifest的诊断保持原样。无新IO读取、线程、轮询、网络请求、额度或历史退款。
+
+最终原identity-network同次9场景119检查通过，330实际编译输入/22当前源码匹配，10个编译/业务Raw Job均自然退出且关闭前active0。混合行尾准备错误、首次计数类型预期FAIL、仅该场景修正通过均保留；交接前发现观测计数过严，撤回中间SOURCE_READY，以UINT64_MAX无关计数复现误耗最终预算后修成非抛异常范围检查，原strict retryableFailures业务判定保持，再因产品变化定向重验完整原9场景。只改3产品头+原测试，精确4叶片补丁应用字节一致。未部署/整主程序编译/新版Win5/真实Steam设备睡眠/CPU百分比验收，持续ACTIVE；只交自然后继合批，不冻结或追包。
+
+最终原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-failure-observation/SOURCE_READY-FINAL.json、REPORT-FINAL.md。中间SOURCE_READY已由SOURCE_READY-SUPERSEDED前向撤回，旧原件不可当最终交付。
+<!-- /CUSTOM-LIBRARY-IDENTITY-FAILURE-OBSERVATION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-SECONDARY-IDENTITY-TERMINAL-20261110 -->
+## 自定义游戏库次级元数据完成后的Steam身份失败回执（2026-11-10）
+
+实际workerMain复现：Steam官方验证超时、IGDB元数据成功时返回4并写次级manifest，却没有rounds-failed.json，原父读取器因缺回执不能认出网络重试。现仅在身份未确认的exit4分支调用原persistResolutionFailure，并传入已登记的identityNetworkRetry复用；不再enqueue一次，不将IGDB当SteamID。普通拒绝和验证成功保持，原共享重试额度/间隔不变；没有新常驻、轮询或网络请求。
+
+原mixed-network case显式参数一次通过三模式：timeout仍exit4且父retryable=true，队列1条/失败次数1；明确404为unrecognized、父retryable=false且无队列；官方恢复exit0/正式Steam验证、无失败回执。当前506实际编译输入在候选编译前声明并逐项匹配，25当前源码与私有最终来源一致，原断言保持；只有助手cpp和原lifecycle测试两叶片回写。前一shared9/119的22项源码相同，但本轮未重跑、不计新PASS。原场景扩展的此次consumer墙钟约4.2秒，完整网络组总成本未测，不增加canonical ID/minimum/发布父门。
+
+保留原NOMINMAX测试前置编译FAIL、32 SDK头原负例编译未预pin的后置拒绝及限制；补登记后复用自然完成的编译，只跑首次负例消费者，未为门重编。原生命周期exit1被外层误按shortcuts exit2比较的后置错误仅读同raw纠正，未重跑。共3编译+2业务Job自然退出、关闭前active0，同900秒预算收费。Win5 Skyrim具体原因、完整主程序/部署/实机/CPU收益仍未验；旧网络队列与共享队列整体归属另列，未据本修复声称全局仅一个队列。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-terminal-receipt/SOURCE_READY.json、REPORT.md。交自然后继合批，不冻结/追包；目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-SECONDARY-IDENTITY-TERMINAL-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-RETRY-OWNER-20261110 -->
+## 自定义游戏库共享身份任务只交原共享队列重试（2026-11-10）
+
+原实际助手会把共享媒体身份失败再排入旧network-retry队列。现身份启动器只在本次CreateProcess的Unicode环境副本加shared-media-v1标记，保留原CLI/包协议；助手仅在综合身份模式且精确标记下返回原失败证据和shared-media归属，不读写/登记旧队列。父环境不改，命中身份缓存无环境副本/助手启动；普通metadata忽略标记、未标记综合识别保留旧重试，旧助手代码仍可按原协议处理。既有旧队列逐字保留，不自动迁移/取消/退款或冒称所有历史双队列已消失。
+
+原worker mixed-network1case八模式通过，shared identity-network9case同次127检查通过；实际6次自有测试子进程均收到标记、父标记原值保持。原弱网/存储退避、最后一次额度、旧策略一次恢复及错误目标/格式/类型拒绝保持。506/330实际编译输入均预先声明并核对，32当前源相符；4编译+4业务Raw Job自然退出、关闭前active0，独立输出并行在同900秒墙钟中计费。精确4叶片patch应用字节相等，只回写2产品叶+2原测试，原check表达式完整保持。预检查的终态归属字段补齐在任何编译前修正，原未编候选保留。
+
+无新常驻线程、timer、网络请求、重试额度或历史退款；实际未缓存身份调用才复制环境/读标记，不承诺CPU百分比收益。未整主程序/部署、任意旧二进制混装、Win5 Skyrim具体原因、真实Steam输入设备睡眠验收；交自然后继合批，不冻结/追包。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-retry-owner/SOURCE_READY.json、REPORT.md，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-IDENTITY-RETRY-OWNER-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-TASK-DATA-ROOT-20261110 -->
+## 自定义游戏库身份助手显式接续当前任务数据目录（2026-11-10）
+
+原启动器只传输出与owner，父环境B可使任务A的助手仍经正式configuredDataRoot解析到B；已在真实自有子进程复现，不认作Win5旧失败根因，也未实跑供应商错缓存/写入。现只在已有子进程Unicode环境副本以当前任务root替换数据目录变量，保留重试归属。父全局环境/用户设置、原CLI与包协议不变，无迁移或历史额度退款。
+
+原identity-network首case用已有参数定向，修前语义FAIL保留；修后同次75检查、六次真实子进程均解析中文/空格A，父环境保留中文/空格B、原B文件保持，原网络/存储退避、额度和恢复断言保持。其余八case及旧整体9/127未重跑，不扩大PASS。两编译330实际输入预声明并匹配，22当前源匹配，4Raw Job自然退出、关闭前active0，原600秒预算未重置。两叶片精确patch私有应用相等，原check表达式完整保持并CAS入主线；仅身份头和原测试修改，保留并行工作。
+
+无新常驻、timer、网络请求、重试额度/退款。完整主程序、部署、外部供应商错根写入、任意旧混装、Win5 Skyrim具体原因、真实Steam输入设备睡眠与CPU百分比仍未验。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-data-root/SOURCE_READY.json、REPORT.md，交自然后继合批，不冻结或追包，持续ACTIVE。
+<!-- /CUSTOM-LIBRARY-IDENTITY-TASK-DATA-ROOT-20261110 -->
+
+<!-- CUSTOM-LIBRARY-EXCLUDED-TOOL-QUEUE-PENDING-20261110 -->
+## 自定义游戏库Steamworks旧队列候选，缓存升级及原生回归未闭合（2026-11-10）
+
+已在原unavailable-status复现旧工具228980被手动补全清掉停止状态/债务并重新领取。私有候选保留记录、排除新任务/单项/批量重试和非活跃统计，普通不可用项目仍可重试，已持有的历史活动仍显示至结算。原Win5闲置67任务无旧进度缓存回放得到66统计/7不可用，67原jobs完整保留；仅证明此范围。
+
+原生扩展case仍FAIL：生产动作及active/field数据均已采集，之后测试错误要求仅入队的普通记录已生成媒体项。纯断言已改正，但未重编/重跑；同一原数据11项只读复核通过，不能记原生整case PASS。私有Store接口编译FAIL及后续statusRevision/inventoryReady夹具修正、不匹配范围保留。7Raw Job原截止前终态归零，其中3次是校验后只归还自有vctip工具，不能称全自然；600秒原生窗口已结束且未扩/重开。
+
+还发现统计规则改变缺少旧进度缓存代次边界：原statusMatches只比owner/revision等，旧总数/截止时间可能继续被复用。下一原场景需复现并修缓存升级，保留同owner真实字节进度；必须一次修复后恢复无写空闲，不能新增poller或每读都失效。该缓存边界尚未原生验证。
+
+候选未SOURCE_READY，H/测试未写主线、未部署；主线仍沿前一identity-data-root来源。精确私有patch已验证，原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/excluded-tool-queue/CANDIDATE-REVIEW.json、REPORT.md、OBSERVATION-REVIEW.json、CACHE-UPGRADE-REVIEW.json。保留失败/费用/未验边界，持续ACTIVE；不冻结、不让这批未完成候选追入当前包。
+<!-- /CUSTOM-LIBRARY-EXCLUDED-TOOL-QUEUE-PENDING-20261110 -->
+
+<!-- CUSTOM-LIBRARY-EXCLUDED-TOOL-SUMMARY-POLICY-READY-20261110 -->
+## 自定义游戏库Steamworks旧任务及统计缓存修复已入主线（2026-11-10）
+
+承接上条私有候选：只改原Queue头与原recovery测试。确切数字工具228980不新入队、不被明确单项/批量重试，不计非活跃素材数量；67历史记录及旧债务保留，真正owner持有活动显示至结算。派生进度新增summaryPolicyVersion=1，owner/revision校验与统计代次分开；旧缓存重算数量/截止时间并保留较新bytes/resumed。原recheck/configure/resource一次落盘后恢复无写空闲，无新timer、thread、并发、网络或历史退款。
+
+原unavailable-status同次32检查PASS；Win5原闲置67jobs回放66有效/7不可用、全部原jobs保留，未导入现场旧progress。通用有效同owner/revision旧缓存实际验证计数/nextDue、321/1024字节和128断点保留、首次修复/重复检查字节与时间不变、configure/resource与外来session拒绝。修前语义FAIL保留；首次新增idle夹具继承attempts3而提前预算归一化，前置不符FAIL及后置预期拒绝保留，纯夹具attempts1/去旧stopReason后在同300秒内续作；原600秒失败账未重开。
+
+三编译各315实际输入预声明并核验，17当前源匹配，原53个check表达式按泛化不可用样本228980→3551360完整保持。6Raw Job截止前active0，3编译仅声明回收自有vctip，3业务自然退出；精确两叶二进制patch私有应用逐字一致并CAS入主线。此前私有候选及FAIL原件不覆盖，现由本SOURCE_READY前向接续；无整recovery/整主程序、部署、真实Steam设备睡眠、Win5具体历史原因或CPU%验收。交CPU1自然合批，持续ACTIVE。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/excluded-tool-queue/cache-upgrade/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-EXCLUDED-TOOL-SUMMARY-POLICY-READY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-POWER-INTERRUPTION-20261110 -->
+## 自定义游戏库身份识别遇电源中断不扣失败额度，并修复长输出清理（2026-11-10）
+
+原身份lane捕获media-stale-wallpaper-power后把它交普通Queue.result，真实自有helper边界中DC/unknown再回AC可使attempts2→3/自动停止，队列错误completed且旧session未退休。现与原prepare分支一致把电源原因交原外层暂停/取消owner：保留attempts2/time1234、归还活动及作废旧session，新AC owner用同助手/EXE恢复。真正unrecognized仍按3次上限停止，无历史退款、身份放宽或新常驻/轮询/并发/网络。
+
+实际回归又发现261字符manifest在231字符短根下清理失败。单包原ioPath仍因<248阈值无效，FAIL保持；现在仅递归清理显式请求forceExtended=true，普通默认调用行为与持久路径保持。失效原件与旧残留保留，未缩短fixture或删清理断言；最终中断/正常恢复目录归零。
+
+原identity-network首case同次108检查PASS，包含两个实际自有helper中断/恢复、新owner接续与真识别拒绝，原75项网络/存储、数据根及环境断言保持；其余8case未重跑。原测试全字节逆向保持。五编译各330实际输入、22当前源匹配；10Raw Job原600秒内active0，5编译按声明只归还vctip、业务自然。新并行时间假设误断言及两次长输出清理FAIL分别保留，未重开或延长预算。仅3产品叶片+原测试经私有精确二进制patch应用一致并CAS入主线，保留并行工作。
+
+Win5旧Skyrim仍仅有unconfirmed/attempts3、缺助手观察，具体原因UNKNOWN。本轮软件电源端口不代签实机/UNC递归/整主程序/部署/Steam设备睡眠或CPU%收益，交CPU1自然合批，持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-power-interruption/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-IDENTITY-POWER-INTERRUPTION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-LONG-IDENTITY-OUTPUT-READ-20261110 -->
+## 自定义游戏库读取长目录身份结果（2026-11-10）
+
+真实自有helper exit0在207字符短根下生成288字符目录/302字符manifest，正式readSnapshot见精确EXE/AppID108，旧递归读取却漏掉结果并记unconfirmed、attempts2→3停止。现在仅原扫描入口用已有ioPath(output,true)，长IO路径按原root纯词法映射回普通manifest路径交Store，设备前缀不写缓存；原64项/深度/类型、快捷方式/精确EXE/来源与重试门保持，无新常驻、poller、网络或历史退款。
+
+原identity-network首case同次125检查PASS：有效/外部目标/坏JSON三种真实助手长输出，正确提升/原3次拒绝、活动与临时目录归零、缓存路径普通；此前108项电源/网络/存储/根目录/父环境检查保留，原测试字节可逆保持。两个编译各330实际输入预声明匹配、22当前源匹配，4Raw Job原600秒内active0（2编译声明只归还vctip、2业务自然），修前语义FAIL保留。精确两叶二进制patch私有应用一致并CAS入主线，仅身份头+原测试，保留并行修改。
+
+自有助手是受控结果，不是实际供应商联网或远程游戏实机恢复；其余8身份case、整主程序/部署、Win5具体历史原因、真实Steam设备电源睡眠及CPU%未验，交CPU1自然合批，持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-output-read/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-LONG-IDENTITY-OUTPUT-READ-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-OUTPUT-DIRECTORY-IO-20261110 -->
+## 自定义游戏库助手输出目录暂时不可读时保留识别额度（2026-11-10）
+
+真实自有助手exit0已写AppID109有效结果，根/内部目录持FILE_LIST_DIRECTORY句柄后实际std::filesystem均返回共享错误32。旧读取器吞掉目录错误并记unconfirmed，attempts2→3/时间1234→1267/自动停止，队列completed。现不吞权限错误并保留条目类型读取错误，仅明确权限/共享占用/设备IO类交原media-storage-unavailable和20秒退避；缺失/坏JSON/外部EXE/不安全或未来协议保持原身份门，无新常驻、扫描器、poller、网络或历史退款。
+
+原identity-network首case同次157检查PASS：两种实际目录共享拒绝保留attempts2/time1234、未读不授身份、其它任务完成、owner归零，释放后同助手/EXE正确恢复，每种恰2助手；此前125项长路径正负、电源/网络/存储/根目录/环境检查保持。外部句柄仍持有时可挡住原产品清理，夹具明确释放后只清其确切UUID，此动作不算产品在外部锁下可删除的证明；健康重试由产品清理。真实注入只有32，其它列明IO错误不冒认实测。
+
+两个编译各330实际输入预声明匹配、22当前源匹配，4Raw Job原600秒内active0（2编译声明只归还vctip、2业务自然），修前FAIL保留。混合LF/CRLF准备锚点失败发生在候选/计划/原生创建前，原件保留，仅精确行尾适配后续作。原测试全部字节逆向保持，精确两叶二进制patch应用一致并CAS入主线，仅身份头+原测试，保留并行修改。未其它8身份case/整主程序、实际供应商联网、部署、Win5历史原因、真实Steam设备电源睡眠或CPU%验收；交CPU1正常合批，持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-output-directory-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-IDENTITY-OUTPUT-DIRECTORY-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-LOG-COMPARISON-REFRESH-20261110 -->
+## 自定义游戏库日志总表补齐至568包（2026-11-10）
+
+只读对比568 ZIP，171份所选媒体成员中170核心队列可解析；1份AYA 2026-11-06 20:08队列3384字节全NUL，进度可读，原错误保持并单独核收，已有recovered-queue-status专项，不当空队列/新故障根因。旧552/155总表未覆盖，补入16条媒体归档路径，任务签名342→408、新增66不是66个新故障。48个HTTP502全部来自已专项核收的ROG 2026-11-09 14:21:51包，素材失败记录仍停2026-11-08 07:25:07+08:00，不能算本次打开新爆发；另1个12002也已在Win5 11:27:09接收。
+
+Win5最新仍2026-11-10 02:05:08，日志67任务/59done/8unavailable、worker0/active0，Skyrim仍unconfirmed且缺助手细节。最新源码/157检查SOURCE_READY两叶仍与现盘一致；本轮只核来源，不新增业务PASS/产品或夹具修改/部署/实机/CPU结论，原sourceReady及status指针保持。目录最后导出不等于同一物理机器，“其他”含多设备；历史PID和done不代签当前进程或真实媒体解码。新60份去重raw与751次保留raw引用逐SHA核对，独立AYA复核原件另存；不改原SUMMARY/错误或重跑旧消费者。持续目标ACTIVE，详Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/log-comparison-refresh-20261110/REVIEW.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-LOG-COMPARISON-REFRESH-20261110 -->
+
+<!-- CUSTOM-LIBRARY-UNKNOWN-LENGTH-EOF-RESUME-20261110 -->
+## 自定义游戏库无Content-Length视频完整下载后可校验复用（2026-11-10）
+
+原200无文件长度正常EOF/flush后仍complete=false/expectedSize0。受控索引发布拒绝后等原20秒，恢复Range96收到416却又全下96字节，已在原消费者复现。现仅原成功EOF位置写实收长度/完成状态，原cap/长度/flush、416精确validator/source/size及后续容器验证保持；读错/中断不授完成，无新重试/常驻/timer/并发或历史退款。
+
+原storage-health complete-416-revalidation显式--unknown-length同次28检查PASS，原416断言及83个原check表达式保留；强ETag恢复1请求/0正文、无validator仍全下96、16字节读错未完成且未发布。两次原20秒实际等待，默认suite/ID/minimum不扩。两编译成功；第一次后置声明漏2个VC SAL头FAIL保留，补声明后复用原编译产物作有限修前语义观察，不为元数据重编或倒填完整身份。修后328实际依赖条目/298唯一路径全预声明匹配、20当前源码匹配。4RawJob原600秒截止前active0，两编译按声明仅归还精确vctip、业务自然；旧语义FAIL保持。
+
+仅worker头/原storage-health测试两叶经私有Git二进制patch应用逐字一致、fresh-byte CAS入主线，目录IO157来源链前向保留。受控ERROR_ACCESS_DENIED发布端口不等于实机OS共享锁，96字节合成容器/内存HTTP不代签真实网络和解码器、整主程序/部署/Steam设备睡眠或CPU%收益。Win5最新67历史任务59done/8unavailable与Skyrim缺助手细节结论保持，不称该新缺陷是现场已证根因。交CPU1自然合批，不冻结/追包，持续ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/unknown-length-resume/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json、DECLARATION-CORRECTION.json。
+<!-- /CUSTOM-LIBRARY-UNKNOWN-LENGTH-EOF-RESUME-20261110 -->
+
+<!-- CUSTOM-LIBRARY-IDENTITY-ZERO-EXIT-OBSERVATION-20261110 -->
+## 自定义游戏库助手成功退出但身份未确认时保留扫描诊断（2026-11-10）
+
+日志目录仍568包，最新仍Win5 2026-11-10 02:05:08，没有新增归档，不重复旧总表/157/28消费者。本轮真实自有helper空输出exit0后原通用unconfirmed诊断为空已复现；不是Win5旧Skyrim根因证明。现仅在原有界扫描的最终拒绝处使用已有IdentityLookupRejected，原Queue.result同session/provenance门后保存退出0、扫描条目/manifest候选0～64和已知missing/unconfirmed状态；不复制provider文本/manifest/路径/AppID，无新读取、扫描、写入、常驻、timer、并发、重试额度或历史退款。有效身份与暂时IO原路径保持。
+
+原network-no-receipt显式--zero-exit同次57检查PASS，原非零无回执断言及324原check表达式保留，默认suite/ID/minimum不扩。空/坏JSON/外部EXE/未确认四种真实helper仍attempts2→3停且无身份，摘要在原产品清理后保留，旧session回调不能覆盖；有效106正常提升。各1helper、无关777完成、owner/active归零。修前FAIL原件保持。
+
+两编译各330依赖条目/300规范唯一路径全预声明匹配，22当前源码一致；4RawJob原600秒内active0，两编译仅声明归还精确vctip，业务自然。后置Python误要求job必有可选provenanceRevision而KeyError，主线写入前失败保留，仅按原生产value0语义复读同raw，不重跑生产者。三叶片（身份头/Queue头/原shortcuts测试）精确binary patch私有应用等字节、fresh-byte CAS入主线，保留并行工作与上轮完整断点来源链。
+
+本轮受控真实子进程与文件不代签实际供应商联网、完整network9/identity首157重跑、整主程序、部署、远端Win5新版、Steam设备睡眠或CPU%收益。Win5旧Skyrim具体原因保持UNKNOWN，交CPU1自然合批，不冻结/追包；持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-zero-exit-observation/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json、POST-READBACK-CORRECTION.json。
+<!-- /CUSTOM-LIBRARY-IDENTITY-ZERO-EXIT-OBSERVATION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-DOWNLOADED-VIDEO-READ-IO-20261110 -->
+## 自定义游戏库视频暂时不可读不再被当成坏格式删除（2026-11-10）
+
+本轮仍568日志包，最新Win5 2026-11-10 02:05:08，无新增归档。真实原Worker读到96字节完整EOF后以Win32句柄拒绝新读、独立探针报32；原mediaKind无流错误检查，把读占用当unsupported-container并删完整part、attempts2→3停止。现原读取位置区分打开/badbit/非EOF读错和可读内容格式/截断，size错误走已有media-storage-unavailable。无新IO/常驻/timer/并发/重试额度/历史退款；不把此新复现当Win5旧现场根因。
+
+原storage-health disk-full显式--read-denial同次19检查PASS：存储退避保留attempts2/time1234/完整96字节和海报原字节，真实原20秒到期解锁后同文件Range96/416恢复0正文。真实格式不支持/MP4长度越界仍耗原最后attempt3并删除坏part，不能借存储退避绕完整性。只有mediaKind初始打开共享32实际注入；file_size/第二解析流/badbit及非EOF失败分支仅源码核查，不扩大实测。默认组/其它显式参数未重跑，98原check表达式保留，无默认ID/minimum增量。
+
+首次fixture混合auto局部声明C3538编译FAIL未执行业务，旧源/raw保留；拆分测试变量后用新私有epoch续作，不重置原600秒预算。其后两编译各328实际依赖条目/298唯一路径全预声明并匹配，20当前源码一致；5RawJob原截止前active0，3编译按声明仅归还vctip、2业务自然。修前语义FAIL保持。仅共享media头、download_worker头、原storage测试三叶经私有binary patch应用等字节、fresh-byte CAS入主线，identity-zero-exit及前序来源链保留，交CPU1自然合批，不冻结/追包。
+
+96字节是结构合成容器，未实际解码/真实网络、整主程序/部署、远端Win5新版、Steam设备睡眠或CPU%验收，其它mediaKind消费者不代签全路径；持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/download-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json、COMPILE-CORRECTION.json。
+<!-- /CUSTOM-LIBRARY-DOWNLOADED-VIDEO-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-HLS-SEGMENT-READ-IO-20261110 -->
+## 自定义游戏库HLS本地片段不可读沿原存储退避（2026-11-10）
+
+仍568日志包、最新Win5 2026-11-10 02:05:08，没有据此新增现场HLS根因结论。原HLS本地拼接打不开/非EOF读错用media-resume-cache-unreadable，未走共享存储政策；两个48字节完整片段仍在却attempts2→3停。现只把该精确原因在原install catch交media-storage-unavailable；其它网络/格式/身份错误不扩大，无新IO/常驻/timer/并发/重试额度或历史退款。
+
+复用原storage-health disk-full/read-denial分支显式--hls-read-denial，同次26检查PASS。实际Win32 init新读探针共享32，修后保留2/time1234/两个complete断点/海报原字节，等原20秒后同两个Range48/416校验恢复、媒体正文0字节，原容器门后才发布。HLS真实结构截断、网络端口读错及原直接unsupported/truncated四反例仍attempt3停/无视频发布。只初始init打开共享32实注入，后续非EOF本地读错仅同错误分支源码覆盖；48+48合成容器/内存HTTP不等于真实网络/解码。
+
+两编译各328实际依赖条目/298唯一路径全预声明匹配，20当前源码一致；4RawJob原600秒内active0，两编译仅声明归还精确vctip、业务自然，修前语义FAIL保留。准备中else/check三处拼接空白在声明/原生启动前已纠正并保留PRE-NATIVE-SYNTAX-REVIEW，不冒充原生FAIL或预算重置。113原check表达式保留，默认suite/ID/minimum不扩，旧19/28/57/157未重复执行。两叶片（download_worker/原storage测试）精确binary patch私有应用等字节、fresh-byte CAS入主线，保留并行修改和download-read-io前向来源。
+
+未整主程序/部署、实际供应商联网/解码、远端Win5新版、Steam游戏设备睡眠或CPU%验收。交CPU1自然合批，不冻结/追包，持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/hls-cache-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json、PRE-NATIVE-SYNTAX-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-HLS-SEGMENT-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-RESUME-SIDECAR-READ-IO-20261110 -->
+## 自定义游戏库断点记录暂时不可读不再当损坏重下（2026-11-10）
+
+目录观察仍568包，最新Win5 2026-11-10 02:05:08，没有新增现场根因结论。真实共享32使原Worker把有效96字节complete sidecar/part移成2份corrupt，再整下96字节。现原checkpoint读路径用ReadUnavailable区分IO未知与可读坏数据，原what文本保持；Worker在既有首读/写保护/保留与清理判断中不把未知authority当损坏。仅清理IO时保持原传输原因，不据诊断赋身份/重试退款。没有新增IO、常驻、timer、并发、重试额度或历史退款。
+
+原storage-health disk-full显式--resume-read-denial同次36检查PASS。两处真实sidecar打开共享32：complete96预检查0素材请求/0正文、partial16第一写保护已送Range16但正文未读；原metadata/part逐字、0corrupt、attempts2/time1234和海报原字节保持，owner归零。各等原20秒，前者Range96/416恢复正文0，后者Range16/206只补80。坏JSON/错误身份仍拒绝Range并保全后全下96；future99请求前拒绝且原bytes/额度保留，身份/版本/类型/大小/文件类型/来源/容器门不放宽。
+
+两编译各328依赖条目/298唯一路径全预声明匹配，20当前源码相符；4RawJob原600秒内active0，两编译仅声明归还精确vctip、业务自然，修前FAIL保持。首准备锁函数抽取空白锚点不符，在快照/PLAN/原生前拒绝，精确纠正并保存PREPARATION-REVIEW，不冒充原生失败或预算重置。120原check表达式保留，默认suite/ID/minimum不扩，旧26/19/28/57/157不重复。三叶片（Queue/Worker头、原storage测试）binary patch私有应用等字节、fresh-byte CAS入主线，保留并行工作和hls-cache-read-io前向链。
+
+只有两处sidecar打开32实际注入；stat/size/中读/peek badbit和仅清理IO分支源覆盖，其它Queue消费者仅原what/generic行为保持，未全Queue组/整主程序/部署。内存HTTP和合成96字节不代签真实网络/解码、远端Win5新版、Steam游戏设备睡眠或CPU%收益。交CPU1自然合批，不冻结/追包；持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/resume-sidecar-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json、PREPARATION-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-RESUME-SIDECAR-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-CHECKPOINT-READER-ORIGINAL-REGRESSION-20261110 -->
+## 自定义游戏库共享读取器原有兼容回归（2026-11-10）
+
+承接resume-sidecar-read-io的36项产品修复，本轮不修改产品或测试源码，只用当前原shared_game_media_downloads_selftest.cpp单次编译，精确--storm-case执行checkpoint-long-path（14）与temporary-corruption-and-future（2），共16检查PASS。覆盖普通逻辑长目录读写/未知字段、坏bytes拒绝及保全、修复替换、future99不降级、磁盘满/替换失败不ACK和tmp归还、目录类型拒绝，以及损坏所有权记录保全/未来所有权拒绝。
+
+339实际依赖条目/309规范唯一路径全预声明并核对，23当前源码与捕获逐字一致，上批产品三叶仍匹配。3RawJob原300秒内active0，1编译按声明仅归还精确vctip、2业务自然；原120秒compile/25秒case不放宽，只有两项精确原用例，默认suite/ID/minimum不扩，旧36未重跑。补充VERIFICATION_READY不冒充新的产品SOURCE_READY，status/sourceReady/productSourceReady/currentVerificationScope原指针全部保持，仅追加此项。
+
+目录观察568日志包、最新仍Win5 2026-11-10 02:05:08，不新增现场根因结论。未全Queue默认/整主程序/部署、真实网络/解码、远端Win5新版、Steam设备睡眠或CPU%验收。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/checkpoint-reader-regression/VERIFICATION_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。持续ACTIVE，向CPU1补充上批来源证据，不要求追包、冻结或重复部署。
+<!-- /CUSTOM-LIBRARY-CHECKPOINT-READER-ORIGINAL-REGRESSION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-STAGING-CENSUS-READ-IO-20261110 -->
+## 自定义游戏库暂存目录核算失败不再按空缓存准入（2026-11-10）
+
+目录观察仍568包、最新Win5 2026-11-10 02:05:08，没有新增现场根因结论。实际FILE_LIST_DIRECTORY拒读32使原WorkerContext.used0/failure空，仍请求素材并发布，尽管已有119字节暂存数据；这证明未知核算被当空缓存，不是实测已超过6GiB。现原一次枚举保留IO错误；在原parent/power/queue检查后、清理/claim/lane/素材请求前，沿已有storage20秒退避结束。真正不存在的首次缓存目录仍合法，8192原上限不扩大；先过滤非part名再读相关类型/大小，无新扫描、线程、timer、并发、重试额度或历史退款。
+
+原storage-health disk-full显式--census-read-denial同次18检查PASS。目录未知时0素材请求/0正文，原metadata/part/海报保留、attempts2/time1234保持、owner归零；解锁等原20秒后核算119（96complete+16partial+7corrupt），同完整断点Range96/416恢复0正文，仅释放96，余23和海报逐字保持。首次无缓存目录控制也过。只有初始目录共享32实注入，后续迭代/条目/size错误源覆盖，不声称超过8192条目的全量盘点。
+
+两编译各328实际依赖条目/298唯一路径全预声明匹配，20当前源码相符；4RawJob原600秒内active0，两编译仅声明归还精确vctip、业务自然，修前语义FAIL保留。138原check表达式保持，已有resume分支改显式enum选择以免继续增加位置bool，旧CLI/default工作不变；默认suite/ID/minimum不扩，旧36/补充16未重跑，仍为各自原epoch证据。两叶片（Worker头/原storage测试）精确binary patch私有应用等字节、fresh-byte CAS入主线，保留并行改动和resume-sidecar-read-io前向链。
+
+未整主程序/部署、真实网络/解码、远端Win5新版、Steam游戏设备睡眠或CPU%验收。交CPU1自然合批，不冻结/追包，持续ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/staging-census-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-STAGING-CENSUS-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-TEMPORARY-OWNER-READ-IO-20261110 -->
+## 自定义游戏库临时文件归属未知时跳过年龄清理（2026-11-10）
+
+沿用568包复核与最新Win5 2026-11-10 02:05:08，67历史任务/59done/8unavailable、worker0/active0；Skyrim缺旧助手观察，具体原因仍UNKNOWN。源码发现且原生复现：临时归属JSON共享拒读32被temporaryRecords吞成空，原年龄清理删掉16字节活PID/birth归属partial及7字节真孤立partial、used23变0。现原读取可选报告readable，年龄清理只在可读时执行；未知就退出本次清理，无新IO/线程/timer/素材请求/重试或退款。
+
+原storage-health disk-full显式--ownership-read-denial，修前指定语义FAIL、修后17检查PASS。共享32时两个48小时前的partial与归属原字节及used23保持；解锁仅删除7字节真孤立，活PID/birth归属16字节保持。future99继续原拒绝并保留23字节；损坏files数组不授权删除，之后原tracking修复保留损坏原件并接纳新工作；真正无记录时仍正常清理旧孤立文件且不建记录。仅执行Queue/WorkerContext原公开清理路径，非完整Worker.run。
+
+两编译各328实际依赖条目/298唯一路径全预声明匹配，20当前源码相符；4RawJob原600秒内active0，2编译仅声明归还精确vctip、业务自然，修前原件保留。155原check表达式保持，默认suite/ID/minimum不扩；三叶片Queue/Worker头+原storage测试精确binary patch应用等字节、fresh-byte CAS入主线，保留并行修改及前批目录核算保护。旧18/36/补充16未重跑，保持各自原epoch。
+
+未完整主程序/部署、真实网络/解码、远端Win5新版、Steam游戏设备睡眠或CPU收益验收，不能由本地缺口推定现场原因。交CPU1自然合批，不冻结/追包，目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/temporary-owner-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-TEMPORARY-OWNER-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-TEMPORARY-OWNER-WRITE-IO-20261110 -->
+## 自定义游戏库临时登记读失败不覆盖旧归属（2026-11-10）
+
+沿前批保护继续核登记路径，未重扫不变的568包：Win5最新仍2026-11-10 02:05:08、67历史任务/59done/8unavailable、worker0/active0，Skyrim具体原因UNKNOWN。容量trim已跳过读不到的sidecar，本批不改它。新源码缺口已真实复现：temporaryRecords读共享32回空，原生同线程first-chance C++异常边界解除唯一自有锁后，trackTemporary后续store第二读成功，却以空基础生成的新映射覆盖旧登记；随后原年龄collector删掉16字节活PID/birth归属partial，used23降7。
+
+现原temporaryRecords可选报告storageUnavailable，track遇未知初读沿已有storage错误退出，不ACK新项；store第二读IO也保留原记录，不尝试损坏备份。原默认查询/年龄collector的readable行为保持，可读损坏仍原备份修复、future99拒绝不变。没有新增IO、线程、timer、并发、重试额度或退款。原storage-health disk-full显式--ownership-write-denial修前指定FAIL、修后16检查PASS：实际共享32和1次解除已核；旧归属/字节及23用量保留，恢复可读后两归属合并，release新项保留旧项及两文件；第二读实际持锁时存储拒绝、原字节保持、虚假corrupt备份0。素材请求0。
+
+两编译各328依赖条目/298唯一路径全预声明匹配，20当前源码相符；4RawJob原600秒内active0，2编译仅声明归还精确vctip、业务自然。171原check表达式保持，默认suite/ID/minimum不扩；两叶片Queue头+原storage测试精确binary patch应用等字节、fresh-byte CAS入主线，保留并行修改及前批年龄/缓存核算保护。旧17/18/36/补充16保持各自原epoch，未重跑或计作当前PASS。
+
+实际只调用Queue及WorkerContext原公开方法，非完整Worker.run/主程序；未部署、真实网络/解码、远端Win5新版、Steam游戏设备睡眠或CPU收益验收，不能推定现场根因。交CPU1自然合批，不冻结/追包，目标ACTIVE。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/temporary-owner-write-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+<!-- /CUSTOM-LIBRARY-TEMPORARY-OWNER-WRITE-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-WATCHER-TEMPORARY-CLEANUP-20261110 -->
+## 媒体监听开启时的通用临时清理尊重下载归属（2026-11-10）
+
+原main gameMedia.watch经Store.collectOrphans仍调用旧capacity通用年龄清理。本地原消费者实际删4个旧片段，包含活PID/birth归属16字节及完整断点视频96字节，归属JSON/sidecar却留下。现有队列归属目录交回原下载清理；无归属时仍保护任意版本/损坏sidecar及观察错误，只清理真正无断点旧legacy片段。以目录项状态避免跟随断开链接当不存在，重解析负例源覆盖；仅显式清理时增加归属/sidecar stat，无新常驻、timer或重试，原24小时/8192界限保持。
+
+原disk-full显式--watcher-cleanup最终15检查PASS：合法/实际共享32/坏/未来归属原字节保持，Queue最后归属释放后仍清3个无sidecar旧part/segment；有效/坏/future99断点、近期/外来文件保留，幂等0。原Worker单目标Range96/同validator416恢复，正文0、暂存127→31，队列done/active0/worker0及transport句柄0。主程序IPC只核源码，实跑Store/Queue/Worker。
+
+首exists候选15 PASS保留，因最终源改symlink_status才在原600秒重编同一case，不计30唯一覆盖。三编译各328条目/298唯一路径全预声明，20当前源匹配、6RawJob末端0、3次仅声明编译工具归还；186原check保持、默认suite/ID/minimum不扩。两叶capacity头/原storage测试精确patch等字节CAS入主线，保留并行及旧修复。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/watcher-temporary-cleanup/SOURCE_READY.json、REPORT.md、STATUS-PRESENCE-REVIEW.json。
+
+沿既有568包复核，未重扫不变历史；不推定Win5 Skyrim原因。未UI/整主程序/部署、真实网络/解码、Steam设备睡眠或CPU收益验收；旧epoch不重跑计绿。交CPU1自然合批，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-WATCHER-TEMPORARY-CLEANUP-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MEDIA-INDEX-READ-IO-20261110 -->
+## 媒体索引暂时拒读不耗尽游戏重试（2026-11-10）
+
+实际共享索引读32复现：0素材请求，原attempts2→3并autoStopped，队列completed；原索引/海报/96字节complete断点没损坏。现仅Worker.prepare传输错误与失败记录错误两处将精确media-index-unreadable并入已有media-storage-unavailable，原Queue/Store/schema/租约/20秒退避、次数上限和历史债务保持，无新IO/线程/timer/并发/重试或退款。
+
+原disk-full显式--index-read-denial同次21检查PASS。初读拒绝保留attempts2/time1234和所有原字节，实际等原20秒deadline后同Range96/validator416恢复、正文0、正常发布及归还。另视频96字节EOF后真实锁索引，使发布/Store.fail读失败，正常storage退出，完整断点/海报/原未发布current-process lease保留，future cooldown、active0/worker0/transport0；此分支未代签后继进程恢复。两个可读坏JSON/根类型负例仍原attempt3有限拒绝，不能借存储重试。
+
+两编译各328依赖条目/298唯一路径预声明匹配，20当前源码，4RawJob原600秒内均自然退出/末端0，本轮工具强制归还0；199原check保持、默认suite/ID/minimum不扩。Worker头/原storage测试两叶精确patch等字节CAS入主线，保留并行及前批修复。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-index-read-io/SOURCE_READY.json、REPORT.md、JOB-CLOSURE-REVIEW.json。
+
+沿既有568包复核，不推定Win5 Skyrim历史原因；未真实网络/解码、整main/部署、Steam设备睡眠或CPU收益。旧epoch不重跑计绿；NEXT-SOURCE-REVIEW的共享读取尾随内容疑点仅源码记录、未复现或改动。交CPU1自然合批，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-MEDIA-INDEX-READ-IO-20261110 -->
+
+<!-- CUSTOM-LIBRARY-SHARED-MEDIA-STRICT-EOF-20261110 -->
+## 共享媒体文档须到实际EOF才授权使用（2026-11-10）
+
+上批NEXT-SOURCE-REVIEW已原生复现：空entries对象后拼接完整原索引，旧read只取第一个对象，Store.collectOrphans实际删3个旧文件，其中2个仍被完整原索引引用。现严格流解析并核istream物理EOF，原16MiB/路径/缺文件/根类型/IO合同保持；无整文件副本、新读所有者、常驻/timer/schema/重试或退款。
+
+原disk-full显式--index-trailing-content最终21检查PASS：拼接及9项数值/对象/NUL/单NUL/文本/注释/尾BOM/坏JSON/根类型负例都在清理前拒绝，索引/素材/孤立文件原字节保持；3项正常原文/空白/BOM及合法转义NUL/未知字段兼容。恢复完整索引只删1真旧孤立文件、保留2引用素材，幂等0；缺文件原空观察、实际read共享32仍原错误且解锁可读，素材请求0。
+
+首strict-only候选第5检查FAIL保留：vendored lexer视NUL为结束，仍接受尾随并删真孤立文件（引用2素材尚在）。核对同一stream adapter仅真实EOF设置/保留eofbit，补结束判断并在原600秒新epoch重编同case，加入单NUL和合法转义NUL控制，旧原件/费用不回填。三编译各328依赖/298唯一预声明，20当前源匹配，6RawJob全自然/末端0、工具强制归还0；217原check保持，默认suite/ID/minimum不扩。
+
+shared media头/原storage测试两叶精确patch等字节CAS入主线，保留并行及前批修复。实跑shared read/Store，不是Worker.run/解码/网络/整main/部署或远端Win5原因、Steam设备睡眠、CPU收益验收；旧epoch不计当前PASS。沿既有568包分析，不重扫不变历史。原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/media-index-trailing-content/SOURCE_READY.json、REPORT.md、EOF-CORRECTION.json；旧源码疑点原件保留，由本批前向解决。交CPU1自然合批，目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-SHARED-MEDIA-STRICT-EOF-20261110 -->
+
+<!-- CUSTOM-LIBRARY-INVENTORY-NOTICE-20261110 -->
+## Win5 名字卡片与加入 Steam 结果弹窗（2026-11-10）
+
+已修复 Win5 名字卡片与加入 Steam 反馈。
+
+09:59:51 日志中，library-scan 65 项都有游戏目录及主 EXE，共享 game-media 73 项中15项无EXE。原真实 mergedGames 将未匹配缓存补成卡片，回放产生73张，其中8张额外卡片；包含 totk_xlate、Call of Duty、Delta Force、旧棒球记录、旧小马记录、旧博德记录、Homeworld和Lossless Scaling。它们是壁纸缓存/历史身份，不证明目前安装。现缓存只丰富扫描清单内卡片，不自行生成游戏；完整缓存及素材不删除。相同日志回放为65张、原生9、已加入34、等待17、需处理5；王国之泪 totk.exe 手动项保留。回放不是远端文件存在性或新实扫证明。
+
+单卡与批量加入的完成、失败、空选择和预检错误统一用同一结果弹窗。编辑头及原生progress晚到失败保持短“加入失败”，细节在弹窗；Steam运行仍由原native FIFO拒绝，未自动关闭Steam或扩大单卡范围。结果通知等busy归还焦点后显示；后台只排队、回前台呈现，不加计时器。A/B、Esc、鼠标、真实CDP触摸关闭只退回原编辑层，接受的任务照常后台处理。
+
+最终完整shipping UI在1280×720、1280×800、1920×1080执行13个原定向场景，另2项来源/未捕获错误观察均过；含长错误正文、编辑头不叠字、方向/A/B返回、触摸/鼠标/Esc、晚到native progress、Steam运行和重新启动、显式重试、单卡/批量范围、后台完成和禁用项。53项原snapshot消费者及原1000形状/1000素材组合通过；消费者清单SHA配套更新，无ID/minimum/父门扩展。原缓存-to-card预期按本次用户决定改为只允许inventory，清空ID/换EXE不串素材等断言保留。
+
+失败原件保留：第一次snapshot准备误改无关按钮文字断言，恢复原断言后通过；日志回放初次漏生产shouldPreserveWaitingCard依赖，补真实边界后回放成功；首浏览器B返回焦点失败，修正可聚焦触发元素和busy后通知并再次定向验证。7个RawJob均自然结束、末端0；核心Run -Optimized明确返回NOT_RUN_UNPROVEN_CLOSURE，注册消费者尚无中央闭包资格，业务启动0，不能把独立叶消费者/浏览器通过标成核心或Full通过。核心自身Job亦末端0。
+
+6叶精确CAS写回主线，所有捕获前并行修改保留。未部署、未操作真实Steam/游戏/设备/睡眠，未测物理手柄或真实Win5；交CPU1自然合批，不要求冻结/重开已完成包。整体持续目标ACTIVE。
+
+原件：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/win5-name-only-steam-notice-095951/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-INVENTORY-NOTICE-20261110 -->
+
+<!-- CUSTOM-LIBRARY-AUXILIARY-PE-20261110 -->
+## Win5 辅助工具不得取得游戏身份（2026-11-10）
+
+Win5 扫描将辅助工具当游戏的四项修复
+
+日志20261110-095951中，CreationKit.exe与Fallout4.exe同为180分，字典序选中前者；QtWebEngineProcess的Qt6、protoc的编译器描述、fifaconfig也取得高可信游戏身份，进一步提供错误标题/素材线索。这是扫描层问题，与上一批共享壁纸缓存补出8张无路径卡片分开。
+
+原native分类器现识别QtWebEngineProcess、Protocol Buffers/protoc、fifaconfig为helper，Creation Kit为tool；在现有PE评估及排名阶段生效。只增4行，不改分类顺序、主程序人工锁定、黑名单策略、PID所有权或后台线程/定时器/并发。已缓存扫描须经既有扫描入口重算，未远程操作Win5，不声称远端数据已更新。
+
+复用原discovery-producer-primary-publishes-exact-game-before-dependent-write一个case，原所有断言保留。修前用日志四份真实ProductName/FileDescription及原路径分类调用实际assessPeIdentity，4条全为main-game；第一条按原断言FAIL。修后4条分别tool/helper且pe-tool-classification；实际scanOneGameDirectory在伪造但真实文件目录中选Fallout4.exe，3种仅辅助程序的目录均不选主程序。正常Fallout身份、Hearts of Iron说明回退、Total War合法launcher控制及用户显式选CreationKit的锁定保留。原Zelda同目录辅助排除、手动EXE持久化、重叠根及注册原生Steam清单仍通过。没有伪造PE资源文件，PE部分是字段级原生评估回放；完整PE读取/实机游戏不据此验收。
+
+实际最终消费者编译508输入/422唯一，23主线本地与399外部编译头均预声明并回核，主线其余21本地文件无漂移。调用与summary均network/process/priority/drive-discovery为0。首次编译因新增断言字符串类型FAIL，适配c_str后保持语义；首次case根不在__FILE__对应允许范围，原入口拒绝且业务0，保留失败，改用原允许的Evidence/Build路径与c0后复用已编译EXE，未重复编译基线。共3次编译（首失败）、3次case启动（首根拒绝），6RawJob末端0；编译vctip按声明工具收尾，不冒称自然退出；实际业务case自然退出。
+
+产品及原fixture两叶逐字CAS入主线，保留并行和上批UI/媒体修复。无新ID/minimum/父门/默认整轮测试，不把局部结果标成完整native/Full、安装、物理手柄、Win5实机或CPU收益通过。未部署、未操控真实Steam/游戏/设备/睡眠。交CPU1自然合批，整体持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scanner-auxiliary-identity-095951/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-AUXILIARY-PE-20261110 -->
+
+<!-- CUSTOM-LIBRARY-CACHED-PRIMARY-RECOVERY-20261110 -->
+## 旧自动选择的真实扫描恢复验证（2026-11-10）
+
+旧自动主程序与人工选择的持久化恢复回放
+
+本轮仅验证上一批主线，不改产品和正式夹具。仍用Win5 095951同源错误示例，在原Worker CLI消费者的私有定向分支中预置：自动CreationKit主程序、QtWebEngineProcess游戏卡、用户手动锁定CreationKit、known-backup requiresFreshScan标记及用户未知字段。两次实际--scan-library都经过原合并、持久化和读回路径；fake文件从不执行，真实Steam/网络/进程/优先级/盘符探测端点全为0。
+
+最终两轮均确认：自动项改为Fallout4.exe且不转成人工锁；明确锁定CreationKit的手工项和其自定义字段/配置保留；Qt卡退出games但missingGames与过滤审计保留；known-backup来源债被当前完整扫描清除；活动games及summary均2、无重复卡片，第二次lifecycleTransitions为0。原未知全库历史unknownPreviousInventory策略未改，也不以此次known-backup通过解除未知所有权保护。
+
+Host源码另行只读核对：openLibrary和手动scan都启动已有startLibraryPipeline(true)，已有原子单owner去重，缓存快照先返回、目录扫描在后台执行。这里只证明Host派发源码与Worker实际消费者的各自边界，未执行Host后台线程/安装版打开或远端Win5，因此不代签整条实机链路。重开游戏库已有扫描入口，不需为此新增常驻轮询/任务。
+
+实际current 23 shipping源与私有产品来源一致；原生编译508输入/422唯一。第一回放FAIL来自新增断言的Build/build字符串大小写比较，实际落盘已正确；原失败和文件保留，改用项目原canonicalPathKey再续，逻辑断言未放宽。2编译、2case启动，4RawJob末端0；编译vctip按声明工具收尾，业务case自然退出。最终仅1个原case的historical-primary-recovery私有变体通过，原默认case正文虽逐字保留但本轮未执行；不增加唯一业务数量、不把私有变体当默认整组或核心/Full通过。
+
+没有产品/正式test导入，不触发合批重建；上一批SOURCE_READY_SCANNER_AUXILIARY_PE_IDENTITIES两叶保持原SHA。无部署、Steam/游戏/设备/睡眠或物理验收，整体目标ACTIVE。下一处待核为下载checkpoint字符串解析的NUL尾部拒绝，仅源码疑点，尚无该处业务复现或修复结论。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scanner-cache-recovery-095951/VERIFICATION_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-CACHED-PRIMARY-RECOVERY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-CHECKPOINT-NUL-20261110 -->
+## 下载checkpoint不得以NUL截尾当健康记录（2026-11-10）
+
+下载checkpoint的NUL尾部拒绝修复
+
+接旧源码疑点，本轮实际原生复现：game-media-downloads.json的合法队列JSON后跟原始NUL，再跟schemaVersion99的另一份文档。vendored字符串lexer把NUL当EOF，原checkpoint::read接受前缀，Queue.document/snapshot把它当可读健康，Queue.start返回可启动token并经原save写回，完整原文被截掉尾部。未启动Worker进程，transportRequests0；这是解析/准入/覆盖的实际缺陷，不宣称Win5现场已发生该种文件损坏。
+
+现仅在原16MiB有界字符串读完后拒绝literal NUL；合法JSON中的转义\u0000不含原始NUL，保持兼容。无新增文档副本、线程、timer、schema、重试次数或并发；原大小/深度/版本/IO类别继续在既有路径处理。
+
+原storage disk-full显式checkpoint-only变体最终33检查：NUL夹未来文档/单NUL尾/夹文本/前导NUL/双JSON/尾bool/注释7组均拒绝，Queue不返回token、checkpointReadable=false、不借前缀jobs、原文件逐字保留，guard隔离备份完整；合法原文/空白/BOM、转义NUL与未知元数据、attempts2及automaticElapsedMs1234、正常resume字段、未来版本独立拒绝、字节限额、缺文件、真实共享锁读拒绝及解锁重读均保持。没有重跑默认整组。
+
+共用read还会影响Worker续传，因此复用同一次编译EXE执行原complete-416-revalidation控制3检查，实际Queue/Worker/Store对96字节完整视频的Range/416/容器核对和发布通过；WinHTTP是既有内存端口，无真实网络或解码验收。首次控制助手因继承Path再叠PATH导致JSON反序列化拒绝，在terminal ownership及business启动前退出10，保留完整失败，明确不计业务执行/自然Job终态；去重环境键后用同一EXE完成控制，原600秒账未重置。
+
+2次编译与3次原生业务执行有完整Raw回执，5Job末端0；编译vctip按声明工具收尾，不写自然退出。另1次助手启动拒绝没有business PID/terminal，缺终态边界单列。两次编译各328输入/298唯一，20主线文件与外部头完整声明回核。新增测试仅原disk-full可选分支，逆向移除新增块、enum值及CLI分支后原fixture逐字相等；原默认检查正文/范围不变，无新ID/minimum/父门。
+
+Queue头与原storage test两叶逐字CAS入主线，其余18本地依赖无漂移。未部署、真实Steam/游戏/设备/睡眠/Win5/CPU收益或完整native/Full验收。上一批扫描器/卡片与shared index严格EOF修复保留。交CPU1自然合批，整体持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/checkpoint-nul-tail/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-CHECKPOINT-NUL-20261110 -->
+
+<!-- CUSTOM-LIBRARY-EXISTING-IDENTITY-20261110 -->
+## 已加入Steam项目继续读取已验证身份（2026-11-10）
+
+已加入Steam项目不再丢弃已验证身份
+
+Win5 095951导出中，re2.exe的计划formalName为旧快捷方式“Homeworld: Deserts of Kharak”，缺少官方AppID；同EXE共享媒体却是Resident Evil2/883710。当前源码确有独立数据缺口：buildSteamLibraryAddPlan命中已有shortcut后立即返回，后续portable manifest和verified exact-EXE cache从未读取。日志未导出这台机器的原manifest/cache，不能确认历史错名是用户重命名还是早期resolver误配；本批不猜测其来源，也不据字段回放宣布王国之泪4285170错配原因已解决。
+
+已有shortcut分支现投影共享verifiedSteamIdentityMatch准入的同EXE当前manifest/完整cache，补官方title/AppID/身份状态及已验证发行年；原有shortcut名称另存steamShortcutName，stored/short/long ID、grid预览、already-in-steam状态继续来自真实快捷方式。用户ID已清空时不补回，未验证/未来/其他EXE/缺失缓存时保留旧观测；不发网络、不改Steam名称、不重算已存ID或增加游戏。
+
+复用原identitycaller-valid-cache-through-header场景并保留原首断言。修前真实native计划即使有完整同EXE已验证cache仍输出旧名/空AppID，原错误准确FAIL。最终当前原生调用覆盖cache补回、当前manifest优先、显式idCleared、4种无效/缺失cache的安全fallback及原件不变、有效后继可重读；每次计划都核只有1个already-in-steam、readyToAdd0、VDF原字节及stored/shortID不变。输出读回匹配，network/process计数0。
+
+原实际workspace app.js函数消费native原件：修前Homeworld/空ID，修后Resident Evil2/883710，分类仍in-steam且不在等待加入可选集合；匹配正确当前media，用户自定义name仍优先，输入快照不变。是VM数据投影检查，无UI/CSS改动、未代签DOM/手柄/安装版。Host本地fallback仍保留自己的旧membership观测，整条Host新worker刷新和远端实机未验证。
+
+首修后场景到cache原件比较时FAIL：新测试先用普通fs::exists在293字符路径判不存在，后用ioPath读取却拿到完整字节，产生假“被重写”。原件保留后仅将测试改为既有identity_cache::readSnapshot/sameSnapshot并用ioPath删除；产品候选逐字未改。最终299字符路径实测plainExists=false、safeExists=true，candidate/future/其他EXE均同inode/原字节，缺失前后仍缺失。三编译各508输入/422唯一，23本地及399外部闭包核对；3编译+3case共6RawJob末端0，编译vctip按声明收尾，业务自然退出。
+
+仅Worker及原消费者两叶逐字CAS入主线，其他21本地与shipping UI未漂移；无新ID/minimum/父门，无全量重跑。未部署/操作真实Steam、游戏、设备、睡眠，非完整native/Full/Win5/CPU收益验收。上一批scan/helper/cache-card/checkpoint修复保留。交CPU1自然合批，整体目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/existing-shortcut-identity-095951/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-EXISTING-IDENTITY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-WORKER-CLEAR-ID-20261110 -->
+## Worker清空ID保持用户纠错（2026-11-10）
+
+清空ID的Worker持久化补漏（2026-11-10）
+
+继续Win5自定义游戏库日志比对。11:19同名ZIP已被外部替换为25090330字节，SHA b8930e6025774d57be6c1d1e7c5e843e2710cec9b7669e524e36a095ae54fd16；当前library-scan、Steam计划、媒体及下载队列与前次观察的对应文档哈希相同。与09:59相比，Steam计划仍逐字相同；65扫描项、9原生、1手动游戏未变。原始resolver rounds/每游戏manifest/cache仍未导出，王国之泪4285170历史错配来源保持UNKNOWN，不自动修改用户ID。
+
+定位并修复独立源码缺口：Worker --clear-id仅处理既有覆盖对象，并在没有非空自定义name时删掉整条记录。缺记录/空对象/只有ID/只有自选素材时无法保持idCleared，读取本地steam_appid.txt仍得到旧候选；自选封面壁纸及扩展字段还会被连带删除。已有name虽保留tombstone，却留存storefrontSteamId和旧身份/重试字段。
+
+现始终创建或保留单游戏覆盖对象，持久保存idCleared；身份字段清理与Host现行路径一致。名称、cover/wallpaper、未知字段、其他游戏及根扩展字段保持；没有新增后台线程、轮询或网络。显式新ID保存分支未修改。
+
+复用原identitycaller-valid-cache-through-header用例，原首断言及已有cache/manifest/快捷方式/清空ID负例逐字保留。新增边界直接调用改名的真实Worker CLI：5种覆盖形状，各清空、重复清空、后继离线读取，共15次调用；每次注入Steam失败，读取真实输出failure与持久配置。修前原case准确FAIL，15条保存不符，其中12条复活本地旧AppID候选，自选素材对象变空；修后15条均保持清空及其他数据，本地候选为null，原case通过。网络/外部进程/优先级修改/自动磁盘发现均0。
+
+初次诊断误把常规Worker输出参数写为--output（该CLI实际用位置参数），在清空前被拒绝；原编译/退出/错误原件保留。仅修夹具参数形成r1新身份，未改产品断言。三编译与三用例共6个RawJob均自然结束、末端active0；两份r1编译均508实际输入/422唯一，依赖及工具逐字核对。未运行Full或中央全域，不据局部native通过代签安装版/远端Win5/物理手柄。
+
+两叶精确CAS写入主线，其他21本地依赖与捕获基线一致，并行任务修改保留。未部署，也未操作真实Steam、游戏、设备或睡眠。交CPU1自然合批，不要求冻结或重开已完成包；持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-id-clear-cli/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-WORKER-CLEAR-ID-20261110 -->
+
+<!-- CUSTOM-LIBRARY-SUPPLEMENTAL-CONTENT-20261110 -->
+## 附属攻略与数字画册不得自动取得游戏身份（2026-11-10）
+
+Win5附属攻略、数字画册不得自动生成游戏（2026-11-10）
+
+11:19日志实际扫描把ACVI的Digital Artbook and Soundtrack、ELDEN RING的Adventure Guide和Digital Artbook & Soundtrack作为3个独立自动游戏；Adventure Guide计划匹配NIGHTREIGN/2622380。Sekiro的DigitalArtwork_MiniSoundtrack另为未选中游戏候选。4份路径、大小及PE原始证据绑定当前ZIP；只确认本地误分类，历史resolver为何给错ID仍缺原轮次，不能据此推断王国之泪错配原因。
+
+新增有界识别：完整数字画册/原声附属标题后缀，以及AdvGuide父目录配Adventure Guide程序，归现有tool角色。PE附属标题和实际EXE均处理；主程序评分不能再用共享PE描述将明确附属EXE提升为游戏。仅含该附属程序且没有游戏候选的目录归原unrecognized-tool，退出待处理；含真实主程序的父目录继续正常识别。没有泛化裸guide/artbook/soundtrack或仅含这些词的父目录。手动选择依旧保留锁与目标，未新增PID黑名单写入、常驻扫描/线程/网络。
+
+原discovery-producer-primary-publishes-exact-game-before-dependent-write消费者复用，同ID原有辅助工具、普通PE、翻译伴随程序、手动Zelda、原生Steam及精确主程序保存断言逐字保留。4条现场PE/路径输入直接调用原assessor、评分器、实际单目录扫描与手动扫描。当前4条均非自动游戏、无白名单建议，手动目标保留；4条普通名称/父目录控制仍为游戏。原Worker完整fresh扫描从含4条旧自动记录的状态出发，最后只保留3个正常主程序、1个手动Zelda及1个原生Fixture；4条旧附属记录退出active games，仍在missingGames审计并dataRetained，未删除素材或覆盖用户ID。
+
+保留全部失败来源：初次基线编译引用仅新产品有的helper，且Windows路径反斜杠转义警告；r1仅修夹具后得到旧产品4条均main-game的原始失败。后置validator错误要求手动路径字符串相同，混合斜杠实际是同一锁定目标；只重读原件作规范化核收，没有重跑基线业务。r2实际证明单降级tool仍留needs-primary，修原non-game出口而不放宽断言。r3四条分类/手动均过，但20MiB无PE的ACVI正控低于原评分阈值；r4仅将正控改为日志实际111413272字节，产品与r3逐字相同，原阈值不动。正控证据初次GBK写U+2122失败留下空文件，保留并用另名UTF8原件纠正，无业务启动。
+
+最终原case通过；四份成功编译各508实际输入/422唯一，4个本地源epoch与外部工具/依赖核对。5次编译（初次失败）和4次case共9个RawJob均自然结束、末端active0；原FAIL和费用不回填。没有新ID/minimum/父门，无Full/中央全集/实际Win5/物理手柄或UI渲染验收。
+
+仅Worker及原消费者两叶精确CAS写主线，另21本地输入未漂移；原行尾和并行任务修改保留。未部署或操作真实Steam、游戏、设备、睡眠。交CPU1自然合批，持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scanner-supplemental-content/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-SUPPLEMENTAL-CONTENT-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-SELECTION-IDENTITY-20261110 -->
+## 手动选择约束身份、预览及展示缓存（2026-11-10）
+
+手动Steam ID纠错不得被旧身份覆盖（2026-11-10）
+
+继续Win5日志身份问题的源码检查。本批是独立原生复现，不宣称已确定王国之泪历史错配原因；原日志仍缺该次resolver原轮次。发现同EXE的旧verified manifest被Worker与Host本地计划优先采用，即使用户已保存不同Steam ID。Host原已加入分支还会原样保留旧官方字段，预览扫描会重新找回已拒绝的旧manifest，resolvedIdentities展示出口也能继续带出旧名/ID。
+
+新增共享的手动选择兼容检查，与原verifiedSteamIdentityMatch分开：用户数字不是官方验证。数值或合法数字字符串限制在AppID范围；匹配当前canonical ID，或原验证已支持的explicit-content本体关系才兼容。原官方验证谓词逐字不改。Worker已加入和待加入两分支均筛选manifest/cache，冲突manifest不借给新ID元数据/素材；匹配的新缓存可接续。Host本地计划及预览同样拒绝冲突；已有快捷方式状态/shortID/自选数据保留，只去旧官方身份字段。展示缓存按原操作内索引核当前选择，不删除/改写缓存；没有新增IO扫描、timer、线程或常驻服务。
+
+复用原identitycaller-valid-cache-through-header及discovercfg-owned-plan-authority-and-alias，各6种输入×已加入/未加入共12条：双方都旧、仅缓存新、仅manifest新、数字字符串、显式DLC本体关系、只有名称无ID。旧Worker4条与旧Host7条身份冲突准确FAIL。当前Worker12条与最终Host12条通过，保留原用例全部旧断言；Worker原15次清空ID、cache/manifest/shortcut边界仍同case执行。Host12条实际预览关联及6次实际身份缓存导出通过，manifest/覆盖配置/旧缓存字节保持。新reader guard移除的同源语义负例中，计划/预览12条仍对，缓存出口8条错误，被同一原case拒绝；不把此负例称为整份历史产品重编。
+
+两份初修原生均通过后，发现展示缓存独立出口，后继只重编受影响Host；Worker/header/Worker测试字节与已完成Worker编译相同，未为登记再跑Worker。最终Host输出再交实际shipping app.js的merge/category/草稿与confirmed ID函数，12条VM投影通过：保留草稿与已加入分类，冲突旧缓存不成为确认身份，DLC草稿/本体分开。首次VM断言误将原owned夹具的部分数字观测当成官方确认（缺identityStatus），UI正确返回空；只修后置预期，原错误/脚本保留，无产品改动或native重跑。未做DOM/控制器/安装验收。
+
+6编译+6case共12RawJob末端active0；编译工具vctip声明回收与业务自然退出分列。Worker各508实际输入/422唯一，Host各592/452，实际闭包、35本地/449外部联合声明及工具原件已核。原FAIL、变异与前后source epoch保持，无新ID/minimum/父门、无Full/中央全集或CPU收益结论。
+
+5叶精确CAS入主线，其他30本地捕获来源未漂移，既有同行修改与原行尾保留；无UI/CSS源码改动。未部署或操作真实Steam、游戏、设备、睡眠，交CPU1自然合批，不要求冻结或重开已完成包。持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-selection-identity/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-MANUAL-SELECTION-IDENTITY-20261110 -->
+
+### 本批Host编译输入计数更正
+
+manual-selection-identity的Host本轮实际输入为593项、453唯一；上段592/452及初次交接沿用了旧配方数量，现前向更正。SOURCE_READY.counts、各READBACK和ACTUAL-INPUTS原件原本就记录并逐项核对了593/453，无遗漏输入、无产品改动或编译/业务重跑。原报告/费用保留，核收见Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-selection-identity/COUNTS-CORRECTION.json。
+
+<!-- CUSTOM-LIBRARY-CACHED-MANUAL-SELECTION-20261110 -->
+## 缓存快照保持当前ID及待加入队列（2026-11-10）
+
+缓存快照也须遵守当前手动ID（2026-11-10）
+
+接上一批身份投影检查，发现workspaceSnapshot直接使用匹配账户/目录的旧计划，绕过buildLocalSteamPlanSnapshot；普通state、编辑返回以及刷新取消/失败后的缓存回退都可能重新带出旧ID。这是独立源码复现，不据此补写Win5或王国之泪历史resolver原因；日志无新的原始识别轮次。
+
+在快照公共出口应用当前手动选择，复用原兼容检查；只清除冲突官方身份/旧发行信息和自动素材就绪标记，不改持久缓存。已加入的状态、stored/shortID、原生Steam、用户素材/未知字段均保留。已失效的ready-to-add、ready-not-selected、needs-minimum-artwork转既有waiting-steam-verification，原ready/needsArtwork计数归还、needsIdentity/needsSteamVerification相应增加；身份未被确认，但用户待加入队列不丢。相同ID、合法数字字符串/DLC本体关系和原本无ID的手动导入保留。提取共用清理函数供本地owned分支复用，无新schema/IPC/后台线程、定时器、网络或素材树重扫。
+
+原discovercfg-cached-snapshot-process-work复用原1/80游戏缓存读量和实际工作量断言；新增8种输入×普通快照/已取消刷新回退共16快照、64行。旧源8快照身份/统计失败且文件保持；最终16均通过，包含4种原状态、手动封面/壁纸可见、membership/native保护、计数、同ID/无ID/DLC控制。受影响的discovercfg-owned-plan-authority-and-alias同最终EXE通过，保留其上一批身份/预览/展示缓存边界。原1/80素材文件读取次数前后相同，属于此固定样本的读取计数，不是CPU平均收益或整机功耗结论。
+
+初修仅原生native预览控制失败：夹具错误要求原生Steam走自定义预览，产品实际保持原生独立路径。只修这条预期形成r1，产品未改。r1原生及owned控制通过后，实际shipping UI normalizer/merge/category/confirmed-ID用真实同根旧快照+新快照回放，发现24行待加入卡被needs-steam-verification送入unclassified。保留该真实集成FAIL，r2只改为既有waiting-steam-verification并保留原统计断言，当前原生及同控制通过；64行实际UI数据投影全部通过，旧ID不回流、已加入不可重复加入、待加入保留。没有UI/CSS源改动，无DOM/物理手柄/安装验收。
+
+末端逆向校验在恢复被替换的旧三行语句时丢了两个CR；原失败保留，改为从捕获基线按同一补丁正向逐字重建，完整候选bytes严格相同。产品/消费者未改，无编译或业务重跑。
+
+4编译和6case共10个RawJob末端active0，原失败及source epoch保持；原实际闭包数量见SOURCE_READY.counts，不沿用旧配方数字。35联合本地/449外部及实际编译输入、工具逐项核验。无新永久ID/minimum/父门、Full或中央全集；没有真实Steam/游戏/设备/睡眠操作。
+
+仅Host与原消费者2叶精确CAS写入主线，其他33本地来源、原行尾和同行修改保持；未部署，交CPU1自然合批，不要求冻结/重开已完成包。持续目标ACTIVE。
+
+原件Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/cached-plan-manual-selection/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-CACHED-MANUAL-SELECTION-20261110 -->
+
+### 本批阶段封存时间说明
+
+原900秒阶段在源码正向重建校验及封存时达到989.776秒，阶段收尾预算不通过；费用与原FAIL不退款、不重开预算。10个原RawJob均在原父截止前完成，最后一个为716118毫秒，功能回执与收尾时限资格分列。未追加编译/业务或Full。见Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/cached-plan-manual-selection/CLOSING-BUDGET-OBSERVATION.json。
+
+<!-- CUSTOM-LIBRARY-MANUAL-REPLY-20261110 -->
+手动识别回执须与本次选择一致（2026-11-10）
+
+继续Win5日志的自定义游戏库检查。本批为独立源码复现；没有新增历史resolver原件，王国之泪4285170错配起因仍UNKNOWN。09:59的“自定义游戏库bug”和“TDP又超过了”ZIP逐字相同，见LOG-INTAKE.json。此前缓存生成8张无头卡片的修复及所有后继身份/扫描修复保持。
+
+旧Host只核对同EXE和官方身份证明，未绑定本次Steam/IGDB选择。真实identifyOne后台任务成功回执可将Steam620换成777，或将IGDB72换成99；非零部分失败也可把777写进原620缓存。新请求pending还保留旧formalName、storefrontSteamId和验证标记。
+
+现成功与部分完成均核对请求；实际cache writer自身重读manifest后再次验证，避免外层读取和发布之间的缺口。冲突不替换用户选择/原缓存，保留可见错误，不启动冲突结果的素材后续。新请求仅清旧结果字段，保留名称、自选素材和未知字段；Steam合法explicit-content本体关系沿用原规则。未改变自动调用者、既有任务所有权、重试次数、线程或轮询。
+
+复用原editor-queue-manual-enrichment-id-only-conflicting-app并先执行其完整原断言；之后7种请求/回执边界执行真实Host接收、任务、配置及缓存写入，受控同EXE子程序只生成合成回执，不代表真实网络识别。旧产品准确FAIL，当前7条通过；Steam/IGDB匹配、显式内容和有效部分结果均保留。另有当前源直接cache writer冲突探针，拒绝且原缓存逐字保持；该探针没有对旧产品执行，不能称为修前结果。
+
+4个原控制分别覆盖用户后改名、支持的v2证明、后继清空ID及失败清空ID，均通过。两个编译各593实际输入/453唯一路径，声明源/工具与编译闭包重新核对。2编译+6业务共8个原RawJob自然退出，全部active0/disposed；本次封存不重跑。原失败、全部费用及限定范围保留，无新永久ID/minimum/父门，无Full、中央全集、真实Steam/游戏/设备/睡眠或远端Win5/安装版验收。
+
+正向从捕获基线重建产品和消费者，逐字等于已测试候选；原消费者body保留。35当前本地输入新读与基线一致，随后仅Host与原消费者两叶精确CAS到主线，另33叶保持，原行尾和并行修改保留。未部署，交CPU1下次自然合批，不要求冻结或重开已完成包。持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\manual-reply/SOURCE_READY.json、REPORT.md。
+
+原900秒阶段封存时为1109.367秒，收尾预算资格为False；8个原RawJob均在父截止前完成，最后约636410毫秒，不重置费用、不追加业务。
+<!-- /CUSTOM-LIBRARY-MANUAL-REPLY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-RESULT-FEEDBACK-20261110 -->
+手动身份识别反馈及后继任务回执（2026-11-10）
+
+当前日志目录没有新增晚于11:19的ZIP；09:59两同内容归档及11:19当前大小/SHA重新核对，见LOG-INTAKE.json。本批继续检查已修请求/回执链，不宣称已找到王国之泪历史resolver错配起因，仍UNKNOWN。
+
+实际发现两处独立缺陷：原生拒绝不匹配的手动身份后，配置保留needs-confirmation和具体错误，但完成事件发空identityStatus且遗漏错误；实际页面监听器不看状态，一律提示“后台补齐完成”。另外同EXE的manualIdentifyEventMatches只接受第一代任务，后继代次的完成被忽略；旧started分支又忽略拒绝结果，仍能覆盖当前提示。
+
+现完成事件使用最终reportedStatus并传递冲突错误。页面分别提示Steam身份确认、资料确认但Steam待确认、网络未完成、尚未确认/具体冲突；身份成功也不宣称所有素材已下载完成。每EXE按原生单调代次接受较新回执，早代started/complete/failed全部忽略；缺started但更晚终态可恢复，不同EXE独立。没有新定时器、线程、IPC命令、schema、样式或手柄路由变化。
+
+复用原editor-queue-manual-enrichment-id-only-conflicting-app，原全部身份/素材/缓存/直接writer断言保留，增加受控PostMessage端口读取真实AsyncResult队列负载；旧源两个冲突事件不符实际配置而FAIL，候选7条成功/部分失败请求都与持久结果一致。原supported-v2控制通过。原子事件所有权由端口接收并释放，所有后台任务原join/Job关闭仍执行；不是实际WebView显示或网络识别。
+
+页面继续使用原malformed-bridge-message-does-not-access-array-shape场景，先保留原断言，再执行确切shipping listener及generation helper。6类终态与后继代次控制通过；旧源所有反馈仍报完成且后继/旧started控制FAIL。原53项用例、1000形状及1000素材组合均执行，case集合前后完全相同，仅原消费者SHA合同同步，不新增canonical ID/minimum/父门。
+
+最后将7条实际原生events按同EXE连续代次交给同一正式JS监听器，7条提示正确、每条仅一次刷新，最早旧事件重放无影响。初次临时回放漏提供structuredClone VM端口，在第一事件克隆时报错；原stderr/Job/费用保留，另名r1仅补测试端口后通过，产品、永久消费者、原生与53项UI业务未重复。
+
+两编译各593实际输入/453唯一，声明来源/工具及实际闭包逐项新读核对。2编译、3原生case、2UI消费者、2次衔接回放共9RawJob均自然终结、active0/disposed；所有原FAIL保留。仅五叶精确CAS入主线，41个当前输入先核一致，其余36叶及并行修改保持，候选从基线正向逐字重建。未部署/真实Steam、游戏、设备、睡眠或网络操作，无DOM、控制器布局、安装版或远端Win5验收，也不据数据回放断言CPU收益。交CPU1下次自然合批，不请求冻结或重开已完成包；持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\manual-result-feedback/SOURCE_READY.json、REPORT.md。
+阶段收尾425.632秒/900秒，资格True；原业务与封存分别留账。
+<!-- /CUSTOM-LIBRARY-MANUAL-RESULT-FEEDBACK-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-ID-INPUT-20261110 -->
+手动AppID输入须在转换和落盘前校验（2026-11-10）
+
+用户新指定的09:59“TDP又超过了”ZIP重新按当前字节核对，12636160字节/SHA4680d3859426efa404a96c0461223688508d7a10569b94d7e56e5c9f321bdb6d，与“自定义游戏库bug”逐字相同；11:19当前25090330字节/SHA b8930e6025774d57be6c1d1e7c5e843e2710cec9b7669e524e36a095ae54fd16也未变。旧库清单/幽灵卡片比较沿用既有原件，不据新文件名重判TDP或重复整包业务。历史王国之泪resolver起因仍UNKNOWN。
+
+继续实际保存入口检查，发现搜索有格式检查，但保存直接Number(rawText)：科学记数、十六进制、负数、小数、超精度整数可转换为另一个ID后提交。原生只检查不等于字符串0，00仍可接受；Steam范围未与Worker已有int32上限一致，stoll溢出也只给内部错误。saveEditor仅预检命令结构，坏ID位于改名之后时可以先写部分名称。
+
+现UI在转换/提交之前检查原始Steam ID十进制正整数及1..2147483647范围，搜索复用同一谓词；非法输入留在编辑框，草稿名称/素材不丢，不发保存或搜索。Host共用数字边界检查用于identifyOne及saveEditor完整ID预检，写入和开后台任务前拒绝坏值。Steam沿用既有Worker signed-int上限，IGDB沿用持久层signed-int64上限，原生既有正值带前导零字符串可继续读取。未修改自动识别/网络超时/重试、线程、轮询、样式或手柄路由。
+
+复用editor-queue-submission-validates-all-commands-before-write并保留原未知命令零写断言；当前18条Steam/IGDB非法值×直接/编辑入口均拒绝、配置原字节保持、无Worker启动、所有owner归还。6条正控覆盖两类最小值、上限及带前导零合法数字，均接受并保留自选封面；原supported-v2控制通过。
+
+修前原生实际接受00、启动受控同EXE Worker并把原名称改为请求名称，错误回执又提升为620/ready。第二条测试准备尝试清除上一结果字段时触发原配置删除保护，原case停止于Configuration field changed during deletion; retry，外层预期新断言的核收随后FAIL。保留raw、声明、进程、现场文件和费用；只证明这条旧00错误，不宣称旧18条或旧6正控已完成。当前候选完整24条有实际原件；没有为了对称统计重跑基线或已过候选。
+
+原浏览器场景a later Steam ID edit remains pending after a name save保留原异步保存/后继ID断言后追加输入边界。在隔离Edge完整shipping页面实际输入事件、保存和搜索中，旧9种输入均错误发出保存并被回执重置；当前9种拒绝、每条0保存/搜索派发且文本/草稿保留，3条有效Steam边界正确提交。前后只有该原场景，无未捕获页面错误；实际native为受控端口，不代签真实网络/远端Win5/物理手柄。
+
+准备脚本短锚点命中两次时在业务前拒绝，原部分候选保留为after-preparation-failed，r1用完整上下文重建。初次两浏览器外层在原始声明父目录未建立时退出，均未创建RawJob或启动浏览器；另名r1仅补自身目录创建，原源与消费者不变。两项准备失败和修前部分对照均前向记录，不回填原件。
+
+两次编译各593实际输入/453唯一；2编译、3原生case、2浏览器共7个RawJob均自然终结、active0/disposed，实际依赖/工具和73浏览器样本/依赖输入重新核对。42本地来源与基线新读一致，仅Host/app.js/原生消费者/原浏览器消费者4叶精确CAS，另外38叶及并行修改保持；正向补丁重建逐字匹配。未新增永久case ID/minimum/父门，不自动Full、中央全集或部署。未操作真实Steam、游戏、设备、睡眠或现场设置；交CPU1下次自然合批，不要求冻结/重开已完成包。持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\manual-id-input-validation/SOURCE_READY.json、REPORT.md。
+阶段收尾566.451秒/900秒，资格True；修前不完整对照及费用保留。
+<!-- /CUSTOM-LIBRARY-MANUAL-ID-INPUT-20261110 -->
+
+<!-- CUSTOM-LIBRARY-SCAN-CONFIG-PUBLICATION-20261110 -->
+旧扫描不得发布已被用户修改的扫描配置（2026-11-10）
+
+日志最新仍为11:19当前ZIP，09:59两包内容相同且未变，重新核SHA/大小见LOG-INTAKE.json。既有Win5缓存、辅助程序、手动ID与输入修复保留。本批为独立源码实际复现；没有补出历史resolver轮次，王国之泪错配和用户当时是否遇到本次并发保持UNKNOWN。
+
+旧Worker发布完整扫描时仅核manualPrimary。扫描读配置后，根目录、修改器目录、单独添加目录、排除目录或明确清空根目录改变，旧结果仍能写入当前库存和job并返回确认。当前在同一既有DataTransaction内重新读取一次配置，核对这六类实际扫描输入（含原手动主程序）；不增加第二次配置读、轮询、线程或后台补扫。使用已实际读取/持久化的configBaseline，避免仅在内存规范化的临时值造成假冲突。
+
+在真实Worker完整CLI中，现有ReadFile端口于配置已读取、扫描状态开始读取时提交一次合法配置变更。原discovery-producer-primary-old-full-scan-cannot-replace-new-choice保留原手动主程序拒绝断言，再复用11变体。旧源五类变化仍写库存/job且ACK，手动主程序这一类原本能拒绝；当前六类都拒绝且库存/job原字节、最新配置保持。六次按最新配置重试均确认，实际新手动游戏可见，排除/移除/清空不再带入旧游戏。分类桶、扩展字段、首次扫描诊断、时间戳四类不影响扫描内容，继续允许；显式CLI根目录的既有持久化行为保留。
+
+真实正控又暴露独立同链错误：只有updatedAt被并发新增时，扫描已发布库存和job，但最后配置写入先走delta，抛added concurrently导致错误失败。原本已有忽略updatedAt的库配置无业务变化检查，现提前到delta之前；只在原对象无修复且除时间戳外完全相同时返回现存原件，不覆盖时间戳、不制造备份。真实业务变化、损坏/未来schema和其它字段合并仍沿原分支。当前时间戳控制完整CLI成功，原字节保持；非库配置不走此优化。
+
+首轮候选的六类旧扫描拒绝已通过，但总体case因三个额外观察FAIL：手动添加测试用了normalize允许的字符串形状，实际扫描循环只接受对象；时间戳是上述真实产品缺口；显式CLI根目录控制错误要求文件字节不变，而原CLI会持久化其明确根目录。r1仅将手动添加输入改为实际产品入口产生的path/source/locked对象，保留“重试后手动游戏必须可见”断言；明确CLI正控允许原有自身配置写入，六类外部冲突仍要求原字节保持。原始四份source/raw/费用保留。字符串旧形状的独立漏扫线索另存NEXT-SOURCE-REVIEW.json，未在本批修复或冒称已证明Win5原因。
+
+最终11变体通过，每份source执行17次原Worker CLI；四编译各508实际输入/422唯一，23本地及外部闭包、工具和全部原始进程回执逐项核对。4编译+4原case共8RawJob自然终结、active0/disposed。原FAIL、首修及r1来源分开，没有重跑其它历史整组、新case ID/minimum/父门或Full。实际网络/外部进程/优先级写/自动盘符发现均0。
+
+产品/消费者从捕获基线正向逐字重建等于最终候选；仅Worker与原消费者两叶CAS到主线，另外21本地输入及同行修改保持。未改UI、启动/部署安装版，也未操作真实Steam、游戏、设备或睡眠；不声称远端实机或CPU收益验收。交CPU1自然合批，不请求冻结/重开已完成包，持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\scan-config-publication/SOURCE_READY.json、REPORT.md。
+阶段收尾684.693秒/900秒，资格True；原失败及费用保留。
+<!-- /CUSTOM-LIBRARY-SCAN-CONFIG-PUBLICATION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-LEGACY-MANUAL-DIRECTORY-20261110 -->
+旧格式单独添加游戏的扫描、重加及撤销恢复（2026-11-10）
+
+接scan-config-publication留下的独立线索：配置normalize和configuredDirectory接受manualGameDirectories中的路径字符串，但手动扫描循环只读对象，扫描成功也没有该卡片。重新添加只删除对象旧条目，留下字符串别名而重复；移除恢复包只保存对象，撤销成功却丢掉旧手动目录来源。它们均为实际原消费者复现，不是仅静态猜测。
+
+统一提取允许的对象path或路径字符串，现有匹配/删除辅助函数、手动扫描和重新添加均采用同一路径语义。恢复包保留既有object/path格式：旧字符串在存包时包装为path对象；已有对象完整保留。混合别名优先已有对象，防止字符串排前导致较新扩展字段丢失。无新schema/迁移任务/线程、轮询、网络或UI改动。外来恢复路径仍由原verifyRecoveryFiles拒绝。
+
+复用discovery-producer-audit-remove-valid-unknown-preservation，完整保留原明确移除时opaque行、unscannedGames、futureUnknown及恢复债务断言。追加string、斜杠string、object、混合重复、object扩展5变体，每条实际原Worker CLI执行scan/remove/undo/add/scan。旧纯字符串两条扫描成功却没游戏、恢复包来源null、undo丢来源；旧重加三条留下2个同路径配置记录。对象正控本来通过。最终五条均首次及重扫恰好一张卡片，移除保留来源、撤销恢复主程序/名称/素材选择/元数据，重加配置唯一；别的手动目录和根扩展保持，游戏安装文件不删不启动，5条外来恢复路径反例均被拒。
+
+初候选原断言均过后，逐项原件核收发现混合条目先字符串时备份仅保path，后面的对象扩展没有保留；原旧产品会跳过字符串并取对象。这是候选缺口，保留首修来源/raw，r1补对象优先并在同一混合变体加强扩展相等断言；只重编/运行受影响候选，旧源及已完成其他场景不重跑。原先首修PASS只证明其较窄断言，未倒填为最终覆盖。
+
+三份编译各508实际输入/422唯一，实际闭包/声明/工具逐字核对。每epoch26次原CLI（原移除1、5变体各5），共3编译+3原case六个RawJob自然终结、active0/disposed；网络/外部进程/优先级写/自动盘符发现均0。无新canonical ID/minimum/父门、整组或Full。
+
+09:59两同内容日志与11:19当前文件重新核SHA/大小未变。额外核查10月26日成功包与11月10日11:19包，均未导出原library-config/manual-overrides/recovery-manifest；不能把本批旧格式修复当成已证明Win5当时漏Zelda的历史原因。历史resolver错配及现场原配置形状仍UNKNOWN。
+
+23当前本地输入与捕获基线一致，产品和消费者从基线正向重建逐字匹配，仅Worker与原消费者两叶CAS主线，另21叶及并行修改保持。未部署/改现场设置或操作真实Steam、游戏、设备、睡眠；非DOM/物理手柄/远端Win5或CPU收益验收。交CPU1下次自然合批，不要求冻结或重开旧包；持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\manual-directory-legacy/SOURCE_READY.json、REPORT.md。
+阶段收尾275.521秒/900秒，资格True；原旧FAIL及候选扩展缺口保留。
+<!-- /CUSTOM-LIBRARY-LEGACY-MANUAL-DIRECTORY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-NESTED-GAME-REMOVAL-20261110 -->
+移除及撤销父卡片不得改动独立子游戏（2026-11-10）
+
+当前最新日志仍为11月10日11:19包，09:59两个同内容包未变，重新按大小/SHA核对见LOG-INTAKE.json。历史Win5原配置/恢复包未导出，不能据本次独立源码复现归因其Zelda问题，历史resolver错配与是否遇到嵌套移除均UNKNOWN。
+
+旧移除消费者对manual-overrides使用pathWithin(selectedDirectory)：父目录内已单独登记的子游戏也被打包并清掉名称、自选素材和扩展字段，而子游戏的库存行及独立元数据仍在。撤销时旧包还会在该子游戏条目缺失时把父包旧覆盖补回，影响用户后来独立清空的子游戏。
+
+现从本次移除已读的原库存（active/missing/unscanned）及当前手动目录/主程序配置提取独立的嵌套游戏目录边界，打包及删除共用同一归属判断。父卡片保留自己的深层主程序/候选覆盖，但跳过这些独立目录。撤销对当前配置和库存做同样判断，旧包即使已含子游戏覆盖，也不能复活该独立游戏的旧条目。新包格式及原路径/清单校验不变。移除复用既有库存，不重复扫描；撤销增加一次该动作内的库存读取，无常驻timer/线程、网络或自动修复循环。
+
+复用原discovery-producer-audit-remove-valid-unknown-preservation，其原opaque/未知债务/非目标库存断言及上一批5种旧格式scan/remove/undo/add/scan全部保留。追加8变体：6种独立来源为手动path对象、旧path字符串、主程序锁、active/missing/unscanned库存；2种正控为未登记普通子目录、名称相似但并非路径祖先的目录。真实Worker remove/undo逐条执行，旧源6条都删除子游戏覆盖、错误打入父包并在undo补回；最终6条均保护，2普通归属仍随父卡片正常移除/恢复。
+
+旧包兼容边界使用实际移除产生且通过原verifyRecoveryFiles的包，显式放入旧产品会写出的同父子游戏覆盖后，再将当前子条目清空，交原undo CLI。当前父名称/素材、自己的深层备用程序覆盖及元数据恢复，独立子游戏条目保持清空。未修改原用例结果/回执；该临时包作为用例输入，不声称是现场历史包。所有游戏安装文件、子游戏元数据、独立库存行和非目标覆盖保持。
+
+两个编译各508实际输入/422唯一路径；23本地、外部闭包和声明工具逐字核对。每epoch42次真实原Worker CLI（原移除1、5旧格式各5、8嵌套各2），2编译+2原case共4RawJob自然终结、active0/disposed。旧准确FAIL、当前PASS及实际原件分别保存；网络/外部进程/优先级写/自动盘符发现均0，无新canonical ID/minimum/父门或Full。
+
+从捕获基线正向逐字重建产品及消费者与已测候选一致，23当前本地输入新读与基线相同，仅Worker和原消费者2叶CAS主线，另21叶及并行修改保持。未改UI/现场设置、部署安装版或操作真实Steam、游戏、设备、睡眠；非远端Win5/实体手柄/CPU收益验收。交CPU1下次自然合批，不要求冻结或重开旧包，持续目标ACTIVE。
+
+原件 G:\YeManCC-Work\Testing\YMCC\Evidence\CustomLibrary-LogComparison-20261108\nested-game-removal/SOURCE_READY.json、REPORT.md。
+阶段收尾187.183秒/900秒，资格True；原旧FAIL保留。
+<!-- /CUSTOM-LIBRARY-NESTED-GAME-REMOVAL-20261110 -->
+
+<!-- CUSTOM-LIBRARY-REMOVAL-MANUAL-RETIREMENT-20261110 -->
+移除游戏后退休已删除选择的手动识别任务（2026-11-10）
+
+09:59两个Win5 ZIP重新核大小/SHA仍逐字相同，11:19归档未变。本次是独立源码复现，历史Zelda resolver根因仍UNKNOWN，不按TDP/手柄文件名归因游戏库。
+
+旧removeGame确认删除覆盖后，手动识别仍可发布缓存和重建配置。现于既有task boundary内读取前后覆盖键，Worker成功后只取消实际消失且位于所选目录的manual-identify任务；沿用Worker独立子游戏所有权，覆盖旧主程序而保留独立子游戏和旁边目录。失败移除保持原任务，确认移除后的扫描失败不撤销退休。没有新轮询、线程或常驻注册。
+
+复用editor-queue-manual-enrichment-id-only-later-id-clear，原ID清空断言逐字保留，再执行确认/失败移除两组各4个真实Host后台任务。修前确认组准确FAIL；修后取消[true,true,false,false]、失败组[false,false,false,false]，配置/缓存及保留素材/未知字段正确。另有原失败清空ID控制通过。移除/扫描/识别是自有同EXE受控端口，不冒称实际Worker CLI或网络；实际移除CLI及独立子游戏规则引用上一批原件，不重复生产。
+
+首次marker观察漏用ioPath，因长路径误报未启动、停在移除前；原source/raw/费用保留，r1仅修观察。三编译+三目标case+一控制共7原RawJob；最终前后编译各593实际输入/453唯一。编译仅按原策略回收已固定身份的MSVC vctip，记DECLARED_TOOL_FINALIZATION；业务NATURAL，所有Job active0/disposed，不豁免产品资源。
+
+35本地/449外部与工具新读核对，基线正向重建等于候选，仅Host/原消费者2叶CAS，另33叶及并行修改保留。未部署或操作真实Steam/游戏/设备/睡眠，不代表实物手柄、远端Win5、CPU收益或自动刮削完整移除并发验收。无新ID/minimum/父门/Full，交CPU1下次自然合批，不冻结、不重开已完成包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/removal-manual-retirement/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-REMOVAL-MANUAL-RETIREMENT-20261110 -->
+
+<!-- BOOT-SLEEP-GUARD-EXIT-OWNER-20261110 -->
+四模式睡眠设置退出准入补齐（2026-11-10，目标仍为ACTIVE）
+
+原sleepGuard请求只核对模式上下文，没有把程序退出纳入失效条件。现仅对带bootContext的请求，复用原owner回调加退出检查，并在原设置写入锁内及运行状态发布锁内再核退出。普通手动/非编辑保存路径保持原行为。仅native/main.cpp三处局部hunk和原sleepGuardOwner消费者两文件写回主线；反向逐字证明保留同文件的并行修改。
+
+复用原睡眠设置用例，实际编译原handler、sgSaveConfig、mirror及owner/predicate源码，定向执行新增退出100行（四模式、8次真实mutex争用），保留并执行原12项普通/保存失败/镜像失败/原清理顺序控制；同EXE只移除owner退出检查的反例在后续effect处失败。原800行及64次mutex历史不重跑，不拼成一次新整组PASS。取消工作和兼容文件均是惰性端口，不证明真实worker/Windows睡眠资源归还。原/W4编译保留fixture既有document遮蔽告警，未禁用既有告警门。
+
+Steam监控已发现原生写入队列缺少逐请求归属且可能留下持久待办；其live-only候选仍私有。真实TS API8次带上下文、2次普通调用已过；Stage125批处理路径分隔符错误在编译器启动前失败，原失败/费用保留。路径修正仅准备，原生432/4/反例及原普通batch尚未运行，未写回Steam候选。
+
+两项自有Job在关闭前均active0并已销毁；未部署、启停安装版或操作真实Steam/游戏/设备/注册表/睡眠。共享300秒及独立SleepGuard原60秒分别续账，不挪用、不退款；详见G:\YeManCC-Work\Testing\YMCC\Evidence\BootMode-NoGap-Fix-20261109/STAGE131-CLOSING.json。当前整main/link/package/安装和物理验收仍OPEN。
+<!-- /BOOT-SLEEP-GUARD-EXIT-OWNER-20261110 -->
+
+<!-- CUSTOM-LIBRARY-REMOVAL-SCRAPE-RETIREMENT-20261110 -->
+移除游戏同时退休自动刮削item及旧队列后续阶段（2026-11-10）
+
+接上一批手动任务修复，真实自动队列还会在移除后发布cache/配置并进入素材阶段；已有身份且无override的游戏也未取消。现在将Worker实际删掉的inventory主程序纳入退休集合，集合只随当前library队列owner存活，准入与配置/cache写入沿原task boundary核对取消/代次/租约。移除item记skipped-removed，不取消整库；失败移除保持原任务，无新持久表/timer/线程。
+
+原automatic-no-id-queue-applies-pictures-without-retrying-identity的runQueueFixture逐字保留并实际执行；再追加identity/artworkOnly×确认/失败4组，各3个真实Host任务及受控同EXE Worker。修前两个确认组FAIL、失败组原本通过；修后4组通过，确认组旧Worker退出ERROR_CANCELLED且仅1次、不进后续阶段、不补配置/cache；独立子游戏和相邻目录每组完成4次identity/artwork Worker。另有上一批manual移除/ID-clear原控制通过。端口刻意在确认移除后让scan失败，不冒称实际Worker CLI/网络；真实移除CLI规则引用nested-game-removal原件，不重复执行。
+
+2编译+2原case+1控制共5RawJob，业务NATURAL，编译按显式策略仅收已pin MSVC vctip，记DECLARED_TOOL_FINALIZATION。所有Job active0/disposed；两编译各593 actual/453 unique。35本地/449外部及全部声明工具/源码新读核对，正向重建等于候选，只CAS Host/原消费者2叶，其余33叶保持。无新ID/minimum/父门/Full。
+
+09:59两ZIP仍逐字相同，11:19包未变，无更新日志；历史Zelda resolver根因仍UNKNOWN，不按文件名归因TDP/手柄。未部署、操作真实Steam/游戏/设备/睡眠，未验收远端Win5/安装版、CPU收益及所有跨进程媒体事务；移除前已落盘的历史媒体文件保留。交CPU1下次自然合批，不冻结或重开已完成包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/removal-scrape-retirement/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-REMOVAL-SCRAPE-RETIREMENT-20261110 -->
+
+<!-- BOOT-STEAM-MONITOR-COMPILE-CONTINUATION-20261110 -->
+四模式Steam监控原生编译接续（2026-11-10，目标ACTIVE）
+
+用户追加共享30秒后，同一总cap330000ms，余593ms；旧失败和费用均保留，不借Sleep独立原账。候选仍私有。真实固定cl独立argv/W4/WX编译成功4539ms，原普通消费者的前半!sectionOnly分支已走完：4条末尾invalid-arg PASS后出现下一独立persisted-section首条check，85条断言输出及原stdout/源码/工具/实际includes已绑定。原ordinary后半6401ms TIMEOUT，整batch不通过；新owner432/control4/negative未派发。
+
+同一已编译EXE可用原--section-only只续未完成组，再执行原--boot-owner分支；无来源漂移不得重编或重跑已完前半。仅证明native消费者编译及前半原普通软件分支，不证明实际Steam运行、完整四模式或物理生命周期。两次shell拒绝、一次保留WX的fixture编译拒绝和本次TIMEOUT均留原件；仅修fixture全局命名、原窄化显式转换及未用兼容端口标注，原断言/产品源码/警告门保持。自有Job及vctip关前active0，工具回收不标自然退出。
+
+主线仍为先前已验证的睡眠退出保护，Steam候选未提升。下一步与未验范围见G:/YeManCC-Work/Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE136-HANDOFF.md；完整链接/包/安装、HUD、sleep下层、charge完整tuple及当前UI/物理验收仍OPEN。
+<!-- /BOOT-STEAM-MONITOR-COMPILE-CONTINUATION-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-RECORD-METADATA-PENDING-20261110 -->
+手动目录/主程序的元数据保留候选（2026-11-10，未并入）
+
+手动目录/主程序记录的附加数据丢失：已复现，修后未验收（2026-11-10）
+
+当前主线Worker重新添加同路径目录时重新构造对象，丢futureAnnotation和自定义tags；add --exe、旧set-library-primary及编辑器publish-primary-state三个入口也完整重建manualPrimary，丢futurePrimary和自定义tags。通过真实原Worker CLI的原discovery-producer-audit-remove-valid-unknown-preservation消费者复现，三路线原有选择及越界拒绝正确，但metadataPreserved全为false；五条旧目录workflow原断言已执行且通过，新增元数据断言FAIL。当前baseline在新增断言处停止，旧嵌套组未到达，不冒称本轮已执行。
+
+私有候选复用小型lockedUserLibraryRecord：在原对象上更新本次owned字段，保留其他字段与自定义tags，并确保原user/locked/required tags；目录字符串别名继续去重并优先对象。三个primary生产入口共同使用它。此候选尚未编译或验收，不进入主线或构建交付。
+
+第一次准备因CRLF锚点未匹配已有LF片段而明确停止，所有候选叶仍等于基线，未启动业务；保留prepare原件与纠正记录，r1按逐块确切内容匹配原换行，不重开原900秒阶段。修前编译508实际输入/422唯一，32次真实CLI，2RawJob均Job归零/销毁；编译仅按原策略收pin的vctip，业务自然退出。修前readback在182669毫秒生成，之后尝试候选编译时原阶段剩余不足180秒编译上限+收尾，运行器在RawJob分配前以ORIGINAL_PHASE_EXHAUSTED拒绝；没有运行候选编译或用例，没有重置额度，收尾超时资格保留为false。
+
+主线23输入与原捕获逐字一致，只保存私有候选及待验收索引。下一步须核对候选来源/工具并完成首次修后编译与受影响原case，不重跑已固定的修前生产者；不得把本记录标为SOURCE_READY/修后PASS或凭静态补丁交付。无新ID/minimum/父门/Full、安装版/Steam/网络/游戏/设备/睡眠操作。最新ZIP仍11月10日11:19，09:59两同内容包继续沿用原对照，历史Zelda错配原因仍UNKNOWN。持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-record-metadata/CANDIDATE-PENDING-VALIDATION.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-RECORD-METADATA-PENDING-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-RECORD-METADATA-VALIDATED-20261110 -->
+手动目录/主程序记录的附加数据保留：候选定向续测已通过（2026-11-10）
+
+旧Worker重新添加同路径目录会重建记录，丢扩展字段与自定义tags；add --exe、旧set-library-primary、编辑器publish-primary-state三个入口也重建manualPrimary，丢附加数据。原阶段真实32次CLI已证明三入口owned字段与越界保护正确，但metadataPreserved全false；原FAIL及900秒收尾超限完整保留。没有重跑修前生产者，REPORT.md与CANDIDATE-PENDING-VALIDATION.json仍为原阶段原件。
+
+当前从同一已固定候选完成首次编译和受影响原case定向续测。lockedUserLibraryRecord仅在原对象上更新本次选择的字段，保留其他字段、自定义tags并确保原user/locked/必要tags；目录继续按路径去重，混合别名优先已有对象。所有三个primary写入入口共用它，没有新schema/迁移任务/线程/轮询或UI改动。
+
+复用discovery-producer-audit-remove-valid-unknown-preservation，五种旧目录形状scan/remove/undo/add/scan完整原断言仍过；三种object/混合形状保留futureAnnotation/custom-directory-tag；三primary路线都保存新EXE/锁定字段、保留futurePrimary/custom-primary-tag及必要tags，外来EXE三项负例保持配置原字节，编辑器定向库存确实换新EXE。原opaque/unknown debt及后继8种独立子游戏归属断言也均执行并通过。候选共48次原Worker CLI，无真实网络/外部进程/优先级写/自动盘符发现。
+
+本次依原FIXTURE-POLICY的失败/未到达阶段定向续测规则单独记录FOLLOWUP-TASK，300秒本次上限、原编译180秒/用例45秒保持；原900秒父阶段没有改写或退款，不合成为一次新的完整父PASS。续测2个RawJob（编译、原case），加原阶段2个，共4个原件；业务NATURAL，编译仅按原显式策略收已pin MSVC vctip，所有Job active0/disposed，不豁免产品资源。两编译各508 actual/422 unique，23本地/399外部及原前后声明工具/源码逐项新读一致。
+
+源码从捕获基线正向重建逐字等于已测候选，仅Worker/原消费者2叶精确CAS到主线，其他21叶和同行Host/UI修改保持。未部署或操作真实Steam/游戏/设备/睡眠；非安装版/远端Win5/物理手柄/CPU收益验收。没有新增ID/minimum/父门/Full。最新ZIP仍11月10日11:19，09:59同内容归档沿用既有对照，历史Zelda resolver根因UNKNOWN。交CPU1下次自然合批，不冻结或重开已完成包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-record-metadata/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-MANUAL-RECORD-METADATA-VALIDATED-20261110 -->
+
+<!-- BOOT-SLEEP-GUARD-MIRROR-OWNER-20261110 -->
+四模式睡眠兼容镜像归属修复（2026-11-10，目标ACTIVE）
+
+原sgSyncEnableMirror在外层校验后直接消费全局g_guardEnabled写Enable.txt，写入没有模式约束。现仅bootContext请求在原SettingsFileGuard内重新核归属，并从同一已提交sleep配置生成开关值；公共纯policy helper与原runtime predicate共用逻辑。普通无上下文调用仍走旧路径，通用原子写helper完全不改。原owner回调也在受阻读取返回后再核退出。已接受的原子IO允许完成，调用者在成功回执前复核，不承诺退出时回滚。
+
+原sleepGuardOwner消费者实际mirror72/controls4通过，含真实fixture timed_mutex竞争者被阻断；同EXE去上下文转交反例写1次，被原断言检出。文件IO/跨进程SettingsGuard仍是受控端口，不等于OS文件或底层睡眠worker验收。父核收在实际正负完成后因额外negative jsonl未写而FAIL；原stdout/exit/source/tools/include和Job0已重新逐项核对，保留空文件与父FAIL，不重跑producer。仅为未来fixture补负例jsonl输出。原900/exit100不重复，原警告选项保持，3个原source/fixture文件局部写回，逆向逐字保留main并行改动。
+
+原Sleep60秒累计58932ms、余1068ms，账见G:/YeManCC-Work/Testing/YMCC/Evidence/BootMode-NoGap-Fix-20261109/STAGE141-SLEEP-BUDGET.json；Steam共享330秒仍余593ms，未挪用。未部署或操作Steam/游戏/设备/注册表/真实睡眠。Steam已编译候选的owner432/4/负例与--section-only仍未完成；HUD路由/叶层与恢复上下文缺口、charge全tuple/default/ABI、当前完整编译/包/UI/物理仍OPEN。
+<!-- /BOOT-SLEEP-GUARD-MIRROR-OWNER-20261110 -->
+
+<!-- CUSTOM-LIBRARY-LEGACY-PRIMARY-ADMISSION-20261110 -->
+旧版主程序选择入口的排除规则与原生Steam所有权（2026-11-10）
+
+上一轮元数据保留修复已核当前字节，继续检查主程序写入入口。原add --exe和编辑器会拒绝被排除EXE/清单原生游戏，旧--set-library-primary没有同样检查，返回成功并写manualPrimary，随后扫描却可排除或继续由原生清单管理。此为独立源码真实CLI复现，不是Win5历史Zelda漏扫/错配归因。
+
+新增同一个validateManualPrimaryAdmission复用现有libraryExecutableExclusion及steamNativeGameInfoForDirectory；add沿原准入改用该帮助函数，旧primary在写配置之前执行。编辑器仍走原authoritative inventory与其排除/未来schema保护，未加额外Steam清单搜索。没有放宽黑名单、抢原生主程序所有权、改变合法旧入口无需预扫描的合同或添加后台任务/线程/轮询/schema。
+
+复用discovery-producer-primary-rejects-blacklisted-and-protected-inventory，原5次CLI的编辑器排除、未来库存、添加排除、原生添加拒绝和健康添加断言整段逐字保留并在前后实际执行。追加旧primary exact Steam.exe、wildcard UnityCrashHandler64.exe及受控原生appmanifest三负例，再加合法旧primary正控，每epoch共9次原Worker CLI。旧3条全返回0、发成功ACK并改配置；修后全非零、无成功ACK，配置/库存原字节保持。合法旧选择成功且保留新主程序、未知根/primary字段，库存原字节保持。
+
+所有文件/Steam标记与appmanifest均是Evidence自有惰性输入，执行实际原Worker main而非独立模型；没有启动游戏/真实Steam/网络/设备/睡眠，真实安装版/远端Win5行为与CPU收益未验收。2编译+2原case共4RawJob均NATURAL，所有Job active0后disposed。两编译各508 actual/422 unique，23本地/399外部及全部前后声明工具/源码重新核字节；从基线正向重建等于已测候选，只CAS Worker/原消费者2叶，其余21叶及并行Host/UI修改保持。无新ID/minimum/父门或Full。
+
+当前日志最新仍11月10日11:19，09:59两归档同内容且SHA未变；不能从文件名归因TDP/手柄，历史Zelda resolver根因仍UNKNOWN。未部署，交CPU1下次自然合批，不冻结或重开已完成包。持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/legacy-primary-admission/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-LEGACY-PRIMARY-ADMISSION-20261110 -->
+
+<!-- BOOT-HUD-CONTEXT-PRIVATE-CANDIDATE-20261110 -->
+四模式HUD上下文私有候选（2026-11-10，目标ACTIVE）
+
+新查到current只到输出外层，未进carrier queue/leaf；host reconcile调用apply(desired)也丢来源约束。私有3文件候选将current送入router各阶段和carrier接口，通过瞬态request metadata保留origin/bootContext及本地序号；host恢复沿原context提交并过滤迟到旧request/save完成。无持久schema/新timer/thread/poller。
+
+在当前615-file coherent前端捕获上，actual vue-tsc6856ms和Vite4862ms均通过，guard源码/工具不变且关前Job0。正常产品编译原240秒累计224739ms，余15261ms；没有消费软件fixture账、没有部署或运行安装版。保留Vite原chunk/dynamic import提示。
+
+该候选不写主线：desktop/Steam pending create/frame/ACK、精确id/nonce清理、native create/frame/迟到WebView回调准入和确认后的瞬态约束释放仍须补齐，原router/host/owner/relay runtime及负例NOT_RUN。编译不能替这些语义验收。源码和完整边界见G:\YeManCC-Work\Testing\YMCC\Evidence\BootMode-NoGap-Fix-20261109/STAGE145-CLOSING.json。已有Stage141睡眠镜像修复及原失败历史保持；Steam未完native组、charge/睡眠下层、整main/link/package/UI/物理继续OPEN。
+<!-- /BOOT-HUD-CONTEXT-PRIVATE-CANDIDATE-20261110 -->
+
+<!-- CUSTOM-LIBRARY-PRIMARY-MANUAL-TRANSFER-20261110 -->
+切换主程序时保留明确的手动选择（2026-11-10）
+
+旧编辑器只在字段相对旧EXE变化时写名称/ID/图片；仅换主程序时，相同的手动名称、AppID、清空意图和已保存图片仍留在旧EXE，新卡片回读丢失。当前只在primary实际改变时向新EXE提交已有的明确手动字段：名称、Steam候选ID/旧IGDB候选或清空标记、自选静态图片及删除保护。通过已有identifyOne复核候选，不拷贝旧缓存的官方身份证明；自动默认名称/ID/图片不变成人工选择。
+
+自选图片沿现有saveArtworkOverride流程，未改动的迁移优先已保留portableFile；本次用户新编辑的路径仍优先。不可用旧图片不额外提交，避免无关主程序纠正被旧失效文件阻塞。兼容现有legacy override.artwork容器；清空保护可迁移，即使旧AppID已被清空。没有新IPC命令、schema、HTML/CSS、手柄路由、timer或线程。
+
+复用a changed primary EXE is captured before dependent edits and survives Back，原primary-first/依赖EXE/返回另一个编辑器断言整段保留；追加7个实际selector change/save/reopen变体：manual-content、cleared-identity、automatic-defaults、edited-artwork、unavailable-artwork、manual-name-only、legacy-igdb。旧源前4类手动选择丢失（manual-content/cleared/name-only/legacy-igdb），后三种自动默认、用户新图片及失效图片正控保持。当前7项都正确提交到新EXE，受控回执回读/重开一致，ID保留pending-network，不伪造已验证身份。另有原unchanged primary selection does not schedule a redundant worker，通过且未触发迁移写。
+
+首次旧源运行在原Back前置中找不到media-only缓存卡片，因当前inventory-only策略正确隐藏此无头记录。仅为该场景提供真实第二inventory/plan游戏，保留原其他编辑器所有权断言。r1到达7变体，但新探针错误地把Windows路径替换成相对EXE，且把draftFor自动加入的空artwork:{}当数据差异；r2只修探针的绝对路径和这个空草稿投影，未变产品/有效断言/时限。全部初始source/raw和费用保留。最终修前4手动类准确FAIL、三正控PASS，修后7类和原两场景均PASS，无未捕获页面错误。
+
+4个Edge/Node原RawJob全部NATURAL，活动数归零后disposed，未保留后台浏览器。4本地及73个样本/Playwright依赖、所有声明工具和源码新读核字节；从捕获基线正向重建等于已测候选，仅app.js/原消费者2叶CAS，HTML/CSS与并行Host/Worker修改保持。无新永久ID/minimum/父门、整组或Full。
+
+这是正式编辑器配受控内存原生保存端口的验证，未操作真实库、文件选择器、Steam/游戏/设备/睡眠，也未执行真正文件复制/网络识别或安装版/物理手柄/几何导航验收。共享动态壁纸Store绑定迁移不在本批证明内，不宣称所有媒体事务已验收；未部署。09:59两包与11:19最新日志SHA未变，历史Zelda resolver根因仍UNKNOWN，不按文件名归因TDP/手柄。交CPU1下一次自然合批，不冻结或重开已完成包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/primary-manual-selection-transfer/SOURCE_READY.json。
+<!-- /CUSTOM-LIBRARY-PRIMARY-MANUAL-TRANSFER-20261110 -->
+
+<!-- CUSTOM-LIBRARY-FULLSCREEN-WHEEL-ACTIVE-ACCOUNT-20261110 -->
+## 自定义游戏库默认窗口、滚轮与当前Steam账户（2026-11-10）
+
+普通启动默认最大化，重复唤起仅最小化时恢复；WebView绑定禁用滚轮/双指缩放并归一到100%，正常滚轮保持原生滚动。Win5新日志计划读取22202，Steam实际非零登录账户89250578；原默认取历史第一账户，现仅无明确目标的计划刷新时读取ActiveUser/SteamPath，优先本次清单中同安装的当前账户，显式账户/root/file不覆盖，无新轮询/注册表写入。
+
+原账户snapshot消费者9变体修前2失败、修后全过，default/plan-receipt/account-error-gate原控制通过。真实隔离WebView中普通及Ctrl滚轮滚动且比例1，最终设置引用释放并等待同一自有浏览器HANDLE，自然退出/Job0；最大化仅正式源码与编译核对，未操作安装版/物理手柄。原控制参数误传、about:blank被原来源门拒绝、浏览器残留拒绝及probe的SDK类型编译失败均保留，不改断言/期限取绿。
+
+仅Host/原消费者2叶CAS写回，实际源码/依赖/工具核对，同行变更保持。无新ID/minimum/父门或Full，无部署/真实Steam/游戏/设备/睡眠操作；远端shortcuts.vdf未导出，不冒称实机VDF验收。交CPU1下一自然构建，不冻结或重开旧包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/fullscreen-wheel-active-account/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-FULLSCREEN-WHEEL-ACTIVE-ACCOUNT-20261110 -->
+
+<!-- CUSTOM-LIBRARY-MANUAL-ARTWORK-SAVE-ATOMICITY-20261110 -->
+## 自定义库手动素材保存失败不提前覆盖旧图（2026-11-10）
+
+旧saveArtworkOverride先覆盖固定cover/long/wallpaper文件，后写配置；后续素材缺失、复制/备份/配置失败仍能改变旧配置引用的图片，成功后备份也不能恢复旧图。独立真实Host/文件IO复现，不归因于Win5账户日志。现显式保存为本次生成独立资产版本，只清理未提交新副本，旧图供配置和备份保留。原copy帮助函数默认参数仍保持原直接调用语义，无新后台工作/schema/IPC。
+
+通用配置写帮助函数只增加可选activated输出：在原原子激活之后、可抛异常的回读/缓存前置true，默认调用不变。真实ReadFile失败端口确认提交后虽仍报原回读错误，已提交的3张新图不会被清理。原manual-image-activation-fault-keeps-old-image的有效单图断言整段保留并执行，追加12项：首源缺失/不支持、后源缺失、第二图激活/配置激活/备份失败、提交后回读失败、单图/三图成功、清空、清空后失败和重选保留源。修前8失败/4正控通过，修后12通过；原瞬态2次替换控制通过。实际有效BMP/惰性EXE及另一游戏图片，无真实Steam操作。
+
+5RawJob自然退出，活动0后disposed；实际编译输入/声明依赖/工具新读核字节，正向重建等于候选，仅Host/原消费者2叶CAS，其余并行来源保持。无新ID/minimum/父门/Full，无部署/Steam/游戏/设备/睡眠操作。最新仍17:33:49那份Win5ZIP。仅证明自定义隔离素材与配置文件；原生Steam grid多文件、跨进程媒体Store事务及强制结束后的无引用版本GC仍未证明，安装版/远端Win5/物理UI/CPU收益未验收。交CPU1下次自然构建，不冻结或重开旧包，持续目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-artwork-save-atomicity/SOURCE_READY.json、REPORT.md。
+<!-- /CUSTOM-LIBRARY-MANUAL-ARTWORK-SAVE-ATOMICITY-20261110 -->
+
+<!-- CUSTOM-LIBRARY-NATIVE-ARTWORK-SAVE-ROLLBACK-20261110 -->
+## 原生Steam素材成组写入与失败恢复（2026-11-10）
+
+显式编辑现在先准备全部账户/槽位的新图与独立备份，再写grid和配置；失败反向恢复本次已改动文件。消费已接受的隔离副本，配置已激活后的回读失败保持已提交图。恢复遇到不同外部字节或写入受阻时，保留备份并报告恢复未完成，不冒称已全恢复。补原生备份/枚举/源检查的ioPath长路径。
+
+原native-grid失败case保留有效单图断言；18变体修前13FAIL/5PASS、最终18PASS，含2个恢复受阻/外部修改的正确不确定性控制。原own-slot及上一批隔离素材12项控制通过。保留首次类型编译拒绝、17/18长路径失败和全部费用；9RawJob自然结束/Job0。只CAS Host/原消费者2叶，来源闭包新读核对，无新ID/minimum/父门/Full/常驻任务。未部署或操作Steam/游戏/设备/睡眠。跨应用CAS、备份到首次写入窗口及崩溃/断电持久恢复仍未解决，安装版/远端/物理/CPU未验收，目标ACTIVE。
+
+原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/native-artwork-save-rollback/SOURCE_READY.json、REPORT.md；交CPU1下一自然构建，不冻结或重开旧包。
+<!-- /CUSTOM-LIBRARY-NATIVE-ARTWORK-SAVE-ROLLBACK-20261110 -->
+
+<!-- CUSTOM-LIBRARY-NATIVE-ARTWORK-PREWRITE-OBSERVATION-20261110 -->
+## 原生素材写入前及配置提交前核对观察状态（2026-11-10）
+
+保存现在记录选中槽位的集合（含初始空清空槽），首次写入前核整个集合/内容，每个复制/删除前核本槽与目标，提交配置前核应用后的状态。检测到新增、改变、删除或其他扩展时停止，沿原恢复器撤回本次写入并保留外部不同字节；不拦其他游戏/未编辑槽。无新后台任务/schema/IPC。仍非跨应用CAS，最后检查与写入间竞态及断电恢复未解决。
+
+原native-grid case可选11项边界探针：修前8FAIL/3正控PASS，修后11PASS，5类首次写入前冲突真实native激活0。续测只跑未完成原native18和单槽控制，现均通过；Host与已过11的字节一致，观察函数正文保持。夹具两处递归改用原ioPath(forceExtended=true)，不缩路径/删断言。12实际RawJob自然/Job0。原900秒与首续测FAIL/收尾超时及分配器拒绝保留；成功r3首次编译续测独立记账，不拼原父PASS。仅2叶CAS，同伴来源保持，无新ID/minimum/父门/Full。未部署/操作Steam/游戏/设备/睡眠，安装/远端/物理/CPU未验收。
+
+18:50/18:59新Win5包的库存及加入计划逐字沿用17:33原件，不作更新版本实跑或手柄/TDP归因。完整来源、限制与证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/native-artwork-prewrite-observation/SOURCE_READY.json、REPORT.md。交CPU1下一自然构建，不冻结或重开旧包，持续目标ACTIVE。
+<!-- /CUSTOM-LIBRARY-NATIVE-ARTWORK-PREWRITE-OBSERVATION-20261110 -->
+
+
+<!-- SCREEN-MENU-GAME-OVERLAY-ROUTE-20261110 -->
+## 2026-11-10：屏幕菜单优先现有游戏覆盖层
+
+用户反馈直接三个点只出现在 Steam 主界面，游戏内原本大部分可用。本轮查 Valve Steamworks 官方覆盖层/ISteamFriends 文献，并下载当前 Steam 客户端 `sp.js` 镜像原件。官方公开覆盖层功能要求目标游戏已挂接覆盖层，公开 ActivateGameOverlay 是游戏侧接口，不是第三方全局 QAM SDK。本方仍使用既有客户端内部按键接收器，不声称为稳定公开接口。
+
+Valve 的 OnQuickAccessButtonPressed 操作的是所属窗口自己的 MenuStore；ActiveWindowInstance 又优先已存在的导航上下文，再看 FocusedAppWindowStore 的游戏覆盖层回调缓存。后台主界面导航仍被保留时，本方沿旧 active/main 路径会切主界面的菜单。用户新现场没有本轮运行日志，所以这是源码确认的可复现路由缺口，不把所有现场情况归为同一个原因。
+
+现菜单接收器保留当前已有的游戏覆盖层；否则优先读取 Valve 自己的 GetFocusedOverlayAppID/GetFocusedOverlayPID，用 WindowStore.GetOverlayInstance(app,pid) 精确取已有且 IsGamepadUIOverlayWindow 为真的接收器。查不到、API缺失/异常、非Gamepad覆盖层仍沿原 active/main 兼容路线。没有用 GetOverlayInstanceWithFallback、运行中游戏列表猜测、OS前台PID、窗口创建、SetOverlayState 或改变焦点。只选择 Steam 自己已记录的游戏覆盖层，不把“游戏运行中”当作“应该切走当前Steam界面”。
+
+原始菜单键、只读菜单检查和750ms有界补发共用同一选择器。覆盖层目标/上下文变化时，旧点击补发终止，不能落到主窗口或另一个游戏；已打开/关闭意图、未知响应和退出/电源/取消保持原边界。账户门移除保留，设置/睡眠等账户操作不受此修改影响。Steam主菜单也使用相同接收器以保持这对屏幕功能键一致；不改实体/虚拟报告和触摸板滑动。
+
+只在点击/原补发发生时读既有回调缓存并取一次实例，没有新常驻线程、轮询、刷新率或系统输入。复用原 screen_standalone_special_actions_selftest：旧源实际在新增游戏覆盖层断言FAIL（只切主界面）；候选完整123项通过，其中21项新增游戏路由，包含菜单原有102项。源JS与当前生成头 --check 通过，三个Raw Job均先归属后执行、自然退出且关闭前active0。无新C++业务/接口，未完整主程序link/打包/部署或在游戏中操作Steam。
+
+来源及原件：Testing/YMCC/Evidence/Touchpad-OverlayRouting-20261110。Research/SOURCES.json记录在线地址、时间及SHA；当前客户端镜像是 Valve 交付代码内容的研究样本，不等于用户安装版/加载内存身份或未来接口保证。此修正只处理“已有游戏覆盖层却误选主界面”的路由，未挂接/被禁用/不兼容的覆盖层仍需按 Steam 的条件处理，不能承诺所有游戏强行可见。
+
+<!-- /SCREEN-MENU-GAME-OVERLAY-ROUTE-20261110 -->
+
+
+## 自定义游戏库：账户读取故障隔离（2026-11-10）
+
+健康账户不再被历史坏VDF整体挡住；当前账户不可读保持明确失败，不悄悄落到历史账户。全账户加入/刷新/删除保留不可读账户及跳过警告，单卡和批量原UI如实提示部分完成。原Worker5、Host15及原控制原件经字节/工具/Job复核引用，续作生产JS两原用例实际通过，覆盖四种警告；六叶CAS已入主线。原1500秒父FAIL及旧UI断言失败保留，未改判；续作单独限额，仅补未完成UI及整合。安装版/Win5/物理输入/CPU收益与完整构建未验收，无部署。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/account-read-isolation/SOURCE_READY.json。目标ACTIVE，交CPU1下一自然构建，不冻结同行或重开旧包。
+
+
+## 2026-11-10：2077 本机覆盖层验证与 PID=0 菜单路由
+
+用户明确要求本机模拟，现有 Steam PID13920/birth 与 CDP webhelper16916/路径已绑定；2077进程73836、非Steam appid4131894616，覆盖层宿主77064。Valve 实际 GetFocusedOverlayPID 回报0，GetOverlayInstance 的0为合法按app查找。上一版 menuReceiver 的 pid>0 会在主窗口导航残留时漏掉游戏路由；本轮只改该条件为>=0，其他进程身份、菜单账户门移除、锁屏/VR/补发边界保持。
+
+同一真实 stale-main/PID0 会话只读执行旧源/候选menu.inspect，旧源选主界面、候选选游戏覆盖层，两边menu0无写。实际生产JS按键在用户保持前台的2077上打开QAM，截图显示游戏内侧栏，游戏menu与composition均0→2；同接收器关闭后2→0、截图返回2077，main menu始终0，临时probe已删除。不是安装版触控UI→原生队列的完整验收，未构建/打包/部署。
+
+安装版与实际加载的方法体确认：所属窗口的QAM接收器只切本窗口MenuStore，Valve计算合成后才通过Window.SetComposition/Overlay.SetOverlayState提交；Windows这段不依赖Gamescope的NotifyGameOverlayStateChanged。没有由YMCC直接设置合成、造焦点、切模式或猜测运行中游戏。
+
+既有JS消费者132项通过、旧源PID0反例FAIL；4个Raw Job自然退出并观察active0。另以实际Valve方法体进行隔离回放3项通过；初次替身缺GetName日志方法的FAIL原件保留。仅缓存/原实例点击时读取，无新增常驻线程、轮询或MOVE工作，CPU百分比未测量。JS/生成头同步；旧生成载荷不反盖共享源码。详情docs/screen-standalone-steam-global-keys-20261011.md，证据Testing/YMCC/Evidence/Touchpad-QAM-Live2077-20261110。
+
+
+## 自定义游戏库：有效账户贯穿计划与结果（2026-11-10）
+
+本次计划同时校验有效账户/安装和原摘要；缓存读取复用原mutex内与数据目录/选择范围绑定的读取目标，不能在刷新后复活其他账户的状态。批量完成从已验证accountResults取当前账户展示，保持完整结果和串行写入。原11输入修前7FAIL/4PASS、最终11PASS；另4边界确认本地状态零注册表/子进程且不改缓存，五原控制通过。全部原件/实际输入/工具/Job核收，两叶CAS入主线。无新后台任务/线程/timer、布局/手柄改动或部署；完整构建和Win5实机待验。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/effective-account-plan/SOURCE_READY.json；目标ACTIVE，交CPU1下一自然构建。
+
+
+## 自定义游戏库：账户及操作结果随普通日志导出（2026-11-10）
+
+原exportMetadata固定允许名单追加已观察dataRoot下账户发现、单/全账户加入及全账户刷新/删除五缓存；仅显式导出现有文件，沿原16MiB/错误/原始字节和暂存发布语义，无新后台采集、Steam/VDF/游戏路径读取或凭证导出。五文件原消费者及default/UI/Host/root控制通过，正式归档投影与原ZIP核收正文59检查通过；失败派生编译和换行核收纠正保留，未重跑通过的业务。三叶CAS已入主线，main入口既有文件遍历接线不改；实际安装导出和Win5实机效果待验，无完整构建或部署。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/steam-outcome-log-export/SOURCE_READY.json。目标ACTIVE，交CPU1下一自然构建。
+
+
+## 2026-11-10：Win5触控菜单选中主窗口与定点路由日志
+
+212927触控专用对焦不对ZIP：进程9248的34条完成行（33QAM+1Steam）均keyDelivered=true、isGameOverlay=false/windowType0，32条只是主窗口菜单确认。按键送达与游戏可见不同。本机手动成功选游戏窗口，不能将跨机器/不同入口对照写成触控夺焦点。导出磁盘EXE哈希bf3ff0f3d0f30dfedf27dc5de835f58634bb21fe3d2925a1e049622cf190d3df与对照包一致，但不是加载内存镜像证明。
+
+现只增加menuTarget.routing.version1的点击证据：缓存AppID/PID、active/selected数值身份、lookup原因、最多8个现有覆盖层。保留负值以诊断signed AppID线索，不改当前验证/选择/回退/按键/3秒补发行为。无新OS前台/原生覆盖层读、账号读取、线程/轮询/timer或MOVE工作；诊断读取失败不阻断按键。随原常开screen-standalone-special完成行导出。
+
+137项原消费者通过（保留132断言+5新边界）、3Raw Job自然结束active0，生成头检查通过；仅主线JS/生成头/原消费者与文档，未构建部署。Win5真实失败原因仍UNKNOWN，下一次普通导出后复现会有确定分支证据。来源Testing/YMCC/Evidence/Touchpad-Win5-Receiver-20261110-212927，详细说明docs/screen-standalone-steam-global-keys-20261011.md。
+
+
+## 自定义游戏库：刷新和删除完成回读（2026-11-10）
+
+刷新图片与删除快捷方式不再仅凭退出0读取旧请求结果。原Worker CLI补固定长度完成内容回执，Host从原请求/全局回执严格核唯一摘要、当前schema、完成模式、账户/安装，删除再核当前库；未知结果明确核对、不重放写入。Worker实际8发布变体和原拒绝/恢复/加入控制、Host32结果边界及原错误/加入控制通过；旧partial替身缺summary的FAIL保留，仅补真实字段后原15控制通过，未重跑已过场景。四叶CAS主线，Host/Worker须配套。21:29归档仍旧缓存，不能作新修复实跑；原数据和筛选纠正见log-intake-212927。无部署/Steam/游戏/设备/睡眠或完整联合实机验收；中途失败后的跨账户删除续作仍待独立核对。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/action-completion-readback/SOURCE_READY.json。目标ACTIVE，交CPU1下一自然构建。
+
+
+## 自定义游戏库：跨账户删除续作（2026-11-10）
+
+全账户删除显式允许已重新确认不存在的已知项目，解决部分账户成功后的重试阻塞；默认单账户拒绝保持。计划行和指纹绑定同次文件字节，Host保留串行及完成摘要校验，中途失败记录已验证结果，不自动重放。Worker实际9项与source-race正反控制、Host3恢复项及原错误/加入/partial15通过；原端口时机FAIL及七次编译真实费用保留，工具归还均0。四叶CAS写回，Host/Worker配套交CPU1下一自然构建；无部署或Win5/完整EXE联合实机验收。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/delete-batch-resume/SOURCE_READY.json。目标ACTIVE。
+
+
+## 2026-11-10：Win5覆盖层开关确认、开机启用选项及四模式触控菜单
+
+Win5 22:00:43导出记录的最新进程10次三个点均送达主窗口，但Steam UI现有覆盖层Map为0。用户随后实际观察到Steam界面开关关闭，手动重新开启后确认“可以了”。ROG 22:20:27成功包43条新诊断行均选择已存在的游戏覆盖层（最新PID18320为20条），不是改焦点或猜游戏。关闭状态是用户实机确认，与日志吻合；未假装前面的Shift+Tab回复是实体键盘验收，也不再把未知开关值当默认开启。
+
+开机模式通用启动中在风扇控制上方新增“游戏中启用 Steam 界面”。startupDesired.steamOverlayOnBoot在无配置/缺字段时默认true（用户随后明确要求）；明确保存false才停止自动设置，不反向关闭Steam。Windows boot identity在原SettingsFileGuard/文档写入器内先持久占用，再发本次设置；重开YMCC、renderer重建、睡眠唤醒和丢回执均不重复。YMCC授权logon启动器只在既有启动准入后调用一次可选准备，再重新核Steam存在性；准备失败不阻塞原授权Steam启动。普通主进程在UI启动前走同一启用器。Steam关闭时使用原scoped VDF解析、备份、原子写及回读；Steam运行只走既有settings.set(enable_overlay=true)，保留账户/会话/取消门且不运行时写配置。无新常驻线程、订阅、计时器或故障重试；结果随原启动偏好和生命周期日志导出。只管理总开关，不覆写每游戏AllowOverlay或重启Steam/游戏。
+
+触控专用键四个profile（disabled/steamdeck/dualsense-edge/elite）新默认均为开启Steam全部，即Steam+三点，控制中心默认对侧呼出。PS5/Xbox保留原有专用键选项与原报告路径；显式选择Steam对时走直接菜单键，与虚拟目标是否可用无关。仅1/2两个专用键改变图标/动作，背键保持真实profile名称和映射；按下/移动不发菜单或虚拟位、有效UP只派发一次，取消/退出沿原代次清理，残留菜单位在快照再次剔除。已有配置明确的原生选择和旧mask-only选择保留，不强制覆盖用户设置。UI名称改为“呼出YeManCC控制中心”，可及名称同步。
+
+已实跑：原生四profile消费者47项；原开机设置23项通过后，按用户新默认开启要求修正并实跑25项（含无配置、缺字段默认开启及明确关闭保留）；实际Vue与正式gamepad engine在1280×700/720/800的18项专用键检查，以及720/800开机控件检查通过。首批MSVC vctip工具残留被原Job强制清零，已保留失败；随后直接复用编译产物确认自然退出/Job0，没有重编已过的两个消费者。启动包装层临时提取器编译失败及其工具声明拒绝均保留；其六项新语义用例尚未完成实跑，不以源码审阅冒充通过。完整vue-tsc首次工具进程0xC0000005、关闭JIT后的续测在原360秒墙钟余量到限，保持未验收；普通包不自动增加完整夹具。当前未完整主程序link、打包、部署或真实开机验收。
+
+来源：Testing/YMCC/Evidence/Touchpad-Steam-Overlay-Startup-20261110/REPORT.md、SOURCE_READY.json；原FAIL/UNKNOWN与本轮限定通过分别保留。触控按键路由没有因为开关问题改成强制焦点/创建覆盖层。
+
+
+## 自定义游戏库：加入完成的严格读取和本次账户（2026-11-10）
+
+加入完成结果沿原请求/账户/全局路径使用既有严格有界读取，拒重复键/缺失或非当前schema，committed=false仅接受原nothing-ready-to-add；当前库与账户核本次不可变target，避免页面选择变化误拒已完成加入。原15项旧源5语义失败、新源15通过，原加入10/有效账户11/删除恢复3实跑通过，Worker未改或重编。两叶CAS写主线，保留同伴修改；独立600秒账、原删除预算及FAIL不重开。ROG22:20仅历史库证据，未部署或实机/完整EXE联合验收。入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/add-result-binding/SOURCE_READY.json。目标ACTIVE，交CPU1下一自然构建。
+
+
+2026-11-10 默认开启补充：用户明确“无配置默认开启”，当前DEFAULTS、PowerView缺省显示和原生开机准入已同步；只把缺省解释为开启，不把字符串/损坏分区当作缺省。25项原生及720/800实际Vue/gamepad检查通过；MSVC工具遥测按原已声明限定策略回收，自有Job均归零。前轮完整类型检查/启动包装层未验收继续保留，无新包或部署。最新来源：Testing/YMCC/Evidence/Touchpad-Steam-Overlay-Startup-20261110/SOURCE_READY-DEFAULT-ON.json。
+
+
+## 自定义游戏库：扫描失败与Steam状态独立（2026-11-10）
+
+打开库的原目录扫描非零不再阻断已有有效库存的Steam只读计划刷新；保留扫描/首次错误，未确认扫描不发成功事件或启自动刮削，取消仍停止后继。实际原Host pipeline5旧源3失败/新5通过，原有效账户11与严格加入15实跑通过，两叶CAS、2编译/6 RawJob active0，无Worker修改/新线程/轮询/写Steam。Win5同EXE和Steam短/长ID启动原件确认用户现象，但09:57旧计划早于10:25起启动记录，历史唯一原因和4285170来源未知，不冒充现场复验。入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/scan-membership-independence/SOURCE_READY.json。无部署，交CPU1下一自然构建；目标ACTIVE。
+
+
+## 2026-11-10：触控专用键正反检查的两项待修
+
+隔离生产头文件/Vue回放确认：丢UP后的期限回收仍限定SteamDeck，disabled/PS5/Xbox新点击可能被旧contact挡住，旧UP可迟触发；部分开机预设只有summon/autoHide时，子组件未补新默认，下拉显示关闭/“—”。四profile普通点击正常，回放虚拟报告位均0；capture loss/切换/退出清理仍保留。修复边界应只扩Steam直达回收并统一部分预设缺省，保留原PS/Xbox长按及旧明确选择。本轮仅检查复现，产品执行逻辑未改；前轮通过不包括新负例。证据Testing/YMCC/Evidence/Touchpad-Steam-Overlay-Startup-20261110/chain-audit/REPORT.md；两个自有Job已归零。完整类型检查/启动包装层未验收不变。
+
+## 2026-11-10：开机 Steam Overlay 启用的回读与关闭时序加固
+
+保持公用开机选项缺配置默认开启、明确关闭优先。Steam运行仍只走原settings.set，现再独立settings.get确认；liveConfirmed、persisted和游戏实际挂载分别记录，不能把客户端开关成功当作当前游戏覆盖层已验证。Steam关闭写入前复核账号/安装、配置原文与运行状态，提交后核完整字节且仍关闭；提交竞态明确失败、不对运行中Steam回滚。
+
+明确未修改且已知接口不可用时，仅保留同Windows boot下一次既有启动前入口的一次文件机会，绑定原账号/路径且先持久占用；未知/丢回执/已修改/身份失败不重放，失败不轮询。没有新常驻线程、退出监视器、计时器或自动启停Steam；旧睡眠Overlay-off路线仍退役。
+
+旧启动头配新场景在SET成功但独立读取OFF反例实际FAIL；候选原生startup-only 58项、同产物共用设置358项通过。首个共用消费者工具声明拒绝和编译vctip声明清理原件保留；未完整EXE链接、打包、部署或真实Steam/开机验收。证据：Testing/YMCC/Evidence/SteamOverlay-Startup-Hardening-20261110/REPORT.md。
+
+## 2026-11-11：触控专用键两项缺口已修及正反验收
+
+接续chain-audit的两个待修：四模式Steam直达键统一在新DOWN时回收原3秒期限已过的旧contact，先释放旧反馈/自动隐藏接触，迟到UP不得作用于新触点；部分开机预设编辑器按实际ProfileBank补缺省视图，保存仍只发原部分配置和显式改动，保留false/zero/off、旧mask-only及PS/Xbox原生长按。没有新增轮询、线程、timer或MOVE工作，开机Overlay同伴代码未改。
+
+旧原生22项反例与旧Vue缺省显示反例实际失败；候选原生118项、实际Vue/正式gamepad engine侧栏72项、原四模式界面18项及32组原生/TS逐字段对照通过。初次Vue因退场动画双listbox失败保留，只修等待后重跑受影响预设组，已通过消费者不重跑；同一原始开始/1800秒预算，自有Job均0，编译vctip按已声明限定策略收尾。前轮完整类型检查/启动包装层及完整EXE/打包/部署/实机未验收保持，不能以软件回放冒充Steam游戏画面验收。来源：Testing/YMCC/Evidence/Touchpad-Steam-Overlay-Startup-20261110/chain-fix/REPORT.md、SOURCE_READY.json；旧待修记录为历史，以上追加为修复现状。
+
+
+## 自定义游戏库：返回时刷新加入状态（2026-11-11）
+
+返回前台复用原静默队列进行一次只读Steam plan，修复旧卡片保留未加入状态。保留后台停止、合并、旧根目录隔离及20秒恢复，不新增轮询或写Steam。原代码浏览器明确失败；修后浏览器10项、原账户VM38项通过，3个已执行Job active0。保留原900秒和路径拒绝，原追加180秒完成VM后写回前到期，另经用户追加120秒仅核收写回。两叶CAS已写回；无部署，CPU1下一自然构建。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/membership-return-refresh/SOURCE_READY.json。持续目标ACTIVE。
+
+
+## 2026-11-11：触控Steam/三个点临时诊断精简
+
+用户要求只保留少量必要数据。routing.version2只记录lookup分支，删除active/selected/lookupWindow及AppID/PID/browserID明细、覆盖层清单与遍历；原完成行的接收源、窗口类型/是否游戏覆盖层、送达/响应和失败原因保留。原路由、按键及3秒补发未改，QAM区域与原件逐字一致，没有新轮询或线程。原消费者137项通过（132原功能+5调整后的诊断合同），确认额外清单/窗口metadata读取0；生成头同步检查通过，自有Job3个自然结束active0。未完整EXE编译、打包或部署，CPU百分比未测。证据Testing/YMCC/Evidence/Touchpad-Menu-Log-Trim-20261111/REPORT.md、SOURCE_READY.json；旧详细日志继续保留。
+
+
+## 自定义游戏库：Win5新日志核对（2026-11-11）
+
+23:49/00:22新归档：较新账户89250578计划已识别totk.exe加入Steam，原生9项、启动地址无空；60变59为DWORIGINS目录缺失并保留。下载70个历史任务排除数字228980前置组件后为69个终态、7不可用，与进度一致，未证实计数缺陷。Zelda4285170初始选择来源仍UNKNOWN，媒体deleted不自动恢复。只读源码/归档观察，无新夹具、构建或产品改动，不代表已部署/真实播放。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/log-intake-20261111-002235/REPORT.md。目标ACTIVE。
+
+
+## 自定义游戏库：普通日志保留手动选择（2026-11-11）
+
+现有被动导出精确列表加入config/manual-overrides.json，记录当前保存的ID/名称/素材选择，避免仅靠scan.manual误判ID来源。原16MiB/共享读/错误回执及不创建缺失根保持，无新增扫描、Worker、网络或常驻成本。旧源明确缺证失败；修后手动观察8、cached27/default34及实际ZIP64通过，3小型编译/7 RawJob自然末端0。三叶CAS完成，交CPU1下一自然构建，未部署；4285170历史首次来源仍UNKNOWN，不猜换ID。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/identity-selection-log-export/SOURCE_READY.json。总目标ACTIVE。
+
+
+## 自定义游戏库：手动IGDB选择缓存绑定（2026-11-11）
+
+IGDB-only选择现约束Worker/Host旧身份缓存；Host按全部选择过滤，并仅允许严格匹配、正数、已确认的显式IGDB请求替换旧官方缓存，不把IGDB当Steam验证。保留Steam选择/DLC、已有快捷方式归属、自动不降级、未来schema与未知注释。旧定向消费者各1项失败；修后Worker16/Host14观察、原Steam控制及2个Host控制通过。4编译/13 Jobs归零；477项误默认78FAIL、两次Host执行前拒绝与全部费用保留，同一900秒。四叶CAS，无部署，CPU1下一自然构建；历史4285170来源仍UNKNOWN。入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/igdb-selection-cache/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：再次识别恢复保存ID（2026-11-11）
+
+普通Worker现按原显式/忽略/清空门读取保存Steam或IGDB，支持配置允许的数字字符串及原int64范围，保留Steam优先并拒绝溢出。原CLI定向12观察旧5失败/新12通过，原Steam12、IGDB8+8、清空15控制保持；2编译/4 Jobs归零，无网络或真实应用操作。两叶CAS，交CPU1下一自然构建，未部署；原函数重入不冒充完整安装版重启。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/persisted-identity-choice/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：卡片名称回退（2026-11-11）
+
+只删除显示名正则的2个多余反斜杠，识别EXE/占位名称并回退可读目录名，保留手动和正常标题。真实正式UI的1080p DOM/aria旧10失败+3控制，新13通过；原720/800动作导航及2收尾通过，after精确5项。两Edge RawJob/根子孙均归零。两叶CAS，无身份/入库/后台逻辑改动，交CPU1下一自然构建，未部署或物理验收。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/card-name-fallback/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：动态壁纸候选过期反馈（2026-11-11）
+
+保留原精确版本/媒体/数据根写入校验，同一画廊版本推进后明确提示并提供重新搜索，用户操作时捕获新版本；不自动重搜或重放选择。匹配成功完整快照先于回执时正常关闭同一画廊，换根/新记录/删除保护保持。正式页旧6语义失败，修后6及原9控制通过，后台2响应顺序均零隐藏画廊DOM/焦点变更；两自然RawJob活动0。仅UI/原消费者两叶CAS，弱网与原生下载策略不变。准备失败、600秒启动拒绝和独立用户追加窗口均保留；原120秒核收写回未完成不倒填。本次未部署或安装/真实Steam/物理验收，CPU1下一自然构建。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/video-gallery-freshness/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：模组辅助工具PE分类（2026-11-11）
+
+Win5实际Explorer++/lootcli曾获main-game/0.98；现在只按三个确切PE文本分类tool，保留普通Explorer/Loot Hero/LOOT游戏标题。原主程序发布消费者旧2工具误判、修后6工具观察及3普通标题控制通过，原完整定向断言保持；2编译/5 RawJob归零，首次隔离参数遗漏的准入FAIL及字段收集拒绝保留，旧EXE仅补入此前未执行场景。仅分类器/原消费者两叶CAS，无扫描周期、后台、Steam权威或PID规则变动，交CPU1下一自然构建，未部署/安装或物理验收。不倒推Skyrim未确认身份或历史无头卡片唯一原因，原费用/失败保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/pe-mod-utilities/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：无PE的模组运行时分类（2026-11-11）
+
+Win5 MO目录实际存在Explorer++错误主程序/游戏映射；既有PE修正后，3个无PE代理/协议程序仍会被视作main-game。本次按usvfs_proxy_x64.exe、usvfs_proxy_x86.exe、nxmhandler.exe确切文件名走helper，保留普通相似名称和显式手动选择；不新增PID规则或手柄/后台操作。旧3错误角色已观察，旧控制目录构造FAIL保留、修后仅修新候选目录；新3角色/2普通游戏/手动及原6 PE工具/3标题/完整定向主程序发布通过。2编译/5 RawJob归零（after来源根准入拒绝保留，同EXE补入未执行case），准备Path错误和全部原费用保留。两叶CAS，交后继自然构建，不追33b包，未部署或Win5重扫。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/mod-runtime-executables/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：角色标记的路径边界（2026-11-11）
+
+对上轮控制FAIL前向补充：合法路径去掉分隔符后可跨组件拼成exeproxy/modmanager/trainer，正常游戏因此误判。角色分类局部键现为候选与规则统一保留正反斜杠边界；标题搜索/通用归一化/Steam权威不变，显式Tcl/Tk和真实工具标记保持。旧3路径误判，修后3项真实扫描/6工具及Unicode控制通过，原运行时/PE/手动与完整定向发布断言保持；2编译/4 RawJob归零。两叶CAS，无新后台工作，交下次自然构建、不追33b，未部署/现场重扫。旧FAIL/解释/费用不回填或退款。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/path-marker-boundaries/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：历史证据完整性纠正（2026-11-11）
+
+identity-query-summary私有编译误用旧绝对输出路径，覆盖plan-publication-receipt/build/worker-fixed的EXE、OBJ和依赖JSON。错误产物已逐文件核SHA隔离；可访问的Evidence/Workspace/Build Tasks中未找到原EXE完全相同备份，搜索有拒绝访问边界。该历史Worker产物链现为EVIDENCE_INCOMPLETE；原raw、失败、SOURCE_READY及费用保留，不重建历史原件，也不自动失效其他独立证据。当前查询摘要候选仍PRIVATE/未验证，未写产品源码或部署；原1800秒到期和准备超时记录保留。纠正入口：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/plan-publication-receipt/FORWARD-INTEGRITY-CORRECTION-20261111.json。目标ACTIVE。
+
+
+## 自定义游戏库：安装器的文件说明回退（2026-11-11）
+
+近期日志UEPrereqSetup_x64.exe先识别installer，随后被文件说明提升main-game/0.94。现在明确installer路径禁止经文件说明提升，沿原分类回退installer；原helper/main-game合法描述、launcher和手动选择保持。原唯一主程序发布case旧3提升失败、修后3安装器与2描述控制及原完整定向断言通过；首次after的证据父目录installer触发原路径控制FAIL保留，同字节中性来源重验通过。3编译/6 Job归零，三输出路径启动前新目录/不存在校验，实际源码/依赖均核。两叶CAS，交CPU1下一自然构建，未部署/Win5重扫。查询摘要待验及历史产物链EVIDENCE_INCOMPLETE不变，不重置原额度。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/installer-description-fallback/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：系统工具确切标记（2026-11-11）
+
+LeoMoon CPU-V确切产品/文件名、InSpectre作者产品或确切说明归tool，裸InSpectre/普通相似游戏及手动锁定保留。旧5 PE/无PE扫描错选，新5工具/无自动主程序白名单或PID资格、5普通控制和原完整定向发布及安装器/路径/运行时/PE控制通过。4编译/8 Job归零；首次测试状态误期望FAIL、准备拒绝、作者引号疑点被原字节否定及开始时间前向加计38411ms均保留，同900秒无退款。两叶CAS，交下次自然构建，未部署/Win5重扫；查询摘要待验、历史EVIDENCE_INCOMPLETE不变。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/pe-utility-labels/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：Steam试玩版壁纸（2026-11-11）
+
+Win5原生3551360试玩版被not-game门同时停封面/视频。当前官方只读元数据确认demo且有封面；Worker类型门现只接受game或demo，同AppID/素材源/父游戏隔离及原预算/弱网/所有权保持，音乐DLC仍拒绝。原消费者精确10场景通过，封面/视频真实loopback发布与旧停止项单独手动重试恢复、无关旧任务不变；2编译/13 Job归零。旧5断言失败为有限观察，旧子EXE/.pyd未预声明不冒充完整资格，后继每次已补齐且无补登记重跑。三叶CAS，交后继自然构建，未部署/现场重扫；旧停止项沿原手动重试，不新增自动退款。查询摘要待验/历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/demo-media-review/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：试玩版候选搜索接续（2026-11-11）
+
+原候选解析器仍只接受game，现与上一下载修复一致接受game/demo，保留AppID/源/版本/token/清晰度门。旧3demo拒绝，新3（含3551360实际空目录）和6负例/原候选耐久选择/默认480与显式高清通过，最终13原生断言。原消费者同段抽为函数，显式catalog-only不跑默认Controller循环；首编译重名FAIL、旧默认max质量断言FAIL及费用保留。4编译含失败/3调用/7 Job归零，同原试玩版1800秒不重置。两叶CAS，交CPU1自然构建并配套demo-media-review，未部署/完整默认回归/实机播放。查询摘要待验及旧EVIDENCE_INCOMPLETE不变。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/demo-catalog-completion/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：静态壁纸备用字段（2026-11-11）
+
+background_raw为空时漏用有效background，raw有效时又因备用对象被提前求值而整项失败。现按需读备用字段，沿原screenshots/URL/身份/发布/预算门，不增请求或来源。旧2实际Worker失败4/6断言保留，修后9场景及原单槽/404缓存恢复/所有权通过，2编译/13 Job归零。两叶CAS，交自然构建，未部署/现场播放；3项当前官方元数据仅2215200成功、另2项两地区超时，旧网络根因不据此确定。独立900秒不重置旧额度，查询摘要待验和历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/poster-field-fallback/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：现有媒体加速路由核对（2026-11-11）
+
+此前直连超时未经过程序现有hosts加速路由。本次按现有视频/商店别名用Windows curl默认TLS串行读文本：2215200主/720p子列表均200，1568590/4115450元数据200且7/4个HLS条目。共6请求、0媒体字节；采样CRLF摘要错误造成两次多余请求，原件/费用保留，仅离线核收纠正。源码审阅未见该列表格式缺口，无产品修改或夹具/编译/部署；不能替代WinHTTP、完整下载/播放或Win5现场验收，不据此确定历史原因。原查询摘要追加待答和历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/live-media-metadata-sample/ROUTE-READBACK.json。目标ACTIVE。
+
+
+## 自定义游戏库：不完整扫描的PID字段（2026-11-11）
+
+既有不完整状态判断前移到PID字段生成之前，避免条目要求复核而候选/条目仍带游戏目标与白名单建议。仅顺序调整，无新扫描/后台任务；候选留存、显式手动选择和完整扫描保持。原主程序发布case用自有目录真实ACL拒绝复现旧失败，新case及原全部断言通过，完整前后/手动/恢复对照保持；2编译/4自然Job归零。首准备锚点拒绝保留，同900秒无退款；两叶CAS交下一自然构建，未部署或实机验收。近期7扫描无不完整条目，不归因历史现场。查询摘要待答/历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/incomplete-scan-eligibility/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：不完整扫描旧缓存接续（2026-11-11）
+
+缓存校验将条目标为需复核/数据异常时，同步清理候选及条目遗留的游戏目标/白名单建议与game标签；未知键/自定义标签、原文件及显式manual/完整记录保持。原消费者旧3缓存字段失败，新5缓存观察、原新增Steam计划拒绝/磁盘不变及上一新扫描/完整/手动/ACL恢复和全部定向发布断言通过。缓存阶段2编译/4自然Job归零，连上一阶段累计4编译/8Job，同原900秒不重置。两叶CAS交下一自然构建，未部署/实际设备或Win5验收；不把字段残留写成真实Steam/PID误操作。旧FAIL/准备拒绝/查询摘要待答与历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/incomplete-scan-eligibility/cache/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：迟到导航与动画不抢后台焦点（2026-11-11）
+
+导航完成仅恢复仍在前台可见非最小化且未关闭的本窗口网页焦点；动画fallback只更新已可见窗口并销毁自身，不重新显示用户隐藏/最小化的库。原立即全屏打开/首次聚焦保持，无新后台任务或设备屏蔽操作。原activity组追加两路径16状态，旧15错误/修后16正常，原13case保持，2编译/4自然Job0。before导航末段提取逐字可逆，实际自有HWND/splash与受控焦点端口，非实际COM/用户应用/Win5验收。最新日志2次前台记录无法确定回调原因，不归因手柄故障。两叶CAS交自然构建，未部署；独立900秒，cap/查询摘要待答与历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/background-navigation-focus/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：后台保存中重新打开（2026-11-11）
+
+显式重新显示撤销旧closeAfterWrites，父状态通知不撤销；FIFO结束派发私有收尾，在UI再次核对仍关闭且无accepted写入才走原关闭。避免重开后新编辑被拒绝和迟到WM_CLOSE关掉新会话。原关闭排空case真实FIFO/磁盘/owned窗口复现旧失败，新重开/后继保存/重复迟到/再次关闭后真实销毁通过，原activity13和导航16控制保持。首SB/SW测试宏编译FAIL保留；接续3编译含失败/6自然Job0，累计5编译/10Job0，同原900秒。两叶CAS交自然构建，无部署/Win5实机；cap/查询摘要待答与历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/background-navigation-focus/reopen/SOURCE_READY.json。目标ACTIVE。
+
+
+## 自定义游戏库：扫描候选上限（2026-11-11）
+
+超过250候选与旧缓存上限标记均明确为不完整扫描，沿原需复核/PID建议处理，显式manual保持。原case真实251惰性EXE复现旧扫描/缓存误完整，新二者及manual、原5缓存/ACL/完整/恢复与全部定向发布断言通过。本段2编译/4自然Job0，累计6编译/12Job0，同原900秒不退款。原900秒收尾拒绝保持；用户追加120秒仅核收已有证据、合入和记录，零生产器重跑。两叶CAS交下一自然构建，无部署/实机；近期7扫描无上限记录，不归因历史。原失败/查询摘要待答/历史EVIDENCE_INCOMPLETE保持。证据：Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/incomplete-scan-eligibility/cap/SOURCE_READY.json。目标ACTIVE。
+
+<!-- WIN5-COMPLETED-RESUME-REPAIR-20261111 -->
+## Steam 睡眠回补的完成唤醒接续（2026-11-11）
+
+native/sleep_recovery_auto.h：动态不按507原因枚举或半静态版本hash挡住完成唤醒；原始PBT6/7收件、完成退出与本代真实Ready绑定，乱序与捕获完成均可接续一次Running引擎Wake。S4迟到107保留原时间，由新鲜交互恢复独立支撑动态证据；严格内核路径不刷新旧证据。native/steam_original_recovery_runtime.h保留两路线各自待接续，原PID规则更新可重接，已消耗结果不退款。native/sleep_steam_recovery.h以QueryUnbiasedInterruptTime计活动预算，代次/原实例失配继续拒绝。
+
+无新常驻轮询/线程/服务/恢复EXE，无公开API或用户设置变化。184项定向实际消费者通过、83项源码接线通过、666项原生固定快照语法编译通过；不是成品链接/部署/物理睡眠验收。旧全量输入诊断R39失败另留原件。唯一项目继续维护原STEAM-SLEEP-EXECUTION-BASELINE.md/.json，详见[本次证据](G:/YeManCC-Work/Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/WakeRepair-20261111-01/Seal-final-02/REPORT.md)。
+<!-- /WIN5-COMPLETED-RESUME-REPAIR-20261111 -->
+
+## 2026-11-11：通用开机 Game Bar 手柄入口与副标题
+
+PowerView在Steam界面选项下增加“允许手柄打开 Game Bar”，startupDesired.gameBarControllerOnBoot缺配置默认false。复用现有HKCU registry IPC，只操作Software\Microsoft\GameBar的UseNexusForGameBarEnabled DWORD，0关闭/1开启；不关Game Bar本身，不改录屏、Win+G、其他Nexus快捷键或Steam设置。App原启动入口每设置代次一次按记忆核对，值一致零写入；用户点击先保存意图再写Windows并回读，失败显示实际状态、不轮询。成功事件解决启动写入晚于页面首读的显示竞态，用户操作可取消旧默认读；测试/隔离启动不执行。九项副标题统一显示和配色，其他推荐文字不改变现有偏好。
+
+原boot模式运行器精确过滤19项、原overlay-startup浏览器选择720/800共5项通过；旧私有来源漏文件失败保留，同一180秒账内最终155.9秒，无新ID/minimum或自动发布门。主线导入已核原字节，未部署、完整构建或Windows/Steam实机验收。证据Testing/YMCC/Evidence/GameBar-Controller-Startup-20261111/REPORT.md。
+
+## 2026-11-11：Win5唤醒后触摸板/专用键消失的有界恢复
+
+12:55:11日志配置dual且非自动隐藏，但HWND/原生输入层不可见并报0x8000FFFF；12:55:19–20手动关开布局恢复。主线在现有Ready后输入恢复入口增加本功能核验：5秒内最多3次重建，两次连续健康即停止；共享电源代次/Ready、OFF/换模式/再睡眠/退出撤销，重复和迟到唤醒不重建已恢复源。保持设置、自动隐藏、鼠标穿透及共享合成器/设备所有权，无常驻扫描/MOVE工作；仅一条小终态日志及导出摘要。最终隐藏桌面真实WinRT28项及删除重建反例完成；初版38与中间内存32分开保留，不合成整父PASS。源码接线已核，完整EXE/包/部署/真实掌机睡眠未验收，原始COM内部原因仍UNKNOWN。入口Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/REPORT.md、SOURCE_READY.json。
+
+## 2026-11-11：自定义游戏库草稿 Steam AppID 与壁纸手柄导航
+
+单卡编辑页动态壁纸搜索改读当前未保存的 Steam AppID，空值/非法值不借用旧 ID；原生 Steam 仍锁定 manifest。不同草稿 ID 复用 AppID-only 共享媒体查询和原下载队列，不传本地 EXE、不提前保存游戏身份。改 ID 后旧结果与候选拒绝提交。壁纸预览向上连接类型/播放控件、左右按视觉位置、向下返回预览。原 editor-race 旧源2项预期失败、修后20项浏览器检查通过，含720/800、A/B/下拉及原15项新鲜度/所有权控制；两个自然Job末端0。无原生接口修改/新线程，无安装版、实体手柄或真实网络验收，未部署。两叶CAS保留并行修改；证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/draft-wallpaper-controller-20261111/SOURCE_READY-r2.json。
+
+## 2026-11-11：Win5原生Steam条目阻断游戏白名单同步
+
+18:22新日志与11月10日17:33、11月11日00:22均保留 Whitelist row does not match actual account membership，Steam提交成功不等于YMCC规则发布成功。publishYmccGameWhitelist改用原实际manifest/精确主程序证据核验原生条目，按事件缓存，跨账户peer支持嵌套EXE；普通快捷方式仍按真实账户/VDF及hash准入，已排除的228980不发布或阻塞。原消费者旧源复现相同拒绝，最终7项既有用例与其原生负例/手工及peer保留断言通过。补测目录复用拒绝和费用保留，复用已编EXE在新owned根补完，所有Job末端0；不新增ID/minimum或常驻轮询。最新启动意图disabled另列，不能把规则错误当本次实体手柄故障的完整因果；未改启动设置、设备或部署。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/native-whitelist-20261111/SOURCE_READY.json。
+
+
+## 2026-11-11：崩溃辅助程序不作为自动游戏目标
+
+Win5记录中的CrashLogsGenerator.exe和codCrashHandler.exe曾被识别为高置信度游戏；现按精确文件名归为crash-handler，并阻止游戏描述将已有崩溃角色升级为主程序。显式手选和普通Crash游戏标题保持。旧源实际消费者复现；追加180秒修后原单个发布case及日志PE、文件名扫描、手选和普通标题对照通过，Job末端0，但写回超时拒绝。用户再追加60秒仅核收既有证据及两个文件CAS写回，无重跑测试。原900秒、编译失败、路径干扰失败和超时记录全保留；无部署或实机原因验收。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/crash-helper-classification-20261111/SOURCE_READY.json。
+
+
+## 2026-11-11：手柄 Steam／三点快捷动作复用触摸菜单通道
+
+手柄规则中的 Steam 键和三点键由旧虚拟脉冲／Ctrl+1 分支统一为触摸既有 `menu.button` 通道，两入口共同调用 `nativeSteamMenuButton`。虚拟模式独立，来源、规则、OEM/WMI、录制、退出、电源和不确定结果边界保留；新菜单仅终止接纳时已有触摸补发，不误取消后来触摸。普通快捷动作保持单发，触摸原 3 秒补发不改。PS/Xbox/Gamebar 原路径保留，动作说明和失败提示同步。
+
+原生定向235、原Steam接收端137、现有映射Vue18项及私有完整来源类型检查通过，旧源通道差异反例复现。环境及闭包初次失败保持原件；完整EXE、打包、部署与实物手柄/游戏画面未验收。见 `docs/screen-standalone-steam-global-keys-20261011.md` 与 `Testing/YMCC/Evidence/ControllerSteamMenuChannel-20261111`。
+
+
+<!-- TOUCHPAD-OWNED-SELFHEAL-QAM-KINDS-20261111 -->
+## 2026-11-11：触摸板自有资源自愈与三个点小诊断
+
+触摸板自愈已写主线：原三次只换输入源且保留根HWND/合成器的缺口，改为第二次修复重建本功能独立合成器及根窗口；最多3次/5秒，保留线程DispatcherQueue及监控/轮盘所有权，无新空闲扫描或MOVE工作。原最终WinRT44项及前一来源反例保持，原600秒父FAIL不改。本次三个点只加现有失败焦点值的一项分类，不输出原ID/增加查询/改变路由；原screen.standalone-actions消费者137项实跑通过，首次NOT_RUN和同90秒内剩余29秒续作均保留。main.cpp同伴后继保留，受测菜单精确片段相同，不能当整main联合编译。
+
+用户不能回忆操作顺序、仍怀疑睡眠。日志UTC+08时序19:19已失败、19:20:22才见本段睡眠；Windows内部0x8000FFFF步骤、Win5睡眠实机及三个点游戏内可见性仍OPEN。Valve交付代码及WSGM/toolkit参考均需可靠游戏接收端，不强制焦点/清合成缓存/猜运行游戏。未部署、启停YMCC/Steam/游戏、改设置设备或执行睡眠。唯一原项目继续ACTIVE；详见 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/ROUTING-FOLLOWUP.zh-CN.md、ROUTING-FOLLOWUP.json。
+<!-- /TOUCHPAD-OWNED-SELFHEAL-QAM-KINDS-20261111 -->
+
+<!-- deckyQamConnectionCheck20261111 -->
+2026-11-11 Decky 三个点每次实际打开复核：既有 qamDefaultTab 在验证过的 MenuStore.OpenSideMenu 的真实关闭到打开转换后只发无数据事件，Toggle/Navigation/直接路径共用；原客户端 testConnection 借一次读需求并要求原 probeId/原生 provenance 回包，重叠合并且归还原deadline。原 health observer/CDP watch 转给当前 run 的 YMCC，先失效共享Mode缓存，再请求既有 Runtime 检查。官方 WS/原生 peer/hook 存在不能代替 browser client connectionReady；hook.hasUnpatched 和 qamReady 同时纳入。保留原唯一共享Ready、原分级额度及不自动重启整个Steam；无新增常驻轮询/业务重放。原QAM32收据满时只淘汰最旧自有页签而不dispose整个console。24叶含真实minimal插件载荷已写，原有定向消费者及builder通过；未部署/完整主程序link或实机验收。证据 Testing/YMCC/Evidence/DeckyQamConnectionCheck-20261111/SOURCE_READY.json，联合交接 BUILD-HANDOFF.json（40叶，含历史已验证改动）。
+<!-- /deckyQamConnectionCheck20261111 -->
+
+<!-- deckyQamOpeningState20261111 -->
+2026-11-11每次QAM打开检查的续作：原probeId+native provenance当前回包即证明链路，ready:false只保持业务灰控；frontend.connectionChecking/deckyClientChecking在原probe期限内暂停现有恢复episode的成功/升阶裁决，不能掩盖独立官方backend故障。connectionReady保留已建立transport事实供旧native短暂交替读取，当前native先处理checking，失败仍由failedOpeningRun反映。无新增常驻轮询/超时/整个Steam重启。新旧源反例、原client/mode/typed消费者及真实minimal builder有原件；累计190081/原240000ms，完整main/link/部署/实机仍NOT_RUN。最新累计40叶交接：Testing/YMCC/Evidence/DeckyQamConnectionCheck-20261111/opening-state/compatibility/BUILD-HANDOFF.json。Win5 213833新增断链位于退出清理，重启后只确认desktop，不放开退出或桌面启动边界。
+<!-- /deckyQamOpeningState20261111 -->
+
+
+<!-- TOUCHPAD-REENTRY-OWNERSHIP-20261111 -->
+## 2026-11-11：触摸板旧刷新不清理新源
+
+触摸板真实WinRT输入派发探针复现：回调内新源已健康，旧nativeInputSync返回后无条件close清掉它，实际为E_ABORT而非现场E_UNEXPECTED。主线仅screen_touchpads.h增加UI刷新代次和派发返回后的归属核对，旧refresh不再清理或隐藏新窗口，无MOVE/空闲工作或共享Surface修改。产品候选12项真实WinRT正例通过，原完整两观察探针10项控制的错误效果保留；新增第三独立观察的旧源负例因夹具未退掉故意缺失源而崩溃，不能算语义成功，补夹具退场后续跑被原120秒剩余准入拒绝。主线原消费者新增显式--reentrant-only，默认组/ID/minimum保持；最后夹具退场分支未重新编译/运行，原44仅保留旧来源证明，未宣称新头整组复验。三个自有Job实际归零，旧FAIL原件不改。
+
+后续21:38普通Win5包仍是此前程序，同码专用键输入失败，不能当新补丁反例。独立Steam电源日志与19:20睡眠时序相符；原现场0x8000FFFF内部步骤仍UNKNOWN。本机真实2077旧快照证明overlay宿主PID与游戏PID不同，不能用前台PID直接查Steam实例；三个点路由/焦点本轮未改。未部署、完整构建、应用启停或物理睡眠。唯一总项目继续ACTIVE；证据 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/REPORT.zh-CN.md、REENTRY-UPDATE.json。
+<!-- /TOUCHPAD-REENTRY-OWNERSHIP-20261111 -->
+
+
+<!-- TOUCHPAD-RECOVERY-TEST-ZIP-20261111 -->
+## 2026-11-11：触摸板恢复调查主线测试包
+
+本功能已有完整主线测试ZIP，来源2026-11-11T14:52:21.022Z，main/059240f8及实际工作区修改，11185文件稳定捕获。原publish.ps1 -FastRelease完成网页/完整Native编译链接/配套及归档；1735编译来源中本功能8文件逐项核收，EXE与ZIP/export identity相符，HC34逐项保持，622项且无PDB。BuildId 9e27d49f924216287963fcfe812033322e52eafce130448cdfe17c77c07e9fc1；ZIP SHA256 6cd4d5c62fc258158cc0ffdfbea529c57f131e70842952551d2f0de841247a08，111257949字节。产物 Deliverables/YMCC-触摸板恢复调查测试-20261111T145155Z/YeManCC.zip。
+
+普通夹具NOT_RUN、formalReleaseAccepted=false；不倒填旧44/137/12专项或失败反例为本包整轮验收。含当前自愈、旧刷新退让、失败阶段及小路由分类；旧20:18包及21:38前日志早于这些修补。未部署、启停应用/Steam/游戏或睡眠；后继不追齐重编。Windows0x8000FFFF内部步骤与Win5三个点游戏内对焦仍OPEN，唯一总项目ACTIVE；待本包的普通现场日志。Valve新Ctrl+Shift+Tab的设置在Gamescope分支，尚不是Windows通用修复。证据 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/test-export-20261111T145155Z/REPORT.zh-CN.md、TOUCHPAD-PACKAGE-INTAKE.json。
+<!-- /TOUCHPAD-RECOVERY-TEST-ZIP-20261111 -->
+
+
+## 2026-11-12：白名单历史归属不阻断已核实规则
+
+Win5 00:24导出中22:55计划出现Peer membership cannot be confirmed；旧加入回执与18:22逐字相同。原消费者复现历史peer缺失阻断独立新游戏规则。现只发布当前实际VDF/原生manifest核实的规则；有未确认项时仅向原已发布托管块追加已核实项，保留原字节、手工规则和未知归属警告，不从未知元数据生成规则，不据此删旧规则。完整显式刷新后恢复正常收敛。原账户/hash/schema/unbound/不可读/标记/CAS保护保留，无轮询/新后台。修后原两账户case及6既有控制通过，2次编译/各Job末端0。旧误选87场景及独立pause FAIL、启动时限拒绝全保留，不冒充整父通过；本次自定执行计划调整单列，旧任务额度不重开。两产品文件和1原夹具CAS写回，无部署/实机。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/log-20261112-002427/partial-rules/SOURCE_READY.json。
+
+
+## 2026-11-12：本地模拟器及管理器不反复猜游戏身份
+
+Win5对比PPSSPP尝试61→65、Snes9x/NsEmuTools14→15；后者还被错配IGDB的Switch!，中间相同快照不重复计。自定义库复用现有模拟器EXE目录并精确补snes9x/mesen-s/nsemutools；扫描评分与非游戏终态同步保护，旧ready缓存的Host自动队列也拒绝这些应用。显式手选/手动刷新仍沿原路径，不按文件夹或游戏标题关键词排除，不删除旧配置、不放松Steam验证，无新线程/轮询。旧Worker和实际Host队列复现，修后4既有ID及原主程序发布/冷却补图/手动/删除归属对照通过；首候选只降role未落非游戏状态的FAIL保留，原断言不改；Host新增嵌套证据路径触发Windows目录长度失败，缩短owned运行根后复用同一已编产物补验，不重编/改断言。3产品与2原夹具精确CAS交下一自然构建；无安装、实机或CPU百分比验收。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/local-program-identity-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：单卡加入仅由本次选择的冲突阻止
+
+Win5保留计划存在使命召唤主程序与旧sp26快捷方式ID冲突，原生产者另复现未选冲突阻塞独立单卡加入。两处计划冲突计数改为仅计explicitlySelected，条目仍显示冲突与旧EXE；普通全库计划所有条目仍被选中，原总数和拒绝不变。提交器/账户/写入/hash/别名/匹配与Steam关闭围栏逐字保持。原add CLI用例增加实际计划+提交，独立游戏成功且原VDF节点全部字段保持，选中/别名/全库/无身份冲突均拒绝；原6准备拒绝/发布警告及2audit控制通过，共3既有ID。旧源FAIL和全部费用保留，两叶CAS交自然构建，无部署或现场完整归因。新01:49/01:52两包游戏库原件仍同00:24，不当修后反例。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/selected-add-20261112/SOURCE_READY.json。
+
+<!-- DECKY-RUNNING-BUILD-RECOVERY-20261112 -->
+## Decky 新构建恢复接续（2026-11-12）
+
+源入口是 `native/decky_running_build_store.h` / `decky_running_build_recovery.h`。原 `native/build_native.bat` 在main编译前生成唯一标识并仅对main强制包含，link与mt之后封存 `native-build-identity.json`；Build、Package与开发部署携带匹配收据。运行时只认自身编译literal及匹配最终PE，旧升级器无需新握手字段。原startup在mock隔离返回之后、Steam准入之前记录一次；失败不拦普通Decky启动，无新增常驻轮询/服务/EXE。
+
+只有原恢复额度耗尽、原两份已知记录一致且实际构建可验证时，才预留用户已允许的一次额外页面重建和一次大屏开关。永久seen/used/retired记录在既有ProgramData保护目录，独立于设置与安装回滚；每安装专用mutex避免旧升级器仍持维护锁时挡住新进程。保留ON、Ready、当前上下文、双份原额度及未知派发不重放。未观察的中间版本无法追溯；已观察回滚/A-B交替、同构建重开/睡眠/重装不退款。
+
+已核：原策略23项、原settings真实文件单case69项、实际Win32专用mutex5项；完整原native配方5PE与最终标识收据匹配。管理员ACL正例、实际运行literal记录、整包/部署和真实S3/S0仍未验收。原FAIL/超时/费用保留，不把软件检查或编译当实机恢复。原件见 `Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/upgrade-identity/integration/running-route/native-product-build/completed/BUILD-HANDOFF.json`；源码内注释即维护入口，无需凭本文补握手或新更新服务。
+<!-- /DECKY-RUNNING-BUILD-RECOVERY-20261112 -->
+
+
+## 2026-11-12：缓存计划遵守IGDB选择并修正素材数量
+
+实际workspaceSnapshot(false)缓存快速路径漏IGDB手选准入；改选IGDB时旧Steam身份仍返回。仅原applyManualIdentitySelectionToPlan包含IGDB约束并传原igdbId给既有兼容函数，name-only/Steam优先/匹配IGDB/native/IDless及已加入归属保持；只改返回快照，不写用户配置或磁盘计划。相同原函数扣素材计数改needsMinimumArtwork，消除旧needsArtwork残留。原owned-plan用例中13缓存矩阵旧7失败/新13通过，含真实快照来源/磁盘零改；原全部Steam/IGDB边界和2原缓存控制通过，共3既有ID、2编译6Job关前0，无新增ID/minimum。01:54/01:55新包7项核心库字节同00:24；塞尔达保存名/ID是稳定candidate-selection，未自动改数据，不据此编造现场IGDB操作或缓存覆盖。两叶CAS交自然构建，无部署或实机。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/cached-choice-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：后台补图任务长路径入口
+
+原Host用例复现252字符输出目录创建失败；队列批次/单项创建沿既有ioPath，实际结果与旧身份迁移遍历同样适配，条目先还原普通路径再走原identity ancestry及保存/UI，保护不放宽。原补图/卡片/移除归属、冷却、手动及缓存身份控制4既有ID通过；4编译12Job关前0。首创建候选后续遍历FAIL、次候选ancestry拒绝、额外不可选ID入口FAIL和核收准备拒绝/费用保留，不拼整父PASS。Win5使用短根，不把隔离失败当现场根因；2叶CAS交自然构建，无新线程/ID/minimum或部署。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/job-path-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：新视频选择不借用旧下载进度
+
+原sharedWallpaperDownloadFeedback仅筛终态manualItems而未筛active/current，旧50%/重试/正在应用会出现在新排队选择。仅复用minimumRevision筛明确旧请求，缺字段旧版兼容；原下载、弱网、身份和后台策略不改，无新常驻任务。原用例保留断言追加8行DOM边界，旧raw5项错误展示、修后8行及9既有浏览器场景通过；2Job关前0。名称预检拒绝/断言补强及旧FAIL费用保留，无新ID/minimum。2叶CAS交自然构建，未部署，现场因果未证。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/video-progress-revision-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：Steam删除沿用确认时的选择
+
+旧删除确认只记数量、提交重读当前选择，改选/后台新增或移除卡可导致A确认变B或A+B。现在原弹窗捕获目录列表/全部账户参数及dataRoot，确认消费一次，取消/关闭/Back清除，换根拒绝，同根别名保留；沿原焦点工具进入/退出弹窗。Native最终匹配/事务不变，无新界面/常驻任务。原归属场景保留全部断言追加10行DOM边界，旧6项请求范围不符、修后10行与5原场景通过；2Job关前0，原准备插值FAIL/费用保留。2叶CAS交自然Web/包，未部署或真正删除快捷方式，现场数据丢失因果未证。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/delete-confirmation-selection-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：Steam批量预检/同意的当前页面归属
+
+批量加入两次预检与关闭Steam同意、图标预检/同意均捕获原dataRoot/page epoch，等待返回核对再显示或派发，确认连原target绑定上下文；不改Native参数。in-flight由context自己释放，退役读不阻塞/解锁新根，同根重复合并；空加入不查询Steam。原16行缺口及首候选2接续失败保留，最终18边界/5原浏览器场景及10原删除行通过，4Job关前0，无新ID/minimum或native编译。准备标签核对/费用保留。2叶CAS交自然Web/包，未控制实际Steam或部署；已派发后的批量快照/忙碌归属及实机仍OPEN。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/steam-preflight-context-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：批量操作回执及busy清理归属
+
+原runBusy只让当前dataRoot/page/busy owner消费晚快照、运行状态和失败补读；已提交业务结果保持，绘制异常仅诊断。取消/旧finally与scrape终态不清除新command busy，prepare finally只清自己，旧close无外根补读。id0仅快照形状更新数据，纯确认忽略、合法旧完整推送保留；当前Native普通uiError无回包，兼容回放不作现场ACK证据。最终33操作+5回执控制、5原浏览器场景及3账户/16+2+10旧边界通过，5Job关前0，TIMEOUT/端口挂起/首候选别名及ACK失败/费用全保留，无新ID/minimum/native编译。2叶CAS交自然Web/包，未实际操作Steam或部署；独立扫描/openLibrary/picker回执和实机仍OPEN。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/busy-write-context-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：刷新/打开/扫描与选择路径的上下文
+
+原prepare/open/scan回执与错误核当前root/page/owner；旧phase和禁用按钮不挡新根重入，旧finally不释放新owner。同根合并，首次未知根可绑定/跟随匹配startup，矛盾已知根拒绝。原picker与两类移除确认在等待返回后核原context才写，原Native协议/规则不变，无新常驻任务。旧47行缺口复现，修后47/47及5原浏览器场景、33+5+16+2+10旧边界保留通过；2Job关前0，无新增ID/minimum/native编译，旧FAIL/费用保留。2叶CAS交自然Web/包，未运行真实picker/写盘或部署，同根独立读写全序及实机仍OPEN。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/library-action-context-20261112/SOURCE_READY.json。
+
+
+<!-- STEAM-MENU-NATIVE-ALIAS-20261112 -->
+## 2026-11-12 三点菜单的原生覆盖层身份同步
+
+逻辑快捷方式的完整GameID与游戏原生覆盖层登记可能不同；不改游戏文件、窗口params、合成队列或焦点缓存。nativeSteamMenuGameRequest只在原菜单请求中读取既有游戏阀、实际前台PID和tracker，并用游戏/Steam/overlay宿主HANDLE、出生/路径/会话、宿主-pid/-steampid/-gameid及唯一native浏览器登记闭合归属。原JS接收器不重放；只给已证明的同一宿主登记ID同步Valve原SetOverlayState状态。原B关闭、菜单关闭、Destroy、OFF及正常YMCC退出释放本功能hook；保留原API返回与其他任务替换的hook。无空闲线程、定时巡检、MOVE工作或游戏名称猜测。Steam页隐藏鼠标行下新增自动补全游戏ID；默认ON，已保存OFF优先。副标题按用户要求为“自动隐藏Steam游戏多余鼠标”。
+
+新实例龙之信条2已实际显示右侧菜单且原返回逻辑关闭后画面继续渲染，旧实例证明在新宿主前明确拒绝；同一源码147项原接收器测试、19项真实Valve方法回放及21项实际原生消费者边界已通过。原生全main编译、双比例UI、安装版自动路径及稳定性继续待核，不能以局部PASS宣称完整交付。前期截图缩放裁剪的负向推断已纠正；03:36起不再渲染的旧游戏实例及随后崩溃弹窗保留，不判成03:48候选导致。统一证据Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112。
+<!-- /STEAM-MENU-NATIVE-ALIAS-20261112 -->
+
+
+## 2026-11-12：底部工具栏仅操作当前可见游戏
+
+原底部工具栏会借上一页 lastCard，三尺寸实际打开隐藏旧游戏9次。原 resolver 现将焦点/记忆/hover与回退限制到当前分类及搜索结果；空列表沿原按钮投影禁用，路径别名与当前手柄焦点保留。原生产UI最终24边界/3既有场景通过，含原壁纸/双游戏参数/47库动作及保存归属；4Job自然退出且末端0。初轮override守卫、首候选测试分类错误及旧双游戏幽灵夹具FAIL/费用保留；权威安装记录补齐后原断言不改，无新ID/minimum。1产品/1原夹具CAS交自然Web/包，未部署/实际写Steam，现场归因未证；目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/dock-visible-card-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：封面失败保留卡片手柄操作提示
+
+原createCard图片error清空cover容器，连选中勾/X编辑一起移除；三尺寸12行及真实本地404复现。唯一产品改为仅替换失败img，保留卡片/控件节点和焦点；下载/弱网/素材优先级及原一次回调不变，无新增网络/轮询/native/CSS。最终21边界/3既有场景及上一轮24底部归属断言通过，3Job自然退出末端0；首前置复用失败卡的FAIL/费用保留，后继独立URL与原复用断言保持。1产品/1原夹具CAS交下一自然Web/包，未部署/实体手柄/现场归因，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/cover-failure-controls-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：搜索取消勾选不再误转全选
+
+原storePageSelection仅比数量，隐藏/已移除选择等量时会把刚取消的当前卡重选并扩大加入/删除名单。唯一函数加实际成员全等核对，普通null全选/反选及分类与Native语义不变。原4错误操作分支已复现；修后12行计数/卡片状态/实际IPC目标和3既有场景通过，原删除10/预检16+2边界保留，2Job自然退出末端0。旧FAIL与费用保留、无新增ID/minimum/常驻任务，1产品/1原夹具CAS交下一自然Web/包；未部署/操作真实Steam或现场归因，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/filtered-selection-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：搜索输入首次返回不关闭游戏库
+
+动态搜索框晚于静态输入配置，原A能叫键盘却缺editing状态，三尺寸9行提前关闭请求已复现。原动态绑定接已有输入helpers：A/指针进入、首B/Esc结束并清返回计时、blur/方向重锁，输入后Enter仍到结果，根双B/Native协议保持。修后18边界/3原场景，21封面/24底部/12选择及删除10/预检16+2/保存归属保留通过，3Job自然退出末端0；首整候选受旧演示state串行模型干扰的FAIL/费用保留，只修内存读取前置，产品候选不变。1产品/1原夹具CAS交下一自然Web/包，无新ID/minimum/常驻任务，未部署/真实键盘或实体手柄/现场归因；目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/search-input-state-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：左栏与管理页的迟到刷新焦点
+
+原无ID密度/目录行失焦及隐藏目标/后台repair问题，旧源三尺寸18错位已复现。沿原记忆增加密度button及列表+规范路径定位，只恢复可见有效目标；缺失目录动作回原页添加入口，管理无卡也有效，后台不抢焦点。现有rAF/修复上限保持，无新轮询/native/CSS。最终30边界/3原场景及搜索18/封面21/底部24/选择12/删除10/预检16+2/保存归属保留通过，4Job自然退出末端0；首标准密度误匹配容器的旧/候选FAIL与费用保留，后继限定button不改断言。1产品/1原夹具CAS交下一自然Web/包；未部署/实机/现场归因，确认弹窗返回另属未验边界，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/sidebar-focus-refresh-20261112/SOURCE_READY.json。
+
+
+2026-11-12 三点菜单后继：双游戏共用 MainRunningAppID 的反例已复现并限制同步到目标窗口自身请求的合成状态；菜单证明/清理的可能写入保留 uncertain，不作普通 GET 重试。148 原接收器、19 原 Valve 方法、7 生命周期和13原生消费者边界已核；1280×720/800 定向真实组件/正式 engine 均通过。原完整 Native 5 PE 已完成，分类修正仅重编 main/重链并重新封存身份，辅助产物沿用同一固定源。最新 JS 在新 DD2.exe 实例实际显示右侧菜单且原关闭成功；证明由诊断提供，安装版自动路线未部署。用户启动的 TMNT 为完整 GameID 一致的正常对照，只读记录无 alias、原生 API 保持。真实双游戏、切换与睡眠唤醒仍待现场；不新增证据补强/夹具。交接：Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：确认返回及编辑器原首帧归属
+
+原确认DOM触发器被目录刷新退役，返回失焦/后台聚焦；现沿原语义描述器+根/页复核，只恢复当前可见控件、缺条目走安全入口，结果结算一次且绘制错误不丢回调。首候选另复现原openEdit首帧越过确认/背景，沿同一rAF核epoch/顶层modal/前台/现有控件/dropdown，普通入页保持，无新定时器/native/CSS。修后27边界/3既有场景与47库动作/30刷新焦点/18搜索/21封面/24底部/12选择/删除10/预检16+2保留通过，旧19反例/首候选FAIL与费用保留，4Job自然退出末端0。1产品/1原夹具CAS交下一自然Web/包，未部署/实际删除或实体手柄/现场归因；多确认并发队列未覆盖，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/confirm-return-focus-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：通用确认弹窗串行归属
+
+原批量加入/图标预检及自动Steam安装提示能覆盖单resolver，首调用悬挂；现原弹窗按独立上下文排队，逐个结算、退役/换根取消未确认项，busy/后台/结果弹窗沿原事件接续，先让已同意工作接管busy再呈下一问。旧安装提示过期拒绝，无新timer/轮询/native/CSS。11边界/3原场景及原27焦点/47库动作等保留通过；首候选退役焦点控制FAIL与费用保留，r2要求取消已结算且late close不动当前焦点，产品候选不变。3Job自然退出末端0，58031ms；1产品/1原夹具CAS交自然Web/包。未部署/真实Steam或实机，10:56新日志另核不当修后反馈，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/confirmation-queue-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：指定图片回执按编辑卡片归属
+
+原pickArtwork返回直接写当前artworkDraft，57行旧36项串卡/覆盖及旧错误已复现。现复用root/page/editor代次与目录/EXE，并按slot保留最新选择；删除/改搜/候选/草稿重置退役旧选择，同卡保存rebase及不同slot保持，后台沿原绘制门。最终57行/3原场景与原双尺寸手柄、27确认/47库动作等保留通过；原媒体导入仍绑定首卡不改。旧ghost夹具缺已安装记录FAIL保留，r3只补真实库存前置，产品候选不变；3Job自然末端0，37190ms。首准备pin拒绝源于并行清理误删活依赖，已从原工具回执恢复7558/80628fd4...完全相同原字节并受保护，旧journal不改。1产品/1原夹具CAS交自然Web/包，无部署或实机，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/artwork-picker-context-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：自动补图不抢前台素材候选
+
+实际img错误事件复现封面自动fallback推进共用token，使视频回包被丢/候选点击0提交；旧自动下载URL也会挡新手动选图。现候选界面打开时沿原_deferredArtworkError延后，新搜索清退休busy URL，原Back/cancel完整绘制恢复延后补图，无新timer/轮询/Native/CSS或弱网策略变化。旧5交错全FAIL保留，修后5边界/6原场景通过，视频2候选点击1提交，延后自动补图仅1次；原双尺寸及24底部/21封面/18搜索/30焦点控制保留。2Job自然末端0/22727ms。1产品/1原夹具CAS交自然Web/包，未部署/实际下载/实机，10:56现场归因未证；前轮57边界按原epoch保持，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/artwork-fallback-gallery-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：静态候选的编辑卡片与草稿身份
+
+原gallery context缺root/editor代次/目录/查询身份，同EXE换卡及换根/name/ID的旧点击/下载回执可串草稿，EXE别名又误拒。现沿原context核当前root/page/editor/卡目录和既有search key，规范EXE别名；openEdit真实换owner沿原retire helper关旧候选/聚焦。原45行30错位已复现，修后45/7原场景及前轮自动补图5交错、名称/AppID native回环和双尺寸控制保持通过；2自然Job末端0/31963ms，无新ID/minimum/Native/CSS或轮询。1产品/1原夹具CAS交自然Web/包，未部署/真实下载/实机，最新仍10:56日志且来源未证，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/artwork-gallery-owner-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：自动补图草稿归属与有效文件
+
+原自动fallback漏root/page/name/AppID与path校验，66行旧42误写/无效成功复现。仅原函数核捕获上下文/查询身份及有效path，旧成功/错误不写新草稿；同卡保存rebase只清占位不接旧结果。首候选5原场景通过、rebase真实FAIL保留；最终只补失败原场景+66行及原2清理边界通过，5项仍按首epoch引用。准备EEXIST/窗口拒绝和全部费用保留，自排900后接续仍同原起点固定1800总限，3自然Job末端0/48183ms，无新ID/minimum/Native/CSS/轮询。1产品/1原夹具CAS交自然Web/包，未部署/真实下载/实机，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/automatic-artwork-owner-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：自动补图串行及丢回执释放
+
+自动封面/横图/静态壁纸fallback沿原延后错误回调串行；同EXE换卡也取消旧owner，手动候选结束接续。下载IPC复用185000ms上限，原生180000ms及弱网重试未改。旧3并发/仅末项写入已复现；r2六串行和五gallery边界完成，但整场景丢回执前置FAIL保留。修夹具隔离后仅原丢回执检查通过：1派发、超时释放、迟到不写，未重跑已过控制；另五原场景仍首候选epoch引用。四自有Job自然末端0，全部失败与费用保留。仅1产品/1原夹具写回，无新ID/minimum/轮询/Native或部署，整体ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/automatic-artwork-serial-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：手动图片下载回执超时释放
+
+手动封面/横图/静态壁纸候选downloadArtworkCandidate此前无IPC回执期限，旧源三槽均0 timer；丢回执时busy与pending保持，迟到又写草稿。产品仅该调用传原ARTWORK_SEARCH_TIMEOUT_MS=185000，原生180000和弱网重试保持。原gallery fallback场景保留并加三槽×超时明确重选/正常回包/旧owner/后台超时12边界；旧FAIL保留，当前1原场景及12边界PASS，超时回调为受控触发、不冒称真实185秒等待。两自然Job末端0/23964ms，无已过自动串行控制重跑/新ID/minimum。两叶CAS交自然Web/包，未Native编译/部署/真实下载/实机，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-artwork-receipt-20261112/SOURCE_READY.json。
+
+
+## 2026-11-12：素材候选后台静默与前台接续
+
+封面/横图/静态壁纸候选的load/error与手动下载终态现复用原presentation owner延后DOM/焦点/提示，后台保留成功草稿与busy/IPC清理。旧三槽各8/1/5/10次隐藏DOM修改、失败时焦点移动已复现；修后12边界均隐藏修改0且焦点/提示不动，前台接续可用。原2场景含12回执边界、另3原归属/页面/串行控制完成；45归属/6串行/5gallery碰撞及丢回执保持。旧FAIL/阶段900秒拒绝及费用保留，只续未跑3项，无已过组重跑。仅1产品/1原夹具CAS交自然Web/包，未Native编译/部署/真实下载/实机，整体ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/artwork-gallery-background-20261112/SOURCE_READY.json。
+
+
+<!-- STEAM-SHARED-IDENTITY-R27-CLOSURE-20261112 -->
+2026-11-12：原 sleep_steam_only_selftest 的十组 R27 账户/睡眠接线已复用成功 EXE 实跑通过；原十组语句、所有断言及既有标签逐字/逐项保留，默认路径仍只执行一次。独占 --shared-account-only 与 --prepare-only 已接原入口，未新增默认 ID/minimum。注册表外来 PID/账户噪声不会取代睡眠 UI pin；换账户、换 PID/birth/root、退出和旧请求仍拒绝。原准备漏头、后置 Psapi 声明及重复 source pin 的 FAIL 均保留；追加45秒中未编译、未跑整套，自有业务 Job 自然退出且关前0。
+
+当前主线与已执行 R27 的 main wrapper、原十组函数逐字相同。随后睡眠协调层的新 runtime/auto 分类守卫另由其134项/1527检查和2个单项反例核收；本层只读独立接收，不重复运行。当前 R27 生成体补同代/非退出的分类终端内存端口后只做 prepare，未编译或执行新头组合；此端口不证明真实 pending 分类算法。证据为 SteamUnifiedChannel-20261112/SleepIntegration/CLOSING.json 与 SLEEP-CLASSIFICATION-INTAKE.json。完整 main/link/配套包、实机及 CPU 收益继续 OPEN，整体 ACTIVE。
+<!-- /STEAM-SHARED-IDENTITY-R27-CLOSURE-20261112 -->
+
+
+## 2026-11-12：手动素材下载拒绝无效文件回执
+
+手动选图原仅判断path真值，三槽共15条空白/数字/布尔/对象/数组回执被当成功写草稿并提示已下载，真实浏览器IPC回执已复现。仅该guard改为非空白字符串，与原自动fallback一致；原草稿保留，异常只走既有延后失败显示，用户仍可明确选择有效备用候选。原gallery fallback场景及12回执控制保留，新增三槽×8形状共24边界全部通过，21异常后手动备用与3合法含空格/Unicode路径正常，原消费者除新增块外逐字保持、无新ID/minimum。两自然Job末端0，旧FAIL及费用保留。最新10:56日志原SHA未变，不认定历史现场根因；仅1产品/1原夹具CAS交自然Web/包，未Native构建/部署/真实下载/实机，目标ACTIVE。证据 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/manual-artwork-file-receipt-20261112/SOURCE_READY.json。
+
+
+<!-- QAM-SHARED-FOREGROUND-DELIVERY-20261112 -->
+2026-11-12 三点修正交付：菜单点击改复用原单前台PID游戏资格核对，不改睡眠/硬件全局游戏阀；屏幕和OEM/手柄仍汇入同一nativeSteamMenuButton。菜单Steam身份消费原Observer identitySnapshot/sameIdentityEpoch，账户候选须currentRegistryAccountKnown，foreign注册PID不能否定独立验证UI账户。公共steamLiveRequest/run6绑定原PID/birth，可能写的发送不明仍禁止重放。别名只镜像菜单0/2，菜单关闭及overview退役按精确原host/账户守卫释放；正常完整ID不装别名，无新增idle线程/轮询。
+19:33香港时间部署固定build4932c549c1862545c085de0113e434bd1e985f149115a135bd68f9930ae2cc63，设置保留。原13点击状态/6receipt消费/5释放和早一源epoch的235快捷键定向各保留其范围；安装版真实屏幕三点、切换/双游戏和用户触发睡眠仍OPEN。来源是已交付底稿+精确本任务/公共身份后继，不含同日其他睡眠分类后继。交接Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/dual-game-click/DELIVERY-INTAKE.json；本段为编译后文档记录，不追赶重编。
+<!-- /QAM-SHARED-FOREGROUND-DELIVERY-20261112 -->
+
+
+## 2026-11-12：本机安装库包与后继源码边界
+
+只读核本机19:30:08（香港）生成的0.0.39库包，11项fileIndex与实际大小/SHA一致；主包buildId da18996531174edf77004a249df940cf81a1f02f6671d35e8450b929bed7e795。安装app.js 5620dc3381391067e98c155c64340c48bbb66725acbc2fe34ada41804d9bf515精确等于confirm-return-focus后继，confirmation-queue至manual-artwork-file-receipt九项SOURCE_READY形成连续before/after链到当前3b06c3efc5259cf01cbf8f3830ba98c9ee01cabcf97d589cffdc4c870fe5a64b，尚不在该固定包。完成包保留，九项交下一自然Web/包，不追重编、不单独替换安装UI。最新现场仍10:56原SHA，未有修后Host/UI身份日志；磁盘一致不能证明已加载进程/画面。未启停、部署、测试或操作Steam/设备/设置，持续目标ACTIVE。原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/INSTALLED-LINEAGE-20261112T1138.json。
+
+
+## 2026-11-12：库包替换后的八项后继核收
+
+最终阻碍核收时安装manifest由1fadf0变418ff2，先前9项均未安装的状态只属于此前观察。现11项fileIndex实际大小/SHA、Host/Worker sourceBuild均匹配；app.js 345307/4c70b564精确等于artwork-gallery-background后继，九项中的前八项已在磁盘，只剩manual-artwork-file-receipt校验3b06c3ef仍待下一自然包。manifest生成19:17早于前观察19:30，按确切SHA链核收而不按时间排序推断。安装原manifest/UI/version已保存只读快照。替换操作者/完整部署回执待协作者回应，未冒称本聊天部署；根buildId仍da189965。加载实例与实机/新日志仍未验。原最终audit失败保留；其后错误设置blocked已前向纠正为判断不成立，恢复active需用户/系统。此处无新测试/编译/产品或安装写入。原件 Testing/YMCC/Evidence/CustomLibrary-LogComparison-20261108/INSTALLED-LINEAGE-REPLACEMENT-20261112.json。
+
+
+<!-- QAM-INSTALLED-ENTRY-SUCCESS-20261112 -->
+2026-11-12：用户确认DD2安装版Alt+W与屏幕三点均成功。两条实际快捷键原生事件命中proven-game-overlay-selected/native-registration-alias；屏幕入口是用户确认，无独立screen事件。实际包为主线e4a218/da31fd，原4932/f9b部署记录不外推到当前。只精确将nativeQamFollowupSubmit的ActiveUser私读改为公共identitySnapshot/currentRegistryAccountKnown，原ticket/fences保持；未构建/部署，交下一自然配套包。无新线程/轮询，切换/双游戏/用户睡眠仍OPEN；原件 G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/dual-game-click/INSTALLED-ENTRY-SUCCESS.json。
+<!-- /QAM-INSTALLED-ENTRY-SUCCESS-20261112 -->
+
+
+<!-- QAM-CURRENT-GAME-COMPLETE-20261112 -->
+2026-11-12：用户收口当前DD2动态补ID/三点游戏内呼出，状态COMPLETE。真实Alt+W/屏幕入口已确认；双游戏失败按用户裁决退出当前验收门、保留干扰记录。退回单游戏后残留其他游戏库路由的诊断通过原NavigateToRunningApp恢复，用户再按原入口成功；自动路由归位尚未接入产品，不列为已完成。无新构建/部署，公共账户followup仍源码后继。范围终态及局限见 G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/dual-game-click/CURRENT-GAME-CLOSING.json；整体Steam睡眠目标不随此项关闭。
+<!-- /QAM-CURRENT-GAME-COMPLETE-20261112 -->
+
+
+## 2026-11-12：公共原生兼容失败位置
+
+按用户“各任务补同一个Steam”要求，只改原steam_compatibility_graph_core.h::Resolver::propagate：operand/typed引用、重复pdata归属、pdata绑定三类原拒绝填入已有failedRva参考坐标，root/vendor/read/publish共用，无新私有producer/cache或offset放宽。精确hunk读回及去除诊断赋值后的原决策表达式一致；未编译/业务实跑，待自然Native。当前Steam图变化及睡前UI账户缺失仍OPEN。原件Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-native-compatibility-failure-coordinate/MAINLINE-IMPORT.json。
+
+
+2026-11-12公共兼容失败位置定向后继：实际C++当前模块拒绝定位到参考图0x991eba/0xbdeab，原Public对照及缺参拒绝正确。原file selftest新增独占--qualify-only，不跑默认整组；一次编译/三只读调用、294源码/8库、四Job关前0。首包装器FAIL与37072ms总费用保留，未重编/部署。SOURCE_READY只覆盖共同诊断，不授当前新布局/offset或睡眠恢复。原件Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-qualification-observation/SOURCE_READY.json。
+
+
+<!-- QAM-SINGLE-GAME-STALE-LIBRARY-RETURN-20261112 -->
+2026-11-12：单游戏旧库页面残留归位已接入显式 quick-access menu.button，严格核唯一当前游戏/原账户/原host/已退出前App及无干扰UI，再原 NavigateToRunningApp(true)一次并读回后调用原handler；派发不明不重放。正常完整ID不进入新增归位分支，无新增后台线程/轮询/timer。完整固定build eea4de95ace047b7bc4a0aee85d9e289145587b6bab71c145c2f6cdd12dfbf75 已于本机20:34(UTC+8)正常设置保留部署，EXE ad6371a6d8a689e4d5a9ae671dc80be99149582ffb76f6c16cf28c28251ab2e6；公共账户followup后继本次已配套编入。
+
+自行系统Alt+W实机观察：已复现 /library/app/2555806947、0/3，首个持续350ms原映射快捷键后为 /apprunning、2/2，真实右栏可见；ArrowDown切到性能页，同键关闭0/0且alias释放、重开2/2、最终关闭0/0。未在该输入序列直接发菜单operation或game proof。对应新原生日志事件未捕获，结论按输入/页面/别名/画面因果观察，native receipt保持未捕获；早先直接proof诊断另列，不能替代安装入口。定向helper17仅引用原执行（stdout工具历史d6a463），不为归档重跑；默认完整夹具NOT_RUN/formalReleaseAccepted=false。
+
+当前单游戏已知失败收口；新包屏幕触摸/实物手柄、正常完整ID实体新epoch、睡眠及更多游戏未独立验收，双游戏按用户裁决只作干扰记录。整体Steam睡眠继续ACTIVE，不改历史FAIL/UNKNOWN/旧COMPLETE。本段为构建后文档，不追赶并行来源重编。原件 G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/single-game-return/CLOSING.json。
+<!-- /QAM-SINGLE-GAME-STALE-LIBRARY-RETURN-20261112 -->
+
+
+2026-11-12共同Steam兼容图Literal后继：同一graph core/read graph补齐两段Public只读断言文本，使用完整字节含NUL、存储类型及已匹配完整caller引用绑定，不嵌入当前实际RVA、不扫描首个字符串。一次因真实源码变化的编译、六次既有--qualify-only选择实跑：原Public对照通过；当前两处拒绝已推进到Client 参考0x991ec6 compatibility-contract-unrecognized；UI 参考0xbdeb7 compatibility-contract-unrecognized；NUL/文字破坏及同文本迁至可写/代码区均在原参考字段拒绝。七个实际Job自然退出且关前0；原默认断言/代码/fixup与Legacy不改。共享修正SOURCE_READY仅限此范围，current完整资格仍未通过；无新私有producer、线程、timer或产品EXE。累计执行88530/120000ms，原FAIL及身份/R27账保留。原件Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-qualification-observation/literal-relocation-source/SOURCE_READY.json。
+
+
+<!-- QAM-FAILURE-LOG-NATIVE-RECEIPT-20261112 -->
+2026-11-12只读对照旧01:55/10:56/20:06档与本机前后版本：当前native-detail实际已读到21:07:18.318原快捷键PID25852回执，navigation从/library/app/2555806947按原接口恢复/apprunning，steam-proven-game-overlay/proven-game-overlay-selected/native-registration-alias，composition2；21:13:47、21:14:16、21:14:38为0/2/0，后三次无额外导航。与已保存实机右栏、ArrowDown及alias释放一致，当前DD2已知失败确认修复。此前未捕获回执只是旧时观察，原件保留；此前不可见原因未知，不认定缓冲/补写。
+
+20:06档实际菜单进程5224，不能与同EXE的本机31984合并；19:40后15行仍有3次主界面回退。旧本机19:57/58命中alias仍composition-not-settled，这次已归位。潜行者新包实机与Win5新包加载未复测；屏幕触摸、睡眠/Running/publisher、实体及双游戏不据此放行。相邻WebView ipc-response-delivery-failed仍单列，未称修复。无产品/测试/构建/部署/输入动作，原FAIL和第一次筛选计数误判保留。新回执原文及对比：G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/single-game-return/failure-log-comparison/CLOSING.json 与REPORT.zh-CN.md。
+<!-- /QAM-FAILURE-LOG-NATIVE-RECEIPT-20261112 -->
+
+
+<!-- STEAM-IDENTITY-PAIRED-CONTINUATION-20261112 -->
+2026-11-12：用户追加75秒定向核收后，复用原EXE的账户原用例实际通过，包括真实20秒慢准入；共享回执拒绝6项、账户转换12/旧证明拒绝24、binding Windows会话重复查询0、句柄147回到147。原15867ms分配不足的TIMEOUT保留，不改成产品死锁或历史PASS。
+
+健康消费者两次编译失败分别暴露生成器把参数默认{}当函数体，以及旧ownedworker::SteamLease三参数端口漏接原继承cancel第四参。提取器/当前外部ports已补，最后端口改为委托请求消费实际产品SteamLease，原健康断言与业务体保持；最终修正仅源码，未重编/运行。原余量低于既定25000ms编译准入，不降低门槛求绿。SOURCE_READY=false，六产品候选仍私有、未导入或部署。
+
+本段三个实际Job自然退出、关前0；封存复核1514项输入，执行/准备/封存原账299785.031/315000ms，分析与通讯端到端另列。原FAIL、准备误断言及分数时间准入失败均保存。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/IdentityDelegation/PairedClosure-r2/CLOSING.json；最终健康源码在HealthCompileRepair-r4/REPAIR.json。仅待该项及配套声明核收，不重跑账户/Observer/child/Client/R27已过组。
+
+同层PEER-SUCCESSOR-INTAKE-20261112.json已独立核原件：媒体共享身份与空bridge后继按各自范围接收；Literal修正不授当前Steam原生资格，__FILE完整文本差异仍拒绝；当前DD2四条原生回执已读，但不外推Win5/睡眠/Running/双游戏。整体R1～R6及匹配自然构建/现场CPU收益仍OPEN，目标ACTIVE。
+<!-- /STEAM-IDENTITY-PAIRED-CONTINUATION-20261112 -->
+
+
+2026-11-12睡眠回补消费边界后继：固定prepareSession在Observer fallback中重读前清旧账户pin，临时读失败可留下原捕获未绑定；旧pin在Win5当时是否仍合格UNKNOWN，不能盲保。所需持续UI/document/账户证明仍应由共同Steam层提供。两份本地ScopeRunningApps定义1043/FNV3939488289和799/FNV2306644473均不匹配当前原两选择器；实际加载文档和现场调用仍UNKNOWN，未加白名单。共同身份PairedClosure-r2当前为ACCOUNT_PASS_HEALTH_COMPILE_PENDING：原账户选择raw实际PASS，三个Job关前0已独立核收；最终健康接口源码未编，sourceReady=false，未消费或导入private delegate/session候选。所有原FAIL/超时和账保留，未重跑或借预算。原件QamFocusReview-20261112/shared-ui-capture-boundary/FINAL-RESULT.json及IDENTITY-INTAKE.json。
+
+
+2026-11-12共享SourceFile候选后继：原公共graph的构建目录前缀变化已准备私有节点，固定源码尾部、只读存储、有限NUL及原caller引用；不同长度路径只绑定起点，中间/末端不映射。17个新增边界留在原file工具互斥选择，不增默认ID/minimum。首次编译因离线夹具unsigned char字符串初始化C2440失败，自有Job自然关前0，未执行行为；只在新私有工具副本改char[]与显式字节转换，未重编、未SOURCE_READY或导入。原120000ms账已用102024ms（封存另计），不借身份/R27账；按原成功编译11840ms+准备2596ms+原后续准入6000ms安排不足余量，不降门求绿。当前生产主线仍为已验两Literal版本。原件shared-qualification-observation/source-file-fixture-repair/HANDOFF.json。
+
+
+<!-- STEAM-SHARED-IDENTITY-DELEGATION-SOURCE-READY-20261112 -->
+2026-11-12：共同Observer身份委托及配套已精确写入主线，当前SOURCE_READY仅覆盖本段。6产品文件为steam_session_observer.h、decky_binding_worker.h、decky_binding_process_owner.h、decky_binding_client.h、decky_sidebar_runtime.h及main.cpp的deckySidebarOwnedBindingPlan；另10原测试/生成器/声明。产品头不含测试friend或会话替身，原并行main字节和原EOL保持。
+
+最终私有配套由精确补丁独立重建，六个原生成成员仅worker有EOL差异，无业务代码差异。修后健康consumer实际编译399源码/16库、x64 GUI PE通过，Job自然退出且关前0；五个入口只做syntax，健康业务/完整父门未运行。账户原用例及Observer/child/Client已过范围引用各自原epoch，不重跑，不将失败父组拼成新PASS。每请求撤销沿既有继承cancel接子进程；旧排队成功和context转交仍拒绝已撤销归属。
+
+原TIMEOUT/编译/准备和封存错误原件全保留。人类追加30秒仍沿原身份账，当前317514.3676/345000ms（执行/准备/封存，分析协作和产品导入耗时另列）；未部署、未完整产品编译/新包或现场CPU收益验收。精确写集及来源为Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/IdentityDelegation/SOURCE_READY.json，原件SHA5714609c7be9cd179386071eb63c2cc11edd9dfc39ff3cb73340730dbbf55d30；配套交下一自然构建，不追改旧972/ef25等包。
+
+这不授当前Steam原生兼容资格，也不把单次liveAccountPinned或每请求cancel当持续UI/document/整睡眠周期证明。其余手工监控/鼠标读者、URI/启动/broker/外观/独立库统一、匹配构建与实机CPU收益继续OPEN，整体R1～R6仍ACTIVE。较早private/no-ready记录保留为历史，不再代表本段当前源码状态。
+<!-- /STEAM-SHARED-IDENTITY-DELEGATION-SOURCE-READY-20261112 -->
+
+
+2026-11-12 SourceFile公共兼容图配套已核收写回：3个原生产品头及1个原file工具，读取/发布图对同一utlmemory.h起点采用一致描述，保留完整代码/fixup、只读、固定源码尾部和非起点拒绝。17边界实际一次全过，旧版模块对照通过。首后置FAIL发现发布图仍含同一旧路径Data描述，原件保留；只续定位并补齐该一处描述，当前失败坐标已前移为client 0x991f55、UI 0xc4b398，整体仍未资格化。不重跑未变17正常组、不增默认ID/minimum。295实际include输入/8链接库已核；编译根正常退出0，3次均按已声明并核路径/SHA的vctip工具策略回收，不能称整个Job自然退出；业务观察自然结束，所有Job关前0。本SOURCE_READY只限SourceFile配套，不表示当前Steam整体适配或Running/原PID/primary/睡眠/手柄通过；未完整构建、打包或部署。原120秒追加45秒同账，全部FAIL和费用保留。原件shared-qualification-observation/source-file-publication-pairing/SOURCE_READY.json。
+
+
+2026-11-12继续限定同一未建模callee：完整204字节除4个已核RIP操作数外188字节全相等。四引用实指相同断言文本、相同utlmemory.cpp源码尾部及同DLL/符号的两个导入；UI缺口同属导入身份迁移。下一修正应复用共同graph补完整callee/pdata/unwind及共享PE导入身份，不能改固定RVA或放宽任意只读目标。此为静态候选约束，未修改产品、编译或授当前资格。原件post-source-file-reference-attribution/CONSTRAINTS.json。
+
+
+<!-- STEAM-SHARED-PRESENCE-SOURCE-READY-20261112 -->
+2026-11-12：剩余sofSteamRunning私有Toolhelp枚举已移入既有唯一processInventory owner，精确写main单函数及两份原settings夹具。所有调用维持fresh0，只有Complete表能证明不在运行；未知/失败/不完整继续拒绝离线写盘。无新Store/线程/定时器，中央不支持时的Toolhelp回退和原名称规范保持。
+
+原配方/O2一次编译核收302实际源码输入/7库、x64 console PE。29实际正常边界全过，缓存absence的1个必要反例按命名断言失败，6个无效选择实际拒绝、未落入默认业务；原默认CPP全部字节和MJS执行正文保持，不增ID/minimum。主线只做源码prepare/readback，生成字节与已编候选相同，不重跑正常组。
+
+编译根exit0，已声明并核完整路径/SHA的驻留vctip按工具策略回收；其余8个业务/选择Job自然结束，9个Job均关前0。原报告误称全部自然退出，已前向更正，原报告/raw不覆盖。原120000ms独立消费者账约32.3秒加本状态记录实耗，不借Identity/R27/同行账；分析通讯另列。SOURCE_READY仅本函数配套，未完整产品构建/默认整组/部署或现场CPU百分比验收。交下一自然构建，不追赶重编；其他Steam账户/根目录/URI/bootstrap/broker/外观/独立库路径及R1～R6仍ACTIVE。
+
+唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/SOURCE_READY.json（SHA 3c8f48086c823b1e0bdb5eb0a76d988472f95cca97578890d1f35599452b407d）；编译工具收尾更正同目录REPORT-CORRECTION.json（SHA f2a88474b6e706bfca515feee441ee2fd39bebf87220daa6ca1fd12beeda97e6）。
+<!-- /STEAM-SHARED-PRESENCE-SOURCE-READY-20261112 -->
+
+
+<!-- DECKY-CLEANUP-SHARED-DELEGATION-20261112 -->
+2026-11-12：Decky最终清理及inspect/confirm私有子进程已接共同Steam Observer逐请求身份委托，沿原pipe/cancel归属，不再由标记请求重复发现账户注册表。身份暂缺仍沿原无子进程、无预留等待，旧未标记协议保持兼容。只精确写2产品文件、1原夹具及2原来源声明；共同发布器和生成器原件未改，main其他并行字节保留。
+
+原51项中的“actual native dependency callback carries verified offline account through the existing child protocol”实际一次通过：离线UI账户传达、1000次暂缺事件不耗机会、同一不存在注册表旧路径拒绝与新委托可用、真实进入子进程后撤销身份并归还。编译输入/库图及严格Observer派生已核；编译根exit0后仅按完整路径/SHA回收VCTIP工具，业务Job自然关前0。其余50项、inspect/confirm行为组、完整native/包、实机睡眠和Win5视频未跑，不拼接为完整父PASS。原失败和账保留，后继交下一自然构建，未改已安装9723031a。证据：Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/cleanup-session-receipt/delegated-child-20261112/SOURCE_READY.json；整体ACTIVE。
+<!-- /DECKY-CLEANUP-SHARED-DELEGATION-20261112 -->
+
+
+<!-- QAM-SHARED-STEAM-FACTS-REQUIREMENTS-20261112 -->
+2026-11-12用户明确三点需求走唯一Steam层、不得私有接入Steam信息。已发YMCC-Steam层并盘点：Observer身份/账户候选、main请求run6与followup已公共；menu runtime tracked的gameprocess_log读取/缓存及identity头的game/Steam/overlay host OS证明/租约仍是待迁移缺口。要求Steam层按本次选定前台PID/birth/path统一提供process-lifetime AppID/decimal GameID、实际UI账户/browser/host父链命令行及请求期可撤销lease；菜单只保留显式动作与配置/前台/rules/power/OFF策略。无新watcher/timer/worker/全进程扫描，不借sleep/native-primary选中游戏，不省略最后身份复核，不重放未知写；menu.inspect+menuGameRead才是精确只读形状。
+
+公共接口/生产者实施归属尚待owner回应，不能把此项写成已迁移或SOURCE_READY；本轮无产品/测试/构建/部署/Steam游戏动作，原DD2验收保留。后续仅消费owner正式公开的事实入口，不另扩私有来源。需求及源码pins：G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/single-game-return/shared-steam-facts-requirements/REQUIREMENTS.json。
+<!-- /QAM-SHARED-STEAM-FACTS-REQUIREMENTS-20261112 -->
+
+
+<!-- QAM-SHARED-STEAM-FACTS-OWNER-ACK-20261112 -->
+Steam层已正式确认公共按需tracker/full GameID、host/browser事实及请求期lease/失效合同由其提供；本三点任务接runtime::tracked/Cache与identity::pin/inspectHost两个消费者迁移，保留菜单显式动作和原最终围栏。公开Observer/delegation/account facts当前不包含可授资格的tracker/host owner入口，也不提供持续document或跨进程长期授权。无SOURCE_READY，不接未验候选；原需求PENDING作为旧观察保留，本后继仅确认分工，迁移仍OPEN。无新私有读取/watch、产品/夹具/测试/构建/部署/现场动作，当前DD2证据保持。原件G:/YeManCC-Work/Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/self-heal/native-route-review/re2-live-20261112/resume-20261112/single-game-return/shared-steam-facts-requirements/OWNER-ACK.json。
+<!-- /QAM-SHARED-STEAM-FACTS-OWNER-ACK-20261112 -->
+
+
+2026-11-13公共兼容图后继：既有PE解析器的导入事实接入唯一graph，完整callee/pdata/unwind/固定源码尾部及真实加载后named-target检查接齐；旧版Public两模块磁盘/加载健康及拒绝坏目标通过。R3原29组FAIL、启动重复pin拒绝、/WX遮蔽FAIL和加载源码路径缺口均保留。r5实际28/29通过，后继仅续3个受影响原场景并加强健康前提，r7实际3/3；其余26只按原epoch引用，不能拼成整父PASS，旧SourceFile17不重跑。5产品头与1原file工具精确写主线，无私有parser/cache/常驻进程；295实际include/8链接库及自有Job关前0已核，vctip显式工具回收另列。当前Steam仍未整体资格化：client后继失败引用0x991fea，UI还缺精确失败range；SOURCE_READY仅为公共图配套，不表示当前Running/原PID/primary/Continue/睡眠或手柄恢复。完整Native/包/部署/实机未执行，session()公共身份消费仍待验证。原账追加人类60秒只记一次；后继按2026-11-12 FIXTURE-POLICY自主评估追加120秒，同账cap345000ms，保留全部费用与旧失败。证据 shared-qualification-observation/import-identity-candidate/qualified-graph-closing/SOURCE_READY.json。
+
+
+2026-11-13后继缺边已精确记录：实际离线qualify-only诊断把UI失败从0定位至共享DLL名0x10b42a0；修其处理顺序的私有候选前移到runtime-function引用0x123a598，但完整当前UI断言仍FAIL，未导入。client0x991fea由原唯一完整caller指向旧0x11666a0/当前0x118d340可执行复制实现，不能当Literal或用短前缀放行；完整callee/跳表/展开关系仍缺证，停止扩树。原诊断后置误读current而非observations的FAIL复用同raw纠正，不重跑；3正常控制及所有FAIL/费用原件保留。主线仍为先前已验公共graph配套（5头+1原工具），当前Steam整体与睡眠回补继续未通过，无完整构建/部署或现场动作。原件 shared-qualification-observation/import-identity-candidate/remaining-edges/MISSING-EVIDENCE.json。
+
+
+<!-- STEAM-OBSERVED-SETTINGS-FAILURE-DIAGNOSTICS-20261113 -->
+2026-11-13 公共 Steam 层后继：设置显示 root/候选账号/PID 统一消费同一 Observer，原最终操作鲜读保留。18 原用例、1 必要反例、3 无效选择核收，1001 次显示零新增注册表发现，原 VDF IO 仍在。公共通道新增有界 CDP/JS/HTTP/WinHTTP 错误投影和 caught 异常类，不复制原文/堆栈/凭据；原业务 reason/dispatch/不重放不变。首 transport 23 项与修夹具后只续 1 项分列，父 FAIL 保留；真实旧源反例和脚本 13 项另核，不能拼整父 PASS。设置 304 源/9 库、故障三份各 366 源/9 库及自有 Job 关前零已核，vctip 工具清理单列。精确导入并保留同行 main，完整 native/包/部署、现场 CPU 与自愈频率仍 OPEN。Decky 动作消费、metadata/跨 child lease、ModeSource、菜单 tracker、主题文档与 controller 来源分别继续，普通事实不授动作权限。证据 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/RemainingReaders/ObservedSettingsImportFinal/SOURCE_READY.json、FailureDiagnostics/SOURCE_READY.json 及 SHARED-CONSUMER-COORDINATION-20261113.json；整体 ACTIVE。
+<!-- /STEAM-OBSERVED-SETTINGS-FAILURE-DIAGNOSTICS-20261113 -->
+
+
+<!-- DECKY-RECOVERY-CAUSE-TRACE-20261113 -->
+2026-11-13 Decky恢复追因源码已接共同steam_failure_diagnostics：原Runtime动作Selected/Rejected/Observation不冒充派发，实际绑定/回收自有Loader/页面重建/开关大屏才分配单调actionId，开始和完成保持相同原Steam PID/birth、电源归属和episode；日志仍复用原有写者/轮转，不采URL、token、账户、原message、堆栈或脚本。Steam进程重启与BPM/document/后端轮换分列，不能用后者计整Steam重启。
+
+原typed-admission-park-resume 1注册用例、4实际阶梯场景核收，私密内容过滤/未知code及Context和写日志回调抛错均保留原业务次数和清理断言。实际Runtime/diagnostics头逐字匹配已编来源；main调用/写者适配只做精确源码核对，完整native/包/实机未跑。普通日志保留当前writerPowerGeneration，实际动作仍沿开始时nativePowerGeneration，避免唤醒后回执被重标。首次launcher工具清单、fixture局部名/WX、长输出路径及并行main CAS拒绝全部保留。公共头有独立SOURCE_READY，精确导3产品+1原fixture；共享Steam身份后继不追入旧编译。独立bootstrap/watch源头错误捕获仍私有，不冒称已部署或已降低现场自愈频率。证据Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/SOURCE_READY.json。
+<!-- /DECKY-RECOVERY-CAUSE-TRACE-20261113 -->
+
+
+2026-11-13 壁纸公共Steam消费后继：已写回素材库存对共有 steamUi/steam.uiStateChanged 的订阅、单请求合并/变化去重与旧响应拒绝；大屏同态完成只调用原ForegroundWake，不撤销健康许可。原媒体消费者声明补齐新公共依赖，不加ID/minimum或轮询。首轮9过1失败及修后定向/真实pending/负例分别留原epoch，当前游戏原14/28通过，71项类型依赖闭包通过。正式当前范围仅 Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/shared-steam-consumers-20261112/SOURCE_READY.json。默认后台membership私读、SourceLease跨child及同步撤销、前台installation metadata生产配套、持续UI document和完整共同sleep仍OPEN；私有候选通过不等于默认已接，不部署/不冒称全链或CPU实测。
+
+
+2026-11-13睡眠共享输入消费已核收写主线：仅session()去掉3处私有注册表读，改消费唯一Observer不可变receipt，保留OS PID/birth/path/歧义、原UI账户pin及原最终请求检查；空/不可读、旧PID重用、查询期间进程/账户代次变化拒绝，同身份revision变化接受。原10组R27与新增8子边界实际通过，session私有注册表调用0；341实际include/10链接库及3个Job关前0核收，编译vctip为显式工具回收不冒称自然。原同账129414ms续作，自主追加120000ms至cap285000；旧准备漂移/锚点/缺读依赖/缺类型别名FAIL与费用保留。1产品函数+1原夹具精确CAS，保留并行game-link选择器，无新ID/minimum/producer/常驻任务。新UI源码证据另确认407字节函数7处对象偏移一致+0x10，而实际reader仍controller+0x350；这不是仅RVA搬迁，不能放宽校验后读旧布局。完整getter/owner/controller/heap消费及客户端copy/move callee仍缺证；失败私有兼容候选不导入，当前新版睡眠回补、原PID/primary/Continue/手柄仍未通过。无完整main构建/包/部署/现场动作。原件 session-receipt-candidate/published-observer-successor-r4/Closing2/SOURCE_READY.json 与 shared-qualification-observation/import-identity-candidate/ui-schema-shift/SCHEMA-EVIDENCE.json。
+
+
+2026-11-13 壁纸共同睡眠消费后继已精确写主线：Host/素材库存/Ready适配使用公共isSharedPowerLifecycleAdmitted，pending与同代更正均保留撤销；Host与插件增加requestContext以补OFF尚未送达就被Ready替换时的可见性重握。原Host两项39断言、实际客户端接收正反控制/旧context重复拒绝、库存同代pending一项10断言及93项类型依赖通过；原FAIL保留。当前证据Wallpaper-Foreground-Demand-20261102/shared-steam-consumers-20261112/sleep-handshake-candidate/SOURCE_READY.json；本段未改公共power/Steam producer，原生coherent最终水印及跨child SourceLease、公共installation消费整链仍OPEN，不作真实睡眠/CPU/部署通过。
+
+
+<!-- CUSTOM-LIBRARY-PUBLIC-STEAM-INFORMATION-20261113 -->
+2026-11-13：自定义游戏库Host/Worker的Steam安装候选、默认账户和即时运行状态已接共同Steam层。主native唯一生产，独立EXE用同安装来源/SID/会话/持有父链核验的一次性mapping及WM_COPYDATA读取；无新常驻线程、timer或私有失败后路。前台公共steamInformation.get默认mask3，素材库存只需mask1，不默认查询Presence。未知/部分读取不作为离线写入许可；显式root和多账户离线库存保留。
+实际桥43唯一范围分原epoch核收（27协议/解析与16剩余正常场景）、原新IPC17断言、31原素材和13原命令分段核收；未拼接整父PASS。原夹具root前置、路径、完成回执及提交后显式读取已适配，所有FAIL/费用保留。SourceLease仅抽象声明；媒体真实source/cancel由共同Steam owner负责，不授V1或V2能力。无完整产品构建/部署/Steam动作；交下一自然配套包。唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/SOURCE_READY.json与Import/MAINLINE-IMPORT.json。
+<!-- /CUSTOM-LIBRARY-PUBLIC-STEAM-INFORMATION-20261113 -->
+
+
+<!-- STEAM-APPEARANCE-PUBLIC-READ-20261113 -->
+## Steam 外观消费公共 Steam 层（2026-11-13）
+
+Steam 外观已接回唯一公共 Steam 层。身份由现有 Observer 的不可变快照提供；PowerShell 不再枚举 Steam、不再查找 Steam 的 8080 监听者或自建 WebSocket。CSSLoader 的 35821 RPC、主题文件、编辑器保护与唯一常驻仍由外观模块负责。
+
+公共 `native/steam_document_read.h` 复用原传输锁、监听者验证、进程租约和有界 socket，只接受三类文档的样式属性计划。来源、实际页面、文档代次与最终目标集合均复核；请求绑定 PID、出生时间、根目录、进程/账户代次及电源代次。未知事实不当作未运行；读取是顺序批次，缺少菜单文档保持 incomplete，不能当作三槽全部确认。
+
+原 CSS worker 映射承载 typed 请求；新旧 native/Web/PowerControl 协议必须配套，缺配套明确拒绝，不退回私有读取。不新增 Steam producer、常驻线程或巡检定时器，不启动/重启 Steam、不切模式、不抢前台。七项主题及布局、参数与特效策略未改。
+
+本次精确导入 8 产品文件、19 原夹具/导出支持文件；保留并行 main 和公共故障诊断。实际公共身份 13、文档 34、浏览器定向 20、前端到离线脚本 12、service 37、模块 10、离线配置 78及导出配套 4 项分别有原件，不能拼成整父 PASS。最终两份原生实际编译输入为 368/366、链接库 12/9；SDK 声明遗漏修复前的失败保留。9 个核收 Job 关前均为零，VCTIP 工具回收单列。历史默认组按原 epoch 引用。
+
+仅源码配套就绪，未完整产品构建、打包、部署或操作真实 Steam/CSS；真实视觉、现场 CPU 和物理睡眠另验。下一自然构建收录整套来源，不追改旧包。原件：`Testing/YMCC/Evidence/SteamAppearanceSharedLayer-20261112/SOURCE_READY.json` 与同目录 `MAINLINE-IMPORT.json`、`SOURCE-VERIFICATION.json`。
+<!-- /STEAM-APPEARANCE-PUBLIC-READ-20261113 -->
+
+
+2026-11-13 壁纸公共 installation 消费已写主线：steamMediaSource.ts 移除私有registry入口，消费唯一steamInformation.get mask1；保留manifest身份/目录核验与共用缓存，不请求Presence，也不将metadata当current授权。独立核公共SOURCE_READY的7个引用、3产品头与实际IPC函数；已有31/38库存/身份回执通过实际bundle函数独立复现核收，未重跑；当前28文件类型闭包另通过。原fixture只合并库存分支，后来的共有Steam/power案例保留。
+
+V2三撤销源+提供者寿命只完成私有消费边界准备：真实三事件子进程20/21/22、provider退出且事件均未signal的撤销、owned句柄逐一关闭/Job零及mode-only坏例分段核收，旧失败和冷全局handle变化UNKNOWN保留，不拼整父PASS。sourceReady=false，实际acquireSourceV2/export/import和默认Supervisor/Worker仍OPEN；不造公共工厂、不新增私有worker/线程/轮询。原90秒账最终76.615秒含保守准备封存，详见Wallpaper-Foreground-Demand-20261102/shared-steam-consumers-20261112/source-v2-child-candidate/HANDOFF.json。新installation源见同层installation-consumer-candidate/SOURCE_READY.json；未部署、完整Native/包或实机CPU/睡眠验收。
+
+
+2026-11-13新版布局后继：开发侧固定离线capstone5.0.6，未改产品依赖。完整copy/move1661字节347指令+rep16字节/43跳表项/82引用私有合同已形成，原Public模块及loaded健康/坏目标控制保持通过；当前完整检查仍FAIL，候选不导入。拒绝点已从0x991fea前移至0x9d35dd/0x9d3615，实际67字节tick尾部 [rsi+0xc80]→[rsi+0xc88]，账号getter同形候选 -0x1c66→-0x1c6e但各版3个且归属未闭。UI已有7处字段+0x10，不能只改地址/日志放行旧reader。旧UI短getter无命中原因为未扫描，不能称不存在；caller已定位当前8字节globalLeaf，纠正独立封存。一次原图字符串诊断得到4同文+1utlvector.h构建根变化，未授资格。原17/默认29/整轮未重跑；两新完整当前定向FAIL与原件/费用保持，6自有Job关前0，编译工具回收另列。无新主线产品写入/部署/现场动作，目标ACTIVE。原件 shared-qualification-observation/import-identity-candidate/complete-research-closing/INTAKE.json、REPORT.zh-CN.md、EVIDENCE-CORRECTION.json。
+
+
+<!-- STEAM-PUBLIC-SOURCE-SUCCESSORS-20261113 -->
+2026-11-13 后继：公共 ModeSource 单向撤销核心两文件已精确合入，14 用例/394 断言、2 旧源缺边对照、1 after-await 反例、3 无效选择和 9 自有自然 Job 关前零独立核收；原读窗/默认夹具不改，身份+power+跨 child 仍 OPEN。公共安装/身份 metadata 三头、WM_COPYDATA 与 steamInformation.get 及库消费者已由对应 owner 精确导入，43 桥按 27+16、13 命令按 9+2+2、31 素材与 IPC17 各原 epoch 分列，旧父 FAIL/OPEN 不改；SOURCE-PROJECTION 明确命令夹具受控 public read 边界与实际编译对象复用，不能拿 Current15 pins 代签真实 main 传输。Decky bootstrap/watch/exception event/ModeRead 错误源与原动作 trace 已各自有界配套，不新增探测/恢复次数/周期线程；全产品构建、部署与现场降频未证。
+
+游戏识别与 Steam 是两个独立唯一层，共同 query 只是消费者。联合 get 固定纯缓存，refresh 是一次明确需求经唯一 TrackerOwner token 进入原 GameLink worker，完成仅触发 get，避免 Unknown 自动刷新闭环。Canonical fact key 不放 feature 私有 config/doc/全局选择世代；请求/动作 guard 独立，显式前台 B 不借全局 A 世代，OFF 只撤本请求。公共 Tracker/ProcessFacts 最终候选和一次 producer+joint 验证由指定 owner 接续，菜单仅映射独有消费，未验头不产品 include。SourceLeaseV2 的三独立取消 event+provider 生命句柄纯合同已固定，实际 native finalCurrent/最早同步信号须消费睡眠协调层，缺端口默认 Unknown，不把 JSON/Ready+generation 当许可。当前 native 完整 client/typed UI 资格仍未闭，不由历史 game 关联授 Running/Continue/睡眠权限。
+
+唯一项目后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R2.json；原件、费用与所有 FAIL 保留，整体 ACTIVE。
+<!-- /STEAM-PUBLIC-SOURCE-SUCCESSORS-20261113 -->
+
+
+2026-11-13 原生布局后继：账号getter归属已由精确CUser RTTI/IClientUser PMD/slot10闭合（当前0xcfed0，接口0x1e78，account仍0x20a），不再沿用三个同形候选未区分的旧结论。实际构造/完整walker同root交叉核对用户表0x1080/1090→0x10c8/10d8，完整lookup/构造核对记录表0x2568/2578→0x2570/2580；record stride0x330、GameID+8及predicate非RIP字段保持。恢复成员精确类型CUserAppManager现位于CUser+0x3870（旧0x3800），原CUser回指仍+0xd8；不同幅度不能全局+8。主线实际reader/callback仍旧布局，当前完整client/UI资格仍FAIL，不能只改地址放行。两准备归属FAIL和费用保留，原17/29/default未重跑；本阶段无产品写入/部署或Steam/游戏/YMCC/设备/睡眠操作。事实已发送统一Steam层和三点菜单任务；非菜单因果或Running恢复证明。唯一后继：Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-qualification-observation/import-identity-candidate/typed-layout-closing/INTAKE.json及REPORT.zh-CN.md。目标ACTIVE；下一缺边为实际非虚publisher方法/owner字段、真实reader/OSD配套及loaded证明。
+
+
+<!-- WALLPAPER-NATIVE-SHARED-SOURCE-CONSUMER-20261113 -->
+2026-11-13 壁纸原生前台消费已精确写主线：reader 使用共同 observedSource/current/modeRevision，默认0为Unknown；Facts记公共版本以区分同文档真实撤销重发，两个尾回调只Wake并水位去迟到，不异步撤掉新票。最终睡眠事实直接使用正式公共 capturePower/powerCurrent；物理窗口、held UI/root、会话、OFF、AC/DC及末端检查保持，无新Steam reader/轮询/线程。
+
+原ForegroundBoundary分来源10/57、连续性后继2/12、正式power配套3/20、默认0后继1/7及4个必要反例分别核收，不拼完整父PASS，不重跑Mode14/睡眠producer原组。20自有Job关前零，VCTIP工具回收单列；SDK声明/准备路径/PE元数据/公共ABI晚变FAIL全部保留，补pin只复编复现已测PE，无业务重跑。两产品文件保留并行字节。整链仍ACTIVE：默认后台membership私读、公共V2跨child factory/export/import仍OPEN，不引私有默认路径。未完整产品构建/打包/部署或真实Steam/睡眠/CPU验收，交下一自然Native/包。原件Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/shared-steam-consumers-20261112/foreground-source-candidate/SOURCE_READY.json及同层MAINLINE-IMPORT.json；整体验收接REPORT-ForegroundShared.zh-CN.md。
+<!-- /WALLPAPER-NATIVE-SHARED-SOURCE-CONSUMER-20261113 -->
+
+
+<!-- STEAM-BOUNDED-TRACE-CANONICAL-SUCCESSOR-20261113 -->
+2026-11-13 公共 Steam 稳定性后继：Decky 动作编号/开始归属、bootstrap/watch 异常与模式失败已按原日志写者有界接续。已核收无关 created 噪声导致误断链的旧源反例及原 89 断言；混合回调噪声正式 r2 的原 96 断言另有来源，首 89、中间 94 与旧失败保持各 epoch，不跨候选拼整父。仍保留 32 相关队列、4096 包、2500ms/7s 和原恢复额度。既有两份选定现场日志未命中该原因，不归因既往现场，也不把重绑/Loader/页面/BPM 操作都称作整个 Steam 进程重启。普通导出已包含原 decky-sidebar.log 及轮转；新字段须由配套新产品实际产生。
+
+共同 tracker 私有源码已固定并独立核 57 引用：canonical fact 与 request/action 分离，8 个 fact/32 个 request 有界，同 key 单次执行；executionEligible 在 acquire 前只读内存并保留其他订阅者，真实负源 metadata 独立于阳性 association。ProcessOnly 可从实际原 bounded readTail/track 冷观察，AccountBound 在缺真实 typed proof 时明确拒绝。唯一游戏 owner 的原生 39 检查已有实跑原件；一编译后代被强制回收且身份 UNKNOWN，工具/库闭包和后继 wire/host/type 另核，不改旧原件、不称自然退出。公共 import/SOURCE_READY 仍 OPEN；菜单 cold 同击接续须由公共 dispatcher 有界完成，不 refresh 后静默退回原动作，不复制私有 parser/获取器或授 Running/Continue/睡眠权限。
+
+外观公共文档消费者与壁纸前台实际 ModeSource/revision 和 capturePower/current 配套已由各 owner 精确导入。V2 决策改为直接消费原睡眠 Registration，前稿 Steam power 影子镜像退为历史；三独立事件加 provider 生命句柄保持，第三事件也可表示本请求撤销。重复 cancel 的完成信号窗口须等原 owner 正式后继，不消费未知新字节。默认后台 export/import/Supervisor、same-tuple 身份更正通知、完整 native/包/部署及实机 CPU/自愈频率继续 OPEN，无自动现场操作。唯一后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R3.json；原件/费用/FAIL 均保留，整体 ACTIVE。
+<!-- /STEAM-BOUNDED-TRACE-CANONICAL-SUCCESSOR-20261113 -->
+
+
+2026-11-13 发布/getter后继：真实唯一56字节part+CHAININFO定位新publisher0x4f8240，全部8部1357字节308指令（旧1185/272），栈帧188→178、原全局用户枚举通知改用manager+d8所属CUser；方法先前全局UI投递仍在，不能把新callee未核当恢复完成。getter ABI1候选已实际编staticlib/DLL；原13场景×两位移，static/DLL各26实际getter_runs/32070断言通过。首次JSON转发头C1083及费用保留，后继复用3成功native步骤仅续fixture；8自有Job均关前0。候选仍私有SOURCE_READY=false，主线member3800/旧getter/prologue188及embedded尚未配套，完整当前资格/实机仍OPEN，动态/半静态路线保留。三点菜单原DD2窗口无同原实例finished job不作因果排除，type2源码门不代签现场误分类。原17/29/default未重跑，智能体497秒/超17秒与并行重叠UNKNOWN均保留，原执行账追加180秒到705秒，不豁免历史费用。无产品导入/部署或现场操作；目标ACTIVE。后继Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-qualification-observation/import-identity-candidate/publisher-getter-closing/INTAKE.json及REPORT.zh-CN.md。
+
+
+2026-11-13 当前布局配套后继：root/vendor共用纯布局数据，原28/102断言、21/84及旧Public健康对照；UI原17+旧Public共18项分别核收。新getter/publisher/member3870/帧178已配套trial DLL→精确嵌入头→host编译，复用已验ABI1库；原engine12定向+6当前边界通过，错误库摘要实际拒绝。32真实准入Job与2未准入空Job关前0分别记录；两次准备FAIL/UNKNOWN及费用保留，仅续未到达用例、未重编已成功输出。仍是私有exact-pair动态候选，SOURCE_READY=false；当前半静态完整graph/loaded/callee及实机Running/primary/Continue/手柄OPEN，不能称通用或无缝恢复。原17/29/default未重跑，无产品导入/部署或现场操作，目标ACTIVE。唯一后继Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/owner-scoped-readers-pair-closing/INTAKE.json及REPORT.zh-CN.md。
+
+<!-- GAME-STEAM-TYPED-CONSUMER-AND-LIFETIME-20261113 -->
+2026-11-13：共同游戏/Steam消费端新增有界冷读衔接，两个唯一事实层仍各自拥有游戏PID/EXE与Steam身份。显式前台B使用自己的闭合scope，和全局refresh共用原GameLink工作线程及唯一TrackerOwner；阳性cache hit不发demand、不等待、不读时钟。冷读的750ms绝对截止为本次新策略；结果分缓存/本次关联、真实负源、不可用、超时和取消，只有原菜单caller持最后UI/Host/焦点门并执行一次，worker不持栈callback或派发动作。
+
+原Observer/ProcessLease/TrackerOwner/readTail的8项新场景30断言及单语义反例已通过；transport为有界测试端口，不冒充原queue整组重跑。原get/capture全文前缀保持。客户端read/refresh可选signal，等在途查询共用IPC、独立退订，最后一位退出才取消IPC；公开纯客户端epoch失效订阅避免页面复制源事件清单，无新增timer/线程/事实缓存。取消5组及后继epoch2组分别按原件核收，reader实际类型闭包通过；旧提取noexcept准备FAIL、fixture getter适配FAIL保留，不拼成整父PASS。
+
+仅公共header和reader已精确写主线；菜单一次button消费、Decky非阻塞可选显示由各owner独立后继，尚未用其结果代签。本段未完整当前main编译/链接、新包、部署或现场Steam操作。唯一证据：Testing/YMCC/Evidence/SteamGameIdentity-20261113/cache-consumption/MenuColdDispatcher-20261113/SOURCE_READY.json及MAINLINE-IMPORT.json；wholeGoalComplete=false。
+<!-- /GAME-STEAM-TYPED-CONSUMER-AND-LIFETIME-20261113 -->
+
+
+2026-11-13 UI结构后继：8完整家族/10parts/139范围/338引用/6导入候选，原公共文件与合成loaded19项实际通过；另只续完整globalLeaf移动4项，正式qualifier按incoming定位新位置，旧引用/破坏拒绝，未用SHA授资格。两次新增图分类FAIL与费用保留，8自有真实Job关前0，未重跑19/原17/29/default。发布callee父级逐字再核：metadata148B仍有engine1410→1458缺owner；旧CUser通知完整5parts461B/127指令而当前85B/28，不能只改RVA。agent整体192866/180000ms超12866保留并关闭。仍私有SOURCE_READY=false，client/publisher完整图/loaded和现场Running/primary/Continue/手柄OPEN；新UI头不得混用旧trial/pins。无产品导入/部署/现场操作，目标ACTIVE。唯一后继QamFocusReview-20261112/owner-scoped-ui-callee-closing/INTAKE.json及REPORT.zh-CN.md。
+
+
+<!-- STEAM-PUBLIC-FACTORY-TRACE-R4-20261113 -->
+2026-11-13 公共 Steam 后继：联合游戏/Steam只读通道已由两独立唯一owner配套写主线；cold typed口/单订阅取消/实际retention与weak运输清理各保留独立定向epoch，不授Running/Continue或动作权。菜单private四参接线已结构核，实际唯一button/freshUI/noReplay及Decky可选上下文非阻塞显示仍由各owner收口；已复现可选get丢回包拖住原三业务读取，修复尚不代签。
+
+本协调独立核收watch103及健康writer20：523关键引用、两watch图各374源/15库、两writer图各402源/7库；生成TU已从固定源码与generator AST纯字面量完整重建。原源码对照、5个当前writer定义、Job关前零、未启动UNKNOWN和后置核收拒绝均保留，未重跑已过业务。128次健康缓存观察写128→1行，仅此日志行数；故障/未知/实际耗时/Steam与power边沿/动作因果保持，不归因旧现场、不称整机CPU收益。
+
+SourceLeaseV2两头及main六处生命周期接线已fresh独占CAS写回，反向hunk严格复原其余并行字节。独立core2case/28与suffix10case/308、lifecycle27/单guard反例分epoch；必要固定main语法编译实际1398include/零缺项通过。原root0/raw businessSucceeded=false和vctip限定工具回收/Job0分列，不冒称自然退出、全main当前后继或完整link/包。无新producer/轮询；原Native Registration三事件加provider生命句柄，第三事件也可为本请求撤销。
+
+同tuple错误恢复通知确有漏口，正在原Observer/消费者私有补语义publication回调；默认壁纸remote/HANDLE_LIST/长child、剩余日志reader各scope、离线root最终写、当前native/typed完整图、配套包/部署及实机频率CPU仍OPEN。无Steam/游戏/设备/真实睡眠动作，整体ACTIVE。正式后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R4.json；可读追因说明 FailureDiagnostics/RECOVERY-TRACE-20261113-R4.zh-CN.md，原件/费用/FAIL不改。
+<!-- /STEAM-PUBLIC-FACTORY-TRACE-R4-20261113 -->
+
+<!-- DECKY-OPTIONAL-STEAM-DISPLAY-20261113 -->
+2026-11-13 Decky 侧可选 Steam 元信息改为独立异步展示：丢回包不阻塞 TDP/输入/帧率/监控的原核心读取。共享 reader d984/7895 仍唯一；本侧只保可见 DTO，隐藏/源 epoch/游戏 ABA/电源代次/停止撤销自身订阅，晚回只使原 relay 重绘一次，不 warm、不新建 timer、不改变动作准入。
+
+原真实 host/relay/reader 六个精确场景旧源一过五失败、候选六过，显式监控意图不重放；185 个实际 TypeScript 输入通过。仅一产品文件与两个原夹具精确主线写回，5 个含失败的实际准入 Job 关前零。准备/模块接线/首类型漏 JSON 的 FAIL 与费用保留；不重跑公共 39/25/host8 或默认整组。后继证据 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/joint-read-stall/SOURCE_READY.json、CLOSING.json。Bootstrap/watch async socket 的泛化错误与公共 CDP socket 关闭码是两条覆盖，前者仍 OPEN。未整包构建/部署或操作 Steam，实机恢复频率与总 CPU 收益未证，目标 ACTIVE。
+<!-- /DECKY-OPTIONAL-STEAM-DISPLAY-20261113 -->
+<!-- STEAM-MENU-PUBLIC-FACTS-20261113 -->
+2026-11-13 三点菜单已接公共 Steam 层：私有 tracker 解析、缓存和进程信息采集移除，消费统一历史关联及持有的 Process/HostLease，游戏识别层仍独立确认本次前台。屏幕三点与快捷键沿同一动作入口；首次冷查询使用新 750ms 观察子阶段，入队前固定截止，原 QAM 三秒后继不续期。超时/取消/未确认返回未派发，实际源负结果经当前进程和鲜 UI 账户门后才保留原合法回退一次；未知派发不重放。18 菜单动作场景/29 断言与一个精确语义反例已核，公共组按原 epoch 引用，四产品文件精确写回并保留并行 main。未完整构建、打包、部署或操作真实 Steam/游戏；不授 Running/Continue/睡眠权限。原件 `Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/QamSharedMenuAction-20261113/run-002/CLOSING.json`；消费接线与写回回执位于原菜单项目 `shared-steam-facts-requirements/canonical-menu-candidate-20261113/dispatcher-integration/`。
+<!-- /STEAM-MENU-PUBLIC-FACTS-20261113 -->
+
+
+
+2026-11-13 record/发布组件后继：13完整记录家族/29parts/350范围/1236引用/28导入，原合同与精确复用loaded前缀28项核收；修正新增graph把可变.data初值当运行常量的误拒，旧record/UI反例与新正常/坏RTTI共6边界实跑，旧UI19/4保留原合成范围不重跑。发布变化6家族17parts127范围/329引用/8导入与record合并另12项通过，但完整publisher仍拒绝，agent时点37代码/186非代码当前对应OPEN，需先核record重叠/实际消费。engine1458经typed engine主槽14→9342d0返回赋值及COL/PMD闭到CRemoteClientManager、secondary+8虚槽318→939a60，live/槽语义未证。9afc20/9b08c0校正为更支持诊断打印的静态角色。全部准备/编译FAIL保留，5实际Job关前0；agent340995/360000ms收尾。原账AI追加180秒至885秒一次，端到端准备UNKNOWN保留。仍私有SOURCE_READY=false，无导入/部署/现场动作，目标ACTIVE。后继QamFocusReview-20261112/owner-scoped-record-publisher-closing/INTAKE.json及REPORT.zh-CN.md。
+
+
+<!-- STEAM-BOUNDED-CLOSE-ASYNC-CONSUMER-R5-20261113 -->
+2026-11-13 公共Steam后继：已有同步CDP关闭帧仅补一次实际数字close status，查询失败保unknown，Receive错误保原WinHTTP码且不query；123字节临时reason不保留/解释，不增请求/重试/恢复额度，原reason/mutated/dispatched/noReplay保持。原同一close用例正反（真正当前public控制唯一actual-close-code失败）、各366源/9库与4Job0已独立核，1产品/2原夹具fresh独占CAS主线。此范围不包含Decky独立AsyncRequest/BootstrapWatch异步socket，后者仍OPEN。
+
+Decky可选共同元信息不再阻塞基础snapshot，原6场景候选6/旧源1通过5语义失败、185实际类型输入及5Job0已独立核；1产品/2原夹具精确写回，隐藏/换游戏/代次退本订阅，晚回不warm/不重放。菜单owner也已正式导入公共事实消费者3头+main8小hunk，原18/29、拒绝反例及固定main1398include均有正式原件；本协调已核身份并交游戏owner独立只读核，不冒称已完成独立菜单消费或现场。公共producer/typed/queue及其它已过组均未重复执行。
+
+原V2 factory导入后二头/六block再次只读核同；主语法快照后继分列，不追编。阶段分配600000ms、closing实耗621827ms超21827已如实保留；原累计1370914/总1500000，未追改分配/退款。原失败和工具强制收尾继续保留。same-tuple通知仍私有，默认remote/壁纸/长child、其余日志reader/离线root、完整包及实机频率CPU仍OPEN。未部署或操作Steam/设备/真实睡眠。唯一后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R5.json；可读说明 FailureDiagnostics/RECOVERY-TRACE-20261113-R5-SUPPLEMENT.zh-CN.md，整体ACTIVE。
+<!-- /STEAM-BOUNDED-CLOSE-ASYNC-CONSUMER-R5-20261113 -->
+
+<!-- GAME-STEAM-CONSUMER-TEMP-GOAL-COMPLETE-20261113 -->
+2026-11-13 后继核收：本聊天临时“唯一游戏 EXE/PID 层接入独立唯一 Steam 层”的源码消费任务已完成。共同 get 保持纯缓存，显式 refresh/菜单冷读共用原唯一 TrackerOwner 和 GameLink worker；历史关联不授动作权限。菜单三个头/八处原 main 接线及 Decky 非阻塞可选显示已由各 owner 精确写主线，并由游戏层独立读回核收，私有 Steam 解析/缓存已撤换，迟到或取消不重放，侧栏隐藏只撤自身订阅。
+
+原 1001 次缓存零发现与同目标单次物理观察、后继 typed 八项及单有界内存修复分别保持原 epoch；菜单十八场景二十九断言和精确语义反例、一次固定完整 main 语法 1398 输入，Decky 六场景/185 类型图已核原 raw 与当前接线。只读核收未重跑业务或追赶并行 main；主线历史整文件 hash 不当当前来源证明。当前完成审计：Testing/YMCC/Evidence/SteamGameIdentity-20261113/cache-consumption/MenuColdDispatcher-20261113/GOAL-COMPLETE.json；菜单独立核收 MENU-FORMAL-CONSUMER-INTAKE.json，Decky DECKY-CONSUMER-INTAKE.json。
+
+这里只关闭上述临时源码接入目标；整个 Steam/睡眠/typed 资格项目、下一自然完整构建/配套包、部署和真实游戏/睡眠验收仍由各自任务保留，未测安装版 CPU 百分比。所有旧 FAIL/UNKNOWN 与费用不改。
+<!-- /GAME-STEAM-CONSUMER-TEMP-GOAL-COMPLETE-20261113 -->
+
+<!-- DECKY-ASYNC-NUMERIC-TRACE-20261113 -->
+2026-11-13 Decky async WinHTTP 的现有回调/WS同步失败带回原操作数字错误码及源阶段，经原 steamFailure/failureRecord 对应原动作编号与恢复 episode。原 reason、额度、截止、取消和 callback lifetime 不变；无新探测、timer、线程、重试或重启。真实回环直接消费者11项，后继监听/日志消费者7项分别通过，产品头逐字相同；原双空元信息负例、首新测试误消费通用record的FAIL及费用保留，后继只续watch7。
+
+三产品头/两原夹具精确写主线，5个实际编译图与10个实际Job关前零，已核身份的编译工具强制收尾分列。仅初始inject catch编译/源码核，不冒称真实Steam/Runtime全链；未重跑默认103或完整bootstrap，未整包/部署/操作Steam。优雅WebSocket关闭码仍单列OPEN，公共CDP关闭码不覆盖本async通道。证据 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/async-transport-failure/SOURCE_READY.json及CLOSING.json。实机自愈频率/CPU仍未证，目标ACTIVE。
+<!-- /DECKY-ASYNC-NUMERIC-TRACE-20261113 -->
+
+<!-- DECKY-ASYNC-CLOSE-STATUS-20261113 -->
+2026-11-13 Decky自身async通道的优雅关闭码补齐：实际收到CLOSE后，原串行owner对原句柄只查询一次。1000/1011/空1005按真实回执记，固定123字节reason不进日志；查询失败保持unknown且不输出部分写入的code。当前Windows对1012在交付CLOSE前返回12152，direct/watch真实观察均保留原WinHTTP数据，不伪造close。原reason、截止、取消、callback lifetime与恢复额度不变，无新网络探测/timer/线程/重试。
+
+原消费者direct60/watch25定向通过；原bootstrap缺元信息对照引用、watch新支持1011反例实跑，旧错误预期与新测试auto编译FAIL/费用保持，7实际编译图、15实际Job关前零，编译工具强制收尾单列。仅1产品头/2原fixture精确主线写回。上轮11/7及默认完整组/Runtime全链不重跑，未真实Steam/整包/部署/物理睡眠；本机留存旧writer三路健康不算新源码收益。完整目标ACTIVE，实机CPU和恢复频率未证。后继 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/async-close-status/SOURCE_READY.json及CLOSING.json，取代较早“本侧关闭码OPEN”的当前状态，历史原件不改。
+<!-- /DECKY-ASYNC-CLOSE-STATUS-20261113 -->
+
+
+<!-- STEAM-SEMANTIC-NOTIFY-ASYNC-TRACE-R6-20261113 -->
+2026-11-13 公共Steam后继：同Session元组内的注册PID错误、presence及Windows会话已知性恢复已通过唯一Observer语义publication回调接到原有界异步队列，旧成功通知只有投递成功才推进；revision/observedAt诊断扰动不warm。刷新提示lifecycle争用try_lock立即拒绝，避免callback/stop/join相互等待。当前Observer/main两hunk/Deckyhost小片段/原typed生成器4文件配套fresh独占CAS，保留此前optional显示退订逻辑。独立原40、停止后继12、UI4分epoch；必要当前main1398/type185、当前callback原生7事件回放实际已核。真实host/defaultreader后继另有原件，不拼新整父。
+
+菜单18/29与原语义反例/固定main1398已由独立producer核收，当前3头/main8片段保留，私有菜单parser/cache已去除；这不代表GameLink/sleep所有scope迁完。Decky异步numeric原11/watch7已前向补完源码投影边界核，原459980/360000超限FAIL仍保留，仅9源码引用、不重哈3059或重跑。异步CLOSE后继另独立核560引用/7实际图/15Job0、direct60/watch25；查询成功才用实际code，失败保持unknown，123字节reason不进日志。当前provider在交CLOSE前的12152仍WinHTTP，原reason/deadline/cancel/归还/恢复额度/noReplay保持，未新增探测、重连循环或线程。
+
+较新Win5-213009导出仅离线观察868Decky行，原时字面跨11/11晚至11/12 21:30；reconnect阶段5、页面重建/重开大屏阶段0、新trace0，不能由阶段数推整个Steam重启或新源码实机收益。普通新日志须由下一自然配套产品运行产生。默认壁纸remote/HANDLE_LIST/长child、其余日志事实/离线root、完整Native/Web/包及实机继续OPEN；无部署或Steam/设备/真实睡眠动作，整体ACTIVE。唯一后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R6.json及FailureDiagnostics/RECOVERY-TRACE-20261113-R6-SUPPLEMENT.zh-CN.md，旧FAIL/费用/UNKNOWN不改。
+<!-- /STEAM-SEMANTIC-NOTIFY-ASYNC-TRACE-R6-20261113 -->
+
+<!-- DECKY-HEALTH-OBSERVATION-FAULT-20261113 -->
+2026-11-13 Decky真实Runtime的健康读取异常误重开恢复轮次已复现并修复：原catch只有reason，默认required/paused=false被当资格丢失；现仅暂停原观察，原episode/stage/截止保持。连续异常/实际读取返回只记两个诊断边沿，不复制异常原文，不把读取返回当三路恢复；无新线程/timer/探测/动作权限或额度。
+
+相同Steam身份下实际生产Runtime（无legacy）注入16次异常，原决策reconnect轮次[1,2]/误stopped[1]/recovered[2]，候选[1]/无误停/recovered[1]。精确1场景7最终语义检查，19健康读取，admission始终拒绝，preflight/UI动作/Loader/Steam均0；OFF正常join且晚读拒绝。5实际Job关前0，工具强制收尾单列；混合EOL准备拒绝和首夹具Windows/Winsock顺序编译FAIL及费用保留，后继只修头顺序续测。12最新Win5日志未命中此异常，不归因现场。仅1产品头/1原夹具精确写回；原阶梯类/期限字节未改，默认完整组/整包/部署/物理睡眠/CPU与现场频率仍OPEN。目标ACTIVE。后继 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/health-observation-fault/SOURCE_READY.json及CLOSING.json。
+<!-- /DECKY-HEALTH-OBSERVATION-FAULT-20261113 -->
+
+
+2026-11-13 完整当前Steam私有候选后继：原正式文件/合成加载17项（含旧Public/完整getter移动）保留原epoch，最后19项缺口已逐角色核收，原237范围无未解释项。两段含LF文本从8字节补到完整37/49字节；四个真实叶函数边界pdata保留，修前5项证实漏口、修后仅受影响18项通过，原编译/准备FAIL不改。当前发布图21家族55parts357范围1003引用14导入；新UI/record/publication三头成套加入embed sourcePins，DLL/内嵌头/恢复Host实际配套编译5Job0，另定向5Job0，旧17两Job仅引用。Remote槽直接遍历/子谓词角色已核，间接focus仍OPEN；agent超3005ms保留。原账自主加120秒至1005秒一次，端到端准备UNKNOWN不豁免。仍私有SOURCE_READY=false、无产品导入/部署或Steam/游戏/设备/睡眠动作，目标ACTIVE；后继QamFocusReview-20261112/owner-scoped-current-qualification-closing/INTAKE.json及REPORT.zh-CN.md。
+
+
+<!-- STEAM-HEALTH-READ-EPISODE-R7-20261113 -->
+2026-11-13 Steam/Decky恢复稳定性后继：相同Steam身份的健康读取抛异常不再被默认required=false当作资格丢失，改为原paused观察路径，保原episode/stage/due/次数；真实OFF/退出、安全停止及已验证会话变化仍先处理。原阶梯头before/candidate/current逐字相同，paused只调check_，不改deadline/attempts/episode、不派动作。异常连续段及读取返回只记两个固定边沿，原文不入日志，返回不等于恢复成功。
+
+已独立核443关键引用/实际原Runtime非legacy单场景7项、两图各386源15库及5Job关前0。19读含16异常，旧源reconnect[1,2]/误停[1]/recovered[2]，候选[1]/无误停/recovered[1]，预检/UI/Loader/Steam动作0，真实OFF后停与晚提示拒绝均有原件。跨原截止的Runtime异常未另实跑，只按原未变源码核边界；原准备/编译FAIL、费用和工具强制收尾不改，default整组未重跑。
+
+只导1产品/1原夹具，原公共Steam通知、唯一事实与独立游戏owner保持。不据此归因历史掌机，也不宣称安装版CPU/自愈频率收益；完整Native/Web/包/部署/实机仍OPEN。壁纸远程/default Worker候选正由原owner修sourceUnknown误停整worker，尚不代签；其余日志scope/离线root继续后继。唯一原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R7.json及DeckyHealthEpisodeIntake-20261113/INTAKE.json，说明FailureDiagnostics/HEALTH-OBSERVATION-EPISODE-20261113.zh-CN.md，整体ACTIVE。
+<!-- /STEAM-HEALTH-READ-EPISODE-R7-20261113 -->
+
+<!-- DECKY-AUTOMATIC-HEALTH-TIMER-20261113 -->
+2026-11-13 补显式真实Runtime自动观察/线程CPU边界，产品未再改。故障设置后无手动重连/检查/Observer通知：修复候选实测5000ms原evidence cadence再次读取，随后自动发现健康返回，同episode1；10016ms测量窗仅2轮工作循环，总读取4。旧修复前Runtime在6500ms观察窗未再读，不据此称30秒后永不恢复。精确自身worker只读句柄GetThreadTimes差0，退出后该确切句柄已观察结束；0可能受粒度影响，不代表绝对零CPU或安装版峰值/平均通过。
+
+6最终语义检查/2非法选择拒绝、2实际图/6实际Job关前0，工具强制收尾和初准备锚点误计FAIL分列。仅原recovery fixture增--health-observation-timer显式入口及非法选择拒绝，默认阶梯正文/旧fault helper逐字未改；不默认增加长测、不重跑旧7/default。当前Runtime/阶梯头与所执行候选相同；旧7仍按原epoch引用，不将源码相等写成新实跑。无实际Steam/Loader/UI/设备/整包/部署，物理睡眠与现场CPU/恢复频率继续OPEN，目标ACTIVE。后继 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/health-observation-timer/SOURCE_READY.json、CLOSING.json；原账AI按实需追加180秒至1260秒，不退款或改旧原件。
+<!-- /DECKY-AUTOMATIC-HEALTH-TIMER-20261113 -->
+
+
+<!-- WALLPAPER-PUBLIC-V2-DEFAULT-WORKER-CONSUMER-20261113 -->
+2026-11-13 壁纸默认后台已接公共SourceLeaseV2：Supervisor一次捕获，原headless入口消费3个SYNC事件副本+QUERY_LIMITED/SYNC provider+只读snapshot mapping的五项HANDLE_LIST；校验同一held父PID/birth、原directParent/session、安装路径/文件身份/SID，并保持原token/挂Job后Resume/超时/优先级。只改专用副本继承位，通用继承窗口共用进程内锁。原lease持至实际root/成员signalled及Job0，异常同账保留。Worker三处私有RegGetValue移除，无私有回退；来源Unknown在pending及verified快捷方式均按原20秒只延期本lane，其他下载继续，OFF/power/取消门保持。状态文本与backgroundSteamSourceProtocol=1/原导出源码声明配套。
+
+原私有child8不重跑；真实factory/default跨child7/109、2必要坏例、exporter4、原两项25/59、诊断失败父前缀72与只续verified9/65、原network自动20.163秒、cacheIO51和当前公共头parent/child Zs335/337分epoch核收，不能拼完整父PASS。42准入Job关前零，另1未准入空Job UNKNOWN单列，VCTIP工具收尾另列；所有FAIL/UNKNOWN及费用保留。crypt32补pin仅复编8个PE独立字节复现，无业务重跑。精确导14文件/3新头/39片段，保留并行字节，不加私有producer/Observer/常驻/轮询。
+
+当前源码配套SOURCE_READY，仅本壁纸consumer范围。完整Native/Web/CustomSteamLibrary新包、部署、现场CPU和真实睡眠仍OPEN；下一自然构建须带新主程序+库协议，不追改旧包、不自动启动Steam。原件Testing/YMCC/Evidence/Wallpaper-Foreground-Demand-20261102/shared-steam-consumers-20261112/default-worker-source-candidate/SOURCE_READY.json及同层MAINLINE-IMPORT.json，报告同项目REPORT-DefaultWorkerShared.zh-CN.md。
+<!-- /WALLPAPER-PUBLIC-V2-DEFAULT-WORKER-CONSUMER-20261113 -->
+
+
+<!-- STEAM-AUTOMATIC-HEALTH-OBSERVATION-R8-20261113 -->
+2026-11-13 公共Steam/Decky自动健康观察已独立核收：故障设置后不再手动wake，候选由原5000ms计时器复查并在同episode1发现连接恢复；10016ms仅2轮/总4读。旧源只证明6500ms窗内未再读，不外推30秒以后。454关键引用、2实际图各386源15库、6Job关前0、原6最终检查/2非法入口拒绝已核；未重跑旧7/default或新增编译/业务。
+
+产品Runtime/阶梯头未再改，默认正文和旧fault helper保持；原次数/截止不退款。确切held worker只读GetThreadTimes差0且停后观察同线程退出，0受粒度限制，不代表绝对零/安装版CPU验收。实际跨操作截止仍未另实跑，只保持原源码证明。日志进入/返回边沿不冒称整体恢复，按writer/Steam PID+birth/power/episode/action分因果，阶段数不冒称Steam重启数。原失败/费用/工具限定强制收尾不改。
+
+壁纸remote/default消费者仍由原owner做最后公共接口配套，未代签；其余日志scope/离线root、下一自然完整Native/Web/包、部署和实机频率CPU仍OPEN，无Steam/设备/睡眠动作，整体ACTIVE。唯一后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R8.json、DeckyHealthTimerIntake-20261113/INTAKE.json；追因说明FailureDiagnostics/HEALTH-AUTOMATIC-OBSERVATION-20261113.zh-CN.md。
+<!-- /STEAM-AUTOMATIC-HEALTH-OBSERVATION-R8-20261113 -->
+
+
+<!-- STEAM-WALLPAPER-DEFAULT-R9-20261113 -->
+2026-11-13 公共Steam默认壁纸消费者14文件/39raw hunk已正式主线导入并独立核收：1012引用、42准入Job0及1未准入空Job UNKNOWN、22实际图（含8全PE标准时间戳外逐字重现）分别核。来源Unknown只本lane沿原20秒等待，其他lane继续；原7/109、2反例、前缀25/59、失败父72、修后9/65、network20.163秒/cache51各保原epoch，current335/337只syntax，不拼当前整父。raw锁前重放14/14精确等formal after，原SHA无归一化；五次只读适配拒绝与87.777秒费用保留，业务/编译重跑0。
+
+SourceJob原26只覆盖已有grandchild。已确认captureMembers失败在终止owned Job前返回、retained仅下次runOne收且停止无finalreap；原owner正用原case定向后继修复，暂不授清理SourceReady。late-born/已退成员全HANDLE信号未证；独立source sidecar246.571/180秒超时UNKNOWN保留且关闭，不冒称实际产品反例。正常导入/旧实际raw与本异常清理范围分列。
+
+下一自然包须新Native/Web/库成套及backgroundSteamSourceProtocol1，CPU1已成21:51固定包早于该consumer，不追赶重编或旧包重hash。V2不授offline-root写入，第三取消事件不独断硬件因果。其余日志scope/离线root、配套包/部署/实机CPU与恢复频率仍OPEN，无Steam/设备/睡眠动作，目标ACTIVE。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R9.json及WallpaperDefaultIntake-20261113/INTAKE.json，说明FailureDiagnostics/WALLPAPER-DEFAULT-STABILITY-20261113.zh-CN.md。
+<!-- /STEAM-WALLPAPER-DEFAULT-R9-20261113 -->
+
+
+2026-11-13 当前Steam布局配套已入主线：原完整图17/修后18保留epoch，本后继实际两路engine2项及正版type0/错配拒绝通过；按fresh主线hunk/EOL保留并行字节，20源/来源+内嵌头/原schema receipt/原构建检查共23路径写回，配套重建41695ms。现有build source guard6正反/选择控制已核，后继只修同工具健康同目标/Ready转发两条过时断言，原失败父3前缀及修后20+两反例分epoch，不拼完整23父。实际21唯一Job关前0，584ms有效窗TIMEOUT/强制收尾与全部FAIL保留；原账工具窗加120秒至1125秒一次，准备/重叠UNKNOWN不豁免。Remote子谓词961040完整70B25指令无直接focus写，内部960fd0/间接因果OPEN；agent142776/180000，旧超3005保留。SOURCE_READY仅当前布局配套组件，整体ACTIVE；公共native身份/power scope已反馈唯一Steam层，不私造producer或借候选读发布。无部署或Steam/游戏/设备/睡眠动作，完整main/link/包、Running/Continue/手柄/S3/S4/三点现场仍OPEN。唯一后继QamFocusReview-20261112/owner-scoped-mainline-recovery-closing/SOURCE_READY.json、INTAKE.json及REPORT.zh-CN.md。
+
+
+<!-- STEAM-DISPLAY-OBSERVER-R10-20261113 -->
+2026-11-13 Decky显示订阅异常已独立核收：原2秒timer在applying=true后notify抛错会阻断send/finally，使hasWork不结束、隐藏页面继续要求业务快照；结算notify异常还可成未处理rejection。现仅每个显示listener隔离同步异常，原主动dispose仍可撤后续订阅；独立逐字证明只notify和注释变化，2秒/valid/send/finally/权限/恢复次数及风扇后端保持。
+
+1251关键引用、8Job自然退出且关前0已核。原6故障边界旧失败/候选通过；两detach错误期望修后旧新各2过，保留原父FAIL不合并整父。原21正常/3非法拒绝另核；实际生产TSX+MirrorClient为内存transport/虚拟时钟、硬件写0，无新业务/编译重跑。1产品/1原fixture已精确主线导入，无新ID/minimum。
+
+不将此源码缺口归因为历史Steam重启或宣称现场CPU/恢复降频；下一自然插件包配套，旧包不追编。SourceJob异常捕获/静止账最终回收仍原owner定向后继OPEN，其余日志scope/离线root、完整配套包/部署和实机仍OPEN，无Steam/设备/睡眠动作，目标ACTIVE。唯一后继 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R10.json及DeckyDisplayObserverIntake-20261113/INTAKE.json；说明FailureDiagnostics/DISPLAY-OBSERVER-STABILITY-20261113.zh-CN.md。
+<!-- /STEAM-DISPLAY-OBSERVER-R10-20261113 -->
+
+
+<!-- STEAM-LAYOUT-AND-CLEANUP-R11-20261113 -->
+2026-11-13 公共Steam消费者异常清理具体修复已独立核收：query/Open失败不再阻断准确owned Job终止，同账/source保留，原窗口重取证；原Supervisor仅pending账沿原慢等待reap，stop join后零预算finalreap，不续时间/加线程或健康timer。旧capture-query14终止0/root活/Job非0，候选query/open/stop各14终止1/root结束/Job0/source归还；7Job关前0/两图各336源/407引用与两个产品raw hunk已核，原26/7/109不重跑。scopedFixVerified=true，sourceReady=false；任意历史/后生完整HANDLE census、idle-vs-destructor先后与慢wait实测仍OPEN，永久不明仍准确保账UNKNOWN不启替身。
+
+当前布局组件23路径/25source pins及909312B DLL与embedded逐字配套已核；629引用/21Job0/2图实际3TU，原engine2/pair6含原positive引用/runtime20+2分epoch，旧前缀3/FAIL/TIMEOUT/工具窗费用保持。不授泛用typed UI/Running/Continue，doc/native power scope和Remote间接focus仍OPEN。原MirrorClient fixture补真实model VM依赖：622引用/3Job自然0，旧case前缺依赖失败、原1+18实际用例和不变断言tail已核，只fixture无产品变化。各只读适配拒绝与原费用保留，不拼默认整父，不重跑业务编译。
+
+原05:51包保持旧epoch，下一自然Native/Web/plugin/库protocol1再配套，不追赶重编/旧包重hash。其余日志scope/离线root、完整包/部署/实机CPU与恢复频率仍OPEN；无真实Steam/设备/睡眠动作，目标ACTIVE。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R11.json；说明FailureDiagnostics/SOURCE-CLEANUP-AND-COHORT-20261113.zh-CN.md。
+<!-- /STEAM-LAYOUT-AND-CLEANUP-R11-20261113 -->
+
+
+<!-- STEAM-BOUNDED-LINEAGE-R12-20261113 -->
+2026-11-13 已独立核12原Win5 archive/member SHA及原行：4636唯一/4778重复/0坏。10个UI重建相关记录=5选择+5mutated回执，不是10动作/Steam重启；同Steam10180/birth两回执writer不同，缺构建/账户/预算分支，不认定绕过预算或现场根因。原3client exact case（首含24内存循环）/6Job自然0/654引用已核；只白名单增3原名，业务/默认正文保持，前轮1+18未重跑，当前fixture77455与旧77220分epoch。
+
+实际snapshot/capture仍硬编码user+1e70及Rcx-1c66，而当前已核1e78/20a需差1c6e；两个旧布局保持1c66。原2carrier未覆盖此消费，R11不升恢复通过；原owner私有checked helper/捕获因果日志后继待正式trial/header/host配套，旧e107不追改。预算来源enum/boolean候选仅复用已有读事实锁外记录，无新增IO/轮询/额度，目前未代签。
+
+SourceJob canonical仅两具体Fix SourceReady=true/overall=false，完整历史/late HANDLE census继续OPEN。费用前向更正201435→339619；399619仅deadline偏移，实际373831较命名360000超13831，旧超39619/累计1041674及原件保留，无新业务/编译执行。轻隔离retire由独立owner精确hunk，公共正常门/独立只读controller储备保留，正式拒绝后继待核。
+
+未部署或操作真实Steam/设备/睡眠，整体ACTIVE；捕获实际消费者、预算追因、退休边界、底层资格、剩余日志/离线root及配套包/现场CPU频率继续OPEN。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R12.json；说明FailureDiagnostics/BOUNDED-BUDGET-LINEAGE-20261113.zh-CN.md。
+<!-- /STEAM-BOUNDED-LINEAGE-R12-20261113 -->
+
+
+<!-- STEAM-HELD-ORDER-LIGHT-RETIREMENT-R13-20261113 -->
+2026-11-13 SourceJob持有资源关闭顺序一文件一hunk已独立核收：members.clear→raw thread/root/port/Job→source.reset。旧/候选原release-order各18；旧10Close成功但member关闭时lease已expired，候选首member已signaled且exactJob0，10不同owned HANDLE逐一Close成功时同一实际公共factory租约仍held，之后才expired。386引用/4Job关前0/两图各336源与raw正反hunk已核，不以active0/expired单独签归还，不重跑26/7-109。正式32997 prefix、142104/240000与累计1183778保留；仅该顺序Fix Ready，overallfalse，历史/late全census和Close失败注入仍OPEN。
+
+轻隔离原owner授权根退役已独立核公共边界：14源/说明导入，资格不产票、旧worker/续期和public known分类移除，CDP去light特例，旧JS直接无派发拒绝/kLight生成删，普通owner/cancel/sourcelease/steamFailure/close及独立controller只读储备保持。1457引用/JS6/诊断10/actual111 PASS行、transport366与原普通宏Zs1616/1405输入/SDK权威核。固定db7语法按原epoch；并行main仅fresh退役入口和derived公共消费者逐字核，不追编。4guard最终0但各强制1后代身份未留，UNKNOWN保持，不称VCTIP/自然或完整生命周期/发布；旧成功light组历史NOT_RUN。原失败和只读适配拒绝保留，新业务/编译0。
+
+捕获实际消费/配套新trial与预算来源诊断/原focus夹具仍后继，下一自然包再配套，旧包不重hash冒充新源。无部署/真实Steam/设备/睡眠操作，CPU/恢复频率及整目标继续OPEN/ACTIVE。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R13.json；说明FailureDiagnostics/HELD-RETURN-AND-RETIRED-ENTRY-20261113.zh-CN.md。
+<!-- /STEAM-HELD-ORDER-LIGHT-RETIREMENT-R13-20261113 -->
+
+
+<!-- STEAM-CANCELLATION-RETURN-STOP-R14-20261113 -->
+2026-11-13 SourceJob取消归还续作已由原owner停止，stop回执63ced0...与原order CLOSING/SOURCE_READY身份已只读核。取消+持续清理取证失败+quiet owner恢复没有新runtime原件，维持UNKNOWN；旧21/26、revoked、Job0和order各分离PASS不能拼成此组合PASS，不改既有一hunk/两Fix canonical或整体准入。
+
+原240000ms下报告实际295506ms，超55506保留；已记2778包含在原报告，不另加、扩限、退款或重置。不凭跨phase可能重叠的账制造总额。该阶段0编译/业务/产品/部署/新Steam连接，无旧组重跑；本层只前向封存停止事实，不要求原owner续做。整个公共Steam目标仍ACTIVE，组合、历史/late census与原其它未闭项保持OPEN。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R14.json及SourceJobReturnOrderIntake-20261113/CANCELLATION-STOP-INTAKE.json；R13已接受源码范围与原件不改，无部署/真实Steam/设备/睡眠动作或实机CPU收益证明。
+<!-- /STEAM-CANCELLATION-RETURN-STOP-R14-20261113 -->
+
+
+2026-11-13 实际snapshot/capture/driver后继已写主线9路径：读取self/account统一消费既有布局；OwnerScoped不再误选Legacy；完整14字节getter按已选profile核验，manager仅诊断。新增capture前后原实例/serial及开始Native power代次日志，附加期间无新增callback/IO，未确认detach不升成功；QueryActor/普通IPC初始化早于begin仍OPEN。地址3/捕获身份3/真实relay4断言/driver2分epoch，最终5步41618ms及1配对4326ms、32唯一Job关前0；40声明依赖未变。最终DLL28b16837...，中间876不导；HOST-SOURCE实际生产副本/原offline正文及单vendor pin变更已核，准备与导入字段适配FAIL及私有copy纠正保留。Remote当前960fd0/旧93bf60各109B27指令无直接focus写，两个内部调用与导入间接因果OPEN，不扩树；192898/180000超12898与旧费用分列不重叠相加。仅本配套组件SOURCE_READY，公共native Steam/account/power scope与最终取消、完整main/包/部署、实机Running/Continue/手柄/S3/S4/三点仍OPEN，整体ACTIVE，无现场操作。唯一后继QamFocusReview-20261112/capture-consumer-mainline-closing-r2/SOURCE_READY.json、INTAKE.json及REPORT.zh-CN.md。
+
+
+2026-11-13 原生恢复公共scope需求已按9源20段实际函数/类型交接：候选账户不得升写票，attach前原CUser/完整GameID/record/primary及账号代次current需要公共来源；唯一Native capture/current/observe/粘性撤销保留至清理，不借UI文档。已明确sameScopeNow无accountEpoch及ABI3 Packet/Steam内最后publisher无公共power/account撤销委托，host Current/deadline不能代签最终边界。另原完整QueryActor两路线各4处取消后推进已离线复现，4检查候选14项通过、host编译/归档完成，4准入Job0；Steam调用为端口，真实SDK取消/有界返回和焦点仍未证明。首次重复pin准入UNKNOWN无编译，费用保持；候选未写主线/SOURCE_READY=false，此前9路径28b逐字保持。按公共owner新委托只交源码/类型/需求，不继续构建/采样或私造producer。无现场/部署，目标ACTIVE。唯一后继QamFocusReview-20261112/native-scope-requirements-20261113/REQUIREMENTS.json、CURRENT-BOUNDARY-CLARIFICATION.json、REQUIREMENTS.zh-CN.md及INTAKE.json。
+
+
+<!-- STEAM-BOUNDED-BUDGET-CAPTURE-INTAKE-R15-20261113 -->
+2026-11-13 有界恢复预算追因已独立核收：原22预留对照的业务/双份全文/IO及current次数不变，另1最终取消场景分epoch；固定enum/布尔/已有前端hash锁内捕获、锁外附加到原回复，不新增logger/查询/轮询/重试/额度，reserved不等于派发。原核收中no-new-logger条件assert曾为空操作，已以独立SOURCE-GUARD-SUPPLEMENT补实际三hunk检查，旧核收/纠正不覆盖。完整private-child IPC/Runtime原显式variant仍OPEN。
+
+轻隔离退役的两原focus夹具各profile160断言与原负例已核，父FAIL/第五后继和惰性metadata边界分列，不授实际foreground/input。捕获组件原32真实Job（19自然/13精确VCTIP收尾）、713引用、最终2TU421/339及9库与原sourceDependencies集合已独立核；9路径/25pins/28b DLL引用原sidecar配对，不重做。只读before历史字段/arguments pin两次适配拒绝及费用保留，无业务/编译重跑、不拼跨epoch整父。
+
+原生9源20完整片段需求已核：无UI-document依赖的只读账户scope、原Native power Registration持至清理、ABI3最终撤销委托仍缺；RegistryCandidate/UiLocal/诊断代次不升级写票，QueryActor四Current候选仍私有。R14取消+持续观察失败+quiet恢复组合UNKNOWN及owner停止不变。CPU1已报告部署固定055102旧epoch，早于R8+；cpuAcceptance=false和ETW完整性UNKNOWN不归因新诊断收益。下一自然配套包接续，无本层部署或真实Steam/设备/睡眠动作，整体ACTIVE。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R15.json；追查说明FailureDiagnostics/RECOVERY-LINEAGE-AND-SCOPE-20261113.zh-CN.md。原FAIL/UNKNOWN、费用、包及各来源版本保持。
+<!-- /STEAM-BOUNDED-BUDGET-CAPTURE-INTAKE-R15-20261113 -->
+
+
+2026-11-13 三点/回补关联补查已得具体字段缺口：屏幕proven-game请求有完整GameID及Steam/game/host出生/browser，但完成association仅gamePid/birth与本地request/flight；JS routing实际三分类字段不含完整元组。writer日志power是记录时观察值，sink原样写detail，不等于动作准入power。只建议菜单owner投影已合格请求和既有准入字段，未知保持未知，无新producer/查询/轮询；首空trace假设FAIL保留。公共R15的713/32Job及两TU原依赖核收仅引用，不重复工作；三个Native scope缺口仍OPEN，QueryActor私有候选不代签/未导。无构建/业务/现场/产品写，目标ACTIVE。后继QamFocusReview-20261112/menu-capture-correlation-gap/SOURCE-FLOW.json、SINK-SUPPLEMENT.json、PUBLIC-R15-INTAKE-REFERENCE.json及REPORT.zh-CN.md。
+
+
+2026-11-13 四Current取消检查后继已导主线：1产品/3原夹具配套；资格后加载前、ConnectToGlobalUser/GetISteamUser/GetSteamID返回后复用原Current，不新造Steam/power producer。此前实际14行旧新actor及host编译/归档引用，本次零重跑/构建；反向4hunk字节及原fixture默认AST已核。47host依赖、先前8路径、28b DLL/25sourcePins保持；原4Job0、空Job准入UNKNOWN/费用不改。只签本取消检查源码，不签真实SDK可取消/有界或三点根因；三公共Native端口、完整main/包/部署和实机OPEN。旧未导候选记录按原epoch保留；本后继为QamFocusReview-20261112/query-actor-mainline-closing/MAINLINE-IMPORT.json、SOURCE_READY.json及REPORT.zh-CN.md。整体ACTIVE，无Steam/游戏/设备/睡眠操作。
+<!-- STEAM-MENU-COMPLETION-CORRELATION-20261113 -->
+2026-11-13 菜单完成回执补齐已合格请求身份：完整 GameID、游戏/Steam/host PID及出生、browser与原注册身份沿原低频结果投影，screen与shortcut原白名单保留；fallback/未绑定目标及无现成writer birth均明确未知。原action队列前Native power、run内game-scope power与公共writer完成观察分来源，不新增鲜读/producer/logger/轮询。三产品文件精确导入；原screen-shortcut-same-action一个场景扩展10断言及缺hostCreated语义反例已实跑，四Job关前零，两个实际编译各298输入。原18/public组未重跑，已推进的三份公共依赖按独立epoch分列，不冒称全当前main/包验收。无部署/现场或三点因果结论；证据 `Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/QamSharedMenuAction-20261113/correlation-projection/MAINLINE-IMPORT.json` 及同目录后继记录。
+<!-- /STEAM-MENU-COMPLETION-CORRELATION-20261113 -->
+
+
+
+2026-11-13 菜单完成关联字段缺口已有正式源码后继并由回补侧只读核收：12个当前owned hunk唯一，原source反向/调用序列保持；原单screen-shortcut-same-action正例10断言及漏hostCreated反例、两图各298实际输入、4Job0已核，2次精确工具回收不称自然。queue前原power、run游戏scope power与完成writer值分层，完整合格元组来自原请求，negative/unbound与writer出生仍UNKNOWN。公共依赖变更按原编译epoch保留，不签整当前main/包；本侧零重跑/构建/产品写。只收源码诊断缺口解决，不收三点现场因果。三Native端口与实机仍OPEN，整体ACTIVE。原件QamFocusReview-20261112/menu-capture-correlation-gap/MENU-CONSUMER-INTAKE.json；菜单SOURCE_READY在Touchpad-Wake-Recovery-20261111/QamSharedMenuAction-20261113/correlation-projection。
+
+
+<!-- STEAM-STABILITY-WIRE-MENU-OFFLINE-R16-20261113 -->
+2026-11-13 稳定性后继已核：Decky同实例unknown/absent→known-running仅ON且非stopping正边沿唤原worker，原episode/期限/尝试/额度不改。原private-child wire6与controls1各独立来源，后者1000重复正通知及1000 OFF恢复无额外health读/复活；原2s/5s FAIL、旧collector TIMEOUT和legacy宏编译FAIL保留。11Job按5自然/5精确工具/1历史超时兜底分列，4图各497源/15库；自然终态不等于历史失败改绿。完整默认父、legacy私有后继及现场降频不代签。
+
+菜单本次qualified请求11标量完成投影、未知null及入队/run/writer power分阶段已核，原screen-shortcut一case10断言和缺hostCreated负例、两图各298输入/4Job原件均在；原sink完整源码保持，文件IO仅声明JSON端口。共享producer仍原菜单epoch，不冒称整个当前main编译。离线设置另精确写入2行最终目标/文本复核；原12场景47断言+1旧源真实覆写反例、299源/7库/3真实Job已核，额外读取只在显式离线写事务，不授外部原子CAS。
+
+原生QueryActor四Current检查现已主线独立核：14行/两路线8旧漏口、原清理与default AST保持、4Job及actor259源7库/host340源0库按编译归档范围核。原sidecar174584/120000超54584保留，后继同账加300000只读完成，不重跑。真实SDK可取消/有界、无UI-document原生账户scope/power持至清理/最终Packet撤销三端口继续OPEN，不以UiLocal/RegistryCandidate升权；R14停止组合UNKNOWN不变。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R16.json及FailureDiagnostics/STABILITY-CLOSING-R16-20261113.zh-CN.md。前稿frontend散列的“64位”精确为64字符SHA256，原稿保留。CPU1固定055102现场仍旧epoch，下一自然配套包接续，不追编或重标旧包。无本层部署/真实Steam设备睡眠动作，整体ACTIVE，实机CPU/恢复频率未证。
+<!-- /STEAM-STABILITY-WIRE-MENU-OFFLINE-R16-20261113 -->
+
+
+<!-- STEAM-LEGACY-TRACE-VISIBILITY-R17-20261113 -->
+2026-11-13 旧Runtime诊断类型宏可见性两guard后继已独立核收：357关键引用、原Runtime41/health-close11、两图各311源/14库、4真实Job（2自然/2精确VCTIP）关前0。当前产品精确候选；普通生产仅目标宏条件展开源码逐字等价，实际struct FailureTrace标识突变独立拒绝，不冒称完整预处理/生产整编/缓存命中。旧宏编译FAIL、首class/struct消费者检查拒绝和费用保持；只复读原件，不重跑wire/storm或默认父。仅这两个原消费者缺口关闭，完整typed/legacy父继续OPEN。
+
+ModeObserver4原样本已定在监听者/TCP/进程映像/stillOwned读路径，Mode头与055102固定来源逐字同、listeners段文本同；未armed为阻塞等待。无新采样/源码改动，不推忙轮询、CPU比例或现场根因。Native无UI-document身份只读scope、回补链持有原power Registration及最终Steam内撤销三项目前仅需求规划，没有本方执行中的实现/验证任务或正式接口候选；既有底层Registration不等于回补已接入。四Current与菜单字段不替代端口资格。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R17.json；说明FailureDiagnostics/LEGACY-TRACE-VISIBILITY-R17-20261113.zh-CN.md。原R16各范围/版本和R14停止组合UNKNOWN保持；无本层部署或真实Steam/设备/睡眠操作。完整配套包与实机收益仍OPEN，整体ACTIVE。
+<!-- /STEAM-LEGACY-TRACE-VISIBILITY-R17-20261113 -->
+
+
+<!-- STEAM-COST-OWN-SESSION-R18-20261113 -->
+2026-11-13 Decky诊断Sampler同次成功own-session复用后继已独立核收：仅cost头3片段，失败继续逐目标重试、不跨sample留值，原目标映像/PID/session/birth/exit证明均保持。旧8+候选8原raw场景除ownPidCalls/ownSessionCalls两计数外全对象deep equal；12有效目标各12→1，首失败后2次、连续失败后下一调用恢复、别名/目标错误/power/OFF均核。两个302源15库图、5真实Job关前0（2精确工具/3自然含预期exit2选择拒绝），362关键引用和原默认CPP正文已核，默认nativeCost/41/11/wire/storm未重跑。
+
+before.path历史角色已按原PREIMAGE-INTAKE-INDEX映射LOCKED-BEFORE1/2及原图，非以已导入路径冒充前像。无新Steam身份来源/常驻轮询/线程/跨调用cache，无现场CPU降幅证明；原055102 Sampler具名栈仅选点，无新采样/设置/部署。Native三端口执行状态沿R17保持仅需求规划、无本方执行中实现/验证或接口候选；R14停止组合UNKNOWN及其余OPEN不变。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R18.json，说明FailureDiagnostics/COST-OWN-SESSION-R18-20261113.zh-CN.md。下一自然配套构建接续，不追改旧包或冒称完整当前main/正式缓存通过；整体ACTIVE。
+<!-- /STEAM-COST-OWN-SESSION-R18-20261113 -->
+
+
+<!-- STEAM-LOG-SOURCE-SLEEP-CONSUMERS-20261113 -->
+2026-11-13：原 TrackerOwner 新增仅绑定实际 Steam PID/birth/root/session 的日志源 key，复用唯一 MainReadTailPort 和原句柄持有。游戏 Ready-only scope 不变；睡眠捕获、最终独立核对与 inspect 已消费公共源，原绝对 FILETIME 边界、累计 QueryUnbiasedInterruptTime 预算与强证明不得降级保持。截断只供诊断；身份未知、预算取消和读取后失效不再冒充实际缺日志保底，实际缺 Console 的原单成员保底仍为未验证。gameprocess/console 使用各自实际物理源 revision，无新reader、缓存owner、线程或轮询。
+
+真实公共源16项、实际源接原睡眠 Console4项通过；移除读取后存活检查的精确反例失败1项。原 SleepOnly 游戏选择37（含实际 inspect dense 消费）、捕获预算30、唤醒准入26按精确原名实跑通过；13个实际 Job 关前0，工具收尾单列。准备重复pin拒绝/C2373/固定verifier修改事故与旧费用保留，不拼默认完整父通过。四产品/两原夹具精确导主线并保留并行字节，元数据只声明原readTail实际字段。唯一证据 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SleepLogSource-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json 与 HANDOFF.json。
+
+本后继只关闭这条日志消费者源码链，上一 GameLink 记录中的 sleep捕获/inspect待迁移状态保留为历史epoch。完整 Native/link/包、公共层其余资源/布局/电源资格及实机睡眠/CPU/恢复频率仍 OPEN，整体 ACTIVE；本轮未部署、启停Steam/游戏或操作设备/真实睡眠。普通导出夹具 NOT_RUN。
+<!-- /STEAM-LOG-SOURCE-SLEEP-CONSUMERS-20261113 -->
+
+
+<!-- STEAM-LOG-SOURCE-GAMELINK-REGRESSION-20261113 -->
+2026-11-13同源回归补验：复用本轮P实际编译产物，仅运行原 --tracker-fresh-gamelink 19具名场景，实际公共Owner/原ProcessLease/源对/GameLink全部通过；新增编译0，不重跑公共源16。额外1个真实Job自然归零，连原阶段共14个实际Job关前0，原准备拒绝单列。六个导入源码当前SHA仍吻合。该后继不改变旧13 Job阶段记录或原失败，整目标继续ACTIVE，未部署/实机验收。证据 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SleepLogSource-20261113/REGRESSION-SUPPLEMENT.json。
+<!-- /STEAM-LOG-SOURCE-GAMELINK-REGRESSION-20261113 -->
+
+
+2026-11-13 R17确认公共三Native端口仅规划、无其方实现任务；不能以聊天活跃当执行。回补侧已自行准备第2项私有消费候选，实际公共类型/登记及原Current/observation/准入代码17定向检查通过、2Job0，电源Reader为内存端口，无Steam/睡眠动作。不导入/SOURCE_READY=false：新增strict capture会遇到现有phase Ready→通知回补→openHardwareWriteGate顺序窗口，需唯一睡眠层提供一致post-gate Ready；只证明源码/契约，不称真实交错或历史根因。未知在Admission前返回，pre-suspend只读不挡；完整QueryActor/debug/remote清理与Native取消event等待未执行/接入，另两端口OPEN。普通Control重建sequence碰撞猜测已按当前可达路径排除，不改账。原账为明确新覆盖追加120秒至1485秒，历史费用/FAIL保留；无产品/部署。唯一后继QamFocusReview-20261112/native-power-consumer-boundary/CANDIDATE-INTAKE.json、BOUNDARY.json、REPORT.zh-CN.md及native-power-consumer-execution/RESULT.json。
+
+
+<!-- STEAM-NATIVE-POWER-PRIVATE-BOUNDARY-R19-20261113 -->
+2026-11-13 执行状态前向变化：回补owner已自行启动第2项Native power私有消费候选，6片段/PowerRequest及Runtime闭包原17场景、304源7库/2真实Job按328引用独立核收。Reader内存port、Registration真实现，只有受控前缀；候选SOURCE_READY=false/未导入，engine等待集event/真实actor-debug-remote清理未接入实跑。首raw CRLF/规范文本hash消费拒绝14.647ms保留，只复读原件。未consume Admission不能代签Wake队列保留/自动重排，显式post-gate再调用不算自动证明。
+
+当前源码常规Ready store→AutoPowerReady→openGate及already_ready先通知窗口已固定，尚未实际commit交错或现场根因。已交现有“YMCC-睡眠协调层”01a1cd95-092b-75a0-8a47-b1465fa4fad0，owner确认作为同目标后继核post-gate发布、取消、重复/幂等分支；当前只有接收确认，无正式契约/行为证明。本层不改睡眠源码、不建新任务、不加私有poll/retry/假Ready或请求冻结。第1身份scope/第3最终Steam撤销仍仅规划，旧R17/R18三项仅规划保持各时态，不倒改。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R19.json；说明FailureDiagnostics/NATIVE-POWER-PRIVATE-BOUNDARY-R19-20261113.zh-CN.md。所有原FAIL/费用及R14停止UNKNOWN保留，无本层新业务/编译/部署/现场动作，完整配套与实机仍OPEN，整体ACTIVE。
+<!-- /STEAM-NATIVE-POWER-PRIVATE-BOUNDARY-R19-20261113 -->
+
+
+2026-11-13 Native撤销消费后继：私有wait14/清理8/原actor清理持有4分别实跑通过，另3旧源反例成立，不拼整父；原17/actor14/菜单/公共commit不重跑。候选同次wait接借用Native event、隔离ownerHeld诊断异常并把driver WAIT_FAILED按未确认退出保留；SDK/进程/分配失败均明确端口，真实debug/remote完整归还和Steam内最终撤销仍OPEN。睡眠owner已确认post-gate两路原先未接回补，正在唯一投影补接；本侧未获其正式交错证明，不导入strict gate。Unknown未消费Admission不等于自动重排，旧pending注释待改。10真实准入Job0/1未准入UNKNOWN分列，编译与核收FAIL/成本保留；原账自主加300秒至1785秒，不重复人类60秒。无产品/部署/现场，目标ACTIVE。唯一后继QamFocusReview-20261112/native-power-lifetime-followup/CANDIDATE-INTAKE.json及REPORT.zh-CN.md。
+
+
+<!-- STEAM-PRIVATE-WAIT-AND-LEGACY-EVIDENCE-R20-20261113 -->
+2026-11-13 Native等待私有前缀核收：四配套/9实际片段、14原场景+旧实际while取消负例、301源7库/3新Job关前0，首C4127夹具FAIL及Job另保留。Registration/Win32 wait真实，process句柄是自有event端口；延迟entered信号不证明已入内核阻塞。候选SOURCE_READY=false/未导，真实actor/debug/remote清理及post-gate自动接续未证；owner新报分配日志与WAIT_FAILED保留风险仍待定向验，不拼17/14/Job0作完整cleanup。
+
+另独立核未改产品的原crash173、silent HTTP/WS2场景原1500ms/子退出/weak回调/OFF晚到，图313/14与381/15；default native_cost Release117及后继Checked117各290/15，Checked原/Od/RTC1/_DEBUG/ITERATOR2/MTd和宏显式/U保持。8真实Job为5自然/3工具，默认两profile分次、Python wrapper与完整typed/legacy父NOT_RUN，计数器shutdown0不称物理零延迟。旧TDZ准备FAIL保留。本层误将/U当宏存在的919.584ms读验拒绝前向修正，只续legacy消费者，不重跑已核等待/producer；原runtime/cost/CPP小源身份不变，未整体main构建。
+
+睡眠owner现已报告共享投影/WM通知均漏回补PowerReady，正沿原投影准备post-gate/去重/幂等闸窗口后继；仍无正式契约或commit实跑核收，不加私有poll/retry/假Ready。Sampler target-order是另一未收正式原件的私有候选，未并入本轮通过。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R20.json；说明FailureDiagnostics/PRIVATE-WAIT-AND-LEGACY-EVIDENCE-R20-20261113.zh-CN.md。原R14停止UNKNOWN/费用及各epoch保持，无本层新编译/业务/部署/现场动作，整体ACTIVE。
+<!-- /STEAM-PRIVATE-WAIT-AND-LEGACY-EVIDENCE-R20-20261113 -->
+
+
+<!-- NATIVE-READ-SCOPE-POWER-RETENTION-20261113 -->
+2026-11-13原生读取范围与电源持有已配套导主线：唯一Observer新增独立NativeReadDelegation，保留实际publisher快照/processEpoch/accountEpoch、tuple/session及粘性事件，账户候选零/不可读仍只用于资格读取，不借UI文档、UiLocal或candidate相等授NativeQualified/发布票。原Steam实际pin与原Native capture/current/observe Registration随恢复Current/observation回调持有，贯穿QueryActor join及词法debug/remote清理；原实例清理不要求重新Ready。两路仍各自资格/额度，另共享同次operation范围，最终汇总不能在账户/电源撤销后复活前路成功。
+
+真实Observer15场景137断言、原双路消费者6场景35断言及跨路后继1场景3断言各分epoch核收，旧6未追跑，不拼当前7/default父PASS；四必要反例各精确失败1场景，涵盖实际账户ABA事件、拒绝入口、观察fallback及跨路最终复活。16准入Job关前0，限定编译工具收尾单列。两依赖编译FAIL、换行/误取默认分支/默认参数/负例锚点准备拒绝和智能体准备失败及费用均保留。6既有+3新配套路径精确写回，保留并行字节，无新producer/线程/timer/EXE/ID/minimum。
+
+此前R18“三端口仅需求”是历史epoch：本后继仅前两端口范围SOURCE_READY；Steam内最终publisher撤销委托仍未实现。真实SDK取消/有界返回、原debug/remote完整资源归还及常驻DLL静默归还不由源码持有证明替代。完整main/link/Web/plugin/库包、部署和现场Running/Continue/手柄/S3/S4及CPU/恢复频率仍OPEN，整目标ACTIVE。普通导出夹具NOT_RUN；无真实Steam/游戏/设备/睡眠动作。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json、HANDOFF.json。
+
+<!-- /NATIVE-READ-SCOPE-POWER-RETENTION-20261113 -->
+
+
+<!-- NATIVE-READ-SCOPE-SELECTOR-CONTROLS-20261113 -->
+2026-11-13 Native读取夹具选择器补核：复用P同一真实编译产物，空case、未知case、混合mode三项实际退出1，在创建fixture目录/注册表/子进程/Observer之前拒绝；无业务case和新增编译，不重跑原15/6/跨路1。三Job自然0，连原阶段共19实际Job关前0（12自然、7精确工具收尾），不改原16 Job阶段原件。九路径当前SHA均吻合。只补选择器覆盖，最终Steam内publisher委托/整包/现场仍OPEN，整目标ACTIVE。证据同NativeReadScope-20261113/SELECTOR-SUPPLEMENT.json。
+<!-- /NATIVE-READ-SCOPE-SELECTOR-CONTROLS-20261113 -->
+
+
+2026-11-13 私有配套编译后继：完整engine编译/归档及实际main转发+固定runtime声明编译，340/180实际输入、3真实Job0、25868ms；无行为组重跑/trial重建。当前公共NativeReadScope并行导入先触发旧runtime散列拒绝，后继仅私有固定旧声明，未编runtime全体/当前main，不授整文件写回。正式9路径SOURCE_READY及作者已定位；严Ready挡SuspendCapture只读参考的风险由其owner确认并正修，旧PowerRequest将只作历史，后继借唯一ReadScope事件。共享post-gate修正尚待本侧正式核收；第三Steam内publisher/完整debug-remote/包及实机OPEN。无主线产品写/部署/现场，目标ACTIVE。后继QamFocusReview-20261112/native-lifetime-cohort-closing-r2/INTAKE.json及REPORT.zh-CN.md。
+
+
+2026-11-13 回补侧已独立核收唯一睡眠层正常Wake后置自动排队：正式commit/共享投影→原Control/PowerReady/enqueue/Admission及真实Registration，9交错22断言、旧commit负例与Recovery13/74分组核；5原Job0、本侧零重跑/编译。当前两个完整函数逐字同正式导入。正常deferredWake门前Unknown已不再是未验证规划；startupUnknown/后到classification及完整runOne/engine仍OPEN，不代签实机。下一步消费公共ReadScope readonly-Suspend后继及借用取消事件，不叠旧私有PowerRequest。证据QamFocusReview-20261112/shared-post-gate-intake-r2/INTAKE.json，整体ACTIVE，无产品/部署/现场。
+
+
+<!-- STEAM-SCOPED-LIFETIME-TARGETORDER-AND-READSCOPE-R21-20261113 -->
+2026-11-13 Steam公共层后继：cleanup8/actor4两私有epoch已独立核373引用、图298/7与301/7及6新Job0，原wait14仅引用；诊断分配异常/未知等待不提前释放owner，真实SDK有界及持续WAIT_FAILED有限归还仍OPEN。完整私有engine/静态库/main转发也已核，实际engine图340出现/313唯一路径、adapter180/3Job0；冻结旧runtime只编prototype，旧PowerRequest正文未编/未导。原sidecar比较FAIL及CRLF/参数pin/SDK角色/重复include纠正前向保留，只读续验，不重编或重跑。
+
+Sampler目标顺序后继已核主线1hunk+2原fixture：8排序+5身份边界各旧新，共26结果/13新唯一；丢率19+5→0，满槽前插open12→1、保11速率，目标proof及非handle API计数保持。4图各302/15、10Job为8自然2工具；默认CPP8900B投影原字节同，98CR及补验自身排序误假设FAIL保持。核收累计393713/414126ms，alias+churn组合/117/Runtime/wire未重跑，实机CPU收益未证。
+
+公共NativeReadScope实际已由【报错反馈记录反馈】实现导9配套路径，原先规划状态到此前向更新；协调者未代签全部owner测试。作者确认Ready-only scope及原GameLink同链门会阻挡SuspendCapture只读健康采集，正修且保持真实身份/account epochs及动作Ready；Steam内最终publisher撤销随后。旧Observer publication生成器由Decky owner单写配套，原强源门拒绝保留，不盲换hash。Native owner消费唯一scope events，旧私有PowerRequest不叠加。
+
+睡眠层已发布post-gate Ready正式契约，回补侧独立核正常Wake队列前缀；真实Control/Reader/Registration/Admission，不是完整runOne/engine。通知先到分类后到的提前记账缺口由睡眠owner修，StartupUnknown由回补owner沿原事件接续；publication不补额/不复活旧事件，无新poll。完整当前Native/配套包/部署和现场恢复频率仍OPEN，R14停止UNKNOWN及所有旧FAIL/费用保持。唯一协调G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R21.json，追查说明FailureDiagnostics/STABILITY-R21-20261113.zh-CN.md；整体ACTIVE，无本层部署或真实Steam/设备/睡眠动作。
+<!-- /STEAM-SCOPED-LIFETIME-TARGETORDER-AND-READSCOPE-R21-20261113 -->
+
+
+2026-11-13 启动Ready消费接续已主线精确导入：仅Control.startupPending atomic+原PowerReady无当前deferredWake时给未完成且enabled/当前代次补排原TargetChanged；原runOne判Startup，两路线原Admission/持久账不退款。10新定向+旧callback负例实跑/3Job0，含真实私有队列worker、1000通知合一、Wake优先与不改Wake/Suspend选择；Native/身份/分类仍端口，非完整runOne/engine或实机通过。短Windows源事务两hunk反向与回读，其他owner字节保留，不叠旧PowerRequest。原171ms核收FAIL/费用保留，无旧组重跑、无部署/现场。仅本SOURCE_READY，Readonly-Suspend/后到事实/第三publisher/包与三点仍OPEN。证据QamFocusReview-20261112/startup-ready-consumer-mainline-r2/SOURCE_READY.json及MAINLINE-IMPORT.json，整体ACTIVE。
+
+
+<!-- STEAM-STARTUP-CLASSIFICATION-TYPED-R22-20261113 -->
+2026-11-13 公共Steam后继：StartupReady两原runtime hunk已独立核收325引用、10场景/旧callback漏接反例、303源7库/3Job0（2自然1工具）。未知未完成启动经原PowerReady→TargetChanged→原selector/Admission，1000通知单队列，Wake优先且两账不退款；Native事实/分类为端口，不代签完整runOne/engine或alreadyReady身份后到。
+
+分类前不claim及原Complete/Finish共同发布已由睡眠owner导2产品，7场景22/3逐字控制按原owner核收引用；联合后继2场景6/旧漏接4断言两失败，协调者独立核原raw与2自然Job0，404输入7库两图完整资格仍明确引用owner，不冒称重复整图。原7/10/9/13不拼父PASS。
+
+Decky原typed offline/ready两consumer实际原件及3fixture配套已完成侧验，Loader保留/OS三边界/资源153→153与165→165，成功图489记录410唯一路径/15库。3Job包含旧C4505编译FAIL、候选编译及native，2工具1自然；最终封存303612/300000ms超3612ms，整体INCOMPLETE及费用保持，不倒填预算内PASS，不重跑业务。只fixture、产品0，完整typed父/公共scope/实机仍OPEN。
+
+NativeReadScope只读Suspend后继原作者已报真实旧拒绝反例及8消费者收尾，正式SOURCE_READY仍待交回；原Ready/action不放宽。新Sampler同UI PID known-birth/0切换又复现重复OpenProcess，原owner私有3hunk/六alias验证中，未签来源或现场根因，不倒填R21。无新诊断schema/logger/探测/轮询/额度。唯一后继G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R22.json；说明FailureDiagnostics/STARTUP-CLASSIFICATION-R22-20261113.zh-CN.md。旧FAIL/费用/R14停止UNKNOWN和固定055102包各epoch保持，无本层部署或真实Steam/设备/睡眠动作，整体ACTIVE。
+<!-- /STEAM-STARTUP-CLASSIFICATION-TYPED-R22-20261113 -->
+
+
+<!-- NATIVE-READ-OBSERVATION-SUSPEND-20261113 -->
+2026-11-13 Native读取的SuspendCapture只读回归已修复并精确导入10个配套路径。原Ready-only工厂会误拒绝睡眠前参考采集；现明确ObserveOriginal/PrepareMutation，默认仍严格Ready。观察绑定原Observer process/account代次、实际Steam/game持有与同一Native reader的generation/通知序号/suspendSerial/phase/flags；诊断publication前进允许，变化或未知粘性撤销。观察借用原mirror取消事件，不生成Ready权限；原Ready三回调、observe正文和GameFactScope保持。日志读取沿原唯一TrackerOwner/ProcessOwner、完整十进制GameID和primary join。
+
+真实producer6/33通过；原runtime失败父中的有效前缀7/65与端口修后单项1/2分epoch，不拼新8项父PASS。旧源SuspendCapture反例与三编译FAIL/准备拒绝/端口FAIL及费用保留。13原Job加2必要兼容编译Job均关前0；默认及旧scope入口同步支持ReadPurpose，最新合流七参数消费者只编译、不重跑业务。原Startup两hunk、双取消事件和配套模板两行均保留，其他字节经逆hunk与短Windows独占CAS核对。
+
+SOURCE_READY只限此修复；最终Steam内publisher撤销委托尚未开始，SDK有界返回/完整debug-remote归还/完整Native包/部署/物理睡眠仍OPEN，整体ACTIVE。证据Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/ReadOnlySuspend-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。普通导出夹具NOT_RUN，无真实Steam/游戏/设备/睡眠动作。
+<!-- /NATIVE-READ-OBSERVATION-SUSPEND-20261113 -->
+
+
+2026-11-13 公共ReadScope双取消等待配套已主线：5产品文件借用identity/power事件，保留原hint无写票语义；原ownerHeld诊断异常/driver WAIT_FAILED保留修正同cohort导入。9新wait+缺identity反例、完整engine/归档/七参adapter共6Job0，图289/263unique、340/313unique、180/180；原组不重跑。原夹具2行签名+1Frozen include配套，Readonly-Suspend合流完整runOne/route仅额外编译1Job，2旧compileFAIL及UNKNOWN/费用保留。Readonly producer6/33与consumer父FAIL有效7/65+后继1/2分epoch，不拼父PASS。Startup与其他owner字节保留，无旧PowerRequest/新producer/poll/EXE。仅本SOURCE_READY；最终Steam内publisher/全debug-remote/包及实机焦点Running等OPEN。证据QamFocusReview-20261112/public-scope-wait-mainline/SOURCE_READY.json与READONLY-SCOPE-INTAKE.json，整体ACTIVE，无部署/现场。
+
+
+<!-- STEAM-READONLY-RESOURCE-WAKE-R23-20261113 -->
+2026-11-13 公共Steam后继：ReadonlySuspend10配套/19原hunk+3完整新文件已独立原字节重建；strict Ready正文、main3回调/observe、Startup及双event保持。P2真实producer6/33、旧拒绝、原失败父有效7/65及只续1/2分epoch核，不拼8父PASS；15实际Job关前0（8自然7工具）/132引用。完整源码库图明确引用原qualification，不代签48330检查。原postclosing超50469/81602ms、准备/编译/端口FAIL及本方guard位置误判前向保留，不重跑producer。
+
+Decky原资源退出5父/内3已独立核：recover2读1计划、deferred4读3计划/原3063ms，hash/cleanup失败不bind/launch；stalled172/156ms在未release时归还child/descendant，父154→154、内外Job/IO/handles0。两自然外Job，固定图489记录410唯一路径/15库，214126/420000ms按期；产品/fixture0改。另唤醒错序9原ID复用同EXE/前图及前5不重跑，1自然新Job/28引用；各512重复提示、当前代次/Loader/OFF晚到边界及9+2committed+2held资源清零/父147或148恒等已核。原45s/3200等待保持，3200不擅作整个case body界；旧CEF副本核收角色误假设保留，新精确fixture路径+原EXE全字节已核。均不拼完整typed父。
+
+唯一scope双event等待已收原owner五产品两fixture SOURCE_READY、九wait/旧负例/配套engine/7参合流编译，完整wait图仍原owner引用。最终Steam内publisher已有【报错反馈记录反馈】实际执行，已明确告知回补owner不要重复启动，不再误记仅规划；正式候选/最后发布边界仍OPEN。alias6+身份5的主线源码及新admission8只登记后继ownerReference，未倒填本轮独立范围。
+
+无新schema/logger/probe/轮询或恢复额度；旧安装观察只代表保留片段，无部署、无新CPU或现场恢复频率收益证明。原R14停止UNKNOWN、R22 typed2超3612ms及各来源费用/失败保持。唯一后继G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R23.json，说明FailureDiagnostics/READONLY-RESOURCE-WAKE-R23-20261113.zh-CN.md；当前完整main/包/SDK-debug-remote/实机仍OPEN，整体ACTIVE，无本层Steam/设备/真实睡眠动作。
+<!-- /STEAM-READONLY-RESOURCE-WAKE-R23-20261113 -->
+
+
+2026-11-13 第3最终publisher由原NativeReadScope作者已实际开做，本侧独立rights9真实Win32对照通过/2Job0：query+sync source或target复制均error5，DUP权限成功；sync副本不可Set/Reset/继承；关未signal源不撤销副本、先signal后关保signal。原ABI3/callback合同只读定位，不重复写实现；已交Prepare强持有复制一次、末端同时查原YMCC存活和取消、无回调管理/阻塞及原额度不退款等具体边界。无跨权限/跨进程Steam或焦点根因证明。官方两网页超时0B/退出0错误留证、无效引用与已核正文表述撤回，结论仅基于实测/源码。证据QamFocusReview-20261112/final-publisher-revocation-review/INTAKE.json，整体ACTIVE，无产品/部署/现场。
+
+
+<!-- STEAM-FINAL-PUBLISHER-RIGHTS-R24-20261113 -->
+2026-11-13 最终publisher独立只读权限核收：原九自有Win32进程/事件对照、实际句柄计数归还、286出现260唯一路径/7实际链接库、2自然Job关前0及292引用已核。source/target缺DUP_HANDLE均实返error5，wait-only副本不具Set/Reset权且不继承；关闭未置位source后副本仍258，先signal再close后副本仍0。invalid-source只签本API拒绝，fallbackUsed=false是probe常量，不代签产品回退策略；全部对象是探针自己，不是实际跨Steam/跨完整性publisher。
+
+原消息4670B的f9ee...散列与原件不符，首身份门80.077ms拒绝保持；现5b8c5e...由原12221B/986b... INTAKE及原CLOSING既存链精确绑定，按该原链前向续核，未改写/重造RESULT或raw。原owner官方抓取20秒0B/撤回引用不改；本协调者另成功读微软DuplicateHandle/同步权限/CloseHandle/进程终止内容，独立记录来源，不倒填旧doc PASS。
+
+已把具体Native异常死亡边界交唯一publisher owner【报错反馈记录反馈】：普通Registration.reset先signal再close保持；若只观察副本，Native死亡关闭source不能当自动撤销，应证明同一Native源进程生命或已有等效路径。此为文档和真实self-API支持的待验证设计推论，不称已复现未交候选产品漏洞。owner私有DLL已报编译/引用持有，尚未核最终最后一刻取消/跨进程/cleanup；第三端口SOURCE_READY仍OPEN，不重复接管ABI或造producer。
+
+唯一后继G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R24.json，说明FailureDiagnostics/FINAL-PUBLISHER-RIGHTS-R24-20261113.zh-CN.md。R23各范围/原FAIL与费用、R22超3612ms、R14停止UNKNOWN保持，无本层业务/编译/产品写/部署/真实Steam设备睡眠动作，无新schema/logger/poll/额度，整体ACTIVE。
+<!-- /STEAM-FINAL-PUBLISHER-RIGHTS-R24-20261113 -->
+
+
+<!-- STEAM-FINAL-PUBLISHER-REVOCATION-20261113 -->
+2026-11-13 最终Steam发布撤销已配套精确导入16路径：实际ReadScope作为第8参持到engine，写入前要求原Ready stamp/current及借用事件精确匹配；观察scope不能由JSON升级。ABI4的事件源只从已独立验证的原YMCC进程复制，目标仅持3个本地副本；最后SDK调用前再核原Native电源/账户粘性撤销，原CUser/完整GameID/record/primary/健康pins及已消费不退款保持。源事件不Close/Reset，target retire按shared快照安全归还；dispatcher ABI1保持。实际915968字节DLL与嵌入payload/元数据已配对，完整engine及8参main/runtime分别编译，未完整产品main/link/包。
+
+原最后边界反例按预期失败；新17有效前缀+修后单项1分epoch，非18父PASS。8宿主准入及原13发布回归通过，13复用同一PE无重编。真实惰性提供者正常退出后publisher0/撤销不复活；无发布冷控制全进程句柄69→71单列，实际lease71→71，不称冷环境零遗留。原shadow编译FAIL、局部别名缺项、资源计数父FAIL、选择单目标误用于默认双目标的FAIL及工具声明前置UNKNOWN/准备费用保留。16实际Job关前0，另1未准入UNKNOWN不以空Job替通过。
+
+此前第三端口OPEN记录为历史epoch；仅此撤销链范围SOURCE_READY。实际SDK有界返回、debug/remote完整归还、常驻DLL静默清理、完整配套包与物理睡眠/Running/Continue/手柄/CPU继续OPEN，整体ACTIVE；未部署或操作真实Steam/游戏/设备/睡眠。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/FinalPublisherRevocation-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。
+<!-- /STEAM-FINAL-PUBLISHER-REVOCATION-20261113 -->
+
+<!-- DECKY-INITIAL-SUBSCRIBER-20261113 -->
+2026-11-13 Decky首次显示订阅异常隔离已精确写主线：原subscribe先登记再直接首次回调，回调抛错会使调用者拿不到取消句柄；现在首次通知与原publish同样隔离，保留原数据副本、后续通知和取消归属。原稳定性矩阵观察者场景保留原后续异常控制，补普通/connectionOnly首次异常、重连及取消后零回调/零计时器；旧源实际拒绝，候选同一原场景两边界通过。只配对该旧夹具缺失的当前gameSteamContextModel依赖并增加原场景定向选择，未知/空/重复三选择拒绝；5个真实Job均自然退出且关前0，不增canonical ID/minimum。只导1产品/1原夹具，无新查询、轮询、线程、重试、恢复额度或Steam动作。原FAIL和后置pin字典误比FAIL保留，仅复读原件修核收；原完整矩阵/插件构建/部署/实机睡眠及CPU收益继续OPEN，后继进下一自然构建，不追赶旧包。唯一原件沿DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/initial-subscriber/SOURCE_READY.json，整体ACTIVE。
+<!-- /DECKY-INITIAL-SUBSCRIBER-20261113 -->
+
+
+2026-11-13 回补新pair资格消费修正已主线：按原两Admission选择Startup，hint只接Ready，不清账；原Wake消费pair不从普通通知再开Startup，新增查询只读原表。16/73与后继7/1026分epoch及两旧源反例、11Job关前0已核，不拼23整父；2产品/3原fixture精确合流，原Readonly/双event/ABI4保持。第三publisher正式16配套已独立核120引用/DLL915968与embed同字节，仅owner图引用。新Win5 111700包首轮Running真、次轮11:16:02后假；两route均模块校验拒绝且0publisher，次轮公共reconcile又报1043/3939488289合同未知；初期公共Ready准入，末尾约60s后拒绝另由睡眠owner核。缺口归唯一Steam/睡眠层，不新建私有producer；本源码修复不代签现场。原FAIL/UNKNOWN/费用保持，无旧组重跑、整包/部署或实机动作，整体ACTIVE。原件QamFocusReview-20261112/startup-wake-continuation/SOURCE_READY.json及Win5SteamSleepRebind-20261111/Field-20261113-111700/INTAKE.json。
+
+
+<!-- STEAM-QUERY-ACTOR-CANCELLATION-20261113 -->
+2026-11-13 原QueryActor等待的公共撤销漏接已修复。就绪/完成/空闲命令及fire前接同一Native电源和账户事件，caller线程捕获借用句柄及shared ReadScope，持到原join；取消优先，UNKNOWN或缺一拒绝，完成后再核。源句柄不Close/Reset，无新线程/定时器/电源producer；原5000ms、SDK调用/释放及join正文保持，进入SDK内部后不伪称可抢占。
+
+13新真实Win32事件/线程边界、原6完成场景与实际waitReady方法前后对照已核，后者旧满5000ms失败、新按native-cancel拒绝；0ms计时不作零耗时/CPU声明。原6复用同一PE，未知新case0场景拒绝，8实际Job关前0。只1产品CPP+1原配套include精确CAS，原6正文单一lambda/default顺序保持，不扩原默认父或minimum；就绪方法端口不是完整SDK执行。实际SDK有界返回/完整释放、debug-remote/常驻DLL/完整Native包和实机继续OPEN，整体ACTIVE；未部署或真实Steam/游戏/设备/睡眠动作。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/QueryActorCancellation-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。
+<!-- /STEAM-QUERY-ACTOR-CANCELLATION-20261113 -->
+
+
+<!-- STEAM-LATE-CAUGHT-FAILURE-WIN5-PUBLIC-GATES-R25-20261113 -->
+2026-11-13 公共Steam晚到caught错误已精确导1产品头+2原夹具：最终归属拒绝前保留原false失败的规范化安全事实，成功/畸形不伪造；原reason/mutated/sent/单次准入/不重放和恢复额度保持。20新边界、旧源第一断言反例、原UI24及3非法selector各有原件，2图各370出现337unique/9库，8Job关前0（6自然2核身份工具回收）。无新查询/线程/定时器，未完整main/link/包/部署或实机降频。
+新Win5 111700日志：同Steam两轮native身份/图门拒绝且publisherCalls0，第二轮Running真→假后公共rescope拒1043/3939488289；完整既存body已核，但官方manifest来源待核，不盲加白名单或称UI列表重算是native恢复。起初operationAllowed真，末尾约一分钟后假分列；Win5导出盘EXE dd5d...不同于本机055102 c78d...，两者均不代loaded proof，远端包来源继续问原导出owner。
+FinalPublisher16路径真实已导、Native生命句柄已接；摘要63组原件未定位且未独立核收，EVIDENCE_INCOMPLETE不补造。原17+1/13/cold及FAIL/费用/停止UNKNOWN保留；B2/SDK/debug/remote完整归还、默认消费者/配套包/实机仍OPEN，整体ACTIVE。后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R25.json；原件 FailureDiagnostics/LateCaughtReceipt-20261113/SOURCE_READY.json、FIELD-PUBLIC-REVIEW.json及REPORT.zh-CN.md。
+<!-- /STEAM-LATE-CAUGHT-FAILURE-WIN5-PUBLIC-GATES-R25-20261113 -->
+
+<!-- DECKY-TEARDOWN-ISOLATION-20261113 -->
+2026-11-13 Decky模块卸载独立清理已精确写主线：旧线性dismount中更新/壁纸等dispose抛错会阻止后续意图、socket和placement退出；现在各原owner分别执行一次，固定stage警告不含原错误或凭据，原receipt归属与幂等保持。原fan observer卸载场景保留显示异常控制，补Loader/pagehide、5处feature/placement异常、TDP待发送及logger异常14组合；旧源实际留下socket及计时器并拒绝，候选同一原case14组合均零socket/计时器/host监听/误发命令，2实际Job自然退出关前0。不增ID/minimum、轮询、线程、查询或恢复预算；仅index.tsx及原slider夹具导入，其他UI/业务断言不改，默认整组/完整插件包与实机OPEN，进下一自然构建。
+
+同日新Win5-111700包已只读核对：今日4次wake到三通道确认603/6220/631/634ms，40次QAM检查ready；11:15:58的失败行是旧peer/demand19被丢弃，当前demand21快照1060ms就绪，不当作新活动断链。341成本样本含339有效间隔，按PID/birth/起止去掉339个alias；343500ms留存窗口内Loader根+自有child加权0.0227438%单逻辑CPU，Steam UI whole-process为2.137918%，不是独占壁纸或新版收益。上述现场不证明本后继已部署，也不归因为本卸载缺口。原失败/费用保留，整体ACTIVE。原件沿recovery-cause-trace-20261113/teardown-isolation/SOURCE_READY.json及field-win5-20261113/REVIEW.json（DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112）。
+<!-- /DECKY-TEARDOWN-ISOLATION-20261113 -->
+
+
+<!-- STEAM-OFFICIAL-SCOPE1043-EXACT-ADAPTATION-R26-20261113 -->
+2026-11-13 公共sleep.reconcile已精确适配Win5日志1043/3939488289。当前官方stable1794424036/publicbeta1794536281同websrc包35981544/c4ef0ef...已实际下载核SHA，sp.js16224005/4b818cd...与原留存全文同，方法1043/9e01a573...唯一包含。R25“官方来源待核”由本后继前向关闭，不倒填旧记录；未知/同长改体仍拒绝。
+原scope消费者当前profile8项、旧源必要1拒绝和3非法选择实跑，7Job自然关前0；原默认两profile未重跑。原生成器配套完整H，mode小表达式逐字保持；只导JS/H/原fixture，无新ID/minimum/探测/轮询/业务额度。仅UI association，不代native Running/Continue/手柄或真实睡眠恢复；当前Native qualifiedProfile已直接消费同一公共选择的源码接线已核，不代签远端旧包。
+Win5两route发布未进入、remote dd5d...包来源/SDK和真实B2资源仍由原owner接续；本机c78d...不外推。旧20/24与本8分来源、不拼整父，未完整Native/link/包/部署或现场降频，63缺原件/FAIL/费用/R14停止UNKNOWN保持，整体ACTIVE。后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R26.json，原件FailureDiagnostics/Scope1043-Provenance-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-OFFICIAL-SCOPE1043-EXACT-ADAPTATION-R26-20261113 -->
+
+
+2026-11-13 Win5 111700后继：两轮native路线均在兼容检查前拒绝、0publisher；首轮Running真不能归因回补成功，次轮11:16:02.233起至少54.503s缺失。公共1043已由唯一Steamowner精确导主线JS/H/原fixture，本方独立核完整官方包/ZIP成员/正文、8原VM+旧拒绝+3非法选择、7原Job准入/关前0和87关键引用，不重跑。current公共表含现场pair，实际loaded引擎来源仍OPEN。公共睡眠初期Ready准入正常，60s尾部为Steam消费证明年龄路径而非公共Ready到期，逐guard/loaded限制保持。三点59原completion含首12proven接受，次15拒绝/13type1/2desktop接受，无完整tuple不签焦点因果；QueryActor取消独立raw已纳入，SDK/join仍OPEN。原Startup16/73和仅续7/1026分epoch，不拼父PASS。原FAIL/UNKNOWN及费用保留，本后继无新业务/编译/产品改/部署或真实Steam设备睡眠动作。原件Win5SteamSleepRebind-20261111/QamFocusReview-20261112/win5-public-successors-intake/INTAKE.json，现场说明Field-20261113-111700/PUBLIC-LAYER-SUCCESSOR.zh-CN.md；整体ACTIVE。
+
+<!-- DECKY-OPENING-PROBE-COALESCE-20261113 -->
+2026-11-13 Decky同次侧栏打开的冗余读取已精确修主线：原checkConnectionOnOpen先借可见性发普通snapshot，再发带nonce的fresh probe；实际Client+Relay桥接复现2请求/2 read callback。现仅借可见性至发probe的同一同步交接暂缓普通请求，实际1请求/1 read，nonce/服务器fresh/source/身份围栏、超时和恢复额度不变，无新查询/轮询/线程。仅mirrorClient.ts及原client夹具导入。
+
+原restart case候选前段已观察1 read和两visible重连控制，父组随后因旧测试按两个15秒timer的插入顺序选错owner而FAIL；原件/费用保留。夹具现取真实probe/snapshot各自timer，原期限和断言保持；后继仅跑未完成hidden-proof-lifetimes suffix及3非法variant，原超时归还/快照超时250ms原重连/卸载均核，六Job自然关前0，不拼整case/父PASS。两被引用函数切片和产品在分段间逐字相同，旧2 read反例保持。原Win5多次首读discard只为选点，未证明本缺口解释全部现场或新版CPU收益。累计38879/240000ms，原失败不重置；无新ID/minimum、完整插件包/部署/实机验收，后继进下一自然构建，整体ACTIVE。唯一原件沿DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/opening-probe-coalesce/SOURCE_READY.json。
+<!-- /DECKY-OPENING-PROBE-COALESCE-20261113 -->
+
+<!-- DECKY-PACKAGE-UPDATE-AUDIT-20261113 -->
+2026-11-13 Decky升级维护只读核收：固定原embedded PS真实隔离文件事务，原53项父组受25秒执行额度限止，34项实际通过/19项未执行，TIMEOUT原件与31279ms保持，自有Job自然关前0。后继私有夹具只在原Check入口跳过前34，逐项核余19的名称/顺序/原断言正文；19通过且零已过重跑，原30/25/5秒额度不变，不拼整父PASS。坏回执/重复字段/未来schema/原子写锁解除后恢复等边界已观察；semantic mutation proofs及整发布/安装验收仍NOT_RUN。主线产品/夹具本次零改动。
+
+同账独立官方来源诊断确认最新稳定v3.3.1、commit ffd103b9c1a4ce5bf305e7c0998eda6e05457dad及Windows noconsole资产ID/大小/SHA与当前锁一致，未替换或修改Loader。三次自有Job均自然归零且未强杀，已知执行累计60287/240000ms；准备/分析/记录不伪计为子业务耗时。保留官方整包消费及单YMCC升级路径，不恢复独立Decky升级器或Loader版本倒退否决门。无部署/真实Steam/设备睡眠动作，无实机CPU或恢复频率收益证明，整体ACTIVE。唯一后继Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/package-update-audit/AUDIT-CLOSING.json。
+<!-- /DECKY-PACKAGE-UPDATE-AUDIT-20261113 -->
+
+
+2026-11-13 Steam三点/双路线回补完整Native合流：固定1476源码/原3027工具+OneCore前置pin，原build_native.bat五PE及精确NativeBuildID、实际1470 include/55库已核；公共取消/睡眠、双route、1043JS/H与菜单qualifiedRequest真实入图。原库图漏OneCore的后置FAIL保留，仅原main link/mt/seal续接，原obj不编、其余4产物不变。实际原C2065为共享g_inputCaptureStop先用后定义，仅前移同一atomic声明，主线及固定源其余字节锁内校对保持；准备字段位置/重链selector误判FAIL、原C2065/费用保留。四自有Job关前0，工具收尾与自然退出分列，不重跑旧业务，不拼父PASS。主线只后置观察一次漂移8项，不追赶重编。用户龙信2三点视觉成功保持，未绑定操作号/loaded来源；无Web/受管/包/部署或真实Steam设备睡眠，Running/Continue/手柄/焦点因果及S3/S4未验。唯一后继Win5SteamSleepRebind-20261111/QamFocusReview-20261112/native-integration-20261113/SOURCE_READY.json；整体ACTIVE。
+
+<!-- DECKY-FAN-FINAL-ADMISSION-20261113 -->
+2026-11-13 Decky风扇延迟队列最后发送边界已精确修复：原显示notify可同步卸载queue，旧源仍进入send callback一次；现复核disposed/applying及同一当前fan来源，再投递给原共享Client。断线/代次/权限撤回均零send callback，无关revision/game刷新仍仅一次并使用新revision；2秒原延迟保持。此为队列边界证据，不称实际YMCC硬件误写，原共享Client仍有最后保护，不归因为历史睡眠现场。
+
+原unmount case正文及20个其它原case保持，扩展同一原case的5边界；旧源必要反例、候选1原case/5边界与3非法选择拒绝已实跑，5自有Job自然关前0，累计执行44641/180000ms。两次准备FAIL（混合换行锚点、symlink权限）原件和费用保留，后继仅修准备不重跑业务；不新增ID/minimum/轮询/恢复额度。精确1产品+1原夹具写主线，源字节与候选相同，其他字节逆hunk保留。未完整插件配套构建/部署/实机睡眠或CPU收益验证，进下一自然构建，整体ACTIVE。唯一原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/fan-final-admission/SOURCE_READY.json。
+<!-- /DECKY-FAN-FINAL-ADMISSION-20261113 -->
+
+
+<!-- STEAM-LAUNCH-PUBLIC-INVENTORY-R27-20261113 -->
+2026-11-13 Steam原生启动两处私有全进程枚举已移除：WindowsPorts.snapshot/absentExcept仅消费原processInventory fresh0；只有Complete能证明不存在，未知/失败/partial拒绝，原ownedChild排除/联动token-user-session-path/持久账/不确定不重放保持。实际12新场景、旧私扫1语义反例、原NoIo68及3非法选择通过；1001跟随缓存零新增查询，不当实机CPU百分比。
+定向两图各444出现330unique/10库，原NoIo500出现358unique/7库。13实际准入Job关前0（8自然5核身份编译工具回收）；两编译FAIL与后置统计字段误名、准备锚点/换行误比及原1800秒账超时点保留。只续未执行/复读原raw，已过68/12不重跑；实际原生成器prepare与精确binding六边界已核，1产品+8原夹具配套精确导主线，无新ID/minimum/线程/轮询/恢复额。
+Win5 dd5d...导出盘EXE经原d479f2c8包实际zip成员/EXE/BUILD-IDENTITY/固定源码核同，固定2026-11-12 20:38:48.787香港时间，只有Legacy/Public且无新OwnerScoped布局头；因此该盘程序不含后继校准。此关闭远端disk包来源OPEN，不代现场loaded image或全部故障因果，本机c78d包不混用。
+整个R1～R6仍ACTIVE：URI/全部typed输出与独立helper、完整SourceLease/默认消费者/实际SDK资源、匹配包和现场CPU/睡眠恢复未齐，不称全图唯一。未完整产品编译/部署或Steam游戏设备睡眠动作。唯一后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R27.json；NativeLaunchInventory-20261113/SOURCE_READY.json、REMOTE-PACKAGE-INTAKE.json及REPORT.zh-CN.md。
+<!-- /STEAM-LAUNCH-PUBLIC-INVENTORY-R27-20261113 -->
+
+
+2026-11-13 公共record/UI诊断OwnerScoped错选已修：实际sleep nativeRecordDiagnostic调用；2公共/2原vendor映射及record标签精确导入，未知枚举拒绝、旧分支保持，无私有producer/轮询/额度。原digest adapter定向真实PE副本：旧client/UI两个实际反例，root38/vendor38、3非法选择及13真实Job关前0，三原编译图完整核；两次未resumed来源角色拒绝原件和空Job单列，已过编译不重跑。原DLL915968/21483918...与embed/receipt/sourcepins对应，未加载；3配套生成物和1原fixture同事务导入，原publisher动作/ABI4/取消保持。Win5 dd5d盘EXE已独立核原zip/唯一成员/BuildID/快照，绑定d479旧固定包（2026-11-12T12:38:48.787Z）仅Legacy/Public，盘包来源不再OPEN；仍不代log-time loaded和唯一因果。此前整Native属修复前epoch，不追赶重编，下一自然配套；无部署或真实Steam设备睡眠，Running/Continue/手柄/焦点和S3/S4仍OPEN。唯一后继Win5SteamSleepRebind-20261111/QamFocusReview-20261112/shared-diagnostic-layouts-20261113/SOURCE_READY.json，整体ACTIVE。
+
+<!-- DECKY-UPDATER-SURFACE-CLEANUP-20261113 -->
+2026-11-13 Decky更新入口surface清理已精确修复：原module dispose只退DOM，若Steam未同步React卸载，实际两个MutationObserver仍active；先移除组件抛错更会跳过本地清理。现在原owners持完整surface disposer，先归还本地观察/DOM/焦点，再向Steam移除组件；独立释放全部尝试后保留首错误，原顶层有界日志继续接收。初始scan失败自动退本surface，已退surface的迟到callback不再读状态或重建入口。无新增轮询/线程/恢复额度或Loader内核修改。
+
+原single update entry case保留原层级断言并扩5变体：普通module卸载、router错误、effect卸载、首scan失败、observer已断开后的抛错。旧源实际留2观察器，新候选5变体全部0/挂载0/焦点恢复，3非法selector明确拒绝，5自有Job自然关前0，执行29485/240000ms。注入router错误时注册表项仍1、错误保持，不能把本地归还称Steam成功移除。原raw lateCallbackAttempts字段是计划loop上界，旧源在先断言失败后未执行该loop；原raw保留，后继只改为plannedLateCallbackAttempts标签，业务/断言逐字保持且不重跑。精确1产品+1原fixture写主线，匹配插件待下一自然构建，未部署/实际Steam或睡眠操作，未证历史根因或现场CPU收益，整体ACTIVE。原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/updater-surface-cleanup/SOURCE_READY.json。
+<!-- /DECKY-UPDATER-SURFACE-CLEANUP-20261113 -->
+
+
+<!-- STEAM-RECEIVER-LEAST-RIGHTS-20261113 -->
+2026-11-13 Steam最终发布器跨进程撤销传输后继已精确合入11配套路径。Host在原durable consume之后、原scope/current及精确目标复核下，把原电源/账户事件各以SYNCHRONIZE复制至原Steam进程；wire2借用接收端本地槽，接收端再持有自己的3份副本，查询YMCC仅需query/wait，不再要求PROCESS_DUP_HANDLE。原Native stamp/Ready/账户/full GameID/primary/healthy及最终SDK前撤销保持。已知Prepare返回后回收两个传输槽；部分失败不退款，CLOSE_SOURCE失败先忘记数值且永不重试，管理结果未知或原清理归属抛错沿原ownerHeld保留至实际目标退出。ABI5配套915968B DLL/嵌入头/源清单与当前引擎对象已核，dispatcher ABI1保持。
+
+真实自有双进程新2撤销+冷控制、旧只读owner拒绝+冷控制、原发布18/494和同PE原13、sender7及原cleanup块4+冷控制均有独立raw；旧cleanup反例成立，原ownerHeld逐字体配真实子进程。27实际准入Job关前0（限定工具收尾与自然退出分列）、14编译图/884唯一引用核收；无新canonical/minimum或产品线程。原编译警告、HANDLE_LIST临时指针准备、旧cold断言、过期预算拒绝、两次合入路径适配失败和后置纠正及所有费用保留；已过业务不为封存重跑，初次主线CAS在写入前拒绝并行payload变化；仅接续原owner正式共享布局两reader，DLL因此补编一次并仅续受影响原18/同PE13和配套engine；sender/双进程/cleanup未重跑，前后来源分开。
+
+未实际测UAC/跨完整性或Steam SDK，不将权限风险认定为历史现场根因；管理状态/清理owner及Native事实为控制端口，不代签完整debugger/remote/DLL退出。SDK内部有界返回/完整资源归还、配套完整Native/包和物理仍OPEN，整体ACTIVE；无部署或真实Steam/游戏/设备/睡眠动作。正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/ReceiverLeastRights-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。
+<!-- /STEAM-RECEIVER-LEAST-RIGHTS-20261113 -->
+
+<!-- CUSTOM-LIBRARY-COMPLETION-AUDIT-20261113 -->
+2026-11-13 自定义游戏库接入复核：Host/Worker 的 Steam 元数据读取已消费公共客户端，既有后台 V2 仅按各自原限定来源保留。此次修复公共信息 unavailable/读取失败误判未安装并覆盖账户清单，显式目录不重复发现；构建来源补齐 Host 五份/Worker 两份遗漏依赖（一份共用）。原旧源反例、候选六变体、原来源八项及七个精确依赖变更控制通过，5 个准入 Job 关前 0；输出路径错误和两次准备拒绝保持，未跑完整父组。
+仅精确写 Worker 与构建清单；临时受控端口留 Evidence，不增默认门。本机 2026-11-13 05:56:27 +08:00 安装包 0.0.39 缺 backgroundSteamSourceProtocol；未重编或部署，不能称全部接入或安装版通过。配套下一自然构建、SourceJob late-born/all-member 资源归还及实机仍独立 OPEN。
+唯一后继：G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/CompletionAudit-20261113/SOURCE_READY.json 与 REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-COMPLETION-AUDIT-20261113 -->
+
+<!-- DECKY-INTEGRATED-PLUGIN-BUILD-20261113 -->
+2026-11-13 已将这轮五处就绪产品来源合成真实Decky插件：固定当前518源/678工具，原build-decky-sidebar-plugin.mjs原两段指纹配方实际构建，buildId=38ec47753caea7f16714291b88f6b9a70ab6096c881424678a76035304ed1e1d，总511551B。27个原background-intent场景实跑并逐名/顺序核对，包括关侧栏/卸载后TDP及风扇两秒提交、10类已接受命令的回执、真实来源变化与不确定结果不重放；2自有Job自然关前0，执行21364/240000ms。普通默认整组/完整Native和YMCC包均NOT_RUN。
+
+当前PerformanceControls与原20项focus产物来源相同，原index前像SHA匹配且启动/Content完整前缀逐字不变；仅来源等价引用原20，不重跑或称本轮20通过。一次fresh观察518源drift0后，精确提升五项正式插件资产至主线，实际只写dist/index.js，四个相同元数据文件未改字节；Loader官方3.3.1未改。未追赶并行源码、未写安装目录或启停/操控Steam。只读安装插件仍为ca4e3498...旧来源，不能归功新修；早先一次无返回进程的查询曾被误述为未运行，后续实际观察到既有YMCC进程，该错误判断已前向更正且未产生程序动作。配套整包/真实睡眠与CPU收益继续OPEN，目标ACTIVE。唯一原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/plugin-integrated-build/SOURCE_READY.json。
+<!-- /DECKY-INTEGRATED-PLUGIN-BUILD-20261113 -->
+
+
+2026-11-13 三点/回补源码交点后继：正式driver原installed日志回调处于未继续的debug事件内；现只存原tick，确认detach后且result前发原通知，unknown detach抑制该通知。四诊断hunk逆字节核原动作/query/预算/清理保持，不删实际源捕获和driver共用账户往返。完整实际engine TU object-only/323include及3Job关前0；现有ABI5 DLL435实际输入同字节，host driver不在DLL图，复用2ee58042...并原generator更新verify receipt/sourcepins，不重编或加载DLL。3文件Windows新字节锁内精确主线导入，原SDK条件include/错误封存/混合EOL/旧ABI4复用FAIL保留，来源不重拷。当前漂移0项只观察不追整编。微软debug事件暂停合同支持移除额外sink工作的推论，不签现场延迟或焦点因果；无新producer/logger/轮询/测试父/业务重跑、无部署或真实Steam设备睡眠，整体ACTIVE。唯一后继Win5SteamSleepRebind-20261111/QamFocusReview-20261112/deferred-driver-progress-20261113/SOURCE_READY.json。
+
+
+2026-11-13 driver进度后置纠正：后置审计纠正：官方文档的两次web调用没有返回可读正文，另一次直接HTTP读取15秒超时。因此此前OFFICIAL-CONTRACT.json/报告中“官方合同已reviewed”的本轮核验表述撤回，来源URL仅是待核参考，不授官方读取PASS。原源码顺序、实际完整host TU编译、3Job0与3文件精确导入仍有原件；暂停时长/焦点影响继续只作未实测推论。原件不覆写。
+
+原600000ms父期最终封存墙钟651245ms，超51245ms，CLOSING内finishedWithinRegisteredCurrentParent已实际为false。该超支及失败抓取未知尾费保留，不追加回填预算，不称预算内整父通过，不为纠正重跑编译/业务。
+
+<!-- DECKY-INTEGRATED-PLUGIN-ROOT-CORRECTION-20261113 -->
+2026-11-13 对上段私有源根产物38ec477...的“主线匹配”资格前向撤回：真正原默认--check已实际拒绝dist/index.js，FAIL/exit1/费用保留。518源/工具未漂移时，实际主线源根构建得到不同minified指纹；确切变换原因未证，不用改hash、规范化变量或放宽断言求绿。保留私有产物，仅沿未改的原主线builder把实际主线根产物精确写回正式插件资产，再用原默认--check实际通过。
+
+最终主线buildId=76fe5dc242a108c89c8d56d27466740bf8eec1e789da7df967dc8c0e6efc1ceb，总511566B；仅dist/index.js变更，4元数据相同。原background27为同源实际证据、纠正期间业务重跑0，原focus20仍只引用。5自有Job（含首check失败）自然关前0；原builder共4调用（私有build/失败check/实际主线build/成功check），累计已知执行48524/240000ms，不重置21364/28204/35338。先前SOURCE_READY与CLOSING保持历史，以本SOURCE_READY-r2前向取代其主线产物资格。无产品源码/原builder逻辑改动、无安装目录写入/Steam或睡眠动作，Native/YMCC整包/实机CPU收益继续OPEN，目标ACTIVE。唯一后继Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/plugin-integrated-build/SOURCE_READY-r2.json。
+<!-- /DECKY-INTEGRATED-PLUGIN-ROOT-CORRECTION-20261113 -->
+
+
+2026-11-13 Win5已有130435普通后续包已定向只读核收：sleep/recovery完整保留旧字节前缀；新tail54 route+8睡眠事实，首次采集空格/T时间cutoff遗漏原件保留，同raw归一化补齐。盘EXE仍dd5d旧d479包；13:04目标valid=false/pid0/source none、三次waiting engineDispatched=false，不推断游戏退出或漏识别。新506 reason12/507 reason32的SleepEntered=false、SleepDuration0、generation9065，不是已证第三次S4恢复失败。native-lifecycle轮转只12:15后，旧三点59条仍在111700原件，本包0completion不授菜单成功/无点击。无新修复实机验收或焦点因果，无产品/编译/部署/Steam设备睡眠动作。唯一后继Win5SteamSleepRebind-20261111/Field-20261113-130435/ANALYSIS.json及REPORT.zh-CN.md；整体ACTIVE，SDK cleanup私有候选仍待原owner正式资格。
+
+<!-- DECKY-WIN5-130435-REVIEW-20261113 -->
+2026-11-13 Win5新130435“风扇租约”日志已作Decky只读增量核对：今天留存594→837，原594条全部仍在，新243条覆盖设备时间11:17:03.547～13:04:26.964；224次mode报告六个known/connected事实全真、2次QAM检查ready，新增wake/recovery均0，不是新版睡眠自愈通过。8次壁纸inventory成功集中11:17:07～20秒，其后留存没有追加inventory，不作为实际视频首帧或解码成本证明。一次旧snapshot成功后source-changed弃用，随后当前读30ms成功，未作持续掉线归因。
+
+现场报告插件仍646399...，与主线已校验76fe5d...不同，不能把稳定段归功新修。限定4个原生log成员未匹配Decky/cost|cpu|resource交集，不外推整包无资源证据、未计算CPU比例或收益。本段不改产品、不新增夹具/构建/部署或Steam/设备动作；原raw新增行、行号图、两zip/member SHA均固定。整体ACTIVE，下一步只对独立可复现缺口续作。原件Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/field-win5-130435-20261113/REVIEW.json。
+<!-- /DECKY-WIN5-130435-REVIEW-20261113 -->
+
+
+<!-- STEAM-FIXED-CLIENT-COMMAND-R28-20261113 -->
+2026-11-13 公共固定Steam命令出口已精确写2产品+5原夹具配套及原identity-only索引4条。manual set/show/stop与已获准恢复共用typed BigPicture/Desktop/Stop、固定参数和持PID/birth/root句柄；手动捕获原共享电源，先完成会话锁读取再核持进程及exit/mock/power，通知/serial/代次/未知拒绝、纯publication推进保持。恢复admit最终仅一次，空admit拒绝，异常/授权期间撤销归还句柄，无重放或新恢复额度；原显示flag/radial与set后CSS/Decky授权保持。
+最终36边界、原display30/stop36、3非法selector及必要旧源反例已核；12实际图/50准入Job关前0（40自然10核身份工具收尾），1未准入UNKNOWN另列。旧32与中间5/最终36分epoch，最后共同函数变化才重验受影响组；原静态诊断命名FAIL修后仅续，3前缀+后缀不拼整父。准备模板/复制/重复pin/路径比较FAIL及全部费用前向保留；原1800秒+有据追加900秒，未重置旧账。
+UI固定命令只关闭本范围出口，独立直读/其他typed/helper、完整SourceLease/SDK资源/全消费者、完整Native配套包与实机仍OPEN。Shell提交不算PID原子动作、模式/退出完成或历史现场根因。未部署/操作Steam、游戏、设备或真实睡眠，无CPU百分比/恢复降频证明，整体ACTIVE。唯一后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R28.json；ClientCommandOutlet-20261113/SOURCE_READY.json、QUALIFICATION.json及REPORT.zh-CN.md。
+<!-- /STEAM-FIXED-CLIENT-COMMAND-R28-20261113 -->
+
+
+<!-- STEAM-QUERY-ACTOR-RETURN-20261113 -->
+2026-11-13 完整QueryActor资源后继已精确合入1产品+5原配套/夹具路径。正常结束按原线程归还user/pipe，并要求本YMCC进程local SDK BShutdownIfAllPipesClosed成功后只归还本次LoadLibrary引用；加载后factory缺失/null也归还。SDK抛错、释放false/抛错或loader归还未知均不跨线程逃逸，单一process-local debt保留原module/client/pipe/user和shared ReadScope，拒绝后续actor加载/调用，不重试/卸载/借Ready复活。它不是Native电源或Steam账户authority。原host在发布结果及最终读回之间显式finish/join并确认cleanup，summary独立记录真实归还。SDK内部仍原join等待，不detach/TerminateThread。
+
+完整原类Current14、真实自有DLL生命周期12/相关原断言、两原module泄漏反例、实际success-tail3/缺finish原反例及3非法选择已核。6个未知场景在actor结束时有意保留SDK/module/scope，直到夹具进程退出，不拿Job0代作提前归还；两真实阻塞SDK叶保scope/module到放行join。28实际准入Job关前0、6编译图已核，限定工具收尾分列。原R1重复pin在业务准入前UNKNOWN/空Job另列，旧失败/费用不变。独立审阅修fixture截止异常跳join：仅clock叶改为零剩余并保留join，F/P2分别补验，原14/12按P epoch保持未重跑。原prepare-only入口补H/等待/json及三完整actor闭包，默认14保留，定向每case独立进程，SDK债无reset，无新ID/minimum/产品线程或timer。
+
+真实SDK API/quiescence/内部有界返回、任意SEH、完整debugger/remote/常驻DLL和全消费者、配套完整Native/包与物理仍OPEN，整体ACTIVE；无部署或实际Steam/游戏/设备/睡眠。此轮不重跑既过publisher/旧wait组。正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/NativeReadScope-20261113/QueryActorCompletion-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。
+<!-- /STEAM-QUERY-ACTOR-RETURN-20261113 -->
+
+
+<!-- DECKY-WALLPAPER-LOCAL-TEARDOWN-20261113 -->
+2026-11-13 Decky壁纸模块卸载异常已按原late-home-no-route-remount消费者复现并精确修复。原Steam路由移除抛错打断后续清理，真实React/Edge留下10监听/2 MutationObserver/1 IntersectionObserver、2patch、1表面及壁纸订阅；候选逐项尝试全部本地释放后再抛首错误，故障与正常两变体各31原断言通过，迟到事件不复活，共用HUD连接保持。故障Steam注册项仍1且原错保留，不冒称外部移除成功。3非法selector在编译/浏览器前拒绝，原复现及候选共6自有Job自然关前0，旧负例不重跑。
+
+仅1产品+1原浏览器夹具精确导入，显式teardown变体补模拟native foreground事实，默认组/产品准入不改；无新timer/线程/恢复额度/ID/minimum。准备阶段一次多余转义修正断言在写前拒绝，未改来源且原FAIL/费用保留。执行账72617/300000ms，图片场景不是视频解码或实机CPU收益证明。旧76fe5d...插件构建不含此后继，交下一自然配套构建，不追赶重编；未部署或操作Steam/游戏/设备/睡眠，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\wallpaper-teardown\SOURCE_READY.json。
+<!-- /DECKY-WALLPAPER-LOCAL-TEARDOWN-20261113 -->
+
+
+<!-- DECKY-HUD-MODULE-TEARDOWN-20261113 -->
+2026-11-13 Decky监控HUD卸载异常已用原cold-connected-later/already-defined HUD-only入口、真实React/Edge和MirrorClient复现。原router移除报错后仍留hud passive demand/本地占用标记/1根；候选逐项释放全部本地归属再抛首错误，并阻止旧React根与迟到bootstrap重领。故障/正常两变体各13原扩展检查（HUD内10）通过，32迟到事件与残留根强制重挂后仍0旧归属；下一模块取得新标记并正常退出，独立共用连接保持。故障外部Steam注册项仍1及原错保留，不冒称移除成功。
+
+原首次编译因新SVG图标未在旧fixture快照filter登记而拒绝，未到浏览器，FAIL/原stderr及费用保留；只补两处SVG登记/原asset loader转交后续同用例。原复现只跑一次，候选5Job加原复现及准备失败共7自有Job自然关前0，3非法selector在输出/编译/浏览器前拒绝；累计106888/420000ms。仅1产品+1原浏览器夹具精确导入，默认组/Loader/业务准入/恢复次数不变，无新timer/线程/ID/minimum。此处为惰性Full-mode能力导出、无native popup/实际Steam/实机睡眠或CPU收益验收；不认定历史掌机根因。旧76fe5d...插件未含此后继，交下一自然配套构建，不追赶已完成包，未部署；整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\hud-module-teardown\SOURCE_READY.json。
+<!-- /DECKY-HUD-MODULE-TEARDOWN-20261113 -->
+
+
+<!-- STEAM-LIVE-NATIVE-OWNER-R29-20261113 -->
+2026-11-13 公共Live原steamLiveRequest已消费唯一Observer，本后继补exit/mock纯撤销，原快照/队列/发现/最终admit及迟到回包保持该请求归属；不加全局Ready，不阻断原SuspendCapture只读，固定sleep witness/foreign-registry语义及admit最终一次保持。公共run仅sleep.input-resume迟到拒绝时保留原bounded nativeReturn/v1，diagnostic-only不授成功/输入/Continue或重放；原false的steamFailure规范化保留，无新logger/查询/timer/线程/恢复额。
+实际native-owner前2+后14/44分epoch不拼16整父，当前nativeReturn13/50、旧体反例、当前原main30、3native/3PS非法选择、原PS实际prepare与编译片段逐字核同；5图/20实际Job自然关前0。旧可选回执/路径拼名/片段核收FAIL和原1800整体超时/2700收尾费用保留，当前只读发布另账不倒填旧PASS。2产品+7夹具依赖/原索引精确写回，parallel listeners/main保持。
+旧boot automatic完整extractor之前已缺held-process/分类接线，本轮仅配新依赖，其完整64项仍OPEN；全部typed/helper/SourceLease/SDK资源、完整Native配套包与物理CPU/睡眠/降频未齐。无真实Steam/设备/睡眠动作或部署，整体ACTIVE。唯一后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R29.json；LiveNativeOwner-20261113/SOURCE_READY.json、QUALIFICATION.json及REPORT.zh-CN.md。
+<!-- /STEAM-LIVE-NATIVE-OWNER-R29-20261113 -->
+
+
+<!-- DECKY-HUD-ENTRY-STARTUP-ROLLBACK-20261113 -->
+2026-11-13 Decky HUD部分初始化及入口回滚已实证修复。原入口先启connection demand，HUD注册后抛错使module拒绝且没有onDismount，实际MirrorClient/React/Edge留下在线socket、2订阅、2timer和1注册组件；原cold-connected-later/already-defined消费者捕获。候选HUD以同一disposer回滚已尝试的注册/事件/订阅/自己取得的需求；入口按逆序归还已成功兄弟并dispose原client，保留首初始化错误。注册前/后/diagnostic发布/壁纸factory/更新factory五故障各10检查通过，正常启动5检查通过；32迟到事件不复活，新module仅1socket且无等待timer。兄弟工厂为惰性协作者，不授其内部部分初始化通过。
+
+首次候选因fixture遗漏原隐藏连接probe回复，恢复后的2timer尚在而失败；补显式startup-only correlated native ready:false回复后只续该必要集合，产品及零timer断言保持，原FAIL/raw/费用保留。原复现一次、首候选一次、新候选9Job共11自然关前0，3非法selector在输出/编译/浏览器前拒绝，累计136557/600000ms。精确2产品+原fixture导入，无新timer/线程/ID/minimum/Loader/恢复次数改动；默认组不重跑，不认历史现场根因、实际Steam/popup/睡眠/CPU收益。旧76fe5d插件未含后继，交下一自然配套构建，不追赶已完成包；未部署，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\hud-startup-rollback\SOURCE_READY.json。
+<!-- /DECKY-HUD-ENTRY-STARTUP-ROLLBACK-20261113 -->
+
+
+2026-11-13 公共R29具体日志缺口后继：仅2产品/3原配套写主线，新尝试清旧eventId，两route保各自有界原终态引用；公共Steam睡眠消费记录原求值guard/proof时间，首次/变化写、重复timer安静，终态沿原readiness，不加Ready门/谓词/时钟/TTL/次数。旧源反例成立，首候选3过1FAIL、修后只续失败1，各epoch不拼父；原guard18变体调用序列/返回一致，实际tick3通过，terminal只原赋值端口。集成仅编译，后置错误保留且复读原Job0，不重编。13实际Job关前0，睡眠隐式link closure未单独闭合，不代完整Native。公共QueryActor正式交付已独立核1产品5配套、14/12/成功tail3及28原Job0，未重跑publisher。预算首窗到期与后继、全部FAIL/UNKNOWN/未知准备费保持，无部署/真实Steam设备睡眠。目标本轮progress、连续无进展归0，实机焦点及Running/Continue/手柄仍OPEN。刚发现boot_modes原automaticRecoveryWorker还需补同诊断类型提取，单列后继不代SOURCE_READY全图。原件 G:/YeManCC-Work/Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/QamFocusReview-20261112/route-readiness-diagnostics-20261113/SOURCE_READY.json。
+
+
+<!-- STEAM-HOME-FINAL-ADMISSION-20261113 -->
+2026-11-13 GamingHome独立入口后继已精确合入2产品+1原夹具。固定task/BAT/Steam主页URI/focus共用typed同步出口，日志与COM准备后、每次真实Run/Shell/ShowWindow/SetForegroundWindow前复核原FSE/主页选择/取消/首次持有YMCC进程及原15/60秒。首次身份退出或未知后拒绝替换与复活，原task描述/唯一action/固定路径与参数/当前SID/权限/交互token/零trigger和窗口约束保持。它不是Steam账户/Valve模式/SourceLeaseV2权威。
+
+原67断言、24定向/88断言、4旧源语义反例及3非法选择已核；独立审查发现首次候选snapshot会换持有进程，修后直接消费精确产品snapshot/current并核原候选反例，原24不重跑。各实际Job准入且dispose前0，完整组件私有编译链接及实际依赖图已核；原SDK头漏声明FAIL保留，只读补既有pin后核同raw，真正产品身份变更分别编r2/r3。无新ID/minimum/线程/timer/EXE，无真实任务/Steam/设备/睡眠/部署；全部消费者/SDK有界返回/匹配完整包/物理继续OPEN，整体ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/IndependentHomeAdmission-20261113/SOURCE_READY.json及HANDOFF.json。
+<!-- /STEAM-HOME-FINAL-ADMISSION-20261113 -->
+
+
+<!-- STEAM-SHARED-ENDPOINT-DISCOVERY-R30-20261113 -->
+2026-11-13 公共请求局部端点选择已精确导入4产品+8配套/原索引。Live、Documents、Bootstrap共用steamdiscovery::select；同PID/port成功后IPv4/IPv6别名只读一次targets，首失败/空结果仍可试另一别名，不同端点第二成功仍歧义拒绝。原各域fatal词汇、sync/async、4/7/5秒界及账户/持进程/最终鲜读归属保持，取消不被忽略错误吞掉；无跨请求cache/producer/线程/timer或新权限。
+实际20定向和真实旧bootstrap反例、原main30/expected身份/doc34/bootstrap118/worker13分列；3native/1PS非法选择及原PS三准备路径核同。4图/26实际准入Job自然关前0，单个双地址成功bootstrap的targets GET 2→1，不作整机CPU或现场修复证明。编译flags/advapi32、anchor/EOL和首导入CAS失败保留；binding只重链，PS精确rebase保留CPU1并仅续生成准备，无已过业务重跑。
+原1800秒账不改，本次发布另列；新helper纳入live-transport索引。全部SourceLease/typed/helper、完整Native配套包与物理CPU/睡眠/自愈降频仍OPEN，111700两route未进driver不授恢复成功，guard/proof/终态诊断由原恢复owner续。无部署/真实Steam设备睡眠动作，整体ACTIVE。唯一后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R30.json；EndpointDiscovery-20261113/SOURCE_READY.json、QUALIFICATION-r2.json及REPORT.zh-CN.md。
+<!-- /STEAM-SHARED-ENDPOINT-DISCOVERY-R30-20261113 -->
+
+
+<!-- DECKY-REAL-SIBLING-STARTUP-ROLLBACK-20261113 -->
+2026-11-13 Decky真实壁纸/保底/更新入口部分初始化回滚已精确修复。上一入口父回滚仅有惰性工厂，本后继以实际三consumer与原MirrorClient/React/Edge复现第二wallpaper patch抛错：socket虽已归还，仍留1 patch+7 foreground监听。现wallpaper同一disposer包住注册、预记自己callback并在正常返回用实际handle替换；fallback和updater各自处理addGlobal部分提交后抛错，晚旧root不重新订阅。原cold-connected-later/already-defined下六故障各12检查及正常6检查通过，回滚后新完整模块2patch/3global/1图片可见；当前新epoch另续原late-home卸载故障/正常各31检查，旧原复现不重跑。
+
+首次实接updater因SP_REACT别名缺失在consumer前失败，补明确real-sibling模式的原React别名后继续，FAIL/raw/费用保留。含旧失败、复现、10新启动/selector及2卸载回归共14Job自然关前0，3非法selector编译前拒绝；累计281627/600000ms。精确3产品+原fixture写回，entry/HUD不改，无新timer/线程/ID/minimum/恢复额度；原默认整组不跑。commit后throw控制仅证明本地原callback身份，不授任意外部不透明handle可回收；实际Steam/popup/视频解码/睡眠/CPU收益与历史掌机根因均未证。旧76fe5d插件不含后继，交下一自然配套构建，不追赶旧包，未部署，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\sibling-startup-rollback\SOURCE_READY.json。
+<!-- /DECKY-REAL-SIBLING-STARTUP-ROLLBACK-20261113 -->
+
+
+<!-- DECKY-STARTUP-RECOVERY-PLUGIN-BUILD-20261113 -->
+2026-11-13 Decky最近壁纸/HUD清理、HUD与三兄弟初始化回滚已进入一次自然主线插件构建。固定当前518源码/678工具，实际mainline根的未改原builder构建至隔离输出，随后5项资产锁内精确提升（只dist/index.js变更），原默认--check实际通过。buildId=e9296f3d904437a8a8825a80125f886f54ea1df136aeb607b02231c176dfbdc0，总512649B，官方v3.3.1 Loader未改；两自有Job自然关前0，已知构建/校验执行21715/240000ms。未沿私有源根构建、不复用旧38ec失败资格、不改指纹或放宽原check。
+
+业务证据仅引用原hud-startup与real-sibling当前源码消费者，构建期间业务重跑0；index原手势/意图/Content/卸载后缀逐字同旧已验证来源，仅源码等价，不称background27/focus20本轮通过。未完整Native/YMCC包/安装或真实Steam、睡眠与CPU收益验收，未追赶后继并行源，整体ACTIVE。当前插件资产以本新build取代76fe5d旧快照；旧FAIL/原件保持。唯一原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\plugin-startup-integrated-build\SOURCE_READY.json。
+<!-- /DECKY-STARTUP-RECOVERY-PLUGIN-BUILD-20261113 -->
+
+
+2026-11-13 R29具体日志后继正式回交：guard/proof与两route终态引用见原route-readiness-diagnostics SOURCE_READY/HANDOFF，不制造旧event112新字段或新现场。无公共API缺陷要求新logger/Ready/TTL放宽，R30只作独立来源交接。原boot automaticRecoveryWorker已补真实WakeOperationObservation、交互完成证明及共享classification原依赖提取，1fixture Windows字节锁CAS写主线，无产品/原32+5业务变化。原builder函数实际生成当前消费者，一次真实编译exit0/Job关前0，416include/7lib现盘与先前固定工具图一致；本次漏cstdarg前pin仍保留、完整当前工具身份未授，后置FAIL仅复读修正，不重编求绿。初准备TDZ/后置来源缺项及费用保留，当前8分钟窗内收口；完整Native/包/部署、Running/Continue/手柄/三点因果未验。新进展不改旧blocked原件、不声称目标完成。原件 G:\YeManCC-Work\Testing\YMCC\Evidence\Win5SteamSleepRebind-20261111\QamFocusReview-20261112\route-readiness-diagnostics-20261113/boot-consumer/PUBLIC-OWNER-REPLY.json及CLOSING.json。
+
+
+<!-- DECKY-WIN5-143143-COST-REVIEW-20261113 -->
+2026-11-13 Win5 143143包已只读对比130435：今天Decky837→1015，旧全保留，新178仅mode六项全健康，13:04:49.342～14:31:35.043；无新wake/recovery，不签新修复/视觉/睡眠通过。现场插件仍646399，与当前主线e9296f及本机ca4e来源分开。
+
+本次在virtual-gamepad.log/.1找到357个input-idle-window的真实整进程成本，14:25:47.146～14:31:44.034、区间合357891ms、16LP。GetProcessTimes delta/rate与逐PID/birth连续total核同；10个identity-unavailable候选排除。整机口径加权：Steam共用context0.0332896%、候选UI0.0030878%、官方Loader父0.00109146%/子观测delta全0、Native0.5007089%；Nativep95 0.78125%、最大3.90625%/最后625msCPU点完整保留。均为整OS进程、不授DeckyJS独占归因；357份壁纸visible/queued=false、kindunknown，不签视频。
+
+同期同Native父PID/birth有1430个不同HidHide CLI settled、最高5/s，已交CPU任务作为线索，命令/子CPU/因果未证。峰值邻近导出文件名但export事件匹配0，不归因导出；首次JSON默认cp936读坏路径在scan前失败，改显式UTF8后只续只读、原失败和原脚本保持。未产品/fixture改动、未新测量进程/构建/部署/Steam设备动作，主线健康日志去重已存在不重复修。整体ACTIVE；原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\field-win5-143143-20261113\REVIEW.json、PROCESS-COST-REVIEW.json和REPORT.zh-CN.md。
+<!-- /DECKY-WIN5-143143-COST-REVIEW-20261113 -->
+
+
+<!-- STEAM-BOOTSTRAP-DISCOVERY-FAILURE-R31-20261113 -->
+2026-11-13 bootstrap发现原AsyncFailure被忽略而只剩context-unavailable的缺口已作有界补强。当前请求最多保留一份已有transport事实，仅最终context-unavailable时投影原steamFailure；成功别名即清空，cancel/deadline/其它后期错误不串旧码，当前transport/CDP优先。原status()已读非200/非101带入Http及discovery/upgrade，reason/循环/期限保持，无额外查询、logger、线程/timer/恢复额度或新权限。
+实际12定向/189检查、旧原发现块反例、原endpoint20/bootstrap118分列；3native/3PS非法选择及PS三条prepare逐字核同。首prepare缺私有main的FAIL/原空目录保留，精确补原输入后只续准备，业务重跑0。2实际图/17准入Job含准备失败关前0，结束种类依原件；1产品+3既有配套及原identity-only索引1行精确导入，保留并行Observer/listeners/消费端，不为封存重跑业务或借新来源签旧包。
+这项用于下一配套版本追查，不认定111700第二次恢复已修复；guard/proof/路线终态由恢复owner续，全SourceLease/SDK/helper/消费者、完整Native/YMCC包与实机CPU/睡眠/降频仍OPEN。无部署或实际Steam设备睡眠动作，整体ACTIVE。唯一后继 G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R31.json；FailureDiagnostics/DiscoveryRetention-20261113/SOURCE_READY.json、QUALIFICATION.json及REPORT.zh-CN.md。
+<!-- /STEAM-BOOTSTRAP-DISCOVERY-FAILURE-R31-20261113 -->
+
+
+<!-- DECKY-EXISTING-PAIRED-PACKAGE-INTAKE-20261113 -->
+2026-11-13 Decky交付链只读核收找到现成完整包，不重编追赶：独立065658/vc111700导出build0902eaf...，ZIP709a8baf...，Native7a635c...，包含完全相同e9296f...插件。518固定插件来源及5载荷逐字同主线；原Assert-ExportBuildIdentity/ArchiveIdentity/PublishedTree/DeckyExportPayload含managed manifest实际通过，3038源/678工具、1Job自然关前0，执行24453/240000ms。原完整包不是业务Full/实机验收。
+
+本机仍9db170.../ca4e插件，其精确前包已找到055102/GuardReady、ZIP213e5b...，供原设置保留/回滚事务核对。根Mainline/Release仍Nov9旧包，不借它覆盖本机；独立已完成包与主线源码/本机三个身份分开。CPU任务同时核现成包是否包含其最新叶，由既有配套部署归属衔接；本轮不建包/不编译、不启停YMCC、不替换安装、无Steam/设备/睡眠动作，原部署计划和读回门未执行/未豁免。目标ACTIVE；原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\paired-package-intake\QUALIFICATION.json与DEPLOYMENT-INPUTS.json。
+<!-- /DECKY-EXISTING-PAIRED-PACKAGE-INTAKE-20261113 -->
+
+
+<!-- STEAM-LIBRARY-SHUTDOWN-ADMISSION-20261113 -->
+2026-11-13 自定义游戏库关闭Steam已接原Native typed固定出口。UI确认的PID/birth及Native代次/通知序号/挂起serial按十进制字符串保留，原FIFO内部5秒deadline不退款；纯publication不撤销。Native实际capture并最终复核原power/退出/隔离/实例与单次claim。新增动作通道与只读metadata分离；nonce本地管道的实际server PID由内核核验，引用Host HWND本身不算请求者证明。Host不再自行CreateProcess -shutdown，无硬杀/重启；Unknown不重发，提交不是关闭成功，仍只凭新鲜完整缺席交原离线写者。内部截止字段从原commit合并键剔除，保留首请求截止。
+
+原Host22/Native23/UI17及前候选channel28按各自epoch保持，内核证明后只续受影响channel与合并键控制；完整Host实际TU及真实producer头编译核收，所有实际准入Job关前0。原Native夹具缺Command编译FAIL、准备分隔符拒绝、审阅发现HWND伪造及去重缺口均保留，未把旧28冒称最终认证整父。新正式prepare-only配套生成体逐字等于实跑，不新增canonical/minimum/默认Full。完整installed IPC/跨完整性/祖先ACL、配套全Native/link/包及实机仍OPEN，整体ACTIVE；无真实Steam/设备/睡眠/部署。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/SOURCE_READY.json与HANDOFF.json。
+<!-- /STEAM-LIBRARY-SHUTDOWN-ADMISSION-20261113 -->
+
+
+<!-- DECKY-INSTALLED-AYA-REVIEW-20261113 -->
+2026-11-13 本机和AYA新归档只读补核：本机1216模式观察须分六项真/明确不可用/未知，14:32:58～14:34:00四次live-ui-read-timeout后同writer/Steam/power恢复六项真，邻接窗口无UI/BPM高阶开始；缺字段不当断连，间隔不当断线时长。AYA332mode健康字段缺失且末尾desktop，580runtime主要等待，Loader PID均0，不归为Decky崩溃或Steam重启。当前main原准入已在账户解析前不可重试停desktop，仅读源、不代旧包或实机资格。四次超时原位置交公共Steamowner沿现有有界trace追因；无产品/fixture/CPU采样/构建/部署/Steam动作。CPUowner继续配套部署，本机旧9db170/ca4e与新e9296f分列，S0/S3/视频/CPU收益仍OPEN，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\installed-and-aya-20261113\FACT-CLASSIFICATION.json与REPORT.zh-CN.md。
+<!-- /DECKY-INSTALLED-AYA-REVIEW-20261113 -->
+
+
+<!-- DECKY-DESKTOP-RENEWAL-20261113 -->
+2026-11-13 Decky慢速准入清空已确认desktop的漏口已由原canonical offline消费者+真实共享ModeObserver复现：旧retry1/账户未确认/续读1，候选retry0/desktop停留/续读0。只改Decky lambda续读前的桌面保留，不改未知/大屏刷新、原额度或权限；原case其他桌面零截止/事件16ms接续/账户节流/OFF与153→153全部资源归还通过，4Job自然关前0。封存器误期待ui-pending的FAIL保留，同raw按实际account原因前向核收，不重跑旧源。仅1产品+1原fixture及3既有声明精确写回，无公共Steam产品/新ID/minimum/线程/timer/EXE；下一自然配套构建消费，不追改已完成包，无整main/新包/部署/实机睡眠或CPU收益验收，不归因AYA全部现场，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\desktop-renewal\SOURCE_READY.json与REPORT.zh-CN.md。
+<!-- /DECKY-DESKTOP-RENEWAL-20261113 -->
+
+
+<!-- STEAM-ACTION-REAL-IPC-20261113 -->
+2026-11-13 自定义游戏库固定退出通道已补真实本地跨进程：完整原client/serve/Peer/callerOwned/processInventory执行11场景，真实WM_COPYDATA/映射/事件/管道PID，无惯性identity返回。三进程借用真实Host HWND时，内核server PID是实际第三方，零入队/零效果；前候选移除管道核对的原完整头对照实际接纳并触发1个惯性动作。产品头未改，计数动作与NativeCurrent仍端口，真实48字节电源/typed出口不冒称组合。
+
+重复20真实请求各1 claim/效果/内核核验，预热后owner句柄109/109稳定；首异常冷基线83→85原FAIL保留，1次明确自有warm child后异常展开实际自然归还、85/85严格相等。10实际准入Job均自然关前0、5编译图核收，原11/20未重跑、不拼最后源码13整父PASS。只精确接原prepare入口的显式cross-process模式及1模板，默认原32保持，无新ID/minimum/默认Full。独立foreign primitive只准备未重复执行。
+
+所有组件名均为证据目录的惯性fixture PE，私有桌面隐藏窗口；源码无SwitchDesktop/抢前台，未独立采样实际input desktop。same-user/session/integrity范围外的installed ACL/UIPI/UAC、完整Native/link/匹配包和物理仍OPEN，整体ACTIVE。无真实YMCC/Steam/游戏/设备/睡眠/部署。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/CrossProcess-20261113/SOURCE_READY.json、QUALIFICATION.json及HANDOFF.json。
+<!-- /STEAM-ACTION-REAL-IPC-20261113 -->
+
+
+<!-- DECKY-WIN5-153718-FIELD-20261113 -->
+2026-11-13 Win5新153718包仅Decky只读核：新增550，15:17起已有e9296f插件自报；4个connected终态含14.625s恢复/4.750s独立启动/5.609s唤醒重绑/19.968s前端client掉线后的Loader回收及页面重建。同最后段Steam12540/birth保持，末尾六健康与快照43ms ready真；不把页面重建当整个Steam重启或完整视觉睡眠通过。原始steamFailure unknown/codeKnownfalse仍缺断连根因；本份无产品改，先好后坏待细分client有限状态。266成本窗/14不可用样本排除、Native265样本中128.047s缺口保留，整机0.8615%/最高7.03125%是整Native非Decky独占；无CPU收益/视频GPU验收。初分析漏独立启动终态的FAIL与原脚本保持，同raw复读4终态，无producer重跑。游戏/手柄/其它任务不改，无部署/Steam动作，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\field-win5-153718-20261113\QUALIFICATION.json与REPORT.zh-CN.md。
+<!-- /DECKY-WIN5-153718-FIELD-20261113 -->
+
+
+<!-- STEAM-ACTION-EXCEPTION-RECEIPT-20261113 -->
+2026-11-13 真实本地IPC夹具后继只补同一异常边界的回执守卫：GetProcessHandleCount均核实际返回，析构实际GetExitCodeProcess为0再通过。原自有warm child后85/85严格相等保持；只续原异常case一次，两实际Job自然关前0/1图，当前phase合计12 Job/6图，原真实11、重复20、前候选真实伪造反例不重跑。只写1夹具、精确hunk保留并行字节，无产品变化/新ID/minimum或默认13整父PASS。原冷FAIL及此前scope原件不改。正式后继同CrossProcess-20261113/EXCEPTION-RECEIPT-SOURCE_READY.json及EXCEPTION-RECEIPT-QUALIFICATION.json；全部Steam目标、installed/跨完整性/真实Native及配套包/实机仍OPEN。
+<!-- /STEAM-ACTION-EXCEPTION-RECEIPT-20261113 -->
+
+<!-- CUSTOM-LIBRARY-STALKER-LAUNCHER-MEMBERSHIP-20261113 -->
+2026-11-13 潜行者2原日志复核：111700/143143/153718三包的scan/overrides/add-plan/last-add/all-account/media六成员分别逐字相同，本体1643320及shortcut4279376404/完整18379781702487638016未被本次运行清除；plan与last-add账户不同，不拼当前写入。Steam跟踪外层launcher15324及Shipping15348，三点和恢复的native primary关联拒绝属于公共层消费者边界，不用库静态关系伪造运行证明。
+
+原Worker实复现已有launcher仍被按primary误列待加入。现只按known complete scan内唯一明确launcher/selected primary及当前VDF确认库成员，保原ID/name/launch EXE、primary单列；歧义拒绝，原删除规划和多账户白名单共用同关系，scan最终撤销不写新规则。Worker+inventory头2文件14精确hunk已独占写回/逆字节核收；无main/media/VDF/实际游戏修改。旧源反例、候选2定向/原exact1、12无效scan边界、实际跨账户/撤销/最后成员删除已核，9Job关前0/4实际编译图；首准备和夹具规范化断言FAIL/费用保持，不拼默认父、不新增ID/minimum。
+
+壁纸另由原owner的stalker2-shortcut-20261113 SOURCE_READY负责，旧4/新25原件只读核收；不因其新源追包。两项源码分别待下一自然配套构建与真实Win5验证，未部署或操作真实Steam/设备/睡眠。本库后继：G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/Stalker2Field-20261113/SOURCE_READY.json、MAINLINE-IMPORT.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-STALKER-LAUNCHER-MEMBERSHIP-20261113 -->
+
+
+<!-- STEAM-ACTION-ACK-TIMEOUT-20261113 -->
+2026-11-13 Steam关闭请求回执超时夹具后继已精确导入两个原夹具文件：P1两项真实WM_COPYDATA超时、P2仅异常零ACK一项，两个私有语义反例和两个无效选择器均已核。12实际准入Job自然关前0、4实际编译图；原13不重跑，当前默认16未跑，不拼整父。Native Current/最终effect仍为惯性端口；冷句柄+2原因未证，不能代签全资源归还。原准备依赖/编码FAIL与成本保留，无新ID/minimum、产品变更或部署。BAT2仅核随包/独立工具及手动用途，当前BAT1无调用边，现场外部调用未验。完整Native/Host配套组合、包和实机继续OPEN，目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/AckTimeout-20261113/SOURCE_READY.json、REPORT.zh-CN.md。
+<!-- /STEAM-ACTION-ACK-TIMEOUT-20261113 -->
+
+
+<!-- DECKY-FINITE-CLIENT-STATE-20261113 -->
+2026-11-13 Win5归档确认backend/hooks正常而client断开后约19.968s恢复，Steam身份不变。已补原观测链的有限deckyClientState（16标签），原布尔连接证明/身份/恢复规则保持；旧前端无字段兼容，坏值不入日志。原client/mode各1定向、readiness42及实际共享UI read/main mode callback60断言通过，2000getter读零clone/send/timer，9成功producer实际Job关前0；私有输入pre-case FAIL及工具声明UNKNOWN保留，无已过业务重跑。只Decky字段+原fixture/声明精确导入，无新轮询/thread/EXE或其他任务修复。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\client-state-diagnostic\SOURCE_READY.json；等待下一自然插件/Native配套包，未部署/实机睡眠/视频/CPU收益或历史根因证明，整体ACTIVE。
+<!-- /DECKY-FINITE-CLIENT-STATE-20261113 -->
+
+<!-- CUSTOM-LIBRARY-LAUNCHER-ARTWORK-20261113 -->
+2026-11-13 持续库日志后继：AYA103536与Win5130435/153718只读复核；无库导出不当空库，OPT idle/added0不独自判失败，旧8/9月tmp不当本次泄漏。沿已核launcher/primary结构实复现原图片刷新仍只查primary，已有launcher时虽有本地素材仍拒绝；自动icon也错误绑定primary。
+
+仅refreshExistingSteamArtwork一个函数精确导入：复用已确认scan launcher关系与当前VDF、图标绑定真实launcher、保primary素材身份与自选icon；不完整/歧义拒绝，借scan在写前/写中/完成前撤销沿原事务回滚。原Worker旧拒绝、候选七类边界及原横图/完成失败回滚两控制已核，7实际准入Job关前0/2成功编译图；首临时夹具helper名编译FAIL与费用保持，不拼默认父或新增ID/minimum，其他产品字节逆hunk保持。
+
+安装版已更新至2026-11-13 15:42:31+08:00且有backgroundSteamSourceProtocol1，但Worker仍早于启动器两个后继；当前来源不签已部署。无此任务Steam/游戏/设备/睡眠/设置或安装操作，持续目标ACTIVE。唯一后继G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/SOURCE_READY.json与REPORT.zh-CN.md，下一自然构建消费。
+<!-- /CUSTOM-LIBRARY-LAUNCHER-ARTWORK-20261113 -->
+
+
+<!-- DECKY-FINITE-CLIENT-PLUGIN-BUILD-20261113 -->
+2026-11-13 Decky有限client-state诊断已进入主线插件载荷，518固定源/678工具，原builder及默认--check实跑通过，两Job自然关前0；锁内只dist/index.js变更，buildId=cabc97f10a4e5563fc4da995954de09489977747efed440aec7426fa6781d803，513240B（增加591B），官方v3.3.1 Loader不改。原业务/Native消费者仅引用前epoch，无已过组重跑。源码与5产物重新逐字核对，整体已知执行156366/600000ms；下一自然Native/完整YMCC配套包消费，不追赶已完成CPU包，本次无部署/Steam操作或实机睡眠、视频、CPU收益证明。原FAIL/UNKNOWN保持，目标ACTIVE，唯一后继G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\client-state-diagnostic\plugin-build\SOURCE_READY.json。
+<!-- /DECKY-FINITE-CLIENT-PLUGIN-BUILD-20261113 -->
+
+
+<!-- STEAM-PUBLIC-GROUP-OBSERVATION-R33-20261113 -->
+2026-11-13 公共Steam层接手潜行者2双PID角色缺口。当前仅交付完整GameID历史组观察与原拒绝元组诊断：selected游戏不换，成员保留full64/十进制/原行号，短ID、相关未知、冲突及来源错拼不冒充完整组；缓存不授当前或动作证明。association及原联合拒绝保留已有typed read的数量/primary/foreground，原reason/权限/次数不变，无新查询、线程/timer。4产品+2原夹具Windows当前字节CAS写回；原59项、旧源码单能力反例和原单case21内部边界各自核收，7实际Job自然关前0。首准备仅漏列原fresh仪表适配的FAIL和静态冲突发现均保留，未重跑默认组。SOURCE_READY只限观察/诊断，行动角色lease、睡眠/菜单接线、最终driver/Packet配套、完整Native/包/部署与实机仍OPEN；整体ACTIVE。来源 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/GameProcessGroup-20261113/SOURCE_READY.json、QUALIFICATION.json、MAINLINE-IMPORT.json、REPORT.zh-CN.md及CONSUMER-INSTRUCTIONS.zh-CN.md；现场及行号澄清在同级FieldLogReview-20261113-153718。
+<!-- /STEAM-PUBLIC-GROUP-OBSERVATION-R33-20261113 -->
+
+<!-- CUSTOM-LIBRARY-OWNERSHIP-EXPORT-20261113 -->
+2026-11-13 持续库诊断后继：Win5153718实际报告3条未确认成员，但普通导出名单缺现有ymcc-game-whitelist-membership归属状态；单账户删除/图片更新回执及删除计划亦缺。仅原shared_game_media_diagnostics.h的固定metadataFiles补4个state文件，保cached历史/逐文件不连贯语义和原16MiB界，无新logger/采集/poller/worker或根选择，不带网络重试原始命令参数。
+
+原helper旧4项遗漏/候选四原字节、unknown schema、占用32不阻断其他、缺失、超限223及未observed根不创建实跑；5Job关前0/2实际成功编译图。首临时夹具auto混类型编译FAIL及费用保持；一产品头一hunk鲜读独占导入，原main files→archive与通用JSON分类仅只读接线核收，未签实际ZIP/安装版导出或整Native包。3条unknown不删不补造，需含后继Native的一份普通日志继续指认。
+
+持续目标ACTIVE，下一自然构建消费，无此任务Steam/设备/设置/部署动作。唯一后继G:/YeManCC-Work/Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/metadata-export/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-OWNERSHIP-EXPORT-20261113 -->
+
+
+<!-- DECKY-OPENING-DEADLINE-CALLBACK-20261113 -->
+2026-11-13 原Decky客户端已复现timer回调未运行时，原15秒期限到仍checking/ready均true；Native原规则会暂停。现只读getter按原probe实际开始+同15000ms判断，不增timer/轮询/线程/写命令/恢复权限，14999仍等、15000变false；30分钟模拟迟到保持有界，当前相关只读回执仍恢复连接，10秒visibility准备不缩短15秒。原restart canonical1定向通过，旧源实拒绝、三个Job自然0，首候选原件按自身epoch保留，无已过Native重跑。1产品TS+1原fixture精确写回，下一自然配套构建消费；cabc97已完成插件为本叶之前快照，不追编。本次无部署/实机CPU睡眠或历史根因证明，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\opening-deadline-observation\SOURCE_READY.json。
+<!-- /DECKY-OPENING-DEADLINE-CALLBACK-20261113 -->
+
+
+<!-- DECKY-HISTORY-R33-REVIEW-20261113 -->
+2026-11-13 28包/36日志只读复核，同raw全局去重13079行，36469唯一；mode 2517明确三true/20至少一false/18932未知，不当事故或时长/CPU。旧资源deadline与cleanup-incomplete各2行属同时间相邻不同事件，未放宽归还门；CSS guard的3条crash-unverified独立，所选无wait-failed，风险只观察不改。唯一checking真不能证明现场timer卡；实际超时回调未执行漏口另原消费者已复现并修，等待配套构建。公共R33协调2060B/SHA及三原件已读核，仅历史完整GameID观察/拒绝诊断，不提供双PID动作授权，不改公共任务。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\historical-runtime-gaps-20261113\QUALIFICATION.json及PUBLIC-R33-INTAKE.json；无新业务测试/部署/Steam操作，目标ACTIVE。
+<!-- /DECKY-HISTORY-R33-REVIEW-20261113 -->
+
+<!-- CUSTOM-LIBRARY-OWNERSHIP-ZIP-20261113 -->
+2026-11-13 库日志ZIP后继核收：复用metadata-export已通过helper生成的4个原快照及availability，实际原main archive/runCapture和Windows tar一次打包。解包四文件原字节、snapshot/availability/AI索引长度SHA全部一致，逐文件coherentAcrossFiles=false保持；2实际Job自然归还且关前0、408源输入/11链接库已核。未重跑helper、原边界或已成功编译；新核收误将SHA回执的可选bytes当必填的FAIL保留，修后只接续原产物。产品0改，旧SOURCE_READY实际ZIP未跑的历史范围不改；本后继仅补真实原打包消费者，未签安装版应用导出、整Native或现场。远端3条unknown仍需含新Native导出源的新普通日志，目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/metadata-export/archive-intake/ARCHIVE-INTAKE.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-OWNERSHIP-ZIP-20261113 -->
+
+
+<!-- DECKY-PENDING-HEALTH-CADENCE-20261113 -->
+2026-11-13 实际当前main健康消费者复现checking=true/cached client=true仍走idle30s漏口；现已确认大屏检查期复用原5s evidence请求，正常健康/未知30s和desktop0保持，无新timer/thread/轮询器/恢复额度。原canonical1旧源实拒绝、候选整case通过，含1000重复0、未知25s1、过期原recycle/迟到current回复结束、原20s慢速/真实桌面Observer及153→153全部归还；4Job自然关前0。模拟clock/read端口不是实机恢复或CPU收益。仅Decky lambda+原fixture精确写回，原地图补既有frontend-state头，审计0缺anchor/40unmapped不当兼容验收。前端15s getter为配套来源，下一自然完整构建消费，不追已完成包/插件，未部署/操作Steam或睡眠，目标ACTIVE。唯一后继G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\opening-health-cadence\SOURCE_READY.json。
+<!-- /DECKY-PENDING-HEALTH-CADENCE-20261113 -->
+
+
+<!-- STEAM-HOST-NATIVE-COMPOSITION-20261113 -->
+2026-11-13 Steam关闭请求 Host→Native→Power→Typed 组合模拟后继已导入：8项最终场景、2个必要语义反例、14个自然归零Job、6份编译图及请求资源/目标句柄归还核收。旧成功/失败/来源漂移原件保留，默认16、Native23、Host22未重跑。组合使用自有 inert Steam.exe 与事实适配器，最终Shell为惯性端口；真实Observer/注册表/UI/account、完整Native/Host包、跨完整性、Steam/睡眠/设备仍OPEN。无产品源码改动、部署或真实Steam操作。原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/NativeCompose-20261113/SOURCE_READY.json、REPORT.zh-CN.md。
+<!-- /STEAM-HOST-NATIVE-COMPOSITION-20261113 -->
+
+
+<!-- DECKY-OPENING-PAIR-PLUGIN-BUILD-20261113 -->
+2026-11-13 前端opening15秒getter叶已进入一次自然插件构建，原builder/default--check通过，518固定源/678工具、两Job自然关前0，仅dist锁内提升；buildId=e1ab37b7e12f3e69ee69091ec19b5f7af3a1bf934cc3a8047e221eb7ddaae58f，513533B（比cabc97+293B），官方Loader仍v3.3.1未改。原client/native通过只按各自epoch引用，不重跑业务或签整包；Native pending5秒观察叶须完整配套构建。本次不追赶固定后的并行差异，无安装/Steam操作或实机CPU睡眠视频验收，整体ACTIVE，原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\opening-health-cadence\plugin-build\SOURCE_READY.json。
+<!-- /DECKY-OPENING-PAIR-PLUGIN-BUILD-20261113 -->
+
+<!-- CUSTOM-LIBRARY-FOOTBALL-SETTINGS-20261113 -->
+2026-11-13 库扫描后继：Win5153718中Football Life的Settings.exe218分压过实际FL_2027.exe183，FL27Switcher/Sider toolbox亦错获游戏PE身份。仅原classifyLibraryIdentityText一hunk识别严格数字版本的Football Life settings/FL switcher和明确Sider工具箱标签为helper；不按泛词排游戏，手选仍保留且无PID建议。
+
+旧源六候选全部分数/角色与现场逐项一致；原评分/scanOne/PID输出及真实隔离文件配精确PE元数据叶，候选实际选FL_2027，3手选/8普通名称/5版本边界及原pending-primary断言通过。4实际Job自然关前0，两图各511源输入/23库；不签实机PE读取/安装扫描。旧预期FAIL及费用保留，无已过整组重跑/新增ID或默认门。一产品函数fresh独占精确导入，逆hunk保留并行字节，永久夹具未改，无新后台/网络/设备动作。
+
+后继进下一自然Worker/包，未部署或改安装数据。Switch工具包候选、3条unknown归属、真实Steam/native proof/视频与设备仍分别OPEN，持续目标ACTIVE。唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/football-settings-selection-20261113/SOURCE_READY.json、VERIFIED.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-FOOTBALL-SETTINGS-20261113 -->
+
+
+<!-- STEAM-PRESENCE-HOST-COMPOSITION-20261113 -->
+2026-11-13 Steam缺席判定组合已接实际collectPresence：P2六项、两必要反例、8实际Job自然关前0、4编译图、48惯性PE及3/6目标句柄归还已核。第二实例仍活、partial、旧行和birth不符均不冒充全部关闭；P1误纳idle PID0的fixture FAIL保留。显式native-presence仅投影选择列表，原8/16未重跑，默认native14只准备未实跑。清单仅自有PID范围，ActiveProcess PID为惯性读适配，不代签全机缺席/真实注册表。产品0变更，无新ID/minimum/发布前置；完整Observer/Host写链/包与Steam睡眠实机仍OPEN。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/PresenceCompose-20261113/SOURCE_READY.json、REPORT.zh-CN.md。
+<!-- /STEAM-PRESENCE-HOST-COMPOSITION-20261113 -->
+
+
+<!-- DECKY-OPENING-FIXED-NATIVE-CLOSURE-20261113 -->
+2026-11-13 opening15s前端/5s Native观察修正已进入固定原Native全编译链接与e1ab37插件配套来源。原build_native.bat实际exit0，无私改合同；1491源/3027初工具，1475include/最终54lib，漏OneCore后仅pin后按原main链接/mt/seal补链，不重编C++/其他PE。两实际Job自然关前0，5PE独立final-native，buildId=30e0ec8038a41535f4b9bb59cce68645b2713abf83dca3a5e2216e12b0fd0137。原启动准备UNKNOWN、OneCore及case后置FAIL保留；重链覆盖原路径事故已用逐字备份恢复，RESULT-r3全部原产物pin再匹配，最终另存，SOURCE_READY-r2/ACTUAL-GRAPH-final为当前权威。CPU键盘两绑定确参与全TU，不代业务/实机；两后继source drift只记录不追编。无Web/managed整包/部署或Steam设备睡眠，局部组合不可直接安装，CPU/视频/S0S3和降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\opening-health-cadence\native-build\SOURCE_READY-r2.json、ARTIFACT-PATH-CORRECTION.json及REPORT.zh-CN.md。
+<!-- /DECKY-OPENING-FIXED-NATIVE-CLOSURE-20261113 -->
+
+
+<!-- STEAM-LIBRARY-HOST-FULL-BUILD-20261113 -->
+2026-11-13 完整游戏库Host固定候选已一次编译原TU、复用对象完成原资源与链接：601实际编译输入/40本地、26实际库、原ICO载荷和版本资源、3Job自然关前0核收；50项shipping来源覆盖全部且末端drift0，未发现漏项，不改guard。省略.lib的准备解析FAIL与费用保留，只续资源/链接，不重编对象。RC21头是声明/前后pin，不冒称实际逐头IO。候选NOT_RUN，无产品变更、发布或部署。dormant steamStop与独立boot/manual出口按原合同分列。完整main/Worker/Web/plugin/包、Steam睡眠实机/CPU仍OPEN，目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostBuildClosure-20261113/SOURCE_READY.json、REPORT.zh-CN.md。
+<!-- /STEAM-LIBRARY-HOST-FULL-BUILD-20261113 -->
+
+<!-- CUSTOM-LIBRARY-SWITCH-TOOLPACK-20261113 -->
+2026-11-13 Switch工具包误选后继：Win5153718的12候选原分数/角色均复现。仅扩原shared libraryLocalProgramExecutable的精确品牌及SAK bin/Squirrel确切结构，原Worker评分/扫描及Host旧ready队列共用；泛标题/独立Squirrel不排，手选/手动刷新保持。
+
+候选12 tool/无自动主程序及PID建议、12手选/9普通游戏/同目录真游戏控制通过；Host原自动case的15旧应用（原3+新12）Worker调用48→0，正常无ID补图及原手动case通过，不签整机CPU。四成功图Worker各511输入24库/Host各608输入27库，12准入Job自然关前0、另1准入前UNKNOWN分列。旧Worker父对照前置FAIL仅核12字段误选，不重跑；准备定位/路径/pin/两编译/后置epoch/混合换行拒绝及费用保留。
+
+一产品头策略精确独占导入，原Host夹具仅补一行既有类型定义依赖，临时字段块不导入；逆片段和当前3 Worker函数/Host队列核同，无新ID/minimum/后台/探针。交下一自然双组件包，未部署或改Steam/设备/安装数据；远端3 unknown/现场新扫描及运行仍OPEN，目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/switch-toolpack-20261113/SOURCE_READY.json、VERIFIED.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-SWITCH-TOOLPACK-20261113 -->
+
+
+<!-- STEAM-LIBRARY-HOST-WORKER-PAIR-20261113 -->
+2026-11-13 固定来源Host/Worker私有构建配套已核：Worker498实际输入/20本地/17链接库/原资源，复用Host不重编，21共同来源及协议布局一致。3构建+1原来源门Job自然关前0；原门接受固定55来源/两候选，拒绝当前排除头漂移与混配EXE指纹。并行custom_steam_library_exclusions.h变化的当前身份FAIL及核收/准备FAIL、原费用保留，未追赶重编或倒填新pin。currentMainlineMatch=false、publicationEligible=false；产品清单/二进制未写、候选NOT_RUN，不是完整Native/Web/plugin/包或实机通过。后台媒体child属于Host，与SteamArtworkLab分别记录；总目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/WorkerBuildPair-20261113/SOURCE_READY-SOURCE-ADMISSION.json、REPORT.zh-CN.md。
+<!-- /STEAM-LIBRARY-HOST-WORKER-PAIR-20261113 -->
+
+
+<!-- DECKY-OPENING-PAIRED-FULL-EXPORT-20261113 -->
+2026-11-13 Decky opening15秒getter/检查期5秒观察已进入同一固定完整YMCC自然导出。原publish -TestExport一次，guard412907ms/root0/Job自然关前0；619文件+5目录逐项CRC/SHA匹配stage，配套Native=fc0dcbe417e12e4c1ea7bfae66a2251cbc36883a05fc95ad4a5959f9b576f582，plugin=e1ab37b7e12f3e69ee69091ec19b5f7af3a1bf934cc3a8047e221eb7ddaae58f，build=1680743b30324a03bed76ac003b68cc5acc99cb7871ead5438a0c52f2f221344。私有PDB GUID/age匹配且不入ZIP，官方v3.3.1原字节、无新交付EXE。固定11072文件来源不追后继；实际1487include/56lib，额外工具取证漏queue头保持false，原导出合同完成与独立forensic缺口分列。旧路径消费FAIL/别名清单及全部费用保留，后继只读原产物不重编；夹具NOT_RUN/正式发布false。未由本聊天部署/操作Steam、游戏、设备或睡眠；交CPU维护owner协调，现场CPU/视频/S0S3与恢复降频仍OPEN，目标ACTIVE。包SHA=9ba10431376d9eb8a16d9543f19bc2cde444ece3b21c5bc2f41bc3219ac278e3；原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\opening-health-cadence\full-export\PACKAGE-READY.json及REPORT.zh-CN.md。
+<!-- /DECKY-OPENING-PAIRED-FULL-EXPORT-20261113 -->
+
+
+<!-- DECKY-CURRENT-LOADER-BASELINE-AND-RAW-TYPES-20261113 -->
+2026-11-13 本机原3c12d786安装盘来源只读基线：原日志Loader35656及准确同映像子31748，持2句柄6读/10000.173ms，kernel+user均无可见增量，归还153→153；不是Steam renderer/插件JS/壁纸或整机CPU为零，不代新版收益。原ZIP33条steamFailure实际均dict/known0，原episode嵌套同为dict，str只存在于PowerShell低深度显示，首错误预期FAIL保留；只前向核收不改原件、不造产品日志bug或历史根因。两通道关闭码源码已存在，本次产品0改/业务测试0/新采样仅该10秒，无部署或Steam/游戏/设备/睡眠动作，配套包交原维护owner。S0S3/视频/全UI CPU和恢复降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\current-loader-cpu-baseline-20261113\RESULT.json、RAW-FIELD-TYPE-INTAKE.json及REPORT.zh-CN.md。
+<!-- /DECKY-CURRENT-LOADER-BASELINE-AND-RAW-TYPES-20261113 -->
+
+
+<!-- STEAM-TYPED-WINDOWS-OWNER-20261113 -->
+2026-11-13 固定Steam typed命令已核Windows用户/SID及SessionId：旧源2反例确证遗漏；原consumer新增8+受影响原7、实际自有进程/token/IPC组合2通过，23Job自然关前0，3成功图288/10、288/10、318/13。仅1产品头+4原夹具精确CAS，36原case正文保持；当前main并行漂移而原4切片/模板仍等于实跑。换行准备、漏helper编译及核收字段FAIL/费用保留，核收复用raw无业务重跑。不冒称AuthenticationId/实际跨session/UAC、完整44/14父或完整Native/Host/Worker/Web/plugin包；旧固定包/来源拒绝保持，无部署/真实Steam/设备/睡眠，总目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/TypedWindowsOwner-20261113/SOURCE_READY.json与REPORT.zh-CN.md。
+<!-- /STEAM-TYPED-WINDOWS-OWNER-20261113 -->
+
+
+<!-- DECKY-OPTIONAL-STEAM-DISPLAY-ISOLATION-20261113 -->
+2026-11-13 旧实际客户端复现可选gameSteam坏显示误断合法核心；现在只剔除无效/迟到展示DTO，原run/generation/revision/game identity/权限及操作owner保持，合法当前/缓存展示保留，已下发TDP不因展示异常取消或重放。原3canonical/29边界与3非法selector、完整实际client类型72输入已核；484固定源/1052工具、9Job自然关前0。私有缺settings-baseline的2307 FAIL保留，补原字节仅续类型不重跑业务。仅1产品TS+1原fixture鲜读独占精确写回/逆hunk保并行字节；共享DTO和游戏/PID/动作层不改，无新ID/minimum/请求/timer/thread/恢复额。此叶晚于1680743b包，下一自然插件/包消费，不追旧包；无部署/Steam设备睡眠动作，历史根因及CPU/视频/S0S3/恢复降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\optional-display-isolation-20261113\SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /DECKY-OPTIONAL-STEAM-DISPLAY-ISOLATION-20261113 -->
+
+
+<!-- STEAM-HOST-COMMIT-CONSUMER-20261113 -->
+2026-11-13 原库提交no-restart夹具过时签名已实编译复现并仅修2原文件：默认24保持，定向原8+异常4/反例2/selector拒绝2，20Job自然关前0，3图各400来源/7库。真实2574字节分支与当前正式默认提取输出一致，Buffer保CR/LF及source/slice/output/generator pins，wx/fsync/读回。关闭拒绝/未授权/不确定零写、离线无需关闭，本次completion覆盖旧snapshot；重新插restart和旧completion分别被原断言拒绝。旧编译FAIL/费用保留，精确CAS逆hunk保并行字节。只证明原命令分支与内存端口，不冒称实际FIFO/worker写盘/Native关闭/默认24整父。产品0、无部署或真实Steam/设备/睡眠；整目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostCommitConsumer-20261113/SOURCE_READY.json与REPORT.zh-CN.md。
+<!-- /STEAM-HOST-COMMIT-CONSUMER-20261113 -->
+
+
+<!-- DECKY-OPTIONAL-DISPLAY-PLUGIN-BUILD-20261113 -->
+2026-11-13 可选Steam显示隔离已进入主线Decky载荷，原builder/default--check实际通过，518固定源/1052工具、2Job自然关前0；仅dist变化，buildId=afaf3a7797cda33e4b549fe87ac86a848619d81f34fe44a72476742c85294699，总516342B/增加2809B。当前共享cached group显示配套已编入，官方v3.3.1未改，无新增EXE。此前业务3case/29边界/类型72按原epoch引用，不重跑、不改旧失败；此首次载荷生产与已封存源码修复各自计费，原起点全墙钟另留，不重置预算。固定后差异不追赶，未改已完成1680743b或CPU10:42固定包；本叶下次自然整包消费，本聊天无安装/Steam设备睡眠动作。现场CPU/视频/S0S3及恢复降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\optional-display-isolation-20261113\plugin-build\SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /DECKY-OPTIONAL-DISPLAY-PLUGIN-BUILD-20261113 -->
+
+
+<!-- DECKY-INSTALLED-CPU-PACKAGE-RECOVERY-20261113 -->
+2026-11-13 已独立核CPU维护owner实际安装：build ca3a45a3/EXE edf3701a/Native7ed91a47/plugin4392a414，PID29756/birth134390417050277906；原包5条Decky/Native条目匹配，不代本轮全619。编译源确含opening15s/Native pending5s，晚于固定的gameSteam隔离未装。新writer19:08:31.188恢复、38.197重建页/38.283 mutated，51.809三层true与state connected、51.835完成；原elapsed20641/日志配对20647分列。普通主备额度reserved且未申请upgrade，未见reopen大屏；Steam30612/birth134389420928041607当前仍原实例，2只读句柄归还。原source字面量预期FAIL保留，只续常量核收，无重编/测试/采样/本聊天安装或Steam设备睡眠动作。日志静默不代持续健康，inventory不代视频；CSS DOM失败单列不修外域。物理S0S3/视频/CPU与恢复降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\installed-cpu-package-recovery-20261113\INTAKE.json及REPORT.zh-CN.md。
+<!-- /DECKY-INSTALLED-CPU-PACKAGE-RECOVERY-20261113 -->
+
+
+<!-- STEAM-ROLE-SIMULATION-ASSIST-20261113 -->
+2026-11-13 原role组合失败协助：确证atomicJson目标247字符而.next-PID-TID临时路径越界status-open，旧EXE同等根长度反例复现；仅该函数Win32扩展路径修复精确CAS写回。r4私有与当前完整引擎翻译单元分别原单case21通过（20持久拒绝回执+1真值正例），不重跑已过角色63/观察8/旧46。原final探针命名冲突候选复用后一次编译/首次10检查通过，两真实Prepare保单次门/0publisher；PSS11阶段最终+2句柄槽（Key与未识别）未完整归因，不冒称全资源归还。9实际Job自然关前0；空Job准备UNKNOWN及准备/核收FAIL、原账保留，未导入未核角色引擎/driver/DLL。SOURCE_READY仅状态IO修复，角色动作/消费端/完整包和实机仍OPEN，总目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/GameProcessGroup-20261113/RoleLease/SimulationAssist-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-ROLE-SIMULATION-ASSIST-20261113 -->
+
+
+<!-- DECKY-DEPLOYED-PEAK-ROOT-TRACE-INTAKE-20261113 -->
+2026-11-13 Decky独立消费CPU当前edf/29756原trace：原StackWalk明确PID+UTC100ns/TID/IP交汇，293 ETLX仅280确认、触发33、未知68保持；这280已解析Native方法/源位置无Decky名字，SessionObserver17/触发3分列，不是函数独占成本或Decky零CPU，Loader/Steam renderer不在root范围。原丢事件0不签完整采样；无据不放慢恢复检查。只读同raw，不重采/重跑解析或测试/改其它域；源因/物理S0S3/视频/CPU和恢复降频仍OPEN，目标ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\deployed-peak-decky-attribution-20261113\ATTRIBUTION-INTAKE.json及REPORT.zh-CN.md。
+<!-- /DECKY-DEPLOYED-PEAK-ROOT-TRACE-INTAKE-20261113 -->
+
+<!-- GAME-OWNER-DUAL-PID-CONSUMERS-20261113 -->
+2026-11-13 唯一游戏层后继已接公共Steam历史processGroup，selected Shipping PID/birth/path/identityGeneration不被launcher/host替换，可选坏组只降级metadata。暂停回执按原root+birth、按钮核birth；game.close及原两个快捷入口队列前捕获完整身份、唯一选择锁内持HANDLE终止实际游戏，game.waitExit沿公共撤销事件一次有界等待，去掉taskkill/tasklist重复链。CPU apply/restore/rollback实际写HANDLE补birth；手动回焦用实际成功恢复原birth，旧marker恢复通过可选success projection接续，SgResumeResult/公共ABI不变。
+
+消费14独立epoch/40实际终态Job关前0、metadata原16及定向wire/类型分列；LS真实top/Decky/原owner交错、trainer3、speed5、native暂停5与必要反例已核。两次固定完整main语法核收仅签各自来源，无完整link/包/部署或实机CPU/Steam/睡眠收益，原FAIL/UNKNOWN/费用保留、不拼默认父。Steam CORE lease/取消合同引用已核，engine/driver/final正式配套和实际消费、原严格directory-resume夹具签名依赖后继、匹配包和物理仍OPEN，目标ACTIVE。原件Testing/YMCC/Evidence/SteamGameIdentity-20261113/GameOwnerDualPid-20261113/SOURCE_READY.json、HANDOFF.json与REPORT.zh-CN.md。后继只续未完范围，不冻结或追改并行固定旧包。
+<!-- /GAME-OWNER-DUAL-PID-CONSUMERS-20261113 -->
+
+<!-- STEAM-PUBLIC-ROLE-LEASE-R34-20261113 -->
+2026-11-13 公共Steam双PID角色后继：原selected不替换，full64历史组与真实held拓扑分开，普通fresh默认不pin未消费成员；显式opt-in复用原game/console两读。group/process request/business request三路单向取消按需创建，原ProcessLease无额外事件；native P/F精确布尔保持，只有实际唯一记录且直接涉及selected才可准备新两节点角色，launcher-only不授动作。原life/consume不加组revision退款，group健康v2不借旧v1/seed升级。
+核心5头+原2夹具及3取消后继头已正式导；engine/driver/final/真正ABI6 embedded和2既有测试片段共11文件作为候选精确写主线，sourceReady=false/actionEnableReady=false。保留SimulationAssist已验的唯一atomicJson扩展Win32 IO函数，原CAS拒绝零写留证，复合shipping TU另实际通过；官方generator对主线asset/source逐项verify通过。未冻结同行、未触碰其main/consumer写集，不追改旧包。
+59旧角色、当前7opt-in/19fresh、11取消、63引擎helper、8取消观察、原单case21边界各按epoch分列；长测试路径原status-open FAIL保留，同EXE短owned路径只续原case、原15前缀重复诚实计入。最终原46是44 PASS/2 FAIL，真实Prepare首次102/二次205且无新增pin/publisher的10后继不能拼整父。2个self句柄槽初现自有Tree构造期，1注册表Key/1未知对象归因继续OPEN，Job零不代资源全归还。SimulationAssist原长路径反例/两来源case及9自然Job另独立核收，原FAIL/UNKNOWN和费用不改。
+消费端同步config/rules/选择或原sleep target/request取消、菜单registered-host正式证明、全部SourceLease/typed/helper、最终正常dispatcher资源、完整Native/匹配包及现场Steam/睡眠/CPU仍OPEN，整体ACTIVE。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/SHARED-CONSUMER-COORDINATION-20261113-R34.json及GameProcessGroup-20261113/RoleLease/CONSUMER-CONTRACT.zh-CN.md、COMPOSITION-QUALIFICATION.json、MAINLINE-CANDIDATE-IMPORT.json；不称双PID现场已修或全部Steam已唯一。无部署或实际Steam/游戏/设备/睡眠动作。
+<!-- /STEAM-PUBLIC-ROLE-LEASE-R34-20261113 -->
+
+
+<!-- STEAM-HOST-FIFO-COMPOSITION-20261113 -->
+2026-11-13 原Host FIFO/close helper/commit消费者已沿原no-restart夹具接显式变体：8450/4123/2574原字节切片、真实worker/join，定向12通过；续deadline和Unknown误放行两反例均实触错误writer并拒绝，原N2后置文字FAIL复用raw核收不重跑。2非法选择/8真实文件系统提取控制，21Job自然关前0，3图各411源/11库，初编ADL FAIL及费用保留。仅3fixture精确CAS，默认24/原4正文保持，默认提取仍两输出，--fifo才加header与pins。facts/shutdown/clock/UI/磁盘受控，不代实际Observer/nativeIPC/worker写盘或完整Host/WebView/包，原跨epoch不拼父PASS。产品0，无部署/真实Steam设备睡眠，总目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostFifoComposition-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-HOST-FIFO-COMPOSITION-20261113 -->
+
+
+<!-- DECKY-WAIT-ORIGIN-ERROR-20261113 -->
+2026-11-13 Decky等待失败原始Win32错误已精确保留：wait后立即捕获、清理后仍发布原值。真实Windows两错误6/87×四惰性清理覆盖0/5/995/258，逐字原片段旧8错/候选0错，正常等待各1与句柄归还保持；只签原结果/失败消费片段，未签完整Runtime/清理实现或历史根因。首次EXE tool pin缺失在Resume前UNKNOWN及第二次输出占用拒绝保留，旧编译复用，4实际Job自然关前0。只1产品两hunk，无新增恢复/查询/线程/永久ID；下一自然Native配套，不追赶已完成包，无部署/Steam/睡眠动作或CPU收益证明，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\wait-error-preservation-20261113\SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /DECKY-WAIT-ORIGIN-ERROR-20261113 -->
+
+
+<!-- STEAM-PUBLIC-TYPED-ROLE-OBSERVATION-20261113 -->
+## 公共 native 角色的同次只读观察（2026-11-13）
+
+原 native record reader 现在可选返回不可由JSON构造的 TypedNativeRoleObservation；observeWithRoles 与原三参 observe 共用同一次读取，保留原JSON、P/F实际值和 originalPrimaryMatched 等式。输出绑定复制的 Query／Win32 Context，不是账户、电源、进程或动作租约；失败清旧，0／多记录仅有数量、无挑选P/F。恢复消费端仍须原 ReadScope、完整请求/current 和公共 ProcessGroupLease 证明。2公共头与原diagnostic fixture已精确CAS导主线；原one original primary定向1项2734断言、2选择拒绝、284实际编译输入／11库及4自然Job关前0已核。Win32仅编译和missing-binding零读，不签真实绑定成功、完整Native／包或动作启用。
+
+新194242现场原JSONL148／154明确 P8384等selected、F12856为launcher不同，唯一记录；两条startup路线原original-record-primary拒绝，driver／publisher／consume均0。Console launch-primary与typed native P分列，不沿旧日志推primary不匹配。菜单renderer完整GameID已知、UI注册未知另跟踪；7次started不当7次崩溃，导出盘f46不当loaded证明。菜单heldHost／provider／JS与最终group动作仍OPEN。
+
+当前原件：Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/GameProcessGroup-20261113/RoleLease/TypedNativeRoleObservation/SOURCE_READY.json；现场FieldLogReview-20261113-194242/ANALYSIS.json。R34正式协调原件实际位于同项目GameProcessGroup-20261113/SHARED-CONSUMER-COORDINATION-20261113-R34.json。原FAIL／UNKNOWN／费用和并行后继保留，不追旧包重编，整体ACTIVE。
+<!-- /STEAM-PUBLIC-TYPED-ROLE-OBSERVATION-20261113 -->
+
+
+<!-- CUSTOM-LIBRARY-MEMBERSHIP-WARNING-DETAILS-20261113 -->
+2026-11-13 自定义游戏库成员警告明细已写主线：沿原 publisher 已有快捷方式/native manifest 观察，原回执增加账户/EXE/规则与未确认原因；最多32条，真实总数和截断保留，跨账户不合并，正常恢复无旧明细。诊断分配失败隔离，不增查询/线程/timer/logger/文件，不改变成员/规则写入决策。原成员场景旧源反例、候选与原4拒绝控制通过，两图各511输入24库/9实际Job自然关前0已核。首次noexcept准备拒绝、目录保护FAIL和只读解释器路径纠正及费用保留；旧before编译直接复用，未重跑已过组。1产品原函数三hunk+1原fixture场景精确CAS，逆片段保并行字节，无新ID/minimum。本轮未完整产品包/部署或Steam设备操作，交下一自然双组件包；旧Win5三条身份不倒填，新扫描/发布和运行时双角色/实机仍OPEN，整体ACTIVE。原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/membership-warning-details-20261113/SOURCE_READY.json、VERIFIED.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-MEMBERSHIP-WARNING-DETAILS-20261113 -->
+
+
+<!-- STEAM-WORKER-FACTS-ISOLATION-20261113 -->
+2026-11-13 原Worker公共facts切换后，旧Toolhelp bool不再控制Steam guard，已由原datachain旧EXE复现Unknown拒绝。只修2原fixture：正式types+Worker include局部facts端口、自有安装根嵌套归还，默认无安装/不伪造动作身份；7新增/4原定向跨固定epoch通过，2必要反例/2非法选择，21真实Job自然关前0。5图各511源/17库；旧编译漏ACL头后置FAIL保留，原EXE不重编，后继4图完整预声明。新成功case的recent更新误断言只续1项纠正；准备与后置FAIL/费用保留，不拼默认整父。两fixture fresh CAS和逆hunk，导入后并行成员诊断后继保留，本段hunk/新setup/4旧case块逐字保持，原完整文件读回拒绝留证，不追赶重编。facts受控、原真实文件事务，非实际公共provider/nativeIPC/Host组合，另3runtime consumer套未跑。产品0，无部署或真实Steam/YMCC设备睡眠，总目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/WorkerFactsIsolation-20261113/SOURCE_READY.json与REPORT.zh-CN.md。
+<!-- /STEAM-WORKER-FACTS-ISOLATION-20261113 -->
+
+<!-- GAME-MANUAL-PAUSE-FINAL-OWNER-20261113 -->
+2026-11-13 唯一游戏层手动暂停后继已精确写回：前端control queue前和原生op mutex前保留原pid/birth/path/identityGeneration，A→B→A不重认领；最终NT沿原选择锁和同HANDLE核birth/image及公共power/current撤销。helper默认空callback保持原sleep捕获/恢复债语义，原生诊断current仅绑定handler入场。RAII补异常归还，未派发只清本次marker，已attempted保恢复债和真实标记。
+
+原manual20/原26/两反例与异常后继5/原体反例分epoch，最终固定main语法及metadata分列，15实际终态Job关前0；不拼默认父、不重跑directory70/26。原夹具配套仅原断言/5语义不变下校正诊断端口、过时anchor及togglePause第4参hash；准备FAIL/旧raw/费用保留。1产品10精确hunk+7配套文件保留并行字节，无新增常驻扫描/worker/timer/EXE。SOURCE_READY仅该范围，Steam角色最终动作/完整Native/link/包/外部二进制和实机仍OPEN，目标ACTIVE；未部署/操作Steam、设备或睡眠。原件Testing/YMCC/Evidence/SteamGameIdentity-20261113/GameOwnerDualPid-20261113/native-manual-pause/SOURCE_READY.json、MAINLINE-IMPORT.json及HANDOFF.json。
+<!-- /GAME-MANUAL-PAUSE-FINAL-OWNER-20261113 -->
+
+
+<!-- STEAM-PUBLIC-CALLBACK-R35-20261113 -->
+## 公共角色R35：最终回调取消定向证明（2026-11-13）
+
+原单case1197断言已核：两路线×group／process-request／business-request×回调前／首snapshot读取／最终publisher身份口共18取消边界均0发布，另2group正例与原single控制保留。真实receiver21请求、147source／slot归还，稳定72→72；冷62→72的10增长仍UNKNOWN，不豁免为全进程零增长。生产8函数正文独立重提逐字相同，3实际extract／compile／business Job自然关前0。原Python生成器两分支从6函数补齐8函数及explicit coverage，配套CPP／inc为实际编译字节；本次仅配对／语法和只读核收，无业务重跑。准备唯一性误判、后置raw无bytes声明等FAIL前向保留。
+
+R35正式原件位于Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/GameProcessGroup-20261113/SHARED-CONSUMER-COORDINATION-20261113-R35.json。typed native同次观察已正式；本回调图／身份／内存／时钟／publisher仍含fixture ports，不签typed owner、Prepare／Arm／dispatcher／remote／真实Steam。菜单Host纯投影候选交消费端原循环／夹具配套，未导主线；公有返回能力方向接受，但内部/apprunning路由与sleep窗口raise各守原用途。恢复完整scope与同步writers、held registeredHost／provider／JS、最终资源／匹配包与实机仍OPEN，fullActionSourceReady／consumerActionEnableReady=false。CPU1固定121815Z实际8参adapter不启group、官方ABI6 embedded核收成功；不要求冻结／追编，也不称现场已修。目标ACTIVE，无本层部署或Steam／游戏／设备／睡眠动作。
+<!-- /STEAM-PUBLIC-CALLBACK-R35-20261113 -->
+
+
+<!-- DECKY-TERMINAL-RECONNECT-REFUSAL-20261113 -->
+2026-11-13 新Win5 194242尾部已加载afaf并17203ms三路恢复；检查/结果双信号不当重复点击，未证明视觉/睡眠。原Runtime明确非重试准入拒绝仍空等7s已由实际typed原消费者复现。仅1产品hunk将明确失败交原阶梯，待确认和有效retained保持；原注册新增定向参数3场景，候选两terminal step观察[16, 16]ms、retained1计划0页面，OFF/资源/句柄归还与2非法选择均核。首候选漏fixture健康通知FAIL保留，修后只续候选，旧反例不重跑；默认注册/原case正文保持，无新ID/minimum/恢复额度或计时变更。两文件精确写回，无完整Native/包/部署、现场收益/物理睡眠或CPU改善证明，整体ACTIVE。原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\field-win5-194242-20261113\SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /DECKY-TERMINAL-RECONNECT-REFUSAL-20261113 -->
+
+
+<!-- STEAM-PUBLIC-HOST-PROJECTION-R36-20261113 -->
+## 公共Host拒绝事实R36（2026-11-13）
+
+新steam_game_host_observation.h已独占导主线：同次HostInspection的纯值有界投影，无新增IO／current／时钟／解析／句柄／动作能力。菜单原screen-shortcut-same-action 1项47断言与known-session0必要反例已独立读raw、2图各301实际输入／库、前后SHA／bytes及4当前自然Job关前0；原准备FAIL保留，消费runtime由原owner精确导入。stage明确UI未读／筛选与Host拒绝、parsed registered PID及未知值，不用native F顶替registered PID，也不重抓Host。正式原件GameProcessGroup-20261113/RoleLease/MenuHostObservation/SOURCE_READY-r2.json；旧同名SOURCE_READY.json仍为历史source-only=false，不覆盖。主线索引增加同header anchor／pattern，13区域／834候选／0缺anchor／40原待映射，仅源码盘点。
+
+恢复owner另静态发现Win32 typed路径只在首末核owned，逐笔读取／profile mutex和冷资格不消费睡前同一预算；尚不认现场根因。公共后继observeWithinBudget正在私有实现：只用原admitted／同缓存try_lock，冷／忙unknown、无额外warm，默认观察成本保持，不签Win32单调用硬时限。R36保fullActionSourceReady／consumerActionEnableReady=false；held registeredHost／provider／JS、完整scope／配套包和潜行者2实机仍OPEN，目标ACTIVE。本层未操作Steam／游戏／设备或睡眠。
+<!-- /STEAM-PUBLIC-HOST-PROJECTION-R36-20261113 -->
+
+
+<!-- STEAM-WORKER-NATIVE-FACTS-IPC-20261113 -->
+2026-11-13 原datachain显式YMCC_LIBRARY_FACTS_IPC变体已接正式client/read/serve与Wire、真实进程/token/父子/nonce/WM_COPYDATA/映射，再到原磁盘事务。Q定向6通过：缺席真提交、初始在场/late Unknown/late实际惯性Steam/重复provider/错误client拒绝且原字节保持；禁最终guard反例实际错误提交并拒绝，2非法选择。13真实Job自然关前0、18内部child正常join、32惯性PE pins、3图520/521/521源各17库。原P冷总handle+25/+2 FAIL保留；Q复用原真实API ledger归还0，但冷总差额仍OPEN，不代全kernel/SDK。2原fixture+2显式include精确CAS，默认未定义宏600/88796词法token等价不算默认实跑，无新ID/minimum/父门。实际callerOwned用真清单父子；Presence只本方清单、ActiveProcess读取拒绝，不代全机缺席/实际Observer/typed shutdown/完整Host FIFO链。导入后置TU文件名拒绝修正不重跑；完整包/实机仍OPEN，总目标ACTIVE，无产品或部署/真实Steam设备睡眠。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/WorkerNativeIpc-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-WORKER-NATIVE-FACTS-IPC-20261113 -->
+
+
+<!-- STEAM-PUBLIC-BUDGET-READ-R37-20261113 -->
+## 公共只读预算R37（2026-11-13）
+
+Win32公开observeWithinBudget现已精确导主线，单头13182B／0c92537c…；调用方只传原request／ReadScope／剩余1000ms admitted。每笔actual RPM前核同guard；原唯一私有local-static缓存try_lock，busy／cold分别unknown，不等待／冷qualify／hash／额外warm，无新timer／reader／worker。原observe／observeWithRoles默认full路径不增加逐笔owned。新封装源cache定向8项19断言、真实mutex／FileStamp及112→112、293源8库／2自然Job；读取取消用此前真实RPM首笔1的成功epoch，observePolicy起尾部逐字相同，仅按跨epoch引用，不拼整父或签当前整个读路径再跑。旧准备／后置／probe FAIL、旧可写state候选不就绪、归档源原件与费用均保留。
+
+正式RoleLease/TypedNativeReadBudget/SOURCE_READY-r6.json为本后继；旧source-only false文件不覆盖。菜单公共头与runtime诊断已成套主线，原47／必要反例只引用未重跑。完整恢复scope／selector消费者继续只改一处桥并使用同字节新API；冷缓存不得偷偷warm，Windows同步单调用无硬时限证明。R37正式GameProcessGroup-20261113/SHARED-CONSUMER-COORDINATION-20261113-R37.json仍fullActionSourceReady／consumerActionEnableReady=false；heldHost／provider／JS、最终动作资源与匹配包及潜行者2实机仍OPEN，目标ACTIVE。Decky固定125154Z已核8参默认group关闭／ABI6配套与菜单纯诊断，后继不追旧包重编。本层无Steam／游戏／设备／睡眠或部署动作。
+<!-- /STEAM-PUBLIC-BUDGET-READ-R37-20261113 -->
+
+<!-- GAME-RULE-LITERAL-RTSS-CONSUMERS-20261113 -->
+2026-11-13 唯一游戏层与Steam保持两owner；Stray实际.exe.exe规则链已成套写主线，literal保真实完整basename，Worker/member/managed text/native matcher/UI幂等，普通/glob和Windows身份normalizer保持。RTSS真实SFC确认/等待/取消/隐藏后继与启动专用250ms共享库存、fresh-positive同批写回，普通proc.running仍fresh，无新常驻timer/worker/选择器。15文件8产品7配套精确hunk/逆补丁/fresh CAS保并行字节。
+
+前端22/跨端8wire/普通glob20/非法6/旧matcher与member各4、实际publisher原场景+4拒绝、SFC7组27实例2219断言、原Store14、bridge原父FAIL有效2前缀与后继5各自核收；固定main语法及119类型输入通过，9手动/5规则/handler/4前端最终绑定已核，不拼默认父。自有17终态Job0，库侧11已准入自然0与1旧缺terminal Job UNKNOWN独立保留，库metadata超原预算前向记账；原FAIL/费用/换行准备拒绝保留，不重跑旧组。SOURCE_READY仅本范围，Steam角色final/menu/recovery、RTSS native已排队原子门/完整包/外部binary/实机和CPU百分比OPEN；无部署或真实Steam/游戏/设备/睡眠动作，目标ACTIVE。
+
+唯一消费索引Testing/YMCC/Evidence/SteamGameIdentity-20261113/GameOwnerDualPid-20261113/ALL-CONSUMERS-CURRENT.json；本后继final-consumer-import-r3/SOURCE_READY.json、MAINLINE-IMPORT.json、FINAL-BINDING.json。后继只续未完范围，不冻结/追编旧包。
+<!-- /GAME-RULE-LITERAL-RTSS-CONSUMERS-20261113 -->
+
+
+<!-- DECKY-TERMINAL-PAIRED-EXPORT-20261113 -->
+2026-11-13 Decky125154Z一次原完整主线TestExport已核：终止准入不空等7s/Win32原错保留/afaf配套，5PE、1495实际include/56lib、未闭合输入0、匹配PDB；619文件CRC/SHA及完整stage集合核收，两个构建/finish Job自然关前0。仅再读5关键ZIP成员，未重跑producer/默认夹具；NOT_RUN与正式发布未验收保持，旧定向/FAIL按epoch引用。共享层实际8参默认组关闭/官方ABI6配套已消费。包G:\YeManCC-Work\Deliverables\YMCC-Decky-Recovery-Test-20261113-125154Z\YeManCC.zip，SHAe0e5632c549e91867d1c49aeab1f951edf516be85db0be3c1414eb924c8f674e，build 0d2c6518946514fa1dceef825159fc008a444d460eed4bf7e76b48a6779c77f9；未由本聊天部署/操作Steam睡眠或测实机收益，目标ACTIVE。末次主线差异单列不追编。唯一原件G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\paired-export-20261113\NaturalExport\EXPORT-INTAKE.json及REPORT.zh-CN.md。
+<!-- /DECKY-TERMINAL-PAIRED-EXPORT-20261113 -->
+
+
+<!-- CUSTOM-LIBRARY-LITERAL-EXTENSION-20261113 -->
+2026-11-13 自定义库Stray真实.exe.exe漏成员修复已与唯一游戏层成套导主线：共享literal保真实完整basename，Worker normalize/成员valid/managed文本/blacklist、Native读写matcher及UI幂等往返一致；不改Windows实际stem、PE替路径或旧glob。原6before保留，Worker原场景+4拒绝、8实际前端wire组合/20旧glob/6非法/旧matcher与member各4、Host/Worker codec来源门均有原件；图400/8、512/24、401/8，11已admitted Job自然关前0，另Path/PATH helper可能建空Job无terminal的UNKNOWN单列。两个写回准备拒绝均0产品写，第三耦合15文件；库4文件6HEX逆hunk与当前6相关函数RAW核同，非选中fixture的并行IPC optin和main后继保留，不签新整fixture/main编译。元数据与只读收尾超时/所有费用FAIL保留，不称整次预算内PASS，已过组不重跑。未整包/部署或Steam设备动作，交下一自然配套包，Win5新扫描/发布和实际识别仍OPEN，整目标ACTIVE。原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/stray-double-extension-20261113/SOURCE_READY.json、MAINLINE-INTAKE.json及REPAIR-REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-LITERAL-EXTENSION-20261113 -->
+
+
+<!-- STEAM-HOST-WORKER-FIFO-IPC-20261113 -->
+2026-11-13 原Host FIFO/commit/runProcess/真实管道与Job/完成reader已接原Worker CLI及正式facts IPC到原磁盘事务。六定向按Q前三/R后三分来源核收，不拼完整父；去重/关闭保留接受写/最终Unknown与本方Steam出现保护文件/退出77后FIFO接续均核。必要旧快照反例真实提交成功而原Host回执拒绝，2非法选择。23真实Job自然关前0、8成功编译图、32内部child、50PE pins；请求API归还不代全kernel/SDK，冷handle欠账仍OPEN。5原fixture+2显式include精确CAS，逆hunk保并行字节；datachain并行literal默认正文保留，合并全文件未冒称重编。初提取UNKNOWN/编译及两资源观察FAIL和后置换行FAIL均保留，只续受影响/未执行，不重跑前三。UI/target/snapshot为受控端口，Presence仅owned清单、callerOwned真实OS父子，typed Shutdown/实际Observer/完整Host WebView/全消费者与匹配包及实机OPEN。无新ID/minimum/默认父门，无产品/部署或真实Steam设备睡眠动作，整体ACTIVE。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-HOST-WORKER-FIFO-IPC-20261113 -->
+
+
+<!-- STEAM-TYPED-HOST-WORKER-IPC-20261113 -->
+2026-11-13 原Host FIFO/Worker真实IPC磁盘组合已接正式Shutdown sender/producer、原main handler/typed dispatch与公共capture/current片段。TR固定TH2/TP三项通过：一次动作确认本方目标退出后一次真提交；原Dispatch排队后Suspend撤销、queue拒绝均一次请求且零claim/动作/Worker，两原文件保持、零暂存/备份。必要单项将shared current置true后实际迟到退出，原消费者拒绝，不能用文件保护替动作安全；反例raw originalPowerBodies标签按变异来源明确无效。2非法选择/Unknown未实现拒绝，Unknown业务NOT_RUN。10真实Job自然关前0、4图、13内部child、20PE；观察API归还不代全kernel/SDK，旧冷差额OPEN。4原fixture+1typed include精确CAS，原generator三include在私有snapshot生成，无新ID/minimum/默认父；并行literal正文保留、合并整文件未重编。旧准备pin漂移EVIDENCE_INCOMPLETE/后置可选bytes FAIL及全部费用保持，无业务封存重跑。Observer为明确端口、最终Shell仅本方SetEvent+自然join，不签实际Steam退出/全机absence/完整Host WebView/全消费者与包及实机。整体ACTIVE，无产品/部署或真实Steam设备睡眠。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/typed-shutdown/SOURCE_READY.json与REPORT.zh-CN.md。
+<!-- /STEAM-TYPED-HOST-WORKER-IPC-20261113 -->
+
+<!-- GAME-RTSS-NATIVE-IDLE-CONSUMER-20261113 -->
+2026-11-13 双PID消费后继：RTSS页显式关闭／复位用 `rtss.stopIfNoGame`，原IPC receiver入队前捕获唯一Valve已确认无游戏receipt。健康空闲刷新保持，未知／游戏／规则／电源ABA拒绝旧点击；小型撤销序号只在原Valve锁内管理，不是新游戏事实。固定原5工具在同持有HANDLE核PID／birth／path／session，整组复核后在原选择锁内终止，锁外沿原30秒及共享power取消确认；失败／partial不taskkill回退、不继续复位，普通／开机原路径保持。无新后台timer／thread／EXE。
+
+原生core45／epoch反例、前端143／原路反例、helper35项281断言前缀与13项106后缀及3旧体控制分来源核收；两夹具FAIL保留，不拼完整父PASS。18实际RawProgram Job关前0，固定完整main /Zs及API／桥类型通过；6文件精确导入保留并行字节。中文原因仅字符串后继，不重跑143。SOURCE_READY只签此配套源码；完整Native link／Web／包／部署、外部二进制与实机、Steam角色engine／driver正式组合仍OPEN，整体ACTIVE。
+
+原件 `Testing/YMCC/Evidence/SteamGameIdentity-20261113/GameOwnerDualPid-20261113/rtss-native-no-game/SOURCE_READY.json`、`MAINLINE-IMPORT.json`、`FINAL-BINDING.json`；唯一总索引仍是同父 `ALL-CONSUMERS-CURRENT.json`。不重跑旧暂停／LS／trainer／speed及R1／R2组，不追赶并行旧包。
+<!-- /GAME-RTSS-NATIVE-IDLE-CONSUMER-20261113 -->
+
+
+<!-- STEAM-ACK-UNKNOWN-HOST-WORKER-20261113 -->
+2026-11-13 两个真实action ack迟到Unknown组合已接原Host FIFO/Worker：cancel在真实sender返回后Wire cancelled1/claimed0/completed0，再由原pending拒绝；submitted已自然退出本方target一次，Wire cancelled1/claimed1/completed1/Submitted，但客户端仍Unknown。两者一次请求/真实返回信号、零Worker/暂存/备份、原两文件保持。实际SMTO/Outcome未替换，原1500/5000/20000ms合同保持，Returned event仅观察真实shutdown返回、nonce只读mapping和借用Host句柄均按实际归还。必要反例只删Host outcome拒绝段，真实Unknown后实际Worker退出0并错误提交文件，原消费者准确拒绝；非资源误报。8真实Job自然关前0、3图423/423/531各17库、10内部child/15PE、2非法选择。4原fixture精确CAS并与实编字节相同，无新ID/minimum/默认父，不重跑旧3/6。共享原generator/native切片不计本轮实跑，完整kernel/SDK/冷差额仍OPEN；Observer明确端口、Shell只本方事件+自然join，完整Host WebView/全消费者/配套包与实机OPEN，整体ACTIVE，无产品/部署或真实Steam设备睡眠动作。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/typed-shutdown/ack-unknown/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-ACK-UNKNOWN-HOST-WORKER-20261113 -->
+
+
+<!-- STEAM-ACK-UNKNOWN-HOST-WORKER-CORRECTION-20261113 -->
+2026-11-13 核收后继：两正例/反例provider总handle128→133，+5仍未归因。反例首waiter断言失败后未到达Host nested Job查询/原终态断言，raw初始0不作实际查零证明；此前typed TNC同类范围亦不声称已查零。8外层真实原子Job自然关前0保持；反例仍实际Unknown后一次动作、Worker退出0及错误事务，两文件已变，语义控制有效。SMTO未替换且真实Wire/Returned握手支持未取得及时ack和Unknown，不额外声称直接观测ERROR_TIMEOUT。QUALIFICATION-r2/SOURCE_READY-r2/REPORT-r2当前，旧原件/费用保留，无业务重跑。唯一原件同ack-unknown/EVIDENCE-CORRECTION.json及SOURCE_READY-r2.json，整体ACTIVE。
+<!-- /STEAM-ACK-UNKNOWN-HOST-WORKER-CORRECTION-20261113 -->
+
+
+<!-- CUSTOM-LIBRARY-PACKAGE-IDENTITY-EXPORT-20261113 -->
+2026-11-13 自定义库新225328日志已核195 indexed payload；8份库资料与194242逐字相同，旧3未确认不猜测删除。6次Stalker typed primary13764等selected、foreground14888不同的拒绝交公共Steam，未改PID/动作。9950只读39主路径仍在、原14候选按完整EXE仍见OPT，未重做producer枚举。
+
+导出缺子包版本证据已修：原显式export接已知安装目录3文件有界快照SHA；仅原清单以custom-library-package-manifest.json进files，二进制临时快照删除。占用/缺失/超限/摘要失败留unknown，声明disk/per-file非loaded证明；无后台timer/worker/网络。2产品+原fixture共5精确hunk，逆补丁保并行字节。19定向/2非法选择、两图各324实际输入/7自然Job零及9950实际三文件SHA核同、Host51/Worker27索引当前匹配。首外层误期望exit1而原consumer为2的FAIL及费用保留，旧反例不重跑。完整main/安装导出/ZIP未实跑，无部署或Steam设备设置动作；下一自然Native消费，Host/Worker不要求重编，整目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/package-identity-export/SOURCE_READY.json及REPORT.zh-CN.md；现场ANALYSIS.json在同父win5-225328-intake。
+<!-- /CUSTOM-LIBRARY-PACKAGE-IDENTITY-EXPORT-20261113 -->
+
+
+<!-- STEAM-REAL-OBSERVER-HOST-WORKER-20261113 -->
+2026-11-13 真实隔离Observer已接原main完整信息分支/原collect/真实IPC到Host FIFO/typed/Worker文件事务。原类首次宏隔离、每PID新测试HKCU子键actual publication绑定PID/birth/root/account42/Windows session；正常6collect完成一次动作/提交，第二collect原读后Dispatch撤销时原facts仍available却由最终main current拒绝发布，动作/Worker0且文件保持。仅删最后current反例实际发布旧facts并尝试一次action，原消费者拒绝，后续action仍阻断零实际动作/Worker/写；反例nested查询observed=false，两正例实际查0。8外层真实Job自然关前0、3图423/534/534各17库、10child/15PE/3子键删除及不存在复查。Observer原stop join/身份清空不代线程/事件/HKEY/hook逐对象归还；128→134的+6及祖先容器恢复/全SDK仍OPEN。原generator显式--information-reader默认四体逐字同、第五原分支重建，6内存拒绝非业务；2非法选择。4原fixture+1原generator+1新include精确CAS，无新ID/minimum/默认父、旧2/3/6不重跑。准备schema/缺配置未准入/可选字段核收FAIL与费用保留。Observer实类为真但Presence仍owned census、mode端口未调用，Session/Installations/global及完整Host WebView/全消费者/包与实机OPEN，整体ACTIVE，无产品/部署或真实Steam设备睡眠。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/observer-chain/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-REAL-OBSERVER-HOST-WORKER-20261113 -->
+
+<!-- DECKY-STABLE-LINK-CAUSE-20261113 -->
+2026-11-13 同进程Decky断连后继：用户明确换YMCC进程恢复排除。本机21:55/21:57 QAM复核使共享mode暂缺→retained发布waiting→owner主动stop broker已复现；同intent活context只等原有限共享读，不授新业务/启动许可。准备中模式返回只增launchIntent的漏重绑已确定性复现并消费原intent补齐。原typed5次复核0stop/0新binding、desktop/准备返回/OFF/153→153，原broker真实Winsock171及客户端deferred原15s/取消通过；旧FAIL不改。21:37 peer消失源头仍未知，在原断开沿补固定原因/数码/时长，不加轮询。原配方插件87e6194d已构建；未全Native/link/包或部署，不称实机稳定/延迟/睡眠已验收，目标ACTIVE。唯一后继Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/local-automatic-bpm-20261113/STABLE-LINK-SOURCE-READY.json与STABLE-LINK-REPORT.zh-CN.md。
+<!-- /DECKY-STABLE-LINK-CAUSE-20261113 -->
+
+
+<!-- CUSTOM-LIBRARY-LAUNCHER-QUEUE-IDENTITY-20261113 -->
+2026-11-13 自定义库后台身份四处断接已修：库存已确认launcher→primary，原Queue仍按exact缓存降回appId0，转正/lookup/停止恢复同样失联。仅queue/identity_worker两头复用现有shortcutWallpaperIdentity，普通来源exact、原Store投影/成员SourceLease/电源/额度不变，缓存返回后再核成员，无新后台任务或伪造exact绑定。旧4处实际拒绝/候选4通过，父FAIL有效35前缀保留；第36项因261字符自有cache未创建导致前置失效，仅修I/O并续原6后缀，未拼完整case/PASS。2非法选择/3图各358源23库/9自然Job零核收；首编译/CRLF准备与缺runner失败和费用保留。2产品1原fixture共7hunk精确导入，逆hunk保并行字节，当前4函数等两个候选epoch。下一自然Native+Host消费，SteamArtwork Worker源未改；无完整包/部署/Steam设备动作，现场播放及整目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/launcher-queue-identity-20261113/SOURCE_READY.json、REPORT.zh-CN.md及CLOSING.json。
+<!-- /CUSTOM-LIBRARY-LAUNCHER-QUEUE-IDENTITY-20261113 -->
+
+
+<!-- CUSTOM-LIBRARY-LATE-ID-ADMISSION-20261114 -->
+2026-11-14 自定义库队列迟到身份后继：原enqueue锁前确认ID，锁内只重查素材；6种关联撤销/切ID/新增exact/非游戏/读拒绝实际仍旧ID入队。现仅原锁内对pending verified EXE重查原投影/缓存，变化跳过且不借新ID改写旧请求，原queue/progress保持；3稳定对照及候选9项通过。原mutex调用前同线程确定性端口，不签真实竞争时长/跨文件原子租约。2图358各/23库、4自然Job零；CRLF准备拒绝0写/0测保留，旧selector/其它已过组仅引用。共用旧fixture方法仅移类/构造名，无复制实现/新ID/minimum。1产品1fixture4精确hunk及逆字节核收，当前enqueue等实跑候选，原3身份消费者等旧epoch。下一自然Native+Host；无完整包/部署/Steam设备设置睡眠，整目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/CustomLibraryConsumers/ContinuingLogAudit-20261113/launcher-admission-current-20261113/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /CUSTOM-LIBRARY-LATE-ID-ADMISSION-20261114 -->
+
+
+<!-- STEAM-OBSERVER-RESOURCE-ATTRIBUTION-20261114 -->
+2026-11-14 本地后继（UTC原件11-13）：Observer直接资源ledger与本进程table已接原撤销case。事件3/进程4/Key1/Hook1正例全归还；保留事件控制进程2次，真实1遗留被拒绝后实际关闭恢复，不固定实时inventory次数。std Observer线程ID匹配live handle并于原stop/join后消失。128→134剩余类型2Key/3EtwRegistration/1File，私有Desktop关闭另减1，具体SDK/cache所有者仍OPEN、不签全部kernel。snapshot分拆保原65535B，按新raw重建旧聚合206205B；旧三producer FAIL/更早首因不明、RP5未准入owner-query UNKNOWN及准备/后置FAIL费用保留。13实际Job自然关前0、6编译图，成功/控制6内部child原归还；失败不借Job0签owner。Resource宏只允许原撤销case，2选择拒绝，普通Observer仅另编译；正常typed跨close资源组合未签，旧normal/2/3/6不重跑。2原fixture+2include精确CAS、无新ID/minimum/默认父，无产品/部署或真实Steam设备睡眠。全局/SDK/Host WebView/配套包/现场仍OPEN，整体ACTIVE。唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/observer-chain/resource-attribution/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-OBSERVER-RESOURCE-ATTRIBUTION-20261114 -->
+
+<!-- DECKY-STABLE-PAIRED-BUILD-20261114 -->
+Decky同进程稳定性修复的完整配套后继已核：原TestExport一次233016ms、固定快照一次，1499实际include/56lib/0缺口、PE/PDB匹配，619文件CRC/SHA与stage完整集合一致，2自有Job自然关前0；原默认夹具NOT_RUN。包YMCC-Decky-Stability-Test-20261113-155709Z，build ba395035179eab7debbc41dbd1f6cb46d5d8e9459b648473238d68ea4e6502f6，Native eb933c6b、插件87e6194d、公开v3.3.1 Loader原字节保持。整main并行变化的准备FAIL保留，复用同一快照片段核收，不重捕/追编。已补齐完整Native/link/匹配包，未部署或验收长期稳定/睡眠/CPU及正式发布，目标ACTIVE。21:37旧掉线新旁证为Steam Shared JS Context先LoadStart/Decky卸载，再SteamUI重新初始化，之后镜像断开；发起者未知。930条本地MP4 Mixed Content警告已交壁纸owner，警告不当下载/崩溃因果。唯一同项目后继local-automatic-bpm-20261113/paired-native-export/CLOSING.json与REPORT.zh-CN.md；旧原件不改。
+<!-- /DECKY-STABLE-PAIRED-BUILD-20261114 -->
+
+
+<!-- STEAM-OBSERVER-TYPED-RETURN-PAIRING-20261114 -->
+2026-11-14环境标签／11-13 UTC原件：正常typed Process获取与析构关闭的Observer观察归属已配对，同锁查找/真实关闭/原记录更新，其他请求HANDLE解锁后转原账本。原normal case实际完整Host/typed/Worker文件提交，Observer直接Event3/Process5/Key1/Hook1全归还，配对1/转发4；Process计数按实际逐行核，不固定。旧错配控制同样真实退出和提交但留1观察账本Process，被资源门拒，不称kernel leak或再次关闭旧值。7外层Job自然关前0、3编译图、6内部child归还；空/未知2项拒绝，普通分支仅编译，旧revoked不重跑。3既有fixture精确CAS等于实跑源，无产品/新ID/minimum/默认父/部署。旧cwd未准入及只读线程归属核收FAIL保留，后继仅复读同raw；中断后不重启已完编译。差额2Key/3ETW/1File所有者、全局/Host WebView/SourceLease/包/现场OPEN，整体ACTIVE。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/observer-chain/resource-attribution/typed-return/SOURCE_READY.json及REPORT.zh-CN.md。
+<!-- /STEAM-OBSERVER-TYPED-RETURN-PAIRING-20261114 -->
+
+<!-- DECKY-PRESENCE-PUBLICATION-WIN5-20261114 -->
+2026-11-14 Decky 后继：公共身份通知现补消费同一 Session 的 presence-only 变化，只在当前 publication 与 Runtime 运行状态不同时接原 typed observeSteam；无额外账户门/扫描/轮询/额度。原定向旧源实际漏清理，候选含512次重复/过期、未知/恢复、入队失败重试和OFF通过，句柄153→153、自有Job关前0；两准备/夹具FAIL及费用保留。不拼默认整父，不追改旧配套包，此后继未建包/部署。
+新 Win5 20261114-015248 档案唤醒镜像 owner-stop 后69ms接通，后续通道验证正常，无唤醒后大屏恢复。Steam会话current，缺失游戏PID从睡前已存在；菜单前置拒绝与侧栏实际输入分别开放，CSS三次dom-unconfirmed不当断链因果。唯一原件 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\PRESENCE-WIN5-CLOSING-r9c.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\field-win5-20261114-015248\DECKY-REVIEW.json`。同进程长稳、侧栏输入与真实睡眠仍OPEN，整体ACTIVE。
+<!-- /DECKY-PRESENCE-PUBLICATION-WIN5-20261114 -->
+
+
+<!-- STEAM-RECOVERY-DUAL-PID-SIX-CONSUMERS-R41-20261114 -->
+
+2026-11-14 六处原实例双PID恢复消费已精确写主线：main/sleep_steam_recovery/sleep_recovery_auto/steam_game_link_runtime/steam_original_recovery_runtime/steam_native_observation_tracking。原公共count2/RoleLease及business cancellation完整送入两route引擎，不再8参丢group；睡前/唤醒绑定原CaptureRequest、原PID/birth/GameID/Steam与代次，global选择不替换sleep原实例。ObserveOriginal复用现有public held group；SuspendCapture明确同gen及Suspending，只读健康基线，无mutation、无新增reader/poller/产品EXE。
+
+动态与半静态各startup/wake两原参数共4项完整handle各1084断言已实际核：原durable健康v2→受控child状态丢失→真实Query/getter/Prepare/Arm/dispatcher/publisher一次→同IPC child SDK effect4到8196→一次CopySparse→原snapshot false到true，inner均自然exit0/Job0。18实际Job/12图分列，controlled模块/hash/content/loaded/SDK叶不当真实Steam资格或掌机验收。公共owner/readScope原睡前consumer另1项50断言通过；旧体第4断言实际拒绝，首后置错误期待更后失败点保持FAIL，只读同raw前向核收，不重跑。
+
+最后实际主线固定r42完整main TU编译退出0、1642实际输入；六文件current/imported/compiled逐字同，独立saved forward/inverse逐字还原并保留并行字节。限定vctip工具收尾与实际Job0分列，不称纯自然。两后置准备/核收错误及早期编译失败、旧reboot UNKNOWN和全部费用保留，默认/完整父夹具未重跑或改PASS。当前SOURCE_READY只签六消费者源码范围，完整Native/link/Web/包、部署与潜行者2真实Running/UI/手柄/Continue仍待新包实测。已交“导出”下一自然包与公共菜单新JS/embedded联合，旧菜单包不当本修复交付。
+
+公共completion readiness hint独立OPEN，不虚构BindingReady或TrackerObserved动作grant。早前sharedSleepWakeClassified被描述为“非Ready必拒”已前向纠正：真实函数仅检查代次与blocked标志，修复保留原守卫。目标ACTIVE，无真实Steam/游戏/设备/睡眠或本方部署动作。
+
+唯一原件：Testing/YMCC/Evidence/Win5SteamSleepRebind-20261111/Field-20261114-015248/SOURCE_READY.json、DELIVERY-REQUIREMENT.json、REPAIR-REPORT.zh-CN.md，full-handle/FULL-HANDLE-CLOSING.json与mainline-import/MAINLINE-IMPORT.json。
+
+<!-- /STEAM-RECOVERY-DUAL-PID-SIX-CONSUMERS-R41-20261114 -->
+
+
+<!-- DECKY-CSS-READ-CAUSE-TRACE-20261114 -->
+2026-11-14 Decky/主题消费后继：原公共CSS读取返回增加steam-css-read固定原因/耗时/文档类型计数，正常identity静默；不含URL/CSS/账户/令牌，不改PS协议、原4秒读取/24秒窗口/重试/动作。原CSS shared identity显式--read-diagnostics旧源拒绝及候选12检查已核，实际372include/18库、句柄114→114/自有Job归零；两准备/编译FAIL保留，旧模板无关标签前向纠正且不算实跑。两个产品和三个原支持文件精确CAS，后继未整编/包/部署。
+新Win5唤醒176秒有效Loader父子样本平均整机CPU0.00221946%，不当Decky JS/GPU或修补收益。DOM子因、触控/手柄和长稳仍OPEN，整体ACTIVE。唯一原件 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CSS-READ-DIAGNOSTIC-CLOSING-r10c.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CSS-READ-DIAGNOSTIC-REPORT.zh-CN.md`。不追改其它任务已封存包。
+<!-- /DECKY-CSS-READ-CAUSE-TRACE-20261114 -->
+
+<!-- DECKY-WIN5-WAKE-REVIEW-20261114-053138 -->
+2026-11-14 Win5 053138档案复核：YMCC3052/Steam13704，导出磁盘Native627c8255匹配已交付菜单配套包（非加载模块证明），官方Loader3.3.1未改。两轮wake mirror owner-stop后102/224ms重接，均有ready快照与验证样本，未见postwake全局recovery/BPM。Steam会话均current，游戏目标capture已缺：首轮preferred5936/nativePrimary14212报group-role-unavailable，次轮无绑定。10条已调用菜单的导航准备均input-owner-busy-or-unknown，另30条preflight context-changed；准确file/line已交原Steam/菜单owner，触摸/手柄不得以通信成功代验。CSS两次dom-unconfirmed，末helper仍pending，不猜内部子条件。
+唯一证据 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\field-win5-20261114-053138\REVIEW-CLOSING.json`、`G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\field-win5-20261114-053138\DECKY-REVIEW.json`。本轮零产品变更/夹具/构建/部署/Steam或睡眠动作；r9c/r10c保持原SOURCE_READY范围，此聊天未追加交付，其他owner自然固定包按各自来源核对。同进程长稳、实机侧栏输入、主题根因及历史FAIL/UNKNOWN继续保留，整体ACTIVE。
+<!-- /DECKY-WIN5-WAKE-REVIEW-20261114-053138 -->
+
+<!-- DECKY-CSS-ROUTE-DOCUMENT-20261114 -->
+2026-11-14 Decky/CSS同源路由兼容后继：原steam_document_read仅接受index.html，当前Win5 console页面已为/routes/library/home；只增精确Steam HTTPS源下/routes/，原held进程/监听/current/电源/origin/href/documentKey/target-set保持。原DocumentReadOnly消费者旧头第4断言实际拒绝，候选49断言通过；2图各381include/18lib、2Job实际归零，限定已pin vctip工具收尾不称自然。仅1产品头+1原fixture共6精确hunk，逆变换保持其它字节；准备/只读核收FAIL及费用保留，不重跑正常组/新增ID或minimum。
+权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CSS-ROUTE-SOURCE-READY-r11.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CSS-ROUTE-REPORT.zh-CN.md`。仅签同源路由读取兼容，不签实际/json清单、全部dom-unconfirmed因果、视觉/CPU/长稳/实机；下一自然Native包消费，不追改封存包，r10c诊断保留。未完整Native/Web/link/包/部署或操作真实Steam/睡眠，整体ACTIVE。
+<!-- /DECKY-CSS-ROUTE-DOCUMENT-20261114 -->
+
+<!-- DECKY-ACTUAL-REPAIR-CALLBACK-20261114 -->
+2026-11-14 Decky重载发起者追溯后继：原repair/cleanupConnection既有回调仅增固定console三态scheduled/cancelled-before-call/restart-call-entered及manual/final-cleanup来源；最多两行，不含账户/令牌/URL/args，不改guard/取消/动作/额度，记录器异常不阻断原调用。原manualRepairTests显式diag选择，旧源实际调用一次却缺事实被拒，source/embedded各8共16通过；2Job自然关前0，原mode/light逐字同、官方embed check通过。2产品JS/H+1原fixture精确导入，7hunk逆变换保其他字节，无新ID/minimum/timer/worker/poller；默认整套NOT_RUN。
+权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\REPAIR-CALLBACK-SOURCE-READY-r12.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\REPAIR-CALLBACK-REPORT.zh-CN.md`。21:37发起者仍未证明，进入调用不当完成；下一自然完整Native包消费，未编译Native/建包/部署/操作真实Steam或睡眠。r10/r11来源与历史FAIL/UNKNOWN/费用保持，长稳/CPU/实机及整目标ACTIVE。
+<!-- /DECKY-ACTUAL-REPAIR-CALLBACK-20261114 -->
+
+<!-- DECKY-CPU-STEADY-OBSERVATION-20261114 -->
+2026-11-14 Decky已有计数后继：Win5仅writer3052/birth明确且Steam13704，排除旧writer260条；32.062+16秒有效计数，Loader父子平均整机0.0030458565%/0增量，共享Steam0.0487337034%/0增量。UI候选与共享上下文同PID10208，各段32/16别名不得相加；无跨睡眠补零，不签独占JS/GPU/CPU优化收益。本机34772/birth精确窗口05:41:55.631至06:33:29.760，110个native客户端验证/hooks有效样本，官方WS均false；无mirror断开/全局recovery/wake日志，不代验商店、物理输入或睡眠。原件 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CPU-STABILITY-OBSERVATION-CLOSING-20261114.json`。零新产品/夹具/采样器/部署或Steam动作；配套包由原导出owner准备，尚未以会话意图代签live Job，目标ACTIVE。
+<!-- /DECKY-CPU-STEADY-OBSERVATION-20261114 -->
+
+<!-- DECKY-CSS-RELOAD-MATCHED-PACKAGE-063546-20261114 -->
+2026-11-14 Decky/CSS后继已进入063546完整配套Native/Web/插件/ZIP及源码/PDB，并独立核包SHA、关键成员、完整生产JS实际嵌入、3原compiler include、主题配套和官方Loader不变；Native SHA417a426a452f876170fcfa920c435580de1d8c77de8769425b295f74b70087b9，build c704fd8db3e884e784973f23dd87303cdc8eaf7b71db5ed4944ba2dae7e9744f。原PDB解析及编译后工具图引用边界保持；Job关前0、限定vctip收尾不称全自然。两次审查字段类型FAIL前向纠正，原失败/费用不改，无业务重跑/重编。
+Win5两次唤醒镜像102/224ms接通，首次客户端验证稍后才转真，无后续全局恢复或开关大屏；公共Steam会话current/ready不代游戏绑定或物理输入。已有短时CPU与本机51分钟观察只作分范围证据。权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\next-natural-package-20261114\CLOSING-r13.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\next-natural-package-20261114\REPORT.zh-CN.md`。此后继只关闭r10c/r11/r12等就绪来源缺匹配包，不追改旧epoch；默认fixtures NOT_RUN，未由本任务部署或操作真实Steam/游戏/睡眠。实际CSS分支、21:37重载发起者、本机手柄/触摸、真实睡眠及长稳/CPU收益OPEN，整体ACTIVE；现场接续由原菜单owner独占。
+<!-- /DECKY-CSS-RELOAD-MATCHED-PACKAGE-063546-20261114 -->
+
+<!-- DECKY-OFFICIAL-BACKEND-STATE-20261114 -->
+2026-11-14 Decky同次官方ws状态诊断已精确导入：本机90.57分钟/188条native连接verified/hooks正常而backend=false，无断链/阶梯/唤醒/BPM；只补原ui.mode.get同一次readyState的六固定enum，原bool与策略/额度不变，无新IO/timer/订阅。source/full/mode JS原单例、native诊断候选63与实际read+main回调85断言按各自来源核收，旧源三处必要语义拒绝；4成功图315/315/386/386各18lib、9Job关前0，5限定vctip收尾不称自然。两准备/一缺支持源编译FAIL和费用保持，只续未完UI组；默认父NOT_RUN，无新ID/minimum。
+6产品/3原fixture精确hunk与同源H写回，public input trace/r12保留，mode新诊断epoch单列、light字节保持。权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\BACKEND-STATE-SOURCE-READY-r14.json` 与 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\BACKEND-STATE-REPORT.zh-CN.md`。仅签观察源码，不签官方后端根因/重载调用者/实际输入睡眠或CPU收益；无完整Native/Web/包/部署，下一自然配套，不追改063546。整体ACTIVE。
+<!-- /DECKY-OFFICIAL-BACKEND-STATE-20261114 -->
+
+<!-- DECKY-OFFICIAL-WS-RETRY-EVIDENCE-20261114 -->
+2026-11-14 本机已有webhelper_js末尾2MiB自05:41:55起保留812条WSRouter断连固定事实，0条相应Connected；相邻日志秒标签6..13、多数7..10，不当准确timer/CPU/网络请求计数。实际保存官方v3.3.1 locked commit/tag的wsrouter.ts逐字同，close沿原this.error/sleep5000/connect；网页呈现差异导致的首研究guard FAIL及初始tail边界UNKNOWN保留，后继用实际原件纠正。只有安全字段/行SHA，无URL或凭据。
+原retained路径无新自有Loader，只接桥接；这不证明没有外部Loader，认证/缺服务/传输及关闭码仍UNKNOWN，不移除保护或重启UI。现有native90.57分钟/188条健康属独立部分重合窗口。原件 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\official-backend-retry-20261114-r2\REVIEW.json`、`G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\official-backend-retry-20261114-r2\REPORT.zh-CN.md`；报告中约7秒描述以本后继6..13分布为准。无新探测/采样/fixture/产品改动/构建/部署或Steam睡眠动作。下一步关联旧owner退出与重试起点，整体ACTIVE。
+<!-- /DECKY-OFFICIAL-WS-RETRY-EVIDENCE-20261114 -->
+
+<!-- DECKY-CONNECTION-OBSERVATION-20261114 -->
+2026-11-14 新32880/063546启动实际用接通前socket-missing选recycle→rebuild，预算拒绝mutated=false，1593ms后native确认正常。现新增Decky专用requestConnectionRefresh：清旧cached观察但pending不revoke公共mode/document/account来源；真实变化/无效读仍原撤销，普通requestRefresh逐字保持。main仅真实retained接续及当前QAM入口用新API；Decky OFF即使CSS ON也拒绝，无新IO producer/timer/线程/重试/恢复额度，原窗口保持。
+原canonical typed offline的first-proof旧源实际拒绝，候选1binding/0恢复、153→153；后继32inFlight QAM/旧阳性/正常与失败撤销/OFF+CSS分别核收。原五轮pending/desktop/OFF同r16 EXE续跑、零重编147→147。四图各492include/15lib，5Job关前0，4限定vctip收尾非自然。私有r15双fixture组合FAIL/后置id FAIL/程序pin拒绝UNKNOWN及费用不改，不拼父PASS；JS/H/插件/Loader未变，无新ID/minimum，默认父NOT_RUN。
+仅2产品/2原fixture精确导入，原普通方法和当前changed前缀核收；权威 `G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CONNECTION-OBSERVATION-SOURCE-READY-r16.json`、`G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CONNECTION-OBSERVATION-REPORT.zh-CN.md`。新增5条CSS source-unconfirmed说明文档库存前拒绝，不签全部CSS/GPU根因；812 WSRouter失败/旧Loader完整退出及实机睡眠/输入/CPU仍OPEN。下一自然Native配套，不追改063546或部署，整体ACTIVE。
+<!-- /DECKY-CONNECTION-OBSERVATION-20261114 -->
+
+<!-- DECKY-OFFICIAL-BACKEND-CAPABILITY-081632-20261114 -->
+2026-11-14 Decky081632固定包已独立核两ZIP及12安装/10源码PDB成员、r14六产品、七原compiler include和完整JS实际嵌入；官方Loader/插件不变，原Job0及限定vctip收尾/编译后观察范围保持，无业务重跑/重编。当前YMCC1560/Steam21088只读持HANDLE核活，native已结算25样本正常；官方socket closed/connecting且内核IPv4/IPv6固定1337监听均0，0网络请求，仅解释观察时刻后端不存在监听，历史Loader退出原因UNKNOWN。YMCC换进程单列，不冒称稳定同进程自然断连。
+锁定v3.3.1 entry/config无受支持backend-only路径，LIVE_RELOAD仅插件重载，已加载页注入会安排RestartJSContext；官方字节/retained准入保持。r16已主线且下一自然包登记有效，081632不含，固定旧包不追编。Win5两次唤醒102/224ms镜像后有验证/配置，物理触屏手柄由原菜单owner接续。权威`G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\package-081632-intake\CLOSING.json`与`G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\package-081632-intake\REPORT.zh-CN.md`；旧FAIL/UNKNOWN/费用保持，未本任务部署或操作Steam/游戏/真实睡眠。官方退出源头、r16现场效果、长期稳定及CPU收益OPEN，整体ACTIVE。
+<!-- /DECKY-OFFICIAL-BACKEND-CAPABILITY-081632-20261114 -->
+
+<!-- DECKY-OWNED-LOADER-STOP-TRACE-r17-20261114 -->
+2026-11-14 Decky r17仅补原closeOwned主动清理cause/held PID+birth及开始结束回执，复用原wait/Job结果；无root不造记录、未知不绿，日志抛错不跳清理，无新增健康poll/worker/网络/恢复额度。旧源原ready-owned必要反例真实拒绝，候选原owned+retained通过165→165/157→157，实际exit0/Job0/bindingDestroyed核收；两492include/15lib成功图分epoch、四Job0/三限定vctip非自然。准备/换行编译FAIL和费用保持，默认父NOT_RUN，全部13类cause/main writer/实机未全验。
+2产品/2原fixture精确20hunk已导，逆变换保留并行字节；main/JS/H/plugin/官方Loader不变。权威 G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\LOADER-STOP-SOURCE-READY-r17.json 与 G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\LOADER-STOP-REPORT-r17.zh-CN.md，下一自然Native配套r16+r17，固定旧包不追编，未部署或操作Steam/游戏/睡眠。旧Loader退出根因、官方后端恢复、长稳/CPU/真实睡眠继续OPEN，整体ACTIVE。
+<!-- /DECKY-OWNED-LOADER-STOP-TRACE-r17-20261114 -->
+
+<!-- DECKY-CLIENT-SNAPSHOT-PROOF-REENTRY-r19-20261114 -->
+2026-11-14 Decky原snapshot先publish后取probe，显示回调同步新建deferred检测时旧消息会结算新请求，已由原client/native-reply-proof first same-socket反例实拒。现在发布前捕获probe、回调后核同socket/epoch/对象及未销毁，完成通知也核当前连接，合法deferred续接保持，无新IO/timer/worker/额度。候选原1项含same-socket/new-run/dispose及原deferred控制，2业务+1插件Job自然0；旧负例止于首项，不签三个旧边界全反例。
+原配方固定514来源插件c1e3b6be5467d88e61dcd6303e0402a9bb7da3a5c7c83c6cba2da42c3730cdcd，dist489434/SHA434c134d，官方Loader不变。源/原fixture3hunk+匹配dist鲜读导主线，逆变换保留并行字节；准备junction FAIL/费用保持。权威 G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CLIENT-PROOF-REENTRY-SOURCE-READY-r19.json 及报告，下一自然包配r16/r17，不追081632、未部署/Steam/真实睡眠，现场根因/输入/长稳/CPU收益OPEN，整体ACTIVE。
+<!-- /DECKY-CLIENT-SNAPSHOT-PROOF-REENTRY-r19-20261114 -->
+
+<!-- DECKY-LAST-LOADER-OWNER-EXIT-20261114 -->
+2026-11-14 从实际窗口title目录原native-lifecycle发现23164/34996最后一轮失联的owner明确退出：05:35:31.739 wm-app-exit→32.977 Decky disabled→33.001 cleanup finished→33.485 window-destroy/exitRequested。按用户规则换YMCC单列；支持正常owner退出关联，但旧root birth/exitCode/Job0仍UNKNOWN，不倒填子进程终态。28992后续retained镜像恢复与官方后端false保持分列。当前1560普通日志54.010分钟/108native健康样本无后续断连/恢复/唤醒，官方closed/connecting仍不绿；现有日志无当前CPU计数，不造收益或新采样。原件 G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\owner-exit-attribution-20261114\REVIEW.json、G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\owner-exit-attribution-20261114\REPORT.zh-CN.md。
+另r19显示订阅重入真实缺口已独立修源/匹配插件，不宣称为本段现场根因；r16/r17/r19下一自然包，不追081632、未部署/Steam/游戏/睡眠。全官方后端恢复、物理输入/睡眠、长稳CPU及旧重载发起者OPEN，整体ACTIVE。
+<!-- /DECKY-LAST-LOADER-OWNER-EXIT-20261114 -->
+
+<!-- DECKY-CLIENT-TRANSPORT-TEARDOWN-r20-20261114 -->
+2026-11-14 Decky旧close先busy:false后offline，订阅同步恢复后被旧尾段再次标离线的旧mainline真实反例已核。原disconnect统一先撤旧对象/原timer，再完整离线通知，仅关/结算捕获旧socket/pending/probe，close/error/protocol共用；不取消新显式意图，不重放未知写。私有v1原8交错+24循环及hidden通过，另v1 opening finally污染同run新验证连接反例实拒；最终v2清旧opening/归还current守卫后，原native-reply-proof新增2和r19控制/hidden寿命通过。分epoch，不拼最终v2整父24/default PASS；7Job自然0，无新timer/worker/源读/恢复额度。
+原配方固定514来源匹配插件f8b232a35e6731589055ea6c74da6975fa0ad5050db1f090e2164ba7bd79a35a，dist489397/SHA110bbc3a…已与源/原fixture6hunk精确导主线，逆变换保并行字节；官方Loader/Native/JS/H不变。权威 G:\YeManCC-Work\Testing\YMCC\Evidence\DeckyRetainedBackendRecovery-20261111\verified-health-wake-20261112\shared-admission-review-20261112\recovery-cause-trace-20261113\local-automatic-bpm-20261113\CLIENT-TEARDOWN-SOURCE-READY-r20.json 及报告。r20合格接续r19客户端/载荷，r16/r17下一自然Native一起配包，旧081632/原FAIL/费用保持，未部署/Steam/真实睡眠；全官方后端/物理输入/长稳CPU仍OPEN，整体ACTIVE。
+<!-- /DECKY-CLIENT-TRANSPORT-TEARDOWN-r20-20261114 -->
+
+<!-- DECKY-SNAPSHOT-SEND-REENTRY-r21-20261114 -->
+2026-11-14 Decky r21：原requestSnapshot发送失败先finishProbe通知、后disconnect会误关订阅同步建立的替代连接，旧主线首same-run反例已核；现仅删提前finishProbe，沿r20原子disconnect退役捕获旧对象。原native-reply-proof新增same/new-run及原控制实际通过，新显式意图一次成功、旧消息不重放、timer0；未重跑24风暴/隐藏组，不拼整父。3自有Job自然归零，无新timer/worker/恢复额度，官方Loader/Native/JS/H不变。
+原配方514输入一次匹配插件build1331afbc4d160086cdddbe7a271dd760644bf4e090cb1e14ef6a4e907a57094c，dist489309/SHA b4f95d87dce86011a76caa6e26d87cfbc5c00762a2c7bcac5bbc26b5398b440c；1产品/1原fixture3精确hunk及匹配dist导主线，逆hunk保并行字节。权威原local-automatic-bpm-20261113/SNAPSHOT-SEND-SOURCE-READY-r21.json及MAINLINE-IMPORT-r21.json；PendingSources/DeckySnapshotSendFailure-r21.json合格接续r20客户端/载荷，下一自然包配r16/r17，不追081632。原FAIL/费用/epoch保留，文档首次anchor拒绝亦保留，无部署/Steam/游戏/睡眠；官方后端、物理输入、长稳CPU仍OPEN，目标ACTIVE。
+<!-- /DECKY-SNAPSHOT-SEND-REENTRY-r21-20261114 -->
+
+<!-- DECKY-PROBE-SETUP-OWNER-r22-20261114 -->
+2026-11-14 Decky r22：原testConnection发布pending后，取消的旧调用会借用替代连接的新probe编号多发一次读取。原checkConnectionOnOpen同run首反例实际拒绝（2条对1条）；捕获原probe并在通知后/catch核同对象后，same/new-run各只发1当前请求、旧调用0，hidden-passive取消不再恢复业务流，三边界timer0。原r21发送失败及r20/r19/deferred控制同候选通过；未重跑24/隐藏组，不拼整父。临时摘要继承count2以原raw前向纠正3，原件/FAIL/费用/上一额度超出10960ms保持。
+1产品/1原fixture4精确hunk及原配方514输入匹配dist已导，逆hunk保并行字节，3自有Job自然归零。buildbec016d9879ef45f50a0571f05a00fdeeb972bf2e149d9417326995a00bc2b76，dist489365/SHA3d938ea9d0ee37956df89e4d5f7171c01da9c1b481ba9c0d7586400b89af3a0c；无新timer/worker/重试额度，官方Loader/Native/JS/H不变。权威原local-automatic-bpm-20261113/PROBE-OWNER-SOURCE-READY-r22.json、MAINLINE-IMPORT-r22.json与VALIDATION-SCOPE-CORRECTION-r22.json；PendingSources/DeckyProbeSetupOwner-r22.json合格接续r21客户端/载荷，原r19/r20/r21保留，下一自然包配r16/r17，不追081632。无部署/Steam/游戏/睡眠；少一次请求不当CPU百分比收益，官方后端/物理输入/长稳CPU仍OPEN，目标ACTIVE。
+<!-- /DECKY-PROBE-SETUP-OWNER-r22-20261114 -->
+
+<!-- DECKY-R22-ORIGINAL-STORM-ACTUAL-20261114 -->
+2026-11-14 Decky r22实际范围后继：源码/匹配插件未改，在同最终r22候选实际补跑原24 mixed restart及原hidden-proof-lifetimes两个既有消费者；原8清理交错、新旧run/丢事件/静默连接/迟到回调/未知写不重放及timeout/snapshot-timeout/dispose通过，2新增Job自然归零，无重编/部署。此前r22主证书24/隐藏NOT_RUN按当时epoch保留，本后继补实际执行，不倒改V1/V2历史、不拼默认整父。首次workspace元数据文件名准备FAIL（未起test/Job）及原摘要计数纠正/费用均保留。
+权威原local-automatic-bpm-20261113/PROBE-OWNER-STORM-INTAKE-r22t.json与VALIDATION-r22t.json；r22原3Job加本2Job分别记录，不重复父耗时。PendingSources原r22来源/插件hash不变，下次自然包配r16/r17；官方后端、真实输入/睡眠、长期稳定及CPU收益仍OPEN，目标ACTIVE。
+<!-- /DECKY-R22-ORIGINAL-STORM-ACTUAL-20261114 -->
+
+<!-- DECKY-R22-MATCHED-FULL-PACKAGE-104038-20261114 -->
+2026-11-14 Decky r16/r17/r22已进入104038一次固定来源的完整Native/Web/插件/ZIP及源码PDB，独立核两ZIP、12安装/9源码PDB成员、r16两个实际连接调用hunk与3原生头/实际include、完整production JS在Native内1份及原Job关前0；限定vctip工具收尾不称全自然。默认fixtures仍NOT_RUN，原r16/r17原生与r22客户端/24/hidden各按原epoch引用，不重编/重跑。包build a683a28a8dfc56295070ecda69decd6d4231637b2f04153f4ca466bd5f3d06ac，Native SHA76bb5731dd0277ed82671b20c8018b8abd9397b0f0fc7e358d47f824752695ce，官方Loader不变。
+整包插件a261ee5563f0d2967fa4dbeb4278b42d64c39bb78ce838557aa0acdabceb15b2/SHA0a06ee971360f4c2d158ae87740c124315a07306880cdcda08d255927ffe961d与私有r22 bec016区分：514源输入完全相同，只4处Vue prop运行类型元数据及buildId不同，其余bytes精确重建相等；完整交付使用整包实际值。旧整payload期望/两个无关legacy日志邻接核收FAIL及准备引用/费用保留，实际r16连接hunk保持；不放宽业务断言。独立证据原local-automatic-bpm-20261113/current-package-intake-104038/PACKAGE-INTAKE.json及PLUGIN-CODEGEN-QUALIFICATION.json，交付Deliverables/YMCC-DeckyR22-TestPackage-20261114-104038。旧081632本机129.511分钟/261 native健康样本无后续重连，官方后端0，不能当r22实机或CPU收益。现场仍由原菜单owner统一；本任务未部署或操作Steam/游戏/睡眠，实际已加载插件/真实睡眠输入/长稳CPU与官方后端OPEN，目标ACTIVE。
+<!-- /DECKY-R22-MATCHED-FULL-PACKAGE-104038-20261114 -->
+
+<!-- DECKY-FRONTEND-READY-DISPATCH-r23-20261114 -->
+2026-11-14 Decky r23仅原upgrade import微任务在current/OFF后复核原fresh；匹配active/buildId已到时结算本ready等待，不再导入已就绪module。旧源首ready-event实际imports1对0拒绝，候选ready-event/marker-only均0、timer/listener0，原21用例121断言及2自有Job自然归零。first-load函数逐字不变、未重跑；无新timer/worker/事件/次数/ID或默认父门，未改官方Loader/mirrorClient/plugin dist/main。JS+同源H及原fixture2精确hunk已导，逆hunk保并行字节。
+权威原local-automatic-bpm-20261113/FRONTEND-READY-DISPATCH-SOURCE-READY-r23.json及MAINLINE-IMPORT-r23.json；PendingSources/DeckyFrontendReadyDispatch-r23.json只交下一自然Native。r23不在已完成104038，不追改旧包；现场r22继续原菜单owner统一已有窗口。本任务未部署/操作Steam/游戏/睡眠，不签CPU百分比、物理输入或全目标完成，整体ACTIVE。
+<!-- /DECKY-FRONTEND-READY-DISPATCH-r23-20261114 -->
+
+<!-- DECKY-COLD-HEALTHY-MIRROR-r24-20261114 -->
+2026-11-14 Decky r24：Win5 111659新日志已实际加载104038插件a261ee…；11:16:25 committed Ready后镜像owner-stop至返回210ms、至三路健康615ms，无页面/大屏高阶动作。其后subscribe:false为明确隐藏停读，19秒后重新请求不能当连续可见故障。旧015248/053138插件87e619与新epoch分开；触控/手柄或游戏身份不在本修复范围。
+冷启动11:06:57镜像已验证且快照ready，Runtime仍为官方后端待就绪发起250ms重绑。原ready-rebind消费者扩展精确复现旧源FAIL；仅当本次梯级为reconnect且transportConnected时，不额外设置transport恢复请求，原已捕获watch请求保持。候选原ready和睡眠断连owned两用例通过，原显式代次重绑/OFF/资源归还保留；两实际Job关前0，限定vctip收尾分列，不称全自然。无新timer/worker/次数或时间预算。
+只导1产品hunk与原CPP夹具3hunk，锁内fresh及逆hunk保留并行字节，整文件等已执行候选。G盘满导致准备FAIL/删除审批拒绝均保留，改C临时私有编译，原件另归档回核心层。权威原local-automatic-bpm-20261113/COLD-MIRROR-SOURCE-READY-r24.json、MAINLINE-IMPORT-r24.json及field-win5-111659/ANALYSIS.json。r24交下一自然Native，和r23均不在已完成104038，不追编旧包；本机未部署，长稳/睡眠输入/CPU收益仍OPEN，目标ACTIVE。
+<!-- /DECKY-COLD-HEALTHY-MIRROR-r24-20261114 -->
+
+<!-- DECKY-QUEUED-HEALTH-r25-20261114 -->
+2026-11-14 Decky r25：原Runtime真实消费者复现连接已在32ms恢复，旧250ms排队重绑仍执行。原worker仅新增watch请求归属位：真实完整健康取消普通排队恢复，原监听故障仍走其重绑；成功/终止清理沿原窗口归还，不加次数/timer/worker。冷场景普通1计划/有watch2计划，追加此前已健康场景仍1/2，Loader不变、句柄及Client/Job归还；r24冷镜像等待与原睡眠断连用例保持。
+原两canonical用例及追加同ready参数按epoch分列，不拼整父；原旧源FAIL、混合换行准备拒绝、首次新参数被原selector64拒绝与费用均保留。仅补原白名单及exact-case绑定后续1原参数，另复用同EXE核3非法选择拒绝，无重编/重跑业务。5外层Job关前0，自然/限定vctip按原回执分列，不豁免产品。
+1产品7hunk及原CPP夹具精确写回，两源均等最终实际候选，逆hunk保留并行字节；r24原hunk与原冷用例保留，r25为其合格后继。权威原local-automatic-bpm-20261113/QUEUED-HEALTH-SOURCE-READY-r25.json及MAINLINE-IMPORT-r25.json。下一自然Native与r23配套，不追104038，未部署/Steam/游戏/设备/真实睡眠，长期稳定/实机输入和CPU收益仍OPEN，目标ACTIVE。
+<!-- /DECKY-QUEUED-HEALTH-r25-20261114 -->
+
+<!-- DECKY-DIRECT-WATCH-PROVENANCE-r26-20261114 -->
+2026-11-14 Decky r26补齐r25遗漏：r25仅标公开watch请求，原worker ended/failed及owned/retained非变更绑定失败重试仍可能被页面健康误取消。实际原consumer旧源4项均失败（两false重试只1计划、两child-exit不恢复），不是历史现场根因推定。原三入口现保持watch归属至原绑定结算；候选4原用例通过，owned/retained普通及持管道后代真实退出、当前健康读、旧资源归还均核。未降低身份/OFF/未知写保护或退款。
+另复用同一候选EXE实跑原ready默认及queued-stable-only两个参数：冷镜像等待、普通排队健康取消仍1计划，独立watch仍2计划，句柄/Loader保持。来源及用例按epoch分列，不拼默认整父；3实际Job关前0，2限定vctip/1自然，不称全部自然。只1产品3hunk+原CPP7hunk精确CAS，源码逐字等已执行候选；r25、r24核心取消/抑制语句保留，无新timer/worker/额度。
+权威原local-automatic-bpm-20261113/DIRECT-WATCH-SOURCE-READY-r26.json、MAINLINE-IMPORT-r26.json及DIRECT-WATCH-REPORT-r26.zh-CN.md。r26为含修正的r25合格后继，下一自然Native整头用r26连r23；r25不再作为独立最终配包来源。104038固定且不含r23/r25/r26，未部署或Steam/游戏/设备/真实睡眠；长稳/物理输入/CPU收益仍OPEN，整体ACTIVE。旧r25证据/准备、selector FAIL及费用保持。
+<!-- /DECKY-DIRECT-WATCH-PROVENANCE-r26-20261114 -->
+
+<!-- DECKY-RETAINED-SAME-LOADER-UPDATE-20261114 -->
+2026-11-14 Decky 同 Loader 插件升级接续已精确导主线4产品/4原夹具共28hunk。只在原生升级授权、同Steam/大屏、官方Loader同版、精确旧YMCC模块及官方后端实际在线时走原importPlugin；实际文档再核旧/新build及后端，普通exact重连/OFF/取消/未知历史保持。无新EXE/线程/计时器/恢复额或Loader修改。
+最终完整bootstrap/updater/health VM五边界按r27f；最终原生策略1项、原worker14项及一次冻结完整main/c按r27g。实际图498/477/1647、4Job归零（1自然/3仅核身份vctip），旧三个版本控制及必要旧源反例按r27d，不拼整父。源码8文件逆hunk保留并行main，main整源并行漂移不当最终全主线重编；默认fixtures NOT_RUN，无link/包/部署。准备/编译/收尾FAIL与费用保留，Observer原生成体逐字消费不重跑。
+唯一后继 Testing/YMCC/Evidence/DeckyRetainedBackendRecovery-20261111/verified-health-wake-20261112/shared-admission-review-20261112/recovery-cause-trace-20261113/local-automatic-bpm-20261113/SOURCE_READY-r27g.json及MAINLINE-IMPORT-r27g.json。本机r26手动后约6秒恢复并获目视确认，不算自动自愈通过；后端缺失+未知历史及manual-ready不能完成unknown新基线仍OPEN。交下一自然Native/link/匹配包，不追改已安装r26；现场由菜单/恢复owner占用，整体ACTIVE，无新Steam/设备/睡眠动作。
+<!-- /DECKY-RETAINED-SAME-LOADER-UPDATE-20261114 -->
+
+
+<!-- DECKY-MANUAL-UNKNOWN-BASELINE-20261114 -->
+2026-11-14 Decky精确 unknown迁移记录的手动新健康基线漏口已核收并导主线：原managed::completed已支持有效v1，却拒绝同样已确认manual/new-doc/owned-backend/native-ready下的{schemaVersion:1,history:unconfirmed}。仅该精确格式沿现有ManualBaseline/private writer建立新生命周期，普通观察/同文档/坏格式/外国pending v2/OFF/电源代次/双份冲突及部分提交仍拒绝，不推断或重放旧未知动作、不补恢复次数。
+原手动基线用例旧源实编反例、当前原手动链+writer两项通过，各实际图499、2Job归零且仅限定vctip收尾；8坏格式/无来源/同文档/双份与原回调/服务/迟到控制在原case内，不另加ID/minimum或拼默认父。Observer仅线程描述后的精确元数据pin配套，原适配生成体保持；原准备/runner/收尾排序FAIL及17050ms前级越界/费用保留，后置读取同raw不重跑业务。
+2产品（main只说明）+2原夹具5hunk锁内fresh导入及逆hunk保其它字节。权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r28d.json、MAINLINE-IMPORT-r28d.json及REPORT-r28d.zh-CN.md。下一自然Native/link/匹配包消费，不追改安装r26，无整main/link/包/部署/真实Steam设备睡眠动作；后端缺失首次自动恢复、独立BPM未知账及实机长期/CPU仍OPEN，目标ACTIVE。
+<!-- /DECKY-MANUAL-UNKNOWN-BASELINE-20261114 -->
+
+
+<!-- DECKY-NEW-BUILD-UNKNOWN-ARCHIVE-20261114 -->
+2026-11-14 Decky新构建自动恢复的精确unknown旧记录门槛已实证修复，1产品头/2原夹具8hunk精确导主线。原detail::ledgers拒{schemaVersion:1,history:unconfirmed}；现仅该格式由独立已验证新build槽归档priorLedger后预留page/BPM。普通availability、literal/收据/hash/保护目录/双份门及每build上限不改，不推断旧未知动作完成、不退款或新增EXE/worker/timer。
+原actual reserve双namespace+真实Win32 pair旧源反例、候选1case147断言；精确归档、坏格式/无authority/错digest/重复/settings回滚/同build/E到D及实际提交失败不退款通过。2图各348源/include7库、2Job归零仅限定vctip，默认父NOT_RUN；实际保护账本与映像proof为声明port，完整ACL/store组合及实机不代签。manifest后继pure prepare等实编CPP，不重跑业务。
+原编译/pure准备/patch拒绝FAIL、费用与前级28797ms越界保留。权威同Decky恢复项目local-automatic-bpm-20261113/SOURCE_READY-r29d.json、MAINLINE-IMPORT-r29c.json及REPORT-r29d.zh-CN.md。交下一自然Native/link/匹配包，不追改安装r26，无部署/Steam/设备/真实睡眠。现场自动恢复、长稳和CPU仍OPEN，整体ACTIVE，中央sleep总JSON未碰。
+<!-- /DECKY-NEW-BUILD-UNKNOWN-ARCHIVE-20261114 -->
+
+
+<!-- STEAM-COMPLETE-REFERENCE-INTEGRATION-20261114 -->
+2026-11-14 公共Steam完整新参考资格/旧读取器/取消配套31文件已排他fresh CAS主线导入，31字节/78生成器来源复核相符。原C家族保留，独立F Client707/UI139完整义务；同一选定F图核disk/loaded，显式C-F-A模块/typed根端口只转已证地址，账户/GameID/packed PID保raw，缺map拒绝。原app根+50完整槽只授类型根，无SourceFile内部、section或新callee权限。原count1公共lease接StrictSingle，取消wirev2与健康记录v1分开；无新worker/poller/扫描/恢复额度/手柄输入管理。
+原父19/1FAIL中Client11/UI7有效前缀、后继UI9/公读4/旧未知hash10、原publication fixed/content各1/2938及R41 count1三边界各1/1084分epoch，不拼父PASS。R41是旧pair受控carrier/SDK与当前exact adapted产品；business保守cleanup-not-confirmed/publisherCallsKnown=false及已consume不退款，最终reject4/guardBefore1/零发布不代完整cleanup/实机。旧FAIL/超时费用保持，工具限定收尾分列。
+正式DLL/项目原生成器/engine库/来源checker已核，静态库非完整YMCC。唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-143723/complete-reference-integration/{SOURCE_READY.json,DELIVERY-REQUIREMENT.json,MAINLINE-INTAKE.json,REPORT.zh-CN.md}。恢复owner一次完整固定snapshot按原Native/Web/link/包接续，普通fixtures NOT_RUN；主线后继不追编/无同行冻结。真实Steam页、原实例非睡眠续接、Win5睡眠和物理手柄/触摸OPEN，总目标ACTIVE；本源码核收无现场动作，后续YMCC部署和唯一config_refresh沿原已授权现场owner。
+<!-- /STEAM-COMPLETE-REFERENCE-INTEGRATION-20261114 -->
+
+<!-- STEAM-JUDGMENT-REAL-STATE-20261114 -->
+2026-11-14 匹配7ac09a29安装版已由恢复owner唯一部署，设置字节同。新669fa08e/2dfb0a5d真实disk+loaded及typed健康基线通过；唯一config_refresh后正常YMCC Startup续接，Judgment原28116/birth134391153872580811、Steam21780/CEF21892和完整GameID/账户/P=F保持，flags4→8196且publisherKnown1，最终UI4、单游戏实例，healthy reference逐字同。没有第二刷新/Steam游戏重开/假wake/退款。
+SDK QueryActor cleanup完成且资源归还；driver trial-finished-dependencies-retained仍保留远端DLL/trampoline，不能冒称全部卸载。lossConfirmed至nativeRecovered约1787ms仅为该阶段，不含正常维护步骤空窗，不称自动awake或整个断开时长。原R41业务取消的保守cleanup/known=false结果与本现场成功分epoch保留。正式原件complete-reference-integration/JUDGMENT-REAL-STATE-SUCCESSOR.json及JUDGMENT-RETENTION-TIMING-SUPPLEMENT.json；公开层只读核收，无重复现场动作。
+此为Judgment单进程非睡眠真实Startup续接；物理Continue/手柄方向AB/触摸、潜行者2双PID和真实睡眠仍OPEN，整体目标ACTIVE。没有直接改手柄输入链。
+<!-- /STEAM-JUDGMENT-REAL-STATE-20261114 -->
+
+
+<!-- STEAM-DEFAULT-INVALIDATION-DEDUP-20261114 -->
+2026-11-14 公共Steam默认reader重复通知后继：原sourceChanged完整八字段且进程/Windows会话明确可用时才同值去重；任一其它事件、unknown/legacy/畸形/额外字段继续清签名并撤销。Native原publisher等价关系已核，root/错误变化由原epochs承载；completion同payload及power重复仍有效，无新读取/timer/worker或权限。未改手柄输入链。
+
+原shared client epoch canonical真实默认reader+原Host/relay同bus受控传输中，20重复使旧frame/get2→22、候选2→2；真实身份/会话及未知/完成/电源撤销和原ABA保留，原power canonical独立过。199输入定向类型、7自有Job自然关前0；输出目录碰撞/缺两个私有JSON/准备与类型FAIL、raw和49155ms程序合计保持，不当任务墙钟。重入仅独立静态核查，不当动态实证。
+
+1产品+2原夹具15hunk已fresh独占精确导入，逆hunk保其它字节/原混合EOL；原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-143723/default-invalidation-contract/{SOURCE_READY.json,MAINLINE-IMPORT.json,VALIDATION.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。交下一自然Web/匹配包，不追编或部署；现场重复频率/CPU降幅、潜行者2双PID真实睡眠及物理手柄/触摸仍OPEN，目标ACTIVE。原游戏/Steam/设备/睡眠未操作，中央sleep JSON未写。
+<!-- /STEAM-DEFAULT-INVALIDATION-DEDUP-20261114 -->
+
+
+<!-- STEAM-CONSOLE-PRIMARY-SCAN-20261114 -->
+2026-11-14 公共Steam Console纯扫描已导1产品sleep_steam_tracking.h/3精确片段（2diff区块）：借原完整bytes逐行view，宽Game process预筛免整源与无关行复制；原primary/坏timestamp/末尾remove/update/行号/时间窗/PID/fullID/32项及8MiB门不变。无cache/降频/额外源、权限或手柄链变化。
+5原pure组、531完整输出对照、两必要反例与原namespace签名/常量/尺寸编译核收；两固定11对campaign中真实ROG143723离线4.57MB field比.04168/.04202，分配229868→1909，sparse/dense/small/同parser控制均过原定门，无重计时。仅局部parser成本，不签7ac线程/整机CPU或193736现场已安装；原7ac采样有活动Judgment非idle AB。
+7实际Job关前0，4自然/3单个已核vctip限定收尾；1环境拒绝缺terminal保UNKNOWN、1未准入业务空Job0及small宏编译/准备FAIL分列。主线逐字等原namespace typed候选，逆hunk保其它字节。原件 Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-143723/primary-parser-source-scan/{SOURCE_READY.json,MAINLINE-IMPORT.json,EXECUTION-INTAKE.json,REPORT.zh-CN.md}。下一自然Native/link/源码符号包，不追编部署；普通fixtures NOT_RUN，实机/双PID睡眠/手柄触摸OPEN，目标ACTIVE。默认reader旧49155ms标签已在其TIMING-SUPPLEMENT前向纠正为包装调用elapsed，非child实际执行或任务墙钟。
+<!-- /STEAM-CONSOLE-PRIMARY-SCAN-20261114 -->
+
+
+<!-- STEAM-OBSERVER-CNG-PEER157-20261114 -->
+2026-11-14后继：原sha256函数及Observer self census逐字进入独立冷诊断；无CNG对照零变化，首次CNG新增2ETW/1File/1HKLM Key且bcryptprimitives首次加载，后续3次无增减，32真实CNG返回成功。加强首次初始化区间证据，不证明原Provider具体SDK对象所有者；原2HKCU Key/3ETW/1File完整归属仍OPEN。1编译/2诊断Job实际关前0，诊断2自然，编译仅准确身份vctip工具限定回收，不能称全自然；未执行草稿及2只读FAIL保留，只复读同raw。中央157原OFF94/exit63已核native writer迟到归还→distinct recovery→同managed Host/pipe→最终清理，3owner重取/2旧pipe缺席/9坏回执拒绝为引用，本读入0 producer/编译。当前源码后继独立，原子receipt naturalExitObserved=null由native父exit0证明，累计spawn1/2不误当重建；两个核收FAIL保留。无产品/主线fixture/新ID/minimum/包/部署/现场操作，currentWholeSourceReady=false，整体ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/residual-cng/EVIDENCE_READY.json及peer-intake/native-host-combined157/READBACK.json。
+<!-- /STEAM-OBSERVER-CNG-PEER157-20261114 -->
+
+
+<!-- STEAM-NATIVE-ROOT-CLOSE-FAILURE-INTAKE-20261114 -->
+2026-11-14中央真实受保护root失败已核原件：child退出/writer durable settled/Job0与原root CloseHandle成功分开。实际Poll遗忘仍有效root及pending，被原独立root断言拒绝，INCOMPLETE/exit3、36到达及确切FAIL保留。测试控制后置解除保护/checkedClose、owner独占归还不视作产品已修。157正常软件快照不重跑、不改范围；lease关闭失败、当前产品修复/ProcessExit/真实SDK/现场唯一原因仍OPEN，由原手柄owner接续。此读入0编译/producer/产品写/包/部署/现场，无新ID/minimum。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/peer-intake/native-root-close-denied/READBACK.json。整体ACTIVE。
+<!-- /STEAM-NATIVE-ROOT-CLOSE-FAILURE-INTAKE-20261114 -->
+
+
+<!-- STEAM-CURRENT-RECOVERY-TUPLE-INTAKE-20261114 -->
+2026-11-14新恢复tuple实际组合已前向核收：固定原OFF94/exit63共157 PASS，各creation后validated HELLO共4条successor-bound；同raw原writer attempt/currentRequest3/newRecovery4与Host epoch/run/instance/actual PID/pipePID相关。21错绑/缺证拒绝及同身份重复HELLO接受是同raw消费者控制，非21新产品场景、不拼旧20。710来源/1477include沿原生产者范围，当前主线后继分列、不追编或授整父/cache；vctip工具收尾与业务自然exit0分开。前向关闭仅此快照“新tuple无组合证据”的旧限定，历史FAIL及真实root关闭失败不覆盖；lease失败、产品ProcessExit、设备/实机OPEN。本读入0编译/producer/产品写/包/现场，新ID/minimum0，整体ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/peer-intake/current-recovery-tuple/READBACK.json。
+<!-- /STEAM-CURRENT-RECOVERY-TUPLE-INTAKE-20261114 -->
+
+<!-- STEAM-MENU-FOCUS-CACHE-DIAGNOSTIC-20261114 -->
+2026-11-14 ROG193736：同4372实例event20动态flags4→8196/pub1及UI恢复已证，kernel-wake→native读回10801.6479ms、确认loss→读回4013.2958ms；5.219秒包含此前健康观察。用户当前明确三点后手柄仍控制游戏、Windows触摸无效、远程鼠标可操作Decky，输入FAIL不能被Running/accepted覆盖。renderer部分Showing overlay/禁用raw设备已到达，不称全部原生激活缺失；sourceDown/Up在消息映射和边沿之后，零值不证原callback未入。
+
+公共Steam仅补既有qualified-alias菜单before/after的steamFocusCache固定诊断：主UI模式/应用焦点/窗口号有界且缺证null。原observable字段getter及公开pure reader均需精确官方原体，陌生底层/公开getter不调用；新必要反例已拒绝。缓存新鲜度未知、activationCallbackDelivery=UNKNOWN、inputCapabilityGranted=false，无新扫描/订阅/timer/worker/动作或输入manager。新四原摘录按原始CRLF UTF16切片及同包MobX库核收，旧三坐标错误前向保留。
+
+原canonical最终6场景/62断言，前3/34与5/53分epoch，不拼整父；11自有实际Job自然关前0。2产品+4原配套最终15hunk已锁内fresh精确导入，逆补保留其它字节，主线等最终实跑；原mode/light表达式不变。原准备/后置FAIL和费用保持。唯一SOURCE_READY仅签诊断源码：Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261114-193736/menu-focus-cache/guarded/SOURCE_READY.json、DELIVERY-REQUIREMENT.json和REPORT.zh-CN.md。交下一自然Native/配套源码包，fb01旧包不含，不追编/部署或现场操作；物理手柄/触摸、Win5双PID及完整消费/长期稳定性仍OPEN，整体ACTIVE。中央sleep JSON仍由原恢复owner维护。
+<!-- /STEAM-MENU-FOCUS-CACHE-DIAGNOSTIC-20261114 -->
+
+
+<!-- STEAM-LAUNCH-LEASE-CLOSE-FAILURE-INTAKE-20261114 -->
+2026-11-14父继承租约真实关闭失败已前向核收。creationReturned清parent duplicate字段后，真实受保护副本仍持share0；child退出/精确Job0/root关闭/writer durable settled/record.active=null均成立，Session仍32 owner-open-or-lock-failed。仅解保护并关闭同一确切副本后Session独立重开ready，原归还断言拒绝；INCOMPLETE/exit3、40到达及1FAIL保留，产品正例通过0，wrapper0不当业务PASS。仅前向关闭“lease失败尚未实证”，产品fix和其余异常/析构/shared Session/ProcessExit/物理/现场唯一原因继续OPEN。旧157/新tuple/root负例不重跑，本读入0编译/producer/包/现场，无新ID/minimum。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/peer-intake/launch-lease-close-denied/READBACK.json。整体ACTIVE。
+<!-- /STEAM-LAUNCH-LEASE-CLOSE-FAILURE-INTAKE-20261114 -->
+
+
+<!-- STEAM-LEASE-CLEANUP-INDEPENDENT-REVIEW-INTAKE-20261114 -->
+2026-11-14租约独立review和私有清理纠正已核原件：review支持root/Job0/durable record不能代parentduplicate归还，原INCOMPLETE/exit3/40到达/唯一Session check36失败不变。私有提前别名风险现按原Scope归属处理：仍归owner只解保护/放弃alias，已遗失才checkedClose。精确helper在真实Win32缩减端口组件safe3通过/old前2反例失败，第三同结果不加唯一覆盖；future生成器/支持片段来源回执与字节核对，原full-TU/raw不改，无40/157重跑。仅私有清理纠正，不代产品fix或完整early exception/析构/shared Session；后置projection FAIL/历史费用保留。此读入0编译/producer/产品写/新探针/包/现场，无新ID/minimum，整体ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/peer-intake/launch-lease-close-denied/cleanup-review-successor/READBACK.json。
+<!-- /STEAM-LEASE-CLEANUP-INDEPENDENT-REVIEW-INTAKE-20261114 -->
+
+<!-- STEAM-OPERATION-UNCERTAINTY-20261114 -->
+2026-11-14 公共唯一Steam出口的原known Decky repairConnection/recoverConnection/cleanupConnection仅补setter不确定性分类，不新增词表/动作或准入；已发送的未知写不再被main wrapper降为live-read-unavailable/mutated=false。发送前确认取消仍未写，原settings.get只读及未知后缀拒绝保持。当前Decky生产manual/cleanup直接steamlive::run，派发/预算/JS/main未改，本漏口不是侧栏手柄失败的已证根因。
+
+原main实际抽取函数+完整原transport夹具定向mutation-policy14场景/47断言通过，旧源必要反例保留，不跑默认整组。首次编译漏预声明iostream按INCOMPLETE保留；补pin后只续before/candidate两个原producer，两有效图各350输入/9实际库。5实际自有Job关前0：2业务自然，3编译仅已核单vctip限定收尾，非全自然。1产品头+2原配套4hunk已独占fresh精确导入，逆补保其它字节；主线等实际候选，原main wrapper仍等实编片段。独立反推无阻断；发送后迟到负ACK且身份失效仍保守不确定，不称所有取消都未写。
+
+唯一后继Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/OperationUncertainty-20261114/SOURCE_READY.json、EXECUTION-INTAKE.json、REVERSE-REVIEW.json与REPORT.zh-CN.md；UNIFIED-BOUNDARY-AUDIT.json分列唯一观察者/Mode/V2工厂及壁纸实际消费、Native恢复原ReadScope和未闭环，不把UiLocal文档门强塞原生恢复。下一自然Native构建消费，不追旧包/部署或现场动作。真实Decky方向/A/B/Windows触屏接收与关闭归还、Win5双PID睡眠、完整消费者和长期CPU收益继续OPEN，整体ACTIVE；中央sleep JSON未写。
+<!-- /STEAM-OPERATION-UNCERTAINTY-20261114 -->
+
+<!-- STEAM-EXPLICIT-DEFER-RECEIPT-20261114 -->
+2026-11-14 公共canDefer严格负回执已主线：仅明确对象/ok=false/mutated=false/string reason且原9个transient才允许延后。缺字段/畸形/成功/可能写不再默认为未写，判定不触发已观察类型异常；requestDispatched=true的原JS busy或失败只读仍可按明确回执延后。无新词表/动作/恢复额度/扫描/worker/timer，当前Decky直派发和侧栏故障不归此项。
+
+原main实际抽取函数+完整transport原canonical defer-receipt定向57场景/60断言，旧源缺mutated必要反例真实拒绝；默认整组NOT_RUN。两有效编译图各350输入/9实际库，4自有Job关前0（2业务自然/2编译已核单vctip限定收尾）；原混合EOL准备/selector拒绝/here-string/导入基线FAIL及费用保留。1产品steam_live_cdp.h+2原配套4hunk独占fresh精确导入/逆补保其它字节，主线等实跑，原main wrapper片段保持。独立反推无阻断，wrapper更早.value处理畸形回执仍不在完整无异常证明内。
+
+唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/DeferReceipt-20261114/SOURCE_READY.json、EXECUTION-INTAKE.json、REVERSE-REVIEW.json及REPORT.zh-CN.md。205123包另已核两ZIP全哈/Native payload及6个选定source-symbols成员，含既有菜单焦点诊断/Console parser/default reader去重，不含本后继和稍早operation分类；不当整编图独立核或loaded像/实机。配套原件FieldLogReview-20261114-193736/public-state-intake/205123-PUBLIC-SOURCE-PACKAGE-INTAKE.json。交下一自然Native，不追编/部署/现场；真实Decky手柄/Windows触屏和关闭归还、Win5双PID、全消费者和长期CPU收益OPEN，目标ACTIVE。中央sleep JSON未写。
+<!-- /STEAM-EXPLICIT-DEFER-RECEIPT-20261114 -->
+
+
+<!-- STEAM-OWNER-ROOT-FORMAL-COUNT-CORRECTION-INTAKE-20261114 -->
+2026-11-14正式root/ClearLease2hunk与ROG/GPD限域后继已核，8既有+1新文件37精确hunk正逆重建；2289refs沿原核收范围引用。ROG76/GPD83各3真实managed child归还，原父FAILED_WITH_TOOL_CLEANUP/exit2和三家整父INCOMPLETE不改绿。MSI原46 trace=44PASS/2FAIL，第33 cached late proof/第46 recovery波次分列，只有前32连续PASS；旧45摘要原件保留，owner独占后继，本方不重复生产。中央tuple消费者并行覆盖02dca原件保留，四exact操作恢复3b686并逆核，既有157/21坏回执仅复读。六prehost拒绝选择27各/162已固定快照实跑，2.652秒无native编译，不与旧90拼父。本读入0编译/producer/产品fixture写/包/现场；父duplicate修复独立OPEN，旧FAIL/UNKNOWN/metadata越窗和费用保留，全目标ACTIVE。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/LibraryShutdownAdmission-20261113/HostWorkerFifoIpc-20261113/peer-intake/owner-root-mainline/READBACK.json。
+<!-- /STEAM-OWNER-ROOT-FORMAL-COUNT-CORRECTION-INTAKE-20261114 -->
+
+<!-- STEAM-COMMON-REPLY-ENVELOPE-20261114 -->
+2026-11-14 公共Steam现有CDP回包点增加固定envelope校验：ok必需bool，原可选mutated/requestDispatched须bool、reason须string、observedAccount须严格正uint32。成功缺省mutated等合法回执保持，payload原样交原consumer；校验在原late-current分支之后，不丢原bounded error/nativeReturn。畸形已发写仍uncertain/不重放，固定只读原错误映射保持；未加reader/manager/worker/timer/恢复额度或输入动作。
+
+原transport完整夹具+当前main实际抽取函数定向reply-envelope143边界/725断言通过，四类实际写/读/发现/后台读和合法最小回执/账户端点/迟到bounded错误；旧源reason-object真实包装异常负例保留。两有效图各350输入/9库，4自有Job关前0，2业务+before编译自然，candidate编译仅已核单vctip限定收尾；原后置错期望两次工具收尾FAIL只读纠正，不重跑。1产品头+2原配套5hunk独占fresh精确导入/逆补保其它字节；主线等实跑，main wrapper/JS未写，原defer/mutation组与默认父NOT_RUN。
+
+正式原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ReplyEnvelope-20261114/SOURCE_READY.json、EXECUTION-INTAKE.json、REVERSE-REVIEW.json和REPORT.zh-CN.md。SOURCE_READY仅固定envelope，不签全部payload/消费链畸形输入无异常；不是当前Decky手柄/触屏失败已证根因。下一自然Native消费，205123旧包不含，不追编/部署/现场动作。真实Decky方向/A/B/Windows触屏接收与关闭归还、Win5双PID、完整消费者和长期CPU收益OPEN，总目标ACTIVE；中央sleep JSON未写。
+<!-- /STEAM-COMMON-REPLY-ENVELOPE-20261114 -->
+
+<!-- STEAM-SESSION-PROFILE-PREPARATION-20261114 -->
+2026-11-14 公共Steam会话模块提前准备已精确导主线2产品/8原配套。真实sessionChanged沿原settings pool，写锁/queued lane释放后复用原module磁盘facts；OFF/exit/identity/config/power撤销拒采纳，无新worker/timer/游戏P/F读取或健康证明。DefaultFull可完成旧key纯facts，cold跨消费者非singleflight，不承诺零重复CPU或赶上初始8196。
+完整helper/queue受控叶17/70、实际两TU缓存7边界和必要反例、原default编译及section-only63/273分别核收。导入后正式preparer生成体3/3等实跑，11Job关前0（5自然/6限定vctip）。首CAS并行main拒绝零写，r2精确逆补保并行，原准备/编译FAIL和费用保留，不重跑已过业务、不拼完整Native。
+权威同SteamUnifiedChannel-20261112/FieldLogReview-20261114-215306/session-profile-preparation的SOURCE_READY.json、MAINLINE-IMPORT-r2.json、FINAL-INTAKE.json、GRAPH-PIN-READBACK.json及DELIVERY-REQUIREMENT.json。原菜单context-failure-stage核收4/77及352getter顺序，仅first-false诊断、不签输入修复。
+用户已授权9950联合启停游戏及新版YMCC部署/必要提权关闭。nonce MENU-9950-20261114-LOCAL-A由菜单任务独占，导出只做一次固定主线匹配包，不冻结/追编。本方未部署/现场输入；当前无Computer Use委托已结束，不造输入器。event39两route healthy8196/P33604/F42788，只有dynamic明确referenceCaptured=true，semi字段缺失不补。本机exact与ROG alias不同，不代验物理手柄触屏；完整构建/部署/首次健康采样/物理仍OPEN，整体ACTIVE。
+<!-- /STEAM-SESSION-PROFILE-PREPARATION-20261114 -->
+
+
+<!-- STEAM-MENU-MUTATION-SHARED-CLASSIFIER-20261114 -->
+2026-11-14后继公共菜单判写已统一：main的dispose-only typed value对null等在run返回后抛异常；现与CDP catch共用严格bool纯函数。menuGame字段存在仍保守可能写，合法回执/实际未写与已发不确定/原身份拒绝不变，无新读取/operation/worker/timer或输入权限。
+2产品+2原工具6hunk fresh排他逆补保并行；原完整transport+抽取main25场景180检查和旧源null必要反例已核，两图各350输入9库，4Job关前0（2自然/2限定vctip）。原143/14/默认组不重跑，原账一致性准入FAIL保留，r54只将旧gap计入已耗且不变deadline。
+权威SteamUnifiedChannel-20261112/MenuMutationClassification-20261114的SOURCE_READY.json、FINAL-INTAKE.json、MAINLINE-IMPORT.json与REVERSE-REVIEW.json。交下一自然Native/源码符号包；当前已部署232834不含，不追编/部署，不冒称手柄首因修复。
+9950独立后继：232834完整guard COMMITTED、正常新root44496，原同life健康ref下Startup仅semi 4→8196/pub1，dynamic该场未派发、event5独立健康；SDK query归还与trial依赖/trampoline retained分列。用户直接反馈外接实体手柄可操作游戏内三点，原EXTERNAL-CONTROLLER-FIELD-ACCEPTANCE.json保留；未逐项签方向AB/游戏抑制/关闭归还，掌机内置手柄/触屏/ROG alias/真实sleep及cold首次参考OPEN。
+原session准备结果仅详细steam-settings-batch，默认base不可见，不能判未执行或归因提速；recovery status同名值是另一路临时准备。稀疏终态诊断交日志owner下一自然源码；不为补证重试现场。整体公共Steam目标ACTIVE。
+<!-- /STEAM-MENU-MUTATION-SHARED-CLASSIFIER-20261114 -->
+
+
+<!-- STEAM-OPTIONAL-PROCESS-PID-GATE-20261115 -->
+2026-11-15 公共可选进程PID提示门已精确主线：原CDP在try外两层value可因null/畸形抛或超范围窄化；现只在原解析点校验被消费的sleep/light字段容器、整数及uint32范围，失败固定未写/未派发。保missing/empty/zero与范围内signed/unsigned、忽略无关字段，原current次序/锁/时限/typed Session与持有HANDLE不变。不是新PID抓取/lease/权限；main完整birth/root见证未改。
+原完整transport定向43场景172检查及旧源null抛异常必要反例实际核收，两图各350输入9库、4Job关前0（2自然/2限定vctip），旧25/143/14/默认整父不重跑。1产品头+2原工具5hunk fresh排他逆补保并行，头等实编；原PrepareOnly选择器顺序假设FAIL/成本保持，只续未到达项。
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ProcessPidGate-20261115的SOURCE_READY.json、MAINLINE-IMPORT.json、FINAL-INTAKE.json与REVERSE-REVIEW.json。只交下一自然Native/源码符号包，当前232834不含，无现场动作/部署。单一Steam全面消费/CPU实益/掌机触屏/ROG alias及真实睡眠继续OPEN，目标ACTIVE。
+源码入口盘点另发现deckySidebarEnvironment对展示/准备每次直读SteamPath，已交Decky owner按原scope核；不拿未知当未安装或删除最终fresh fence。preset旧CEF清理仅见定义无当前调用，不据文字搜索当新常驻轮询。
+<!-- /STEAM-OPTIONAL-PROCESS-PID-GATE-20261115 -->
+
+
+<!-- STEAM-SESSION-SPARSE-LOG-INTAKE-20261115 -->
+2026-11-15 公共层核收日志owner会话准备稀疏终态：仅原prepareProfile实际消费后固定source/status/scope，独立精确base名steam-module-profile-preparation，普通batch仍detail；本地catch异常不退款/重放，无新身份/配置/计时读取、poller或计数器。原helper和门不改。
+原23场景102检查（原17+日志6）及三个必要负例、私有Job0已核；4图272/273/273/272输入各9库，319唯一引用核对。特别核旧queue/旧classifier不同宏及控制include，不能只凭同名失败；当前正式preparer四生成体逐字等实际执行。核收本方无producer/编译重跑，内存logger sink不签完整writer。
+公共原件SteamUnifiedChannel-20261112/ProcessPidGate-20261115/session-profile-log-intake/INTAKE.json及REPORT.zh-CN.md；上游LogOptimization-20261113-111700/session-profile-log-20261115/SOURCE_READY.json。下一自然配套快照消费，232834不含/不追编部署，真实session准备执行/时延因果未知，目标ACTIVE。
+<!-- /STEAM-SESSION-SPARSE-LOG-INTAKE-20261115 -->
+
+
+
+<!-- STEAM-COLD-FILE-FLIGHT-20261115 -->
+2026-11-15 公共Steam qualifyFile冷并发已合入1产品/4原配套5hunk。精确path/kind/held FileIdentity共享弱注册mutex；metadata短锁外等待、二次原cache查验，原八项cache/单buffer证明/hash升级/前后stamp及loaded权限保持；不同文件或替换身份并行。无新worker/timer、缓存HANDLE/bytes或新抓取权限；同key同步等待不增加取消保证。
+原两TU样本read/hash 53574960→26787480B，仅局部CPU工作量。r3失败父前三有效检查与r4后缀3项分epoch，不拼六项整父PASS，原七loaded不重跑；原缺头/准备/超时/替换夹具FAIL及费用保留，12旧来源版本按原实际图整哈核归档。11自有Job关前0：4自然/6限定工具/1原TIMEOUT自有强制回收；初始闭包未全编译Job独立纳入，不称全自然。
+五文件当前等实跑，正逆hunk保并行；反推锁序/异常释放/摘要升级/旧新身份cache晚提交无阻断。唯一原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ColdFileSingleFlight-20261115/{SOURCE_READY.json,MAINLINE-IMPORT.json,FINAL-INTAKE.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。下一自然Native/源码符号包，232834不含，本核收不重编部署/现场；整机CPU、cold首次参考、ROG alias手柄触屏和完整消费OPEN，目标ACTIVE。
+<!-- /STEAM-COLD-FILE-FLIGHT-20261115 -->
+
+
+<!-- STEAM-DECKY-ROOT-AND-ROG-BOUNDARY-20261115 -->
+2026-11-15 公共Steam独立核收Decky r58普通environment IPC消费Observer root/error，动作preflight/retained仍显式freshRoot，未知steam-session-unconfirmed不误当未安装。1产品/3原配套6hunk，原13边界20断言/旧反例/3图/4Job0已核；不是健康高频主因或整main证明。r59仅原manual static gate1hunk跟随closeOwned诊断参数，完整原静态函数和漏close/晚close两原后缀反例、1自然Job0；不重跑r58/native业务。原FAIL保持，后继源码门通过不倒改旧父。
+公共原件ProcessPidGate-20261115/decky-r58-intake/{INTAKE.json,R59-INTAKE.json}，上游local-automatic-bpm-20261113/SOURCE_READY-r58e.json及SOURCE_READY-r59.json；只交下一自然Native，当前232834不含r58，不追编部署。当前whole main并行漂移只核消费片段，完整产品/长稳/CPU仍OPEN。
+ROG002519严格25completed=19 qualified game+4 mainUI+2 loss-window display reject；native event7恢复成功与用户三点手柄/触屏FAIL分列。7次game QAM有subscribe/ready、14check ready/窗口peer断开0，6close退订；实际queued→ready数组96/227/210/265/89/151/88ms，前向纠正旧96~265摘要为88~265，不改raw。BasePanel警告早于首请求且恢复后持续，正确fullID cmdline已在；两UI副本严格prefix只差3072B/32警告，不能叠加或凭文本强Force。native WM_ACTIVATE/私有activation callback/公开SDK分域，cache/ready不代实体输入。原public-state-intake/PUBLIC-STATE-INTAKE.json及BASEPANEL-DECKY-BOUNDARY-SUPPLEMENT.json；菜单owner现有alias有界trace后继独占，无新增现场操作/订阅。总目标ACTIVE，中央sleep JSON仍由恢复owner维护。
+<!-- /STEAM-DECKY-ROOT-AND-ROG-BOUNDARY-20261115 -->
+
+
+<!-- STEAM-MODE-REASON-TYPE-GATE-20261115 -->
+2026-11-15 公共唯一ModeObserver的try外取消识别改严格string/精确原值。原canonical reason5实际worker退出3已证，原stdout/stderr空，具体exceptionWhat未观察；候选同原块三断言通过，原3次窗口及明确事件恢复保持，同EXE未知选择2拒绝。取消string/缺reason/nonobject、known/ownership/预算和锁内分支经独立静态反查无回归，无新reader/timer/worker/恢复额度。
+1产品头/2原配套4hunk fresh精确正逆合入，原默认body抽同include且完整原源码重建hash同，不跑默认/旧18/Decky整组。两个有效图305来源/9库，7Job0=3自然+4限定vctip。缺头/漏两库/旧例过严stderr后置FAIL和费用保持；独立review186.021844>180秒，超额保留不称预算内。
+原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/ModeReadCancellation-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,MAINLINE-IMPORT.json,REVERSE-REVIEW-AGENT.json,REPORT.zh-CN.md}。下一自然Native/源码符号匹配包，232834不含，不追编部署/现场；不是ROG手柄已证修复，整机CPU及全消费仍OPEN，目标ACTIVE。
+<!-- /STEAM-MODE-REASON-TYPE-GATE-20261115 -->
+
+
+<!-- STEAM-MENU-NATIVE-ROUTE-INTAKE-20261115 -->
+2026-11-15 公共层独立核收菜单owner现有alias原lookup/list/state窄trace：5文件当前等实跑，6原case在失败父保持（该父raw共41成功checks），后继仅2case/11，六Job自然关前0及嵌入配套已核，不拼八整父。普通inspect原隐藏state与menuGameRead=true纯读分形，旧两fixture FAIL保持。
+按键前arm，每alias一次16calls/10000ms，外inputTrace32另列；无新Register/timer/worker/输入设备读，原this/return/throw/descriptor/fallback保持。native caller/输入接受仍UNKNOWN，旧alias缺新nativeRoute不填零或当native callback未交付，夹具直接调用handler不当物理事件。
+原public-state-intake/native-route-trace-intake/{INTAKE.json,REPORT.zh-CN.md}及上游menu-intake/native-route-trace/SOURCE_READY.json，下一自然Native/源码符号匹配包；232834不含，无新构建部署/现场或重复模式试验要求。ROG真实手柄/触屏仍OPEN，整体ACTIVE。
+<!-- /STEAM-MENU-NATIVE-ROUTE-INTAKE-20261115 -->
+
+
+<!-- STEAM-QUICKAPP-INSTALLATION-CONSUMER-20261115 -->
+2026-11-15 原quickapp LS库回退已走原main steamInformation.get mask1，去私有HKCU/HKLM registry探测。保runtime→固定路径→Steam库、LS PID/配置/前台/自愈；api只合并同在途Promise，结算/失败后fresh，无长期cache/timer/worker。未知单列，成功绝对path去重/7行界，metadata不授账户/进程写许可。
+完整原quickapp+actual api绑定摘录/纯reader5定向case30检查及旧首必要反例、3自然Job0已核；65输入类型仅helper+原绑定/consumer摘录及原InvokeOptions/匹配受控invoke，不签全项目。3产品/2原配套6hunkfresh正逆导入。Native唯一producer HKLM兼容由原owner另1产品/1原工具3hunk配套：两个原slot的InstallPath失败/空才同key SteamPath，保正常优先/原错误/7wire，最多2额外按需reg值。原metadata52/两图413输入10库/5Job0（3自然2限定工具）独立核收，首12 SDK/锚点FAIL及费用保留；不拼整父或完整Web-Native物理组合。
+原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/QuickappInstallationSource-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,NATIVE-HKLM-INTAKE.json,MAINLINE-IMPORT.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}，上游SteamGameIdentity-20261113/GameOwnerDualPid-20261113/installation-hklm-steampath-20261115/SOURCE_READY.json。下一自然Web+Native配套，013316/232834不含，无追编/部署/现场；仅并发query3→1的软件计数，不签CPU。全唯一进出/门及实机仍ACTIVE。
+<!-- /STEAM-QUICKAPP-INSTALLATION-CONSUMER-20261115 -->
+
+
+<!-- STEAM-PUBLIC-013316-SELECTED-SOURCE-DELIVERY-20261115 -->
+2026-11-15 公共核013316两ZIP全哈及所选source member/BuildIdentity/实际compiler include：cold文件flight头37601611与Mode reason头5899d682均等各原实跑后继，首次自然配套缺口仅就两选项前向关闭；实际include+hash为producer原post-build观察，不冒称本方重核全部1512闭包。新Native34b6d942与新trace完整嵌入另沿专家原核收，普通fixtures NOT_RUN，无新编译/现场/部署/loaded证明。
+原件FieldLogReview-20261115-002519/public-state-intake/013316-PUBLIC-SELECTED-SOURCE-PACKAGE-INTAKE.json。Quickapp/HKLM后继晚于snapshot，不在013316，继续下一自然配套，不追编。CPU1旧2fec/root12804峰仅供版本问答：232834源含session preparation、缺cold singleflight及稀疏base终态；缺base不证未执行。原QuickappInstallationSource-20261115/CPU1-OLD-2FEC-SOURCE-ANSWER.json，无新采样或因果归CPU给Steam/HWInfo。全目标ACTIVE。
+<!-- /STEAM-PUBLIC-013316-SELECTED-SOURCE-DELIVERY-20261115 -->
+
+
+<!-- STEAM-MEDIA-SHARED-INSTALLATION-FLIGHT-20261115 -->
+2026-11-15 原media steamLibraryRoots已消费同quickapp公共API在途Promise，去第二份direct mask1请求/候选读取，原库展开/manifest/身份/网络业务保持。跨消费者原2→1，同flight失败仍media空/quickapp未确认、结算后下次fresh，无新reader/poller/worker/长期cache。完整两模块+actual api摘录/helper原inventory定向4case13check及旧必要反例已核，65输入类型只helper/绑定/consumer摘录，不签全项目；3自然Job关前0。
+1产品/4原配套5文件6hunkfresh正逆导入，原outer lossless/global adapter只补source input，无新ID/minimum或默认父；旧inventory/quickapp5/native52不重跑。首准备Syntax FAIL保留，只续准备不重跑业务。原件Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/MediaInstallationFlight-20261115/{SOURCE_READY.json,FINAL-INTAKE.json,MAINLINE-IMPORT.json,REVERSE-REVIEW.json,REPORT.zh-CN.md}。下一自然Web/配套源码包，013316未含，无追编/部署/现场；软件查询计数不签CPU百分比，整体ACTIVE。
+<!-- /STEAM-MEDIA-SHARED-INSTALLATION-FLIGHT-20261115 -->
+
+
+<!-- STEAM-ROG021152-PUBLIC-STATE-20261115 -->
+2026-11-15 新ROG同机对照公共核56原件/原29current行：24accepted=19alias游戏+2exact小猫+3主UI、5拒绝。后继writer9960/Steam15404同birth/power16267有有效双游戏请求；旧writer15224/Steam19732及rotation旧样本不混。潜行者after8196/nativeRecovered与小猫startuphealthy分列，小猫wake未验；输入/触屏不据恢复/accepted签通过。
+菜单原lookup registered+heldHost已命中，不盲扩映射。独立identity报告aliasUNKNOWN为其未消费菜单映射的scope，原qualifiedRequest注册域另有实际原件，本方核原行只并列不授native实现/因果。UI原393/0警告只相关；renderer头UnityCrashHandler64.exe10264绝不归Kitty18144或Stalker5816，同秒show/hide不补owner。manifest34b6仅export disk，actual trace另证observer，不称全部loaded。
+原FieldLogReview-20261115-021152/public-state-intake/{COMBINED-INDEPENDENT-INTAKE.json,REPORT-COMBINED.zh-CN.md,SOURCE-DELIVERY-READBACK.json,IDENTITY-STATE-REVIEW.json}。agent384.042>240秒且不含首命令已保留，interruption来自父截止消息非新用户请求；只读GBK输出失败纠正无业务重跑。无产品/编译/native reader/现场/重复模式试验；继续原注册状态→输入交接合同，没证据不全局Force/猜ID，整体ACTIVE。
+<!-- /STEAM-ROG021152-PUBLIC-STATE-20261115 -->
+
+
+<!-- STEAM-THREE-WAY-ACTIVATION-CONTRACT-20261115 -->
+2026-11-15 用户要求三方对照已独立核本机9950潜行者2、ROG小猫、ROG潜行者2。两成功均exact/full，ROG失败short+alias；本机3原exact回执与后人类确认不强拼按键，旧root不替代。原selected receiver/return/sync三函数UTF8规范化hash同且原JS整哈相符；Steam build同1794536281，Native2fec/34b6及游戏/学习DLL不授同源，游戏config差异另OPEN。本机UI/renderer缺失UNKNOWN，ROG rendererCrashHandler10264不归真实游戏。
+实际新source证据改变此前设计限定：固定Valve4b818 sp有主Store与独立React hook两处RegisterForOverlayActivated，hook原返回M并M.unregister()；此前“禁第二注册”是保守设计，不是已证API禁止。正式ACTIVATION-SUBSCRIPTION-CONTRACT只给原唯一alias owner一个候选：显式action前一次被动activation订阅，原四primitive/exact proof过滤、16/10s语义窗、独立归还、不改主bound、不动作/不重试/不伪造。无timer不冒称10s硬释放；原focus通知cleanup无证先不增加。仅合同无产品/测试/现场通过，待原菜单owner定向验证，不新建输入manager。
+原件FieldLogReview-20261115-021152/public-state-intake/{THREE-WAY-PUBLIC-COMPARISON.json,THREE-WAY-SOURCE-SUPPLEMENT.json,ACTIVATION-SUBSCRIPTION-CONTRACT.json}；原event-shape/只读GBK准备FAIL及agent超时不改，整体ACTIVE。
+<!-- /STEAM-THREE-WAY-ACTIVATION-CONTRACT-20261115 -->
+
+<!-- STEAM-MENU-REGISTERED-FOCUS-CANDIDATE-20261115 -->
+2026-11-15 101730现场writer9496/compiled7f3abdcc四次same-tuple composition真实提交仍无手柄。原菜单owner新候选只在显式single-short alias真实打开且composition确定提交后，核原coordinator完整class/原bind getter/已登记immutable own-bound、current tree/context/row和held root browserContext.ownerWindow，一次原OnTreeActivated；合法child tree.Window可不同于root。最终game/entry/single-list再次核对，无全局Force/私有reader/manager/按键重放/新线程timer或close写。
+
+当前r3受影响及未到达4case/77检查与原生成配对核收；r2关闭/unknown组保原epoch，不拼6项整父。旧源新焦点断言拒绝、准备语法FAIL、旧close夹具重复callback FAIL、实际最终second-game漏口FAIL及错误header消费者结果均保留前向纠正。7自有Job关前0；6精确文件鲜读写回/逆向原字节，mode/light保持。仅软件候选SourceReady，不签ROG registered row/callback执行/SteamInput焦点或实体手柄触摸和关闭返回。请求下一份固定匹配Native/source包，094805不追改；普通导出NOT_RUN。
+
+权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261115-101730/focus-handoff/{SOURCE_READY.json,REVERSE-REVIEW.json,MAINLINE-IMPORT.json,DELIVERY-REQUIREMENT.json,REPORT.zh-CN.md}；公共合同同field/public-state-intake/FOCUS-BINDING-SOURCE-SUPPLEMENT.json。目标ACTIVE，无本轮部署/现场动作。
+<!-- /STEAM-MENU-REGISTERED-FOCUS-CANDIDATE-20261115 -->
+
+<!-- STEAM-MENU-HELD-WINDOW-COORDINATOR-20261115 -->
+2026-11-15 115123现场执行111602 compiled21c5e896、writer300；9次same-tuple补交均在registered-tree-unconfirmed拒焦点callback。新候选只在同一显式single-short alias真实打开后，检查已持有root/current-tree/evaluation最多3Window，Window/coordinator各去重；原class/prototype/getter/FindTree/已安装immutable own-bound保持。唯一同tree登记且React browserContext owner为held root才一次原callback；最终slot/row/constructor/native API/game/single再核。schema2区分FindTree返回/own-data计数/槽形态；原close、未知/歧义/失效拒绝保留，无扫描任意窗口、私有reader/manager/Force/定时器/worker/按键重放。
+原canonical受影响6+窗口4共10case135检查、旧源首新断言拒绝、4Job关前0、原生成配对/full JS/H与mode/light保持已核；4精确文件逆向导入/3支持不改。16原source span核收；研究285346ms超原180秒保持，未重研究。权威Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261115-115123/coordinator-scope/{SOURCE_READY.json,REVERSE-REVIEW.json,MAINLINE-IMPORT.json,PUBLIC-SOURCE-INTAKE.json,DELIVERY-REQUIREMENT.json,REPORT.zh-CN.md}。
+实际held-window登记位置仍属待现场验证假设，callback执行、实体方向/A/B、触摸、游戏输入抑制/关闭返回继续OPEN；虚拟自定义按键屏蔽由原owner核。下一份固定匹配Native/source包，111602不追改；普通导出NOT_RUN，无本轮部署/现场动作，整体ACTIVE。
+<!-- /STEAM-MENU-HELD-WINDOW-COORDINATOR-20261115 -->
+
+<!-- STEAM-MENU-HELD-WINDOW-COORDINATOR-R2-20261115 -->
+2026-11-15 前向取代同115123上一段r1包准入：r1 SOURCE_READY因两个source review缺口正式撤回，原10case135/4Job与费用不改。r2已有未知coordinator槽/profile/row-tree槽即scope incomplete拒绝；原FindTree前重核所选own-data row.tree和唯一matches[0]仍原row。两条独立r1控制各原新增断言拒绝；只续受影响4窗口scope+2新边界，6case47检查/新5Job关前0（连原共9），final accessor反例getter0。未重跑原focus-handoff6或整10，不拼整父。
+4文件fresh精确导入/逆向原字节，原生成及mode/light配对保持。当前唯一准入为Testing/YMCC/Evidence/SteamUnifiedChannel-20261112/FieldLogReview-20261115-115123/coordinator-scope/{SOURCE_READY-r2.json,DELIVERY-REQUIREMENT-r2.json,REVERSE-REVIEW-r2.json,MAINLINE-IMPORT-r2.json,REPORT-r2.zh-CN.md}；原SOURCE_READY-SUPERSESSION.json与旧失败都保留。Export原源门拒绝r1，未启动产品编译；修后交一次固定匹配包，不冻结peer、不追后继。实机登记位置/原callback/手柄触屏/关闭返回继续OPEN，无本轮部署/现场动作。
+<!-- /STEAM-MENU-HELD-WINDOW-COORDINATOR-R2-20261115 -->
+
+<!-- STEAM-MENU-COORDINATOR-R2-MATCHED-122321-20261115 -->
+2026-11-15 菜单 r2 已进入固定122321完整运行/源码符号包，前向关闭所选七源的下一自然配套缺口。SOURCE_READY-r2 16233B/SHA42ea995154778fc353da60fd1b82cc14ece9e61532f7f26751913b114e9a49a2保持；本方独立核七selected、runtime CRC、实际完整224292B脚本唯一嵌入、compiled8b3366e7050cd7360dcefed2587f4d4ebd6415fc311afbd098b1dd1c082ec286与PE/PDB GUID b17ba95d-0331-4e1e-9767-ccaecb17cbf3 age1。运行ZIP112596061B/SHA3eb28f5b01db96dc77c8ecdd758c76c55a2ffdf1358d5ffdc80682d261b1e94c；source ZIP100857161B/SHA88e5b149a3b3295db89584717dea3addad2c72ad9e61d434ae5c92ca3523db38。
+权威原FieldLogReview-20261115-115123/coordinator-scope/matched-delivery/{INTAKE.json,DELIVERY-SUCCESSOR.json,REPORT.zh-CN.md}；successor11926B/SHA6c57ae40bdd7797924a8f40bca9060208bbab098e0bf10cb5b2964c0ca932983。Steam层原MENU-R2-SOURCE-INTAKE与虚拟owner328采样报告只读绑定，无业务/编译重跑；完整source/compiler图保持producer证据范围。root0/Job0，但raw EXITED_WITH_TOOL_CLEANUP/businessSucceeded=false与精确vctip30828工具收尾保持，不称全自然。旧121415源门拒绝/等待545981ms与不同epoch成本不改，修后产品构建仅一次，fixtures NOT_RUN。
+本次未部署或建立loaded；ROG菜单方向/A/B、触摸、游戏输入抑制和关闭返回仍OPEN，整体ACTIVE。旧SOURCE_READY/r1撤回/FAIL/UNKNOWN及111602等固定包保持，当前配套完成不代表实体输入成功。
+<!-- /STEAM-MENU-COORDINATOR-R2-MATCHED-122321-20261115 -->
+
+<!-- STEAM-MENU-QAM-POPUP-TREE-R2-20261115 -->
+2026-11-15 130145实际122321 writer10272：三开1/3/5同tuple补交，但root/active Window无coordinator、evaluation4row无当前tree，原focus callback0；闭合2/4的被动native active匹配registered3958459/Host5772已收到，不能说通知全未到。后继沿原独立QAM onActivated→module91780 BrowserView链，仅single-short显式QAM已打开/comp确定提交、coordinator完整且零match、原QuickAccess-NA精确已持有mounted树/DOM/context/window唯一时，一次原OnActivate。当前同树previousTree保留原React inactive过滤；main CEC/close/exact/多游戏原路径不改，无新reader/manager/timer/worker/原始native焦点或按键重放。
+公共26原文span/late同对象挂载finding已核，原r1准入撤回。disabled/mounted/nativeDOM最后状态与previousTree各旧源必要反例保留；r10三项29/r11一项5/r12一项25分epoch，原25Job关前0/生产71298ms，不拼默认整父。源/夹具准备、旧父FAIL、source reader字段/斜杠FAIL及费用保持，六文件fresh排他精确导入，JS/H与mode/light配对、其它并行字节保留。
+权威原FieldLogReview-20261115-130145/{SOURCE_READY-r2.json,DELIVERY-REQUIREMENT-r2.json,REVERSE-REVIEW-r2.json,MAINLINE-IMPORT-r2.json,REPORT-r2.zh-CN.md}。SOURCE_READY33350B/SHA3693ec0893517e367d6c83e4d732f292239ca6e8cf5edba6b7ae4ec010bf837e。原SOURCE_READY已撤、122321不追；只请求一次修后自然完整配套包，fixtures NOT_RUN。此为有副作用的人工原激活、非健康读或自然同树Activate等价；实际subscriber/BrowserView形态和方向/A/B、触摸、游戏输入抑制/关闭返回仍OPEN，无部署/loaded/物理成功声明，整体ACTIVE。
+<!-- /STEAM-MENU-QAM-POPUP-TREE-R2-20261115 -->
+
+<!-- STEAM-MENU-QAM-TREE-R2-MATCHED-134733-20261115 -->
+2026-11-15 菜单130145 r2已进入自然134733完整运行/匹配source-PDB包，前向关闭所选七源配套缺口。独立核所选7源/runtimeCRC/实际231558B完整JS唯一嵌入/唯一compiled f0fb9a73f1a1633d220cfe42d7824d3c293d96ae7a4c87aa8f07e5dee217a957与PE/PDB GUID942eb244-b031-45f6-868b-050fdf2a5126 age1。运行ZIP112604965B/SHAbe9c83d7c776fb33dfd3fb5429801b811cdffbdd66d34b9ce70e273296ad948f，Native22492160B/SHA6afbee147138025077e5c72b31880dd942d35705e224de147b379dcdd8367e13；不宣称本方复核全部source/compiler图。
+权威FieldLogReview-20261115-130145/matched-delivery/{INTAKE.json,DELIVERY-SUCCESSOR.json,REPORT.zh-CN.md}，successor14548B/SHAc12bcb5b19930e70200f0ce90472ed87d11d5ca13e5a7eae7a65640cea915734。当前SOURCE_READY-r2保持33350B/3693ec0893517e367d6c83e4d732f292239ca6e8cf5edba6b7ae4ec010bf837e；133802旧准入撤回在产品编译前拒绝、等待570933ms与原总915873ms保持，修后产品构建仅一次。root0/Job0，但EXITED_WITH_TOOL_CLEANUP/raw businessSucceeded=false与精确vctip22768工具收尾保持；无普通fixtures/新业务重跑或部署。
+配套交付不证明实体输入，actual mounted/subscriber/BrowserView及方向/A/B、触摸、游戏输入抑制/关闭返回仍OPEN，整体ACTIVE。下一现场核新执行marker和menuTarget.windowFocus.menuTreeActivation，不重复旧SD/OFF/入口排列测试，不追旧122321或其它并行后继。
+<!-- /STEAM-MENU-QAM-TREE-R2-MATCHED-134733-20261115 -->
+
+<!-- YMCC-CPU-STEAM-TRACK-CLASSIFICATION-20261115 -->
+CPU1沿原Continuation-20261114/SteamLayerCost-20261115/classify-once合入仅sleep_steam_tracking.h::track消息分类复用：三原前缀只分类一次再走原timestamp及分派，2MiB/行号/两scope/PID-path-time-GameID/reset-remove-drop保持，Console及其余字节不变。两配置各20836含原10片段组/两实日志/固定随机，必要reset反例exit1；首固定2campaign每形11对Win5比.613265/.605236、ROG.546765/.552604，三控制/old-old均过1.05，仅纯解析局部收益。首重复判断版relevant1.054643/tinycycles1.053618拒绝零写，不重计时；准备语法FAIL保留。四实际图/四Job关前0=3自然+1准确vctip收尾，原costroot1不改绿。单函数fresh排他55.2894ms/句柄归还/整头与逆补相同，正式fixture/ID/minimum0新。SOURCE_READY2841B/SHAe31c1713002b7925f393a84ab8470ae103555da3fa644ba5d1d92432949dfe2c；PendingSources/CpuSteamTrackMessageClassification.json仅下一自然Native/runtime/sourcePDB，不追180522/155943、无构建部署或实机动作。权威同目录SOURCE_READY/EXECUTION-INTAKE/REVERSE-REVIEW/MAINLINE-IMPORT/REPORT；全消费/长期与安装CPU/ROG实体仍OPEN，总目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-TRACK-CLASSIFICATION-20261115 -->
+
+<!-- YMCC-CPU-STEAM-HISTORY-AND-INVENTORY-20261116 -->
+CPU1原项目SteamLayerCost后继：inventory-classification两配置各21759/原6片段组通过，但固定old-old1.061012超1.05整体拒绝、产品0写/不重计时。snapshot-history仅GameLink publish保存空history标记/get原锁内组装真实history，初始缺席/16条/顺序/公开全JSON/fresh-epoch-OFF及日志门保持，无新状态owner/worker/timer/IO。两配置各809与200步、实ROG/Win5快照及漏history负例；首次固定2campaign各11对，ROG发布.291892/.285050、发布+读.731910/.720962，Win5发布.814225/.817651；纯读/空历史/old-old均过1.05，仅离线局部成本。原日志配套补prepared writer/旁路关闭端口及compact-direct边界，保原丰富字段断言；trace13有效、suffix26含2FAIL、修后仅两case16分epoch，不拼默认父。7成功图/2编译失败、8Job关前0=2自然+6准确vctip工具收尾；缺依赖/额外WX/无JSON终止/短路径反证/记录器EEXIST/错误原始detail输入及全部费用保持。1产品2原配套同持3share0正逆读回7.6269ms/全HANDLE归还，0新ID/minimum。权威原Continuation-20261114/SteamLayerCost-20261115/snapshot-history/{SOURCE_READY.json,EXECUTION-INTAKE.json,REVERSE-REVIEW.json,MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SR2722B/SHA3a869400da1b03b9c81fb848333b0f48c64b4bbe520e83043efabd57ca38ac79，PendingSources/CpuSteamGameLinkHistory.json只下一自然Native/runtime/sourcePDB，不追固定包；未构建部署/loaded/应用设备Steam设置睡眠动作。此前track分类Ready保持；实际CPU/ROG/长稳与全目标继续ACTIVE。
+<!-- /YMCC-CPU-STEAM-HISTORY-AND-INVENTORY-20261116 -->
+
+<!-- YMCC-CPU-STEAM-LINES-REJECTION-AND-CURRENT-PAIR-20261116 -->
+CPU1原项目继续：borrowed-lines只尝试省两原切行入口的stream整缓冲复制，原来各切一次并无重复SourceView切行；两配置各21535/allbyte-CR-NUL-尾行/10000随机/自定义locale/四原parser及必要末行反例通过，但首固定第二Win5 old-old wall1.064420/cycles1.061760超1.05，整体拒绝且产品/正式fixture0写、不重计时。仅25quoted依赖准备，正式Observer/完整头编译依先成本门NOT_RUN。2实际图/2Job关前0，raw costroot1/vctip收尾保留。权威原Continuation-20261114/SteamLayerCost-20261115/borrowed-lines/{SOURCE_READY.json,COST.json,EXECUTION-INTAKE.json,CLOSING.json,REPORT.zh-CN.md}。
+首次当前8496/birth134392195222631149和自然同像子28344/birth134392289068555535各60窗已核：根1328.125ms/均.06917295%/P95.19535182%/峰.24411770%（32逻辑）；按精确process+thread birth复用原role声明，BUS515.625ms≈38.8235%，UI296.875≈22.3529%，capture/lifecycle共享109.375不重复算。子本窗0ms，实际职责/命令行UNKNOWN，不是InputHost；未命中regex不当字段false。双观察54HANDLE+子单点7全归还，外层Job自然root0/关前0；observer加入held thread owner核对与64初始上限，不绑新线程。自然混合工作/计数非原子，不作栈、函数因果、空载/ROG/A-B或补丁收益；最高窗仍超.2。
+同C/Current8496AndChild28344-20261116/{INTAKE.json,SUMMARY.json,CLOSING.json,REPORT.zh-CN.md}。磁盘仍155943/38e7cf46、loaded未读，最新自然包仍180522，无新部署；两个已合格Steam Pending保持，只下一自然包不追编。准备PS管道/Python括号/默认gbk消费错误仅工具记录/后继纠正，原件与已过producer不重跑。下一优先BUS/UI实际调用成本，Steam可运行于这些线程，不能用某named线程低计数排除；InputHost唤醒热线程/ROG静止gyro/长稳全目标ACTIVE，无应用设置Steam游戏设备睡眠动作。
+<!-- /YMCC-CPU-STEAM-LINES-REJECTION-AND-CURRENT-PAIR-20261116 -->
+
+<!-- YMCC-CPU-STEAM-CONSTANT-BASE-REJECTED-20261116 -->
+CPU1继续Steam层：constant-base仅尝试复用GameLink15字段纯常量JSON，publish/get及实时门原字节不改；首固定两campaign虽ROG发布.909995/.912663、Win5约.48、空约.33，首ROG仅9/11快不达10，整体拒绝/不重计时/产品及正式fixture0写/无Pending。Release旧父第809因新用例改变linked前置FAIL保留，808有效前缀与仅续tail4、Checked812/200步及8线程/必要schema反例分epoch，不拼整父。4实际图、3Job关前0均准确vctip工具收尾/root1保；canonical/完整main及包依成本拒绝NOT_RUN。
+权威原Continuation-20261114/SteamLayerCost-20261115/constant-base/{SOURCE_READY.json,EXECUTION-INTAKE.json,CLOSING.json,REPORT.zh-CN.md}；SOURCE_READY=false。此前track分类/history两已合格Pending保持，只下一自然匹配包不追编；BUS/UI仍优先，嵌套elapsed非CPU函数归因。无应用/Steam游戏设备设置睡眠/部署或重复现场采样，整体ACTIVE。
+<!-- /YMCC-CPU-STEAM-CONSTANT-BASE-REJECTED-20261116 -->
+
+<!-- YMCC-CPU-STEAM-DUAL-BINDING-REJECTED-20261116 -->
+CPU1/Steam后继binding-scopes：仅尝试同source两scope绑定共享行解码，保独立map/Remove与原drop/reset；两实现各Release/Checked42657/原10组/10652集合和必要反例通过。首成本单scope噪声约1.083/空1.10及old-oldFAIL整体拒；第二实际来源改Binding直接返回/双scopearray和空提前返回，Win5组合.832919/.855960、ROG.849009/.848881，但第二noise1.079214/cycles1.076327超1.05仍拒。不重计时/删控制/拼父，产品与正式fixture0写/无Pending。
+权威SteamLayerCost-20261115/binding-scopes/{SOURCE_READY-r2.json,EXECUTION-INTAKE-r2.json,CLOSING-r2.json,REPORT-r2.zh-CN.md}；6实际图、5Job关前0=3自然2限定vctip，包装器准备FAIL/首COST描述错前向纠正及费用保。canonical/完整main/Native依成本拒绝NOT_RUN，原两产品头读回等旧。已合格track/history两Pending保持，只下一自然匹配包；无应用/Steam游戏设备设置睡眠部署或重复现场采样。CPU/ROG/长期峰及全目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-DUAL-BINDING-REJECTED-20261116 -->
+
+<!-- YMCC-CPU-STEAM-DUAL-SCOPE-READY-20261116 -->
+CPU1/Steam层binding-dual-only已导两头3精确hunk，4.9692ms/2share0 HANDLE归还：原standalone track全函数逐字保持，新trackScopes仅供projectSource双视图同source共享行解码，两map/Remove独立/drop-reset共用。两配置各42657/原10组/10652集合、必要Remove反例和实际canonical59唯一项/7源读/3自有child退出已核。首固定Win5组合.838852/.862034、ROG.841889/.847099；单scope和old-old均过1.05，不签整机CPU。此前两模板候选/所有FAIL和费用仍拒绝保留，不重计时。
+权威SteamLayerCost-20261115/binding-dual-only/{SOURCE_READY.json,EXECUTION-INTAKE.json,MAINLINE-IMPORT.json,CLOSING.json,REPORT.zh-CN.md}；SR3413B/SHA5e514f6f7d7e1fc75e66e54470bef82f07746c7a9655de1f90d282bda4d8afc8。4成功图/2失败编译，5Job关前0=2自然3限定vctip/root失败保。原fixture缺trackingOriginal仅私有throw编译口/不导入，默认/完整NativeRead父未签；模板提取/callgraph/同名头/末换行注册准备FAIL前向纠正，不重跑已过producer。PendingSources/CpuSteamDualScopeBinding.json成套接续两重叠头，旧track/history Ready保持；只下一自然Native/runtime/sourcePDB，不追固定包/本轮构建部署。ROG/长期CPU峰/实机及全目标ACTIVE，无应用Steam游戏设备设置睡眠或重复采样。
+<!-- /YMCC-CPU-STEAM-DUAL-SCOPE-READY-20261116 -->
+
+<!-- YMCC-CPU-STEAM-DUAL-INVENTORY-READY-20261116 -->
+CPU1/Steam库存双视图已导capture/facts两头6hunk，6.1781ms/2share0 HANDLE归还。原standalone库存逐字保持，新pair共用行解码/独立map冲突/Remove；寿命超32后failed不可被后reset复活，另一视图继续。projectSource仅两外部指针均缺才pair，否则只补缺视图；readLogSource原Raw/metadata/诊断/首残行门保持。首候选空1.0586/1.0686及ROG旧旧1.0907拒绝保；空提前返回新来源两配置各44567/原6组/11135集合、必要超限复活反例、canonical投影62和源读取22实际过，四指针组合/外部原优先/完整字段均核。
+首固定后继Win5组合.653246/.648145、ROG.642739/.636276，单scope/空/旧旧全过1.05；仅离线当前绑定+库存组合不签整机CPU/百分比相加。7成功图/2编译准备FAIL、7Job关前0=2自然5限定vctip/root失败保；formal猜23对原22已前向纠，旧fixture仅私有throw签名编译口/不导入，不签完整NativeRead/Original/default父。权威SteamLayerCost-20261115/inventory-dual-only/{SOURCE_READY-final.json,EXECUTION-INTAKE-final.json,MAINLINE-IMPORT.json,CLOSING-final.json,REPORT.zh-CN.md}；SR3454B/SHA331587e613aa0432aa6c2d3f8aca9604baeb51bc400bb0ecff507cfd8cce598b。PendingSources/CpuSteamDualScopeInventory.json仅接续两重叠头，tracking原已合格binding头全字节保持，track/history Ready不动。只下一自然匹配Native/runtime/sourcePDB，不追包/本轮完整构建部署或应用Steam游戏设备设置睡眠/重复CPU采样，实机/长期CPU与全目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-DUAL-INVENTORY-READY-20261116 -->
+
+<!-- YMCC-CPU-STEAM-COMBINED-SCAN-AND-015709-20261116 -->
+CPU1/Steam组合scan已导capture/facts两头4hunk，5.6713ms/2share0 HANDLE归还；只对两外部清单皆缺的projectSource共享绑定+库存一次行解码，独立及dual-only入口/外部优先不改。两配置各66885/原6组/11143集合，必要库存failed但绑定仍有效反例、投影62/实际源22均过。局部与完整projectSource两个首固定成本门各2campaign/11对全过；完整Win5约.67/.69、ROG.71/.72（仅本范围31%~33%/28%~29%），外部全给/一份/空控制保持<=1.05，不签整机CPU/与旧收益相加。4成功图/3Job关前0均限定vctip/raw工具收尾分列；唯一准备TypeError前向修，已过producer不重跑。
+权威SteamLayerCost-20261115/source-scan-once/{SOURCE_READY.json,EXECUTION-INTAKE.json,MAINLINE-IMPORT.json,CLOSING.json,REPORT.zh-CN.md}；SR3452B/SHAe8de6e09d7fe976111ffd2e9e7c600ab7bbc6384e7a02a14955bda41660a93d2。PendingSources/CpuSteamCombinedSourceScan.json两头配套下一自然包，不追capture015709；原binding/inventory及history/分类Ready保持，组合语法需后续成套维护。无本方完整构建部署/应用Steam游戏设备设置睡眠或重复CPU采样，整体ACTIVE。
+新自然015709已独立核三较早Steam CPU项：track分类/history/双scope绑定，6源码CRC/SHA/snapshot/index/4实际头include、runtime3519509c及实际PE/PDB4ffa7d50-7220-4026-8852-98e608b8e25b/1配对，完整JS/marker各唯一；原Host失败与resume限定vctip/rawbusinessSucceeded=false保。权威Continuation-20261114/MatchedCpu015709-20261116/PACKAGE-INTAKE.json。实际capture/facts是库存优化前字节，库存与组合后继未含，不追包；无本方部署/loaded/9950或ROG实体与CPU收益签收。8496/28344原60s观察已终、当前无采样/持有窗口，source-scan-once/RUNTIME-COORDINATION-BOUNDARY.json有准确birth/原回执；不冻结同行源码。
+<!-- /YMCC-CPU-STEAM-COMBINED-SCAN-AND-015709-20261116 -->
+
+
+<!-- STEAM-MONITOR-GET-EARLY-OWNER-20261116 -->
+普通监控GET原sameIdentity同时接第四pure owner，第三最终准入/GET后身份账户目标及离线写门保持；搜索前换代先拒绝，无新reader/worker/timer。原20+3=23/128、句柄51→51，旧header仅1原边界必要FAIL/discovery1/ownerfalse保持；新增三项受控discovery/live0不签CPU或真实Steam。默认CPP仅/Zs，3实际图已核，6Job关前0=5自然含1root1/FAILED+1准确vctip工具收尾/rawfalse。4文件8hunk鲜读share0精确合入163.1288ms/4HANDLE归还，独审156.636s/120目标超额及全部历史FAIL/费用保留，不拼默认父。权威原RemainingReaders/MonitorLiveRead-20261115/early-owner-20261116/{SOURCE_READY.json,FINAL-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SR3937B/SHA1d2ad395c2d5a916ea1d67f731455c0e594583f45d108d397307c09511168ff3，PendingSources/SteamMonitorReadEarlyOwner.json只下一自然Native/runtime/source-PDB，不追015709/无本轮部署或loaded。菜单/R5与ROGpad-touch-sleep/长期CPU及全目标ACTIVE。
+<!-- /STEAM-MONITOR-GET-EARLY-OWNER-20261116 -->
+
+
+<!-- STEAM-APPEARANCE-WAKE-READY-20261116 -->
+2026-11-16 Steam主题唤醒提速已精确合入2产品/2原fixture、7hunk：原三次预算首项Ready立即请求公共模式，后两次30秒；caller重复invalidate移到原worker内唯一顺序，stableBigPicture只接续waiting-steam-ui，健康不重放。Win5旧现场18.211秒含约10秒固定等待，ROG旧document-source失败与公共actualHref后继分列。原定向19/旧回归92及两必要反例、4成功图/全部10自有Job关前0按epoch核收；首编译/定向/准备FAIL保留，不拼默认父。当前三个抽取callback等已编体，其它并行bytes逆补保留。权威 G:\YeManCC-Work\Testing\YMCC\Evidence\SteamAppearanceSharedLayer-20261112\wake-ready-20261116\SOURCE_READY.json、VALIDATION/MAINLINE-IMPORT/REPORT；PendingSources/SteamAppearanceWakeReady.json仅下一自然Native/runtime/source-PDB，不追旧包，未部署/Steam-CSS控制或真实睡眠。ROG真实主题速度/确认、applying短窗兜底延迟及长期CPU仍OPEN，整体ACTIVE。
+<!-- /STEAM-APPEARANCE-WAKE-READY-20261116 -->
+
+
+<!-- STEAM-MOUSE-EXPLICIT-PROBE-EARLY-OWNER-20261116 -->
+鼠标原sdmStateLocked实时probe把同一发布身份接第四pure owner，原第三空admit/末身份拒绝/离线写门保持；统一mouse GET与原事件刷新共用，无新reader/worker/timer。原24+5=29断言及旧main仅1必要FAIL实核，旧discovery1/live1/ownerfalse；false展示仍2内存load，显式GET增加纯复核不签CPU收益。2实际图/4自然Job关前0含旧root1/FAILED/rawfalse，不拼默认父。4文件10hunk fresh share0合入207.2079ms/4HANDLE归还，158并行字节保留；独审197.95s/180目标超17.95保，未核SDK/真实wrapper业务/ROG等边界保持。权威原RemainingReaders/MouseEnqueue-20261115/probe-owner-20261116/{SOURCE_READY.json,FINAL-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SR4087B/SHA8c7b37759e3ad8ee8008b29db40cf67e09d4c79eb8a3ef31b3da8c870d22c613，PendingSources/SteamMouseProbeEarlyOwner.json只下一自然Native/runtime/source-PDB，不追015709/本轮无部署loaded。菜单/R5和ROGpad-touch-sleep/长期CPU及全目标ACTIVE。
+<!-- /STEAM-MOUSE-EXPLICIT-PROBE-EARLY-OWNER-20261116 -->
+
+
+<!-- STEAM-APPEARANCE-INFLIGHT-STABLE-20261116 -->
+2026-11-16 Steam主题wake后继只将原stable邮箱扩至applying+resume-css-recheck精确ensure返回窗口，其它applying/健康仍拒，无新读/线程/timer/恢复额度。原CPP定向2交错/28检查，旧完整header必要assert exit1，缓存兜底60秒且候选0cache读/1refresh/1新增use；queued stable后nonReady零helper。两实际图/4Job关前0按原件核，原19/92不重跑/不拼父。仅1产品+1原CPP、3hunk鲜读CAS，main/extractor零写、3callback等已编。权威 G:\YeManCC-Work\Testing\YMCC\Evidence\SteamAppearanceSharedLayer-20261112\wake-ready-20261116\inflight-stable\SOURCE_READY.json 及VALIDATION/MAINLINE-IMPORT/REPORT；同Pending前向接续两个重叠源，原主线main/提取器保持。下一自然Native/runtime/source-PDB，未完整构建/部署/Steam-CSS或睡眠动作；全时序/manual/再次Ready/ROG视觉速度及CPU仍OPEN，整体ACTIVE。
+<!-- /STEAM-APPEARANCE-INFLIGHT-STABLE-20261116 -->
+
+2026-11-16 Steam主题inflight叙述计数前向纠正：原MAINLINE-IMPORT实际1产品+1原CPP共2hunk，前段写3不准确；当前SOURCE_READY为G:\YeManCC-Work\Testing\YMCC\Evidence\SteamAppearanceSharedLayer-20261112\wake-ready-20261116\inflight-stable\SOURCE_READY-r2.json，配套REPORT-r2/COUNT-CORRECTION，同Pending已更新。原source/raw/4Job/28检查与费用不变，无产品改动或业务重跑。
+
+
+<!-- STEAM-THEME-CONFIG-SNAPSHOT-20261116 -->
+2026-11-16 Steam主题单配置快照已导1产品脚本/1原PS夹具、3hunk：旧文本解析后另开文件hash能混入并发新版本，原完整旧源必要断言exit1；现在一次受限文件捕获产生BOM-aware raw与原bytes SHA。PS5/7各12定向/各5原状态检查及5Job自然关前0分别核收。保目标/active/manifest检查及缺失全开默认，下一次OFF鲜读，原native协议/布局/选择不改，无新cache/timer/扫描/Steam动作；仅减少重复文件打开，不签现场CPU或真实提速。权威G:\YeManCC-Work\Testing\YMCC\Evidence\SteamAppearanceSharedLayer-20261112\config-snapshot-20261116\r2\SOURCE_READY.json及VALIDATION/MAINLINE-IMPORT/REPORT；独立PendingSources/SteamAppearanceConfigSnapshot.json下一自然脚本/源码配套，wake/inflight不重跑或覆盖，未构建部署/实体睡眠，整体ACTIVE。
+<!-- /STEAM-THEME-CONFIG-SNAPSHOT-20261116 -->
+
+
+<!-- STEAM-MONITOR-OUTPUT-EARLY-OWNER-20261116 -->
+普通监控SET及开机应用SET/GET原sameIdentity接第四pure owner；第三混合boot/file最终准入、返回后核对和durable不重放保持，无新reader/worker/timer。原ordinary4/22与owned5/34分scope、两旧源单例必要FAIL已核，句柄51→51；4成功实际图/首次owned断言签名compileFAIL、3准备4native共12Job自然关前0。独立首审发现三处fixture多参，父任务精确修后只续owned；独审162.061s/120目标及核收错估11Job FAIL保留，不冒修后独审或默认父PASS。6文件14hunk share0 132.2451ms/6HANDLE归还/逆补同字节。权威原RemainingReaders/MonitorOrdinaryWrite-20261115/early-output-owner-20261116/{SOURCE_READY.json,FINAL-INTAKE.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}；SR4427B/SHA4d7d08db4dc742c8d121d342f9363e8add305e1679afe38b9ac2e09a781eeefd，PendingSources/SteamMonitorOutputEarlyOwner.json只下一自然Native/runtime/sourcePDB，不追015709/无部署loaded或CPU收益。菜单/R5/ROGpad-touch-sleep及整体ACTIVE。
+<!-- /STEAM-MONITOR-OUTPUT-EARLY-OWNER-20261116 -->
+
+
+<!-- STEAM-MODE-CACHE-OWNER-GUARD-20261116 -->
+公共模式缓存返回补原owner及公共sameIdentityEpoch，仅内存复核；原五秒/failure预算和forced路径不改，无补请求/reader/worker/timer。原旧产品账户epoch变化仍旧bigpicture/account42已实际复现；最终原两native case含六缓存边界21断言+原owner9，同事实新pointer缓存保持，六边界Live新增0；最终旧产品必要FAIL/非法selector exit2均保。4成功实际图/无关Bootstrap fixture接口compileFAIL、13Job自然关前0/rawfalse分列；EOL/历史图消费/未执行syntaxFAIL及独审382.452秒超120目标、两metadata问题原件保，RESULT-SUCCESSOR仅前向纠正。4文件6hunk share0 148.551ms/4HANDLE归还/逆补同字节。权威RemainingReaders/ModeCachedIdentity-20261116/{SOURCE_READY.json,FINAL-INTAKE.json,RESULT-SUCCESSOR.json,REPORT.zh-CN.md}；SR4461B/SHA059a67488dde6d4c30cdf532a3d1806351daf6d87e5ab649b5fef296497f3c28，PendingSources/SteamModeCachedIdentityGuard.json只下一自然Native/runtime/sourcePDB，不追015709；不签真实Observer并发/公共transport/CPU收益，未部署loaded。ROG与全目标ACTIVE。
+<!-- /STEAM-MODE-CACHE-OWNER-GUARD-20261116 -->
+
+
+<!-- STEAM-BOOTSTRAP-FIXTURE-AND-MAIN-DISCOVERY-GAP-20261116 -->
+原Steam传输夹具Bootstrap内存适配已修当前parent/5参AsyncRequest/retire及typed拒绝，完整product模板由原PS编译前核源。原发现20/24、诊断12/189、公共UI owner14/31各独立选择，旧adapter compile exit2非语义负例；6实际Job真实原子root准入/自然关前0，rawfalse保。首anchor/metadata前缀FAIL与独审146521ms/120000超额保留，已过两组不重跑。2工具文件5hunk share0 134.2334ms/2HANDLE归还，产品0改；mock normal-retire不签真实WinHTTP末通知。权威RemainingReaders/BootstrapFixtureCompatibility-20261116/{SOURCE_READY.json,FINAL-INTAKE.json,MAIN-ONLY-DISCOVERY-INTAKE.json,REPORT.zh-CN.md}；SR3199B/SHAb9ecb7dc804b188e901f2ce74b97a0a1d4fe48b4b5584e6873f704d0ec1df467，PendingSources/SteamBootstrapFixtureCompatibility.json仅下一自然sourcePDB，不为fixture追Native。关键整体缺口：原child入口→worker::run→injectBootstrap/listeners及watch requireOwner→stillOwned仍在子进程fresh0读取公共processInventory和完整TCP表，代码统一不等于唯一主进程生产。既有Client只收result/diagnostic，metadata IPC只授Host/Artwork；后继须原认证channel的typed只读代理，保Steam PID/birth/委托取消、双族完整/暴露/歧义/末新鲜与原期限，无新manager/reader/poller。该代理未实现，resource r135/menu集成不冒签；ROG/CPU/全目标ACTIVE。
+<!-- /STEAM-BOOTSTRAP-FIXTURE-AND-MAIN-DISCOVERY-GAP-20261116 -->
+
+
+<!-- STEAM-MAIN-ONLY-LISTENER-PRIVATE-PROXY-20261116 -->
+公共Steam已实做私有主进程listener代理：bootstrap/watch与cleanup经原认证channel，child拒本地回退，已知PID/birth活体核验仍保；单reader/写串行/seq-generation-deadline，watch原2500ms共预算。18实际Job自然关前0，原channel十项前缀父仍FAIL，只续late/cancel及Client/watch，entry/identity12项34检查、cleanup正反及撤销、两必要旧行为FAIL各epoch保持，不拼默认父。SDK漏pin/编译/late期待错误/queue anchor与shadow FAIL及全部费用保留。
+独审发现Client.next同步扫描阻塞Runtime，代理硬错进原通用恢复属SOURCE_ONLY待实证风险，均未闭；SOURCE_READY=false，0产品主线/Pending/部署。另私有Observer单请求邮箱复用原线程、加1事件，真实单在途/原identity poke共存/stop-restart撤销13检查通过，但尚未Client/Runtime接线、无整进程漏损或硬Win32时限证明。不能将原型当父阻塞已修。
+权威RemainingReaders/MainOnlyListenerProxy-20261116/{SOURCE_READY.json,EXECUTION-INTAKE.json,RAW-TERMINAL-INTAKE.json,SOURCE-PAIRING.json,INDEPENDENT-CANDIDATE-r2.json,REPORT.zh-CN.md,CLOSING.json}；后继走既有发布线程+Runtime原wake异步回收，保原期限/取消/业务FIFO及故障分类，不新permanent worker/reader/poller。主线并行漂移不覆盖；ROG三点pad/touch/sleep及CPU/整体ACTIVE。
+<!-- /STEAM-MAIN-ONLY-LISTENER-PRIVATE-PROXY-20261116 -->
+
+
+<!-- STEAM-MAIN-ONLY-ASYNC-PRIVATE-r27-20261116 -->
+公共Steam主进程listener代理已私有异步接Client/原Observer/Runtime原wake与cleanup，0主线产品/Pending/部署。Work不持Session/pipe、不排队cleanup借栈current；正常与卡住read时OFF、过期、initial/post-result源忙不授恢复分别实跑。独审再抓run先ready可绕done/slot归还；现run仅prepared，Source清inFlight后done统一publish，Client及cleanup同走。r24实际held-slot not-ready/释放可取/撤销not-ready，r25只恢复early-ready原断言必要FAIL；独立r26仅关闭F1 SOURCE_ONLY。最终r23原Runtime四项/r26 cleanup两项/r27 expiry已核，不拼默认父。
+本续42实际Job自然关前0/6 rawfalse保留；r14 fixture非原子checks潜在竞争剔接受、仅补受影响四项，随后真实产品ready修复再按受影响scope续；所有compile/preparation/quoting FAIL及费用保持。r22仅main配置片段真实类型历史编译，包装器owner-order status误标前向解释，最终全main/link未跑。原Owner头不动。
+权威RemainingReaders/MainOnlyListenerProxy-20261116/{SOURCE_READY-r27.json,ASYNC-EXECUTION-INTAKE-r27.json,ASYNC-SOURCE-PAIRING-r27.json,ASYNC-READY-FIX-REVIEW-r26.json,REPORT-r27.zh-CN.md,CLOSING-r27.json}。SOURCE_READY=false：同intent源故障停放尚无自动只读续接、malformed proxy JSON generic→outage、真实main wake所有者析构与publisher Win32扫描延迟仍OPEN。实际Steam/CEF/ROGpad-touch-sleep/CPU无验收，整体ACTIVE；不得把本私有集合整文件覆盖同行主线或注册Pending。
+<!-- /STEAM-MAIN-ONLY-ASYNC-PRIVATE-r27-20261116 -->
+
+
+<!-- STEAM-MAIN-ONLY-STABILITY-PRIVATE-r37-20261116 -->
+公共Steam私有r37：原admission读窗口续暂忙，未知prepare只接独立当前许可的retained、确认接回清旧cold due；协议及source在途坏帧硬拒不授outage。每query weak WakeState代次回调，原event所有权不变。原r28七项通过/父cold FAIL保持，仅续修cold r29通过；wake r31五边界、r36真实在途坏帧两项与r32/33/34/37必要反例分别核，不拼默认父。独审原P2只SOURCE_ONLY关闭。
+本续25实际Job自然关前0/6 rawfalse保持，全部准备/编译/预算拒绝/费用留证；0产品主线/Pending/部署，SOURCE_READY=false。权威RemainingReaders/MainOnlyListenerProxy-20261116/{SOURCE_READY-r37.json,STABILITY-EXECUTION-INTAKE-r37.json,STABILITY-SOURCE-PAIRING-r37.json,STABILITY-FRAME-FIX-REVIEW-r36.json,REPORT-r37.zh-CN.md,CLOSING-r37.json}。identity publisher Win32采集延迟、正式生成消费者及fresh rebase/全Native配套、Steam/ROG/CPU仍OPEN，整体ACTIVE。
+<!-- /STEAM-MAIN-ONLY-STABILITY-PRIVATE-r37-20261116 -->
+
+<!-- STEAM-MAIN-ONLY-EXECUTOR-PRIVATE-r48-20261116 -->
+公共Steam私有r48把listener同步采集移出identity/Runtime，主进程单native-pool在途槽跨stop/restart不清；原身份线程仍独立发布/撤销，ReadView只持内存cell，main/cleanup采集闭包不借Observer。真实37检查含受阻采集时账户撤销/stop返回、重启拒并发、析构等真实回调；确定排队旧代9检查及去代次必要反例分别核。原Runtime四项和fresh后同四项、原production wiring及当前main六行配置片段编译分epoch通过，不拼父或全main。
+14fresh只读share0同持102.4079ms/14HANDLE归还，私有16源81块逆补保fresh；两Client冲突保r138/r139/r143同行处理，当前Owner原bytes未改。独立executor/fresh merge均无actionable finding；静态审查超目标费用保。19Job关前0=11自然/8准确工具收尾，9rawfalse含compile/必要反例保，所有旧准备/失败/费用不覆盖。
+权威RemainingReaders/MainOnlyListenerProxy-20261116/{SOURCE_READY-r48.json,EXECUTOR-EXECUTION-INTAKE-r48.json,EXECUTOR-SOURCE-PAIRING-r48.json,PRIVATE-REBASE-r46.json,REPORT-r48.zh-CN.md,CLOSING-r48.json}；候选Workspace/MainOnlyListenerProxy-20261116/candidate-fresh-r47。SOURCE_READY=false：最终析构仍等同步Win32实际返回，无硬退出上限证明。0产品主线/Pending/部署；完整formal业务父/main/link/包/loaded、ROG三点pad-touch-sleep及长期CPU仍OPEN，整体ACTIVE。不得整文件覆盖同行或以本机/模拟代实机。
+<!-- /STEAM-MAIN-ONLY-EXECUTOR-PRIVATE-r48-20261116 -->
+
+<!-- STEAM-MAIN-ONLY-LISTENER-SOURCE-READY-r62-20261116 -->
+公共Steam唯一listener facts代理所选源码已主线：child bootstrap/watch/cleanup只消费原认证channel，拒本地raw回退；main单native-pool槽、原代次/期限、完整双栈/暴露/歧义/末活体门保持。identity/Runtime不执行采集，View只持原内存cell；原stop可撤身份不等采集，最终finish永久封准入并在原background退出末段/finished与ExitReady前等真实callback归还，末消息循环兜底幂等，不在WM_DESTROY加join。排队取消/在途原归属保留，系统同步调用硬延迟仍不签；不新manager/poller/EXE/孤儿quarantine。
+原raw叶取消49检查、实际main尾20及两必要反例分别核；fresh4 Runtime/Client/channel选择、原production wiring与当前main六行配置实际编译/精确publication epoch和三头声明已核，不拼default/formal全父。22Job关前0=13自然/9准确工具收尾，13rawfalse含工具/编译/必要FAIL保，准备EOL/负例lookup/缺stub/图声明/夹具时序FAIL及费用均留。16产品及配套95hunk由49share0句柄同持453.5722ms/readback+inverse精确导入，Owner原bytes及同行main HTTP日志/睡眠/Client/Runtime修改保持。
+权威RemainingReaders/MainOnlyListenerProxy-20261116/{SOURCE_READY-r62.json,QUALIFIED-EXECUTION-INTAKE-r62.json,QUALIFIED-SOURCE-PAIRING-r62.json,EXIT-CONTRACT-DECISION-r62.json,qualified-import-r62/MAINLINE-IMPORT.json,DELIVERY-REGISTRATION-r62.json,REPORT-r62.zh-CN.md}。SourceReady仅所选软件2949B/SHA4a6ca3fc1cda2b70a06c6d9869a7f5535584bb2cf8d96ebc5dd18957eec2fc8b/globalfalse；原r27/r37/r48/r49 false按历史保持。PendingSources/SteamMainOnlyListenerFacts-r62.json只下一自然完整Native/runtime/source-PDB，须含三新头steam_listener_source/steam_listener_executor/decky_listener_proxy及四formal支持；不追旧包/默认夹具。已发导出/resource消息，仅提交非ACK。
+本轮未完整main/link/新包/部署loaded或ROGpad-touch-sleep/CPU收益验收，整体ACTIVE。下一已定位overlay boot live分支重复PID/account/路径/presence读取，因初始publisher晚于startup初始化，须在原一次性归属链交接后再消费，不直接替snapshot丢boot机会；见RemainingReaders/NextActiveReader-20261116-r51，不接管其它任务。
+<!-- /STEAM-MAIN-ONLY-LISTENER-SOURCE-READY-r62-20261116 -->
+
+
+<!-- YMCC-CPU-IPC-ARGUMENT-TRANSFER-20261116 -->
+CPU1同聊天继续：034145已按用户提权/开关YMCC/部署测试授权安装，实际loaded marker699763e6…/Native b70ad510…已核。原10分钟本体可见非前台均.040771%/P95.146095%/峰.340949%、9/597窗>.2；另15进程60s均值合计约.215536%但端点错开，不拼A/B。设置在安装事务前后、10分钟采样前后各同，启动后状态变化不签全程未变；旧备份保留。Decky worker20740命令行已核，UI工具native pipe2失败未送输入。权威原Continuation-20261114/Deploy034145-20261116/{CLOSING.json,REPORT.zh-CN.md}。
+新ipc_dispatch仅两处args局部/原lambda移交，1产品2hunk fresh排他168.9811ms、源与只读helper句柄均还，逆补/读回保其它fresh字节。原提取完整函数Release/Checked各6067场景12138检查及空capture必要FAIL已核；同行HTTP分类新字段令首import拒绝0写，保新增/实际helper头补受影响各40/136，不重跑原组、不拼父。唯一固定2campaign11对，大参sync wall比.789227/.816289、async.697717/.704285，各11/11快；小参/缺参/拒权限及old-old过1.05。成本仅原dispatcher epoch/确定性端口，fresh HTTP分支未计时，不签整机CPU；无重计时。
+5成功实际图+1compileFAIL、5Job销毁前0=1准备失败自然+4原wrapper准确vctip收尾；原C4459/WX、误清单路径/import拒绝保留。权威IpcArgumentTransfer-20261116/{SOURCE_READY.json,EXECUTION-INTAKE.json,REVERSE-REVIEW-r2.json,MAINLINE-IMPORT.json,REPORT.zh-CN.md}，SR5414B/SHA8fa798486a492995ba846258550977ef4ea0caa350d4f97922621401e6bc7418。PendingSources/CpuIpcArgumentTransfer.json交下一固定Native/runtime/source-PDB，034145未含，不倒填旧包；本候选0正式fixture/ID/minimum/完整构建或部署。隐藏后台/WebView/ROG静止gyro/长期.2峰与总目标ACTIVE。
+<!-- /YMCC-CPU-IPC-ARGUMENT-TRANSFER-20261116 -->
+<!-- STEAM-OVERLAY-STARTUP-SHARED-IDENTITY-20261116 -->
+公共Steam overlay startup Live已消费唯一immutable identity，SET与独立GET沿原第四pure owner；不再本处私读PID/account/root或presence扫描。初始Unknown保原一次boot机会，原publisher通知原160ms settings队列，撤销/换代在claim前拒绝；claimed uncertain/失败不重放，完成注销可选消费者。原prelaunch/offline fresh absence、backup/CAS/readback保留，旧negative末次鲜核不误耗新live机会；无新reader/worker/timer。
+6文件29hunk含新steam_overlay_startup_identity_cases.inc已fresh share0精确导入，22HANDLE归还/379.4154ms，保同行main字节。原startup58及实际Observer四选择8/16/4/8检查、去SET第四owner必要原断言FAIL、空selector拒绝各epoch保持；3实际图/10Job关前0=7自然+3准确工具收尾，5raw business false与准备FAIL/原费用保持，不拼默认父。最终preparer五生成输入逐字配对；其它monitor/observed依赖补声明仅SOURCE_ONLY。独审无具体finding仅静态；原时区数值错保留，UTC约253.575202秒/180目标超73.575202秒。
+权威RemainingReaders/OverlayStartup-20261116/{SOURCE_READY.json,EXECUTION-INTAKE.json,FINAL-PREPARER-PAIRING.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}。SourceReady3499B/SHA62a698fbbaabb5aaf672fcc442cf739b1069abe567eca006e5a03c01c0777aa9仅所选软件/globalfalse；原pre-import flags按历史保留。PendingSources/SteamOverlayStartupSharedIdentity.json只下一自然完整Native/runtime/source-PDB，须带新inc；不追包/普通夹具/部署。完整main/link/loaded、ROGpad-touch-sleep和长期CPU仍OPEN，整体ACTIVE。
+<!-- /STEAM-OVERLAY-STARTUP-SHARED-IDENTITY-20261116 -->
+
+
+
+<!-- YMCC-CPU-IPC101648-LOADED-HIDDEN-20261116 -->
+CPU1同聊天后继：已按用户提权/正常启停/部署测试授权，将101648完整固定主线包部署并--minimized启动；原安装事务COMMITTED_VERIFIED_MAINLINE_LOCAL_PACKAGE、不可变完整回读/mutable存在字节保均真，backup a5c5c17d…保留。实际root15080/birth134392700917537633、Native32138f9b…、内存85B markerc0a1c268…、PE/PDB de202df8-70a8-4544-93ee-adad5b049720/1已核；build70f9eede…包含IPC参数两处移交。原producer root0/Job0含准确vctip工具收尾/raw businessfalse保持，不冒全自然；fixtures NOT_RUN。当前运行按固定D:/Codex/YMCC-Exports/20261116-101648-cpu-ipc-mainline-export配套源归因，不以移动主线代签。
+排除至少60s启动期，本体600.002s/597完整窗均隐藏非前台，32LP均.03792307%/P95.09755828%/峰.29102592%，3窗29/30/243>.2全部保；BUS/UI/monitor累计占38.20/18.88/15.88%，角色非函数栈。旧034145自然隐藏120.013s/119窗均.03051421%/峰.14593521%仅时段对照，原可见600s不混，0因果A/B或整机降幅。新树14进程60s端点均值和.12606340%，非同步树总/P95/峰；HWiNFO.07889377%、本体.03740965%、GPU.00243998%，后生短命UNKNOWN。root/scene均exit0、handles/hooks全还；树reader退出码未捕获，terminal/归还/事后消失分列，不补exit0。
+HWiNFO21396/birth134392706321246170由原YMCC恢复启动，Program Files实际8.60-6120/SHA670a7f20…；原code7是30s未确认新鲜共享内存。unsupported-image只指可选传感器registry裁剪哈希白名单，不当code7根因。较晚03:04:05Z/09Z两次只读48B头时间1794798243→1794798249、period3000/13组415行，view/handle全还；不代完整body或先前窗口，原消失原因/首次恢复时刻UNKNOWN。0手动HWiNFO控制/设置周期或白名单改动。monitor结果move仅SOURCE_ONLY筛查，活动前缀仍复制、可选shared_ptr移交差异未测，0产品/计时/新Ready。
+设置在安装启动前保20289e94…，启动后及600s采样前后同01a5168f…；阶段间变化执行者UNKNOWN，不签全寿命不变。权威Continuation-20261114/Deploy101648-20261116/{CLOSING.json,REPORT.zh-CN.md,RUNTIME-OBSERVATION.json,HWINFO-READONLY-VERDICT.json,SETTINGS-PHASE-BOUNDARIES.json}；closing7598B/SHA1d371d7fc6538a42870cf6b47508837e3e1ea9e48b06f39ab8e02e1d75849650。36原件回读核同，0生产重跑；Q/RUNTIME-SUCCESSOR-101648及RegistrationHistory/CpuIpcArgumentTransfer-20261116/RUNTIME-101648前向接原IN_PROGRESS，Pending/旧raw不回写。原部署采样1800s计划和费用保留，后续只读核收/报告另账，不签聊天全程预算。当前YMCC继续后台；BUS/UI/IPC函数归因、长期.2峰/ROG静止gyro和总目标ACTIVE，无Steam游戏设备或睡眠操作，不追并行后继重编部署。
+<!-- /YMCC-CPU-IPC101648-LOADED-HIDDEN-20261116 -->
+<!-- STEAM-MANUAL-COMMAND-SHARED-IDENTITY-20261116 -->
+公共Steam手动set/stop消费同一immutable identity，最终held-process准入用原sameIdentityEpoch，show跨独立mode read与set保原身份；同值后继/Unknown不再靠split Session/presence放行。set在shell已接受后原身份/owner失效只返回原拒绝并保commandSubmitted，不重放、不授后继确认。stop明确仍为原提交回执，正常快速退出/后置epoch或power变化不抹掉已接受提交；无新reader/worker/timer，原中央dispatch/recovery/read算法全字节保持。
+3文件17hunk fresh share0导入，6HANDLE归还/75.2152ms，实际main三registrar/power两helper鲜读同。原manual选择35项分epoch，最终仅续stop5；其余33项只按不变函数/用例继承范围，原恢复2项和空selector拒绝分别核。四个有效旧源语义FAIL；早期旧stop后置FAIL只历史，不再当最终反证。4compiler含const端口C2662 FAIL保、3成功实际图；18Job关前0，工具收尾/rawfalse分列，不拼默认父。原两公共类型及pure comparator逐字，publication为受控terminal口，不签真实Observer并发。最终preparer生成体逐字等最后编译体。首次锚点/图错叶核收/智能体transport FAIL和费用保；parent直接反推，非独审。
+权威RemainingReaders/ContinuePublicSource-20261116/{SOURCE_READY.json,COMMAND-QUALIFIED-INTAKE.json,SOURCE-PAIRING.json,import/MAINLINE-IMPORT.json,REPORT.zh-CN.md}。PendingSources/SteamManualCommandSharedIdentity.json只下一自然完整Native/runtime/source-PDB，须带原更新MJS和cases.inc；不追包/普通整组/部署或真实Steam动作。源码仅所选scope/globalfalse；完整main/link/loaded、ROGpad-touch-sleep和长期CPU仍OPEN，总目标ACTIVE。
+<!-- /STEAM-MANUAL-COMMAND-SHARED-IDENTITY-20261116 -->
+
+
+<!-- YMCC-CPU-GENERIC-EVENT-PAYLOAD-TRANSFER-20261116 -->
+CPU1同聊天继续：ipc_emit同一template正文接const借用与json&&拥有入口，仅原receiver门后forward；三声明及原unique_ptr mailbox成功分支move data，原event/exit/power/revision/重试尾不变。main6hunk+原controller_snapshot_wire_selftest.py两hunk，fresh share0/逆补/读回281.4614ms，含只读mailbox3HANDLE全还，保同行其它bytes，无新reader/worker/timer/输入频率或设置变更。导后实际原提取器重建三头逐字等已编译输入，0重跑。
+Release/Checked各4219场景33878检查，空内容必要反例exit1/未知selector2；唯一2campaign8shape11对2048call：临时Steam普通wall .48486267/.50457617、详细.49754577/.49374728、power派生.70867159/.69286526、controller.48720990/.48635129，各11/11快/cycles同过.95；普通new162→66/12277→6213B、详细730→258/56931→27827B。左值/无receiver/scalar/old-old过1.05，无重计时，仅局部factory+emitter/惰性端口成本，不签整机CPU。
+原完整广播Release1145场景9395检查74个序列化计数FAIL保留；仅私有选择原六generic组，两配置各768/6144通过，默认父未拼PASS、原CPP0改/无新ID/minimum。未改gyro叶日志开关各真实post1、dump计数0/1及parity1/0仅说明prevalidated wire计数口径，非74项逐例归因或夹具修复。7实际图/4自有Job关前0=3root0+1root1，均准确声明path/SHA/birth vctip工具收尾，原无businessSucceeded字段不补造、不冒自然退出。
+权威Continuation-20261114/IpcEventPayloadTransfer-20261116/{SOURCE_READY.json,EXECUTION-INTAKE.json,REVERSE-REVIEW.json,MAINLINE-IMPORT.json,POST-IMPORT-READBACK.json,REPORT.zh-CN.md,CLOSING.json}；SR7612B/SHA3381719531113906b9753fe19fbbbf598cd9eaec44adc7785911f5169ed30f53，限定软件/globalfalse。PendingSources/CpuIpcEventPayloadTransfer.json仅下一自然完整Native/runtime/source-PDB，须带原提取器；不追并行后继构建部署。当前loaded101648/build70f9eede…未含候选，不倒填旧CPU数据；本轮无完整main/link/新包/部署/应用启停、Steam游戏设备或睡眠操作。用户YMCC维护授权保持，BUS/UI/IPC函数归因、长期.2峰/ROG静止gyro与完整稳定目标ACTIVE。
+<!-- /YMCC-CPU-GENERIC-EVENT-PAYLOAD-TRANSFER-20261116 -->
+
+<!-- STEAM-LIBRARY-ACTION-SHARED-IDENTITY-20261116 -->
+公共Steam库管理器温和退出已在原入队前捕获immutable identity，原电源/Kernel caller/proof pipe/current/claim-once及最终固定命令同核原epoch；执行不再另取split Session/presence。正常已提交后目标退出仍Submitted，未知不退款/重放，原global fresh完整缺席与替换拦截保持，无新reader/worker/timer/EXE。
+原native-composition仅13定向含7身份边界+6既有端、旧源3语义FAIL实有1shell/1effect；实际Host/typed/power与真实pipe server PID/映射CAS/私有desktop/自有目标，root子全join、请求资源回原baseline及目标句柄差3/6按原断言核。3compiler含原C2065 fixture漏CancellationReady FAIL、2成功实际图，20Job关前0=17自然3工具收尾/rawfalse7保持，不拼默认父。fixture接实际未bind CancellationReady对象及准确atomic类型，不stub allows；身份publisher仍terminal口，pure comparator原字节，非实机睡眠。
+5文件13hunk fresh share0导入，22HANDLE归还/4936.2107ms；仅main本函数，私有全main误归一404LF已前向恢复，原measured保存，最终8实际编译输入全字节同。正则误算4个前声明导致首import0写拒绝，改原词法提取后精确提交；末console records NameError只打印故障，真实commit/读回已核，不重导。所有失败/费用保，parent直接反推非独审。
+权威RemainingReaders/LibraryActionIdentity-20261116/{SOURCE_READY.json,QUALIFIED-INTAKE.json,SOURCE-PAIRING.json,import-r2/MAINLINE-IMPORT.json,IMPORT-PRINT-SUCCESSOR.json,REPORT.zh-CN.md}。PendingSources/SteamLibraryActionSharedIdentity.json只下一自然完整Native/runtime/source-PDB带四既有更新工具和既有sleep_cancel_ready.h；不追包/普通整组/部署。完整main/Host/link/loaded、ROGpad-touch-sleep、长期CPU与总目标ACTIVE。
+<!-- /STEAM-LIBRARY-ACTION-SHARED-IDENTITY-20261116 -->
+
+<!-- STEAM-PRESENCE-PUBLIC-IDENTITY-HINT-20261116 -->
+公共Steam信息presence请求已取消本处重复ActiveProcess注册表PID读，registeredPid顺序提示与Session只消费同一immutable identity。提示不授动作或缺席；原fresh完整census/Peer路径出生核实、Unknown及离线写门保持，无新worker/timer/reader/EXE。旧三参helper保可选第四参数兼容。
+原priority14检查和原shared-facts52检查通过，旧源码5必要FAIL；实际66唯一检查/146执行含原失败选择内重复，未扩大ID/minimum。首次compat正斜杠实参导致17FAIL保留，同EXE本机路径续测全过；私有producer130LF误归一仅独立final恢复原未改字节，再只验受影响priority。4实际编译图/9Job关前0=6自然3限定工具收尾/rawfalse5保，不拼默认父；52组header仅EOL等价，final14组实际编译精确最终头。身份publisher/Peer为明确terminal fixture，兼容组实际未启动Observer类型，不签实机CPU。
+2文件15hunk fresh share0导入/13HANDLE还/84.1798ms，原实际依赖鲜读核同，Owner不写。权威RemainingReaders/RemainingRoleAudit-20261116-r193/{SOURCE_READY.json,PRESENCE-QUALIFIED-INTAKE.json,presence-import/MAINLINE-IMPORT.json,REMAINING-ROLE-SOURCE-AUDIT.json,REPORT.zh-CN.md}。PendingSources/SteamPresencePublicIdentityHint.json只下一自然Native/runtime/source-PDB配原更新工具，无新inc/ID/门/追包/部署。
+仍明确OPEN：实际开机BAT500ms双Steam私扫；现无main未就绪的公共cold-start provider，配置任务已核合同，不能以缓存冒Absent或等待main延迟原提前启动。preset旧CSS清理仅定义未见产品caller，不计活跃CPU；ROG手柄触摸/睡眠、菜单JS根因、持续CPU和总目标ACTIVE。
+<!-- /STEAM-PRESENCE-PUBLIC-IDENTITY-HINT-20261116 -->
+
+<!-- STEAM-PRESENCE-PUBLIC-IDENTITY-FIXTURE-SUCCESSOR-20261116 -->
+公共presence最终后继SourceReady-r2：原native action adapter改同份immutable identity显式传registeredPid hint并要求registryReads0。独审F1原旧adapter在替换前检误选target实有1shell/1effect必要FAIL；六原presence选择全过，Kernel/Host/typed/power/私有desktop/自有目标/资源回原baseline及差3或6保持。三参helper仅源码语法兼容，不承诺旧私读语义。
+本scope累计3文件18hunk（1产品2原fixture），两次share0导入13/16HANDLE还、84.1798/57.9512ms；八原正式生成输入从fresh mainline重建全字节等实际编译。6成功实际图/12native/18Job0=13自然5工具收尾/rawfalse8保，不拼默认父。旧adapter编译leaf漏fallback json.hpp失败保，原parent早已固定同路径/SHA，只续同raw消费不重编；候选预声明全核。独审223.799s超150目标73.799s保留，未独立跑业务。
+最终权威RemainingReaders/RemainingRoleAudit-20261116-r193/{SOURCE_READY-r2.json,FINAL-INTAKE.json,REVERSE-REVIEW-FINDING-INTAKE.json,ROLE-FINAL-SOURCE-PAIRING.json,REPORT-r2.zh-CN.md}；SR3154B/SHA0718dd424c4cff3959202809b13e182cdac5cf4e9cb91f7f7618effd844af905。PendingSources/SteamPresencePublicIdentityHintFixtureBoundary.json接前序仅下一自然匹配Native/runtime/source-PDB，不追包/普通fixture/部署。BAT冷启动唯一provider、菜单JS真实根因/ROG手柄触摸睡眠、持续CPU和总目标ACTIVE。
+<!-- /STEAM-PRESENCE-PUBLIC-IDENTITY-FIXTURE-SUCCESSOR-20261116 -->
+
+
+<!-- YMCC-CPU-114650-DEPLOYED-RUNTIME-20261116 -->
+CPU1同聊天已完成114650完整主线配套构建/事务部署/实际loaded核验，Native2d85a336/marker535e4590、PDB1145d292-b3d4-4ed7-b89a-04323139af83/1；原generic payload两文件8hunk已随固定source入包，保原SOURCE_READY/Pending/DELIVERY/raw。首次fractional-ms producer前拒绝0build及最终只读verifier漏依赖FAIL前向保，唯一产品build沿同capture/原期限，原工具收尾/rawfalse保持，普通fixturesNOT_RUN；原全broadcast74FAIL未改绿。
+正常退出15080后全包部署，现43444/birth134392752441526542仍同准确loaded/安装哈；设置仅部署前后与采样前后分别同，startup变化actorUNKNOWN。600.0066s/597完整窗均QQ隐藏非前台，均.04313104%/P95.14572331%/峰.24196040%，341/520两窗>.2仍保/目标未达；BUS3000ms36.2264%、UI1796.875ms21.6981%、monitor937.5ms11.3208%、IPC718.75ms8.6792%，capture/lifecycle同线程不双计，非函数栈。
+另60s14/14含准确外树HWiNFO21396/birth134392706321246170：root-tree各均之和.06424889%、HWiNFO.11465014%、合.17889903%，端点错开非同步树峰；不可漏companion冒签降幅。与101648非受控A-B，无整机CPU因果收益；详细日志原关闭不切换。全部observer终态/句柄归还，root保留运行；实际归因使用固定114650源，不以移动主线后继反授当前。
+权威Continuation-20261114/Deploy114650-20261116/{CLOSING.json,REPORT.zh-CN.md,RUNTIME-OBSERVATION.json,THREAD-COST-RANKING.json,PROCESS-TREE-CPU-INTAKE.json}；Closing SHA934a1f9a16b5bb442b3e7b4c84801b0fae8df3dcd33dbca980c99b956159c3fd。IpcEventPayloadTransfer-20261116/RUNTIME-SUCCESSOR-114650.json及RegistrationHistory/CpuIpcEventPayloadTransfer-20261116/RUNTIME-114650.json前向核收。用户Steam层方向继续优先BUS/UI/IPC实际函数成本，HWiNFO上游单列；长期.2峰/ROG实体仍OPEN，总目标ACTIVE。
+<!-- /YMCC-CPU-114650-DEPLOYED-RUNTIME-20261116 -->
+
+
+<!-- YMCC-CPU-STEAM-IPC-METADATA-REJECTED-20261116 -->
+CPU1沿Steam/UI/IPC继续，两新候选均成本拒绝/主线及正式fixture0写/无Pending/新构建部署或实机重采。SteamIpcRouting-20261116仅原12Steam比较归组：两配置各6937×10+230=69600检查/必要IO反例过，首固定设置9/11两轮、第二wall.957228>.95，未知Steam第二1.052976>1.05，整体拒绝不重测/布局续试。C2026私有corpus准备FAIL保留；2合格图/3Job自然关前0、原root1/成本FAIL保持。
+IpcCommandTransfer-20261116为不同所有权候选：仅parsed cmd及原lambda消费move，完整路由未动；原完整dispatcher两配置各7795case/15594检查、必要closure命令反例/未知selector过。实际长异步分配45→43/2449→2385B，但首固定2campaign设置wall.998247/.984310、鼠标.979264/.989237均>.95，控制/旧旧过也整体拒绝，不缩到字符串叶冒签CPU收益。完整Native/default NOT_RUN。
+两项共原1500s/同deadline/保全部前项费用，无按目录重开额度。第二准备EOL membership及漏真实HTTP诊断头、private bytes计数器C4459/WX/错误文件重名拒绝均保；只续未达实跑，2合格图/4Job关前0=2自然2准确vctip收尾，root1/1/0/1分列，legacy无businessSucceeded不补造。原114650已loaded/600s峰.2419604与HWiNFO companion不改绿；下一找实际较大工作，避免继续命令元数据微优。
+权威Continuation-20261114/SteamIpcRouting-20261116及IpcCommandTransfer-20261116各{SOURCE_READY.json,COST.json,CORRECTNESS.json,CLOSING.json,REPORT.zh-CN.md}；后者closing SHA8a9b336561a6a85e32400b605e9d36e06a25394b76678c815997c689513cc2b5。鲜读两产品函数仍等各Before；无设置/Steam游戏/设备/睡眠动作，无重计时。全CPU/长期.2峰与ROG目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-IPC-METADATA-REJECTED-20261116 -->
+
+
+<!-- YMCC-CPU-STEAM-LOG-PROJECTION-20261116 -->
+CPU1同聊天已合入Steam publish日志scratch投影：1产品头/1函数/1上下文块，原完整snapshot/history16/get/base/Control与logChange触发保持；仅先准备原compact摘要，省完整诊断树临时复制，contact-only不增日志，投影/写日志best-effort与锁外append/reentry保持，无新reader/worker/timer/cache/节拍。
+两配置各844检查/200步及两原快照、fault/reentry/大坏型边界过，空摘要反例/selector拒绝；原canonicalCPP全文实际JSONL36检查全过。首次固定2campaign11pair：ROG完整log-change .712922/.713943、Win5 .844741/.853738，各11/11快，cycles/原控制/old-old过，不重计时/不签整机CPU或叠加收益。4实际图/299唯一输入鲜哈，3Job关前0全部准确vctip收尾/root0，0自然；原formal C4456/C4996与CRLF后置假拒FAIL保，只续消费者0重跑。
+1产品+9只读来源share0 186.2841ms/10HANDLE还，逆补鲜读全头且get字节保持原history资格；新头53388B/SHAa1ba7ec3b284ab50587a63bf57760fe093a331e0d9db4cb2a80149409f02f874。权威Continuation-20261114/SteamGameLinkLogProjection-20261116/{SOURCE_READY.json,EXECUTION-INTAKE.json,REVERSE-REVIEW.json,MAINLINE-IMPORT.json,REPORT.zh-CN.md,CLOSING.json}；SR5239B/SHAad08712a27be52d5ee4c07f44ad4bb740bbaffee3b92844bb75e1251831cdcf3。PendingSources/CpuSteamGameLinkLogProjection.json显式接续旧history publish/get保留，旧Ready/Pending/raw不覆；仅下一自然完整Native/runtime/source-PDB，不追包/本轮部署。
+现场已变更：旧43444退，04:54:23Z有限身份点42876/birth134392774136897025，diskNative ecc08130/22888448B，CURRENT-TEST-EXPORT仍114650但loaded/source绑定UNKNOWN；发起者UNKNOWN。旧600s/峰.2419604仅属43444，不能归新进程，本项未部署/未采CPU。前两IPC元数据候选继续拒绝；当前真实CPU因果/ROG实体/长期.2峰及总目标ACTIVE，普通global/完整NativeNOT_RUN。
+<!-- /YMCC-CPU-STEAM-LOG-PROJECTION-20261116 -->
+
+
+<!-- YMCC-CPU-STEAM-LOG-DELIVERED-1310-FAILED-CAPTURE-20261116 -->
+CPU1原Steam日志投影已随自然1310完整Native/runtime/source-PDB交付：原合格整头53388B/SHAa1ba7ec3b284ab50587a63bf57760fe093a331e0d9db4cb2a80149409f02f874，actual include/源码ZIP CRC与全包PDB鲜哈匹配，producer原root0/Job0；未自行追构建部署。权威Current1219Cpu-20261116/LOG-PROJECTION-NATURAL-1310-INTAKE.json 5692B/SHA3525d4edec1ddc31a49305742b20a13dbb776401f570a181227437e9b45e548e，Q/DELIVERY-SUCCESSOR-1310.json及RegistrationHistory/CpuSteamGameLinkLogProjection-20261116/DELIVERY-1310.json前向保，不覆旧Ready/Pending。
+先前1219 PID42876/birth134392774136897025已完整包+exact85B marker fbbd484b核同，但60s观察约40s root退出/窗口销毁，两observer自然exit1原FAIL保；40有效点/39窗39182.38025ms、root578.125ms、均.046108496%/P95.146214631%/峰.291909818%、1窗>.2，退出点另125ms不计零或完整窗。UI/BUS/capture同lifecycle/monitor为37.84/24.32/13.51/8.11%，非函数栈；383条粒度零正cycles/1cohort不等保。两root/41thread/3hook与marker句柄归还；settings两端同，tree/HWiNFO阶段NOT_RUN。后继替换者UNKNOWN，40860有限点失败原因未保存/无目标JSON，47328 birth和loaded未核；不重采/转绑/追包。
+权威Continuation-20261114/Current1219Cpu-20261116/{REPORT.zh-CN.md,CLOSING.json,PARTIAL-OBSERVATION-INTAKE.json,EXIT-BOUNDARY-POINT.json}。原1800s/deadline13:37:14.318+08不重写，封存实际超时另记；0新产品/正式fixture/Pending/部署写，普通fixturesNOT_RUN。1310仅字节交付，当前磁盘已后继7fdb379f非该包，loaded/CPU收益未证；完整CPU/长期.2峰/ROG及总目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-LOG-DELIVERED-1310-FAILED-CAPTURE-20261116 -->
+
+
+<!-- YMCC-CPU-STEAM-CURSOR-HISTORY-REJECTED-20261116 -->
+CPU1继续Steam层：cursor history opt-out私有候选被固定成本门整体拒绝，0产品/正式fixture/Pending/构建部署/实机重采。两配置各1695检查+原200步和必要忽略false反例过；实际whole get+原nativePrimary谓词首2campaign11pair，ROG wall.309610/.308272、Win5.843993/.858243虽快，但第二Win5公开查询cycles1.067586>原1.05，wall1.049390/旧旧1.029470及1.030138照保，不重计时/删控制/换布局续试。
+3实际图鲜哈、2Job关前final0=1自然root0+1准确vctip工具收尾/root1成本FAIL；formal/default NOT_RUN。权威Continuation-20261114/SteamCursorHistoryRead-20261116/{SOURCE_READY.json,CORRECTNESS.json,COST.json,NEXT-SOURCE-AUDIT.json,REPORT.zh-CN.md,CLOSING.json}；Closing9492B/SHAe6756c8d2e3153fc48f76d603e6f6fda1a22243d3cfe0b82a9d39af39a8b7a52。原1800s含13:40:32.159+08起源码调查，deadline14:10:32.159不按目录重置。当前get/cursor tick/main声明及原正式extractor鲜读前像保持；口头1762已更正为raw1695，无raw改写。
+下一源码UI→focusLightRecheckOnUi→steamLightGamepadUiChanged→公共UI/子库准入，wheel/preference/foreground回核不可当死重复删除；未选择小原子操作作较易成功替代。该cursor仅padSeen/未确认有限5s检查，现场热点归因UNKNOWN；不重启42876原失败采样/转绑后继，不追包。既有Steam日志投影Ready/1310字节交付保持，完整实机CPU/长期.2峰/ROG及总目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-CURSOR-HISTORY-REJECTED-20261116 -->
+
+
+<!-- YMCC-CPU-STEAM-IDENTITY-COST-REJECTED-20261116 -->
+CPU1 Steam身份两独立候选均拒绝/0产品正式fixture/Pending/完整Native部署或重采：scratch未清零堆buf两配置9806检查/1638diff过，但正常API整函wall.985815/.983026、birth mismatch.987259/.984444>.95；denied.475767/.485753不代健康收益。WAIT列表C3535/C2398旧FAIL保，仅测试DWORD修续，3实图/3Job0准确vctip。
+随后不同ASCII path比较算法保原zeroed vector，2源epoch×两配置各151103检查/141297路径oracle（全65536UTF16/NUL/UNC/prefix/Unicode）和真实self/query顺序过；首次成本前去候选专属Unicode额外copy并重新资格。首固定2campaign11pair actual正常same.982331/.986684、path-mismatch.984663/.988198未达.95，5控制/旧旧均过，整体拒绝不重计时/不缩叶/不改门。5实图鲜哈/292unique文件，3Job final0原root0/0/1及工具收尾保；caller/import仅准备未执行/default NOT_RUN。
+共原1800s自13:58:18.817+08至14:28:18.817，不按目录退款。权威Continuation-20261114/SteamIdentityImageScratch-20261116及SteamIdentityPathCompare-20261116各{SOURCE_READY.json,CORRECTNESS.json,COST.json,REPORT.zh-CN.md,CLOSING.json}；后者Closing12968B/SHAea2d10de678c5925b99658bd38cb0fff3f5839028e5db0b88bc5d549c0f31b5c，最终correctness用CORRECTNESS-r2。当前identity/publish/get/Control及原W2U/pathKey/birth鲜读前像，旧日志优化Ready/1310交付保持。API页面未得有效正文不引，按实际API证据。不因低收益结论删除fresh权限/API或重启42876失败捕获；下一高频UI/BUS整体成本/原公共来源，真实CPU/长期.2峰/ROG与总目标ACTIVE。
+<!-- /YMCC-CPU-STEAM-IDENTITY-COST-REJECTED-20261116 -->
+
+
+<!-- YMCC-CPU-133743-MATCHED-ROOT600S-20261116 -->
+CPU1自然133743配套+actual85B marker核同：PID46084/birth134392836255928495/Native446d6266…/PDBfdf2aaac…1，原已Ready日志投影整头a1ba7ec3逐字入源码/actual include和Native/runtime/source-PDB，RUNTIME-SUCCESSOR-133743及RegistrationHistory前向登记保旧Ready/Pending。首次此代600.00188s/597完整窗均QQ隐藏非前台，均.0378416783%/P95.1442755879%/峰.1947624033%，0窗>.2，仅原本体时段阈值观察，非因果/长期/所有窗口或实体CPU验收。
+BUS29.6774%、UI18.2796%、monitor13.7634%、未知52584为12.2581%、SteamSession6.4516%、capture/lifecycle同线程4.9462%、IPC8.1720%，GameLink仅.2151%；角色非函数栈。6003粒度零正cycles/3cohort不等均保。root2/41thread/3hook和marker显式close，observer/driver自然0；tree13有效端点各均值之和.060982486%非同步峰，HWiNFO本轮UNKNOWN：本方预声明C:/而原reader原文C:\拒绝，后置单identity点证同birth/normalized path，0CPU重测/不恢复缺端点。被拒close返回原未独记，不借closed摘要签显式成功；reader自然终态分列。
+权威Continuation-20261114/Current133743Cpu-20261116/{PACKAGE-INTAKE.json,RUNTIME-OBSERVATION.json,THREAD-COST-RANKING.json,PROCESS-TREE-CPU-INTAKE.json,SCOPED-OBSERVATION-VERDICT.json,RESOURCE-INTAKE.json,REPORT.zh-CN.md,CLOSING.json}；Closing11006B/SHAed1419d3d7a3ce48225ed9e5d3525d8618f8c59432de1b75a8254a5e9a0b8ed9。原14:26:01.061+08起1800s/deadline14:56:01.061含全费用；原1219失败不重采转绑，本轮0产品正式fixture/Pending/部署/设置或WPR动作。下一完整BUS/UI/monitor/未知归属，Steam以实测Session为先，不续低频GameLink微叶；长期.2峰/树外上游/ROG和总目标ACTIVE。
+<!-- /YMCC-CPU-133743-MATCHED-ROOT600S-20261116 -->
+
+
+<!-- STEAM-APPEARANCE-COLD-INITIALIZE-GATE-20261117 -->
+## Steam 主题冷启动复用一个临时助手（2026-11-17）
+
+CSS 缺失时，同一当前用户助手依次执行 Ensure、等待原生准入、Automatic 和最终 Idle。复用原 ready/idle/result 对象，初始化回执不算应用成功；原生再次核对当前请求、共享 Steam 身份、公共 Ready/电源代次和 Desktop 编辑器，之后才放行。最终仍要求实际进程退出与五项确认。已有后端、VerifyOnly、手动接管和独立唯一 CSS 常驻策略保持；不启动或切换 Steam，不加线程、事件或轮询。
+
+新原生的冷启动路径只接受 AutomaticInitializeGateProtocol=1 的配套脚本，导出同步检查；混装在创建前拒绝。必须随下一次自然 Native/PowerControl 配套构建，旧成品不倒填。原八场景68项、定向撤销及PS原消费者按各自epoch核收；本地完整惰性冷启动三组成对比中位0.687636，非掌机时延或整机CPU收益。全导出旧尾段缺依赖FAIL保留，新初始化协议只作定向组件验收。
+
+证据：Testing/YMCC/Evidence/SteamAppearanceSharedLayer-20261112/field-win5-20261117-112057/cold-helper-gate/{SOURCE_READY.json,QUALIFIED-INTAKE.json,COST-VERDICT.json,MAINLINE-IMPORT.json}。公共睡眠协调与Steam模式接口产品未改，完整Native/link/安装视觉/长稳CPU仍未验收。
+<!-- /STEAM-APPEARANCE-COLD-INITIALIZE-GATE-20261117 -->
+
+
+<!-- STEAM-CSS-PUBLIC-POWER-LEASE-20261117 -->
+## Steam主题使用租约绑定完整公共电源范围（2026-11-17）
+
+CSS使用及常驻确认除原generation检查外，现由原Native初始化直接绑定readSharedSystemPower，复用sleep_power_state.h的capturePower/powerCurrent。公共suspendSerial、observedNotificationSequence、Ready/known/pending等变化会撤销旧范围；仅publicationRevision前进不撤销。失败或未知只结束本功能临时助手，保留独立CSS，不启动/切换Steam，不新增通知、线程或轮询。
+
+原同代次serial变化仍完成DOM/flags31及旧成功回执仍有效已分别在实际消费者复现；候选阻止旧工作并拒绝旧回执。原八场景68项加八个初始化断言共76项，定向公开范围及实际主初始化语句配套通过。完整惰性冷路径成对比中位0.940347，未超过事前5%回归条件，不宣称新增提速/整机CPU收益。只接下一自然Native；本轮不改公共Ready fanout按generation去重的政策，第二次同代Ready到共享模式前的现场等待仍待单独处理。
+
+证据：Testing/YMCC/Evidence/SteamAppearanceSharedLayer-20261112/field-win5-20261117-112057/public-power-lease/{SOURCE_READY.json,QUALIFIED-INTAKE.json,MAINLINE-IMPORT.json,COST-VERDICT.json}。仅精确初始化语句和真实CSS消费者；完整main/link、安装版/实体睡眠及视觉未验收。
+<!-- /STEAM-CSS-PUBLIC-POWER-LEASE-20261117 -->
+
+<!-- STEAM-STARTUP-HANDOFF-SOURCE-STAGE-20261118 -->
+公共 Steam 启动交接与 strict 恢复消费已源阶段配套：完整 GameID 来自真实日志，已捕获 launcher 与 child 对象关系单独传递，不伪造 tracked 行或健康 reference。动态与半静态保留，代码不按游戏名加参数。历史事实跨公共 power generation 保留；新请求仍须当前 power/account/selection，规则、配置、OFF、watch、owner 和 source 冲突按原合同撤销。普通导出可见 startupLaunchCapture 诊断，不授动作。12 产品源与 11 原 fixture 接口已准确主线导入；源阶段 Ready 不等于 A 无健康引用/B 死父/C 无记录已恢复。无参数实机、睡眠/S4、手柄与 Continue 仍待实证。
+<!-- /STEAM-STARTUP-HANDOFF-SOURCE-STAGE-20261118 -->

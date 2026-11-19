@@ -47,3 +47,33 @@ TrySubmitFrame/TrySubmitNeutral 直接读取已选 HMController.Profile，避免
 合入保留原文件未改动行的原字节/混合行尾。已测private源被Python文本写入转换为CRLF，正式合入用真实MSVC预处理等价记录绑定原成本/完整TU编译原件，不回写旧证据或重跑成本。原Owner/Session消费者ID、正常组、原负例和原预算保留，新增边界仍放原Session场景；普通导出不自动增加本专项整轮。
 
 证据：G:/YeManCC-Work/Testing/YMCC/Evidence/VirtualInput-SteadyCPU-20261102-01a146ff/motion-boundary-static-audit/real-dll-cost/；actual-main-compile/保留R9实际TU与汇编，mainline-proposal/保留变更/行尾来源和CAS回执。已合入与当前验证状态以当轮CAS/READY为准，全进程虚拟开启CPU和真实按键到游戏延迟仍未验收。
+
+
+<!-- IDLE-IMU-DIAGNOSTIC-BUILD-20261108 -->
+## 无序列IMU诊断树的前置去重（2026-11-08）
+
+主线 inputCaptureOnGamepad 的详细sample路径原先无条件构建完整imuObj，再在两个sequence都为零时用imuActive:false覆盖。现在仅在原谓词gyroSequence != 0 || accelSequence != 0成立时建树；最终移动、原inactive覆盖、50ms日志门、队列/落盘和全部输入/Host/DSU链保持原字节。没有新增缓存、状态或计时器，也不根据sensorPresent或启用开关偷换谓词。
+
+复用原 tools/virtual_sample_tree_perf_selftest.py 的显式 --current-idle-imu --before <固定前源> --out <新Evidence目录>，不增加默认ID/minimum/发布门。源提取的Release/Checked各1593例、9558断言通过；或误写成且的同消费者负例在第2例准确拒绝。覆盖序列四组合、独立标志、重置转换、宽整数、特殊浮点位型及最终dump字节；其他字段在测试中为opaque夹具输入，完整生产器其余部分仅作源码不变证明。原分配器探针另实际执行通过。
+
+一次预声明固定成本活动（两组、每组11对、每臂1024次）中，无序列final-record局部cycles配对中位改善58.79%–62.33%，含dump改善48.68%–49.71%，均11/11更快；每次少41次请求/3232请求字节，活动路径分配不增，全部控制在5%保护内。这不是完整sample、全进程CPU、设备或游戏延迟降幅。完整主原生构建、重新导出/部署与安装版外部复测尚未执行；旧安装版0.339%峰值继续保留。
+
+证据 G:/YeManCC-Work/Testing/YMCC/Evidence/RogCpu-20261104/IdleImuDiagnosticBuild-20261108/RESULT.json；续作同目录CONTINUATION.json。前置源码提取/CMD路径/编译器解析失败原件保留，正式成本活动没有失败后重计时或改门槛。
+<!-- /IDLE-IMU-DIAGNOSTIC-BUILD-20261108 -->
+
+
+<!-- TYPED-TELEMETRY-LOCAL-DELTA-20261110 -->
+## gyro.telemetry 独占载荷与惰性编码（2026-11-10）
+
+主线将原80ms遥测的标量/向量保存到 native/gyro_telemetry_record.h 的 Record；3个字符串及10份动态JSON子树继续独占拥有，最后完整Host仍深复制。原ResultMailbox token、actionPower/configuration围栏、失败post/terminal释放和旧JSON入口保留。普通路径到首个有效renderer才编码，不再先构造完整顶层/轴向JSON树；4次独立诊断门、原字段求值顺序和UTF16失败重试边界保留。
+
+固定来源实际测试：Release/Checked各758核心场景/12629断言；每配置原JSON和typed门各2829场景，formatter280、惰性广播62，parity各271864断言；18次指定语义反例拒绝。四组固定成本共44行/484对，cycles及wall每行均11/11更快，原10/11和5%门不变，分配请求/请求字节均严格下降。Release捕获paired-median wall下降54.58%–83.17%，消息53.86%–79.19%，派发/广播22.64%–67.24%。这些只属于对应隔离代码链，不是整进程CPU降幅。
+
+完整Native翻译单元固定快照的/Zs编译通过；1364条实际include拼写/1362个规范唯一路径已核对。主线精确7段补丁保留并行修改；正式header与测试来源仅一条独立注释不同，捕获片段另有一条注释不同。实际编译/成本原件和这些来源等价证明分开，当前整主线链接/ZIP/安装/实机尚未验收，sourceReady=false。
+
+现有 tools/virtual_telemetry_hostframe_current_perf_selftest.py 增加显式 --typed-telemetry-build：prepare生成原核心/双布局成本输入，plan绑定显式工具、累计ledger与实际剩余额度，correctness/fixed-cost通过原owned RawProgram执行。现有 tools/virtual_gyro_parity_gate_selftest.py 的 --typed --prepare-only 为同一流程生成parity输入。公共准备不读取历史Evidence绝对路径，不增加默认ID/minimum/父门；旧模式和原断言/负例保持。
+
+本轮公共执行桥仅已接线和计划检查，尚无其本体的原生实跑。样例correctness账剩113051ms，而相同完整core+parity曾用119133ms；不要启动此样例、重置原账或从其它阶段借额度求绿。新桥的fixed-cost还要求同输入的公共owned correctness回执。V2已有原始正确性/成本证据作为限定引用，不能倒填为新公共运行PASS。
+
+证据：G:/YeManCC-Work/Testing/YMCC/Evidence/RogCpu-20261104/TelemetryDirectWireReview-20261110/FullPipeline/REPORT.md；公共桥见同目录CorePublicPort/HANDOFF-RUNTIME.json。原失败和预算保持；完整历史vcvarsall引导闭包未补，实际最终编译环境/argv/头库/工具/EXE及44行成本的限定核收不受该缺口否定。外部CPU观察器仍仅开发使用，不打包、不自启。
+<!-- /TYPED-TELEMETRY-LOCAL-DELTA-20261110 -->

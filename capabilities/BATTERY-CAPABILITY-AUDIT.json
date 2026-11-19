@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "auditedOn": "2026-11-05",
+  "auditedOn": "2026-11-19",
   "role": "derived audit inside the sole YMCC capabilities library; not a registration or admission input",
   "runtimeConsumer": false,
   "registrationAuthority": "capabilities/hc-battery-policy.json -> native/BatteryHost/battery-routes.json -> capabilities/hc-device-catalog.json -> HcBatteryCapabilityCatalog.generated.cs",
   "evidenceLevel": "source and recorded logs; no hardware probes or writes",
-  "runtimeRouteSha256": "e698f7735cd307a6b184232419d76b9e5d5a42c85d74d858a77479671869ffe8",
-  "catalogueSha256": "2b33f25419a9f4384f96291a0ad58e5c613561e5ab0fc2ec7c68a271b3864a4f",
+  "runtimeRouteSha256": "11c0709b6b5c5100fc2b3e9430f8bfaf9867d64919ae691567775e6de291994e",
+  "catalogueSha256": "8b3e21ecdaf2da95f014f4ecb69ca2f0572777d18babce14651f9f6076be8e18",
   "verifiedReferenceFiles": 134,
   "previousSourceComparison": {
     "verifiedFiles": 134,
@@ -15,8 +15,9 @@
   "upstream": {
     "repository": "Valkirie/HandheldCompanion",
     "commit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
-    "treeSha": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
-    "files": 104
+    "treeSha": "d5cc54b116466d7facda3fc96357e388978f0c49",
+    "files": 104,
+    "inventorySourceBinding": "device C# hashes match the downloaded blobs in the reconstructed Git tree"
   },
   "fieldEvidence": {
     "id": "ONEX-APEX-FIELD-20261105-093203",
@@ -7646,7 +7647,7 @@
             "family": "OneXPlayer",
             "classes": 17,
             "candidates": 6,
-            "ymccRegistered": 6
+            "ymccRegistered": 7
           },
           {
             "family": "SuiPlay",
@@ -15240,7 +15241,14 @@
               "conditions": []
             }
           ],
-          "consumerEvidence": [],
+          "consumerEvidence": [
+            {
+              "ruleId": "battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro",
+              "kind": "firmware-percent",
+              "readback": "independent hardware threshold readback required",
+              "floor": 50
+            }
+          ],
           "fieldStatus": "not-hardware-validated-in-this-audit",
           "effectiveStatus": "source-disabled",
           "protocol": null,
@@ -15315,8 +15323,45 @@
             }
           ],
           "runtimeCapabilityMutations": [],
-          "ymccRoutes": [],
-          "coverage": "upstream-deliberately-disabled",
+          "ymccRoutes": [
+            {
+              "route": "oxp-x2-mini-pro-direct-ec",
+              "family": "OneXPlayer X2 Mini Pro",
+              "kind": "firmware-percent",
+              "identity": {
+                "manufacturers": [
+                  "ONE-NETBOOK",
+                  "ONE-NETBOOK TECHNOLOGY CO., LTD."
+                ],
+                "field": "boardProduct",
+                "values": [
+                  "ONEXPLAYER X2Mini PRO"
+                ],
+                "deviceClass": "OneXPlayerX2MiniPro"
+              },
+              "firmwareGate": {
+                "kind": "oxp-x2-mini-pro-field-firmware",
+                "bios": "0.22",
+                "ecMajor": 0,
+                "ecMinor": 12
+              },
+              "min": 50,
+              "uiChoices": [
+                50,
+                55,
+                60,
+                65,
+                70,
+                75,
+                80,
+                85,
+                90,
+                95,
+                100
+              ]
+            }
+          ],
+          "coverage": "separate-ymcc-route-upstream-inheritance-disabled",
           "knownDifference": null
         },
         {
@@ -16088,7 +16133,7 @@
     {
       "deviceClass": "OneXPlayerX2MiniPro",
       "charge": "source-disabled",
-      "ymcc": "upstream-deliberately-disabled"
+      "ymcc": "separate-ymcc-route-upstream-inheritance-disabled"
     },
     {
       "deviceClass": "SteamMachine",
@@ -16097,9 +16142,9 @@
     }
   ],
   "runtime": {
-    "identityRules": 42,
+    "identityRules": 43,
     "frozenIdentityRules": 34,
-    "reviewedExtensionRules": 8,
+    "reviewedExtensionRules": 9,
     "protocolRoutes": [
       "asus-ally-acpi",
       "lenovo-go-conservation",
@@ -16111,6 +16156,7 @@
       "oxp-x1-intel-ec",
       "valve-deck-firmware",
       "gpd-win-mini-2025",
+      "oxp-x2-mini-pro-direct-ec",
       "oxp3-wmi-ec",
       "oxp-superx-dual-ec"
     ],
@@ -16140,6 +16186,2018 @@
         "sourceStatus": "reviewed non-HC extension; see sole battery policy and source overlay",
         "softwareStatus": "see source-qualified INTEGRATION-STATUS; not counted as an HC class"
       }
-    ]
+    ],
+    "registrationRows": [
+      {
+        "ruleId": "battery.rule.asus-ally-acpi.ROGAlly",
+        "deviceClass": "ROGAlly",
+        "provider": "asus-ally-acpi",
+        "identity": {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC71L"
+          ],
+          "deviceClass": "ROGAlly"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.asus-ally-acpi.ROGAllyX",
+        "deviceClass": "ROGAllyX",
+        "provider": "asus-ally-acpi",
+        "identity": {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC72LA"
+          ],
+          "deviceClass": "ROGAllyX"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.asus-ally-acpi.XboxROGAlly",
+        "deviceClass": "XboxROGAlly",
+        "provider": "asus-ally-acpi",
+        "identity": {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC73YA"
+          ],
+          "deviceClass": "XboxROGAlly"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.asus-ally-acpi.XboxROGAllyX",
+        "deviceClass": "XboxROGAllyX",
+        "provider": "asus-ally-acpi",
+        "identity": {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC73XA"
+          ],
+          "deviceClass": "XboxROGAllyX"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.lenovo-go-conservation.LegionGoSZ1",
+        "deviceClass": "LegionGoSZ1",
+        "provider": "lenovo-go-conservation",
+        "identity": {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83N6",
+            "83Q2",
+            "83Q3"
+          ],
+          "deviceClass": "LegionGoSZ1"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-fixed",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.lenovo-go-conservation.LegionGoSZ2",
+        "deviceClass": "LegionGoSZ2",
+        "provider": "lenovo-go-conservation",
+        "identity": {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83L3"
+          ],
+          "deviceClass": "LegionGoSZ2"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-fixed",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.lenovo-go-conservation.LegionGoTablet",
+        "deviceClass": "LegionGoTablet",
+        "provider": "lenovo-go-conservation",
+        "identity": {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83E1"
+          ],
+          "deviceClass": "LegionGoTablet"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-fixed",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.lenovo-go-conservation.LegionGoTablet2",
+        "deviceClass": "LegionGoTablet2",
+        "provider": "lenovo-go-conservation",
+        "identity": {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83N0",
+            "83N1"
+          ],
+          "deviceClass": "LegionGoTablet2"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-fixed",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.msi-claw-wmi.ClawA1M",
+        "deviceClass": "ClawA1M",
+        "provider": "msi-claw-wmi",
+        "identity": {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T41"
+          ],
+          "deviceClass": "ClawA1M"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 20
+      },
+      {
+        "ruleId": "battery.rule.msi-claw-wmi.ClawA2VM",
+        "deviceClass": "ClawA2VM",
+        "provider": "msi-claw-wmi",
+        "identity": {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T42",
+            "MS-1T52"
+          ],
+          "deviceClass": "ClawA2VM"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 20
+      },
+      {
+        "ruleId": "battery.rule.msi-claw-wmi.ClawBZ2EM",
+        "deviceClass": "ClawBZ2EM",
+        "provider": "msi-claw-wmi",
+        "identity": {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T8K"
+          ],
+          "deviceClass": "ClawBZ2EM"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 20
+      },
+      {
+        "ruleId": "battery.rule.msi-claw-cg3em-ap.ClawCG3EM",
+        "deviceClass": "ClawCG3EM",
+        "provider": "msi-claw-cg3em-ap",
+        "identity": {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T91"
+          ],
+          "deviceClass": "ClawCG3EM"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "firmware-percent",
+        "min": 20
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEO2",
+        "deviceClass": "AYANEO2",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 2",
+            "GEEK"
+          ],
+          "deviceClass": "AYANEO2"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEO2S",
+        "deviceClass": "AYANEO2S",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 2S",
+            "GEEK 1S"
+          ],
+          "deviceClass": "AYANEO2S"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEO3",
+        "deviceClass": "AYANEO3",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 3",
+            "AB07"
+          ],
+          "deviceClass": "AYANEO3"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIR",
+        "deviceClass": "AYANEOAIR",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR"
+          ],
+          "deviceClass": "AYANEOAIR"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIR1S",
+        "deviceClass": "AYANEOAIR1S",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR 1S",
+            "AIR 1S Limited"
+          ],
+          "deviceClass": "AYANEOAIR1S"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIR2",
+        "deviceClass": "AYANEOAIR2",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR 2",
+            "AIR2",
+            "AYANEO AIR 2",
+            "AB10"
+          ],
+          "deviceClass": "AYANEOAIR2"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIRLite",
+        "deviceClass": "AYANEOAIRLite",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Lite"
+          ],
+          "deviceClass": "AYANEOAIRLite"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIRPro",
+        "deviceClass": "AYANEOAIRPro",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Pro"
+          ],
+          "deviceClass": "AYANEOAIRPro"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOAIRPro1S",
+        "deviceClass": "AYANEOAIRPro1S",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Pro 1S",
+            "AYANEO AIR Pro 1S"
+          ],
+          "deviceClass": "AYANEOAIRPro1S"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOFlip11",
+        "deviceClass": "AYANEOFlip11",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 11",
+            "AYANEO FLIP 11"
+          ],
+          "deviceClass": "AYANEOFlip11"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOFlip1SDS",
+        "deviceClass": "AYANEOFlip1SDS",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 1S DS"
+          ],
+          "deviceClass": "AYANEOFlip1SDS"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOFlip1SKB",
+        "deviceClass": "AYANEOFlip1SKB",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 1S KB"
+          ],
+          "deviceClass": "AYANEOFlip1SKB"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOFlipDS",
+        "deviceClass": "AYANEOFlipDS",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP DS"
+          ],
+          "deviceClass": "AYANEOFlipDS"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOFlipKB",
+        "deviceClass": "AYANEOFlipKB",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP KB"
+          ],
+          "deviceClass": "AYANEOFlipKB"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEOKUN",
+        "deviceClass": "AYANEOKUN",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "KUN"
+          ],
+          "deviceClass": "AYANEOKUN"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-cec-bypass.AYANEONEXT2",
+        "deviceClass": "AYANEONEXT2",
+        "provider": "ayaneo-cec-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "NEXT II",
+            "NEXT 2",
+            "AYANEO NEXT II",
+            "AYANEO NEXT 2",
+            "AB09"
+          ],
+          "deviceClass": "AYANEONEXT2"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-ceii-bypass.AYANEOAIRPlusAMD",
+        "deviceClass": "AYANEOAIRPlusAMD",
+        "provider": "ayaneo-ceii-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-AMD"
+          ],
+          "deviceClass": "AYANEOAIRPlusAMD"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-ceii-bypass.AYANEOAIRPlusAMDMendocino",
+        "deviceClass": "AYANEOAIRPlusAMDMendocino",
+        "provider": "ayaneo-ceii-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-Mendocino"
+          ],
+          "deviceClass": "AYANEOAIRPlusAMDMendocino"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-ceii-bypass.AYANEOAIRPlusIntel",
+        "deviceClass": "AYANEOAIRPlusIntel",
+        "provider": "ayaneo-ceii-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-Intel"
+          ],
+          "deviceClass": "AYANEOAIRPlusIntel"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-ceii-bypass.AYANEOAIRPlusNxx",
+        "deviceClass": "AYANEOAIRPlusNxx",
+        "provider": "ayaneo-ceii-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05N",
+            "AB05NXX",
+            "AIR Plus Nxx"
+          ],
+          "deviceClass": "AYANEOAIRPlusNxx"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.ayaneo-ceii-bypass.AYANEOSlide",
+        "deviceClass": "AYANEOSlide",
+        "provider": "ayaneo-ceii-bypass",
+        "identity": {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AS01"
+          ],
+          "deviceClass": "AYANEOSlide"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required"
+        },
+        "kind": "software-bypass-threshold",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD",
+        "deviceClass": "OneXPlayerX1AMD",
+        "provider": "oxp-x1-amd-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 A",
+            "ONEXPLAYER X1z"
+          ],
+          "deviceClass": "OneXPlayerX1AMD"
+        },
+        "firmwareGate": {
+          "kind": "hc-ec-components",
+          "majorMin": 1,
+          "minorMin": 3,
+          "unknownValue": 255
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini",
+        "deviceClass": "OneXPlayerX1Mini",
+        "provider": "oxp-x1-amd-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 mini"
+          ],
+          "deviceClass": "OneXPlayerX1Mini"
+        },
+        "firmwareGate": {
+          "kind": "hc-ec-components",
+          "majorMin": 1,
+          "minorMin": 3,
+          "unknownValue": 255
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro",
+        "deviceClass": "OneXPlayerX1Pro",
+        "provider": "oxp-x1-amd-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1Pro"
+          ],
+          "deviceClass": "OneXPlayerX1Pro"
+        },
+        "firmwareGate": {
+          "kind": "hc-ec-components",
+          "majorMin": 1,
+          "minorMin": 3,
+          "unknownValue": 255
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerApex",
+        "deviceClass": "OneXPlayerApex",
+        "provider": "oxp-x1-amd-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER APEX",
+            "ONEXPLAYERAPEX"
+          ],
+          "deviceClass": "OneXPlayerApex"
+        },
+        "firmwareGate": {
+          "kind": "hc-ec-components",
+          "majorMin": 1,
+          "minorMin": 3,
+          "unknownValue": 255
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel",
+        "deviceClass": "OneXPlayerX1Intel",
+        "provider": "oxp-x1-intel-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 i"
+          ],
+          "deviceClass": "OneXPlayerX1Intel"
+        },
+        "firmwareGate": {
+          "kind": "hc-ec-components",
+          "majorMin": 0,
+          "minorMin": 67,
+          "unknownValue": 255
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.valve-deck-firmware.SteamDeck",
+        "deviceClass": "SteamDeck",
+        "provider": "valve-deck-firmware",
+        "identity": {
+          "manufacturers": [
+            "VALVE"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "Jupiter",
+            "Galileo"
+          ],
+          "deviceClass": "SteamDeck"
+        },
+        "firmwareGate": {
+          "kind": "exact-board-firmware",
+          "pairs": [
+            {
+              "boardId": 10,
+              "firmware": 45104
+            },
+            {
+              "boardId": 5,
+              "firmware": 4112
+            },
+            {
+              "boardId": 5,
+              "firmware": 4176
+            },
+            {
+              "boardId": 5,
+              "firmware": 4240
+            },
+            {
+              "boardId": 5,
+              "firmware": 4352
+            }
+          ]
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.gpd-win-mini-2025.GPDWinMini_HX370",
+        "deviceClass": "GPDWinMini_HX370",
+        "provider": "gpd-win-mini-2025",
+        "identity": {
+          "manufacturers": [
+            "GPD"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "G1617-02"
+          ],
+          "deviceClass": "GPDWinMini_HX370",
+          "processorPattern": "\\bHX\\s*370\\b"
+        },
+        "firmwareGate": {
+          "kind": "exact-reviewed-firmware",
+          "bios": "2.10",
+          "ecMajor": 2,
+          "ecMinor": 7
+        },
+        "kind": "firmware-percent",
+        "min": 60
+      },
+      {
+        "ruleId": "battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro",
+        "deviceClass": "OneXPlayerX2MiniPro",
+        "provider": "oxp-x2-mini-pro-direct-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X2Mini PRO"
+          ],
+          "deviceClass": "OneXPlayerX2MiniPro"
+        },
+        "firmwareGate": {
+          "kind": "oxp-x2-mini-pro-field-firmware",
+          "bios": "0.22",
+          "ecMajor": 0,
+          "ecMinor": 12
+        },
+        "kind": "firmware-percent",
+        "min": 50
+      },
+      {
+        "ruleId": "battery.rule.oxp3-wmi-ec.OneXPlayer3",
+        "deviceClass": "OneXPlayer3",
+        "provider": "oxp3-wmi-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "systemProduct",
+          "values": [
+            "ONEXPLAYER 3",
+            "ONEXPLAYER-3"
+          ],
+          "deviceClass": "OneXPlayer3"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required",
+          "majorMin": 0,
+          "minorMin": 0
+        },
+        "kind": "firmware-percent",
+        "min": 40
+      },
+      {
+        "ruleId": "battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX",
+        "deviceClass": "OneXPlayerSuperX",
+        "provider": "oxp-superx-dual-ec",
+        "identity": {
+          "manufacturers": [
+            "ONE-NETBOOK"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER SUPER X"
+          ],
+          "deviceClass": "OneXPlayerSuperX",
+          "manufacturerMatch": "ordinal-contains",
+          "valueMatch": "ordinal-exact"
+        },
+        "firmwareGate": {
+          "kind": "provider-probe-required",
+          "majorMin": 0,
+          "minorMin": 0
+        },
+        "kind": "firmware-percent",
+        "min": 75
+      }
+    ],
+    "identityAudit": {
+      "method": "Static current DMI predicate pairs; witnesses are synthetic. Does not execute C# or authorize writes.",
+      "sourceSha256": {
+        "capabilities/HcBatteryCapabilityCatalog.cs": "217a70097e34bf84283b4ef143b80dd29a58a123f8f1ea6be5c4ce0c5079e14b",
+        "native/BatteryHost/Policy.cs": "9c1f2987bb0144788224b8fd75933b440ab24d34946e5cb43f39a8d72f9e5a7d",
+        "capabilities/HcBatteryCapabilityCatalog.generated.cs": "9e689cbd57940af184419cefdf50477e7cce3f66863564411b548cf94dc9ac6a"
+      },
+      "pairsExamined": 903,
+      "pairs": [
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER X1 A",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER X1 mini",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER X1Pro",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x1-amd-ec.OneXPlayerApex",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER APEX",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER X1 i",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro",
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER X2Mini PRO",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        },
+        {
+          "kind": "cross-field",
+          "rules": [
+            "battery.rule.oxp3-wmi-ec.OneXPlayer3",
+            "battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX"
+          ],
+          "witness": {
+            "manufacturer": "ONE-NETBOOK",
+            "boardProduct": "ONEXPLAYER SUPER X",
+            "systemProduct": "ONEXPLAYER 3",
+            "processor": ""
+          },
+          "selection": {
+            "status": "ambiguous",
+            "ruleId": null
+          }
+        }
+      ],
+      "samples": []
+    }
+  },
+  "independentOemReview": {
+    "status": "source-checked",
+    "scope": "Static OneXConsole 0.10.4-fix3 battery-enable branches; no hardware, native transaction or admission implied",
+    "sourceSha256": "2eb89e3244f44baeb508ccfaa6d98c73cc1849e4b7bdb08eba71b165aae52726",
+    "offsetUnit": "UTF-16 code units",
+    "branches": [
+      {
+        "offset": 6230381,
+        "manufacturer": "AOKZOE",
+        "exactProducts": [
+          "AOKZOE A1X"
+        ],
+        "positiveConditions": [
+          "\"AOKZOE\"==oe.Manufacturer",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6232964,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1"
+        ],
+        "positiveConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30",
+          "\"ONEXPLAYER F1\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ]
+      },
+      {
+        "offset": 6233503,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1 EVA-01"
+        ],
+        "positiveConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30",
+          "\"ONEXPLAYER F1 EVA-01\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ]
+      },
+      {
+        "offset": 6234266,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1 i"
+        ],
+        "positiveConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=67",
+          "\"ONEXPLAYER X1 i\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=67"
+        ]
+      },
+      {
+        "offset": 6234980,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1 A"
+        ],
+        "positiveConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.06&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3",
+          "\"ONEXPLAYER X1 A\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.06&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3"
+        ]
+      },
+      {
+        "offset": 6235969,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1 mini"
+        ],
+        "positiveConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.04&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3",
+          "\"ONEXPLAYER X1 mini\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.04&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3"
+        ]
+      },
+      {
+        "offset": 6237510,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1L"
+        ],
+        "positiveConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30",
+          "\"ONEXPLAYER F1L\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ]
+      },
+      {
+        "offset": 6237873,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1 OLED"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER F1 OLED\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6238309,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1 EVA-02"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER F1 EVA-02\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6238716,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER F1Pro"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER F1Pro\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6239193,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Pro",
+          "ONEXPLAYER X1Pro B"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Pro\"==oe.Product||\"ONEXPLAYER X1Pro B\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6239906,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Mini Pro"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Mini Pro\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6240620,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1z"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1z\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6241551,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Pro i"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Pro i\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6242311,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Pro EVA-02"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Pro EVA-02\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6242804,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER G1 A"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER G1 A\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6243450,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER G1 i"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER G1 i\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6244245,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Pro A EVA-02"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Pro A EVA-02\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6245311,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X1Air",
+          "ONEXPLAYER X2Air"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X1Air\"==oe.Product||\"ONEXPLAYER X2Air\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6246513,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER SUPER X"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER SUPER X\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6246860,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER APEX"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER APEX\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6250821,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER Apex i",
+          "ONEXPLAYER Apex Air"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER Apex i\"==oe.Product||\"ONEXPLAYER Apex Air\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6252191,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER SUPER V"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER SUPER V\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6255015,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X2",
+          "ONEXPLAYER X2 EVA",
+          "ONEXPLAYER X2 EVA-02"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X2\"==oe.Product||\"ONEXPLAYER X2 EVA\"==oe.Product||\"ONEXPLAYER X2 EVA-02\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6257020,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X2Mini"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER X2Mini\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6259721,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER 3",
+          "ONEXPLAYER 3 EVA-01"
+        ],
+        "positiveConditions": [
+          "\"ONEXPLAYER 3\"==oe.Product||\"ONEXPLAYER 3 EVA-01\"==oe.Product",
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6260952,
+        "manufacturer": "ONE-NETBOOK",
+        "exactProducts": [
+          "ONEXPLAYER X2Mini PRO"
+        ],
+        "positiveConditions": [
+          "oe.Manufacturer&&-1!=oe.Manufacturer.indexOf(\"ONE-NETBOOK\")",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6264642,
+        "manufacturer": "ASUSTeK COMPUTER INC.",
+        "exactProducts": [
+          "RC71L",
+          "RC72LA"
+        ],
+        "positiveConditions": [
+          "F=[],\"RC71L\"==oe.Product||\"RC72LA\"==oe.Product",
+          "\"ASUSTeK COMPUTER INC.\"==oe.Manufacturer",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      },
+      {
+        "offset": 6265545,
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "exactProducts": [
+          "MS-1T41",
+          "MS-1T42",
+          "MS-1T52",
+          "MS-1T8K"
+        ],
+        "positiveConditions": [
+          "\"Micro-Star International Co., Ltd.\"==oe.Manufacturer&&(F=[],\"MS-1T41\"==oe.Product||\"MS-1T42\"==oe.Product||\"MS-1T52\"==oe.Product||\"MS-1T8K\"==oe.Product)",
+          "ie&&(F=[[\"LMenu\",\"RMenu\"],[\"LWin\",\"RWin\"]]),q.supportFunc.funcButtonMode=!0,oe"
+        ],
+        "firmwareConditions": []
+      }
+    ],
+    "offerings": [
+      {
+        "manufacturer": "AOKZOE",
+        "product": "AOKZOE A1X",
+        "offset": 6230381,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1",
+        "offset": 6232964,
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1 EVA-01",
+        "offset": 6233503,
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1 i",
+        "offset": 6234266,
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=67"
+        ],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel",
+            "class": "OneXPlayerX1Intel",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 0,
+              "minorMin": 67,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1 A",
+        "offset": 6234980,
+        "firmwareConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.06&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3"
+        ],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD",
+            "class": "OneXPlayerX1AMD",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 1,
+              "minorMin": 3,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1 mini",
+        "offset": 6235969,
+        "firmwareConditions": [
+          "oe.BIOSVersion&&oe.BIOSVersion>=1.04&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3"
+        ],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini",
+            "class": "OneXPlayerX1Mini",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 1,
+              "minorMin": 3,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1L",
+        "offset": 6237510,
+        "firmwareConditions": [
+          "null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30"
+        ],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1 OLED",
+        "offset": 6237873,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1 EVA-02",
+        "offset": 6238309,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER F1Pro",
+        "offset": 6238716,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Pro",
+        "offset": 6239193,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro",
+            "class": "OneXPlayerX1Pro",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 1,
+              "minorMin": 3,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Pro B",
+        "offset": 6239193,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Mini Pro",
+        "offset": 6239906,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1z",
+        "offset": 6240620,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD",
+            "class": "OneXPlayerX1AMD",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 1,
+              "minorMin": 3,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Pro i",
+        "offset": 6241551,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Pro EVA-02",
+        "offset": 6242311,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER G1 A",
+        "offset": 6242804,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER G1 i",
+        "offset": 6243450,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Pro A EVA-02",
+        "offset": 6244245,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X1Air",
+        "offset": 6245311,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2Air",
+        "offset": 6245311,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER SUPER X",
+        "offset": 6246513,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX",
+            "class": "OneXPlayerSuperX",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required",
+              "majorMin": 0,
+              "minorMin": 0
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER APEX",
+        "offset": 6246860,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x1-amd-ec.OneXPlayerApex",
+            "class": "OneXPlayerApex",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "hc-ec-components",
+              "majorMin": 1,
+              "minorMin": 3,
+              "unknownValue": 255
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER Apex i",
+        "offset": 6250821,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER Apex Air",
+        "offset": 6250821,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER SUPER V",
+        "offset": 6252191,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2",
+        "offset": 6255015,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2 EVA",
+        "offset": 6255015,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2 EVA-02",
+        "offset": 6255015,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2Mini",
+        "offset": 6257020,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER 3",
+        "offset": 6259721,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp3-wmi-ec.OneXPlayer3",
+            "class": "OneXPlayer3",
+            "field": "systemProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required",
+              "majorMin": 0,
+              "minorMin": 0
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER 3 EVA-01",
+        "offset": 6259721,
+        "firmwareConditions": [],
+        "matchingLiterals": [],
+        "status": "vendor-enabled-literal-without-runtime-match"
+      },
+      {
+        "manufacturer": "ONE-NETBOOK",
+        "product": "ONEXPLAYER X2Mini PRO",
+        "offset": 6260952,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro",
+            "class": "OneXPlayerX2MiniPro",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "oxp-x2-mini-pro-field-firmware",
+              "bios": "0.22",
+              "ecMajor": 0,
+              "ecMinor": 12
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ASUSTeK COMPUTER INC.",
+        "product": "RC71L",
+        "offset": 6264642,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.asus-ally-acpi.ROGAlly",
+            "class": "ROGAlly",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "ASUSTeK COMPUTER INC.",
+        "product": "RC72LA",
+        "offset": 6264642,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.asus-ally-acpi.ROGAllyX",
+            "class": "ROGAllyX",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "product": "MS-1T41",
+        "offset": 6265545,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.msi-claw-wmi.ClawA1M",
+            "class": "ClawA1M",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "product": "MS-1T42",
+        "offset": 6265545,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.msi-claw-wmi.ClawA2VM",
+            "class": "ClawA2VM",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "product": "MS-1T52",
+        "offset": 6265545,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.msi-claw-wmi.ClawA2VM",
+            "class": "ClawA2VM",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      },
+      {
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "product": "MS-1T8K",
+        "offset": 6265545,
+        "firmwareConditions": [],
+        "matchingLiterals": [
+          {
+            "ruleId": "battery.rule.msi-claw-wmi.ClawBZ2EM",
+            "class": "ClawBZ2EM",
+            "field": "boardProduct",
+            "firmwareGate": {
+              "kind": "provider-probe-required"
+            }
+          }
+        ],
+        "status": "runtime-literal-present-not-validated"
+      }
+    ],
+    "manufacturerOnly": []
   }
 }

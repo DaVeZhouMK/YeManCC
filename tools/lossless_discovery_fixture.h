@@ -303,7 +303,8 @@ inline BOOL WINAPI forbiddenFindNextChangeNotification(HANDLE) { forbidden("file
 inline BOOL WINAPI forbiddenFindCloseChangeNotification(HANDLE) { forbidden("filesystem watcher close"); }
 inline DWORD WINAPI forbiddenWaitForMultipleObjects(DWORD, const HANDLE*, BOOL, DWORD) { forbidden("monitor multiwait"); }
 inline HWND forbiddenScaleMainWindow(DWORD) { forbidden("UIA window discovery"); }
-inline ymcc::lossless::ScaleSnapshot forbiddenObserveScaling(const ymcc::lossless::Identity&, bool&) { forbidden("UIA scaling observation"); }
+inline ymcc::lossless::ScaleSnapshot forbiddenObserveScaling(
+    const ymcc::lossless::Identity&, bool&, const std::function<bool()>& = {}) { forbidden("UIA scaling observation"); }
 } // namespace ymcc::losslessDiscoveryFixture
 
 #define GetProcessId ::ymcc::losslessDiscoveryFixture::fakeGetProcessId
@@ -535,8 +536,8 @@ inline void sharedInventoryGroups() {
     record(scenario,"shared-inventory",observed);
     expect(observed,true,true,"",lossless.pid,lossless.birth,lossless.path);
     const auto first=ymcc::processInventory::read();
-    const ymcc::gameInventory::SharedBasicSnapshot game;
-    require(game.valid()&&game.entries().size()==3,"GAME_AND_RUNTIME_CONSUME_ONE_OWNER");
+    const auto game=ymcc::gameInventory::readSharedBasicSnapshot();
+    require(game==first&&game->basicStatus==ymcc::processInventory::Status::Complete&&game->rows.size()==3,"GAME_AND_RUNTIME_CONSUME_ONE_OWNER");
     const auto queries=state().metrics.queries;
     std::vector<DWORD> pids; DWORD error=ERROR_SUCCESS;
     require(ymcc::processNames::candidates(L"joyxoff.EXE",pids,error,

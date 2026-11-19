@@ -1,8 +1,46 @@
+
+<!-- LIGHT-ISOLATION-RESTORED-20261113 -->
+2026-11-13用户新裁决恢复无游戏轻度隔离，覆盖当日旧退役策略。仅唯一新鲜Complete/noPID且persona关闭、旧Host/pipe/目标/隐藏债已归还可准入；原3秒/750ms及普通兜底保持，虚拟意图revision和公共power capture/current撤销旧票据，虚拟开启/自愈优先且不设Host页面等待门。原普通XUSB65秒否决未因此修复。当前实现/验证/包状态见docs/light-isolation-restored-20261113.md与Testing/YMCC/Evidence/Isolation-Recent-20261111/Field-Win5-20261113-225328/Restore-Light；旧退役和旧成功原件保留。
+<!-- /LIGHT-ISOLATION-RESTORED-20261113 -->
+
+<!-- LIGHT-ISOLATION-RETIRED-20261113 -->
+## 轻隔离执行退役（2026-11-13）
+
+用户要求从实现根部停用轻隔离。无游戏资格与ticket入口不再启用，Steam导航拦截/租约worker/750ms续期已删除；input.gamepadLease在共同请求入口拒绝，页面原表达式也不能重装拦截器。原呼出隔离开关走既有普通隔离路径；虚拟手柄类型、切换/睡眠、自愈预算和能力总库不由本变更改写。保留的FocusLight结构/归还代码供其它原前台交接依赖使用，不再产生轻隔离票据。
+
+证据：Testing/YMCC/Evidence/LightIsolationRetired-20261113。当前6项旧请求拒绝、10项剩余脚本诊断、111项公共离线请求与固定完整Native语法已核；旧轻隔离成功套件保留历史，未据此宣称仍适用于退役策略。完整链接、配套包、部署与实机未验收；原Job强制归还后代身份UNKNOWN单列，不冒称自然退出。
+<!-- /LIGHT-ISOLATION-RETIRED-20261113 -->
 # 虚拟手柄执行与 YMCC 输出屏蔽维护入口
 
 先读同目录`virtual_controller_runtime_contract.h`：启用和YMCC输出屏蔽共用一条时序，四个定义模块同时包含该契约，并在编译时校对30秒/10秒/单次保底约束。
 
 本文件是不可执行的源码旁说明。实际行为以生产函数及 `virtual_start_protection.h` 的 `VC-LIFECYCLE-20261020-R3` 为准。不要增加第二套状态机。
+
+## 公共睡眠发放与隔离锁（2026-11-10）
+
+睡眠通知由 `sleep_power_dispatch.h` 统一收件，`main.cpp` 的共同入口先判断重复／迟到，再交原生命周期执行。各模块只能投影共同 phase／generation／当前许可，不能先收到原始 suspend 就重新挂私锁，再要求“下次电源换代”才能释放。公共 Ready 可以纠正同代陈旧 PowerHold，不要求再收到一次 raw resume，也不要求所有物理输入已经就绪。
+
+`power.lifecycleChanged` 和 `power.lifecycle` 发放同一当前事实；前端由 `powerLifecycleState.ts` 共用一个读回与订阅所有者。乱序收件、失败投递和未知读回分别沿原公共入口补送／只读核对；未知不当 Ready，健康时没有新轮询。`sleep_power_state.h` 只向同进程组件提供48字节纯缓存快照，返回1才是有效事实；suspendSerial保留被合并通知遮住的公共撤销边界。
+
+这不替代虚拟手柄单线执行、原30秒／10秒约束、helper／目标／隐藏配置／实体归还或游戏PID lease。那些是实际资源责任；不得凭公共 Ready 清账、重开旧终态或重放不确定写入。风扇真实 Close/F5、AC/DC来源和独立恢复服务自保也不是第二个系统 Ready 权威。唯一项目历史仍见 `Docs/Research/Sleep/SteamNonSteamRecovery-20261011/STEAM-SLEEP-EXECUTION-BASELINE.md`。本轮证据在 `Testing/YMCC/Evidence/VC-Win5-Intermittent-20261110-111926/power-suspend-root-r1`；软件验证不代表下一实机包已验收。
+
+## 稳定期观察容忍（2026-11-12）
+
+稳态保留原Host修复和已有界自愈。例行可见性首读改为2秒一轮；其精简管道查询由2秒放宽为4秒（用户要求多留2秒）。这是同一请求持续等待，不存在第2秒的独立回调或重发；延迟成功仍须通过原完整回执校验。开启、切换、唤醒和重隐后的强读回保持原有2秒及500ms观察节奏。稳态资格在实际获得Host锁后重核。
+
+单次超过4秒仍无回执时，不能安全复用不知是否还有旧回执的串行流，仍走原真实传输故障及有界恢复。等待仍占用Host锁，最坏提交停顿可更长；此修正减少慢查询触发的断开，不证明底层阻塞已解决或实机必会在4秒内完成。不加后台任务、缓存健康证明或第二条协议。
+
+## 成功后持续运行期自愈（2026-11-10）
+
+`virtual_runtime_recovery_runtime.h` 只接实际 `SUBMIT_FRAME`／`HIDHIDE_QUERY_STATE` 可重试传输错误，且原玩家轮次已经成功结束；健康空闲、临时源未就绪和YMCC呼出隔离不创造故障。仍由原生命周期worker单线执行，旧目标、管道、实体和持久归还完成后，才为玩家原选类型消费一个独立内部恢复轮次。每次仍沿用原10秒检查与30秒硬上限，旧成功／失败终态不重开，等待不记作健康、不退款旧额度，也不改变设置或能力总库。
+
+持续ON不是一次性任务：快速额度用尽后保留需求，按30／60／120秒封顶退避，后续恢复再失败仍先实际回收、再另开有界轮次。原episode和滚动计数保留，新的慢速波次只放行历史动作上限；fallback进行中、未知归还、外来实例和未完成责任均不能被它越过。观察复用原worker并限频到1秒；没有新线程、设备普查或健康态定时重建。OFF、退出、新意图／玩家轮次或电源换代取消。
+
+两条接续边界必须保留：正常failed-Start／quarantine可能先于排队的runtime Stop完成归还，epoch0必须核对真实旧责任与全部资源后继续同一意图，不能当成串台撤销，也不能重放Stop；Start-return为失败清理绑定的后继tuple不能把成功后继永久划入旧故障去重，下一次真实成功后故障仍须受理。旧serial和旧epoch令牌不接管后继。
+
+归还仍由`inputHostTargetReturnAfterRuntimeQuarantineLocked`及原PS／MSI责任层核对精确实例、旧Host与writer退役、支持家族PnP缺席和持久提交。未知或提交失败保留原责任，不能凭XInput缺席或私有布尔值开新目标。
+
+本轮同一生产头的实际软件证据：Win5准备回执丢失后恢复161检查、成功后再次故障的两个观察边界各137检查；随后对齐原用例的1秒模拟时钟，ROG77／MSI101代表路线及正常宏完整TU语法检查通过。前后夹具身份分别保留，不冒充同轮全套613；原失败、封存超时与未跑项均不覆盖。证据见`Testing/YMCC/Evidence/VirtualControllerStability-20261108/win5-persistent-20261110/STATUS.json`。整包、长期实机和游戏消费仍分别验收；65423ms旧helper禁用调用为另一未解决症状。
 
 ## OneX 普通开启接入（2026-11-05）
 

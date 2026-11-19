@@ -8,7 +8,6 @@ export { samePolicyGame, gamePolicyKey } from './gamePolicyHysteresis';
 // target as the top bar. Behaviour-specific debounce must not retain a second PID.
 const listeners = new Set<GameStatusListener>();
 let started = false;
-let ready: Promise<DetectedGame | null> | null = null;
 const notifications: (DetectedGame | null)[] = [];
 let notifying = false;
 
@@ -46,12 +45,9 @@ export function isPolicyTargetCurrent(target: { pid: number; processCreated: str
 export async function detectPolicyGame(): Promise<DetectedGame | null> {
   ensureStarted();
   if (!isGameStatusInitialized()) {
-    if (!ready) {
-      const attempt = refreshGameStatusStrict();
-      ready = attempt;
-      void attempt.finally(() => { if (ready === attempt) ready = null; }).catch(() => {});
-    }
-    await ready;
+    // The shared detector alone owns/coalesces reads and retires their power
+    // scope. A facade Promise must not keep an earlier scope installed.
+    await refreshGameStatusStrict();
   }
   // Read after await: a newer event/selection may have superseded that reply.
   return getPolicyGame();

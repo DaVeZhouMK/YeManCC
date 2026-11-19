@@ -47,7 +47,7 @@ try {
     const html = await renderToString(createSSRApp(Fixture,{persona: name.startsWith('standalone-')?'disabled':['single-ps5','dual-ps5'].includes(name)?'dualsense-edge':name==='dual-ps4'?'dualshock4':name==='legacy-xbox-buttons'?'elite':'steamdeck',ps5Enabled:true,steamDeckEnabled:true}));
     for (const label of expected) assert.ok(html.includes(label.replace(' (Steam内设置)','')), `${name}: missing ${label}`);
     assert.ok(html.includes('aria-label="屏幕触摸板布局"'));
-    for(const label of ['YMCC呼出位置','专用按键组合','背部按键组合'])assert.ok(html.includes('aria-label="'+label+'"'));
+    for(const label of ['呼出YeManCC控制中心位置','专用按键组合','背部按键组合'])assert.ok(html.includes('aria-label="'+label+'"'));
     assert.equal((html.match(/class="screen-control-select(?:\s|")/g) || []).length, 3, 'Three controller-accessible dropdowns are always shown');
     assert.equal(html.includes('aria-label="触摸板触摸反馈"'), expectedOverlays, 'Feedback follows every configured screen control, including special keys when the pad layout is off');
     if(expectedOverlays) {

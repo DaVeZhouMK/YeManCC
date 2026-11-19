@@ -1,0 +1,109 @@
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include "json.hpp"
+using json=nlohmann::json;
+
+static volatile LONG earlyEntered=0,crtStarted=0;
+static DWORD bootstrapThread=0;
+static std::atomic<unsigned> checks{0},failures{0},queries{0};
+template<size_t N>static void rawLine(const char(&line)[N]) noexcept {
+    DWORD wrote=0;WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),line,static_cast<DWORD>(N-1),&wrote,nullptr);
+}
+static LONG CALLBACK earlyException(EXCEPTION_POINTERS* pointers) noexcept {
+    const auto* e=pointers?pointers->ExceptionRecord:nullptr;
+    if(e&&e->ExceptionCode==EXCEPTION_ACCESS_VIOLATION&&e->NumberParameters>=2&&
+        e->ExceptionInformation[0]==0&&e->ExceptionInformation[1]==0x10&&
+        earlyEntered==0&&crtStarted==0&&GetCurrentThreadId()!=bootstrapThread){
+        rawLine("{\"phase\":\"before-crt\",\"status\":\"av-observed\",\"exception\":\"0xc0000005\",\"faultAddress\":\"0x10\",\"onlyThisFixtureTerminated\":true,\"workerBodyEntered\":false,\"crtStarted\":false,\"threadIsBootstrap\":false}\n");
+        // This negative terminates only its own fixture process after observing
+        // the real access violation, avoiding a Windows reporting UI/helper.
+        TerminateProcess(GetCurrentProcess(),101);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+static DWORD WINAPI earlyWorker(void*) noexcept {
+    InterlockedExchange(&earlyEntered,1);return 0;
+}
+extern "C" void mainCRTStartup();
+extern "C" __declspec(noreturn) void fixtureEntry() {
+    bootstrapThread=GetCurrentThreadId();
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
+    auto handler=AddVectoredExceptionHandler(1,earlyException);
+    if(!handler){rawLine("{\"phase\":\"before-crt\",\"status\":\"handler-setup-failed\"}\n");ExitProcess(102);}
+    HANDLE thread=CreateThread(nullptr,0,earlyWorker,nullptr,0,nullptr);
+    if(!thread){rawLine("{\"phase\":\"before-crt\",\"status\":\"thread-setup-failed\"}\n");ExitProcess(102);}
+    const DWORD waited=WaitForSingleObject(thread,5000);DWORD code=999;
+    const BOOL known=GetExitCodeThread(thread,&code);CloseHandle(thread);
+    RemoveVectoredExceptionHandler(handler);
+    if(waited!=WAIT_OBJECT_0||!known||code!=0||earlyEntered!=1){
+        rawLine("{\"phase\":\"before-crt\",\"status\":\"worker-not-confirmed\"}\n");ExitProcess(103);
+    }
+    rawLine("{\"phase\":\"before-crt\",\"status\":\"worker-entered\",\"crtStarted\":false}\n");
+    InterlockedExchange(&crtStarted,1);mainCRTStartup();ExitProcess(104);
+}
+
+static int externalPriorityUsbPortKindWithEvidence(const std::string& root,json* evidence,DWORD desiredAccess) {
+    ++queries;
+    if(!evidence||desiredAccess!=0)throw std::logic_error("unexpected diagnostic port");
+    if(root=="throw")throw std::runtime_error("controlled query failure");
+    const int kind=root=="unknown"?-1:0;
+    *evidence={{"portKind",kind},{"root",root},{"desiredAccess",desiredAccess},
+        {"hops",json::array({json{{"root",root}}})}};
+    return kind;
+}
+#ifdef BASELINE_RUN
+#include "Port.before.inc"
+#else
+#include "Port.candidate.inc"
+#endif
+
+static void check(bool ok,const char* name) {
+    ++checks;if(!ok){++failures;std::printf("{\"failure\":\"%s\"}\n",name);}
+}
+#ifndef BASELINE_RUN
+static json actualFragments(const std::string& root,bool eligible=true) {
+    if(!eligible)return nullptr;
+    struct Episode {std::string root;};Episode e{root};
+    // @@ACTUAL_INITIALIZATION@@
+    check(portEvidence.is_object()&&portEvidence.empty(),"each Start begins with its own empty diagnostic object");
+    // @@ACTUAL_QUERY_CATCH@@
+    json receipt={// @@ACTUAL_RECEIPT_PAIR@@
+    };
+    portEvidence["postReceiptMutation"]=true;
+    check(!receipt.at("usbTopology").contains("postReceiptMutation"),"published diagnostic owns a value snapshot");
+    return receipt.at("usbTopology");
+}
+#endif
+int main() {
+    check(earlyEntered==1&&crtStarted==1,"unrelated thread reached its body before CRT startup");
+#ifdef BASELINE_RUN
+    (void)inputHostOneXPortKind("negative-survived");
+    std::printf("{\"phase\":\"main\",\"status\":\"negative-survived\"}\n");return 0;
+#else
+    const auto before=queries.load();const auto rejected=actualFragments("never-query",false);
+    check(rejected.is_null()&&queries.load()==before,"ineligible Start performs no diagnostic query");
+    const auto first=actualFragments("first");
+    check(first.at("root")=="first"&&first.at("portKind")==0&&first.at("desiredAccess")==0,"actual port forwards zero access and preserves query evidence");
+    check(first.at("hops").size()==1,"hop evidence remains present");
+    const auto unknown=actualFragments("unknown");
+    check(unknown.at("root")=="unknown"&&unknown.at("portKind")==-1,"unknown classification is retained");
+    check(first.at("root")=="first","later Starts cannot overwrite an earlier receipt");
+    const auto failed=actualFragments("throw");
+    check(failed==json{{"reason","diagnostic-query-exception"}},"actual catch emits the original diagnostic failure value");
+    const auto recovered=actualFragments("recovered");
+    check(recovered.at("root")=="recovered"&&!recovered.contains("reason"),"later Start does not retain an earlier failure");
+    json left,right;
+    std::thread a([&]{left=actualFragments("thread-left");});
+    std::thread b([&]{right=actualFragments("thread-right");});
+    a.join();b.join();
+    check(left.at("root")=="thread-left"&&right.at("root")=="thread-right","independent lifecycle callers retain distinct evidence");
+    check(recovered.at("root")=="recovered","other threads cannot mutate a retained caller receipt");
+    std::printf("{\"phase\":\"main\",\"status\":\"%s\",\"checks\":%u,\"failures\":%u,\"realPortAndCallerFragments\":true,\"wholeOneXStart\":false,\"hardwareIo\":false}\n",failures.load()?"fail":"pass",checks.load(),failures.load());
+    return failures.load()?1:0;
+#endif
+}

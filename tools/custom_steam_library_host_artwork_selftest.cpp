@@ -5,7 +5,17 @@
 #undef wWinMain
 #include <iostream>
 static void require(bool value,const char* why){if(!value)throw std::runtime_error(why);}
-static void writeFixtureJson(const fs::path& p, const json& value){writeJsonWithLocalBackup(p,value,false);}
+static void writeFixtureJson(const fs::path& p, const json& value){
+    // Fixture-owned roots need the same existing readiness record as a real
+    // initialized library. Keep the actual Host admission check intact.
+    if(!g_dataRoot.empty()&&!fs::exists(g_dataRoot/L"data-root.json")){
+        fs::create_directories(g_dataRoot);
+        std::ofstream record(g_dataRoot/L"data-root.json",std::ios::binary);
+        record<<json{{"schemaVersion",2},{"dataRoot",toUtf8(g_dataRoot.wstring())},{"createdAt",uint64_t{1}}}.dump();record.close();
+        if(!record.good())throw std::runtime_error("Owned readiness fixture initialization failed");
+    }
+    writeJsonWithLocalBackup(p,value,false);
+}
 static void fixtureFile(const fs::path& p){fs::create_directories(p.parent_path());std::ofstream stream(p,std::ios::binary);stream<<"fixture; local only";}
 int wmain(int argc,wchar_t** argv){
     try{

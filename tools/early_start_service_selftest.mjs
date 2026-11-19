@@ -90,7 +90,19 @@ const msvc='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/To
 const env={...process.env,INCLUDE:[msvc+'/include',sdk+'/Include/'+version+'/um',sdk+'/Include/'+version+'/shared',sdk+'/Include/'+version+'/ucrt',repo+'/deps/json'].join(';'),LIB:[msvc+'/lib/x64',sdk+'/Lib/'+version+'/um/x64',sdk+'/Lib/'+version+'/ucrt/x64'].join(';'),PATH:[msvc+'/bin/Hostx64/x64','C:/Windows/System32',process.env.PATH].join(';')};
 const original=fs.readFileSync(path.join(repo,'native/early_start_service.h'),'utf8');let cpp=fs.readFileSync(path.join(repo,'tools/early_start_service_selftest.cpp'),'utf8');
 const startupHeader=fs.readFileSync(path.join(repo,'native/steam_native_launch_windows.h'),'utf8');
-const startupPrefix=startupHeader.slice(startupHeader.indexOf('namespace ymcc::steamlaunch {'),startupHeader.indexOf('inline std::wstring registryText'))+'\n}\n';
+const startupNamespace=[...startupHeader.matchAll(/^namespace ymcc::steamlaunch \{/gm)];
+const startupEnd=[...startupHeader.matchAll(/^class WindowsPorts \{/gm)];
+assert.equal(startupNamespace.length,1,'Unique Startup namespace');
+assert.equal(startupEnd.length,1,'Unique WindowsPorts boundary');
+assert(startupNamespace[0].index<startupEnd[0].index,'Startup must precede WindowsPorts');
+const launchPathHeader=JSON.stringify(path.join(repo,'native/steam_launch_path.h').replaceAll('\\','/'));
+const startupPrefix='#include '+launchPathHeader+'\n'+startupHeader.slice(startupNamespace[0].index,startupEnd[0].index)+'\n}\n';
+const getterBody=getter.slice(getter.indexOf('-> json {')+'-> json {'.length,getter.lastIndexOf('});'));
+assert.equal(getterBody.split('startup(POWER_CONTROL_DIR);').length,2);assert.equal(getterBody.split('ymcc::earlystart::read()').length,2);
+const adaptedGetter=getterBody.replace('startup(POWER_CONTROL_DIR);','startup(LR"(C:\\SOFT\\YeMan\\PowerControl)",LR"(C:\\fixture\\YeManCC.exe)",fixtureStartupProfile);')
+ .replace('ymcc::earlystart::read()','fixtureEarlyStartState()');
+const getterFixture='static std::wstring fixtureStartupProfile;\nstatic nlohmann::json fixtureEarlyStartState(){return {{"known",true},{"installed",false},{"automatic",false},{"running",false}};}\nstatic nlohmann::json fixtureStartupGet(const nlohmann::json& args){'+adaptedGetter+'}\n';
+fs.writeFileSync(path.join(out,'getter-adaptation.json'),JSON.stringify({productionBodySha256:createHash('sha256').update(getterBody).digest('hex'),adaptedBodySha256:createHash('sha256').update(adaptedGetter).digest('hex'),changes:['Own test profile and executable/root parameters only','Memory-only service observation terminal'],productionBody:getterBody,adaptedBody:adaptedGetter},null,2));
 const startupFixture=String.raw`
 namespace {
 void advancedStartupCases(){
@@ -98,6 +110,11 @@ void advancedStartupCases(){
  const auto root=fs::current_path()/L"owned-startup-fixture";fs::create_directories(root);
  struct Cleanup{fs::path p;~Cleanup(){std::error_code ec;fs::remove_all(p,ec);}}cleanup{root};
  const auto a=root/L"profile-a",b=root/L"profile-b";fs::create_directories(a);fs::create_directories(b);
+ fixtureStartupProfile=a.wstring();
+ const auto rpcAbsent=fixtureStartupGet(nlohmann::json::object());
+ check(rpcAbsent["known"]==true&&rpcAbsent["file"]["exists"]==false&&rpcAbsent["service"]["installed"]==false,"actual startup getter returns owned file and independent service observations");
+ bool invalidRejected=false;try{fixtureStartupGet(nlohmann::json::array());}catch(const std::exception&){invalidRejected=true;}
+ check(invalidRejected,"actual startup getter rejects invalid RPC arguments");
  const std::wstring expected=L"\"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat\"\r\n";
  Startup first(L"C:\\SOFT\\YeMan\\PowerControl",L"C:\\fixture\\YeManCC.exe",a.wstring());
  std::wstring text;check(first.read(text)&&text.empty(),"absent advanced command is an empty owned profile observation");
@@ -115,16 +132,36 @@ void advancedStartupCases(){
  check(first.set(false)&&first.read(text)&&text.empty()&&!first.authorized(),"Xbox-only clears own earlystart command without running BAT");
  check(ymcc::steamlaunch::writeText(first.file,L"\"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.vbs\"\r\n")&&first.set(true,true)&&first.read(text)&&text==expected,"recognized older VBS entry migrates back to original BAT");
  check(fs::exists(first.file)&&!fs::exists(second.file),"only owned fixture profile is written; second profile remains untouched");
+ const auto absent=second.observation();
+ check(absent["known"]==true&&absent["enabled"]==false&&absent["file"]["exists"]==false&&absent["file"]["bytes"]==0,"absent file is distinguished from an existing empty command");
+ auto observed=first.observation();
+ check(observed["file"]["canonical"]==true&&observed["file"]["encoding"]=="utf-8"&&observed["file"]["bytes"]==expected.size(),"canonical command reports exact UTF8 byte length and CRLF");
+ const auto rpcCanonical=fixtureStartupGet(nlohmann::json::object());
+ check(rpcCanonical["file"]==observed["file"]&&rpcCanonical["enabled"]==true&&rpcCanonical["service"]["installed"]==false,"actual getter cannot turn canonical command into ready service proof");
+ check(ymcc::steamlaunch::writeText(second.file,L""),"owned empty file preparation");
+ const auto empty=second.observation();check(empty["known"]==true&&empty["enabled"]==false&&empty["file"]["exists"]==true&&empty["file"]["bytes"]==0,"empty file is not absent preparation proof");
+ check(ymcc::steamlaunch::writeText(first.file,first.command),"owned missing CRLF command preparation");
+ observed=first.observation();check(observed["enabled"]==true&&observed["file"]["canonical"]==false,"recognized command without exact CRLF is not canonical proof");
+ check(first.set(true,true),"restore canonical file before exclusive handle check");
+ HANDLE held=CreateFileW(first.file.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+ check(held!=INVALID_HANDLE_VALUE,"own file exclusive handle acquired");const auto unavailable=first.observation();CloseHandle(held);
+ check(unavailable["known"]==false&&unavailable["file"]["known"]==false&&unavailable["file"]["exists"].is_null()&&unavailable["file"]["bytes"].is_null(),"sharing failure is unknown and never false absence");
+ check(ymcc::steamlaunch::writeText(first.file,L"C:\\Tools\\Other.exe\r\n"),"owned conflicting command preparation");
+ observed=first.observation();check(observed["known"]==true&&observed["conflict"]==true&&observed["file"]["canonical"]==false,"custom command has explicit conflict without returning its content");
+ const auto c=root/L"profile-c";fs::create_directories(c/L".earlystart");Startup directory(L"C:\\SOFT\\YeMan\\PowerControl",L"C:\\fixture\\YeManCC.exe",c.wstring());
+ check(directory.observation()["known"]==false,"directory command target remains unreadable");
 }
 }
 `;
-cpp=cpp.replace('int main()', '#include <filesystem>\n#include <vector>\n#include <array>\n#include <cstring>\n#include <algorithm>\n#include <cwctype>\n#include <shlobj.h>\n'+startupPrefix+startupFixture+'\nint main()').replace('try{','try{advancedStartupCases();');
+cpp=cpp.replace('int main()', '#include <filesystem>\n#include <vector>\n#include <array>\n#include <cstring>\n#include <algorithm>\n#include <cwctype>\n#include <shlobj.h>\n'+startupPrefix+getterFixture+startupFixture+'\nint main()').replace('int main(){try{','int main(){try{advancedStartupCases();');
 const native=[];
 for(const [name,header,expected] of [['current',original,true],['negative-no-auto',original.replace('if(result.state.startType!=SERVICE_AUTO_START){','if(false){'),false],['negative-no-start',original.replace('if(result.state.status==SERVICE_STOPPED){','if(false){'),false]]){
  const dir=path.join(out,name);fs.mkdirSync(dir,{recursive:true});const h=path.join(dir,'early_start_service.h');fs.writeFileSync(h,header);const source=cpp.replace('"../native/early_start_service.h"',JSON.stringify(h.replaceAll('\\','/'))).replace('"../native/boot_mode_platform.h"',JSON.stringify(path.join(repo,'native/boot_mode_platform.h').replaceAll('\\','/')));const file=path.join(dir,'consumer.cpp'),exe=path.join(dir,'consumer.exe');fs.writeFileSync(file,source);
  const compile=spawnSync(msvc+'/bin/Hostx64/x64/cl.exe',['/nologo','/EHsc','/std:c++20','/utf-8','/W4','/DNOMINMAX','/DUNICODE','/D_UNICODE',file,'/Fo'+path.join(dir,'consumer.obj'),'/Fe'+exe,'/link','Advapi32.lib','User32.lib','Shell32.lib','Ole32.lib'],{cwd:dir,env,windowsHide:true,encoding:'utf8',timeout:45000});fs.writeFileSync(path.join(dir,'build.log'),(compile.stdout||'')+(compile.stderr||''));assert.equal(compile.status,0,compile.stdout+compile.stderr);
  const run=spawnSync(exe,[],{cwd:dir,windowsHide:true,encoding:'utf8',timeout:10000});fs.writeFileSync(path.join(dir,'result.log'),(run.stdout||'')+(run.stderr||''));assert.equal(run.status===0,expected,name+' unexpected result '+run.stdout+run.stderr);if(!expected)assert.match(run.stderr,/disabled stopped service becomes automatic and running/);native.push({name,pass:expected?run.status===0:run.status!==0,negative:!expected});
 }
-const inputs=['native/early_start_service.h','native/steam_native_launch_windows.h','native/boot_mode_platform.h','native/main.cpp','src/bridge/yeman.ts','src/bridge/bootModes.ts','src/bridge/gamingHomePolicy.ts','src/components/BootModesPanel.vue','tools/early_start_service_selftest.cpp','tools/early_start_service_selftest.mjs'];
+const inputs=['native/early_start_service.h','native/steam_native_launch_windows.h','native/steam_launch_path.h','native/boot_mode_platform.h','native/main.cpp','src/bridge/yeman.ts','src/bridge/bootModes.ts','src/bridge/gamingHomePolicy.ts','src/components/BootModesPanel.vue','tools/early_start_service_selftest.cpp','tools/early_start_service_selftest.mjs'];
 const sourceHashes=Object.fromEntries(inputs.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')]));
-const result={pass:true,cases,native,bridgeNegative,homeSelectionNegative,sourceHashes,scope:'actual native service policy plus compiled Win32 adapter; memory service/registry/IPC terminals; no real services, registry, applications or keyboard input executed'};fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({pass:true,bridgeAndRegistryCases:cases.length,nativeCases:29,negativeCases:native.filter(row=>row.negative).length+(bridgeNegative?1:0)}));
+const nativeOutput=fs.readFileSync(path.join(out,'current/result.log'),'utf8'),countLine=nativeOutput.trim().split(/\r?\n/).findLast(line=>line.startsWith('{'));
+const nativeCount=JSON.parse(countLine);assert.equal(nativeCount.pass,true);assert.equal(nativeOutput.split(/\r?\n/).filter(line=>line.startsWith('PASS ')).length,nativeCount.passed);
+const result={pass:true,cases,native,nativeCount,bridgeNegative,homeSelectionNegative,sourceHashes,scope:'actual native service policy plus compiled Win32 adapter; memory service/registry/IPC terminals; no real services, registry, applications or keyboard input executed'};fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({pass:true,bridgeAndRegistryCases:cases.length,nativeCases:nativeCount.passed,negativeCases:native.filter(row=>row.negative).length+(bridgeNegative?1:0)}));

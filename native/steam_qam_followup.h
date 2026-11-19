@@ -5,11 +5,13 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include "sleep_power_state.h"
 namespace ymcc::qamfollowup {
 using Json=nlohmann::json;
 inline constexpr UINT_PTR kTimerId=0x594D5141;
 inline constexpr ULONGLONG kWindowMs=3000,kIntervalMs=750;
-struct Ticket {unsigned long long generation=0;ULONGLONG started=0,startedAt=0,power=0;bool deck=false;std::string id;};
+struct Ticket {unsigned long long generation=0;ULONGLONG started=0,startedAt=0,power=0;bool deck=false;std::string id;
+    ymcc::sleeppower::SharedPowerV1 powerScope;};
 inline std::atomic<unsigned long long> generation{1};
 inline std::atomic<bool> pending{false},done{true};
 inline std::mutex mutex;
@@ -78,8 +80,9 @@ inline void CALLBACK timerProc(HWND window,UINT,UINT_PTR id,DWORD) {
     if(!valid(t)){cancel();++finishedCount;return;}
     launch(t,"menu.qam.retry",true);
 }
-inline void begin(HWND owner,bool deck,ULONGLONG power) {
+inline void begin(HWND owner,bool deck,ULONGLONG power,const ymcc::sleeppower::SharedPowerV1* captured=nullptr) {
     cancel();Ticket t;t.generation=generation.load();t.started=GetTickCount64();t.startedAt=unixMilliseconds();t.deck=deck;t.power=power;
+    if(captured)t.powerScope=*captured;
     t.id=std::to_string(GetCurrentProcessId())+"-"+std::to_string(t.generation)+"-"+std::to_string(t.started);
     {std::lock_guard<std::mutex> lock(mutex);current=t;}
     done.store(false,std::memory_order_release);++startedCount;

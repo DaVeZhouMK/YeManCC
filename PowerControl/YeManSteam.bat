@@ -49,14 +49,20 @@ function Test-BootStartupFocusForeground {
     return $front.Name -eq 'explorer' -and $front.Class -in @('Progman','WorkerW','Shell_TrayWnd')
 }
 function Invoke-BootFlow($P) {
+    if($P.ContainsKey('StartupAdmission')) {
+        $admission=& $P.StartupAdmission
+        & $P.Log 'boot-mode-admission' ('mode='+$admission.Mode+' allowed='+$admission.Allowed+' reason='+$admission.Reason)
+        if(-not $admission.Allowed){return 0}
+    }
     $begin=& $P.Now
     $P.FocusState=@{StartedAt=$begin;WindowDone=$false;VirtualDone=$false}
     $quietSince=-1L;$steamSeen=-1L;$requestAt=-1L
     $shown=$false;$affinityDone=$false
     & $P.Log 'boot-start' 'limitMs=60000 minWatchMs=60000 pollMs=500 quietMs=8000 focusPolicy=steam-window+virtual-ready maximumFocusRequests=2 ymccLaunch=disabled'
-    $s=& $P.Snapshot
+    # These two probes only consume Xbox targets. Refresh Steam just before dispatch.
+    $s=& $P.Snapshot -XboxOnly
     if(@($s.Xbox).Count){& $P.CloseXbox $s.Xbox}
-    $s=& $P.Snapshot
+    $s=& $P.Snapshot -XboxOnly
     if(@($s.Xbox).Count){& $P.CloseXbox $s.Xbox}
     & $P.Log 'ymcc-launch-skipped' 'owner=standard-startup batLaunch=False'
     if($P.ContainsKey('NetworkAcceleration')){& $P.NetworkAcceleration}
@@ -96,13 +102,17 @@ function Write-BootLog([string]$Event,[string]$Detail) {
         [IO.File]::AppendAllText($file,$line+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
     }catch{}
 }
-function Start-Quiet([string]$Exe,[string]$Arguments='', [switch]$Capture) {
+function Start-Quiet([string]$Exe,[string]$Arguments='', [switch]$Capture, $BootRequest=$null) {
     $si=[Diagnostics.ProcessStartInfo]::new()
     $si.FileName=$Exe;$si.Arguments=$Arguments;$si.WorkingDirectory=[IO.Path]::GetDirectoryName($Exe)
     $si.UseShellExecute=$false;$si.CreateNoWindow=$true
     if($Capture){$si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true}
     $p=[Diagnostics.Process]::new();$p.StartInfo=$si
     try {
+        if($PSBoundParameters.ContainsKey('BootRequest')) {
+            if($Capture){throw 'startup-dispatch-capture-invalid'}
+            return Invoke-BootSteamDispatch $BootRequest $p
+        }
         if(-not $p.Start()){throw 'Process start returned false'}
         if(-not $Capture){return}
         $a=$p.StandardOutput.ReadToEndAsync();$b=$p.StandardError.ReadToEndAsync()
@@ -193,7 +203,14 @@ function Start-BootNetworkAcceleration {
 function Request-Steam([bool]$Existing) {
     if(-not $script:steamExe){Write-BootLog 'steam-missing' 'install-path-not-found';return}
     $arguments=if($Existing){'steam://open/gamepadui'}else{'-bigpicture -noverifyfiles -nobootstrapupdate -skipinitialbootstrap'}
-    try{Start-Quiet $script:steamExe $arguments;Write-BootLog 'steam-request' $arguments}catch{Write-BootLog 'steam-start-failed' $_.Exception.Message}
+    try {
+        $result=Start-Quiet $script:steamExe $arguments -BootRequest $script:bootSteamRequest
+        if($null -eq $result -or $result.Current -ne $true){throw 'BOOT_STEAM_REQUEST_EXPIRED'}
+        if($result.Submitted){Write-BootLog 'steam-request' $arguments}else{Write-BootLog 'steam-start-failed' $result.Reason}
+    }catch{
+        Write-BootLog 'steam-start-failed' $_.Exception.Message
+        if($_.Exception.Message -eq 'BOOT_STEAM_REQUEST_EXPIRED'){throw}
+    }
 }
 function Initialize-WindowApi {
     Add-Type -TypeDefinition @"
@@ -248,12 +265,15 @@ public static class YmBootWindow {
 }
 "@
 }
-function Get-BootSnapshot {
+function Get-BootSnapshot([switch]$XboxOnly) {
     $xbox=@(Get-BootXboxTargets)
-    $steam=@(Get-Process -Name 'Steam' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})
+    if($XboxOnly){return [pscustomobject]@{Xbox=$xbox}}
+    $steamRunning=$false
     $owners=@{}
-    foreach($helper in @(Get-Process -Name 'steamwebhelper' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})){
-        try{if($script:steamRoot -and $helper.Path.StartsWith(($script:steamRoot+'\bin\cef\'),[StringComparison]::OrdinalIgnoreCase)){$owners[[uint32]$helper.Id]=$helper.StartTime.ToUniversalTime().ToFileTimeUtc()}}catch{}
+    foreach($process in @(Get-Process -Name 'Steam','steamwebhelper' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})){
+        if($process.ProcessName -ieq 'Steam'){$steamRunning=$true;continue}
+        if($process.ProcessName -ine 'steamwebhelper'){continue}
+        try{if($script:steamRoot -and $process.Path.StartsWith(($script:steamRoot+'\bin\cef\'),[StringComparison]::OrdinalIgnoreCase)){$owners[[uint32]$process.Id]=$process.StartTime.ToUniversalTime().ToFileTimeUtc()}}catch{}
     }
     $found=[pscustomobject]@{Hwnd=[IntPtr]::Zero;Pid=0;Birth=0L}
     $callback=[YmBootWindow+Callback]{param($handle,$unused)
@@ -267,7 +287,7 @@ function Get-BootSnapshot {
     }
     [YmBootWindow]::EnumWindows($callback,[IntPtr]::Zero)|Out-Null
     $script:steamWindow=$found.Hwnd;$script:steamWindowPid=$found.Pid;$script:steamWindowBirth=$found.Birth
-    [pscustomobject]@{Xbox=$xbox;SteamRunning=($steam.Count -gt 0);SteamWindow=($found.Hwnd -ne [IntPtr]::Zero)}
+    [pscustomobject]@{Xbox=$xbox;SteamRunning=$steamRunning;SteamWindow=($found.Hwnd -ne [IntPtr]::Zero)}
 }
 function Get-SteamFocusTarget {
     $handle=$script:steamWindow
@@ -577,7 +597,7 @@ function Get-BootInputContext([switch]$RequireCurrentFrame) {
     $context=[pscustomobject]@{state='unavailable';ready=$false;persona='unknown';steamConsumptionProven=$false};$owners=@()
     try{
         $dir=Join-Path $env:LOCALAPPDATA 'YeManCC'
-        $settings=[IO.File]::ReadAllText('C:\SOFT\YeMan\PowerControl\yeman-settings.json',[Text.Encoding]::UTF8)|ConvertFrom-Json
+        $settings=[IO.File]::ReadAllText((Get-BootSettingsPath),[Text.Encoding]::UTF8)|ConvertFrom-Json
         $target=$settings.input.outputTarget;$persona=[string]$target.persona
         if($persona -in @('disabled','off','none') -or ($target.buttonMappingEnabled -eq $false -and $target.gyroEnabled -eq $false)){
             $context=[pscustomobject]@{state='not-requested';ready=$true;persona=$persona;steamConsumptionProven=$false}
@@ -654,12 +674,123 @@ function Invoke-BootDiagnosticTail($P) {
     & $P.Log 'boot-diagnostics-complete' ('elapsedMs='+((& $P.Now)-$begin)+' cleanup=False applicationLaunch=False focusMaximum=2')
 }
 
+function Get-BootSettingsPath {
+    if([string]::IsNullOrWhiteSpace($env:YEMAN_STARTUP_SOURCE)){throw 'startup-source-unavailable'}
+    return [IO.Path]::Combine([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($env:YEMAN_STARTUP_SOURCE)),'yeman-settings.json')
+}
+function Get-BootSteamAdmission($Settings) {
+    if($null -eq $Settings -or $Settings.GetType().FullName -ne 'System.Management.Automation.PSCustomObject'){throw 'startup-settings-invalid'}
+    $extensions=$Settings.PSObject.Properties['extensions']
+    if($null -eq $extensions){return [pscustomobject]@{Allowed=$false;Mode='global';Reason='unconfigured-global'}}
+    if($null -eq $extensions.Value -or $extensions.Value.GetType().FullName -ne 'System.Management.Automation.PSCustomObject'){throw 'startup-extensions-invalid'}
+    $entry=$extensions.Value.PSObject.Properties['bootModes']
+    if($null -eq $entry -or $null -eq $entry.Value){return [pscustomobject]@{Allowed=$false;Mode='global';Reason='unconfigured-global'}}
+    $mode=$entry.Value
+    if($mode.GetType().FullName -ne 'System.Management.Automation.PSCustomObject'){throw 'startup-mode-invalid'}
+    if(@($mode.PSObject.Properties).Count -eq 0){return [pscustomobject]@{Allowed=$false;Mode='global';Reason='unconfigured-global'}}
+    if($mode.schema -isnot [ValueType] -or $mode.schema -is [bool] -or $mode.schema -ne 1){throw 'startup-mode-schema-invalid'}
+    $enabled=$mode.PSObject.Properties['bootEnabled']
+    if($null -ne $enabled -and $enabled.Value -isnot [bool]){throw 'startup-mode-enabled-invalid'}
+    $selected=$mode.PSObject.Properties['boot']
+    $name=if($null -eq $selected){'global'}else{$selected.Value}
+    if($name -isnot [string] -or $name -cnotin @('global','xbox','steam','xbox-steam')){throw 'startup-mode-name-invalid'}
+    if($null -ne $enabled -and -not $enabled.Value){return [pscustomobject]@{Allowed=$false;Mode='global';Reason='disabled-scene-global'}}
+    $allowed=$name -cin @('steam','xbox-steam')
+    return [pscustomobject]@{Allowed=$allowed;Mode=$name;Reason=$(if($allowed){'selected-steam-mode'}else{'selected-non-steam-mode'})}
+}
+function Read-BootSteamAdmission {
+    param([switch]$CaptureRequest,$ExpectedRequest)
+    $file=Get-BootSettingsPath
+    if($PSBoundParameters.ContainsKey('ExpectedRequest') -and ($null -eq $ExpectedRequest -or $ExpectedRequest.SettingsFile -isnot [string] -or
+       -not [string]::Equals($file,$ExpectedRequest.SettingsFile,[StringComparison]::OrdinalIgnoreCase))) {
+        return [pscustomobject]@{Allowed=$false;Mode='global';Reason='startup-source-changed'}
+    }
+    # Missing or unreadable settings cannot authorize an advanced launch.
+    if(-not [IO.File]::Exists($file)){return [pscustomobject]@{Allowed=$false;Mode='global';Reason='settings-missing-global'}}
+    $json=[IO.File]::ReadAllText($file,[Text.Encoding]::UTF8)
+    # Windows PowerShell enumerates a root array on the pipeline. Require the
+    # serialized object root before decoding, so [validSteamDocument] cannot
+    # acquire the authority of that single object.
+    if($json -notmatch '^\s*\{'){throw 'startup-settings-root-invalid'}
+    $settings=ConvertFrom-Json -InputObject $json
+    $admission=Get-BootSteamAdmission $settings
+    if($admission.Allowed -and ($CaptureRequest -or $PSBoundParameters.ContainsKey('ExpectedRequest'))) {
+        $key=Get-BootSteamRequestKey $settings
+        if($PSBoundParameters.ContainsKey('ExpectedRequest') -and $key -cne $ExpectedRequest.Key) {
+            return [pscustomobject]@{Allowed=$false;Mode=$admission.Mode;Reason='startup-request-changed'}
+        }
+        if($CaptureRequest){return [pscustomobject]@{Allowed=$true;Mode=$admission.Mode;Reason=$admission.Reason;Request=[pscustomobject]@{SettingsFile=$file;Key=$key}}}
+    }
+    return $admission
+}
+function Get-BootSteamRequestKey($Settings) {
+    $admission=Get-BootSteamAdmission $Settings
+    if(-not $admission.Allowed){return ''}
+    # The standalone BAT consumes only the selected Steam boot and the existing
+    # selection request identity. Runtime snapshots, receipts, theme/global
+    # saves and input ACKs are not launch authority and cannot replace it.
+    $mode=$Settings.extensions.bootModes
+    $selection=[ordered]@{mode=$admission.Mode;preparation=$null}
+    $entry=$mode.PSObject.Properties['preparation']
+    if($null -ne $entry) {
+        $p=$entry.Value
+        if($null -eq $p -or $p.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
+           $p.schema -isnot [ValueType] -or $p.schema -is [bool] -or $p.schema -ne 1 -or
+           $p.mode -isnot [string] -or $p.mode -cne $admission.Mode -or $p.enabled -isnot [bool] -or -not $p.enabled -or
+           $p.revision -isnot [ValueType] -or $p.revision -is [bool] -or $p.revision -lt 0 -or
+           $p.revision -gt 9007199254740991 -or [Math]::Truncate([double]$p.revision) -ne $p.revision -or
+           ($null -ne $p.observedBoot -and ($p.observedBoot -isnot [string] -or $p.observedBoot.Length -eq 0 -or $p.observedBoot.Length -gt 500))) {
+            throw 'startup-selection-request-invalid'
+        }
+        $selection.preparation=[ordered]@{revision=[long]$p.revision;observedBoot=$p.observedBoot}
+    }
+    return ConvertTo-Json -InputObject $selection -Depth 5 -Compress
+}
+function Invoke-BootSteamDispatch($Request,[Diagnostics.Process]$Process) {
+    $mutex=$null;$held=$false;$current=$false;$submitted=$false
+    $reason='startup-request-invalid';$errorText='';$cleanupError=''
+    try {
+        if($null -ne $Request -and $Request.SettingsFile -is [string] -and $Request.Key -is [string] -and $Request.Key.Length -gt 0) {
+            $reason='settings-lock-error'
+            $mutex=[Threading.Mutex]::new($false,'Local\YeManCC-UnifiedSettings')
+            try{$held=$mutex.WaitOne(2000)}catch [Threading.AbandonedMutexException]{$held=$true}
+            $reason='settings-lock-timeout'
+            if($held) {
+                $reason='settings-read-error'
+                $admission=Read-BootSteamAdmission -ExpectedRequest $Request
+                $reason=$admission.Reason
+                $current=$admission.Allowed -eq $true
+                if($current) {
+                    # Exact final submission boundary. No log, wait or caller
+                    # callback between the locked comparison and Process.Start.
+                    $reason='process-start-error'
+                    $submitted=$Process.Start()
+                    $reason=if($submitted){'submitted'}else{'process-start-returned-false'}
+                }
+            }
+        }
+    } catch {
+        $errorText=$_.Exception.Message
+    } finally {
+        if($held){try{$mutex.ReleaseMutex()}catch{$cleanupError=$_.Exception.Message}}
+        if($null -ne $mutex){try{$mutex.Dispose()}catch{$cleanupError=$_.Exception.Message}}
+    }
+    # Actual submission truth survives failed diagnostics or cleanup reporting.
+    try {Write-BootLog 'steam-final-admission' ('current='+$current+' submitted='+$submitted+' reason='+$reason+' error='+$errorText+' cleanupError='+$cleanupError)}catch{}
+    return [pscustomobject]@{Current=$current;Submitted=$submitted;Reason=$reason}
+}
+
 function Start-YeManBoot {
     $script:session=[Diagnostics.Process]::GetCurrentProcess().SessionId
     $mutex=[Threading.Mutex]::new($false,'Local\YeMan.SteamBoot.SingleBat.v1');$held=$false
     try {
         try{$held=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$held=$true}
         if(-not $held){Write-BootLog 'boot-skip' 'already-active';return 0}
+        $script:bootSteamRequest=$null
+        $admission=Read-BootSteamAdmission -CaptureRequest
+        Write-BootLog 'boot-mode-admission' ('mode='+$admission.Mode+' allowed='+$admission.Allowed+' reason='+$admission.Reason)
+        if(-not $admission.Allowed){return 0}
+        $script:bootSteamRequest=$admission.Request
         $admin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         Write-BootLog 'boot-context' ('administrator='+$admin+' session='+$script:session)
         $script:steamExe=Find-SteamExe
@@ -673,8 +804,9 @@ function Start-YeManBoot {
         $script:xboxSeen=@{};$script:xboxAttempts=@{};$script:xboxPackages=@{};$script:xboxDenied=@{};$script:xboxObserved=0
         $script:inputContext=$null;$script:inputContextAt=-100000L;$script:focusInputContext=$null;$script:focusInputContextAt=-100000L;$script:lastInputSignature='';$script:lastInputLogAt=-100000L;$script:bootFocusStates=@{}
         $ports=@{
+            StartupAdmission={Read-BootSteamAdmission -ExpectedRequest $script:bootSteamRequest}
             Now={$clock.ElapsedMilliseconds};Wait={Start-Sleep -Milliseconds 500};Log={param($E,$D)Write-BootLog $E $D}
-            Snapshot={Get-BootSnapshot};CloseXbox={param($P)Close-BootXbox $P}
+            Snapshot={param([switch]$XboxOnly)Get-BootSnapshot -XboxOnly:$XboxOnly};CloseXbox={param($P)Close-BootXbox $P}
             NetworkAcceleration={Start-BootNetworkAcceleration};StartSteam={Request-Steam $false};ShowSteam={Request-Steam $true}
             FocusContext={Get-BootInputContext -RequireCurrentFrame};FocusSteam={param($Round,$Stage)Focus-Steam $Round $Stage};FocusAllowed={Test-BootStartupFocusForeground}
             Affinity={Set-BootAffinity}
@@ -684,6 +816,7 @@ function Start-YeManBoot {
         $warmup=@{Now=$ports.Now;Wait=$ports.Wait;Snapshot=$ports.Snapshot;CloseXbox=$ports.CloseXbox;Log=$ports.Log;Checkpoint=$ports.Checkpoint;InputContext={Get-BootInputContext}}
         $ports.InputWarmup={Invoke-BootInputWarmup $warmup}
         $result=Invoke-BootFlow $ports
+        if(-not $ports.ContainsKey('FocusState')){return $result}
         $tail=@{Now=$ports.Now;Wait={Start-Sleep -Seconds 10};Snapshot=$ports.Snapshot;Checkpoint=$ports.Checkpoint;Log=$ports.Log;FocusState=$ports.FocusState;FocusContext=$ports.FocusContext;FocusSteam=$ports.FocusSteam;FocusAllowed=$ports.FocusAllowed}
         Invoke-BootDiagnosticTail $tail
         return $result

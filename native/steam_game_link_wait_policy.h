@@ -4,6 +4,7 @@
 #include <limits>
 namespace ymcc::steamlink::waitpolicy {
 using Tick = std::uint64_t;
+enum Hint : unsigned { Immediate = 1, Window = 2 };
 constexpr Tick maximum = (std::numeric_limits<Tick>::max)();
 constexpr Tick add(Tick now, Tick delay) noexcept { return delay > maximum-now ? maximum : now+delay; }
 constexpr std::uint32_t timeout(Tick now, Tick due, bool scheduled) noexcept {

@@ -1,9 +1,18 @@
 ﻿<# Reuses the established real-component/engine UI harness with memory IO.
    Outputs live in a new evidence directory; no installed app is contacted. #>
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$EvidenceDir,[ValidateSet("all","lossless")][string]$Scope="all")
+param([Parameter(Mandatory=$true)][string]$EvidenceDir,[ValidateSet("all","lossless","trainer","overlay","custom-touch","virtual-click-start")][string]$Scope="all",[string]$ToolManifest='',
+ [string]$VirtualStartNativeReceipt='', [string]$VirtualStartNativeReceiptSha256='')
 $ErrorActionPreference='Stop'
-$uiToolEnvKeys=@('YMCC_UI_TOOL_MANIFEST','YMCC_UI_TOOL_HELPER_URL','YMCC_SIM_BROWSER_RUNTIME_ENTRY','ESBUILD_BINARY_PATH','NODE_OPTIONS','NODE_PATH','PLAYWRIGHT_NODEJS_PATH','PSModulePath','YMCC_UI_SCOPE')
+$replayVirtualStart=$PSBoundParameters.ContainsKey('VirtualStartNativeReceipt') -or $PSBoundParameters.ContainsKey('VirtualStartNativeReceiptSha256')
+if($replayVirtualStart){
+ if(-not $PSBoundParameters.ContainsKey('Scope') -or $Scope -cne 'virtual-click-start' -or !$VirtualStartNativeReceipt -or $VirtualStartNativeReceiptSha256 -cnotmatch '^[a-f0-9]{64}$'){throw 'UI_VIRTUAL_START_REPLAY_REQUIRES_RECEIPT_AND_PIN'}
+ $receiptFile=Get-Item -LiteralPath $VirtualStartNativeReceipt
+ if($receiptFile.PSIsContainer -or $receiptFile.Length -lt 1 -or $receiptFile.Length -gt 1048576){throw 'UI_VIRTUAL_START_REPLAY_RECEIPT_SIZE'}
+ $receiptBytes=[IO.File]::ReadAllBytes($receiptFile.FullName)
+ if([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($receiptBytes)).ToLowerInvariant() -cne $VirtualStartNativeReceiptSha256){throw 'UI_VIRTUAL_START_REPLAY_RECEIPT_IDENTITY'}
+}
+$uiToolEnvKeys=@('YMCC_UI_TOOL_MANIFEST','YMCC_UI_TOOL_HELPER_URL','YMCC_SIM_BROWSER_RUNTIME_ENTRY','ESBUILD_BINARY_PATH','NODE_OPTIONS','NODE_PATH','PLAYWRIGHT_NODEJS_PATH','PSModulePath','YMCC_UI_SCOPE','YMCC_UI_VIRTUAL_START_REPLAY_SHA256')
 $uiToolEnvironment=@{};foreach($key in $uiToolEnvKeys){$uiToolEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 # The outer owned Job remains supplied by the shared runner; this pins only this script and its tool children.
 $env:PSModulePath=$PSHOME+[IO.Path]::DirectorySeparatorChar+'Modules'
@@ -14,7 +23,7 @@ $EvidenceDir=[IO.Path]::GetFullPath($EvidenceDir)
 if($EvidenceDir.StartsWith($repo.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'UI evidence must be outside source'}
 if(Test-Path -LiteralPath $EvidenceDir){throw 'UI evidence directory must be fresh'}
 New-Item -ItemType Directory -Path $EvidenceDir,(Join-Path $EvidenceDir 'site'),(Join-Path $EvidenceDir 'evidence') | Out-Null
-$uiToolManifest=Join-Path $PSScriptRoot 'toolchain-inputs.json'
+$uiToolManifest=if($ToolManifest){[IO.Path]::GetFullPath($ToolManifest)}else{Join-Path $PSScriptRoot 'toolchain-inputs.json'}
 $uiToolHelper=Join-Path $PSScriptRoot 'tool-inputs.mjs'
 $uiToolSpec=Get-Content -LiteralPath $uiToolManifest -Raw -Encoding UTF8 | ConvertFrom-Json
 $uiNodeSpec=$uiToolSpec.executables.node
@@ -36,10 +45,21 @@ foreach($row in $templateBefore.files){$sourceHashes['tools/ymcc_sim/global/ui-n
 $sourceHashes['tools/ymcc_sim/global/ui-navigation/Run-Ui.ps1']=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['tools/ymcc_sim/global/ui-navigation/source-contract.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'source-contract.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
 try {
+ $env:YMCC_UI_VIRTUAL_START_REPLAY_SHA256=$null
+ if($replayVirtualStart){
+  $copy=[IO.File]::Open((Join-Path $EvidenceDir 'virtual-start-native-receipt.json'),'CreateNew','Write')
+  try{$copy.Write($receiptBytes)}finally{$copy.Dispose()}
+  $env:YMCC_UI_VIRTUAL_START_REPLAY_SHA256=$VirtualStartNativeReceiptSha256
+ }
  $stage='tool-preflight'
  & $node $uiToolHelper --phase pre --repo-root $repo --evidence-dir $EvidenceDir --manifest $uiToolManifest --powershell-path ([Environment]::ProcessPath) *> (Join-Path $EvidenceDir 'tool-preflight.log')
  if($LASTEXITCODE -ne 0){throw 'UI_TOOL_PREFLIGHT_FAILED'}
  Copy-SimUiTemplateSnapshot -Snapshot $templateBefore -Destination $EvidenceDir
+ if($replayVirtualStart){
+  $stage='virtual-start-replay-admission'
+  & $node (Join-Path $EvidenceDir 'virtualStartProtectionCases.mjs') --check-native-failed-commit (Join-Path $EvidenceDir 'virtual-start-native-receipt.json') $VirtualStartNativeReceiptSha256 *> (Join-Path $EvidenceDir 'virtual-start-replay-admission.log')
+  if($LASTEXITCODE -ne 0){throw 'UI_VIRTUAL_START_REPLAY_FIRST_REQUEST_UNPROVEN'}
+ }
  $env:YMCC_UI_SOURCE_ROOT=$repo
  $stage='build'
  & $node (Join-Path $EvidenceDir 'build.mjs') *> (Join-Path $EvidenceDir 'build.log')
@@ -60,16 +80,26 @@ try {
  & $node (Join-Path $EvidenceDir 'verify.mjs') *> (Join-Path $EvidenceDir 'verify.log')
  if($LASTEXITCODE -ne 0){throw 'REAL_ENGINE_NAVIGATION_FAILED'}
  $stage='source-gate'
- if($scopeEffective -eq 'lossless'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --lossless *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ if($scopeEffective -eq 'overlay'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --overlay *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ elseif($scopeEffective -eq 'lossless'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --lossless *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ elseif($scopeEffective -eq 'trainer'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --trainer *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ elseif($scopeEffective -eq 'custom-touch'){& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir --custom-touch *> (Join-Path $EvidenceDir 'release-gate.txt')}
+ elseif($scopeEffective -eq 'virtual-click-start'){
+  # The verifier checks exact scoped actions and source identity, not the formal release gate.
+  'NOT_RUN (explicit virtual-click-start only)' | Set-Content -LiteralPath (Join-Path $EvidenceDir 'release-gate.txt') -Encoding UTF8
+ }
  else{& $node (Join-Path $repo 'tools\gamepad_ui_release_gate.mjs') $EvidenceDir *> (Join-Path $EvidenceDir 'release-gate.txt')}
  if($LASTEXITCODE -ne 0){throw 'CURRENT_UI_SOURCE_GATE_FAILED'}
  $build=Get-Content -LiteralPath (Join-Path $EvidenceDir 'build-result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  $nav=Get-Content -LiteralPath (Join-Path $EvidenceDir 'navigation-gate.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  if($build.pass -ne $true -or $nav.pass -ne $true -or $nav.inputsUnchanged -ne $true){throw 'UI_RECEIPT_INCOMPLETE'}
+ $virtualClickExpected=if($replayVirtualStart){2}else{6}
+ if($scopeEffective -eq 'virtual-click-start' -and ($nav.scope -cne $scopeEffective -or $nav.actionCases -ne $virtualClickExpected -or $nav.states -ne 0 -or $nav.fullUiAccepted -ne $false)){throw 'UI_VIRTUAL_CLICK_START_SCOPE_MISMATCH'}
+ if($replayVirtualStart -and $nav.nativeReplay.sha256 -cne $VirtualStartNativeReceiptSha256){throw 'UI_VIRTUAL_START_REPLAY_NOT_CONSUMED'}
  foreach($property in $build.sourceHashes.PSObject.Properties){$sourceHashes[$property.Name]=$property.Value}
  # Keep the exact pre-copy identities instead of hashing newer templates.
  $status='PASS'
-} catch { $failure=[ordered]@{stage=$stage;code='UI_NAVIGATION_OR_SOURCE_RECEIPT_FAILED';exceptionType=$_.Exception.GetType().FullName} }
+} catch { $failure=[ordered]@{stage=$stage;code=$(if($stage -eq 'virtual-start-replay-admission'){'UI_VIRTUAL_START_REPLAY_FIRST_REQUEST_UNPROVEN'}else{'UI_NAVIGATION_OR_SOURCE_RECEIPT_FAILED'});exceptionType=$_.Exception.GetType().FullName} }
 finally {
  $env:YMCC_UI_SOURCE_ROOT=$previousRoot
  if($server){
@@ -85,7 +115,9 @@ if($server -and -not $closed){$status='FAIL';$failure=[ordered]@{stage='cleanup'
 try {
  & $node $uiToolHelper --phase post --repo-root $repo --evidence-dir $EvidenceDir --manifest $uiToolManifest --powershell-path ([Environment]::ProcessPath) *> (Join-Path $EvidenceDir 'tool-postflight.log')
  if($LASTEXITCODE -ne 0){throw 'UI_TOOL_POSTFLIGHT_FAILED'}
- foreach($name in @('build-tool-runtime.json','verify-tool-runtime.json')){if(-not(Test-Path -LiteralPath (Join-Path $EvidenceDir $name))){throw 'UI_TOOL_STAGE_RECEIPT_MISSING'}}
+ if($failure.stage -ne 'virtual-start-replay-admission'){
+  foreach($name in @('build-tool-runtime.json','verify-tool-runtime.json')){if(-not(Test-Path -LiteralPath (Join-Path $EvidenceDir $name))){throw 'UI_TOOL_STAGE_RECEIPT_MISSING'}}
+ }
 }catch{$status='FAIL';$uiToolFailure=@{stage='tool-postflight';code='UI_TOOL_RUNTIME_CLOSURE_UNCONFIRMED'};if($failure){$failure['toolPostflight']=$uiToolFailure}else{$failure=$uiToolFailure}}
 foreach($key in $uiToolEnvKeys){[Environment]::SetEnvironmentVariable($key,$uiToolEnvironment[$key],'Process')}
 [ordered]@{schemaVersion=1;status=$status;scope=$scopeEffective;fullUiAccepted=($scopeEffective -eq 'all' -and $status -eq 'PASS');sourceHashes=$sourceHashes;failure=$failure;states=$(if($nav){$nav.states}else{0});directions=$(if($nav){$nav.directions}else{0});actionCases=$(if($nav){$nav.actionCases}else{0});sourceChanges=$templateChanges;templateSourceStable=$templateStable;executedProductModules=(@($build.components | Where-Object {$_ -match '^src[\\/]'} )+@('src/gamepad/engine.ts','src/gamepad/spatial.ts','src/gamepad/focus.ts'));sourceScopeMeaning='repository-relative keys are product/tool sources; absolute case keys are run-local fixture sources';hardwareValidated=$false;operatingSystemSleepPerformed=$false;installedApplicationMutated=$false;ownServerClosed=$closed;serverPid=$serverPid;serverCreatedUtc=$createdUtc;boundary='real components and engine with explicit memory IO; not physical controller acceptance'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'verification.json') -Encoding UTF8

@@ -5,42 +5,81 @@ import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {sourcePath} from '../runner.mjs';
 import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools,verifyBundledImplementation,verifyBundledToolScope,classifyBundledInput} from '../bundled-node-tool-authority.mjs';
-import {getInputToolDeclaration,authorizeInputFile,parseInputLibraries,fileKey} from './inputs.mjs';
+import {authorizeInputFile,parseInputLibraries,fileKey} from './inputs.mjs';
 import {runObservedInputTool,sourceDependenciesResponseArgument,linkerResponseArguments} from './native-identity.mjs';
-import {calibrationToolchainPreamble} from '../../../fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {startupToolchainEnvironment,verifyStartupToolchain} from '../controller-startup-return/toolchain.mjs';
 const modulePath='tools/ymcc_sim/global/input-signals';
 export const FOLLOWUP_IDENTITY_SOURCES=Object.freeze([...BUNDLED_AUTHORITY_SOURCES,
- 'src/radial/testingState.ts','src/radial/availability.ts',
- ...['input-followup-tool-scope.mjs','input-followup-native-additions.json','inputs.mjs','native-identity.mjs','identity.mjs','tool-inputs.json'].map(name=>modulePath+'/'+name)]);
+ 'src/radial/testingState.ts','src/radial/availability.ts','tools/ymcc_sim/global/controller-startup-return/toolchain.mjs',
+ ...['input-followup-tool-scope.mjs','input-followup-native-additions.json','inputs.mjs','native-identity.mjs','identity.mjs'].map(name=>modulePath+'/'+name)]);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hashFile=file=>hash(fs.readFileSync(file));
 const need=(ok,code)=>{if(!ok)throw Error('FOLLOWUP_'+code);};
 const inside=(root,file)=>{const relative=path.relative(root,file);return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
 const quote=value=>{need(!/["%\r\n]/.test(value),'UNSAFE_BUILD_PATH');return '"'+value+'"';};
 function uniqueTools(rows){const map=new Map();for(const row of rows){const key=fileKey(row.path),previous=map.get(key);need(!previous||previous.sha256===row.sha256,'TOOL_IDENTITY_CONFLICT');map.set(key,{path:path.resolve(row.path),sha256:row.sha256,status:'OK'});}need(map.size<=3072,'ARTIFACT_BUDGET_EXCEEDED');return [...map.values()].sort((a,b)=>a.path<b.path?-1:1);}
-function nativeDeclaration(repo){const original=getInputToolDeclaration(repo),extra=JSON.parse(fs.readFileSync(sourcePath(repo,modulePath+'/input-followup-native-additions.json'),'utf8'));need(extra.schemaVersion===1&&extra.kind==='input-followup-additional-installed-native-headers'&&Array.isArray(extra.files),'NATIVE_ADDITIONS_SCHEMA');const tool={...original,files:uniqueTools([...original.files,...extra.files])};for(const row of tool.files)need(hashFile(row.path)===row.sha256,'NATIVE_DECLARED_TOOL_CHANGED:'+row.path);return tool;}
+function nativeDeclaration(repo){
+ const tool=JSON.parse(fs.readFileSync(sourcePath(repo,modulePath+'/input-followup-native-additions.json'),'utf8'));
+ need(tool.schemaVersion===2&&tool.kind==='fixed-startup-return-x64-v1'&&tool.platform===process.platform&&process.platform==='win32'&&process.arch==='x64','NATIVE_FIXED_TOOLCHAIN_SCHEMA');
+ const bin=path.join(tool.msvcRoot,'bin/Hostx64/x64');
+ const expectedDirs=[bin,path.join(bin,'1033')].map(fileKey),rows=tool.directories??[];
+ need(rows.length===expectedDirs.length&&rows.every((row,index)=>fileKey(row.path)===expectedDirs[index]),'NATIVE_COMPILER_DIRECTORIES_CHANGED');
+ need(Array.isArray(tool.files)&&tool.files.every(row=>inside(tool.msvcRoot,row.path)||inside(tool.sdkRoot,row.path)),'NATIVE_TOOL_OUTSIDE_FIXED_ROOTS');
+ const pins=new Set(tool.files.map(row=>fileKey(row.path)));
+ for(const name of ['cl.exe','link.exe','dumpbin.exe','lib.exe','cl.exe.config','link.exe.config'])need(pins.has(fileKey(path.join(bin,name))),'NATIVE_FIXED_TOOL_MISSING:'+name);
+ verifyStartupToolchain(tool);
+ return {...tool,compiler:path.join(bin,'cl.exe'),linker:path.join(bin,'link.exe'),dumpbin:path.join(bin,'dumpbin.exe'),librarian:path.join(bin,'lib.exe')};
+}
 export function followupToolDeclaration(repo){
- try{const authority=lockBundledNodeTools(repo),tool=nativeDeclaration(repo);for(const row of tool.files.filter(row=>row.path.split(/[\\/]/).includes('node_modules')))need(authority.tools.some(pin=>fileKey(pin.path)===fileKey(row.path)&&pin.sha256===row.sha256),'NATIVE_EXTRA_NODE_TOOL_NOT_BOUND');return {artifactInputs:uniqueTools([...authority.tools,...tool.files]).map(row=>row.path)};}
+ try{const tool=nativeDeclaration(repo),authority=lockBundledNodeTools(repo);return {artifactInputs:uniqueTools([...authority.tools,...tool.files]).map(row=>row.path)};}
  catch(error){return {artifactInputs:[],blockedReason:'INPUT_FOLLOWUP_TOOL_AUTHORITY_UNAVAILABLE: '+error.message};}
 }
+function requireDirectDirectory(directory){
+ const stat=fs.lstatSync(directory);
+ need(stat.isDirectory()&&!stat.isSymbolicLink()&&fileKey(fs.realpathSync(directory))===fileKey(directory),'OWNED_WORK_DIRECTORY_REQUIRED');
+}
+function checkFreshFollowupDirectory(repo,directory){
+ need(fileKey(directory)!==fileKey(repo)&&!inside(repo,directory),'OWNED_WORK_DIRECTORY_REQUIRED');
+ for(let cursor=directory;;cursor=path.dirname(cursor)){
+  try{
+   fs.lstatSync(cursor);
+  }catch(error){if(error.code==='ENOENT'&&path.dirname(cursor)!==cursor)continue;throw error;}
+  need(cursor!==directory,'FRESH_WORK_DIRECTORY_REQUIRED');
+  requireDirectDirectory(cursor);
+  return;
+ }
+}
 export function beginFollowupScope(repoRoot,workDir,sourceInputs){
- const repo=fs.realpathSync(repoRoot);verifyBundledImplementation(repo);
- const directory=path.resolve(workDir);need(!fs.existsSync(directory),'FRESH_WORK_DIRECTORY_REQUIRED');
- fs.mkdirSync(directory,{recursive:true});need(fileKey(fs.realpathSync(directory))===fileKey(directory)&&!inside(repo,directory),'OWNED_WORK_DIRECTORY_REQUIRED');
- const authority=lockBundledNodeTools(repo),tool=nativeDeclaration(repo),tools=uniqueTools([...authority.tools,...tool.files]);
+ const repo=fs.realpathSync(repoRoot),directory=path.resolve(workDir);
+ checkFreshFollowupDirectory(repo,directory);
+ verifyBundledImplementation(repo);
+ const tool=nativeDeclaration(repo),authority=lockBundledNodeTools(repo),tools=uniqueTools([...authority.tools,...tool.files]);
  const sources=sourceInputs.map(relative=>({path:relative,sha256:hashFile(sourcePath(repo,relative))}));
  const sourceMap=new Map(sources.map(row=>[fileKey(sourcePath(repo,row.path)),row]));
  const toolMap=new Map(tools.map(row=>[fileKey(fs.realpathSync(row.path)),row]));
+ const parent=path.dirname(directory);fs.mkdirSync(parent,{recursive:true});requireDirectDirectory(parent);
+ fs.mkdirSync(directory);requireDirectDirectory(directory);
  const scope={repoRoot:repo,directory,authority,tools,assets:new Map(),sources,observedSources:new Map(),observedTools:new Map(),bundles:[],native:null,phases:[],declaration:{repoRoot:repo,sources,sourceMap,tool,toolMap}};
  verifyFollowupScope(scope,'begin');return scope;
 }
 export function verifyFollowupScope(scope,phase){
  const proof=verifyBundledToolScope(scope.authority,scope.repoRoot);
  need(fileKey(fs.realpathSync(scope.directory))===fileKey(scope.directory),'OWNED_DIRECTORY_FORWARDED');
- for(const row of scope.tools)need(fileKey(fs.realpathSync(row.path))===fileKey(row.path)&&hashFile(row.path)===row.sha256,'TOOL_CHANGED:'+row.path);
- for(const row of scope.sources)need(hashFile(sourcePath(scope.repoRoot,row.path))===row.sha256,'SOURCE_CHANGED:'+row.path);
+ // Only this checkpoint's fresh tool proof and source reads may be reused.
+ const nodeDigests=new Map(proof.tools.map(row=>[fileKey(row.path),row.sha256]));
+ for(const row of scope.tools){
+  const key=fileKey(row.path);
+  need(fileKey(fs.realpathSync(row.path))===key&&(nodeDigests.get(key)??hashFile(row.path))===row.sha256,'TOOL_CHANGED:'+row.path);
+ }
+ const sourceDigests=new Map();
+ const checkSource=(row,code)=>{
+  const file=sourcePath(scope.repoRoot,row.path);
+  if(!sourceDigests.has(file))sourceDigests.set(file,hashFile(file));
+  need(sourceDigests.get(file)===row.sha256,code+row.path);
+ };
+ for(const row of scope.sources)checkSource(row,'SOURCE_CHANGED:');
  for(const row of scope.assets.values())need(inside(scope.directory,row.path)&&fileKey(fs.realpathSync(row.path))===fileKey(row.path)&&hashFile(row.path)===row.sha256,'OWNED_OUTPUT_CHANGED:'+row.path);
- for(const row of scope.observedSources.values())need(hashFile(sourcePath(scope.repoRoot,row.path))===row.sha256,'LOADED_SOURCE_CHANGED:'+row.path);
+ for(const row of scope.observedSources.values())checkSource(row,'LOADED_SOURCE_CHANGED:');
  const record={phase,packageCount:proof.packageCount,fileCount:proof.fileCount,graphSha256:proof.graphSha256,declaredToolCount:scope.tools.length,ownedOutputs:scope.assets.size,verified:true};scope.phases.push(record);return record;
 }
 export function bindFollowupOutput(scope,file,role){
@@ -82,32 +121,29 @@ export function verifyFollowupVmCode(scope,built,phase){need(hash(Buffer.from(bu
 function adoptObserved(scope,name){for(const suffix of ['.stdout.log','.stderr.log','.process.json'])bindFollowupOutput(scope,path.join(scope.directory,name+suffix),'original observed native tool ledger');}
 export async function buildAuditedFollowupNative(scope,{fixture,generated}){
  verifyFollowupScope(scope,'native:before-compile');
- const tool=scope.declaration.tool,dumpbin=path.join(path.dirname(tool.compiler),'dumpbin.exe');
- for(const [file,role]of [[tool.compiler,'cl'],[tool.linker,'link'],[path.join(path.dirname(tool.compiler),'lib.exe'),'lib'],[dumpbin,'dumpbin'],[tool.vcvars,'vcvars'],[tool.where,'where']])authorizeInputFile(scope.declaration,file,'native-'+role);
- const located=await runObservedInputTool(scope,'native-vswhere',tool.vswhere,['-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],{timeout:10000});adoptObserved(scope,'native-vswhere');need(located.record.exitCode===0&&!located.record.error,'VSWHERE_FAILED');need(fileKey(path.join(located.stdout.toString('utf8').trim(),'VC/Auxiliary/Build/vcvars64.bat'))===fileKey(tool.vcvars),'VCVARS_NOT_DECLARED');
+ const tool=scope.declaration.tool;
+ const selections={};
+ for(const [name,file,role]of [['cl.exe',tool.compiler,'exact-compiler-command'],['link.exe',tool.linker,'fixed-compiler-linker'],['lib.exe',tool.librarian,'pinned-librarian-not-executed'],['dumpbin.exe',tool.dumpbin,'exact-import-audit-command']])selections[name]=authorizeInputFile(scope.declaration,file,role);
  const dir=path.join(scope.directory,'native');fs.mkdirSync(dir);
  for(const [name,text]of Object.entries(generated)){need(path.basename(name)===name,'GENERATED_INCLUDE_PATH');writeOutput(scope,path.join(dir,name),text,'exact source-extracted C++ include');}
  const source=path.join(dir,'fixture.cpp');writeOutput(scope,source,fs.readFileSync(fixture),'unchanged original native fixture');
  const executable=path.join(dir,'input-diagnostic-followup.exe'),deps=path.join(dir,'source-dependencies.json'),obj=path.join(dir,'fixture.obj');
- const rsp=path.join(dir,'compile.rsp'),cmd=path.join(dir,'compile.cmd'),paths=path.join(dir,'selected-tools.txt');
- const args=['/nologo','/std:c++17','/EHsc','/O1','/MT','/utf-8',`/I${quote(scope.repoRoot)}`,`/I${quote(dir)}`,quote(source),`/Fo:${quote(obj)}`,`/Fe:${quote(executable)}`,sourceDependenciesResponseArgument(deps),linkerResponseArguments()+' /INCREMENTAL:NO /NODEFAULTLIB:user32.lib'];
+ const rsp=path.join(dir,'compile.rsp');
+ const args=['/nologo','/std:c++20','/EHsc','/O1','/MT','/utf-8',`/I${quote(scope.repoRoot)}`,`/I${quote(dir)}`,quote(source),`/Fo:${quote(obj)}`,`/Fe:${quote(executable)}`,sourceDependenciesResponseArgument(deps),linkerResponseArguments()+' /INCREMENTAL:NO /NODEFAULTLIB:user32.lib'];
  writeOutput(scope,rsp,args.join('\r\n'),'actual unchanged compile options plus dependency/link trace');
- const commands=calibrationToolchainPreamble(tool.vcvars)+'set "CL="\r\nset "_CL_="\r\nset "LINK="\r\nset "_LINK_="\r\n'+['cl.exe','link.exe','lib.exe','dumpbin.exe'].map(name=>'where '+name+' >> selected-tools.txt\r\nif errorlevel 1 exit /b 1\r\n').join('')+'cl.exe @compile.rsp\r\nexit /b %errorlevel%\r\n';
- writeOutput(scope,cmd,commands,'reviewed calibration setup and exact native compile invocation');
- const env={...process.env};for(const name of ['CL','_CL_','LINK','_LINK_','INCLUDE','LIB','LIBPATH','VCToolsInstallDir','VCINSTALLDIR','WindowsSDKVersion','WindowsSdkDir'])delete env[name];env.VSCMD_SKIP_SENDTELEMETRY='1';
- const result=await runObservedInputTool(scope,'native-compile',tool.commandProcessor,['/d','/c','compile.cmd'],{cwd:dir,env});adoptObserved(scope,'native-compile');
+ const env={...startupToolchainEnvironment(tool),TEMP:dir,TMP:dir};
+ const environment=saveFollowupOutput(scope,'native-environment.json',JSON.stringify(env,null,2)+'\n','fixed native child environment');
+ const result=await runObservedInputTool(scope,'native-compile',tool.compiler,['@compile.rsp'],{cwd:dir,env});adoptObserved(scope,'native-compile');
  need(result.record.exitCode===0&&!result.record.error&&!result.record.signal&&!result.record.killed,'NATIVE_COMPILE_FAILED');
- bindFollowupOutput(scope,paths,'actual shell tool selections');const selected=fs.readFileSync(paths,'utf8').trim().split(/\r?\n/);
- const selections={};for(const name of ['cl.exe','link.exe','lib.exe','dumpbin.exe']){const actual=selected.find(file=>path.basename(file).toLowerCase()===name);need(actual&&fileKey(actual)===fileKey(path.join(path.dirname(tool.compiler),name)),'ACTUAL_NATIVE_TOOL_PATH_CHANGED:'+name);selections[name]=authorizeInputFile(scope.declaration,actual,'actual-command-selected-'+name);}
  const dependency=JSON.parse(fs.readFileSync(deps,'utf8').replace(/^\uFEFF/,''));need(fileKey(dependency?.Data?.Source??'')===fileKey(source)&&Array.isArray(dependency.Data.Includes)&&dependency.Data.Includes.length>0,'SOURCE_DEPENDENCIES_REQUIRED');
  const headers=[dependency.Data.Source,...dependency.Data.Includes].map(file=>authorizeInputFile(scope.declaration,file,'actual-native-header-or-source'));
  const libraries=parseInputLibraries(result.stdout,result.stderr).map(row=>({...row,...authorizeInputFile(scope.declaration,row.path,row.role)}));
  for(const file of [deps,obj,executable])bindFollowupOutput(scope,file,'actual nested native compilation output');
- const audit=await runObservedInputTool(scope,'native-dumpbin',dumpbin,['/imports',executable],{cwd:dir});adoptObserved(scope,'native-dumpbin');need(audit.record.exitCode===0&&!audit.record.error&&!audit.record.signal,'DUMPBIN_FAILED');
+ const audit=await runObservedInputTool(scope,'native-dumpbin',tool.dumpbin,['/imports',executable],{cwd:dir,env});adoptObserved(scope,'native-dumpbin');need(audit.record.exitCode===0&&!audit.record.error&&!audit.record.signal,'DUMPBIN_FAILED');
  const imports=Buffer.concat([audit.stdout,audit.stderr]).toString('utf8').toLowerCase();
  const forbidden=['user32.dll','win32u.dll','shell32.dll','ole32.dll','sendinput','keybd_event','getasynckeystate'].filter(token=>imports.includes(token));need(!forbidden.length,'FORBIDDEN_NATIVE_INPUT_IMPORT:'+forbidden.join(','));
  const importAudit={status:'PASS',forbiddenImports:forbidden,sha256:hash(audit.stdout),path:path.join(scope.directory,'native-dumpbin.stdout.log')};
- const identity={schemaVersion:1,scope:'Actual sourceDependencies and original ordered linker-library records; declared compiler support, not an OS loaded-module graph',selections,headers,libraries,dependency:{path:deps,sha256:hashFile(deps)},executable:{path:executable,sha256:hashFile(executable)},importAudit};
+ const identity={schemaVersion:1,scope:'Actual sourceDependencies and original ordered linker-library records; declared compiler support, not an OS loaded-module graph',selections,environment,headers,libraries,dependency:{path:deps,sha256:hashFile(deps)},executable:{path:executable,sha256:hashFile(executable)},importAudit};
  const ledger=saveFollowupOutput(scope,'native-compiler-inputs.json',JSON.stringify(identity,null,2)+'\n','actual compiler header/library/output identity ledger');scope.native={...identity,ledger};
  verifyFollowupScope(scope,'native:after-compile');return {dir,executable,executableSha256:identity.executable.sha256,importAudit};
 }

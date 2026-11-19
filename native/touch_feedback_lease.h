@@ -1,6 +1,7 @@
 #pragma once
 #include "touch_haptic_dispatch.h"
 #include <cstdint>
+#include <type_traits>
 namespace ymcc::touchhaptic {
 // Serialized by the existing feedback owner. Ops owns platform resources.
 // Exactly one stable-generation resource or one retired in-flight resource.
@@ -20,7 +21,10 @@ private:
         if(!resource_)return true;
         retiring_=true;
         if(Ops::pending(*resource_)){Ops::cancel(*resource_);if(!Ops::reap(*resource_))return false;}
-        Ops::close(resource_);resource_=nullptr;key_={};++stats.closes;retiring_=false;return true;
+        if constexpr(std::is_same_v<decltype(Ops::close(resource_)),bool>){
+            if(!Ops::close(resource_))return false;
+        }else Ops::close(resource_);
+        resource_=nullptr;key_={};++stats.closes;retiring_=false;return true;
     }
     void block(const SourceToken& key,Reason reason,std::uint32_t error)noexcept {
         blocked_=true;blockedKey_=key;blockedReason_=reason;blockedError_=error;nextRetry_=Ops::now()+retryMs_;

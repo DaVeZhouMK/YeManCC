@@ -17,9 +17,18 @@ for(const match of project.matchAll(/<Compile\s+Include="([^"]+)"/g)){
  if(relative==='..'||relative.startsWith('../')||path.isAbsolute(relative))throw Error('Battery source link leaves the repository');
  if(!inputs.includes(relative))inputs.push(relative);
 }
-inputs.push('native/power_source_state.h','native/battery_managed_runtime.h','native/battery_charge_client.h','native/secondary_display_client.h','tools/battery-charge-contract.mjs');
+inputs.push('native/sleep_power_state.h','native/power_source_state.h','native/battery_managed_runtime.h','native/battery_charge_client.h','native/secondary_display_client.h','tools/battery-charge-contract.mjs');
+// This resource is embedded byte for byte and checked by the runtime binder.
+const ruleFile=directory+'/battery-routes.json', binderFile='capabilities/HcBatteryCapabilityCatalog.generated.cs';
+const ruleBytes=fs.readFileSync(path.join(root,ruleFile));
+const binderText=fs.readFileSync(path.join(root,binderFile),'utf8').replaceAll('\r\n','\n');
+const ruleDigests=[...binderText.matchAll(/^    public const string RuleDocumentSha256 = "([a-f0-9]{64})";$/gm)];
+assert.ok(ruleDigests.length===1&&ruleDigests[0][1]===crypto.createHash('sha256').update(ruleBytes).digest('hex'),'BATTERY_RULE_RESOURCE_BINDER_MISMATCH: regenerate the reviewed route and battery catalog before calculating the contract');
 const hash=crypto.createHash('sha256');
-for(const name of inputs.sort())hash.update(name+'\0'+fs.readFileSync(path.join(root,name),'utf8').replaceAll('\r\n','\n')+'\0');
+for(const name of inputs.sort()){
+ const bytes=name===ruleFile?ruleBytes:name===binderFile?binderText:fs.readFileSync(path.join(root,name),'utf8').replaceAll('\r\n','\n');
+ hash.update(name+'\0').update(bytes).update('\0');
+}
 const contract={schema:1,protocol:2,component:'YeManBatteryHost',implementation:'in-process-60s-msi-cg3em-ap-v1',sourceId:hash.digest('hex')};
 const generated={
  'native/BatteryHost/runtime-contract.json':JSON.stringify(contract,null,2)+'\n',

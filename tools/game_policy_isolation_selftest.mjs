@@ -8,25 +8,43 @@ const vue = require('vue');
 const { parse, compileScript } = require('vue/compiler-sfc');
 const { transformSync } = require('esbuild');
 const root = process.cwd();
+const originalInputOwners=process.argv.includes('--input-owner-originals');
+const originalInputOwnerNames=["后台覆盖确认后注销重试；两分钟空闲不再读输入或专属配置","权威输入提交事件刷新follow覆盖；自身CAS通知合并并回到零重试","未解决的覆盖仍有后台重试；归还后晚到通知不能重新登记","专属覆盖只写overlay；页面本机设置和预设快照逐字节不变","IPC失败不能制造退出；只有成功权威空结果才恢复","首次IPC失败且后续仍无游戏时也能初始化并清理旧会话overlay","CAS冲突可重试；输入字段接管期间原子拒绝本机写入","overlay写入/清除失败保留页面锁与本机值，常驻重试成功后才解锁","本机persona不支持陀螺仪时，专属不能错误开启虚拟输出","旧版inputRestore先修复本机快照，再进入独立overlay","停止订阅后，在飞旧异步任务不再落盘","overlay原子替换并参与配置哈希；退出不需要写回本机","queued CAS在磁盘读取后复核取消条件，旧任务不落盘","关闭订阅时已进入CAS队列的overlay提交被取消","旧快照清理失败重试不再覆写已修复后的本机新编辑","已禁用条目、同值覆盖和无效会话的输入接管边界","同会话native开机基线不被旧游戏恢复快照覆盖"];
+const inputOwnerOnly = process.argv.includes('--input-owner-only')||originalInputOwners;
 const detectionOnly = process.argv.includes('--detection-only');
 const inputRuntimeOnly = process.argv.includes('--input-runtime-only');
 const uiOnly = process.argv.includes('--ui-only');
-assert([detectionOnly, inputRuntimeOnly, uiOnly].filter(Boolean).length <= 1, 'Select exactly one bounded scope');
-const scope = uiOnly ? 'ui-only' : inputRuntimeOnly ? 'input-runtime-only' : detectionOnly ? 'detection-only' : 'default';
+assert([detectionOnly, inputRuntimeOnly, uiOnly, inputOwnerOnly].filter(Boolean).length <= 1, 'Select exactly one bounded scope');
+const scope = inputOwnerOnly ? 'input-owner-only' : uiOnly ? 'ui-only' : inputRuntimeOnly ? 'input-runtime-only' : detectionOnly ? 'detection-only' : 'default';
+const fromIndex=process.argv.indexOf('--case-from'),fromCase=fromIndex<0?null:process.argv[fromIndex+1];
+assert(fromIndex<0||inputRuntimeOnly&&typeof fromCase==='string'&&fromCase.length>0,'--case-from requires an exact input-runtime case name');
+const exactIndex=process.argv.indexOf('--case'),exactCase=exactIndex<0?null:process.argv[exactIndex+1];
+assert(exactIndex<0||(detectionOnly||inputOwnerOnly)&&typeof exactCase==='string'&&exactCase.length>0&&!exactCase.startsWith('--')&&fromIndex<0&&process.argv.lastIndexOf('--case')===exactIndex,'--case requires one exact detection-only case name and cannot combine with --case-from');
+assert(!originalInputOwners||exactCase===null,'Original input group cannot combine with an exact case');
+assert(!inputOwnerOnly||exactCase!==null||originalInputOwners,'Input owner scope requires exact case or original group');
+let exactMatches=0;
+let fromReached=!fromCase;
+const notRun=[];
 const uiEvidence = [];
 const scopeDetails = uiOnly ? { uiFixtures:uiEvidence, scope, completeRegression:false, notExecutedDomains:['input-runtime', 'detection', 'native-wire'] } : {};
 // Selection uses the current original section, never a case-name match or an assertion bypass.
 let currentSection = 'input-runtime';
 const cases = [];
+const inputOwnerEvidence=[];
 async function check(name, run) {
+  if(originalInputOwners&&!originalInputOwnerNames.includes(name)){notRun.push(name);return;}
+  if(exactCase!==null){if(name!==exactCase){notRun.push(name);return;}assert.equal(++exactMatches,1,'Duplicate exact case name');}
+  if(!fromReached){if(name===fromCase)fromReached=true;else{notRun.push(name);return;}}
   if (uiOnly && currentSection !== 'ui') return;
   try { await run(); cases.push(name); }
   catch(error) { console.error(JSON.stringify({...scopeDetails,failedCase:name,passedBeforeFailure:cases.length,passedCases:cases,error:String(error)},null,2));throw error; }
 }
 function evaluate(source, imports = {}, globals = {}) {
   const module = { exports: {} };
-  vm.runInNewContext(transformSync(source, { loader: 'ts', format: 'cjs' }).code, {
-    module, exports: module.exports, console, structuredClone, performance, TextEncoder, setTimeout, clearTimeout, queueMicrotask,
+  const transformed=transformSync(source, {loader:'ts',format:'cjs'}).code;
+  if(process.env.YMCC_C125_INPUT_DIR){const directory=process.env.YMCC_C125_INPUT_DIR;fs.mkdirSync(directory,{recursive:true});const stem=path.join(directory,String(fs.readdirSync(directory).length/2).padStart(4,'0'));fs.writeFileSync(stem+'.input.ts',source,{flag:'wx'});fs.writeFileSync(stem+'.output.cjs',transformed,{flag:'wx'});}
+  vm.runInNewContext(transformed, {
+    module, exports: module.exports, console, structuredClone, performance, TextEncoder, setTimeout, clearTimeout, queueMicrotask, AbortController, AbortSignal,
     require(name) { if (name === 'vue') return vue; if (name in imports) return imports[name]; throw Error('Unexpected import ' + name); },
     ...globals,
   });
@@ -51,7 +69,7 @@ const hc = load('src/bridge/hcInputUtils.ts');
 const personas = load('src/bridge/controllerPersona.ts');
 const baseline = load('src/bridge/settingsBaseline.ts', { '../../PowerControl/settings-baseline.json': JSON.parse(fs.readFileSync(path.join(root,'PowerControl/settings-baseline.json'),'utf8')) });
 const shortcuts = load('src/bridge/bootModeSharedShortcuts.ts', { './settingsSnapshot': load('src/bridge/settingsSnapshot.ts') });
-const repo = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './api': {}, './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts') });
+const repo = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeGlobalPreferences': load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline}), './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './api': {}, './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts') });
 const A = { pid: 101, processCreated: '1001', name: 'a.exe', path: 'C:\\Games\\a.exe', ts: 0 };
 const B = { pid: 202, processCreated: '2002', name: 'b.exe', path: 'C:\\Games\\b.exe', ts: 0 };
 const C = { pid: 303, processCreated: '3003', name: 'c.exe', path: 'C:\\Games\\c.exe', ts: 0 };
@@ -82,14 +100,16 @@ await check('PID复用立即换身份；标题和来源变化不算进程切换�
 async function flush() { for (let i = 0; i < 35; i++) { await Promise.resolve(); await vue.nextTick(); } }
 async function fixture(options = {}) {
   let now = 0, timerSeq = 0, raw = options.raw === undefined ? A : options.raw;
-  const timers = new Map(), scheduled = new Map(), rawListeners = new Set(), configListeners = new Set(), scheduleListeners = new Set(), inputListeners = new Set();
+  const timers = new Map(), scheduled = new Map(), rawListeners = new Set(), configListeners = new Set(), scheduleListeners = new Set(), inputListeners = new Set(), readinessListeners = new Set(), performanceListeners = new Set();
   const reads = { input: 0, config: 0 };
   let quickBusy = !!options.quickBusy, powerPhase = options.powerPhase || 'ready', coreProbeFailures = options.coreProbeFailures || 0;
   const calls = { cas: [], performance: [], core: [], clearCore: 0, conflicts: options.conflicts || 0, writeFailures: options.writeFailures || 0 };
   let settings = options.input || base();
   let config = { version: 1, entries: { 'a.exe': profile('steamdeck', 'fps'), 'b.exe': profile('follow', 'off') }, ...options.config };
   let rawCurrent = null, rawInitialized = false;
-  let locked = { locked: false, identity: '' }, strictFailure = !!options.strictFailure, resolveBlockedConfig = null, resolveBlockedCas = null, clearRestoreFailures = options.clearRestoreFailures || 0;
+  let locked = { locked: false, identity: '' }, strictFailure = !!options.strictFailure, resolveBlockedConfig = null, resolveBlockedCas = null, heldConfig = null, heldCas = null, clearRestoreFailures = options.clearRestoreFailures || 0;
+  let settingsGate=null,heldSettings=null,sessionGate=null,heldSession=null;let sessionCalls=0;const casAdmissions=[];
+  if(options.holdSession){let release;const promise=new Promise(resolve=>release=resolve);heldSession=sessionGate={promise,release,value:'retired-session'};}
   const clock = {
     performance: { now: () => now },
     setTimeout(fn, ms) { const id = ++timerSeq; timers.set(id, { at: now + ms, fn }); return id; },
@@ -98,11 +118,14 @@ async function fixture(options = {}) {
   const detector = {
     getCurrentGame() { return rawCurrent ? { ...rawCurrent } : null; },
     isGameStatusInitialized() { return rawInitialized; },
+    isGameStatusCurrent() { return rawInitialized && !strictFailure; },
+    subscribeGameTargetReadiness(cb) { readinessListeners.add(cb); cb(detector.isGameStatusCurrent()); return () => readinessListeners.delete(cb); },
     isCurrentGameTarget(target) { return !!rawCurrent && rawCurrent.pid===target.pid && rawCurrent.processCreated===target.processCreated; },
     subscribeGameStatus(cb) { rawListeners.add(cb); cb(detector.getCurrentGame()); return () => rawListeners.delete(cb); },
     async refreshGameStatusStrict() {
       if (strictFailure) throw Error('transport');
       rawCurrent=raw ? { ...raw } : null; rawInitialized=true;
+      for(const cb of readinessListeners) cb(detector.isGameStatusCurrent());
       for(const cb of rawListeners) cb(detector.getCurrentGame());
       return detector.getCurrentGame();
     },
@@ -112,9 +135,10 @@ async function fixture(options = {}) {
   const repository = {
     mergeSettings: repo.mergeSettings,
     onInputSettingsChanged(cb) { inputListeners.add(cb); return () => inputListeners.delete(cb); },
-    async loadSettings() { reads.input++; return { input: structuredClone(settings) }; },
-    async compareAndSwapInputSettings(revision, patch, isCurrent) {
-      if (resolveBlockedCas) await new Promise(resolve => { resolveBlockedCas.resolve = resolve; });
+    async loadSettings() { reads.input++;if(settingsGate){const gate=settingsGate;settingsGate=null;await gate.promise;}return { input: structuredClone(settings) }; },
+    async compareAndSwapInputSettings(revision, patch, isCurrent, options) {
+      casAdmissions.push({revision,patch:structuredClone(patch),current:isCurrent,options:structuredClone(options)});
+      if (resolveBlockedCas) {const gate=resolveBlockedCas;resolveBlockedCas=null;await gate.promise;}
       if (isCurrent && !isCurrent()) return { ok: false, reason: 'cancelled', value: structuredClone(settings) };
       if (calls.writeFailures > 0) { calls.writeFailures--; return repo.evaluateInputCasWrite(settings, revision, patch, false); }
       if (calls.conflicts > 0) { calls.conflicts--; settings.revision++; return { ok: false, reason: 'revision-conflict', value: structuredClone(settings) }; }
@@ -125,25 +149,54 @@ async function fixture(options = {}) {
   };
   const perf = {
     isPerformanceScheduleBusy: () => false,
-    async loadGameCustomConfig() { reads.config++; if (resolveBlockedConfig) await new Promise(resolve => { resolveBlockedConfig.resolve = resolve; }); return structuredClone(config); },
+    async loadGameCustomConfig() { reads.config++; if (resolveBlockedConfig) {const gate=resolveBlockedConfig;resolveBlockedConfig=null;await gate.promise;} return structuredClone(config); },
     onGameCustomConfigChanged(cb) { configListeners.add(cb); return () => configListeners.delete(cb); },
     async clearGameInputRestoreSnapshot(expected) { if (clearRestoreFailures > 0) { clearRestoreFailures--; throw Error('simulated clear failure'); } if (JSON.stringify(expected) === JSON.stringify(config.inputRestore)) { delete config.inputRestore; for (const cb of configListeners) cb(config); } },
     async loadPerformanceSchedule() { return { configured: true, enabled: true, active: { ac: 'balanced', dc: 'balanced' }, profiles: { ac: {}, dc: {} } }; },
     resolveGameCustomProfiles(entry) { return { ac: entry.ac, dc: entry.dc }; },
-    async restorePerformanceScheduleIfConfigured() { calls.performance.push(target.getPolicyGame()?.pid || null); return 'auto'; },
+    async restorePerformanceScheduleIfConfigured(_side, options) { calls.performance.push(target.getPolicyGame()?.pid || null); return options?.withReceipt ? { ownership:'auto',scope:'global',applied:true } : 'auto'; },
+    onContinuousPerformanceApplied(cb) { performanceListeners.add(cb); return () => performanceListeners.delete(cb); },
     onPerformanceScheduleChanged(cb) { scheduleListeners.add(cb); return () => scheduleListeners.delete(cb); },
   };
-  const input = load('src/bridge/gameInputOverride.ts', {
+
+  const powerListeners=new Map();let nativePower={phase:'ready',generation:100,known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
+  const powerModule=load('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:()=>{throw Error('Use original fixture power read');},on:()=>()=>{}}},clock);
+  const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>({...nativePower}),listen:(name,listener)=>{if(!powerListeners.has(name))powerListeners.set(name,new Set());powerListeners.get(name).add(listener);return()=>powerListeners.get(name).delete(listener);},clock});
+  const stopPowerProbe=sharedPower.onSharedPowerLifecycle(()=>{});
+  let actualConfigService=null,configPort=null;
+  const configMonitors=new Set();
+  if(options.actualConfig){
+    const file='Q:\\C129\\PowerControl\\game-custom.json',store=new Map([[file,JSON.stringify(config)]]);const originalConfig=structuredClone(config);
+    configPort={store,file,fault:null,writes:[],setFault(kind){this.fault=kind;store.set(file,kind==='corrupt'?'{corrupt':kind==='future'?JSON.stringify({...originalConfig,version:99}):JSON.stringify(originalConfig));},recover(){this.fault=null;const next=structuredClone(originalConfig);next.entries['a.exe'].padPersona='elite';store.set(file,JSON.stringify(next));},get readState(){return actualConfigService.getGameCustomRecoveryState();}};
+    const frameModel=load('src/bridge/frameRateModel.ts');
+    const serviceRepository={...repository,loadSettings:async()=>({input:structuredClone(settings),performanceSchedule:{configured:false,enabled:false},extensions:{}}),SETTINGS_FILE:'Q:\\C129\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>1,assertSettingsGeneration:g=>assert.equal(g,1),getSettingsSectionRevision:()=>1,readSettingsSection:async()=>({}),replaceSettingsSection:async()=>{throw Error('Unexpected config migration');},saveSettingsSection:async()=>{throw Error('Unexpected durable user write');},updateSettings:async()=>{throw Error('Unexpected settings write');},rememberOrdinaryPerformancePreferences(){}};
+    const coreModel=load('src/bridge/performanceControls.ts');
+    actualConfigService=load('src/bridge/performanceSchedule.ts',{
+      './settingsSnapshot':load('src/bridge/settingsSnapshot.ts'),'./controllerPersona':personas,'./performanceControls':coreModel,'./powerSource':{powerSourceMode:vue.ref('ac')},'./gamePolicyTarget':target,'./gamedetect':detector,
+      './gameCorePolicy':{},'./api':{powerLifecycle:{get:async()=>({...nativePower})},fs:{exists:async p=>store.has(p),readTextFile:async p=>{if(configPort.fault==='read'&&p===file)throw Error('Owned config read denied after wake');if(configPort.fault==='hold'&&p===file){const raw=store.get(p);return new Promise(resolve=>configPort.releaseRead=()=>resolve(raw));}return store.get(p);},writeTextFileAtomic:async(p,v)=>{configPort.writes.push({path:p,content:v});store.set(p,v);}}},
+      './settingsRepository':serviceRepository,'./bootModeGlobalPreferences':load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline}),
+      './frameRateLimits':{...frameModel,ensureGlobalFrameRates:async()=>frameModel.frameRatePair({}),loadGlobalFrameRates:async()=>frameModel.frameRatePair({})},
+      './yeman':{getTdpHardwareMinimum:()=>2,getTdpHardwareMaximum:()=>150,detectPerformanceTemplate:async()=> 'portable'},'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},'./autofloat':{},
+    },clock);
+    Object.assign(perf,{loadGameCustomConfig:actualConfigService.loadGameCustomConfig,onGameCustomConfigChanged:actualConfigService.onGameCustomConfigChanged,clearGameInputRestoreSnapshot:actualConfigService.clearGameInputRestoreSnapshot,
+      loadPerformanceSchedule:actualConfigService.loadPerformanceSchedule,continuousControlsFromSchedule:actualConfigService.continuousControlsFromSchedule,continuousControlsForEntry:actualConfigService.continuousControlsForEntry,
+      reconcilePerformanceScheduleTdp:async()=>true,getInvalidPerformanceTdpTarget:()=>null,reconcileInvalidPerformanceTdp:async()=>false});
+  }
+
+  const broadcastPower=async changes=>{nativePower={...nativePower,...changes};for(const cb of [...powerListeners.get('power.lifecycleChanged')||[]])cb({...nativePower});await flush();};
+  const input = evaluate(fs.readFileSync(path.join(root,'src/bridge/gameInputOverride.ts'),'utf8')+'\nexport const __inputState=()=>({active,running,pending,dirty,sessionId,epoch});', {
+    './powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},'./powerResume':load('src/bridge/powerResume.ts'),
     './gyroPresetModel':load('src/bridge/gyroPresetModel.ts'),
     '@/bridge/settingsRepository': repository, '@/bridge/gamePolicyTarget': target,
-    '@/bridge/ipc': { invoke: async () => 'native-session-1' }, '@/scheduler': scheduler, '@/bridge/performanceSchedule': perf,
+    './gamedetect': detector, '@/bridge/ipc': { invoke: async () => {sessionCalls++;if(sessionGate){const gate=sessionGate;sessionGate=null;await gate.promise;return gate.value;}return 'native-session-1';} }, '@/scheduler': scheduler, '@/bridge/performanceSchedule': perf,
   }, clock);
   input.subscribeGameInputOverrideState(state => { locked = state; });
-  const runtime = load('src/bridge/gamePolicyRuntime.ts', {
-    './gamePolicyTarget': target, './performanceSchedule': perf, '@/scheduler': scheduler,
+  const runtime = inputOwnerOnly&&!options.actualConfigResident?{startGamePolicyRuntime(){},stopGamePolicyRuntime(){}}:evaluate(fs.readFileSync(path.join(root,'src/bridge/gamePolicyRuntime.ts'),'utf8')+'\nexport const __configResidentState=()=>({active,running,dirty,tdpPending,appliedPerformance,appliedFrames,appliedCore});', {
+    './gamePolicyTarget': target, './gamedetect': detector, './performanceControls': load('src/bridge/performanceControls.ts'), './performanceSchedule': perf, '@/scheduler': scheduler,
     './powerSource': {powerSourceMode:vue.ref('ac')}, './yeman':{detectPowerMode:async()=> 'ac'}, './autofloat':{setFloatRtssLinked(){}},
     './frameRateLimits':{loadGlobalFrameRates:async()=>({ac:{fps:60,lastFps:60,ceiling:60},dc:{fps:30,lastFps:30,ceiling:30}}),onFrameRatesChanged:()=>()=>{},dedicatedFrameRatePair:(_,global)=>global,applyIndependentFrameRates:async()=>true},
     './api': { powerLifecycle: { get: async () => ({ phase: powerPhase, hardwareWritesAllowed: powerPhase === 'ready' }) } },
+    ...(options.actualConfigResident?{'./powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},'./powerResume':load('src/bridge/powerResume.ts'),'./monitorData':{subscribeMonitorSnapshot:cb=>{configMonitors.add(cb);return()=>configMonitors.delete(cb);}},'./monitorSnapshotSignals':load('src/bridge/monitorSnapshotSignals.ts',{'./monitorFrameTime':load('src/bridge/monitorFrameTime.ts'),'./monitorCoreTiles':load('src/bridge/monitorCoreTiles.ts')}),'./autofloat':{setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false})},'./powerSource':{powerSourceMode:vue.ref('ac'),powerSourceBatteryPresent:vue.ref(true)}}:{}),
     './quickActionLock': { isQuickActionBusy: () => quickBusy },
     './gameCorePolicy': {
       detectGameCorePolicy: async () => { if (coreProbeFailures > 0) { coreProbeFailures--; throw Error('probe unavailable'); } return { heterogeneous: true, smtAvailable: true }; },
@@ -162,7 +215,14 @@ async function fixture(options = {}) {
   }
   input.startGameInputOverrideWatch(); runtime.startGamePolicyRuntime(); await flush();
   return {
-    target, input, calls, reads, inputListeners, clock, scheduled, emit, tick, repository,
+    target, input, calls, reads, inputListeners, clock, scheduled, emit, tick, repository, sharedPower,broadcastPower,get power(){return {...nativePower};},restartInput(){input.startGameInputOverrideWatch();},
+    casAdmissions,actualConfig:configPort,actualConfigService,residentState:()=>runtime.__configResidentState?.(),get sessionCalls(){return sessionCalls;},
+    state:()=>input.__inputState(),async pokeRetry(){for(const task of [...scheduled.values()])void task.run();await flush();},
+    async blockSettings(){let release;const promise=new Promise(resolve=>release=resolve);heldSettings=settingsGate={promise,release};},async unblockSettings(){heldSettings?.release();heldSettings=null;settingsGate=null;await flush();},
+    holdSession(value='retired-session'){let release;const promise=new Promise(resolve=>release=resolve);heldSession=sessionGate={promise,release,value};},async unblockSession(){heldSession?.release();heldSession=null;sessionGate=null;await flush();},
+    async setReady(ready){strictFailure=!ready;for(const cb of [...readinessListeners])cb(ready);await flush();},
+    stopInput(){input.stopGameInputOverrideWatch();},
+    assertClosed(){assert.equal(inputListeners.size+configListeners.size+readinessListeners.size,0);assert.equal(scheduled.size,0);assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(timers.size,0);},
     async pollRetries() { for (const task of [...scheduled.values()]) await task.run(); await flush(); },
     async nativeInputCommit(patch) { settings = repo.mergeSettings(settings, patch); settings.revision++; for (const cb of inputListeners) cb(); await flush(); },
     get settings() { return settings; }, get config() { return config; }, get locked() { return locked; },
@@ -172,11 +232,11 @@ async function fixture(options = {}) {
     set strictFailure(value) { strictFailure = value; },
     async changeEntry(key, entry) { config.entries[key] = entry; for (const cb of configListeners) cb(config); await flush(); },
     async retry() { await detector.refreshGameStatusStrict().catch(()=>{}); for (const task of scheduled.values()) await task.run(); await flush(); },
-    async blockCas() { resolveBlockedCas = {}; },
-    async unblockCas() { const blocked = resolveBlockedCas; resolveBlockedCas = null; blocked?.resolve?.(); await flush(); },
-    async blockConfig() { resolveBlockedConfig = {}; },
-    async unblockConfig() { const blocked = resolveBlockedConfig; resolveBlockedConfig = null; blocked?.resolve?.(); await flush(); },
-    stop() { input.stopGameInputOverrideWatch(); runtime.stopGamePolicyRuntime(); },
+    async blockCas() { let release;const promise=new Promise(resolve=>release=resolve);heldCas=resolveBlockedCas={promise,release}; },
+    async unblockCas() { const blocked = heldCas;heldCas=null;resolveBlockedCas = null; blocked?.release?.(); await flush(); },
+    async blockConfig() { let release;const promise=new Promise(resolve=>release=resolve);heldConfig=resolveBlockedConfig={promise,release}; },
+    async unblockConfig() { const blocked = heldConfig;heldConfig=null;resolveBlockedConfig = null; blocked?.release?.(); await flush(); },
+    stop() { input.stopGameInputOverrideWatch(); runtime.stopGamePolicyRuntime();stopPowerProbe(); },
   };
 }
 await check('后台覆盖确认后注销重试；两分钟空闲不再读输入或专属配置', async () => {
@@ -306,7 +366,8 @@ await check('旧版inputRestore先修复本机快照，再进入独立overlay', 
   overwritten.gyroMotion = { ...original.gyroMotion, enabled: true, activePreset: 'fps' };
   const restore = { persona: 'disabled', buttonMappingEnabled: false, gyroEnabled: false, motionEnabled: false, gyroMotion: original.gyroMotion };
   const f = await fixture({ input: overwritten, config: { inputRestore: restore } }); await f.retry();
-  assert(!f.config.inputRestore); assert.deepEqual(f.settings.outputTarget, original.outputTarget); assert.deepEqual(f.settings.gyroMotion, original.gyroMotion); assert(f.locked.locked); f.stop();
+  assert(!f.config.inputRestore); assert.deepEqual(f.settings.outputTarget, original.outputTarget); assert.deepEqual(f.settings.gyroMotion, original.gyroMotion); assert(f.locked.locked);
+  assert(f.casAdmissions.some(a=>a.patch.legacyGameRestoreId));assert(f.casAdmissions.every(a=>a.options?.inputRuntimePower?.generation===100&&a.options.inputRuntimePower.observedNotificationSequence===1),'legacy restore or overlay dropped public runtime power');f.stop();
 });
 await check('停止订阅后，在飞旧异步任务不再落盘', async () => {
   const f = await fixture(); await f.blockConfig(); const count = f.calls.cas.length;
@@ -322,7 +383,7 @@ await check('overlay原子替换并参与配置哈希；退出不需要写回本
 });
 await check('queued CAS在磁盘读取后复核取消条件，旧任务不落盘', async () => {
   let current = true, releaseRead, writes = 0;
-  const durable = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts'),
+  const durable = load('src/bridge/settingsRepository.ts', { './controllerPersona': personas, './bootModeGlobalPreferences': load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline}), './bootModeSharedShortcuts': shortcuts, './settingsBaseline': baseline, './settingsSnapshot': load('src/bridge/settingsSnapshot.ts'), './inputStartupPolicy': load('src/bridge/inputStartupPolicy.ts', { './controllerPersona': personas }), './inputConfigHash': hash, './hcInputUtils': hc, './quickAppDefaults': load('src/bridge/quickAppDefaults.ts'),
     './api': { fs: { exists: async () => true, readTextFile: async () => new Promise(resolve => { releaseRead = resolve; }) },
       settingsStore: { write: async () => { writes++; return true; } } } });
   durable.setSettingsDirectory(String.raw`C:\SOFT\YeMan\PowerControl`);
@@ -370,7 +431,77 @@ await check('同会话native开机基线不被旧游戏恢复快照覆盖', asyn
   assert.deepEqual(f.settings.outputTarget,initial.outputTarget); assert.deepEqual(f.settings.gyroMotion,initial.gyroMotion);
   assert.equal(f.settings.startupAppliedSession,'native-session-1');assert(!f.config.inputRestore);f.stop();
 });
-if (!inputRuntimeOnly) {
+
+if(inputOwnerOnly)await check('公共睡眠配置：同一读结果隔离显示降级与运行拒绝且有效备份空配置可用',async()=>{
+ const f=await fixture({actualConfig:true});try{
+  f.stopInput();await flush();const service=f.actualConfigService;f.actualConfig.setFault('read');
+  const display=service.loadGameCustomConfig(),options={requireReady:true},runtime=service.loadGameCustomConfig('ensure',options);options.requireReady=false;
+  const shown=await display;assert.equal(Object.keys(shown.entries).length,0);await assert.rejects(runtime,/可靠读取/);assert.equal(service.getGameCustomRecoveryState().status,'runtime-fallback');assert.equal(f.actualConfig.writes.length,0);
+  f.actualConfig.setFault('corrupt');const good={version:1,entries:{'a.exe':profile('elite','off')},rtss:{}};const main=f.actualConfig.store.get(f.actualConfig.file);f.actualConfig.store.set(f.actualConfig.file+'.bak',JSON.stringify(good));
+  const recovered=await service.loadGameCustomConfig('read-only',{requireReady:true});assert.equal(recovered.entries['a.exe'].padPersona,'elite');assert.equal(service.getGameCustomRecoveryState().source,'backup');assert.equal(f.actualConfig.store.get(f.actualConfig.file),main);assert.equal(f.actualConfig.writes.length,0);
+  f.actualConfig.fault=null;f.actualConfig.store.set(f.actualConfig.file,JSON.stringify({version:1,entries:{},rtss:{}}));const empty=await service.loadGameCustomConfig('ensure',{requireReady:true});assert.equal(Object.keys(empty.entries).length,0);assert.equal(service.getGameCustomRecoveryState().status,'ready');
+  f.actualConfig.fault='hold';f.actualConfig.store.set(f.actualConfig.file,JSON.stringify({version:1,entries:{'a.exe':profile('steamdeck','fps')},rtss:{}}));const delayed=service.loadGameCustomConfig('ensure',{requireReady:true}).then(value=>({value}),error=>({error}));await flush();assert.equal(typeof f.actualConfig.releaseRead,'function');await f.tick(2000);assert((await delayed).error,'original2s read timeout promoted fallback to runtime');f.actualConfig.recover();const fresh=await service.loadGameCustomConfig('ensure',{requireReady:true});assert.equal(fresh.entries['a.exe'].padPersona,'elite');f.actualConfig.releaseRead();await flush();assert.equal(service.getGameCustomConfig().entries['a.exe'].padPersona,'elite','late timed-out read replaced successor config');assert.equal(service.getGameCustomRecoveryState().status,'ready');
+  inputOwnerEvidence.push({kind:'actual-service-coalesced-readiness',pass:true,displayFallbackAllowed:true,runtimeFallbackRejected:true,optionSnapshot:true,validBackupAllowed:true,validEmptyAllowed:true,originalReadTimeoutMs:2000,lateReadCannotPublish:true});
+ }finally{f.stop();await flush();f.assertClosed();}
+});
+
+if(inputOwnerOnly)await check('公共睡眠配置：真实配置读取失败不能清除输入或确认常驻策略完成',async()=>{
+ const flag=process.argv.find(s=>s.startsWith('--config-recovery-boundary=')),only=flag?.split('=')[1],kinds=['input-read','input-corrupt','input-future','resident-read','resident-corrupt','resident-future'];assert(!only||only==='resident-all'||kinds.includes(only),'Unknown config recovery boundary');
+ for(const kind of only==='resident-all'?kinds.filter(k=>k.startsWith('resident')):only?[only]:kinds){
+  const f=await fixture({actualConfig:true,actualConfigResident:kind.startsWith('resident'),config:{entries:{'a.exe':{...profile('steamdeck','fps'),hyperThreadPolicyEnabled:true,hyperThreadPolicy:'off'}}}});
+  try{
+   await flush();await f.pokeRetry();await flush();assert.equal(f.settings.gameOverride?.outputTarget.persona,'steamdeck','actual config source did not establish initial overlay');
+   if(kind.startsWith('resident')){assert(f.residentState().appliedCore&&f.residentState().appliedFrames,'actual resident did not establish healthy policy');assert.equal(f.calls.core.at(-1)?.[2],'off');}
+   const prior=JSON.stringify(f.settings.gameOverride),priorCalls=JSON.stringify(f.calls);f.actualConfig.setFault(kind.split('-')[1]);
+   await f.broadcastPower({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await f.broadcastPower({generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});await flush();await f.pokeRetry();await flush();
+   assert.equal(f.actualConfig.readState.status,'runtime-fallback');assert.equal(JSON.stringify(f.settings.gameOverride),prior,'failed config read cleared the admitted input overlay');
+   assert(f.locked.locked);assert(f.state().dirty,'failed config read permanently acknowledged input work');assert(f.scheduled.has('game-input-overlay-retry'),'failed config read removed original retry');
+   if(kind.startsWith('resident')){assert.equal(JSON.stringify(f.calls),priorCalls,'failed config read dispatched or acknowledged a resident policy');assert(f.residentState().dirty||f.residentState().tdpPending,'failed config read cleared resident pending work');assert(f.scheduled.has('game-policy-runtime-retry'),'failed config read removed resident original retry');}
+   f.actualConfig.recover();await f.pokeRetry();await flush();await f.pokeRetry();await flush();assert.equal(f.actualConfig.readState.status,'ready');assert.equal(f.settings.gameOverride.outputTarget.persona,'elite','original retry did not recover without a new config event');assert(!f.scheduled.has('game-input-overlay-retry'));assert.equal(f.actualConfig.writes.length,0);
+   inputOwnerEvidence.push({kind,actualConfigService:true,pass:true,originalRetryMs:2000,finalInput:f.state(),finalResident:f.residentState()});
+  }finally{f.stop();await flush();f.assertClosed();}
+ }
+});
+
+if(inputOwnerOnly)await check('公共睡眠输入覆盖：旧配置读取未归还时同游戏新Ready可接续',async()=>{
+ const f=await fixture();await f.blockConfig();const before=f.calls.cas.length;await f.changeEntry('a.exe',profile('elite','off'));const blocked=f.reads.config;
+ try{await f.broadcastPower({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});assert.equal(f.calls.cas.length,before);await f.broadcastPower({generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});assert(f.reads.config>blocked,'public Ready remained blocked by retired input config read');assert.equal(f.settings.gameOverride.outputTarget.persona,'elite');}
+ finally{await f.unblockConfig();await flush();f.stop();}
+});
+
+if(inputOwnerOnly)await check('公共睡眠输入覆盖：配置设置CAS和旧finally生命周期边界',async()=>{
+ const rows=[];
+ const boundaryKinds=['held-settings','held-cas','old-finally','stop-restart','same-target-ready','metadata-sequence','late-session'];
+ const boundaries=process.argv.filter(v=>v.startsWith('--input-owner-boundary='));assert(boundaries.length<=1,'Duplicate input owner boundary');const selected=boundaries[0]?.slice('--input-owner-boundary='.length);assert(!boundaries.length||boundaryKinds.includes(selected),'Unknown input owner boundary');
+ for(const kind of selected?[selected]:boundaryKinds){
+  const f=await fixture(kind==='late-session'?{holdSession:true}:{});let pending=false;const original=f.settings.gameOverride?.outputTarget.persona;
+  try{
+   if(kind==='late-session'){
+    // A second actual module lifetime starts without a cached session.
+    assert(f.state().running);const oldCalls=f.sessionCalls;
+    await f.broadcastPower({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await f.broadcastPower({generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});assert(f.sessionCalls>oldCalls,'new public session read blocked by retired session');assert.equal(f.state().sessionId,'native-session-1');await f.unblockSession();assert.equal(f.state().sessionId,'native-session-1','late old session overwrote current session');
+   }else{
+    if(kind==='held-settings')await f.blockSettings();else if(kind==='held-cas')await f.blockCas();else await f.blockConfig();
+    await f.changeEntry('a.exe',profile('elite','off'));assert(f.state().running);const before=f.calls.cas.length;
+    if(kind==='stop-restart'){f.stopInput();assert.equal(f.state().running,false,'stopped input kept old owner running');f.restartInput();await flush();}
+    else if(kind==='same-target-ready'){await f.setReady(false);assert.equal(f.state().running,false);await f.setReady(true);}
+    else if(kind==='metadata-sequence'){await f.broadcastPower({publicationRevision:2,observedNotificationSequence:2});}
+    else{
+     await f.broadcastPower({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});assert.equal(f.calls.cas.length,before,'public denial changed overlay');assert.equal(f.settings.gameOverride.outputTarget.persona,original);assert(!f.scheduled.has('game-input-overlay-retry'),'held public power retained overlay poll');
+     if(kind==='old-finally')await f.blockSettings();await f.broadcastPower({generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+    }
+    if(kind==='old-finally'){
+     assert(f.state().running,'successor did not own held settings');await f.unblockConfig();assert(f.state().running,'old input finally cleared successor owner');const calls=f.reads.input;await f.pokeRetry();assert.equal(f.reads.input,calls,'old finally allowed duplicate input successor');await f.unblockSettings();
+    }else if(kind==='held-cas'){
+     assert.equal(f.settings.gameOverride.outputTarget.persona,'elite');const currentCas=f.calls.cas.length;assert.equal(f.casAdmissions[1].current(),false,'old CAS current revived after Ready');await f.unblockCas();assert.equal(f.calls.cas.length,currentCas,'retired CAS committed after newer overlay');
+    }else{assert.equal(f.settings.gameOverride.outputTarget.persona,'elite','admitted successor did not finish before old read');await f.unblockSettings();await f.unblockConfig();}
+   }
+   await flush();await f.pollRetries();assert(!f.scheduled.has('game-input-overlay-retry'),'healthy input kept private retry');const reads={...f.reads},writes=f.calls.cas.length;for(let n=0;n<20;n++)await f.pollRetries();assert.deepEqual(f.reads,reads);assert.equal(f.calls.cas.length,writes);rows.push({kind,pass:true,writes,sessionCalls:f.sessionCalls,state:f.state()});
+  }finally{await f.unblockConfig();await f.unblockSettings();await f.unblockCas();await f.unblockSession();f.stop();f.assertClosed();}
+ }
+ inputOwnerEvidence.push({name:'input-public-owner-boundaries',rows});
+});
+if (!inputRuntimeOnly && !inputOwnerOnly) {
 currentSection = 'ui';
 // Actual compiled pages with in-memory renderer: no WebView, real hardware, process or disk calls.
 function element(type, text = '') { return { type, text, style:{display:''}, props: {}, children: [], parent: null, get textContent() { return this.text + this.children.map(n => n.textContent).join(''); } }; }
@@ -644,7 +775,7 @@ await check('常驻轮询/重试不随窗口隐藏暂停；原始终止游戏动
 }
 }
 
-if (!inputRuntimeOnly && !uiOnly) {
+if (!inputRuntimeOnly && !uiOnly && !inputOwnerOnly) {
 currentSection = 'detection';
 // Actual shared detector + IPC timeout + scheduler + policy owner. All native
 // process replies and browser time are inert; no game or device is accessed.
@@ -659,7 +790,8 @@ function detectionFixture(detectorSource = null) {
   });
   const win = eventTarget(events), doc = { ...eventTarget(documentEvents), visibilityState:'hidden' };
   const f = { native:null, hold:false, messages, timers, events, scheduler:null, detector:null, policy:null, schedules:[] };
-  const clock = {performance:{now:()=>now},setTimeout(fn,ms){const id=++seq;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);},
+  f.abortRecords=[];class ReadAbortController extends AbortController {constructor(){super();const signal=this.signal,record={signal,callbacks:new Set()},add=signal.addEventListener.bind(signal),remove=signal.removeEventListener.bind(signal);f.abortRecords.push(record);signal.addEventListener=(type,listener,options)=>{if(type==='abort')record.callbacks.add(listener);return add(type,listener,options);};signal.removeEventListener=(type,listener,options)=>{if(type==='abort')record.callbacks.delete(listener);return remove(type,listener,options);};}}
+  const clock = {AbortController:ReadAbortController,performance:{now:()=>now},setTimeout(fn,ms){const id=++seq;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);},
     window:win,document:doc,CustomEvent:class{constructor(type,opts){this.type=type;this.detail=opts?.detail;}},queueMicrotask};
   Object.assign(win,{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,chrome:{webview:{
     addEventListener(_name,cb){bridgeListeners.push(cb);},
@@ -674,9 +806,15 @@ function detectionFixture(detectorSource = null) {
   f.show=()=>{visible=true;doc.visibilityState='visible';doc.dispatchEvent({type:'visibilitychange'});};
   f.advance=async(ms)=>{const end=now+ms;for(let guard=0;guard<1000;guard++){const due=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;now=Math.max(now,due[1].at);timers.delete(due[0]);due[1].fn();await flushDetection();}now=end;await flushDetection();};
   const ipc=load('src/bridge/ipc.ts',{},clock);
-  const scheduler=load('src/scheduler.ts',{'./bridge/uiLifecycle':{isUiVisible:()=>visible,onUiVisibilityChange:()=>()=>{}}},clock);
+  f.power={phase:'ready',generation:100,known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
+  const powerModule=load('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:()=>{throw Error('Unexpected shared singleton read');},on:()=>()=>{}}},clock);
+  f.sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>({...f.power}),listen:(name,listener)=>{if(!events.has('public:'+name))events.set('public:'+name,new Set());events.get('public:'+name).add(listener);return()=>events.get('public:'+name).delete(listener);},clock:{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}});
+  f.stopPowerProbe=f.sharedPower.onSharedPowerLifecycle(()=>{});f.powerModule=powerModule;
+  f.broadcastPower=state=>{f.power={...state};for(const cb of [...events.get('public:power.lifecycleChanged')||[]])cb({...state});};
+  const uiPower=load('src/bridge/uiLifecycle.ts',{'./ipc':ipc,'./powerLifecycleState':f.sharedPower},clock);
+  const scheduler=load('src/scheduler.ts',{'./bridge/uiLifecycle':{...uiPower,isUiVisible:()=>visible,onUiVisibilityChange:()=>()=>{}},'./bridge/powerLifecycleState':f.sharedPower},clock);
   f.scheduler={...scheduler,registerScheduledTask(...args){f.schedules.push({name:args[0],ms:args[1],options:args[3]});return scheduler.registerScheduledTask(...args);}};
-  f.detector=evaluate(detectorSource??fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8'),{'./ipc':ipc,'@/scheduler':f.scheduler,'../../PowerControl/GameTitlePolicy.json':JSON.parse(fs.readFileSync(path.join(root,'PowerControl/GameTitlePolicy.json'),'utf8'))},clock);
+  f.detector=evaluate(detectorSource??fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8'),{'./ipc':ipc,'./powerLifecycleState':{...f.sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},'@/scheduler':f.scheduler,'../../PowerControl/GameTitlePolicy.json':JSON.parse(fs.readFileSync(path.join(root,'PowerControl/GameTitlePolicy.json'),'utf8'))},clock);
   f.policy=load('src/bridge/gamePolicyTarget.ts',{'./gamedetect':f.detector,'./gamePolicyHysteresis':hysteresis},clock);
   return f;
 }
@@ -742,22 +880,48 @@ await check('单个策略订阅抛错不会阻断Decky及修改器共享状态�
 });
 await check('实际Decky入口通过同一检测器恢复空缓存，随后原生切换通知直接推送新身份',async()=>{
  const {createMirrorHostFixture}=await import('./fixtures/decky_mirror_host_fixture.mjs');
- const f=detectionFixture(),block=blockDisplayScheduler(f);await f.policy.detectPolicyGame();let host;
- f.policy.subscribePolicyGameStatus(g=>{if(host){host.state.game=g;host.gameChanged();}});
- host=await createMirrorHostFixture({policyRefresh:()=>f.policy.refreshPolicyGameStrict(),policyReadiness:f.detector});host.state.game=null;host.ready();
- const runId='c'.repeat(32),peer={connection:'1',runId,connected:true};
- const read=async()=>{host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flushDetection();const reply=host.replies.filter(r=>r.message.type==='snapshot').at(-1);assert(reply,'actual host must publish its shared-target snapshot');return reply.message.snapshot;};
- f.native={...TMNT};await read();await flushDetection();let latest=host.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot;
- assert.equal(latest.game.label,TMNT.title);assert(latest.game.identity.includes(String(TMNT.pid)));assert.equal(host.counts.gameReconciles,1);
- const next={...TMNT,pid:21003,processCreated:'134372974230246500',title:'Next inert game',path:'D:/Inert/Next.exe'};f.native=next;f.signal('ipc:game.target.changed');await flushDetection();
- latest=host.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot;assert.equal(latest.game.label,next.title);assert(latest.game.identity.includes(String(next.pid)));assert.equal(host.counts.gameReconciles,1);assert.equal(host.counts.saves,0);
- const identity=latest.game.identity;f.hold=true;const fault=f.detector.refreshGameStatusStrict(),rejected=assert.rejects(fault);await flushDetection();f.fail(f.messages.at(-1).id,'inert actual shared-target outage');await rejected;await flushDetection();latest=host.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot;assert.equal(latest.actions.game,false);assert.equal(latest.game.identity,identity);
- f.hold=false;await f.advance(500);await flushDetection();latest=host.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot;assert.equal(latest.actions.game,true);assert.equal(latest.game.identity,identity);assert.equal(host.counts.gameReconciles,1);assert.equal(host.counts.saves,0);host.stop();assert.equal(host.readinessSubscriberCount(),0);block();
+ const f=detectionFixture(),block=blockDisplayScheduler(f);await f.policy.detectPolicyGame();let host,replySequence=0;
+ const waiting=new Set();
+ const stopPolicy=f.policy.subscribePolicyGameStatus(g=>{if(host){host.state.game=g;host.gameChanged();}});
+ const waitSnapshot=(stage,action,accept)=>new Promise((resolve,reject)=>{
+  const after=replySequence;
+  const waiter={after,accept,finish(reply,error){clearTimeout(timer);waiting.delete(waiter);if(error)reject(error);else resolve(reply);}};
+  const timer=setTimeout(()=>waiter.finish(null,new assert.AssertionError({message:'actual host snapshot completion missing: '+stage,
+   actual:{stage,replies:host?.replies.length??0,diagnostics:host?.diagnostics??[],counts:host?.counts??{},detectorRequests:f.messages.map(row=>({id:row.id,cmd:row.cmd})),latest:host?.replies.at(-1)?.message},expected:'new actual snapshot after this operation'})),1000);
+  waiting.add(waiter);
+  try{Promise.resolve(action()).catch(error=>waiter.finish(null,error));}catch(error){waiter.finish(null,error);}
+ });
+ try{
+  host=await createMirrorHostFixture({policyRefresh:()=>f.policy.refreshPolicyGameStrict(),policyReadiness:f.detector,invoke:async(command,args)=>{
+   if(command==='deckySidebar.mirrorAttach')return {connected:false};
+   if(command!=='deckySidebar.mirrorReply')throw Error('Unexpected completion-fixture IPC: '+command);
+   const sequence=++replySequence;
+   for(const waiter of [...waiting]){
+    if(sequence<=waiter.after||args.message?.type!=='snapshot')continue;
+    try{if(waiter.accept(args.message.snapshot))waiter.finish(args.message.snapshot);}catch(error){waiter.finish(null,error);}
+   }
+   return true;
+  }});host.state.game=null;host.ready();
+  const runId='c'.repeat(32),peer={connection:'1',runId,connected:true};
+  f.native={...TMNT};let latest=await waitSnapshot('initial shared target',()=>host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}}),snapshot=>snapshot.ready===true&&snapshot.game!==null);
+  assert.equal(latest.game.label,TMNT.title);assert(latest.game.identity.includes(String(TMNT.pid)));assert.equal(host.counts.gameReconciles,1);
+  const next={...TMNT,pid:21003,processCreated:'134372974230246500',title:'Next inert game',path:'D:/Inert/Next.exe'};f.native=next;
+  latest=await waitSnapshot('native target change',()=>f.signal('ipc:game.target.changed'),snapshot=>snapshot.game?.identity.includes(String(next.pid)));
+  assert.equal(latest.game.label,next.title);assert(latest.game.identity.includes(String(next.pid)));assert.equal(host.counts.gameReconciles,1);assert.equal(host.counts.saves,0);
+  const identity=latest.game.identity;f.hold=true;
+  latest=await waitSnapshot('shared target outage',async()=>{const fault=f.detector.refreshGameStatusStrict(),rejected=assert.rejects(fault);await flushDetection();f.fail(f.messages.at(-1).id,'inert actual shared-target outage');await rejected;},snapshot=>snapshot.actions?.game===false);
+  assert.equal(latest.actions.game,false);assert.equal(latest.game.identity,identity);
+  f.hold=false;latest=await waitSnapshot('shared target recovery',()=>f.advance(500),snapshot=>snapshot.actions?.game===true);
+  assert.equal(latest.actions.game,true);assert.equal(latest.game.identity,identity);assert.equal(host.counts.gameReconciles,1);assert.equal(host.counts.saves,0);host.stop();assert.equal(host.readinessSubscriberCount(),0);
+ }finally{
+  for(const waiter of [...waiting])waiter.finish(null,Error('Host snapshot fixture ended before completion'));
+  host?.stop();stopPolicy();block();
+ }
 });
 
 await check('反向去掉IPC超时会留下永久等待，后续自动轮询无法再发现游戏',async()=>{
- const source=fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8');assert(source.includes(', { timeoutMs: DETECTION_TIMEOUT_MS }'));
- const f=detectionFixture(source.replace(', { timeoutMs: DETECTION_TIMEOUT_MS }','')),seen=[];f.hold=true;const stop=f.detector.subscribeGameStatus(g=>seen.push(g));await flushDetection();f.native={...TMNT};await f.advance(20000);assert.equal(f.messages.length,1);assert.equal(seen.at(-1),null);stop();
+ const source=fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8');const timeoutOptions=', { timeoutMs: DETECTION_TIMEOUT_MS, signal: owner.cancellation.signal }';assert.equal(source.split(timeoutOptions).length,2);
+ const f=detectionFixture(source.replace(timeoutOptions,', { signal: owner.cancellation.signal }')),seen=[];f.hold=true;const stop=f.detector.subscribeGameStatus(g=>seen.push(g));await flushDetection();f.native={...TMNT};await f.advance(20000);assert.equal(f.messages.length,1);assert.equal(seen.at(-1),null);stop();
 });
 await check('反向去掉原生通知处理可复现隐藏时调度被占用后顶部仍为空',async()=>{
  const source=fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8'),binding="window.addEventListener('ipc:game.target.changed',";assert(source.includes(binding));
@@ -955,6 +1119,28 @@ await check('自愈：显式选择在途即撤销旧准入，旧请求失败不�
 });
 
 
+await check('公共睡眠：仅订阅目标准入时也能接续识别，且不启动轮询',async()=>{
+ for(const nextGeneration of [100,101]){
+  const f=detectionFixture(),ready=[];f.native=versionedGame();
+  const stop=f.detector.subscribeGameTargetReadiness(value=>ready.push(value));
+  try{
+   await flushDetection();assert.equal(f.messages.length,0,'readiness alone must not start cold discovery');
+   await f.detector.refreshGameStatusStrict();assert(f.detector.isGameStatusCurrent());
+   f.hold=true;const old=f.detector.refreshGameStatusStrict(TMNT.pid),rejected=assert.rejects(old);await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
+   f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});
+   await rejected;assert.equal(f.messages.length,before);assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);assert(!f.detector.isGameStatusCurrent());
+   f.native=versionedGame(TMNT,11,10);f.hold=false;
+   f.broadcastPower({...f.power,generation:nextGeneration,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+   await flushDetection();await f.advance(100);
+   assert.equal(f.messages.length,before+1,'only readiness observers still require a successor read after public Ready');
+   assert.deepEqual({...f.messages.at(-1).args},{automatic:true,expectedPowerGeneration:nextGeneration,expectedPowerNotificationSequence:2});
+   assert(f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);assert.deepEqual(ready,[false,true,false,true]);
+   f.reply(message.id,versionedGame(NEXT_GAME,12));await flushDetection();
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'retired preferred target must not replace the successor');
+   await f.advance(10000);assert.equal(f.messages.length,before+1);assert.equal(f.schedules.length,0);
+  }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+ }
+});
 await check('风暴：稳定目标十秒只用原1250ms发现兜底，心跳不重发配置或准入通知',async()=>{
  const f=detectionFixture();f.native=versionedGame();const targets=[],ready=[],stop=f.detector.subscribeGameStatus(g=>targets.push(g)),stopReady=f.detector.subscribeGameTargetReadiness(v=>ready.push(v));await flushDetection();assert.equal(f.messages.length,1);
  f.native=versionedGame(TMNT,100,10);await f.advance(10000);assert.equal(f.messages.length,9);assert.equal(targets.filter(Boolean).length,1);assert.deepEqual(ready,[false,true]);assert.equal(f.detector.getCurrentGame()?.generation,100);assert.equal(f.schedules.length,1);stopReady();stop();assert.equal(f.timers.size,0);
@@ -1012,7 +1198,130 @@ await check('自愈：最后订阅撤销时在途观察至多八秒释放且不�
   const expected=count+(foreground?1:0);await f.advance(8000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);
   f.reply(pending.id,versionedGame(NEXT_GAME,11));f.signal('ipc:power.resumed');await f.advance(10000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);assert.equal(f.detector.getCurrentGame()?.pid,foreground?NEXT_GAME.pid:TMNT.pid);block();
  }
-});const nativeWireFlag=process.argv.indexOf('--native-wire-evidence');
+});
+await check('公共睡眠撤销立即退还游戏识别准入且旧显示不冒退出',async()=>{
+ const f=detectionFixture();f.native=versionedGame();const seen=[],ready=[],stop=f.detector.subscribeGameStatus(g=>seen.push(g)),stopReady=f.detector.subscribeGameTargetReadiness(v=>ready.push(v));await flushDetection();assert(f.detector.isGameStatusCurrent());const before=f.messages.length,current=f.detector.getCurrentGame();
+ f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await flushDetection();assert.equal(f.detector.isGameStatusCurrent(),false,'public sleep denial left old game readiness admitted');assert.equal(ready.at(-1),false);assert.equal(f.detector.getCurrentGame().pid,current.pid);await f.advance(5000);assert.equal(f.messages.length,before,'held public sleep emitted game discovery IO');
+ f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});await flushDetection();await f.advance(1250);assert(f.detector.isGameStatusCurrent());assert.equal(seen.filter(g=>g===null).length,1,'sleep was published as a game exit');stop();stopReady();f.stopPowerProbe();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+});
+await check('非 Steam：第一次 Ready 被下一次睡眠打断后继续识别同一游戏',async()=>{
+ const f=detectionFixture(),block=blockDisplayScheduler(f),seen=[],ready=[];
+ f.native=versionedGame(TMNT,10,10);
+ const stop=f.policy.subscribePolicyGameStatus(game=>seen.push(game));
+ const stopReady=f.detector.subscribeGameTargetReadiness(value=>ready.push(value));
+ try{
+  await flushDetection();
+  assert.equal(f.policy.getPolicyGame()?.source,'whitelist');
+  assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid);
+  assert.equal(f.messages.length,1);
+  f.broadcastPower({...f.power,phase:'suspending',hardwareWritesAllowed:false,notificationPending:true,publicationRevision:2,observedNotificationSequence:2});
+  await f.advance(5000);
+  assert.equal(f.messages.length,1);
+  f.hold=true;
+  f.broadcastPower({...f.power,phase:'ready',generation:101,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:3});
+  await f.advance(200);
+  assert.equal(f.messages.length,2);
+  const interrupted=f.messages.at(-1);
+  assert.equal(interrupted.args.expectedPowerGeneration,101);
+  f.broadcastPower({...f.power,phase:'suspending',hardwareWritesAllowed:false,notificationPending:true,publicationRevision:4,observedNotificationSequence:3});
+  f.reply(interrupted.id,noGame(11,11));
+  await f.advance(5000);
+  assert.equal(f.messages.length,2);
+  assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid,'retired empty reply became a game exit');
+  assert.equal(f.detector.isGameStatusCurrent(),false);
+  f.hold=false;
+  f.native=versionedGame(TMNT,12,10);
+  f.broadcastPower({...f.power,phase:'ready',generation:102,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:5});
+  await f.advance(200);
+  assert.equal(f.messages.length,3,'second Ready must refresh the selected game once');
+  assert.deepEqual({...f.messages.at(-1).args},{automatic:true,expectedPowerGeneration:102,expectedPowerNotificationSequence:3});
+  assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid);
+  assert.equal(f.policy.getPolicyGame()?.processCreated,TMNT.processCreated);
+  assert(f.detector.isGameStatusCurrent());
+  assert.deepEqual(ready,[false,true,false,true]);
+  assert.equal(seen.filter(game=>game===null).length,0,'power hold was reported as a game exit');
+ }finally{stopReady();stop();block();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+});
+await check('公共新Ready不等旧识别读取且迟到成功失败不能污染后继',async()=>{
+ for(const strict of [false,true]){const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;const old=f.detector.refreshGameStatusStrict(strict?TMNT.pid:0);old.catch(()=>{});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
+ f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});f.native=versionedGame({...TMNT,pid:22222,processCreated:'2222200',path:'C:/new.exe'},12,12);f.hold=false;f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});await flushDetection();await f.advance(1250);assert(f.messages.length>before,'new Ready joined the old detection request');assert.equal(f.messages.at(-1).args.pid,undefined,'wake replayed a retired preferred PID');assert.equal(f.messages.at(-1).args.expectedPowerGeneration,101);assert.equal(f.messages.at(-1).args.expectedPowerNotificationSequence,2);assert.equal(f.detector.getCurrentGame().pid,22222);assert(f.detector.isGameStatusCurrent());f.reply(message.id,versionedGame(TMNT,10,10));await assert.rejects(old);await flushDetection();assert.equal(f.detector.getCurrentGame().pid,22222);assert(f.detector.isGameStatusCurrent());f.fail(message.id,'old failure');await flushDetection();assert(f.detector.isGameStatusCurrent());stop();f.stopPowerProbe();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+await check('公共同代通知序号变化退休旧识别且拒绝缓存准入',async()=>{
+ const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;const old=f.detector.refreshGameStatusStrict();old.catch(()=>{});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
+ f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2});assert.equal(f.detector.isGameStatusCurrent(),false,'new sequence retained cached game admission');f.hold=false;f.native=versionedGame(TMNT,11,10);await f.detector.refreshGameStatusStrict();assert(f.messages.length>before,'same generation sequence joined old detection');assert(f.detector.isGameStatusCurrent());f.fail(message.id,'old retired read');await assert.rejects(old);assert(f.detector.isGameStatusCurrent());stop();f.stopPowerProbe();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+});
+
+await check('公共睡眠恢复时策略首次识别不保留退休初始化Promise',async()=>{
+ const f=detectionFixture();f.hold=true;const old=f.policy.detectPolicyGame();old.catch(()=>{});await flushDetection();assert.equal(f.messages.length,1);const first=f.messages[0];let next=null,nextError=null,completed=false;let newer;
+ try{
+  f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});
+  f.native=versionedGame(NEXT_GAME,12);f.hold=false;f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+  newer=f.policy.detectPolicyGame().then(value=>{next=value;completed=true;},error=>{nextError=error;completed=true;});await flushDetection();
+  assert(f.detector.isGameStatusInitialized()&&f.detector.isGameStatusCurrent(),'actual public detector failed to recover its new authority');assert.equal(f.detector.getCurrentGame().pid,NEXT_GAME.pid);
+  assert.equal(completed,true,'policy facade retained retired initialization Promise');assert.equal(nextError,null,'policy facade attached to retired initialization failure');assert.equal(next.pid,NEXT_GAME.pid);assert.equal(f.messages.length,2,'policy facade created duplicate discovery');assert(f.messages.every(m=>m.args.pid===undefined),'policy initialization re-elected a captured PID');
+ }finally{f.fail(first.id,'retired old initialization');await old.catch(()=>{});if(newer)await newer;f.stopPowerProbe();}
+});
+await check('公共通知序号立即归还旧识别等待且后继不依赖私有轮询',async()=>{
+ const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;let retired=false;
+ const old=f.detector.refreshGameStatusStrict().then(()=>({ok:true}),error=>{retired=true;return{error};});await flushDetection();const message=f.messages.at(-1),record=f.abortRecords.at(-1);let completed;
+ try{
+  f.hold=false;f.native=versionedGame(NEXT_GAME,12);f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2});await flushDetection();
+  assert.equal(record.signal.aborted,true,'same-generation notification retained the old game IPC signal');assert.equal(record.callbacks.size,0);assert.equal(retired,true,'same-generation notification retained local game wait');assert(![...f.timers.values()].some(t=>t.at===8000));
+  await f.advance(1250);assert(f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame().pid,NEXT_GAME.pid);completed=f.detector.getCurrentGame();
+  f.reply(message.id,versionedGame(TMNT,1));f.fail(message.id,'late retired IO');await flushDetection();assert.equal(f.detector.getCurrentGame().pid,completed.pid);assert(f.detector.isGameStatusCurrent());
+ }finally{f.fail(message.id,'fixture terminal');await old;stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));}
+});
+
+await check('公共撤销归还旧识别IPC等待和timer但不伪造Native取消',async()=>{
+ for(const preferred of [0,TMNT.pid]){
+  const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;let settled=false,rejected=false;const old=f.detector.refreshGameStatusStrict(preferred).then(()=>{settled=true;},()=>{settled=true;rejected=true;});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
+  f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await flushDetection();
+  try{assert.equal(settled,true,'public revocation retained local game IPC wait');assert.equal(rejected,true);assert(![...f.timers.values()].some(t=>t.at===8000),'revoked game IPC timeout retained its private request');assert.equal(f.messages.length,before,'public cancellation sent a native command');f.reply(message.id,versionedGame());await flushDetection();assert.equal(f.detector.isGameStatusCurrent(),false);}
+  finally{f.fail(message.id,'fixture release old IO only');await old;stop();f.stopPowerProbe();}
+ }
+});
+
+await check('公共识别等待64轮撤销恢复归还本侧监听和timer且迟到失败不退款',async()=>{
+ const f=detectionFixture();f.native=versionedGame();const seen=[],stop=f.detector.subscribeGameStatus(g=>seen.push(g));await flushDetection();let held=0;
+ for(let n=0;n<64;n++){
+  f.hold=true;const previous=f.detector.getCurrentGame(),read=f.detector.refreshGameStatusStrict().then(()=>({ok:true}),error=>({error}));await flushDetection();const message=f.messages.at(-1),record=f.abortRecords.at(-1),reads=f.messages.length;assert.equal(record.callbacks.size,1,'original IPC did not own exactly one cancellation listener');
+  f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:f.power.publicationRevision+1,observedNotificationSequence:f.power.observedNotificationSequence+1});await flushDetection();const result=await read;assert(result.error,'public cancellation manufactured a successful detection');assert(record.signal.aborted);assert.equal(record.callbacks.size,0,'retired IPC kept abort listener');assert.equal(f.messages.length,reads,'local cancellation issued Native IO');assert(![...f.timers.values()].some(t=>t.at===8000),'retired request kept its original8s timer');assert.equal(f.detector.getCurrentGame().pid,previous.pid);assert(!f.detector.isGameStatusCurrent());held++;
+  f.hold=false;f.native=versionedGame(n%2?TMNT:NEXT_GAME,20+n);f.broadcastPower({...f.power,generation:101+n,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:f.power.publicationRevision+1});await flushDetection();await f.advance(1250);assert(f.detector.isGameStatusCurrent());const current=f.detector.getCurrentGame();f.reply(message.id,versionedGame(previous,1,1));f.fail(message.id,'late retired failure');await flushDetection();assert.equal(f.detector.getCurrentGame().pid,current.pid);assert(f.detector.isGameStatusCurrent());assert(f.abortRecords.every(r=>r.callbacks.size===0),'completed IPC left cancellation listeners');
+ }
+ assert.equal(held,64);const count=f.messages.length;stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));await f.advance(20000);assert.equal(f.messages.length,count,'last consumer shutdown revived discovery');
+});
+
+if(detectionOnly&&exactCase==='公共睡眠输入覆盖：实际检测器和真实Repository在同游戏恢复后接续')await check('公共睡眠输入覆盖：实际检测器和真实Repository在同游戏恢复后接续',async()=>{
+ const f=detectionFixture();f.native=versionedGame();
+ const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
+ const compiled=await compileSettingsConsumer(root,{onCompiled:result=>{if(process.env.YMCC_C125_INPUT_DIR){const dir=path.dirname(process.env.YMCC_C125_INPUT_DIR);fs.writeFileSync(path.join(dir,'input-repository.metafile.json'),JSON.stringify(result.metafile,null,2),{flag:'wx'});fs.writeFileSync(path.join(dir,'input-repository.cjs'),result.outputFiles[0].text,{flag:'wx'});}}});
+ const memory=createSettingsFixture(compiled,{input:{outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false},gyroMotion:{enabled:false}}});await memory.repo.loadSettings();
+ const config={version:1,entries:{'tmnt.exe':{enabled:true,padPersona:'steamdeck',gyroOverride:'off'}},rtss:{}};const configListeners=new Set();let releaseRead,held=false;const blocked=new Promise(resolve=>releaseRead=resolve);let reads=0;
+ const service={loadGameCustomConfig:async()=>{reads++;if(held){held=false;await blocked;}return structuredClone(config);},onGameCustomConfigChanged:cb=>{configListeners.add(cb);return()=>configListeners.delete(cb);},clearGameInputRestoreSnapshot:async()=>{throw Error('No legacy restore in actual detector composition');}};
+ const input=evaluate(fs.readFileSync(path.join(root,'src/bridge/gameInputOverride.ts'),'utf8'),{'./gyroPresetModel':load('src/bridge/gyroPresetModel.ts'),'@/bridge/settingsRepository':memory.repo,'./gamedetect':f.detector,'@/bridge/gamePolicyTarget':{getPolicyGame:f.detector.getCurrentGame,isPolicyGameInitialized:f.detector.isGameStatusInitialized,subscribePolicyGameStatus:f.detector.subscribeGameStatus,gamePolicyKey:hysteresis.gamePolicyKey},'@/bridge/ipc':{invoke:async(command)=>{assert.equal(command,'input.gameOverride.session');return 'actual-input-session';}},'@/scheduler':f.scheduler,'@/bridge/performanceSchedule':service,'./powerLifecycleState':{...f.sharedPower,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted},'./powerResume':load('src/bridge/powerResume.ts')},{AbortController,AbortSignal});
+ try{
+  input.startGameInputOverrideWatch();await flushDetection();assert.equal((await memory.repo.loadSettings()).input.gameOverride.outputTarget.persona,'steamdeck');assert(f.detector.isGameStatusCurrent());
+  held=true;config.entries['tmnt.exe'].padPersona='elite';for(const cb of [...configListeners])cb();await flushDetection();const before=reads;
+  f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await flushDetection();assert(!f.detector.isGameStatusCurrent());assert.equal((await memory.repo.loadSettings()).input.gameOverride.outputTarget.persona,'steamdeck');
+  f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});await flushDetection();await f.advance(1250);assert(f.detector.isGameStatusCurrent());assert(reads>before,'actual detector same identity recovery did not resume input');assert.equal((await memory.repo.loadSettings()).input.gameOverride.outputTarget.persona,'elite','actual repository overlay not updated before retired read');
+  const revision=(await memory.repo.loadSettings()).input.revision;releaseRead();await flushDetection();assert.equal((await memory.repo.loadSettings()).input.revision,revision,'late actual composition read rewrote overlay');
+  const overlayWrites=memory.state.writes.filter(a=>a.expectedInputRevision!==undefined);assert(overlayWrites.length>=2);assert(overlayWrites.every(a=>a.inputRuntimePower&&Number.isSafeInteger(a.inputRuntimePower.generation)&&Number.isSafeInteger(a.inputRuntimePower.observedNotificationSequence)),'actual input/repository/API dropped runtime public power');assert.equal(overlayWrites.at(-1).inputRuntimePower.generation,101);assert.equal(overlayWrites.at(-1).inputRuntimePower.observedNotificationSequence,2);
+ }finally{releaseRead();input.stopGameInputOverrideWatch();f.stopPowerProbe();await flushDetection();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(f.timers.size,0);assert.equal(configListeners.size,0);}
+});
+if(detectionOnly&&exactCase==='公共睡眠输入覆盖：Native撤销仅取消原CAS并保留普通持久设置')await check('公共睡眠输入覆盖：Native撤销仅取消原CAS并保留普通持久设置',async()=>{
+ const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
+ const compiled=await compileSettingsConsumer(root,{onCompiled:result=>{if(process.env.YMCC_C125_INPUT_DIR){const dir=path.dirname(process.env.YMCC_C125_INPUT_DIR);fs.writeFileSync(path.join(dir,'input-repository.metafile.json'),JSON.stringify(result.metafile,null,2),{flag:'wx'});fs.writeFileSync(path.join(dir,'input-repository.cjs'),result.outputFiles[0].text,{flag:'wx'});}}});
+ const files=new Map(),writes=[];let cancel=false;
+ const storage={directory:'Q:\\ymcc-runtime-power-memory\\PowerControl',seed:(file,raw)=>files.set(file,raw),snapshot:()=>new Map(files),read:async args=>({stamp:files.get(args.path)||'missing',unchanged:false,content:files.get(args.path)||''}),write:async args=>{writes.push(structuredClone(args));if(cancel&&args.inputRuntimePower)return {ok:false,reason:'input-runtime-power-superseded',content:''};files.set(args.path,args.content);return {ok:true,content:args.content};}};
+ const f=createSettingsFixture(compiled,{input:{outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false},gyroMotion:{enabled:false}}},undefined,{storage});await f.repo.loadSettings();
+ const before=await f.repo.loadSettings(),raw=f.text(),power={generation:7,observedNotificationSequence:19};cancel=true;
+ const pending=f.repo.compareAndSwapInputSettings(before.input.revision,{gameOverride:{identity:'held-native-power'}},()=>true,{inputRuntimePower:power});power.generation=99;
+ const refused=await pending;assert.equal(refused.ok,false);assert.equal(refused.reason,'cancelled');assert.equal(f.text(),raw);assert.equal(f.repo.getSettingsRecoveryState().status,'ready','native power retirement incorrectly poisoned durable settings');assert.equal(writes.at(-1).inputRuntimePower.generation,7,'queued runtime request power was not snapshotted');
+ const ordinary=await f.repo.compareAndSwapInputSettings(before.input.revision,{outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false}},()=>true);assert(ordinary.ok,'ordinary durable CAS was gated by runtime cancellation');assert(!Object.hasOwn(writes.at(-1),'inputRuntimePower'));
+ cancel=false;const resumed=await f.repo.compareAndSwapInputSettings(ordinary.revision,{gameOverride:{identity:'successor-current'}},()=>true,{inputRuntimePower:{generation:8,observedNotificationSequence:20}});assert(resumed.ok);assert.equal(writes.at(-1).inputRuntimePower.generation,8);assert.equal(f.repo.getSettingsRecoveryState().status,'ready');
+});
+
+const nativeWireFlag=process.argv.indexOf('--native-wire-evidence');
 currentSection = 'native-wire';
 
 if(nativeWireFlag>=0){
@@ -1033,7 +1342,9 @@ if(nativeWireFlag>=0){
  });
 }
 }
-console.log(JSON.stringify({scope,...scopeDetails,passed:cases.length,cases,nativeWireEvidence},null,2));
+assert(fromReached,'Unknown --case-from input-runtime case');
+assert(exactCase===null||exactMatches===1,'Unknown --case detection-only case');
+console.log(JSON.stringify({scope,...scopeDetails,passed:cases.length,cases,nativeWireEvidence,...(inputOwnerOnly?{inputOwnerEvidence}:{}),...(exactCase!==null?{selection:{exactCase,selected:exactMatches,notRun}}:fromCase?{selection:{fromCase,notRun}}:{})},null,2));
 
 
 

@@ -8,11 +8,16 @@
 namespace ymcc::hidhideCliWriter {
 namespace fileDetail=targetReturn::fileDetail;
 enum class LoadState { Missing, Valid, RetryableIo, Invalid };
+class Session;
 struct LoadResult {
     LoadState state=LoadState::Invalid;
     std::optional<Record> record;
     DWORD win32Error=0;
     std::string reason;
+private:
+    std::optional<Record> unmatchedHistory_;
+    friend class Session;
+    friend LoadResult load(const std::wstring&,const std::string&);
 };
 enum class StoreState { Committed, RetryableIo, Invalid };
 struct StoreResult {
@@ -40,7 +45,10 @@ inline LoadResult load(const std::wstring& rawPath,const std::string& machineBin
     if(!ReadFile(h.value,&extra,1,&extraRead,nullptr)||extraRead){r.state=LoadState::RetryableIo;r.win32Error=GetLastError();r.reason="record-read-snapshot-changed";return r;}
     if(!fileDetail::info(h.value,after,e)||!fileDetail::sameInfo(before,after)){r.state=LoadState::RetryableIo;r.win32Error=e;r.reason="record-info-snapshot-changed";return r;}
     Record record;
-    if(!decode(bytes,record,&r.reason)||record.machineBinding!=machineBinding){r.reason="record-invalid-or-foreign-machine";return r;}
+    // Preserve the decoder reason. Invalid bytes and a valid record for another
+    // machine require different diagnosis; both retain the original Invalid gate.
+    if(!decode(bytes,record,&r.reason))return r;
+    if(record.machineBinding!=machineBinding){r.reason="record-machine-binding-mismatch";r.unmatchedHistory_=std::move(record);return r;}
     r.state=LoadState::Valid;r.record=std::move(record);r.reason="writer-history-only";return r;
 }
 // Nonexclusive leaf: callers must serialize access; Session below holds the
@@ -84,8 +92,10 @@ public:
     Session(Session&&)=delete;Session& operator=(Session&&)=delete;
     bool ready()const noexcept{return owner_.valid()&&record_.has_value();}
     const SessionError& error()const noexcept{return error_;}
+    const std::wstring& recordPath()const noexcept{return recordPath_;}
     const Record* record()const noexcept{return ready()?&*record_:nullptr;}
     LoadState openedFrom()const noexcept{return openedFrom_;}
+    bool historyBindingMatched()const noexcept{return historyBindingMatched_;}
     bool reserve(std::uint64_t expectedRevision,const Attempt& reserved){
         return update([&](Record& candidate,std::string& error){return hidhideCliWriter::reserve(*record_,expectedRevision,reserved,candidate,&error);});
     }
@@ -102,9 +112,11 @@ private:
     std::optional<Record> record_;
     LoadState openedFrom_=LoadState::Invalid;
     SessionError error_;
+    bool historyBindingMatched_=true;
+    std::string expectedMachineBinding_;
     bool setError(SessionErrorCode code,const char* reason,DWORD error=0){error_={code,error,reason};return false;}
     bool clearError(){error_={};return true;}
-    Session(const std::wstring& rawPath,const std::string& machineBinding){
+    Session(const std::wstring& rawPath,const std::string& machineBinding):expectedMachineBinding_(machineBinding){
         std::wstring ownerPath;
         if(!fileDetail::normalize(rawPath,recordPath_)||!fileDetail::normalize(recordPath_+L".owner",ownerPath)||!targetReturn::detail::text(machineBinding,4096)){
             setError(SessionErrorCode::Invalid,"invalid-explicit-path-or-machine");return;
@@ -127,8 +139,10 @@ private:
         if(before.nFileSizeHigh||before.nFileSizeLow!=0){setError(SessionErrorCode::Invalid,"owner-file-not-empty");return;}
         if(!fileDetail::info(h.value,after,e)||!fileDetail::sameInfo(before,after)){setError(SessionErrorCode::RetryableIo,"owner-snapshot-changed",e);return;}
         const auto loaded=hidhideCliWriter::load(recordPath_,machineBinding);openedFrom_=loaded.state;
-        if(loaded.state!=LoadState::Missing&&loaded.state!=LoadState::Valid){setError(loaded.state==LoadState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,loaded.reason.c_str(),loaded.win32Error);return;}
+        const bool emptyHistoryHint=loaded.state==LoadState::Invalid&&loaded.unmatchedHistory_&&!loaded.unmatchedHistory_->active;
+        if(loaded.state!=LoadState::Missing&&loaded.state!=LoadState::Valid&&!emptyHistoryHint){setError(loaded.state==LoadState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,loaded.reason.c_str(),loaded.win32Error);return;}
         if(loaded.state==LoadState::Missing){Record initial;initial.machineBinding=machineBinding;record_=std::move(initial);}
+        else if(emptyHistoryHint){record_=loaded.unmatchedHistory_;historyBindingMatched_=false;}
         else record_=loaded.record;
         owner_.value=h.value;h.value=INVALID_HANDLE_VALUE;
     }
@@ -137,9 +151,13 @@ private:
         Record candidate;std::string reason;
         if(!transform(candidate,reason))return setError(SessionErrorCode::TransformRejected,reason.c_str());
         if(candidate.revision==record_->revision)return clearError();
+        if(!historyBindingMatched_){
+            if(record_->active)return setError(SessionErrorCode::Invalid,"unmatched-history-not-empty");
+            candidate.machineBinding=expectedMachineBinding_;
+        }
         const auto saved=hidhideCliWriter::store(recordPath_,candidate);
         if(!saved.committed())return setError(saved.state==StoreState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,saved.reason.c_str(),saved.win32Error);
-        record_=std::move(candidate);return clearError();
+        record_=std::move(candidate);historyBindingMatched_=true;return clearError();
     }
 };
 } // namespace ymcc::hidhideCliWriter

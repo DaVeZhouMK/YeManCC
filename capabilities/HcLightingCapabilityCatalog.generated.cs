@@ -3,7 +3,7 @@ using System;
 namespace YeManFanBackend.Capabilities;
 public static partial class HcLightingCapabilityCatalog
 {
-    public const string CatalogSha256 = "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3";
+    public const string CatalogSha256 = "74f233e93628ec1e3ccddb37e4c909f34e44738e1e7804880a4be23a2c786a20";
     private static readonly LightingCapabilityDescriptor[] GeneratedRoutes = {
         new("hc.device.AOKZOEA1", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
         new("hc.device.AOKZOEA1Pro", true, false, HcSourceLedEffect.SolidColor | HcSourceLedEffect.Rainbow, false, false, false, false, false),
@@ -95,4 +95,19 @@ public static partial class HcLightingCapabilityCatalog
         ("hc.device.OneXPlayerX1", "hc.device.OneXPlayerX1Pro"),
     };
     public const string IndependentProvider = "ymcc-onex-hid-v1";
+    internal static readonly LightingOemOwnershipCapability[] GeneratedOemOwnership = {
+        new("hc.device.AYANEO2", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEO2S", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOAIR", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", true),
+        new("hc.device.AYANEOAIR1S", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOAIRLite", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOAIRPlusAMD", LightingOemOwnershipProtocol.CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false),
+        new("hc.device.AYANEOAIRPlusAMDMendocino", LightingOemOwnershipProtocol.CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false),
+        new("hc.device.AYANEOAIRPlusIntel", LightingOemOwnershipProtocol.CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false),
+        new("hc.device.AYANEOAIRPro", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOFlip1SKB", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOFlipKB", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOKUN", LightingOemOwnershipProtocol.LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false),
+        new("hc.device.AYANEOSlide", LightingOemOwnershipProtocol.CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", true),
+    };
 }

@@ -23,11 +23,20 @@ export function verifyOriginal(raw,spec,{negative=false}={}){need(!spec.retireme
   need(Array.isArray(raw.results)&&raw.cases===raw.results.length&&new Set(raw.results).size===raw.results.length&&JSON.stringify(raw.results)===JSON.stringify(spec.expectedNames),'PLUGIN_UPDATE_YMCC_ORIGINAL_CASE_REMOVED_OR_CHANGED');
   return {checks:raw.cases,passedNames:raw.results,failedNames:[]};
  }
- need(raw&&Array.isArray(raw.results)&&raw.results.length===raw.cases,'PLUGIN_UPDATE_ORIGINAL_REPORT_SHAPE');const passed=row=>row.passed===true||row.status==='passed',names=raw.results.map(x=>x.name);need(new Set(names).size===names.length&&spec.expectedNames.every(x=>names.includes(x)),'PLUGIN_UPDATE_ORIGINAL_CASE_REMOVED');
- if(spec.report==='UPDATER-SERVICE.json')need(raw.productionService===true&&raw.productionClient===true&&raw.liveNativeInstallation===false&&raw.steamUIActions===0,'PLUGIN_UPDATE_SERVICE_BOUNDARY');
+ need(raw&&Array.isArray(raw.results)&&raw.results.length===raw.cases,'PLUGIN_UPDATE_ORIGINAL_REPORT_SHAPE');
+ const names=new Set(raw.results.map(row=>row?.name));
+ need(names.size===raw.results.length&&names.size===spec.expectedNames.length&&spec.expectedNames.every(name=>names.has(name)),'PLUGIN_UPDATE_ORIGINAL_CASE_REMOVED_OR_CHANGED');
+ need(raw.results.every(row=>(row.status==='passed'||row.status==='failed')&&(!Object.hasOwn(row,'passed')||row.passed===(row.status==='passed'))),'PLUGIN_UPDATE_ORIGINAL_ROW_VERDICT_INVALID');
+ if(spec.report==='UPDATER-SERVICE.json'){
+  need(raw.productionService===true&&raw.productionClient===true&&raw.liveNativeInstallation===false&&raw.steamUIActions===0,'PLUGIN_UPDATE_SERVICE_BOUNDARY');
+  need(raw.onlyCase==null&&raw.excludeCase==null&&raw.ownerVariant==null&&(!Object.hasOwn(raw,'omitted')||(Array.isArray(raw.omitted)&&raw.omitted.length===0)),'PLUGIN_UPDATE_SERVICE_SELECTION_CHANGED');
+  need(!Object.hasOwn(raw,'sourceDrift')||(Array.isArray(raw.sourceDrift)&&raw.sourceDrift.length===0),'PLUGIN_UPDATE_SERVICE_SOURCE_DRIFT');
+ }
  else need(raw.actualInstallations===0&&raw.fixtures===true,'PLUGIN_UPDATE_NATIVE_BOUNDARY');
- if(negative)need(raw.status==='failed'&&raw.results.some(x=>x.name===spec.fault.expectedFailedCase&&!passed(x)),'PLUGIN_UPDATE_EXPECTED_ASSERTION_NOT_REACHED');
- else need(raw.status==='passed'&&raw.results.every(passed),'PLUGIN_UPDATE_ORIGINAL_ASSERTION_FAILED');return {checks:raw.cases,failedNames:raw.results.filter(x=>!passed(x)).map(x=>x.name)};
+ const failedNames=raw.results.filter(row=>row.status==='failed').map(row=>row.name);
+ if(negative)need(raw.status==='failed'&&failedNames.length===1&&failedNames[0]===spec.fault.expectedFailedCase,'PLUGIN_UPDATE_EXPECTED_ASSERTION_NOT_REACHED');
+ else need(raw.status==='passed'&&failedNames.length===0,'PLUGIN_UPDATE_ORIGINAL_ASSERTION_FAILED');
+ return {checks:raw.cases,failedNames};
 }
 export function verifyYmccAssertionFailure(failure,spec,fault,scriptFile){
  need(spec.format==='ymcc-only-original-string-cases'&&!spec.retirement,'PLUGIN_UPDATE_YMCC_ASSERTION_SCOPE');
@@ -45,6 +54,7 @@ export async function runCase(id,root){const spec=SPECS[id];need(spec,'PLUGIN_UP
  fs.mkdirSync(root,{recursive:true});const steps=[];let esbuild;
  try{
   const sources=[...new Set([...MODULE_INPUTS,...spec.sources])].sort(),snapshot=sources.map(rel=>{const p=sourceFile(REPO,rel),bytes=fs.readFileSync(p),copy=path.join(root,'input-sources',rel);fs.mkdirSync(path.dirname(copy),{recursive:true});fs.writeFileSync(copy,bytes);return {path:rel,sha256:sha(bytes),copy};});
+  const capturedHashes=new Map(snapshot.map(r=>[r.path,r.sha256]));
   const moduleMembers=fs.readdirSync(path.join(REPO,MODULE)).filter(x=>/\.(?:mjs|cjs|json)$/.test(x)).sort();write(path.join(root,'input-snapshot.json'),{sources:snapshot,toolInputs:tool.files,moduleMembers});
   const require=createRequire(path.join(REPO,'package.json'));esbuild=require('esbuild');need(esbuild.version===tool.esbuildVersion,'PLUGIN_UPDATE_COMPILER_VERSION');
   const oldBinary=process.env.ESBUILD_BINARY_PATH;process.env.ESBUILD_BINARY_PATH=tool.esbuildExecutable;
@@ -71,14 +81,17 @@ export async function runCase(id,root){const spec=SPECS[id];need(spec,'PLUGIN_UP
   need(declaredFaults.length>0&&declaredFaults.length<=16,'PLUGIN_UPDATE_EXPLICIT_FAULTS_REQUIRED');
   for(const selectedFault of declaredFaults){
    const label=declaredFaults.length===1?'fault':'fault-'+selectedFault.id,mirror=path.join(root,label,'repo');
+   need(spec.sources.includes(selectedFault.path)&&selectedFault.path!==spec.script,'PLUGIN_UPDATE_FAULT_SOURCE_INVALID');
    for(const rel of spec.sources){const from=path.join(root,'input-sources',rel),to=path.join(mirror,rel);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}
    const dependency=path.join(mirror,'node_modules','esbuild');fs.mkdirSync(path.dirname(dependency),{recursive:true});fs.symlinkSync(tool.esbuildPackageRoot,dependency,process.platform==='win32'?'junction':'dir');
-   const changed=path.join(mirror,selectedFault.path),before=fs.readFileSync(changed,'utf8');need(before.split(selectedFault.before).length===2,'PLUGIN_UPDATE_FAULT_ANCHOR_CHANGED');fs.writeFileSync(changed,before.replace(selectedFault.before,selectedFault.after));const mutatedHash=hash(changed);
-   const changedSources=spec.sources.filter(rel=>hash(path.join(mirror,rel))!==hash(path.join(root,'input-sources',rel)));need(changedSources.length===1&&changedSources[0]===selectedFault.path,'PLUGIN_UPDATE_FAULT_NOT_SINGLE_SOURCE');
+   const changed=path.join(mirror,selectedFault.path),beforeBytes=fs.readFileSync(changed),before=beforeBytes.toString('utf8'),originalSha256=capturedHashes.get(selectedFault.path);
+   need(sha(beforeBytes)===originalSha256,'PLUGIN_UPDATE_FAULT_BASE_SOURCE_CHANGED');
+   need(before.split(selectedFault.before).length===2,'PLUGIN_UPDATE_FAULT_ANCHOR_CHANGED');fs.writeFileSync(changed,before.replace(selectedFault.before,selectedFault.after));const mutatedHash=hash(changed);
+   const changedSources=spec.sources.filter(rel=>hash(path.join(mirror,rel))!==capturedHashes.get(rel));need(changedSources.length===1&&changedSources[0]===selectedFault.path,'PLUGIN_UPDATE_FAULT_NOT_SINGLE_SOURCE');
    const detected=execute(label,mirror,selectedFault);need(hash(path.join(mirror,spec.script))===hash(path.join(root,'input-sources',spec.script)),'PLUGIN_UPDATE_ORIGINAL_ASSERTIONS_CHANGED');
-   for(const relative of spec.sources)need(hash(path.join(mirror,relative))===(relative===selectedFault.path?mutatedHash:hash(path.join(root,'input-sources',relative))),'PLUGIN_UPDATE_PRIVATE_FAULT_SOURCE_CHANGED');
+   for(const relative of spec.sources)need(hash(path.join(mirror,relative))===(relative===selectedFault.path?mutatedHash:capturedHashes.get(relative)),'PLUGIN_UPDATE_PRIVATE_FAULT_SOURCE_CHANGED');
    const proof={id:selectedFault.id??'original-semantic-fault',...detected,source:selectedFault.path,sourceFilesChanged:1,expectedFailure:selectedFault.expectedFailedCase};detections.push(proof);
-   write(path.join(root,label,'mutation.json'),{source:selectedFault.path,before:selectedFault.before,after:selectedFault.after,originalSha256:sha(before),faultSha256:mutatedHash,originalAssertionScriptUnchanged:true,expectedFailure:selectedFault.expectedFailedCase,actualFailedNames:detected.failedNames,baselineIsSyntheticCurrentSourceFault:true,notHistoricalBefore:true});
+   write(path.join(root,label,'mutation.json'),{source:selectedFault.path,before:selectedFault.before,after:selectedFault.after,originalSha256,faultSha256:mutatedHash,originalAssertionScriptUnchanged:true,expectedFailure:selectedFault.expectedFailedCase,actualFailedNames:detected.failedNames,baselineIsSyntheticCurrentSourceFault:true,notHistoricalBefore:true});
   }
   const fault=detections[0];
   const drift=snapshot.filter(r=>hash(sourceFile(REPO,r.path))!==r.sha256||hash(r.copy)!==r.sha256);need(drift.length===0,'PLUGIN_UPDATE_SOURCE_CHANGED_DURING_RUN');for(const r of tool.files)need(hash(r.path)===r.sha256,'PLUGIN_UPDATE_TOOLCHAIN_CHANGED_DURING_RUN');need(JSON.stringify(fs.readdirSync(path.join(REPO,MODULE)).filter(x=>/\.(?:mjs|cjs|json)$/.test(x)).sort())===JSON.stringify(moduleMembers),'PLUGIN_UPDATE_MODULE_MEMBERSHIP_CHANGED');

@@ -1,0 +1,35 @@
+Json offline_group_observation_cancellation_tests(const std::shared_ptr<steamgamefacts::ProcessGroupLease>& lease){
+  need(lease&&lease->processCurrent(),"observation-fixture-live-group");
+  struct Restore{Current action=gCurrent,observation=gObservationCurrent;~Restore(){gCurrent=std::move(action);gObservationCurrent=std::move(observation);}}restore;
+  J cases=J::array();
+  const auto test=[&](const char* name,const auto& body){try{body();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& error){cases.push_back({{"name",name},{"passed",false},{"reason",error.what()}});}};
+  const auto identity=[](const steamgamefacts::ProcessWitness& p,DWORD session){return J{{"pid",p.pid},{"birthFileTime",std::to_string(p.created)},{"path",utf8(p.image)},{"session",session}};};
+  Scope scope;const DWORD session=lease->graph().members[0].session;
+  scope.roles[0]=bindLive(identity(lease->steam(),session),PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE);
+  scope.roles[1]=bindLive(identity(lease->selectedGame(),session),PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE);
+  DWORD rootPid=0;for(std::uint32_t i=0;i<lease->graph().count;++i)if(lease->graph().members[i].pid!=lease->selectedGame().pid)rootPid=lease->graph().members[i].pid;
+  const auto root=lease->witness(rootPid);need(root,"observation-fixture-root");
+  scope.roles[2]=bindLive(identity(*root,session),PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE);
+  wchar_t ownPath[32768]{};const DWORD length=GetModuleFileNameW(nullptr,ownPath,32768);need(length&&length<32768,"observation-fixture-own-path");
+  scope.roles[3]=bindLive(identity({GetCurrentProcessId(),steamgamefacts::detail::birth(GetCurrentProcess()),std::wstring(ownPath,length)},session),PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE);
+  scope.processGroup=lease;scope.gameId=lease->source().fullGameId;scope.appid=lease->source().appid;
+  gCurrent=[]{return true;};gObservationCurrent=[]{return true;};
+  WakeProbeReader probe(scope);std::array<HANDLE,4> waits{};for(std::size_t i=0;i<waits.size();++i)waits[i]=scope.roles[i].handle.h;
+  auto request=steamgamefacts::RequestCancellation::create();need(request&&request->current(),"observation-fixture-request");
+  unsigned observerCalls=0;
+  gCurrent=groupActionCurrent([]{return true;},lease,request);
+  gObservationCurrent=groupObservationCurrent([&]{++observerCalls;return true;},lease,request);
+  test("group-observation-normal-keeps-cheap-guard",[&]{need(probe.owned()&&observerCalls==1&&request->current(),"observation-normal-guard");});
+  test("group-observation-normal-wait-keeps-original-timeout",[&]{need(waitWakeObservation(waits,0,0,0,0,reinterpret_cast<WakeSignal>(request->event()))==WakeWait::Timeout,"observation-normal-timeout");});
+  request->cancel();const unsigned beforeCalls=observerCalls;
+  test("group-business-cancel-rejects-original-owned-probe",[&]{need(!probe.owned()&&observerCalls==beforeCalls&&lease->processCurrent(),"observation-cancel-not-independent");});
+  test("group-business-cancel-prevents-any-ui-memory-read",[&]{Snapshot empty;bool rejected=false;try{(void)probe.flags(empty);}catch(const std::runtime_error& e){rejected=std::string_view(e.what())=="wake-probe-scope-changed";}need(rejected&&probe.calls==0&&probe.bytes==0,"observation-cancel-read-ui");});
+  test("group-business-cancel-wakes-original-wait",[&]{const auto at=GetTickCount64();need(waitWakeObservation(waits,0,0,0,1000,reinterpret_cast<WakeSignal>(request->event()))==WakeWait::Cancelled&&GetTickCount64()-at<1000,"observation-cancel-wait");});
+  gObservationCurrent={};
+  test("group-empty-observation-uses-cancelled-action-fallback",[&]{need(!probe.owned()&&probe.calls==0,"observation-empty-fallback");});
+  test("group-missing-business-or-current-refused",[&]{bool missingCurrent=false,missingRequest=false;try{(void)groupActionCurrent({},lease,request);}catch(...){missingCurrent=true;}try{(void)groupObservationCurrent([]{return true;},lease,{});}catch(...){missingRequest=true;}need(missingCurrent&&missingRequest,"observation-missing-guard");});
+  scope.processGroup.reset();gCurrent=[]{return true;};gObservationCurrent=[]{return true;};
+  test("single-observation-keeps-original-guard-and-wait",[&]{need(probe.owned()&&waitWakeObservation(waits,0,0,0,0)==WakeWait::Timeout&&probe.calls==0,"observation-single-changed");});
+  std::size_t passed=0;for(const auto& row:cases)if(row.at("passed")==true)++passed;
+  return {{"schema","ymcc.group-observation-cancellation-helper.v1"},{"tests",cases.size()},{"passed",passed},{"success",passed==8&&cases.size()==8},{"cases",cases},{"nativeMemoryReads",probe.calls},{"publisherCalls",0},{"actualWakeProbeReader",true},{"actualWaitEntry",true},{"realSteamDeviceSleep",false}};
+}

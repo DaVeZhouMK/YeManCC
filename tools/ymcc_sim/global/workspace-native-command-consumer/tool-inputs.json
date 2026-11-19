@@ -23,32 +23,32 @@
   "files": [
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\atlprov.dll",
-      "sha256": "de51e1081c30be9b5b34315ae5c8a923e2c052404deb8126897790a359ff4cd6",
+      "sha256": "fc4c78bf6d6007a89ef48a1e9d805565a516464d9ff5282eac3d8d47f6139f39",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\bscmake.exe",
-      "sha256": "de08279282ae87f667ccb76d9e390db4838c8036cfb39e062a79966f59cb4bae",
+      "sha256": "1f7608fed1ecfacee20300d7bac77cdf1b8c75d8d89abdd2a9a0e21ab9a06b42",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1.dll",
-      "sha256": "48bb561939cfd8fbf194bb73b111b2083912da4fb81af2c181cbe8f4b89e5ad1",
+      "sha256": "6176d88c3e682f64ef960e29ecde0ff431785da664eba854e571e280dba6604b",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1xx.dll",
-      "sha256": "688fe28f3065283edf668868e76aeab28f03f80e2171c14c7d4e37f64513f623",
+      "sha256": "b96238e05dcc5fd9aa2614ab5e29ee2f9d3fd775fe41ce0a2202875956f383ed",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2.dll",
-      "sha256": "98050f97d60f7e95fcaf3525a7103e4818fba498a43563922476819ce88ed162",
+      "sha256": "b057a18570f712ffb535e227825a291706620f3337e5b13d896d6586fb6b3cec",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2dd.dll",
-      "sha256": "66f48262db00a15cffed9bc852e9e377f90c2e42da54b38d9569c3ab615aea54",
+      "sha256": "79dc88b75996e56ff2b760358a497002b69025e254e155de0fff3eb93d2bceaf",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -58,17 +58,7 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
-      "sha256": "88c8344236a27a6e727e0a8edc49aaa2690bdc7a9464b9d18cc7abe70a9f1c0d",
-      "role": "predeclared compiler directory runtime; not dynamic load claim"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dbg_dynamic-x86_64.dll",
-      "sha256": "6ebc5e4c7b5906a3fa8234937dab49aa5b31be1f329bb6cc92141cdc80472ad4",
-      "role": "predeclared compiler directory runtime; not dynamic load claim"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dynamic-x86_64.dll",
-      "sha256": "3aa742521e8cbd23252f0545aa51d5a15624a3e4430fbe2f81567afaeb3fc59b",
+      "sha256": "fe251ef50a1545b1b0835ee17b1e785459712b38d79e45b5c1d3d28970a36619",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -88,7 +78,7 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cvtres.exe",
-      "sha256": "8e4b47f34c08c2118b1a6913ee923abc0c94881dc4e003d0daf059c1230c7687",
+      "sha256": "b5da94e7b9ff60b388ea9013d9e0e3d4a2a68bff7c668c7017583459dac4e3c5",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -98,17 +88,17 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\dpcmi.dll",
-      "sha256": "74aabc92d318480d0f9bd3a65ecc0b15a144eb723f1f3379758913c4fbfd9b81",
+      "sha256": "84b73b9e22dd0d701ef43da2fbedc61592ccdfc0ae71f1a87fde3cf44605dbf6",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\dumpbin.exe",
-      "sha256": "12a1cd87238bd66dfdb788b4fcdcb91ce4b3f81236aab12a7a29e5ae1d85af50",
+      "sha256": "cfee7ed764b7b0866aae0be12f9c0ad2a7f5aecc4046ba2b7de26335827ca815",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\editbin.exe",
-      "sha256": "82fc1e076713c90959d2c5856fd219d88ea8112af74164769a737dff5a418928",
+      "sha256": "e0d0024920f3073410c346813220ba61d034bb22fe13212de4f84094d978ef89",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -128,7 +118,7 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ifc.exe",
-      "sha256": "afceb636b7b8d4e8f0478bc32b77d96c5c69ff0f5f3681fe7751cac18e0e1967",
+      "sha256": "b9f2f8c53ff8a108d00947c84a1368b2e0159a23d4497f0def7853bc3dc05122",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -138,17 +128,12 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\lib.exe",
-      "sha256": "3d694c782f93e998fec5db0c2df78153565da23a028ee4618561fa0c33408489",
+      "sha256": "fde148a275981855689c45f932dda56b10dc9289a0290826a0fb93478da34929",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
-      "sha256": "ca11e6c45debd34bf652dfe984c5360a531a005ed78bf72852330c9c2590cf0d",
-      "role": "predeclared compiler directory runtime; not dynamic load claim"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\llvm-symbolizer.exe",
-      "sha256": "1a591000e57e894662427fee1f24dfbf5b5f0345260f84c5c2102207a31918ab",
+      "sha256": "a364af801a8539e4324d9489313dbf001d959128451fc99a27b24676bbac058f",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -173,82 +158,82 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ml64.exe",
-      "sha256": "a776cf32777d2df2e201a769bb5bd6502bb72bac98f60c6f53a4bfcecd0db8ed",
+      "sha256": "5caf9b734273a9ccb109eb0465581bd6c9fb67fa52a1cd12cc6d40ee12e40d4a",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msobj140.dll",
-      "sha256": "0a18f9fe0a6d7afd9fbcf921c15eee51e3c982d7297429eabf4122a19e56d4bc",
+      "sha256": "6a23e3aa1f1dc964f62c5a761d4ea279f77cc7c2ae3ac43e4fb91e7830bdd88f",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdb140.dll",
-      "sha256": "8cd754a0fe8a91d853e04c48bf56b5de502897c77c3aa89a2dc82d6b80b9351a",
+      "sha256": "eb6535aae9d1a9860c6973fdcd1c20c20045d13db77e1d1897a474b90867aff9",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcmf.exe",
-      "sha256": "79f50bad07e6f9bb9651cfadaf79201e627533b08fd13358494aee189d976f08",
+      "sha256": "ccbdf80b764229f5f8a6c3f64bd74ccd8db316736b0bc25a6bce3cdd579d3dfb",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcore.dll",
-      "sha256": "ff7482bf01d1dcad8d5e368333e4495ed3572713edeec7044623e5f5fff999b9",
+      "sha256": "589861f069bbbcc47cbf496c1d9c823a23cdaccbda671d602d88ff67b48d227e",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbsrv.exe",
-      "sha256": "9221dbe740f39a1059dfe6e917984effad6f97312636f001c9191a6bccb34f93",
+      "sha256": "8ffbacfdbef90a79e8441d640bc8b4c86be02a2d9035ce87c5fa4f36dc3c70e1",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbst.dll",
-      "sha256": "80de4791af04fcdd093fb9f9163122a07d9e08321c8a1512b15cdce08acf729e",
+      "sha256": "e3b1d078aab45329fb88c99e2262dfad6974e650fb75c6e8237d4bd38be7d056",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspft140.dll",
-      "sha256": "f1800a2620d018886440cf1cc1a5ad22d403387409e5b9ff128eaf8eb71a906a",
+      "sha256": "33beb55552b9884e6dee3890542c646212246d5611bfdaab1da0037061150118",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcdis140.dll",
-      "sha256": "a5baa6487efccc4285b1aadd6620b94bbbcd649a77b4068170a5c575b0087e88",
+      "sha256": "e117f84ab6a78ce5e896ced882db6cde3e2fec0018a0963e8f50d6dc5bed52ff",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_1.dll",
-      "sha256": "a65e4abcf1df1ee5b4c363a2dfd27c471f78f1520372e38456c4379064d75aa2",
+      "sha256": "9648d46b710235db9888732a8dbd9e247b8dcb37a9e0dd64fa7c9a9d6763d282",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_2.dll",
-      "sha256": "b0798ec98cb0bade3df33ab66b553282425c6a2b512ff24b2d3f9040c848fe73",
+      "sha256": "f21990f3da34972486072a15bb509773cafae7764f1d9bd14b00825a7ee601af",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_atomic_wait.dll",
-      "sha256": "4b77104b31157c094493667f2919ef857e39f23163df632dbe302c4e6d7e8180",
+      "sha256": "b366579799aa419a9d50daefb34c1898d22044f72dbe0c38136f86f8c216cfa1",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_codecvt_ids.dll",
-      "sha256": "21ce1d7d4685efff88bae1034215529a5a991d3a1dbb9daf5126963818a935a4",
+      "sha256": "e642ecabfd668ab738aa35438644783cedf1d6d2c0f0b0df946ba4c21f7e35ae",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140.dll",
-      "sha256": "20076bc0e3fcb1842cab77dfe8ef816bc099b887c25329847a83e71c98765639",
+      "sha256": "0fa7eb792d3fbcf2233e4ea47e9144b9b1309ba8ed5d4731a72fffa8f4f556d6",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Newtonsoft.Json.dll",
-      "sha256": "a4096c8ab7c4dc5c21485b43f81b8f87699b748d39c4c24dc5dab6df61111219",
+      "sha256": "db96e2166c19dd698041f0d689e810f77bdf11c6596bfc1203d196aee0792f46",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\nmake.exe",
-      "sha256": "b05f089f67dba8df1d7cc38798b71e62a6ce8881b234dcfc80a657264597626c",
+      "sha256": "ce6b50c2d8e6704b671ec116e52ce9d2fbc1d20dd28c5b895b5421adddf94ebb",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -293,12 +278,12 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\tbbmalloc.dll",
-      "sha256": "1e142c6c1d16f5454dbe30167e0164123c8542a85ef0db6a41ce474d93aef8ed",
+      "sha256": "3629efbb6000da9c4ce7a9332affb85c8d04873be22a7af46b10e58a45357d89",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\undname.exe",
-      "sha256": "e805364f61cecb3f7730731a77111a258a7198e33cc89e652392651340f00984",
+      "sha256": "567c5cd29643b97c45c9eeac20521f642b2e770357f4154b9c755166f5f85126",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -308,37 +293,37 @@
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcmeta.dll",
-      "sha256": "2ac473af2de8d862f0b2ee5df02693b7ebbc639b9b0139ae063015aa71dbb7f7",
+      "sha256": "509ed7bbf934a56baa4a168a1ecd6660f76b2b9f178a86e8bca4342e1b9007ae",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcperf.exe",
-      "sha256": "2cfba4e704e19c8eda9514b4f7eca42fd35326f8fa730a2a17dff5144ffec50a",
+      "sha256": "0528568f4ead8fc3ac7eeac119eab8de7186fdfafe67adab8f610478b9a6b54a",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_1.dll",
-      "sha256": "c3feb5700b1cbe6ace93e64e286b6394970e52d36b3b643d8243a1771077d210",
+      "sha256": "99ad0c5380674e28f965dc76b7cdfb8688cc2175a6641e00ab524195c3eaa900",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_threads.dll",
-      "sha256": "077dac1a197b8fbb9bffff1109489fdfba21140a25960b7e94d20bb69687dd84",
+      "sha256": "cb6c85a96cedbf21d3bff225ff47ed5aa0ee4dac4d5f05cd80f505f43ecfbd91",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140.dll",
-      "sha256": "b23a5c9ee132fbb72d970165de052f332209992eb4568616b7802052edc4f398",
+      "sha256": "80b039ca328f53ce4f468eda0e6d25a6e565eb4842b3690db1d1cf033a1f2aca",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vctip.exe",
-      "sha256": "e175c981ca866689bf8f8d9bd5ba1e71e2eb1c9d389de555744b0cb439250996",
+      "sha256": "d591358c6aee4b673562ca3b3a15c250e612708394fe3b44a7a7eda2470570a5",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\xdcmake.exe",
-      "sha256": "8bfe7d0842bbf727c154b0229e0e91b11b6850a8d1ae300839a91e478a917d42",
+      "sha256": "b40291d8df221cf5a3cba7ceb98332f6db9d1ee3e97b3a21fccd96c16b0d3f3f",
       "role": "predeclared compiler directory runtime; not dynamic load claim"
     },
     {
@@ -2549,6 +2534,26 @@
     {
       "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\psapi.h",
       "sha256": "4166fbce43622f469aa46cd1cea27a73171353df8101643c2e850124622d5ef9"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\powrprof.h",
+      "sha256": "2075a213f792a8206c510e26d94a81ff4e1a59f0168a3fd900822d14e863ceb1",
+      "role": "actual compiler/link dependency for existing shared power header"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\powerbase.h",
+      "sha256": "66082f57ff576850899fa3deb4779c0b762163a70946d0be4df78f3a2a506fb2",
+      "role": "actual compiler/link dependency for existing shared power header"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\powersetting.h",
+      "sha256": "68fdcdb5586156ae65de15738ff040c5fd303b5ef97cdc7ee448d96eec0488e6",
+      "role": "actual compiler/link dependency for existing shared power header"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\powrprof.lib",
+      "sha256": "9c05216b4cf2e80a3763d56b49d4a12bed0078c417b3633a03faa7405676378d",
+      "role": "actual compiler/link dependency for existing shared power header"
     }
   ],
   "meaning": "Static predeclared Node, compiler directory executables/runtime, actual bootstrap compiler headers and requested library paths. Public execution must independently observe every header/library and reject any missing member. OS-loaded module graph is not claimed."

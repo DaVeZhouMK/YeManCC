@@ -1,6 +1,8 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$ValidationRoot,[string]$BaselineNative)
+param([Parameter(Mandatory=$true)][string]$ValidationRoot,[string]$BaselineNative,
+ [ValidateSet('default','switch-storm','switch-storm-transitions','switch-storm-verification','switch-storm-autohide')][string]$CaseFilter='default')
 $ErrorActionPreference='Stop'
+if($BaselineNative -and $CaseFilter -ne 'default'){throw 'Baseline comparison supports only the original default selection.'}
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $ValidationRoot=[IO.Path]::GetFullPath($ValidationRoot)
 New-Item -ItemType Directory -Path $ValidationRoot -Force|Out-Null
@@ -33,7 +35,7 @@ cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE /DYMCC_
       & $cmd;if($LASTEXITCODE -ne 0){throw "Fixture build failed: $kind"}
       $report=Join-Path $ValidationRoot "game-switch-$kind.json"
       if(Test-Path -LiteralPath $report){Remove-Item -LiteralPath $report}
-      & $exe $report;$code=$LASTEXITCODE
+      if($CaseFilter -ne 'default'){& $exe $report ('--'+$CaseFilter)}else{& $exe $report};$code=$LASTEXITCODE
       if(!(Test-Path -LiteralPath $report)){throw "No fresh fixture report: $kind"}
       $r=Get-Content -LiteralPath $report -Raw|ConvertFrom-Json
       if(!$r.hiddenDesktop -or $r.visibleDesktopSwitched -or $r.systemInputInjected -or !$r.ownedTargetsTerminal){throw "Invalid isolation/cleanup result: $kind"}

@@ -218,7 +218,8 @@ static void testReset(){
     g_sgAutomaticSleepBudget.confirmedUserWake();testError=0;captured.clear();sgAbnormalDisplay(0);
 }
 static void testEtwDeliverQueued(BYTE version=0){
-    EVENT_RECORD event{};event.EventHeader.ProviderId=SG_ABNORMAL_KERNEL_PROVIDER;event.EventHeader.EventDescriptor.Id=static_cast<USHORT>(sgKernelPowerEventId(testXml));event.EventHeader.EventDescriptor.Version=version;event.EventHeader.EventDescriptor.Task=testEtwRecordTask;event.EventHeader.Flags=testEtwRecordFlags;event.EventHeader.TimeStamp.QuadPart=static_cast<LONGLONG>(testFileTime);event.UserContext=&g_sgAbnormalEtw;sgAbnormalEtwEvent(&event);
+    if(!testEtwLog.EventRecordCallback)return; // No registered consumer means no event delivery.
+    EVENT_RECORD event{};event.EventHeader.ProviderId=SG_ABNORMAL_KERNEL_PROVIDER;event.EventHeader.EventDescriptor.Id=static_cast<USHORT>(sgKernelPowerEventId(testXml));event.EventHeader.EventDescriptor.Version=version;event.EventHeader.EventDescriptor.Task=testEtwRecordTask;event.EventHeader.Flags=testEtwRecordFlags;event.EventHeader.TimeStamp.QuadPart=static_cast<LONGLONG>(testFileTime);event.UserContext=&g_sgAbnormalEtw;testEtwLog.EventRecordCallback(&event);
 }
 static std::string testEvent(unsigned id,const std::string& fields){return "<Event><System><EventID>"+std::to_string(id)+"</EventID></System><EventData>"+fields+"</EventData></Event>";}
 static void testDrainHealthy(unsigned point){

@@ -122,10 +122,11 @@ static struct {Session sessionSnapshot()const{return {};}} g_steamSettingsObserv
 static struct {unsigned reads=0;void requestRefresh(const Session&){++reads;}} g_steamModeObserver;
 
 static unsigned long long currentPowerGeneration(){return powerGeneration;}
-static void stopPowerResumeWatchdog(){++watchdogStops;}
-// CSS resume is a separate product boundary. Keep the exact extracted Decky
-// consumer and its assertions; appearance behavior is verified by its own suite.
-static void steamAppearanceResumeCommitted(unsigned long long) {}
+// Only the legacy Ready extraction references these fanout ports. The current
+// extraction calls the Decky leaf directly; appearance has its own fixture.
+[[maybe_unused]] static void stopPowerResumeWatchdog(){++watchdogStops;}
+[[maybe_unused]] static void steamAppearanceResumeCommitted(unsigned long long) {}
+[[maybe_unused]] static void nativeAyaLightingResume() {}
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool){diagnostics.push_back({{"event",event},{"detail",detail}});}
 #define g_deckySidebarRuntime (*activeRuntime)
 #include "decky_wake_ready_consumer.inc"

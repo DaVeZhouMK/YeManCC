@@ -101,6 +101,7 @@ static void inputHostStop(){}
 static void gamebarTraceStartInitThread(){++startupCurrent->startCalls;}
 static bool applyInputStartupOnce(){++startupCurrent->applyCalls;return true;}
 static bool inputCaptureAssetsPresent(){++startupCurrent->assetsCalls;return true;}
+static bool inputCaptureOemConsumersAvailable(){return false;}
 static HANDLE CreateThread(LPVOID,std::size_t,DWORD(*entry)(LPVOID),LPVOID arg,DWORD,LPVOID){HANDLE result=startupKernelCreateThread(entry,arg);startupCurrent->product=result;return result;}
 '''
 def build_cpp(base_text,outer,parts,globals,bundle,helpers,safe):

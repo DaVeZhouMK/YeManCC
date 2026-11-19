@@ -2,8 +2,13 @@
 #include "../deps/json/json.hpp"
 #include <functional>
 #include <cstdint>
+#include <memory>
+namespace ymcc::steamnative {class ReadScope;}
+namespace ymcc::steamcommand {class Intent;class AvailabilityEvent;}
+namespace ymcc::steamgamefacts {class ProcessGroupLease;class RequestCancellation;}
 // Synchronous event job. Call handle on a dedicated YMCC worker, never the UI
 // thread. All Steam debugger APIs stay on that exact calling OS thread.
+namespace ymcc::steamgamefacts { class StartupHandoffEvidence; class HistoricalStartupHandoffEvidence; }
 namespace ymcc::steamOriginalRecovery {
 using Json = nlohmann::json;
 using Emit = std::function<void(const Json&)>;
@@ -36,7 +41,45 @@ using WakeSignal = std::uintptr_t; // Borrowed host event; signals grant observa
 // Startup permits one actual attempt per original Steam+game lifetime. Other kinds
 // observe only. Missing healthy reference while lost is an explicit refusal.
 Json handle(const Json& event, Emit emit = {}, Current current = {},
-    Current observationCurrent = {}, WakeSignal wakeSignal = 0);
+    Current observationCurrent = {}, WakeSignal wakeSignal = 0,
+    WakeSignal cancelSignal = 0, WakeSignal identityCancelSignal = 0,
+    std::shared_ptr<ymcc::steamnative::ReadScope> publicationScope = {},
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup = {},
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> businessRequestCancellation = {},
+    std::shared_ptr<ymcc::steamcommand::Intent> mutationIntent = {},
+    std::shared_ptr<ymcc::steamcommand::AvailabilityEvent> mutationAvailability = {},
+    std::shared_ptr<const ymcc::steamgamefacts::StartupHandoffEvidence> startupHandoff = {},
+    Current startupHandoffCurrent = {},
+    std::shared_ptr<const ymcc::steamgamefacts::HistoricalStartupHandoffEvidence> historicalStartupHandoff = {},
+    Current historicalStartupHandoffCurrent = {}); // Borrowed public Native scope events.
+// mutationIntent coordinates only this original Steam instance. Startup arrives
+// already promoted by the host BEFORE route admission; it never waits here.
+// Wake remains passive throughout its existing observation, then waits only in
+// the original physical-wake remainder before QueryActor/debugger/source work.
+// The host keeps the intent and dedicated availability resource until handle
+// returns through actual cleanup. A signal is not identity/admission authority.
+// processGroup is an in-process public-owner lease; JSON cannot mint or replace
+// it. A supplied lease must match the selected game, Steam and complete type2
+// identity. It is a topology candidate, not a native role decision. The first
+// existing typed sample freezes strict-single when P=F=selected; that path uses
+// the original selected+Steam currentness, reference v1 and disabled group wire.
+// Only a non-exact qualified two-member tuple enables full group currentness,
+// the role contract and reference v2. Later samples cannot change the mode.
+// The caller's original Current excludes unused helper lifetime; the engine
+// applies full group guards only for its frozen group mode. Other counts retain
+// the original exact-role path without silently manufacturing a group alias.
+// The original account/power/native pins, both routes and durable rights remain
+// mandatory. The private typed host call requires matching driver_port and
+// real ABI6 DLL/embedded assets; final composition/qualification remains OPEN.
+// startupHandoff is a separate historical launch source. A nonempty proof
+// requires its public owner-current callback and exact current Steam/child tuple.
+// Both remain retained through Finish. No native role or healthy reference is
+// synthesized; first-lost/no-reference and dead-launcher/no-record still refuse.
+// historicalStartupHandoff is a distinct owner-issued historical-parent source.
+// It requires its own current callback and the exact Steam/child/full type2 ID.
+// Supplying both handoff kinds is ambiguous and refuses; neither supplies
+// native roles, a healthy reference or mutation authority. Both arguments
+// remain retained through Finish with all original publication gates intact.
 // Read-only cached state. Safe from the native host/UI/shutdown thread.
 Json current_status();
 bool active() noexcept;
@@ -46,3 +89,8 @@ bool active() noexcept;
 // lives. Shutdown must preserve this worker and delay process termination.
 // No child process, anchor, helper exe, Node or UI operation is used.
 }
+
+// A group request additionally requires nonempty original Current and a retained
+// request cancellation signal. Its consumer must synchronously cancel at its
+// own target/rules/config/OFF/exit/request invalidation points, before replacing
+// that scope. Neither metadata nor the group graph can supply this authority.

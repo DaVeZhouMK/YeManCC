@@ -80,6 +80,50 @@ inline void archive(const std::wstring& path,std::size_t maximum){const auto bef
     if(!MoveFileExW(path.c_str(),target.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Cannot preserve updater preimage");
     if(!sameImage(before,read(target,maximum))||read(path,maximum).kind!=Kind::missing)throw std::runtime_error("Updater preimage preservation unconfirmed");
 }
+// Cache metadata/payloads are disposable. An unsupported annotation, archive
+// failure, read-only leaf or directory occupying a file slot cannot veto a new
+// verified download. Fixed callers supply the leaf; never recurse or follow it.
+inline void discardCache(const std::wstring& path,std::size_t maximum,bool preserve=false){
+    if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))
+        throw std::runtime_error("Update cache parent is unsafe");
+    auto attributes=GetFileAttributesW(path.c_str());
+    if(attributes==INVALID_FILE_ATTRIBUTES){const auto error=GetLastError();
+        if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return;
+        throw std::runtime_error("Cannot inspect stale update cache");}
+    if(preserve){try{archive(path,maximum);return;}catch(...){}
+        attributes=GetFileAttributesW(path.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES){const auto error=GetLastError();
+            if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return;
+            throw std::runtime_error("Cannot inspect cache after archive failure");}}
+    if(!(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))){
+        if(attributes&FILE_ATTRIBUTE_READONLY)SetFileAttributesW(path.c_str(),attributes&~FILE_ATTRIBUTE_READONLY);
+        if(DeleteFileW(path.c_str()))return;
+    }
+    // Rename a link/directory itself (or a temporarily unreadable regular file)
+    // rather than deleting its contents or resolving an external target.
+    if(!MoveFileExW(path.c_str(),(path+L".ymcc-retired-"+suffix()).c_str(),MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("Stale update cache is busy; release it and retry");
+}
+inline bool cacheFileOrDiscard(const std::wstring& path){
+    if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))
+        throw std::runtime_error("Update cache parent is unsafe");
+    const auto attributes=GetFileAttributesW(path.c_str());
+    if(attributes==INVALID_FILE_ATTRIBUTES){const auto error=GetLastError();
+        if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)return false;
+        throw std::runtime_error("Cannot inspect update cache file");}
+    if(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)){discardCache(path,0);return false;}
+    return true;
+}
+inline void ensureCacheDirectory(const std::wstring& path){
+    if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))
+        throw std::runtime_error("Update cache parent is unsafe");
+    const auto attributes=GetFileAttributesW(path.c_str());
+    if(attributes!=INVALID_FILE_ATTRIBUTES &&
+        (!(attributes&FILE_ATTRIBUTE_DIRECTORY)||(attributes&FILE_ATTRIBUTE_REPARSE_POINT)))discardCache(path,0);
+    std::error_code error;std::filesystem::create_directories(path,error);
+    if(error || !ordinaryParents(std::filesystem::path(path)/L"entry"))
+        throw std::runtime_error("Cannot create safe update cache directory");
+}
 inline bool policyValid(const Json& p){try{
     if(!p.is_object()||!p.contains("schemaVersion")||!integer(p["schemaVersion"],1)||p["schemaVersion"]!=1)return false;
     if(p.contains("enabled")&&!p["enabled"].is_boolean())return false;
@@ -113,12 +157,12 @@ inline bool resumeValid(const Json& p,const std::string& url,const std::string& 
 // Writable cache/preferences/diagnostics are disposable under the new-data-first
 // policy. Their old JSON/schema/annotations or a preimage copy cannot veto a
 // valid replacement; callers still provide the existing atomic writer.
-template<class Validator,class Writer>
-inline void save(const std::wstring& path,Json next,std::size_t maximum,Validator valid,Writer writer,bool preserveValid=false){
+template<class Validator,class Writer,class Reader=decltype(&read)>
+inline void save(const std::wstring& path,Json next,std::size_t maximum,Validator valid,Writer writer,bool preserveValid=false,Reader readImage=&read){
     (void)preserveValid;next.erase("configReadError");
     const auto text=next.dump();if(text.size()>maximum||!valid(next))throw std::runtime_error("Invalid updater replacement configuration");
     if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))throw std::runtime_error("Updater configuration path is unsafe");
-    const auto before=read(path,maximum);
+    const auto before=readImage(path,maximum);
     if(before.kind==Kind::unavailable){
         const auto attributes=GetFileAttributesW(path.c_str());
         if(attributes==INVALID_FILE_ATTRIBUTES)throw std::runtime_error("Updater configuration source is unavailable");
@@ -127,10 +171,10 @@ inline void save(const std::wstring& path,Json next,std::size_t maximum,Validato
         const auto retired=path+L".ymcc-retired-"+suffix();
         if(!MoveFileExW(path.c_str(),retired.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Updater legacy configuration path is busy");
     }else if(before.kind!=Kind::missing){
-        if(!sameImage(before,read(path,maximum)))throw std::runtime_error("Updater source changed before publication");
+        if(!sameImage(before,readImage(path,maximum)))throw std::runtime_error("Updater source changed before publication");
         if(before.info.dwFileAttributes&FILE_ATTRIBUTE_READONLY)if(!SetFileAttributesW(path.c_str(),before.info.dwFileAttributes&~FILE_ATTRIBUTE_READONLY))throw std::runtime_error("Updater legacy configuration attributes unavailable");
     }
     if(!writer(path,text))throw std::runtime_error("Cannot persist updater configuration");
-    const auto actual=read(path,maximum);if(actual.kind!=Kind::ready||actual.raw!=text||!valid(actual.value))throw std::runtime_error("Updater configuration readback failed");
+    const auto actual=readImage(path,maximum);if(actual.kind!=Kind::ready||actual.raw!=text||!valid(actual.value))throw std::runtime_error("Updater configuration readback failed");
 }
 } // namespace ymcc::updateconfig

@@ -1,9 +1,90 @@
 // Exercises the actual editor/card components. Storage, device capture and native sync are memory ports.
+import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {buildEditorPreview} from './controller_shortcut_editor_preview.mjs';
 const root=process.cwd(),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Build/Tasks/ControllerShortcutFullAudit-20261031/ui');fs.mkdirSync(out,{recursive:true});
+
+const selectedCase=process.argv.includes('--case')?process.argv[process.argv.indexOf('--case')+1]:'';
+assert(!selectedCase||['aya-editor-actions','onex-editor-actions'].includes(selectedCase),'Unknown editor selection');
+const durableEndpoint=process.env.YMCC_OEM_DURABLE_ENDPOINT,durableDirectory=process.env.YMCC_OEM_DURABLE_DIRECTORY;
+assert(!!durableEndpoint===!!durableDirectory,'Both explicit durable storage fields are required');
+assert(!durableEndpoint||selectedCase==='aya-editor-actions','Durable storage belongs to the existing AYA editor selection');
+const durableSettings=durableEndpoint?{endpoint:durableEndpoint,directory:durableDirectory}:null;
+const durableRpc=async(command,args={})=>{assert(durableSettings,'Owned durable settings adapter required');const r=await fetch(durableSettings.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command,args})});const reply=await r.json();assert(reply.ok,reply.error);return reply.result;};
+if(selectedCase==='aya-editor-actions'||selectedCase==='onex-editor-actions'){
+ assert(!fs.existsSync(path.join(out,'ACCEPTANCE.json')),'Existing editor evidence is immutable');
+ const catalogPath=process.argv[process.argv.indexOf('--native-catalog-report')+1];
+ assert(process.argv.includes('--native-catalog-report')&&catalogPath,'Actual native catalog report is required');
+ const catalogBytes=fs.readFileSync(catalogPath),report=JSON.parse(catalogBytes);
+ assert(report.pass===true&&report.modelCatalogs,'Native recorder report must have passed with catalogs');
+ const oneX=selectedCase==='onex-editor-actions',familyId=oneX?'onexplayer':'ayanero';
+ const selectedModels=(oneX?['OneXPlayerApex','OneXPlayer3','OneXPlayerX1','OneXPlayerX2','OneXPlayerX2MiniPro']:['AYANEOAIR1S','AYANEONEXT2','AYANEO3']).map(x=>'HandheldCompanion.Devices.'+x);
+ const profiles=Object.fromEntries(selectedModels.map(model=>{const c=report.modelCatalogs[model];assert(c?.supported&&c.familyId===familyId&&c.deviceClass===model&&c.keys.length,model);return[model,c]}));
+ const settingsPath=path.join(out,'memory-settings.json');fs.writeFileSync(settingsPath,JSON.stringify({input:{buttonMapping:{rules:{shortcutRules:[],shortcutRulesInitialized:true}},virtualEnabled:false},gamepad:{},quickApps:{apps:[]}}));
+ const durableSeed=durableSettings?JSON.parse(fs.readFileSync(path.join(root,'PowerControl/settings-defaults-v1.json'),'utf8')):null;
+ if(durableSeed){durableSeed.input.virtualEnabled=false;durableSeed.input.buttonMapping.rules={shortcutRules:[],shortcutRulesInitialized:true};durableSeed.extensions={...durableSeed.extensions,ayaDurableSentinel:{keep:'unrelated-fields-preserved',nested:[1,{v:'unchanged'}]}};await durableRpc('fixture.seed',{document:durableSeed});}
+ await buildEditorPreview({root,settingsPath,out:path.join(out,'actual-editor'),catalogProfiles:profiles,durableSettings});
+ const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_task.cjs')('playwright');
+ const browser=await chromium.launch({channel:'msedge',headless:true}),checks=[],errors=[],savedInputs=[];let page;
+ const check=(ok,name)=>{assert(ok,name);checks.push(name)};
+ try{
+  page=await browser.newPage({viewport:{width:1280,height:720}});page.setDefaultTimeout(6000);page.on('pageerror',e=>errors.push(String(e)));
+  await page.goto(pathToFileURL(path.join(out,'actual-editor/editor.html')).href);await page.locator('.new-action').waitFor();
+  for(const height of [720,800]){await page.setViewportSize({width:1280,height});
+   for(const model of selectedModels){
+    if(durableSettings){await durableRpc('fixture.seed',{document:durableSeed});await page.evaluate(()=>window.__editorPreview.durableReload());}
+    await page.evaluate(async model=>{const p=window.__editorPreview;p.settings.input.buttonMapping.rules={shortcutRules:[],shortcutRulesInitialized:true};await p.setCatalog(model)},model);
+    for(const key of profiles[model].keys.filter(k=>k.captureImplemented!==false)){
+     const label=`${height} ${model} ${key.keyId}`,beforeWrites=await page.evaluate(()=>window.__editorPreview.writes);
+     await page.locator('.new-action').click();await page.locator('.creation-record-entry').click();await page.waitForFunction(()=>window.__editorPreview.recording);
+     await page.evaluate(code=>{const p=window.__editorPreview,inputs=[{source:'oem',code}];p.emit('shortcut.recording.gamepad',{inputs,released:false});p.emit('shortcut.recording.gamepad',{inputs,released:true})},key.keyId);
+     await page.waitForFunction(()=>!window.__editorPreview.recording);await page.locator('.creation-next').click();await page.locator('.output-summary').click();
+     await page.locator('.output-categories').getByRole('button',{name:'键盘按键',exact:true}).click();
+     const symbols=page.getByRole('button',{name:/^符号层 /});if((await symbols.innerText()).includes('开'))await symbols.click();
+     await page.locator('.keyboard-hit-layer button[data-key-code="KeyK"]').click();await page.locator('.creation-finish').click();await page.locator('.action-trigger-bubble .seg-btn').filter({hasText:'按下'}).click();
+     check(await page.evaluate(()=>window.__editorPreview.writes)===beforeWrites,label+' remains a draft until Apply');
+     await page.locator('[data-editor-action=apply]').click();await page.waitForFunction(n=>window.__editorPreview.writes>n,beforeWrites);await page.waitForFunction(()=>document.querySelector('[data-editor-action=apply]')?.disabled);
+     const input=await page.evaluate(()=>structuredClone(window.__editorPreview.settings.input)),rule=input.buttonMapping.rules.shortcutRules.at(-1);
+     check(rule.enabled&&rule.trigger==='press'&&rule.actionId==='keyboard.letter'&&rule.params.key==='KeyK',label+' saves the actual selected output');
+     check(isDeepStrictEqual(rule.inputs,[{source:'oem',code:key.keyId}]),label+' saves one exact OEM source');
+     check(input.virtualEnabled===false&&input.buttonMapping.rules.shortcutRulesInitialized===true,label+' preserves ordinary nonvirtual mode and explicit ownership');
+     let diskProof;
+     if(durableSettings){
+      const raw=await durableRpc('fixture.snapshot'),disk=JSON.parse(raw);
+      check(isDeepStrictEqual(disk.input,input),label+' actual disk input matches repository commit');
+      check(isDeepStrictEqual(disk.extensions.ayaDurableSentinel,durableSeed.extensions.ayaDurableSentinel),label+' native delta commit preserves unrelated fields');
+      const snapshotFile=path.join(out,'disk-snapshots',String(savedInputs.length).padStart(3,'0')+'.json');fs.mkdirSync(path.dirname(snapshotFile),{recursive:true});fs.writeFileSync(snapshotFile,raw,{flag:'wx'});
+      diskProof={path:snapshotFile,bytes:Buffer.byteLength(raw),sha256:createHash('sha256').update(raw).digest('hex')};
+      const reloaded=await page.evaluate(()=>window.__editorPreview.durableReload());
+      check(isDeepStrictEqual(reloaded.input,disk.input),label+' cache reset reloads the actual persisted rule');
+     }
+     savedInputs.push({name:label,model,keyId:key.keyId,backIndex:key.backIndex,height,ruleId:rule.id,input,catalog:profiles[model],...(diskProof?{diskProof}:{} )});
+     await page.evaluate(model=>window.__editorPreview.setCatalog(model),model);await page.locator('.new-action').waitFor();
+     check(await page.locator('.rule-row').count()===input.buttonMapping.rules.shortcutRules.length,label+' reloads persisted rows without loss');
+    }
+    await page.screenshot({path:path.join(out,model.split('.').at(-1)+'-'+height+'.png')});
+   }
+  }
+  if(durableSettings){
+   const before=await durableRpc('fixture.snapshot'),disk=JSON.parse(before),revision=disk.input.revision;
+   const stale=structuredClone(disk);stale.input.revision=revision+1;
+   const refused=await durableRpc('settings.write',{path:durableDirectory+'\\yeman-settings.json',content:JSON.stringify(stale),baseline:disk,expectedInputRevision:revision-1});
+   check(refused.ok===false&&refused.reason==='revision-conflict','actual native file-lock CAS rejects stale caller revision');
+   check(await durableRpc('fixture.snapshot')===before,'native stale CAS performs no backup/main rewrite');
+   const cancelled=await page.evaluate(async revision=>window.__editorPreview.durableCas(revision,{buttonMapping:{rules:{shortcutRules:[],shortcutRulesInitialized:true}}},()=>false,{globalShortcuts:true}),revision);
+   check(cancelled.ok===false&&cancelled.reason==='cancelled','actual repository cancels before queued durable commit');
+   check(await durableRpc('fixture.snapshot')===before,'cancelled editor transaction leaves disk unchanged');
+  }
+  check(errors.length===0,'no browser runtime exceptions');
+  fs.writeFileSync(path.join(out,'SAVED-INPUTS.json'),JSON.stringify(savedInputs,null,2));
+  fs.writeFileSync(path.join(out,'ACCEPTANCE.json'),JSON.stringify({pass:true,selectedCase,checks,errors,models:selectedModels,savedInputs:savedInputs.length,nativeCatalog:{path:catalogPath,sha256:createHash('sha256').update(catalogBytes).digest('hex')},settingsIo:durableSettings?'actual editor -> settingsRepository/API -> bounded stdio bridge -> original native Win32 storage bodies':'memory CAS using production normalizer and evaluator',physicalInput:false,actualNativeDiskCommit:!!durableSettings,storageScope:durableSettings?{directory:durableDirectory,explicitAdapter:true,nativeIpcHandler:false,runtimeRefresh:false,deviceAdmission:false}:null},null,2));
+  console.log('PASS '+checks.length+' actual '+familyId+' editor save checks; '+savedInputs.length+' saved rule snapshots');
+ }catch(error){fs.writeFileSync(path.join(out,'FAILURE.json'),JSON.stringify({pass:false,checks,errors,error:String(error),lastInput:page?await page.evaluate(()=>structuredClone(window.__editorPreview.settings.input)).catch(()=>null):null,savedInputs:savedInputs.length},null,2));if(page)await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});throw error}
+ finally{await browser.close()}
+}else{
 const require=createRequire(path.join(root,'package.json')),module={exports:{}};new Function('module','exports','require',require('esbuild').buildSync({entryPoints:[path.join(root,'src/bridge/controllerShortcutRules.ts')],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text)(module,module.exports,require);const model=module.exports;
 const actions=model.CONTROLLER_SHORTCUT_ACTIONS.filter(a=>a.available),defaults=model.NATIVE_DEFAULT_SHORTCUTS.map(d=>model.nativeDefaultRule(d.defaultKey)),settingsPath=path.join(out,'memory-settings.json');
-fs.writeFileSync(settingsPath,JSON.stringify({input:{},gamepad:Object.fromEntries(defaults.map(d=>[d.defaultKey,true])),quickApps:{apps:[{id:'audit-app',name:'审计应用',path:'C:/Audit/demo.exe'}]}}));await buildEditorPreview({root,settingsPath,out:path.join(out,'actual-editor')});
+fs.writeFileSync(settingsPath,JSON.stringify({input:{},gamepad:Object.fromEntries(defaults.map(d=>[d.defaultKey,true])),quickApps:{apps:[{id:'audit-app',name:'审计应用',path:'C:/Audit/demo.exe'}]}}));await buildEditorPreview({root,settingsPath,out:path.join(out,'actual-editor'),withGamepadEngine:true});
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_task.cjs')('playwright'),browser=await chromium.launch({channel:'msedge',headless:true}),checks=[],errors=[],exports=[],controlExports=[];let page;
 function check(ok,name){assert(ok,name);checks.push(name)}
 try{page=await browser.newPage({viewport:{width:1280,height:720}});page.setDefaultTimeout(6000);page.on('pageerror',e=>errors.push(String(e)));await page.goto(pathToFileURL(path.join(out,'actual-editor/editor.html')).href);await page.locator('.rule-row').first().waitFor();
@@ -57,14 +138,59 @@ for(const height of [720,800]){
  }
  exports.push({name:'all-actions-'+height,input:await saved()});await page.screenshot({path:path.join(out,'all-actions-'+height+'.png')});
  const before=JSON.stringify(await saved()),n2=await writes();await page.locator('.new-action').click();await record(input,true);await page.locator('.creation-cancel').click();check(await writes()===n2&&JSON.stringify(await saved())===before,`${height} cancel completed input never saves a half-created rule`);
- await select(0);await record([{source:'controller',code:'b'}]);await page.locator('[data-editor-action=close]').click();await page.waitForFunction(()=>window.__editorPreview.closed);await reopen();check(JSON.stringify(await saved())===before,`${height} close discards unapplied existing-rule input change`);
+ await select(0);await record([{source:'controller',code:'b'}]);await page.locator('[data-editor-action=close]').click();await page.locator('[data-close-choice=discard]').click();await page.waitForFunction(()=>window.__editorPreview.closed);await reopen();check(JSON.stringify(await saved())===before,`${height} explicit discard on close preserves saved input`);
+}
+// All editor close entry points use the same three-way guard and real engine.
+for (const height of [720,800]) {
+ await page.setViewportSize({width:1280,height});await resetControl(defaults);
+ check(await page.locator('[data-editor-action=apply]').isDisabled()&&!await page.locator('[data-editor-action=apply]').evaluate(n=>n.classList.contains('has-changes')),height+' clean save stays neutral');
+ await page.evaluate(()=>window.__editorPreview.controllerAction('back'));await page.waitForFunction(()=>window.__editorPreview.closed);
+ check(await page.locator('.editor-close-dialog').count()===0,height+' clean B exits without confirmation');await reopen();
+ await select(0);await record([{source:'controller',code:'x'}]);
+ check(await page.locator('[data-editor-action=apply]').evaluate(n=>n.classList.contains('has-changes')&&getComputedStyle(n).backgroundColor==='rgb(40, 126, 189)'&&!n.disabled),height+' changed save becomes visibly blue');
+ const beforeClose=JSON.stringify(await saved()),beforeCloseWrites=await writes();
+ await page.locator('[data-editor-action=close]').focus();await page.locator('[data-editor-action=close]').click();
+ const modal=page.locator('.editor-close-dialog');await modal.waitFor();
+ check(await modal.locator('button').count()===3,height+' mouse close offers exactly discard/save/cancel');
+ const box=await modal.boundingBox();check(Math.abs(box.x+box.width/2-640)<1&&Math.abs(box.y+box.height/2-height/2)<1,height+' close prompt is centered');
+ check(await page.locator('[data-close-choice=cancel]').evaluate(n=>n===document.activeElement),height+' cancel receives initial controller focus');
+ const graph=await modal.evaluate(async root=>{const controls=[...root.querySelectorAll('button')],edges=[],escapes=[];for(let i=0;i<controls.length;i++)for(const action of ['nav-left','nav-right','nav-up','nav-down']){controls[i].focus();await window.__editorPreview.controllerAction(action);const to=controls.indexOf(document.activeElement);edges.push([i,to]);if(to<0)escapes.push([i,action])}const reached=new Set([2]);for(let p=0;p<3;p++)for(const [a,b]of edges)if(reached.has(a)&&b>=0)reached.add(b);return{reached:reached.size,escapes}});
+ check(graph.reached===3&&!graph.escapes.length,height+' all three choices are reachable and directions cannot escape');
+ await page.locator('[data-close-choice=cancel]').focus();await page.keyboard.press('Tab');check(await page.locator('[data-close-choice=discard]').evaluate(n=>n===document.activeElement),height+' Tab wraps inside confirmation');await page.keyboard.press('Shift+Tab');check(await page.locator('[data-close-choice=cancel]').evaluate(n=>n===document.activeElement),height+' reverse Tab wraps inside confirmation');
+ await page.evaluate(()=>window.__editorPreview.controllerAction('back'));
+ check(await modal.count()===0&&await page.locator('.editor-dialog').count()===1,height+' B only cancels this exit');
+ check(await page.locator('[data-editor-action=close]').evaluate(n=>n===document.activeElement),height+' cancel restores the previous editor focus');
+ check(await writes()===beforeCloseWrites&&JSON.stringify(await saved())===beforeClose,height+' cancel preserves draft without settings writes');
+ await page.locator('.editor-overlay').dispatchEvent('pointerdown');await modal.waitFor();await page.keyboard.press('Escape');check(await modal.count()===0,height+' backdrop exit and Esc cancel share the guard');
+ await page.evaluate(()=>window.__editorPreview.controllerAction('back'));await modal.waitFor();await page.locator('[data-close-choice=discard]').click();await page.waitForFunction(()=>window.__editorPreview.closed);
+ check(await writes()===beforeCloseWrites&&JSON.stringify(await saved())===beforeClose,height+' explicit discard closes without saving');
+ await reopen();await select(0);await record([{source:'controller',code:'b'}]);await page.evaluate(()=>window.__editorPreview.controllerAction('back'));await modal.waitFor();
+ const saveBefore=await writes();await page.locator('[data-close-choice=save]').focus();await page.evaluate(()=>window.__editorPreview.controllerAction('confirm'));await page.waitForFunction(()=>window.__editorPreview.closed);
+ check(await writes()===saveBefore+1&&(await saved()).buttonMapping.rules.shortcutRules[0].inputs[0].code==='b',height+' controller A saves once and exits only after success');
+ await reopen();check(await page.locator('[data-editor-action=apply]').isDisabled()&&!await page.locator('[data-editor-action=apply]').evaluate(n=>n.classList.contains('has-changes')),height+' reopened saved rules clear the blue state');
+ await select(0);await record([{source:'controller',code:'x'}]);await page.evaluate(()=>{const p=window.__editorPreview;p.closeSaveOriginal=p.save;p.save=(expected,patch)=>({ok:false,reason:'write-failed',currentRevision:p.settings.input.revision,value:structuredClone(p.settings.input)})});
+ await page.locator('[data-editor-action=close]').click();await page.locator('[data-close-choice=save]').click();await page.locator('.editor-close-error').waitFor();
+ check((await page.locator('.editor-close-error').innerText()).includes('保存失败')&&await page.locator('.editor-dialog').count()===1,height+' failed save stays open with a visible failure');
+ check(await page.locator('[data-close-choice=cancel]').evaluate(n=>n===document.activeElement),height+' failed save restores usable modal focus');
+ await page.evaluate(()=>{const p=window.__editorPreview;p.save=p.closeSaveOriginal});await page.locator('[data-close-choice=save]').click();await page.waitForFunction(()=>window.__editorPreview.closed);
+ await reopen();await select(0);await record([{source:'controller',code:'b'}]);await page.evaluate(()=>window.__editorPreview.failNativeSync=true);await page.locator('[data-editor-action=close]').click();await page.locator('[data-close-choice=save]').click();await page.locator('.editor-close-error').waitFor();
+ check((await page.locator('.editor-close-error').innerText()).includes('未同步')&&await page.locator('.editor-dialog').count()===1,height+' native synchronization failure cannot silently exit');
+ await page.evaluate(()=>window.__editorPreview.failNativeSync=false);await page.locator('[data-close-choice=save]').click();await page.waitForFunction(()=>window.__editorPreview.closed);
+ await reopen();await select(0);await record([{source:'controller',code:'x'}]);await page.evaluate(()=>{const p=window.__editorPreview;p.closeSaveOriginal=p.save;p.closeSaveCalls=0;p.save=async(...args)=>{p.closeSaveCalls++;await new Promise(r=>setTimeout(r,140));return p.closeSaveOriginal(...args)}});await page.locator('[data-editor-action=close]').click();
+ await page.locator('[data-close-choice=save]').click();check(await modal.locator('button:disabled').count()===3,height+' saving locks all exit choices');await page.evaluate(()=>window.__editorPreview.controllerAction('back'));check(await modal.count()===1,height+' B cannot discard during an active save');
+ await page.waitForFunction(()=>window.__editorPreview.closed);check(await page.evaluate(()=>window.__editorPreview.closeSaveCalls)===1,height+' save-and-exit uses one transaction');await page.evaluate(()=>{const p=window.__editorPreview;p.save=p.closeSaveOriginal});
+ await reopen();const pendingWrites=await writes();await page.locator('.new-action').click();await page.locator('[data-editor-action=close]').click();await page.locator('[data-close-choice=save]').click();
+ check((await page.locator('.editor-close-error').innerText()).includes('新建')&&await writes()===pendingWrites,height+' unfinished action is never silently omitted by save-and-exit');
+ await page.locator('[data-close-choice=cancel]').click();check(await page.locator('.rule-row.creating').count()===1,height+' cancelling exit preserves the unfinished action');await page.locator('.creation-cancel').click();
+ await select(0);await record([{source:'controller',code:'y'}]);await page.locator('.rule-row').first().click();await page.evaluate(()=>window.__editorPreview.controllerAction('back'));check(await modal.count()===0&&await page.locator('.editor-dialog').count()===1,height+' first B only leaves card management');await page.evaluate(()=>window.__editorPreview.controllerAction('back'));await modal.waitFor();await page.locator('[data-close-choice=cancel]').click();
+ await page.screenshot({path:path.join(out,'unsaved-editor-'+height+'.png')});await page.locator('[data-editor-action=discard]').click();await page.waitForFunction(()=>document.querySelector('[data-editor-action=apply]')?.disabled);
 }
 // Two consecutive CAS conflicts retain the draft and stop after one retry.
 await select(0);await record([{source:'controller',code:'y'}]);await page.evaluate(()=>{const p=window.__editorPreview;p.originalSave=p.save;p.attempts=0;p.save=()=>{p.attempts++;p.settings.input.revision++;return{ok:false,reason:'revision-conflict',currentRevision:p.settings.input.revision,value:structuredClone(p.settings.input)}}});let n=await writes();await page.locator('[data-editor-action=apply]').click();await page.waitForFunction(()=>window.__editorPreview.attempts===2);check(await writes()===n&&(await page.locator('.status-bubble').innerText()).includes('草稿已保留'), 'double revision conflict keeps draft and performs only one retry');await page.evaluate(()=>{const p=window.__editorPreview;p.save=p.originalSave});await page.locator('[data-editor-action=discard]').click();await page.waitForFunction(()=>document.querySelector('[data-editor-action=apply]').disabled);
 // Durable save and runtime-sync error are distinct, and the editor can retry.
 await select(0);await record([{source:'controller',code:'y'}]);await page.evaluate(()=>window.__editorPreview.failNativeSync=true);n=await writes();await page.locator('[data-editor-action=apply]').click();await page.waitForFunction(n=>window.__editorPreview.writes>n,n);await page.locator('.status-bubble').waitFor();check((await page.locator('.status-bubble').innerText()).includes('未同步')&&!await page.locator('[data-editor-action=apply]').isDisabled(),'editor reports saved/native sync failure and keeps retry available');await page.evaluate(()=>window.__editorPreview.failNativeSync=false);await apply();
 // Preset editing returns a draft to its owner and never writes global data.
-const beforePreset=JSON.stringify(await saved()),beforePresetWrites=await writes();await page.evaluate(rows=>window.__editorPreview.setPreset({name:'审计预设',rules:rows,apps:[]}),defaults);await page.locator('.rule-row').first().waitFor();await select(0);await record([{source:'controller',code:'b'}]);await page.locator('[data-editor-action=apply]').click();await page.waitForFunction(()=>!!window.__editorPreview.presetApplied);check(await writes()===beforePresetWrites&&JSON.stringify(await saved())===beforePreset,'preset apply never overwrites the global document');check(await page.evaluate(()=>window.__editorPreview.presetApplied[0].inputs[0].code==='b'),'preset apply returns the changed rule to its outer owner');await select(0);await record([{source:'controller',code:'x'}]);await page.locator('[data-editor-action=close]').click();await page.locator('.preset-close-dialog').waitFor();await page.getByRole('button',{name:/继续编辑/}).click();check(await page.locator('.preset-close-dialog').count()===0&&!await page.locator('[data-editor-action=apply]').isDisabled(),'preset close confirmation can keep the unapplied draft');await page.locator('[data-editor-action=close]').click();await page.getByRole('button',{name:'放弃并返回',exact:true}).click();check(await writes()===beforePresetWrites&&JSON.stringify(await saved())===beforePreset,'discarding preset edits leaves global data intact');
+const beforePreset=JSON.stringify(await saved()),beforePresetWrites=await writes();await page.evaluate(rows=>window.__editorPreview.setPreset({name:'审计预设',rules:rows,apps:[]}),defaults);await page.locator('.rule-row').first().waitFor();await select(0);await record([{source:'controller',code:'b'}]);await page.locator('[data-editor-action=apply]').click();await page.waitForFunction(()=>!!window.__editorPreview.presetApplied);check(await writes()===beforePresetWrites&&JSON.stringify(await saved())===beforePreset,'preset apply never overwrites the global document');check(await page.evaluate(()=>window.__editorPreview.presetApplied[0].inputs[0].code==='b'),'preset apply returns the changed rule to its outer owner');await select(0);await record([{source:'controller',code:'x'}]);await page.locator('[data-editor-action=close]').click();await page.locator('.editor-close-dialog').waitFor();await page.locator('[data-close-choice=cancel]').click();check(await page.locator('.editor-close-dialog').count()===0&&!await page.locator('[data-editor-action=apply]').isDisabled(),'preset close confirmation can keep the unapplied draft');await page.locator('[data-editor-action=close]').click();await page.locator('[data-close-choice=discard]').click();check(await writes()===beforePresetWrites&&JSON.stringify(await saved())===beforePreset,'discarding preset edits leaves global data intact');
 await page.evaluate(()=>window.__editorPreview.setPreset(null));await page.locator('.rule-row').first().waitFor();
 // Retired mode documents must never override ordinary global shortcut editing.
 await page.evaluate(rows=>{const p=window.__editorPreview;p.settings.input.startupObservedBoot='audit-boot';p.settings.input.bootModeShortcuts={schema:1,mode:'steam',boot:'audit-boot',rules:rows};p.settings.input.buttonMapping.rules={shortcutRules:rows,shortcutRulesInitialized:true}},defaults);await reopen();await page.locator('.rule-row').first().click();await page.getByRole('switch').click();await page.locator('.action-manage-cancel').click();await apply();check(await page.evaluate(()=>window.__editorPreview.settings.gamepad.enabled===false),'retired mode does not override the globally disabled summon');await reopen();check(await page.locator('.rule-row.disabled').count()===1,'reopen follows global changes despite a stale mode shortcut copy');
@@ -79,3 +205,5 @@ await page.evaluate(async rows=>{const p=window.__editorPreview;await p.mountCar
 await page.evaluate(async()=>{const p=window.__editorPreview;await p.mountCard(false);p.settings.input.buttonMapping.rules={shortcutRulesInitialized:true,shortcutRules:'damaged'};await p.mountCard(true)});await page.locator('.shortcut-editor-open').waitFor();check(await page.locator('.shortcut-toggle').count()===0&&(await page.locator('.status-line').first().innerText()).includes('规则表异常'),'control-page card never reseeds an initialized damaged table and exposes recovery');
 check(errors.length===0,'no browser runtime exceptions');fs.writeFileSync(path.join(out,'SAVED-INPUTS.json'),JSON.stringify(exports,null,2));fs.writeFileSync(path.join(out,'CONTROL-SAVED-INPUTS.json'),JSON.stringify(controlExports,null,2));fs.writeFileSync(path.join(out,'ACCEPTANCE.json'),JSON.stringify({pass:true,checks,errors,defaults:8,newOutputs:actions.length,resolutions:[720,800],settingsIo:'memory',physicalInput:false},null,2));console.log('PASS '+checks.length+' actual editor/card full save checks');
 }catch(error){fs.writeFileSync(path.join(out,'FAILED-ACCEPTANCE.json'),JSON.stringify({pass:false,checks,errors,error:String(error)},null,2));if(page){await page.screenshot({path:path.join(out,'failure.png')});fs.writeFileSync(path.join(out,'failure.html'),await page.content())}throw error}finally{await browser.close()}
+
+}

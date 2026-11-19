@@ -136,12 +136,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .device-diagram{position:relative;display:block;width:100%;margin:0;color:#d1d6dc;overflow:visible;user-select:none}
-.device-diagram :deep(.device-base){display:block;width:100%;height:auto;max-width:100%;overflow:visible;pointer-events:none;filter:none}
+.device-diagram :deep(.device-base){position:relative;display:block;width:100%;height:auto;max-width:100%;overflow:visible;pointer-events:none;filter:none}
 .device-key{position:absolute;margin:0;padding:0;min-width:0;min-height:0;border:0;border-radius:0;background:transparent;opacity:1;touch-action:none;cursor:var(--cursor-interaction,pointer);appearance:none;-webkit-appearance:none}
 .device-key:disabled{opacity:1;cursor:default}
 .device-key.stick{cursor:grab}.device-key.stick:active{cursor:grabbing}
-/* Animate the fill only; the Steam outlines, glyphs and stick transforms stay intact. */
-.device-diagram :deep([data-fill-active="true"][data-fill-live="false"]){animation:controller-mapped-fill .85s ease-in-out infinite}
-@keyframes controller-mapped-fill{0%,100%{fill:var(--diagram-live-color,#4897d2)}50%{fill:color-mix(in srgb,var(--diagram-live-color,#4897d2) 25%,transparent)}}
-@media(prefers-reduced-motion:reduce){.device-diagram :deep([data-fill-active="true"][data-fill-live="false"]){animation:none}}
+/* Opacity on a separate SVG root can be composited without repainting all paths. */
+.device-diagram :deep(.device-blink-layer){position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;opacity:.25}
+.device-diagram :deep(.device-blink-layer.blinking){animation:controller-mapped-fill .85s ease-in-out infinite;will-change:opacity}
+@keyframes controller-mapped-fill{0%,100%{opacity:1}50%{opacity:.25}}
+@media(prefers-reduced-motion:reduce){.device-diagram :deep(.device-blink-layer.blinking){animation:none}}
 </style>

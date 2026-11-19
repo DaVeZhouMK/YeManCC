@@ -1,0 +1,3668 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXPLICIT26_SOURCE_DERIVED_SWITCH_ASSERTION_GRAMMAR_V1",
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "derivation": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\ORDINARY-SWITCH-FULL98-SOURCE-GRAMMAR.json",
+    "bytes": 2120243,
+    "sha256": "331731f2ba6c5b3742435af9680abfcaa7e954da8c474e13281f45ec2883859e",
+    "rawResultsUsedAsOracle": false,
+    "rawResultReads": 0,
+    "observed1720UsedAsOracle": false,
+    "all98SourceGrammarsIndexed": true,
+    "completeFunctionDerivation": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\ORDINARY-SWITCH-FULL98-SOURCE-GRAMMAR-r2.json",
+      "bytes": 2273543,
+      "sha256": "a61d5998b75f813eec82b52e8c7d94b24554af9019f756acd14feadda72b1708"
+    },
+    "compactDerivationProgram": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\generate_terminal26_switch_expectations-r2.mjs",
+      "bytes": 6513,
+      "sha256": "f3df47a7df21fdd6eac58c827a767878d7b29e5410adf562dd09db358556fa11"
+    }
+  },
+  "sourceBindings": {
+    "adaptedFixtureSha256": "52f45d6fdd5c0e95869d2539cc2f63efa100053f8034084c50f1c20c5453fb2a",
+    "adaptedFixtureBytes": 362976,
+    "exactSwitchSourceSha256": "e6023ae3e37e632b04d5aa06eee73af18da9d8b97d327482bc88033d7e1d07b6",
+    "sourceBindingMeaning": "Full fixture hashes are provenance; runtime must bind the exact switch function and source-derived assertion body.",
+    "switchFunctionBytes": 149921,
+    "actualCompiledFixture": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105T26-20261114162102\\Build\\Validation\\CurrentCoordinatorTerminal22\\n26v11p1\\native\\fixture.cpp",
+      "bytes": 371611,
+      "sha256": "964e149436ba88c0f04b4d08084ff5053b6f90a0e5530c47362785c313116b15"
+    }
+  },
+  "labels": [
+    "central lifecycle version fixes one fallback and the original ten-second and thirty-second limits",
+    "central failure candidate begins execution inspection after admission",
+    "central fallback cannot reserve at9999 after the first candidate",
+    "player request and repeated failure cannot restart candidate inspection",
+    "central fallback becomes available at exactly10000 with its original admission remainder",
+    "foreign request cannot reserve the current fallback",
+    "central fallback reservation charges the same request exactly once",
+    "players and repeated dispatch cannot reserve a second fallback or renew the request",
+    "repeated late failure retains one reservation and one millisecond of the original deadline",
+    "thirty-second expiry cannot renew or reserve a charged request",
+    "an inspected fallback remains eligible strictly before the original thirty-second cap",
+    "an unspent fallback cannot first reserve at the thirty-second cap",
+    "admission time without an execution receipt cannot authorize fallback or invent completed inspection",
+    "recovery private logical SteamDeck target seeded",
+    "source lineage proof establishes an actual native target",
+    "actual first accepted source enters candidate verification",
+    "missing source is unknown and never creates a repair attempt",
+    "real continuity producer distinguishes reappeared source from old accepted lineage",
+    "a new fresh source cannot borrow an old lineage accepted frame to publish final success",
+    "lineage replacement and actual verification inspect without any new Host command or ACK",
+    "actual source-absent submit reaches only the owned cleanup report and ACK",
+    "actual source-absent cleanup ACK cannot prove the newly live physical lineage",
+    "unproven new lineage holds verification without rebuilding a healthy owned target",
+    "current reappeared source forms an actual new accepted report",
+    "actual current-lineage report closes verification without renewing its ten-second or thirty-second clock",
+    "normal source lineage verification uses zero recovery queues Stops reservations or episode attempts",
+    "MSI mode proof establishes an actual owned native target",
+    "actual Start route consumer establishes eligible MSI DInput without XInput fallback",
+    "actual accepted MSI source frame supplies the original-mode verification candidate",
+    "initial MSI accepted frame satisfies the actual current-output verification predicate",
+    "real MSI mode edge retires old accepted continuity while retaining eligible physical source revision",
+    "MSI mode change preserves Host power request intent and target without a new command or ACK",
+    "fresh MSI mode cannot borrow the old-mode accepted frame to publish final success",
+    "missing current-mode ACK holds verification without Host commands or a recovery attempt",
+    "actual current-mode MSI source report reaches a new accepted Host frame",
+    "actual current-mode MSI ACK permits final verification on the same request Host power and source",
+    "normal MSI source and mode lineage verification uses zero recovery queues Stops reservations or episode attempts",
+    "MSI recovery health case establishes actual owned target and eligible source",
+    "old MSI mode owns an actual accepted two-second healthy window before maintenance",
+    "mode edge and fresh read precede any current-mode report or ACK",
+    "new MSI mode cannot reset recovery budget using an old-mode healthy ACK window",
+    "MSI mode maintenance cannot erase the existing rolling recovery budget",
+    "actual current-mode reports establish their own two-second accepted coverage",
+    "only actual current-mode healthy coverage may settle episode budget while retaining rolling limits",
+    "foreground-neutral scenario establishes its actual owned Host",
+    "cached radial ownership supplies actual foreground-neutral eligibility without window operations",
+    "actual accepted current-source foreground neutral supplies a success candidate",
+    "eligible foreground-neutral verification does not credit shared non-neutral recovery health or budget",
+    "foreground-neutral candidate remains locked at9999 with continuous reads and no extra ACK",
+    "healthy foreground-neutral reads retain the accepted source lineage",
+    "actual current-lineage foreground-neutral ACK verifies at10000 without extra submits or recovery",
+    "foreground-neutral final leaves shared health evidence and recovery budget untouched",
+    "normal focus-neutral verification uses zero recovery queues Stops reservations or episode attempts",
+    "actual failed HELLO reaches ordinary opening-failed stop",
+    "classified failed startup enters execution inspection even with a pending fallback offer",
+    "failed-start execution inspection is incomplete before10000",
+    "failed startup performs no fallback queue Stop create or budget charge before10000",
+    "controlled physical read remains live while released source admission and player clock stay independent",
+    "failed-start execution inspection completes exactly at10000",
+    "failed-start retry queues exactly at10000 before central reservation or budget charge",
+    "actual controlled stop then start consumes exactly one shared attempt and central reservation",
+    "startup failure without execution Stop retains the ordered stop start fallback",
+    "forced due-health body executes its exact read-only service query and dev-all inventory leaves",
+    "recovery restores actual prepared target while preserving logical SteamDeck intent",
+    "restored target retains its original failed candidate and completed inspection until actual healthy proof",
+    "recovery preserves settings power request and the original thirty-second deadline",
+    "player transition and repeated reserve cannot renew an already charged recovery",
+    "actual queued lifecycle work drains without stranding ownership",
+    "duplicate failure offer and dispatch cannot Stop Start reserve or extend a charged recovery",
+    "actual recovered healthy proof permits the unique final success after an initial failure candidate",
+    "initial failed candidate and recovered healthy proof publish exactly one successful final",
+    "verification fault scenario creates its first actual native target",
+    "actual current-frame candidate starts the inspection window without a final",
+    "the first ten seconds performs real current-chain inspections instead of waiting idle",
+    "known recording suppression is inspected and excluded without a stop or recovery charge",
+    "actual SUBMIT_FRAME timeout produces the scoped cleanup token",
+    "real bounded frame transport timeout supplies a classified fault during verification",
+    "known fault inside inspection cannot queue or charge fallback before its safety token runs",
+    "foreign epoch cleanup token cannot claim or Stop the current Host",
+    "exact current frame fault is claimed by execution cleanup",
+    "one current frame fault has exactly one serialized Stop owner",
+    "execution Stop owns the exact epoch and run while unproven cleanup retains an unspent fallback",
+    "frame-fault execution inspection remains incomplete at9999",
+    "at9999 execution cleanup permits physical input but no fallback queue duplicate Stop create or budget charge",
+    "frame-fault execution inspection completes exactly at10000",
+    "ten seconds with unfinished fault return cannot reserve charge queue or create a fallback",
+    "actual return consumer retires the old owned target before recovery can continue",
+    "proven return with missing or stale source cannot Start reserve or charge fallback",
+    "proven execution cleanup and fresh source queue the first unspent fallback only after inspection",
+    "fallback after execution Stop performs only one Start and one central and episode charge",
+    "replacement Start occurs strictly after the execution Stop and actual return",
+    "player and repeated dispatch cannot reserve a second repair on the same verifying request",
+    "old scoped fault token is replayed only after an actual successor target exists",
+    "old fault token and repeated offer cannot Stop mutate reserve or renew the successor Host",
+    "repaired candidate neither publishes a contradictory final nor renews inspection or admission time",
+    "only post-repair actual verification emits the one successful final and releases players",
+    "attempt fault followed by recovery never reports both final failure and success",
+    "actual timed-out frame leaves cached source stale before natural cleanup dispatch",
+    "actual frame-fault cleanup stays ahead of maintenance recovery work",
+    "post-inspection fault establishes an actual owned target",
+    "post-inspection classified fault reserves once and retains the actual charged Stop while return is unproven",
+    "charged fallback waits for actual late return without another Stop Start reserve charge or deadline",
+    "verified late cleanup queues only the continuation of the already charged recovery",
+    "late charged continuation performs only its remaining Start with the original reservation cooldown rolling budget and deadline",
+    "actual current output after late charged return permits the unique successful final",
+    "classified execution outcome cannot finish inspection at9999",
+    "pending offer before inspection queues and reserves no fallback",
+    "only classified execution receipt completes inspection at10000",
+    "excluded condition cannot create Host or send target commands",
+    "excluded condition spends no recovery attempt reservation Stop or create after inspection",
+    "excluded condition cannot renew or replace player protection",
+    "return-hook guards establish an actual owned Host",
+    "return-hook guards retain actual unspent execution cleanup and quarantined return ownership",
+    "matching ownership cannot release StartBlocked while actual quarantine remains unresolved",
+    "actual restore and Clear leave a power-mismatched rearm blocked for isolated proof guards",
+    "return hook refuses wrong old runId without clearing StartBlocked or debt",
+    "return hook refuses wrong old epoch without clearing StartBlocked or debt",
+    "return hook refuses wrong request without clearing StartBlocked or debt",
+    "return hook refuses wrong power without clearing StartBlocked or debt",
+    "return hook refuses expired deadline without clearing StartBlocked or debt",
+    "MSI debt guard prepares its actual opted-in owned target",
+    "actual lost MSI release retains nonempty owned-endpoint debt without charging fallback for return-hook rejection",
+    "return hook cannot clear StartBlocked or nonempty actual owned-endpoint debt",
+    "only the actual owned-absence and physical-return consumer clears MSI debt",
+    "held recovery safety case establishes an actual owned target",
+    "withheld recovery leaves exactly one serialized execution safety Stop",
+    "expected pause or exhausted budget cannot suppress execution cleanup or charge a replacement Start",
+    "held fault return after inspection still cannot queue reserve charge or create a fallback",
+    "known guard after proven return and fresh source still withholds fallback while preserving its safety Stop",
+    "held recovery safety cleanup cannot renew the player deadline",
+    "normal transition establishes its original actual target",
+    "normal transition begins only after previous actual input and final verification",
+    "normal persona transition enters through actual player settings admission",
+    "new persona intent preserves old target until serialized execution",
+    "normal persona transition cannot overwrite an old Host whose exit is unproven",
+    "normal delayed return keeps old ownership nonpublishing and preserves player request without fallback reservation",
+    "duplicate internal Start cannot replace an owned normal return wait",
+    "duplicate normal return attempts neither repeat Stop nor renew the player cycle",
+    "normal delayed return captures only the exact original request power epoch runId and persona",
+    "public continuation gate refuses a foreign ticket or persona without replacing the admitted request",
+    "even the exact normal old token cannot authorize Start while the actual owned return is unresolved",
+    "fixture old Host exit is supplied only by signaling its owned process event",
+    "actual old return preserves a blocked normal continuation until its sole remaining Start is claimed",
+    "repeated normal return maintenance queues exactly one remaining Start without Stop or fallback",
+    "a foreign queued ticket cannot claim or consume the exact normal request's remaining Start",
+    "same-request normal resume claims only one Start with no duplicate Stop create or renewed clock",
+    "normal delayed persona execution resumes same player request after proven old return without fallback",
+    "normal remaining Start waits for its actual current-source accepted execution receipt",
+    "normal delayed return completes through the unique verified final with zero fallback",
+    "normal delayed return publishes exactly one final for its original player request",
+    "actual paused cleanup retains exact normal return proof without prematurely claiming Start",
+    "normal return refuses a zero old epoch even after actual ownership cleanup",
+    "rejected normal old token cannot queue a continuation or repeat Stop or Start",
+    "normal return refuses a foreign old epoch even after actual ownership cleanup",
+    "normal return refuses a foreign old runId even after actual ownership cleanup",
+    "normal return refuses an empty old runId even after actual ownership cleanup",
+    "only the exact captured normal old tuple preserves idempotent proof after actual cleanup",
+    "fresh same-persona admission cannot lend its live thirty-second budget to the retired normal request",
+    "exact old normal tuple cannot revive a retired request power or thirty-second budget",
+    "retired normal continuation cannot create or command a target through either maintenance or delayed dispatch",
+    "retired normal old token cannot borrow a fresh request clock or spend fallback",
+    "restoring old power cannot resurrect an already retired normal continuation",
+    "normal continuation retains exactly one millisecond strictly before its original thirty-second cap",
+    "normal continuation loses authority at exactly thirty seconds without renewing admission",
+    "recording external priority or non-Ready pause after real return sends no target commands and repeats no Stop or Start",
+    "normal return pause preserves private intent and its original shrinking clock without fallback writes or charges",
+    "normal continuation paused after queue dispatch remains available for the same-request resume",
+    "resuming a normal return pause at the original thirty-second cap cannot renew time or create a target",
+    "normal MSI SteamDeck retirement pins nonempty actual old-tuple owned endpoint debt",
+    "normal MSI old Host exit plus incomplete empty PnP cannot prove owned return or restore physical visibility",
+    "normal MSI complete PnP retaining the pinned SD endpoint cannot authorize the new persona",
+    "normal MSI proven owned absence still cannot bypass a failed actual physical restore",
+    "normal MSI only complete owned PnP absence and successful production physical restore retire the debt",
+    "local visibility scenario starts its actual owned prepared target",
+    "actual Start hide leaf binds nonempty physical identity root owned paths and its exact current run transaction",
+    "local visibility scenario consumes an actual current physical source frame ACK",
+    "actual readback capture stamps the complete current Host request configuration journal identity and owned target set",
+    "current stamped owned visibility readback publishes outside the Host lock",
+    "actual current local fault predicate classifies exact owned obligation",
+    "local fault classification performs no command or device read",
+    "local obligation offers the original recovery owner without fabricated tuple or transport failure",
+    "owned visibility offer preserves the original thirty-second deadline",
+    "owned hidden loss at9999 holds the original inspection with no queue Stop Start or budget charge",
+    "owned hidden loss queues exactly one original recovery token at10000 before charging",
+    "actual owned hidden loss performs one serialized Stop cleanup and Start with one shared and central charge",
+    "owned hidden fallback Stops its old target before creating the replacement Host",
+    "owned hidden recovery keeps player intent power ticket settings and original remaining budget",
+    "spent owned hidden recovery cannot repeat after a second current missing-target readback",
+    "actual replacement accepted frame and healthy stamped readback finish the original verification",
+    "unknown readback cloak-off alone or a different selected physical identity cannot diagnose an owned hidden fault",
+    "rejected local visibility evidence performs no command or physical observation",
+    "rejected local visibility evidence produces zero queues Stops Starts reservations or attempts",
+    "current local fault queues its original fallback after inspection",
+    "failed owned readback is neither a current fault nor positive resolution",
+    "queued UNKNOWN evidence holds the exact unspent offer with no Stop or charge",
+    "still-current missing targets requeue only the retained offer",
+    "fresh actual owned-path readback proves ordinary repair before dispatch",
+    "ordinary repair cancels queued IO while retaining resolved ticket fault metadata and original deadline",
+    "same-ticket duplicate test has genuine newly missing owned paths",
+    "resolved original ticket cannot renew a local offer or consume Stop Start or budget",
+    "actual publisher rejects changed target set request or power after the query captured its stamp",
+    "rejected old publication cannot set authoritative current missing-target evidence",
+    "publication rejection preserves the same actual Host run epoch transaction and command count",
+    "stale or mutated readback causes zero recovery queue Stop Start reservation or episode attempt",
+    "stale publication test admits a genuinely newer player request",
+    "newer actual query publishes missing owned targets",
+    "late healthy old query cannot overwrite newer missing-target authority",
+    "older healthy query cannot clear a newer current owned fault",
+    "fresh newer query publishes positively healthy owned paths",
+    "late old missing query cannot replace newer healthy authority",
+    "older missing query cannot create a current fault after newer positive readback",
+    "same-contract slow query may publish its original start and actual completion",
+    "fresh completion cannot rescue over1000ms query-start evidence or count as healthy resolution",
+    "old-query and stale-start publication tests perform zero recovery work or charge",
+    "deferred scenario uses an actual registered ROG board identity",
+    "actual ROG source-pending Start prepares its target without manufacturing an owned hide journal",
+    "actual Start arms the current exact run epoch power persona and deadline hide obligation",
+    "current deferred obligation blocks local success despite an actual fresh accepted current-source report",
+    "fresh read from a different selected-slot incarnation cannot diagnose or resolve deferred hide",
+    "no fresh source leaves pending debt unresolved and success blocked without inferring a fault",
+    "post-inspection UNKNOWN deferred source holds original verification and offer with no queue Stop Start or budget",
+    "deadline case has actual queued local fallback before expiry",
+    "queued local fallback at original thirty-second deadline cannot Stop send commands charge or renew request time",
+    "actual completed target without first frame has not invented an execution success receipt",
+    "actual known visibility failure supplies Tc before any accepted frame while retaining the original deadline",
+    "fault observation before the first frame performs no Stop Start or charge inside execution inspection",
+    "real normal configuration helper accepts the exact journal through controlled snapshot I/O",
+    "shared root snapshot consumes actual normal configuration progress and fresh positive bound readback without a refresh",
+    "root offer pins original deadline persona exact normal root targets and configuration intent revisions",
+    "root refresh at9999 neither retires normal continuation nor queues Stops or spends fallback",
+    "root refresh queues the original unspent offer at exactly10000",
+    "actual lifecycle dispatcher takes over then Stops cleans up and Starts the same SD persona with one shared fallback",
+    "root takeover preserves the original player ticket power settings and thirty-second absolute deadline",
+    "replacement normal stage is established by its actual configuration helper",
+    "spent replay probe has a genuine fresh replacement root stage",
+    "spent original ticket cannot replay takeover or retire a fresh replacement normal stage",
+    "actual normal refresh helper completes through the controlled cycle I/O leaf before fallback",
+    "ordinary completion records a possibly issued refresh before clearing its original debt",
+    "actual accepted output positive readback and completed normal debt prove repair before fallback",
+    "ordinary repair revokes the unspent offer while retaining original ticket deadline and resolved state",
+    "resolved replay probe has a genuine current normal configuration stage",
+    "resolved replay is rejected with positive current root evidence",
+    "resolved root offer cannot be renewed by later same-ticket configuration progress",
+    "ordinary repair and resolved replay use zero fallback queues Stops Starts and recovery budget",
+    "incomplete issued retired unknown stale mismatched owner journal or source cannot diagnose root refresh",
+    "rejected root stage performs no command source read or physical refresh",
+    "rejected root stage cannot offer queue Stop Start retire continuation or consume fallback",
+    "stage-change probe begins with one real queued unspent root fallback",
+    "offered exact stage or revision cannot borrow subsequent normal progress",
+    "stage mutation after queue dispatch refuses Stop and budget while preserving the original offer ticket and deadline",
+    "changed offer binding is tested with a genuinely current positive root snapshot",
+    "replacement exact root and target set obtains actual normal configuration proof",
+    "same normal owner completes configuration through controlled hide and actual configuration helper",
+    "positive hidden readback with outstanding root debt and unknown source cannot resolve or strand the old hidden offer",
+    "source-paused promotion retains the original pending offer without consuming fallback",
+    "normal configuration progress does not shorten the original ten-second inspection",
+    "source recovery advances the SAME unspent hidden offer to exact root proof at its original inspection deadline",
+    "same-offer root promotion performs exactly one fallback without renewing request persona deadline or inspection",
+    "spent continuation cannot use normal stage promotion to rearm the offer",
+    "deadline probe begins with the exact root offer queued before the cap",
+    "old queued root offer at the original thirty-second cap cannot Stop or spend fallback",
+    "expiry before dispatch or inside Stop never creates a replacement Host and restores the borrowed scope",
+    "deadline replay probe has an independently admitted newer request",
+    "old queued recovery cannot borrow a newer ticket after its original period",
+    "existing monotonic I/O hook advances actual Stop to the same absolute deadline without refunding its reservation",
+    "actual cleanup only creates a candidate and cannot release player buttons",
+    "actual common exit waits full ten-second verification window",
+    "actual common verification is the unique normal release exit",
+    "late opposite callback cannot create both success and failure",
+    "same request has exactly one final result observation"
+  ],
+  "cases": [
+    {
+      "sourceOrdinal": 1,
+      "name": "central-switch-lifecycle-version-and-single-fallback-clock",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 1,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 2,
+      "name": "actual-source-lineage-change-requires-current-accepted-frame",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 2,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 3,
+      "name": "actual-msi-mode-change-requires-current-mode-accepted-frame",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 3,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 4,
+      "name": "actual-msi-mode-change-cannot-credit-old-recovery-health",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 4,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 5,
+      "name": "actual-focus-neutral-current-source-verifies-without-health-credit",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 5,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 6,
+      "name": "actual-classified-failed-start-off-on-recovery",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 6,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        53,
+        54,
+        55,
+        56,
+        57,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 7,
+      "name": "actual-verification-window-detects-transport-fault-and-reopens",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "naturalOrder": false
+      },
+      "sourceTemplate": 7,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        67,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        67,
+        86,
+        67,
+        87,
+        88,
+        67,
+        89,
+        90,
+        91,
+        92,
+        67,
+        93,
+        94,
+        95,
+        96
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 8,
+      "name": "actual-frame-fault-natural-worker-order-recovery",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "naturalOrder": true
+      },
+      "sourceTemplate": 7,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        97,
+        98,
+        67,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        67,
+        86,
+        67,
+        87,
+        88,
+        67,
+        89,
+        90,
+        91,
+        92,
+        67,
+        93,
+        94,
+        95,
+        96
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 9,
+      "name": "actual-post-inspection-fault-spent-return-continuation",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 8,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        99,
+        75,
+        67,
+        100,
+        80,
+        101,
+        67,
+        102,
+        67,
+        103,
+        104
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 10,
+      "name": "actual-switch-recovery-guard/recording",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "recording"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 11,
+      "name": "actual-switch-recovery-guard/source-missing",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "source-missing"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 12,
+      "name": "actual-switch-recovery-guard/power-paused",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "power-paused"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 13,
+      "name": "actual-switch-recovery-guard/external-priority",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "external-priority"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 14,
+      "name": "actual-switch-recovery-guard/budget-exhausted",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "budget-exhausted"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 15,
+      "name": "actual-switch-recovery-guard/stale-request",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-request"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 16,
+      "name": "actual-switch-recovery-guard/stale-power",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-power"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 17,
+      "name": "actual-switch-recovery-guard/stale-epoch",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-epoch"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 18,
+      "name": "actual-switch-recovery-guard/deadline-expired",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "deadline-expired"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 19,
+      "name": "actual-switch-recovery-guard/unproven-release",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "unproven-release"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 20,
+      "name": "actual-switch-recovery-guard/nonretryable-error",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "nonretryable-error"
+      },
+      "sourceTemplate": 9,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 21,
+      "name": "actual-switch-return-hook-ownership-guards",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 10,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        111,
+        75,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 22,
+      "name": "actual-switch-return-hook-retains-owned-endpoint-debt",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 11,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        120,
+        75,
+        121,
+        122,
+        123
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 23,
+      "name": "actual-frame-fault-safety-cleanup/recording",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "held": "recording"
+      },
+      "sourceTemplate": 12,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        124,
+        75,
+        67,
+        125,
+        126,
+        127,
+        67,
+        67,
+        128,
+        129
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 24,
+      "name": "actual-frame-fault-safety-cleanup/budget-exhausted",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "held": "budget-exhausted"
+      },
+      "sourceTemplate": 12,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        124,
+        75,
+        67,
+        125,
+        126,
+        127,
+        67,
+        67,
+        128,
+        129
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 25,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "resume"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 26,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/return-hook-guards",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "return-hook-guards"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        150,
+        151,
+        152,
+        153,
+        152,
+        154,
+        152,
+        155,
+        152,
+        156,
+        142,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 27,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/stale-request-at-return",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "stale-request-at-return"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": true,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        157,
+        141,
+        67,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 28,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/stale-power-at-return",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "stale-power-at-return"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": true,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 29,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/deadline-at-return",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "deadline-at-return"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": true,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        162,
+        163,
+        141,
+        67,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 30,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/recording",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "recording"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 31,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/external-priority",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "external-priority"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 32,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/power-not-ready",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "power-not-ready"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 33,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/input-not-ready",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "input-not-ready"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 34,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-recording",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-recording"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": true,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        142,
+        67,
+        166,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 35,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-external-priority",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-external-priority"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": true,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        142,
+        67,
+        166,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 36,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-power-not-ready",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-power-not-ready"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": true,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        142,
+        67,
+        166,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 37,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-stale-request",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-stale-request"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": true,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        157,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 38,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-stale-power",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-stale-power"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": true,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 39,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/queued-deadline",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "queued-deadline"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": true,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        143,
+        162,
+        163,
+        158,
+        67,
+        159,
+        160,
+        67,
+        161
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 40,
+      "name": "ROG/normal-persona-transition-retains-timed-out-old-host/pause-to-deadline",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 1,
+        "condition": "pause-to-deadline"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": true
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        67,
+        164,
+        165,
+        67,
+        164,
+        165,
+        162,
+        163,
+        67,
+        167
+      ],
+      "originalContinueCase": true
+    },
+    {
+      "sourceOrdinal": 41,
+      "name": "GPD/normal-persona-transition-retains-timed-out-old-host",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 2,
+        "condition": "resume"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        67,
+        142,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 42,
+      "name": "MSI/normal-persona-transition-retains-timed-out-old-host",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "family": 0,
+        "condition": "resume"
+      },
+      "sourceTemplate": 13,
+      "sourceFlags": {
+        "rejectAtReturn": false,
+        "queuedRetirement": false,
+        "queuedPause": false,
+        "paused": false
+      },
+      "requiredWitnesses": [
+        "exactOriginalHost",
+        "returnedNewHost"
+      ],
+      "grammar": [
+        13,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        168,
+        67,
+        169,
+        67,
+        170,
+        67,
+        171,
+        67,
+        172,
+        142,
+        143,
+        144,
+        67,
+        67,
+        67,
+        67,
+        145,
+        146,
+        147,
+        67,
+        148,
+        149
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 43,
+      "name": "actual-local-owned-hidden-missing-single-fallback",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 14,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "cleanupAwaiting"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        176,
+        177,
+        182,
+        176,
+        177,
+        183,
+        {
+          "fact": "cleanupAwaiting",
+          "then": [
+            67
+          ],
+          "else": []
+        },
+        67,
+        184,
+        185,
+        186,
+        176,
+        177,
+        67,
+        187,
+        176,
+        177,
+        175,
+        188
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 44,
+      "name": "actual-local-owned-hidden-guard/unknown-readback",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "unknown-readback"
+      },
+      "sourceTemplate": 15,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        189,
+        190,
+        191
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 45,
+      "name": "actual-local-owned-hidden-guard/cloak-off-only",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "cloak-off-only"
+      },
+      "sourceTemplate": 15,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        189,
+        190,
+        191
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 46,
+      "name": "actual-local-owned-hidden-guard/journal-selected-identity-mismatch",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-selected-identity-mismatch"
+      },
+      "sourceTemplate": 15,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        189,
+        190,
+        191
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 47,
+      "name": "actual-local-offer-unknown-holds-healthy-resolves-sticky",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 16,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        176,
+        177,
+        192,
+        176,
+        177,
+        193,
+        67,
+        194,
+        176,
+        177,
+        195,
+        176,
+        177,
+        196,
+        67,
+        197,
+        176,
+        177,
+        198,
+        67,
+        199
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 48,
+      "name": "actual-owned-readback-publication-rejected/same-transaction-target-mutation",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "same-transaction-target-mutation"
+      },
+      "sourceTemplate": 17,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        200,
+        201,
+        202,
+        203
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 49,
+      "name": "actual-owned-readback-publication-rejected/stale-request",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-request"
+      },
+      "sourceTemplate": 17,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        204,
+        200,
+        201,
+        202,
+        203
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 50,
+      "name": "actual-owned-readback-publication-rejected/stale-power",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-power"
+      },
+      "sourceTemplate": 17,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        200,
+        201,
+        202,
+        203
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 51,
+      "name": "actual-owned-readback-older-query-and-start-freshness",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 18,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "nonemptyReadbackTargets"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        176,
+        205,
+        206,
+        207,
+        176,
+        208,
+        209,
+        210,
+        176,
+        211,
+        212,
+        213
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 52,
+      "name": "actual-deferred-hide-current-known-source-and-unknown-guards",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 19,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        214,
+        215,
+        216,
+        175,
+        217,
+        178,
+        179,
+        180,
+        218,
+        219,
+        220
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 53,
+      "name": "actual-queued-local-fallback-original-deadline-no-io",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 20,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        176,
+        177,
+        221,
+        67,
+        222
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 54,
+      "name": "actual-owned-local-fault-before-first-frame-starts-original-inspection",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 21,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        173,
+        174,
+        223,
+        176,
+        177,
+        224,
+        225
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 55,
+      "name": "actual-owned-root-refresh-original-clock-single-fallback",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 22,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage",
+        "cleanupAwaiting"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        228,
+        176,
+        177,
+        229,
+        176,
+        177,
+        230,
+        67,
+        {
+          "fact": "cleanupAwaiting",
+          "then": [
+            67
+          ],
+          "else": []
+        },
+        67,
+        231,
+        232,
+        233,
+        176,
+        177,
+        234,
+        67,
+        235
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 56,
+      "name": "actual-owned-root-refresh-ordinary-repair-revokes-unspent-offer",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 23,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        236,
+        237,
+        175,
+        176,
+        177,
+        176,
+        177,
+        238,
+        67,
+        239,
+        240,
+        176,
+        177,
+        241,
+        67,
+        242,
+        243
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 57,
+      "name": "actual-owned-root-refresh-guard/refresh-issued",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "refresh-issued"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 58,
+      "name": "actual-owned-root-refresh-guard/refresh-result-unknown",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "refresh-result-unknown"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 59,
+      "name": "actual-owned-root-refresh-guard/configuration-unapplied",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "configuration-unapplied"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 60,
+      "name": "actual-owned-root-refresh-guard/configuration-not-ready",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "configuration-not-ready"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 61,
+      "name": "actual-owned-root-refresh-guard/continuation-retired",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "continuation-retired"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 62,
+      "name": "actual-owned-root-refresh-guard/refresh-not-required",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "refresh-not-required"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 63,
+      "name": "actual-owned-root-refresh-guard/unknown-readback",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "unknown-readback"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        176,
+        177,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 64,
+      "name": "actual-owned-root-refresh-guard/cloak-off",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "cloak-off"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        176,
+        177,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 65,
+      "name": "actual-owned-root-refresh-guard/stale-readback",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stale-readback"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 66,
+      "name": "actual-owned-root-refresh-guard/foreign-readback",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "foreign-readback"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 67,
+      "name": "actual-owned-root-refresh-guard/stage-targets-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-targets-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 68,
+      "name": "actual-owned-root-refresh-guard/stage-root-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-root-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 69,
+      "name": "actual-owned-root-refresh-guard/stage-identity-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-identity-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 70,
+      "name": "actual-owned-root-refresh-guard/journal-targets-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-targets-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 71,
+      "name": "actual-owned-root-refresh-guard/journal-root-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-root-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 72,
+      "name": "actual-owned-root-refresh-guard/journal-owner-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-owner-changed"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 73,
+      "name": "actual-owned-root-refresh-guard/journal-source-count",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-source-count"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 74,
+      "name": "actual-owned-root-refresh-guard/journal-source-mismatch",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "journal-source-mismatch"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 75,
+      "name": "actual-owned-root-refresh-guard/old-host",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "old-host"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 76,
+      "name": "actual-owned-root-refresh-guard/old-run",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "old-run"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 77,
+      "name": "actual-owned-root-refresh-guard/old-request",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "old-request"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 78,
+      "name": "actual-owned-root-refresh-guard/old-power",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "old-power"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 79,
+      "name": "actual-owned-root-refresh-guard/old-persona",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "old-persona"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 80,
+      "name": "actual-owned-root-refresh-guard/expired-stage",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "expired-stage"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 81,
+      "name": "actual-owned-root-refresh-guard/source-mask-absent",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "source-mask-absent"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 82,
+      "name": "actual-owned-root-refresh-guard/source-mask-extra",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "source-mask-extra"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 83,
+      "name": "actual-owned-root-refresh-guard/source-not-admitted",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "source-not-admitted"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 84,
+      "name": "actual-owned-root-refresh-guard/pretarget-absent",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "pretarget-absent"
+      },
+      "sourceTemplate": 24,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        244,
+        67,
+        245,
+        246
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 85,
+      "name": "actual-owned-root-refresh-offered-stage-change/refresh-issued",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "refresh-issued"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 86,
+      "name": "actual-owned-root-refresh-offered-stage-change/configuration-not-ready",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "configuration-not-ready"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 87,
+      "name": "actual-owned-root-refresh-offered-stage-change/continuation-retired",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "continuation-retired"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 88,
+      "name": "actual-owned-root-refresh-offered-stage-change/stage-targets-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-targets-changed"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 89,
+      "name": "actual-owned-root-refresh-offered-stage-change/stage-root-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-root-changed"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 90,
+      "name": "actual-owned-root-refresh-offered-stage-change/stage-owner-changed",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stage-owner-changed"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 91,
+      "name": "actual-owned-root-refresh-offered-stage-change/configuration-revision",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "configuration-revision"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        176,
+        177,
+        250,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 92,
+      "name": "actual-owned-root-refresh-offered-stage-change/intent-revision",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "intent-revision"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        176,
+        177,
+        250,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 93,
+      "name": "actual-owned-root-refresh-offered-stage-change/unknown-readback",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "unknown-readback"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        176,
+        177,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 94,
+      "name": "actual-owned-root-refresh-offered-stage-change/replacement-root-and-targets",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "replacement-root-and-targets"
+      },
+      "sourceTemplate": 25,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        247,
+        251,
+        176,
+        177,
+        250,
+        248,
+        67,
+        249
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 95,
+      "name": "actual-owned-hidden-offer-advances-root-after-source-wait",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 26,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "cleanupAwaiting"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        252,
+        176,
+        177,
+        253,
+        254,
+        176,
+        177,
+        255,
+        176,
+        177,
+        256,
+        67,
+        {
+          "fact": "cleanupAwaiting",
+          "then": [
+            67
+          ],
+          "else": []
+        },
+        67,
+        257,
+        258
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 96,
+      "name": "actual-owned-root-refresh-deadline/queued-original-deadline",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "queued-original-deadline"
+      },
+      "sourceTemplate": 27,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        259,
+        67,
+        260,
+        261,
+        262,
+        67,
+        263
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 97,
+      "name": "actual-owned-root-refresh-deadline/stop-reaches-original-deadline",
+      "parameters": {
+        "cliBoundaryOnly": 0,
+        "condition": "stop-reaches-original-deadline"
+      },
+      "sourceTemplate": 27,
+      "sourceFlags": {},
+      "requiredWitnesses": [
+        "initialRootStage"
+      ],
+      "grammar": [
+        13,
+        173,
+        174,
+        175,
+        226,
+        176,
+        177,
+        227,
+        178,
+        179,
+        180,
+        176,
+        177,
+        259,
+        67,
+        264,
+        261,
+        262,
+        67,
+        263
+      ],
+      "originalContinueCase": false
+    },
+    {
+      "sourceOrdinal": 98,
+      "name": "actual-unique-OFF-verification-exit",
+      "parameters": {
+        "cliBoundaryOnly": 0
+      },
+      "sourceTemplate": 28,
+      "sourceFlags": {},
+      "requiredWitnesses": [],
+      "grammar": [
+        13,
+        265,
+        266,
+        267,
+        268,
+        269
+      ],
+      "originalContinueCase": false
+    }
+  ],
+  "checkBounds": {
+    "min": 1727,
+    "max": 1730
+  },
+  "requiredWitnessKinds": [
+    "exactOriginalHost",
+    "returnedNewHost",
+    "cleanupAwaiting",
+    "nonemptyReadbackTargets",
+    "initialRootStage"
+  ]
+}

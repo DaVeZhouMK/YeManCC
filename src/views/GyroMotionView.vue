@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// [AI:USER:GYRO] 开启→按当前预设使用体感；关闭→停止体感效果；预设修改保持当前公用/游戏专属范围。
+// [AI:USER:GYRO] 开启→按当前全局预设使用体感；关闭→停止体感效果；预设修改保存到全局输入设置。
 // 体感开关与“虚拟手柄联动”是不同选择；未识别来源不能当作已开启，校准未确认不能当作已保存。
 // 切页不代表关闭，用户关闭后旧请求不能重新开启；输入来源/输出支持查总库与现有实现，不按设备名称猜测。
 import { migrateControllerPersona, type ControllerPersona } from '@/bridge/controllerPersona';
@@ -156,7 +156,7 @@ const gyroPowerText = computed(() => (gyroPowerState.value === 'on'
   ? '陀螺仪已开启'
   : gyroPowerState.value === 'off' ? '陀螺仪已关闭' : '陀螺仪未识别'));
 const gyroPowerClass = computed(() => gyroPowerState.value);
-// 联动落点：仅当联动开启时把陀螺仪电源同步到虚拟手柄状态（顶部专属配置优先于本开关）。
+// 联动落点：仅当联动开启时把陀螺仪电源同步到全局虚拟手柄状态。
 function applyVirtualPadLink(): void {
   // Loading a page is not a user power action: preserve native boot gyro off.
   if (!loaded.value || gameLocked.value) return;

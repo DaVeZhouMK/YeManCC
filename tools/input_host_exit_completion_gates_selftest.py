@@ -4,7 +4,8 @@
 Only a private cleanup thread/event are real Windows resources. The actual full
 Host-local predicate and capture-return getter execute. No product Host/worker,
 window or module cleanup runs. Exact reviewed raw snippets/dependencies are
-required; old code and host-gate deletion are executed negative controls.
+required; old code and host/serial-gate deletion are executed negative controls.
+Serial ownership is an explicit memory port, never a real worker-return proof.
 """
 from pathlib import Path
 import argparse
@@ -23,12 +24,35 @@ TEMPLATE = DIRECTORY + 'fixture.cpp.in'
 CONTRACT = DIRECTORY + 'source-contract.json'
 ADAPTER = 'tools/input_timer_evidence_adapter_selftest.py'
 AUTH = 'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'
+FIXED_PROFILE = 'tools/ymcc_sim/global/controller-host-exit/tool-profile.json'
+FIXED_MODULE = 'tools/input_host_exit_build_inputs.py'
 DEPENDENCIES = ('native/input_host_exit_owner_runtime.h', 'native/exit_cleanup_wait.h',
                 'native/input_host_exit_retirement.h', 'deps/json/json.hpp', ADAPTER, AUTH)
 SOURCES = ('native/main.cpp', RUNNER, TEMPLATE, CONTRACT, *DEPENDENCIES)
 GLOBAL_NAMES = ('g_exitRequested', 'g_exitReadyPosted', 'g_exitCode', 'g_exitCleanupThread',
                 'g_exitCleanupCompleted', 'g_exitCleanupStage', 'g_exitBeginTick',
                 'g_exitLastWaitingStage', 'g_captureExitReleased')
+LEGACY_FAULTS = ('host-local-not-returned', 'capture-not-returned', 'recovery-not-returned', 'wait-failed',
+                 'cleanup-thread-running', 'close-failed', 'all-returned', 'host-process-retained',
+                 'host-primary-retained', 'host-server-pipe-retained', 'host-unadopted-pipe-retained',
+                 'host-transport-pending', 'host-transport-unavailable', 'host-transport-throws')
+LEGACY_CASES = [route + ':' + fault for route in ('ready', 'no-window-loop') for fault in LEGACY_FAULTS]
+SERIAL_CASES = [route + ':serial-not-returned' for route in ('ready', 'no-window-loop')]
+FAST_CASES = [route + ':' + fault for route in ('fast-completed-top', 'fast-completed-after-wait')
+              for fault in ('capture-not-returned', 'host-local-not-returned', 'serial-not-returned')]
+SERIAL_SELECTION = [route + ':all-returned' for route in ('ready', 'no-window-loop')] + SERIAL_CASES + [
+    route + ':serial-not-returned' for route in ('fast-completed-top', 'fast-completed-after-wait')]
+
+
+def selected_cases(selection):
+    if selection == 'all':
+        return LEGACY_CASES + SERIAL_CASES + FAST_CASES
+    if selection == 'legacy':
+        return LEGACY_CASES
+    if selection == 'serial':
+        return SERIAL_SELECTION
+    need(selection in SERIAL_CASES + FAST_CASES, 'Unknown exact completion-gates selection')
+    return [selection]
 
 
 def sha(data):
@@ -110,26 +134,71 @@ def verify_sources(source, contract, mask):
     return scope
 
 
-def variants(scope, historical):
+def variants(scope, historical, serial_only=False):
     current = {name: scope[name] for name in ('readyCase', 'messageLoop')}
     remove_ready = dict(current)
     anchor = '||!inputHostExitLocalOwnershipReleased()'
     need(remove_ready['readyCase'].count(anchor) == 1, 'Exact READY host-gate mutation anchor changed')
     remove_ready['readyCase'] = remove_ready['readyCase'].replace(anchor, '', 1)
     remove_loop = dict(current)
-    anchor = '&&inputHostExitLocalOwnershipReleased()'
+    anchor = 'if(inputCaptureExitOwnershipReleased()&&inputHostExitLocalOwnershipReleased()'
     need(remove_loop['messageLoop'].count(anchor) == 1, 'Exact main-loop host-gate mutation anchor changed')
-    remove_loop['messageLoop'] = remove_loop['messageLoop'].replace(anchor, '', 1)
-    return [('current', current, []), ('historical-before-host-gate', historical, ['ready', 'no-window-loop']),
-            ('delete-ready-host-gate', remove_ready, ['ready']),
-            ('delete-no-window-host-gate', remove_loop, ['no-window-loop'])]
+    remove_loop['messageLoop'] = remove_loop['messageLoop'].replace(
+        anchor, 'if(inputCaptureExitOwnershipReleased()', 1)
+    result = [('current', current, [], 'all'),
+              ('historical-before-host-gate', historical, ['ready', 'no-window-loop'], 'legacy'),
+              ('delete-ready-host-gate', remove_ready, ['ready'], 'legacy'),
+              ('delete-no-window-host-gate', remove_loop, ['no-window-loop'], 'legacy')]
+    for route, block, anchor in (
+        ('ready', 'readyCase', '||!gamepadSerialExitOwnershipReleased()'),
+        ('no-window-loop', 'messageLoop',
+         'if(inputCaptureExitOwnershipReleased()&&inputHostExitLocalOwnershipReleased()&&gamepadSerialExitOwnershipReleased()'),
+    ):
+        changed = dict(current)
+        need(changed[block].count(anchor) == 1, 'Exact serial mutation anchor changed: ' + route)
+        replacement = '' if route == 'ready' else anchor.replace('&&gamepadSerialExitOwnershipReleased()', '')
+        changed[block] = changed[block].replace(anchor, replacement, 1)
+        result.append(('delete-' + route + '-serial-gate', changed, [route], route + ':serial-not-returned'))
+    anchor = 'if(g_exitCleanupCompleted&&inputCaptureExitOwnershipReleased()&&inputHostExitLocalOwnershipReleased()&&gamepadSerialExitOwnershipReleased())'
+    need(current['messageLoop'].count(anchor) == 2, 'Both complete fast-completed gate anchors required')
+    for index, route in enumerate(('fast-completed-top', 'fast-completed-after-wait')):
+        changed = dict(current)
+        starts = [m.start() for m in re.finditer(re.escape(anchor), changed['messageLoop'])]
+        start = starts[index]
+        replacement = anchor.replace('&&gamepadSerialExitOwnershipReleased()', '')
+        changed['messageLoop'] = changed['messageLoop'][:start] + replacement + changed['messageLoop'][start + len(anchor):]
+        result.append(('delete-' + route + '-serial-gate', changed, [route], route + ':serial-not-returned'))
+    if serial_only:
+        return [('current', current, [], 'serial'), *result[4:]]
+    return result[:4]
+
+
+def load_fixed_native_build(snapshot, source, run):
+    file = snapshot / FIXED_MODULE
+    need(file.read_bytes() == source[FIXED_MODULE], 'Fixed Native reader snapshot differs')
+    spec = importlib.util.spec_from_file_location('host_exit_fixed_native_build', file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.FixedNativeBuild(source, run)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root', type=Path, required=True)
-    parser.add_argument('--source-only', action='store_true', help='Verify/extract only; exit 12, never a passing runtime receipt')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--source-only', action='store_true', help='Verify/extract only; exit 12, never a passing runtime receipt')
+    mode.add_argument('--serial-only', action='store_true', help='Explicit serial memory-port baseline and four gate deletions only; original Host/historical controls NOT_RUN')
+    mode.add_argument('--build-only-current', action='store_true', help='Compile both current profiles; no scenario is executed')
+    parser.add_argument('--build-profile', choices=('Release', 'Checked'), help='Limit an explicit current build-only observation')
+    parser.add_argument('--fixed-native-build', action='store_true', help='Use the pinned compiler environment and validate actual header/library inputs before runtime')
     args = parser.parse_args()
+    if args.build_only_current and not args.fixed_native_build:
+        parser.error('--build-only-current requires --fixed-native-build')
+    if args.build_profile and not args.build_only_current:
+        parser.error('--build-profile requires --build-only-current')
+    if args.source_only and args.fixed_native_build:
+        parser.error('--source-only cannot validate a fixed Native build')
+    source_names = (*SOURCES, FIXED_PROFILE, FIXED_MODULE) if args.fixed_native_build else SOURCES
     out = args.output_root.resolve()
     need(not out.is_relative_to(ROOT), 'Evidence must be outside repository')
     run = out / ('run-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '-' + str(os.getpid()))
@@ -138,6 +207,11 @@ def main():
                'profiles': [], 'runtimeEvidenceComplete': False, 'sourceStable': False,
                'wholeMainAcceptance': False, 'wholeLifecycleAcceptance': False,
                'realProductHostOrCaptureExecuted': False, 'realWindowsOrModuleCleanupExecuted': False,
+               'realSerialWorkerExecuted': False, 'realSerialWaitOrJoinProven': False,
+               'serialOwnershipPort': 'explicit memory fact only; actual serial getter/worker not executed',
+               'selectionScope': ('current-builds-only' if args.build_only_current else
+                                  'serial-only' if args.serial_only else 'default-with-original-host-controls'),
+               'originalHostAndHistoricalControlsExecuted': False,
                'privateCleanupThreadHandleIsReal': True, 'processExitUsedAsCleanup': False,
                'startedAt': dt.datetime.now().astimezone().isoformat()}
 
@@ -146,7 +220,7 @@ def main():
         save(out / 'RESULT.json', receipt)
 
     try:
-        source = {name: (ROOT / name).read_bytes() for name in SOURCES}
+        source = {name: (ROOT / name).read_bytes() for name in source_names}
         contract = json.loads(source[CONTRACT])
         historical_path = Path(contract['historicalMain']['path'])
         historical_bytes = historical_path.read_bytes()
@@ -175,8 +249,8 @@ def main():
         publish()
 
         def stable(label):
-            live = {name: (ROOT / name).read_bytes() for name in SOURCES}
-            for name in SOURCES:
+            live = {name: (ROOT / name).read_bytes() for name in source_names}
+            for name in source_names:
                 if name != 'native/main.cpp':
                     need(live[name] == source[name], 'Consumer/dependency source drift ' + label + ': ' + name)
             live_scope = capture_scope(live, helper.mask_cpp)
@@ -190,19 +264,31 @@ def main():
             receipt['sourceStable'] = True
             publish()
             return 12
-        compiler, env = helper.compiler_environment(run)
         authority = json.loads(source[AUTH])
-        pins = {str(Path(row['path']).resolve()).lower(): row['sha256'] for row in authority['files']}
-        need(compiler.resolve() == Path(authority['native']['compiler']).resolve(), 'Native compiler path changed')
-        for path in (compiler, Path(authority['native']['linker']), Path(authority['native']['dumpbin'])):
-            need(sha(path.read_bytes()) == pins[str(path.resolve()).lower()], 'Native tool raw identity changed: ' + str(path))
-        env['INCLUDE'] = ';'.join(authority['native']['include'])
-        env['LIB'] = ';'.join(authority['native']['lib'])
-        receipt['compiler'] = {'path': str(compiler), 'sha256': sha(compiler.read_bytes()),
-                              'vcvarsPath': str(helper.VCVARS), 'vcvarsSha256': sha(helper.VCVARS.read_bytes()),
-                              'sdkVersion': env.get('WindowsSDKVersion')}
+        fixed = None
+        if args.fixed_native_build:
+            fixed = load_fixed_native_build(snapshot, source, run)
+            compiler, env = fixed.compiler, fixed.env
+            receipt['compiler'], receipt['fixedNativeBuild'] = fixed.compiler_receipt, fixed.receipt
+        else:
+            compiler, env = helper.compiler_environment(run)
+            pins = {str(Path(row['path']).resolve()).lower(): row['sha256'] for row in authority['files']}
+            need(compiler.resolve() == Path(authority['native']['compiler']).resolve(), 'Native compiler path changed')
+            for path in (compiler, Path(authority['native']['linker']), Path(authority['native']['dumpbin'])):
+                need(sha(path.read_bytes()) == pins[str(path.resolve()).lower()], 'Native tool raw identity changed: ' + str(path))
+            env['INCLUDE'] = ';'.join(authority['native']['include'])
+            env['LIB'] = ';'.join(authority['native']['lib'])
+            receipt['compiler'] = {'path': str(compiler), 'sha256': sha(compiler.read_bytes()),
+                                  'vcvarsPath': str(helper.VCVARS), 'vcvarsSha256': sha(helper.VCVARS.read_bytes()),
+                                  'sdkVersion': env.get('WindowsSDKVersion')}
+        selected = variants(scope, historical, args.serial_only)
+        if args.build_only_current:
+            selected = [variant for variant in selected if variant[0] == 'current']
+            need(len(selected) == 1, 'Expected exactly one current build variant')
         for profile, flags in [('Release', ['/O2', '/MT']), ('Checked', ['/Od', '/RTC1', '/D_DEBUG', '/MTd'])]:
-            for route, blocks, bad_exits in variants(scope, historical):
+            if args.build_profile and profile != args.build_profile:
+                continue
+            for route, blocks, bad_exits, selection in selected:
                 stable('before ' + profile + '-' + route)
                 folder = run / (profile + '-' + route)
                 folder.mkdir()
@@ -224,23 +310,36 @@ def main():
                      'Actual Host-local predicate was changed in fixture')
                 need(function(body, 'inputCaptureExitOwnershipReleased', helper.mask_cpp) == scope['capturePredicate'],
                      'Actual capture-return getter was changed in fixture')
-                build = helper.execute([compiler, '/nologo', '/std:c++20', '/utf-8', '/EHsc', '/permissive-', '/W4', *flags,
+                compile_args = [compiler, '/nologo', '/std:c++20', '/utf-8', '/EHsc', '/permissive-', '/W4', *flags,
                     '/sourceDependencies', deps, '/I' + str(snapshot / 'deps/json'), '/I' + str(snapshot / 'native'), cpp,
-                    '/Fo' + str(folder / 'gates.obj'), '/Fe' + str(exe), '/link', '/INCREMENTAL:NO'], folder, env, folder / 'build.log', 90)
-                need(build.returncode == 0, 'Completion-gates consumer compile failed: ' + str(folder / 'build.log'))
-                includes = [Path(p).resolve() for p in json.loads(deps.read_text(encoding='utf-8-sig'))['Data']['Includes']]
+                    '/Fo' + str(folder / 'gates.obj'), '/Fe' + str(exe), '/link', '/INCREMENTAL:NO']
                 expected = {(snapshot / 'native/exit_cleanup_wait.h').resolve(), (snapshot / 'deps/json/json.hpp').resolve()}
+                if fixed:
+                    local_pins = {p: sha(source[p.relative_to(snapshot).as_posix()]) for p in expected}
+                    binary = fixed.compile(helper.execute, compile_args, folder, cpp, exe, profile, route,
+                                           local_pins, expected, 90)
+                    publish()
+                else:
+                    build = helper.execute(compile_args, folder, env, folder / 'build.log', 90)
+                    need(build.returncode == 0, 'Completion-gates consumer compile failed: ' + str(folder / 'build.log'))
+                includes = [Path(p).resolve() for p in json.loads(deps.read_text(encoding='utf-8-sig'))['Data']['Includes']]
                 local = {p for p in includes if p.is_relative_to(snapshot.resolve())}
                 need(local == expected, 'Actual compiled local dependency closure changed')
                 tool_roots = [Path(p).resolve() for p in authority['native']['include']]
                 need(all(p in expected or any(p.is_relative_to(root) for root in tool_roots) for p in includes),
                      'Unreviewed dependency outside exact snapshot and approved compiler/SDK')
                 need(all(not p.is_relative_to(ROOT) for p in includes), 'Live repository include was compiled')
-                observed = helper.execute([exe], folder, env, folder / 'run.log', 45)
+                if fixed:
+                    if args.build_only_current:
+                        stable('after ' + profile + '-' + route)
+                        continue
+                    fixed.admit_runtime(binary)
+                observed = helper.execute([exe, selection], folder, env, folder / 'run.log', 45)
                 save(folder / 'PROCESS-EXIT.json', {'exitCode': observed.returncode})
                 need(bool(observed.stdout.strip()), 'Fixture produced no JSON; process exit=' + str(observed.returncode))
                 value = json.loads(observed.stdout.strip().splitlines()[-1])
                 row = {'profile': profile, 'route': route, 'isCurrentSource': route == 'current',
+                       'selection': selection, 'expectedCases': selected_cases(selection),
                        'exitCode': observed.returncode, **value, 'compiledBlockRawHashes': {n: sha(v.encode()) for n, v in blocks.items()},
                        'compiledHostPredicateRawHash': sha(scope['hostLocalPredicate'].encode()),
                        'compiledLocalRawHashes': {p.relative_to(snapshot.resolve()).as_posix(): sha(p.read_bytes()) for p in local},
@@ -248,22 +347,39 @@ def main():
                        'sourceDependenciesSha256': sha(deps.read_bytes())}
                 receipt['profiles'].append(row)
                 publish()
-                need(len(value['cases']) == 28 and value['privateThreadsStarted'] == 28, 'Complete declared scenario set not executed')
+                names = [case['name'] for case in value['cases']]
+                expected_cases = selected_cases(selection)
+                need(names == expected_cases and len(set(names)) == len(names), 'Exact declared scenario set not executed')
+                expected_threads = sum(not name.startswith('fast-completed-top:') for name in expected_cases)
+                need(value['privateThreadsStarted'] == expected_threads, 'Exact selected private-thread count changed')
+                need(value['serialOwnershipIsExplicitMemoryPort'] and not value['realSerialWorkerExecuted']
+                     and not value['realSerialWaitOrJoinProven'], 'Serial memory port misrepresented as real worker return')
                 need(value['allPrivateResourcesZeroBeforeExit'] and value['privateHandlesRemaining'] == 0
                      and value['privateThreadsStarted'] == value['privateThreadsSignalledAndObserved']
                      and value['privateThreadsStillRunning'] == 0 and value['fixtureForcedRealCleanupCount'] == 0,
                      'Actual private resources were not returned before fixture exit')
-                need(value['completeReadyCaseExecuted'] and value['completeWWinMainMessageLoopExecuted']
-                     and value['actualHostLocalPredicateExecuted'] and not value['processExitUsedAsCleanup'], 'Actual consumer scope not executed')
+                need(value['completeReadyCaseExecuted'] == any(name.startswith('ready:') for name in expected_cases)
+                     and value['completeWWinMainMessageLoopExecuted'] == any(not name.startswith('ready:') for name in expected_cases)
+                     and value['actualHostLocalPredicateExecuted'] and not value['processExitUsedAsCleanup'], 'Actual selected consumer scope not executed')
                 if bad_exits:
-                    need(observed.returncode == 1 and not value['pass'] and value['failures'] > 0, 'Specified old/deleted host gate did not fail')
+                    need(observed.returncode == 1 and not value['pass'] and value['failures'] > 0, 'Specified old/deleted gate did not fail')
                     for exit_name in bad_exits:
+                        if selection != 'legacy':
+                            prefix = exit_name + ':serial-not-returned:'
+                            suffix = ('pending-loop-must-not-return-to-final-cleanup'
+                                      if exit_name.startswith('fast-completed-') else 'retain-cleanup-owner')
+                            need(prefix + suffix in value['failedChecks'], 'Serial deletion escaped original necessary-gate assertion: ' + exit_name)
+                            if not exit_name.startswith('fast-completed-'):
+                                need(prefix + 'do-not-mark-completed' in value['failedChecks'], 'Deleted serial gate marked completion')
+                                need(prefix + 'checked-close-only-after-all-gates' in value['failedChecks'], 'Deleted serial gate did not witness forbidden close')
+                            continue
                         prefix = exit_name + ':host-local-not-returned:'
                         need(prefix + 'retain-cleanup-owner' in value['failedChecks'] and
                              prefix + 'do-not-mark-completed' in value['failedChecks'], 'Specified actual host gate defect not witnessed: ' + exit_name)
                         if exit_name == 'ready':
                             need(prefix + 'no-window-or-module-teardown' in value['failedChecks'], 'Deleted READY host gate did not reach forbidden real case teardown')
-                    need(all(any(name.startswith(exit_name + ':host-') for exit_name in bad_exits) for name in value['failedChecks']),
+                    need(all(any(name.startswith(exit_name + (':host-' if selection == 'legacy' else ':serial-not-returned:'))
+                                 for exit_name in bad_exits) for name in value['failedChecks']),
                          'Negative failed for unrelated assertions')
                     row['specifiedNegativeObserved'] = True
                 else:
@@ -275,7 +391,16 @@ def main():
                       ' exit=' + str(observed.returncode) + ' privateHandles=0', flush=True)
         live, end_scope = stable('at final publication')
         save(run / 'COMPLETE-SCOPE-END.json', end_scope)
-        receipt.update(status='PASS_ACTUAL_EXIT_COMPLETION_GATES', runtimeEvidenceComplete=True, sourceStable=True,
+        if args.build_only_current:
+            receipt.update(status='BUILD_ONLY_NOT_RUN', sourceStable=True, sourceScopeRawUnchanged=True,
+                           sourceEndHashes={n: sha(b) for n, b in live.items()},
+                           wholeMainSourceStable=live['native/main.cpp'] == source['native/main.cpp'],
+                           finishedAt=dt.datetime.now().astimezone().isoformat())
+            publish()
+            return 0
+        receipt.update(status=('PASS_ACTUAL_SERIAL_UI_COMPLETION_GATES' if args.serial_only else 'PASS_ACTUAL_EXIT_COMPLETION_GATES'),
+                       originalHostAndHistoricalControlsExecuted=not args.serial_only,
+                       runtimeEvidenceComplete=True, sourceStable=True,
                        sourceScopeRawUnchanged=True, sourceEndHashes={n: sha(b) for n, b in live.items()},
                        wholeMainSourceStable=live['native/main.cpp'] == source['native/main.cpp'],
                        finishedAt=dt.datetime.now().astimezone().isoformat())

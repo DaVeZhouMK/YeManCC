@@ -11,14 +11,20 @@
     "analyze-candidate-cpu.mjs",
     "Observe-MonitorRelay.mjs",
     "YmccCpuScheduling.wprp",
+    "YmccCpuFileIo.wprp",
     "PreciseCpu/PreciseCpu.csproj",
     "PreciseCpu/Program.cs",
     "PreciseCpu/SelfTests.cs",
+    "PreciseCpu/SavedSampleTests.cs",
     "rog-field/Observe-RogCpu.ps1",
     "rog-field/ReadOnlyCounters.cs",
     "rog-field/Start-RogCapture.ps1",
     "rog-field/RogCpu.wprp",
-    "rog-field/README.zh-CN.md"
+    "rog-field/README.zh-CN.md",
+    "rog-field/Observe-BufferedCpu.ps1",
+    "rog-field/BufferedCounterSource.json",
+    "rog-field/WindowScene.cs",
+    "rog-field/Observe-WindowScene.ps1"
   ],
   "description": "Descriptive source manifest only; not a product, publisher, fixture or permission gate."
 }

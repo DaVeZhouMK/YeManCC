@@ -9,6 +9,7 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path('../../Build/Validation/SleepGameIsolation-20260930'))
+parser.add_argument('--sleep-focus-only', action='store_true', help='Exclude the separate WebView summon lane')
 args = parser.parse_args()
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
@@ -28,7 +29,7 @@ def function(name):
     return source[match.start():end]
 
 assert 'AttachThreadInput(' not in masked, 'no YMCC input queue may attach to a foreign game'
-assert 'focusSingleResumedGame(rr.pids, target.processCreated, expectedGeneration)' in source
+assert 'focusSingleResumedGame(rr.pids, target.processCreated, focusOrigin)' in source
 worker = function('focusResumeGameWorker')
 assert 'g_sgOpMtx' not in worker and 'NtResume' not in worker and 'SendInput' not in worker
 assert worker.index('resumeWindowResponds') < worker.index('finalGate') < worker.index('requestWindowForegroundAsync')
@@ -60,7 +61,7 @@ static DWORD windowPid=42;
 static bool exited=false, openFails=false, responds=true, manualMarker=false, sleepMarker=false;
 static bool inWorker=false, queueAccepts=true, postsSucceed=true;
 static int probes=0, activations=0, timers=0, closes=0, posts=0;
-static std::function<void()> onProbe;
+static std::function<void()> onProbe, onPos;
 static std::deque<std::function<void()>> jobs;
 static std::vector<json> logs;
 static HWND gameWindow=(HWND)2;
@@ -77,7 +78,7 @@ static LRESULT fakeProbe(HWND,UINT msg,WPARAM,LPARAM,UINT flags,UINT timeout,PDW
 static BOOL fakeVisible(HWND){return TRUE;}
 static BOOL fakeIconic(HWND){return FALSE;}
 static BOOL fakeShow(HWND,int){assert(inWorker);return TRUE;}
-static BOOL fakePos(HWND,HWND,int,int,int,int,UINT flags){assert(inWorker&&(flags&SWP_ASYNCWINDOWPOS));return TRUE;}
+static BOOL fakePos(HWND,HWND,int,int,int,int,UINT flags){assert(inWorker&&(flags&SWP_ASYNCWINDOWPOS));if(onPos)onPos();return TRUE;}
 static BOOL fakeForeground(HWND h){assert(inWorker||h==(HWND)3);++activations;return TRUE;}
 static BOOL fakeIsWindow(HWND h){return h!=nullptr;}
 static BOOL fakeBring(HWND h){assert(h==(HWND)3);return TRUE;}
@@ -105,6 +106,7 @@ static BOOL fakePost(HWND,UINT,WPARAM w,LPARAM l){assert(w==0&&l==0);++posts;ret
 #define KillTimer fakeKill
 #define PostMessageW fakePost
 #include "resume_focus.h"
+#include "sleep_power_observation.h"
 static HWND g_hwnd=(HWND)3;
 static bool g_webviewReady=true, selfForeground=true;
 static constexpr int COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC=1;
@@ -116,10 +118,26 @@ static std::atomic<DWORD> g_manualPausedPid{0};
 enum class PowerLifecycle{Ready,Suspending,Suspended,Resuming};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static unsigned long long generation=1;
-static unsigned long long currentPowerGeneration(){return generation;}
+static unsigned long long notification=0, suspendSerial=0, publication=1;
+static bool notificationPending=false, publicPowerKnown=true;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes) noexcept {
+ using namespace ymcc::sleeppower;
+ if(!publicPowerKnown||!out||bytes!=sizeof(*out))return 0;
+ *out={};out->generation=generation;out->phase=static_cast<uint32_t>(g_powerLifecycle.load());
+ out->observedNotificationSequence=notification;out->suspendSerial=suspendSerial;out->publicationRevision=publication;
+ out->flags=kKnown|(out->phase==0?kHardwareAllowed:0)|(notificationPending?kNotificationPending:0);
+ return 1;
+}
+static ymcc::sleeppower::SharedPowerV1 powerOrigin() {
+ ymcc::sleeppower::SharedPowerV1 value;
+ assert(ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower,value));return value;
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value) {
+ return ymcc::sleeppower::powerCurrent(&readSharedSystemPower,value);
+}
 struct FocusTargetSnapshot { bool valid=false; DWORD pid=0; ULONGLONG processCreated=0; };
 static FocusTargetSnapshot g_wakeFocusNudgeTarget;
-static std::atomic<unsigned long long> g_wakeFocusNudgeGeneration{1};
+static ymcc::sleeppower::SharedPowerV1 g_wakeFocusNudgePower;
 static constexpr UINT kWakeFocusNudgeDelayMs=5000;
 static const std::wstring SG_SLEEP_LEASE_DIR=L"sleep",SG_MANUAL_DIR=L"manual";
 namespace fspath {
@@ -138,7 +156,7 @@ static bool poolSubmit(std::function<void()> job){if(!queueAccepts)return false;
 begin=source.index('static std::mutex g_resumeFocusMailboxMx;')
 end=source.index('static ymcc::ResumeFocusGate focusResumeGate(',begin)
 globals=source[begin:end]
-names=['focusPidIsManuallyPaused','focusGameControlBlocked','refocusWebView','focusResumeGate','focusResumeLog',
+names=['focusPidIsManuallyPaused','focusGameControlBlocked','focusResumeGate','focusResumeLog',
        'focusResumeTargetPaused','focusResumeGameWorker','focusResumeFocusTimerTickOnUiThread',
        'focusResumedGameOnUiThread','focusQueueResumedGame','focusSingleResumedGame','wakeFocusNudgeRunOnUiThread']
 checks=r"""
@@ -146,17 +164,20 @@ static int passed=0;
 static void pass(const char* s){++passed;std::cout<<"PASS "<<s<<"\n";}
 static void reset(){
  now=10000;created=123;windowPid=42;exited=openFails=manualMarker=sleepMarker=inWorker=false;
- responds=queueAccepts=postsSucceed=true;probes=activations=timers=closes=posts=0;onProbe={};jobs.clear();logs.clear();
+ responds=queueAccepts=postsSucceed=true;probes=activations=timers=closes=posts=0;onProbe={};onPos={};jobs.clear();logs.clear();
  gameWindow=(HWND)2;g_hwnd=(HWND)3;g_webviewReady=selfForeground=true;g_exitRequested=false;g_inputReady=true;g_manualPausedPid=0;
  g_powerLifecycle=PowerLifecycle::Ready;generation=1;g_resumeFocusMailbox={};g_resumeFocusPending={};
- g_resumeFocusLatestTicket=0;g_resumeFocusWorkerBusy=false;g_wakeFocusNudgeTarget={};g_wakeFocusNudgeGeneration=1;
+ notification=suspendSerial=0;publication=1;notificationPending=false;publicPowerKnown=true;
+ g_resumeFocusLatestTicket=0;g_resumeFocusWorkerBusy=false;g_wakeFocusNudgeTarget={};g_wakeFocusNudgePower=powerOrigin();
 }
-static void queue(UINT delay=0){assert(focusQueueResumedGame(42,123,1,delay));focusResumedGameOnUiThread();}
+static void queue(UINT delay=0){assert(focusQueueResumedGame(42,123,powerOrigin(),delay));focusResumedGameOnUiThread();}
 static void run(){assert(jobs.size()==1);auto j=std::move(jobs.front());jobs.pop_front();inWorker=true;j();inWorker=false;assert(!g_resumeFocusWorkerBusy);}
 static bool status(const char* expected){for(const auto& l:logs)if(l.value("stage","")=="complete"&&l.value("gameStatus","")==expected)return true;return false;}
 int main(){
+#ifndef SLEEP_FOCUS_ONLY
  reset();responds=false;assert(refocusWebView(false));assert(probes==0&&activations==1);pass("YMCC summon stays on its own input queue even with a hung foreground game");
  reset();g_webviewReady=false;assert(!refocusWebView(false));assert(probes==0&&activations==0);pass("summon preserves startup render readiness gate");
+#endif
  reset();queue();assert(probes==0&&activations==0);run();assert(probes==1&&activations==1&&closes==1);pass("UI only queues; responsive exact instance activates on worker");
  reset();responds=false;queue();run();assert(probes==1&&activations==0&&status("window-unresponsive-or-probe-failed"));pass("hung window never activated and worker releases busy flag");
  reset();exited=true;queue();run();assert(probes==0&&activations==0);pass("exited game is optional failure");
@@ -169,14 +190,22 @@ int main(){
  reset();g_powerLifecycle=PowerLifecycle::Resuming;queue(1000);assert(jobs.empty()&&timers==1);now+=1000;focusResumeFocusTimerTickOnUiThread();assert(jobs.empty());g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=false;focusResumeFocusTimerTickOnUiThread();assert(jobs.empty());g_inputReady=true;focusResumeFocusTimerTickOnUiThread();run();pass("focus waits for power Ready AND input Ready AND settle deadline");
  reset();g_powerLifecycle=PowerLifecycle::Resuming;queue();now+=8000;focusResumeFocusTimerTickOnUiThread();assert(jobs.empty()&&status("deadline-expired"));pass("readiness wait has an eight-second terminal deadline");
  reset();queueAccepts=false;queue();assert(jobs.empty()&&!g_resumeFocusWorkerBusy&&timers==1);queueAccepts=true;focusResumeFocusTimerTickOnUiThread();run();pass("busy IPC pool cannot block UI; bounded scheduling retry");
- reset();focusQueueResumedGame(42,123,1,1000);focusQueueResumedGame(42,123,1,1000);focusResumedGameOnUiThread();auto ticket=g_resumeFocusPending.ticket;focusResumedGameOnUiThread();assert(g_resumeFocusPending.ticket==ticket);now+=1000;focusResumeFocusTimerTickOnUiThread();run();assert(activations==1);pass("coalesced mailbox + duplicate posts preserve pending readiness request");
- reset();queue();focusQueueResumedGame(42,123,1,1000);focusResumedGameOnUiThread();run();assert(probes==0&&status("superseded"));now+=1000;focusResumeFocusTimerTickOnUiThread();run();assert(activations==1);pass("old queued worker is superseded without dropping the newest request");
+ reset();focusQueueResumedGame(42,123,powerOrigin(),1000);focusQueueResumedGame(42,123,powerOrigin(),1000);focusResumedGameOnUiThread();auto ticket=g_resumeFocusPending.ticket;focusResumedGameOnUiThread();assert(g_resumeFocusPending.ticket==ticket);now+=1000;focusResumeFocusTimerTickOnUiThread();run();assert(activations==1);pass("coalesced mailbox + duplicate posts preserve pending readiness request");
+ reset();queue();focusQueueResumedGame(42,123,powerOrigin(),1000);focusResumedGameOnUiThread();run();assert(probes==0&&status("superseded"));now+=1000;focusResumeFocusTimerTickOnUiThread();run();assert(activations==1);pass("old queued worker is superseded without dropping the newest request");
  for(int kind=0;kind<5;++kind){reset();queue();onProbe=[kind]{if(kind==0)generation=2;if(kind==1)windowPid=43;if(kind==2)exited=true;if(kind==3)manualMarker=true;if(kind==4)g_inputReady=false;};run();assert(probes==1&&activations==0&&status("canceled-or-target-changed-after-probe"));}pass("generation/window/exit/pause/input races after probe cannot activate");
- reset();focusSingleResumedGame({42,42},123,1);assert(posts==1&&g_resumeFocusMailbox.processCreated==123);focusResumedGameOnUiThread();now+=1000;focusResumeFocusTimerTickOnUiThread();run();pass("sleep creation+generation carried through exact production dispatch");
- reset();focusSingleResumedGame({42,43});assert(posts==0);assert(!focusQueueResumedGame(0,123,1,0));assert(!focusQueueResumedGame(42,0,1,0));pass("ambiguous or incomplete identity never posted");
- reset();postsSucceed=false;assert(!focusQueueResumedGame(42,123,1,0));assert(status("ui-post-failed"));pass("failed UI post has a terminal diagnostic");
+ reset();queue();onProbe=[]{++notification;notificationPending=true;};run();
+ assert(probes==1&&activations==0);pass("public suspend notice after window probe vetoes unchanged private Ready");
+ reset();queue();onPos=[]{++notification;};run();assert(probes==1&&activations==0&&status("canceled-or-target-changed-after-probe"));pass("public revocation between async z-order and activation vetoes foreground");
+ for(int kind=0;kind<3;++kind){reset();queue();if(kind==0)++notification;if(kind==1)++suspendSerial;if(kind==2)publicPowerKnown=false;run();assert(probes==0&&activations==0&&status("stale-power-generation"));}pass("same-generation notice, suspend serial, and unknown authority retire queued work");
+ reset();queue(1000);++notification;now+=1000;focusResumeFocusTimerTickOnUiThread();assert(jobs.empty()&&!g_resumeFocusPending.ticket);queue();run();assert(activations==1);pass("old settle timer cancels; a fresh original request still activates");
+ reset();queue();onProbe=[]{++publication;};run();assert(activations==1);pass("publication-only refresh does not retire an admitted wake");
+ reset();auto old=powerOrigin();++suspendSerial;focusSingleResumedGame({42},123,old);assert(posts==0);pass("thaw completion cannot submit under a newer public scope");
+ reset();focusSingleResumedGame({42,42},123,powerOrigin());assert(posts==1&&g_resumeFocusMailbox.processCreated==123);focusResumedGameOnUiThread();now+=1000;focusResumeFocusTimerTickOnUiThread();run();pass("sleep creation and public origin carried through exact production dispatch");
+ reset();focusSingleResumedGame({42,43},0,powerOrigin());assert(posts==0);assert(!focusQueueResumedGame(0,123,powerOrigin(),0));assert(!focusQueueResumedGame(42,0,powerOrigin(),0));pass("ambiguous or incomplete identity never posted");
+ reset();postsSucceed=false;assert(!focusQueueResumedGame(42,123,powerOrigin(),0));assert(status("ui-post-failed"));pass("failed UI post has a terminal diagnostic");
  reset();g_wakeFocusNudgeTarget={true,42,123};wakeFocusNudgeRunOnUiThread();assert(posts==1);focusResumedGameOnUiThread();run();assert(activations==1);pass("wake timer uses captured identity and shared bounded worker");
  reset();g_wakeFocusNudgeTarget={true,42,123};generation=2;wakeFocusNudgeRunOnUiThread();assert(posts==0);pass("stale five-second wake timer cannot queue focus into new generation");
+ reset();g_wakeFocusNudgeTarget={true,42,123};++notification;wakeFocusNudgeRunOnUiThread();assert(posts==0);pass("five-second nudge cannot borrow a newer notice within the same generation");
  reset();g_wakeFocusNudgeTarget={true,42,123};created=456;wakeFocusNudgeRunOnUiThread();focusResumedGameOnUiThread();run();assert(probes==0&&activations==0);pass("delayed nudge cannot substitute a restarted game's reused PID");
  reset();wakeFocusNudgeRunOnUiThread();assert(posts==0);pass("no captured game means no automatic foreground guessing");
  for(const auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Resuming}){reset();g_powerLifecycle=phase;queue();assert(jobs.empty());now+=8000;focusResumeFocusTimerTickOnUiThread();assert(status("deadline-expired"));}pass("all unsafe power phases defer without holding a worker");
@@ -185,17 +214,18 @@ int main(){
 }
 """
 cpp=out/'resume_game_focus_native_selftest.cpp'
-cpp.write_text(preamble+'\n'+globals+'\n'+'\n'.join(map(function,names))+'\n'+checks,'utf-8')
+summon = '#define SLEEP_FOCUS_ONLY\n' if args.sleep_focus_only else function('refocusWebView')
+cpp.write_text(preamble+'\n'+globals+'\n'+summon+'\n'+'\n'.join(map(function,names))+'\n'+checks,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 assert vs.is_file()
 cmd=out/'run-focus-selftest.cmd'
-lines=['@echo off',f'call "{vs}" >nul','if errorlevel 1 exit /b 1']
+lines=['@echo off',f'call "{vs}" >nul','if not "%errorlevel%"=="0" exit /b 1']
 for src,stem in [(cpp,'resume_game_focus_native_selftest'),(repo/'tools/resume_game_focus_win32_smoketest.cpp','resume_game_focus_win32_smoketest')]:
     exe=out/(stem+'.exe')
     lines += [f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{src}" /I"{repo / "native"}" /I"{repo / "deps/json"}" /Fo"{out/(stem+".obj")}" /Fe"{exe}" /link user32.lib',
-              'if errorlevel 1 exit /b 1',f'"{exe}"','if errorlevel 1 exit /b 1']
+              'if not "%errorlevel%"=="0" exit /b 1',f'"{exe}"','if not "%errorlevel%"=="0" exit /b 1']
 cmd.write_text('\r\n'.join(lines)+'\r\n','ascii')
 result=subprocess.run(['cmd.exe','/d','/c',str(cmd)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 (out/'resume-focus-selftest.log').write_bytes(result.stdout)
 print(result.stdout.decode('utf-8',errors='replace'))
-raise SystemExit(result.returncode)
+raise SystemExit(result.returncode or (b'Assertion failed:' in result.stdout))

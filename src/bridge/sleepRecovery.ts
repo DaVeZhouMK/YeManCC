@@ -1,4 +1,5 @@
 import { invoke, isNativeRuntime } from './ipc';
+import { captureBootPreferenceWrite } from './bootModeGlobalPreferences';
 
 export type RecoveryCheck = { id: string; severity: 'warning' | 'info' | 'unknown'; detail: string };
 export interface SleepRecoveryReport {
@@ -54,7 +55,7 @@ export async function exportSleepRecoveryFeedback(feedback: SleepRecoveryFeedbac
 export interface AutomaticSleepRecoveryStatus {
   ok: boolean;
   enabled: boolean;
-  phase: 'idle' | 'off' | 'waiting' | 'game-wait' | 'session-wait' | 'settle-wait' | 'inspecting' | 'confirm-wait' | 'verifying' | 'recorded' | 'blocked';
+  phase: 'idle' | 'off' | 'waiting' | 'command-wait' | 'game-wait' | 'session-wait' | 'settle-wait' | 'inspecting' | 'confirm-wait' | 'verifying' | 'recorded' | 'blocked';
   generation: number;
   reason?: string;
   healthVerified: false;
@@ -67,7 +68,8 @@ export async function getAutomaticSleepRecovery(): Promise<AutomaticSleepRecover
   requireNative();
   return invoke('sleepRecovery.autoGet', {}, { timeoutMs: 10000 });
 }
-export async function setAutomaticSleepRecovery(enabled: boolean): Promise<AutomaticSleepRecoveryStatus> {
+export async function setAutomaticSleepRecovery(enabled: boolean, options: import('./bootModeGlobalPreferences').BootPreferenceWrite = {}): Promise<AutomaticSleepRecoveryStatus> {
   requireNative();
-  return invoke('sleepRecovery.autoSet', { enabled }, { timeoutMs: 15000 });
+  const write = captureBootPreferenceWrite(options);
+  return invoke('sleepRecovery.autoSet', { enabled, ...(write.origin ? { origin: write.origin } : {}), ...(write.bootContext ? { bootContext: write.bootContext } : {}) }, { timeoutMs: 15000 });
 }

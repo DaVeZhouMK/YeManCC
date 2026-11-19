@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include "keyboard_modifier_event_evidence.h"
 #include "keyboard_modifier_retention.h"
+#include "keyboard_modifier_snapshot.h"
 #include "input_signal_activity_windows.h"
 using json=nlohmann::json;
 namespace ke=ymcc::keyboardEvents;
@@ -71,11 +72,16 @@ static json keyboardModifierRawNameAtDrain(const ke::Event&,unsigned& budget){if
 static unsigned checks=0;static json cases=json::array();
 static void check(bool b,const char* why){++checks;if(!b)throw std::runtime_error(why);}
 static void reset(bool enabled=true){g_keyboardModifierEventGate=false;g_keyboardModifierEvents.enable(false,10);g_keyboardModifierEvents.enable(enabled,100);g_keyboardModifierEventGate=enabled;g_keyboardModifierHookInstalled=false;g_keyboardModifierRawSubscribed=false;g_keyboardModifierHookObservedTick=0;g_oemHooksWanted=false;g_oemRawPathActive=false;g_keyboardModifierLogFailures=0;g_oemKeyboardConsume={};g_oemKbDown=0;g_oemKeyMask=0;g_oemKeyHooksActive=false;fake::error=12345;fake::tick=120;fake::consumed=false;fake::post=true;fake::after=0;fake::maintained=fake::consumes=fake::nexts=fake::posted=fake::recomputed=0;fake::throwLog=false;fake::rows.clear();fake::domains.clear();}
-static json idle(int async,int queue=0,bool queueOk=true){return {{"keyboardModifiers",{{"asyncDownMask",async},{"callingThreadQueueReadOk",queueOk},{"callingThreadQueueDownMask",queueOk?json(queue):json(nullptr)},{"asyncZeroIsAbsenceProof",false},{"gameOrSteamKeyboardReceipt","unobserved"}}},{"hostSnapshotKnown",true},{"hostProcessPresent",false},{"hostEpoch",9},{"hostLifecycle","none"}};}
+static json idle(int async,int queue=0,bool queueOk=true){
+ ymcc::keyboardEvidence::Snapshot snapshot;
+ snapshot.asyncDownMask=static_cast<std::uint16_t>(async);snapshot.callingThreadQueueDownMask=static_cast<std::uint16_t>(queue);snapshot.queueReadOk=queueOk;
+ return {{"keyboardModifiers",ymcc::keyboardEvidence::toPeriodicJson(snapshot)},{"hostSnapshotKnown",true},{"hostProcessPresent",false},{"hostEpoch",9},{"hostLifecycle","none"}};
+}
 static void retentionCases(){
  reset();keyboardModifierFlushEvidence(idle(0),1000);check(fake::rows.size()==2&&fake::domains[0]=="virtual"&&fake::domains[1]=="focus","initial snapshot not mirrored");check(fake::rows[0]==fake::rows[1]&&fake::rows.back().at("modifierSnapshotChanged")==true,"mirror identity/initial state");
  keyboardModifierFlushEvidence(idle(0),2000);check(fake::rows.size()==2,"unchanged zero snapshot emitted");
  keyboardModifierFlushEvidence(idle(17),3000);check(fake::rows.size()==4&&fake::rows.back().at("eventCount")==0&&fake::rows.back().at("keyboardModifiers").at("asyncDownMask")==17,"mask onset without event lost");
+ const auto& modifierReceipt=fake::rows.back().at("keyboardModifiers");check(modifierReceipt.at("schemaVersion")==1&&modifierReceipt.at("modifiers").at("leftAlt").at("asyncDownBit")==true,"selected modifier receipt is standalone");
  for(ULONGLONG tick=4000;tick<33000;tick+=1000)keyboardModifierFlushEvidence(idle(17),tick);check(fake::rows.size()==4,"persistent mask caused 1Hz focus spam");
  keyboardModifierFlushEvidence(idle(17),33000);check(fake::rows.size()==6&&fake::rows.back().at("nonzeroModifierHeartbeat")==true,"30s nonzero heartbeat lost");
  keyboardModifierFlushEvidence(idle(0),34000);check(fake::rows.size()==8&&fake::rows.back().at("keyboardModifiers").at("asyncZeroIsAbsenceProof")==false,"release snapshot or zero caveat lost");

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "source": {
+    "name": "OneXConsole 0.10.4-fix3",
+    "installerSha256": "8b1c4d19ea2a0df5f2b6636715a6595573a94836b26d62a25938d5de5cfc0e88",
+    "member": "resources/app.asar/background.js",
+    "sha256": "2eb89e3244f44baeb508ccfaa6d98c73cc1849e4b7bdb08eba71b165aae52726",
+    "product": "ONEXPLAYER X2Mini PRO",
+    "feature": "enableBatteryProtection",
+    "accessType": "WinRing0/direct EC16",
+    "limitAddress": 1253,
+    "limitRegister": "0x04E5",
+    "note": "The exact vendor branch enables battery protection and supplies 1253 as the first /battery/initEc argument (addrChargeLimit). Adjacent bypass and force-charge addresses are not registered. YMCC uses its existing direct EC transport, not the vendor driver."
+  },
+  "fieldEvidence": {
+    "archive": "YeManCC-logs-20261118-182326-12904-1524093-1-OP3.zip",
+    "sha256": "e1b9883555f76348b7fccf44381f8135b678da5f0df21693670512b14e5c81b9",
+    "pid": 12904,
+    "boardProduct": "ONEXPLAYER X2Mini PRO",
+    "systemProduct": "ONEXPLAYER X2Mini PRO",
+    "bios": "0.22",
+    "ecMajor": 0,
+    "ecMinor": 12,
+    "vendorClientWorks": "user-reported",
+    "ymccHardwareReadback": "not-yet-verified"
+  },
+  "runtime": {
+    "route": "oxp-x2-mini-pro-direct-ec",
+    "family": "OneXPlayer X2 Mini Pro",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": ["ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD."],
+      "field": "boardProduct",
+      "values": ["ONEXPLAYER X2Mini PRO"],
+      "deviceClass": "OneXPlayerX2MiniPro"
+    },
+    "firmwareGate": {"kind": "oxp-x2-mini-pro-field-firmware", "bios": "0.22", "ecMajor": 0, "ecMinor": 12},
+    "min": 50
+  }
+}

@@ -6,7 +6,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createCapturedSourceSnapshot,validateSourceSnapshotRoots,SNAPSHOT_MANIFEST,SNAPSHOT_POLICY} from '../source-snapshot.mjs';
 import {bindSnapshotNodeTools} from '../snapshot-node-tools.mjs';
 import {readVirtualControllerSource} from '../../../virtual_controller_runtime_source.mjs';
-import {requireTerminalManagedContract,terminalManagedStageStatus,verifyManagedDecoderCompileEvidence} from './r3-managed-input-contract.mjs';
+import {requireTerminalManagedContract,terminalManagedStageStatus,verifyManagedDecoderCompileEvidence,validateManagedSourceRequirements} from './r3-managed-input-contract.mjs';
 const moduleRelative='tools/ymcc_sim/global/controller-coordinator-pipe';
 const defaultRepo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
 const pathKey=value=>path.resolve(value).toLowerCase();
@@ -36,7 +36,8 @@ export function resolveTerminal22PreparationLayout({primaryRoot,workspaceRoot}={
 
 export function parseTerminalManagedPreparationArguments(args){
  if(!Array.isArray(args))throw Error('STRICT_PREPARATION_ARGUMENTS');const options={};
- for(let i=0;i<args.length;i++){const key=args[i];if(!['--repo','--workspace','--managed-input-contract'].includes(key)||Object.hasOwn(options,key)||typeof args[i+1]!=='string'||!args[i+1]||args[i+1].startsWith('--'))throw Error('STRICT_PREPARATION_ARGUMENTS');options[key]=args[++i];}
+ for(let i=0;i<args.length;i++){const key=args[i];if(!['--repo','--workspace','--managed-input-contract','--stage'].includes(key)||Object.hasOwn(options,key)||typeof args[i+1]!=='string'||!args[i+1]||args[i+1].startsWith('--'))throw Error('STRICT_PREPARATION_ARGUMENTS');options[key]=args[++i];}
+ options['--stage']??='managed';if(!['capture','managed'].includes(options['--stage']))throw Error('STRICT_PREPARATION_STAGE');
  const contract=requireTerminalManagedContract(options['--managed-input-contract']);options['--managed-input-contract']=contract.id;return options;
 }
 
@@ -44,12 +45,13 @@ export async function prepareTerminal22(args=process.argv.slice(2)){
 const options=parseTerminalManagedPreparationArguments(args);
 const selectedContract=requireTerminalManagedContract(options['--managed-input-contract']);
 const {primaryRoot,workspaceRoot,sourceRoot,authorizedBuildRoot,layoutMode}=resolveTerminal22PreparationLayout({primaryRoot:path.resolve(options['--repo']??defaultRepo),workspaceRoot:options['--workspace']});
+validateManagedSourceRequirements(fs.readFileSync(path.join(primaryRoot,'InputHost/Program.cs'),'utf8'),selectedContract.id);
 fs.mkdirSync(path.dirname(sourceRoot),{recursive:true});fs.mkdirSync(authorizedBuildRoot,{recursive:true});
 // Use the exact shared core/sibling roots gate before any capture is created.
 validateSourceSnapshotRoots(primaryRoot,sourceRoot);
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),hash=p=>sha(fs.readFileSync(p));
 const resultPath=path.join(authorizedBuildRoot,'PREPARATION.json');
-const state={schemaVersion:1,status:'CAPTURING_SOURCE',managedInputContract:selectedContract.id,sourceRoot,primaryRoot,workspaceRoot,authorizedBuildRoot,layoutMode,sourceApprovalGranted:false,publicRuntimeAccepted:false,normalHostMainExecuted:false,realSdkLoaded:false,deviceIo:false,errors:[]};
+const state={schemaVersion:1,status:'CAPTURING_SOURCE',preparationStage:options['--stage'],managedInputContract:selectedContract.id,sourceRoot,primaryRoot,workspaceRoot,authorizedBuildRoot,layoutMode,sourceApprovalGranted:false,publicRuntimeAccepted:false,normalHostMainExecuted:false,realSdkLoaded:false,deviceIo:false,errors:[]};
 const save=()=>fs.writeFileSync(resultPath,JSON.stringify(state,null,2)+'\n');
 const say=message=>{console.log(message);save();};
 try{
@@ -80,6 +82,10 @@ try{
   dotnet:{path:dotnetPath,sha256:hash(dotnetPath)}};
  contracts.validateManagedCompileRows(layout.expectedManagedSources,contract.id);
  const layoutPath=path.join(authorizedBuildRoot,'LAYOUT-terminal'+contract.count+'.json');fs.writeFileSync(layoutPath,JSON.stringify(layout,null,2)+'\n');state.layout={path:layoutPath,sha256:hash(layoutPath)};
+ if(options['--stage']==='capture'){
+  state.status='SOURCE_CAPTURED_NOT_COMPILED';state.sourceCaptureOnly=true;state.managedBuiltThisRun=false;
+  say('Source capture and exact managed membership recorded; no compile batch or compiler was started');return state;
+ }
  const actualToolFiles=[...new Set([...toolchainFiles(sourceRoot),process.execPath,...['r3-current-managed-builder.mjs','r3-current-compile-batch.mjs','r3-managed-input-contract.mjs'].map(name=>path.join(sourceRoot,moduleRelative,name))])];
  say('Opening one exact tool/source compile batch; terminal22 cannot use legacy21 authority');
  const token=authority.beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory:path.join(authorizedBuildRoot,'authority')});

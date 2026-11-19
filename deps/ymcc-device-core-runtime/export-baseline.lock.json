@@ -20,8 +20,8 @@
     }
   },
   "approvedChanges": {
-    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261024-canonical-lhm.json",
-    "sha256": "4149db4ce59d6cfd3deeeafdc3dddef56fa3eed5ca782851a5ed63950bb63cea"
+    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261107-aya-kun-color.json",
+    "sha256": "681c9e11e3cd940a179feab781c8856cc687f355e0da94d703049e2d2c7c934d"
   },
   "provenance": {
     "parentPromotionReceipt": "tools/hc-winrt-second-pass/PARENT-PROMOTION-RECEIPT.json",

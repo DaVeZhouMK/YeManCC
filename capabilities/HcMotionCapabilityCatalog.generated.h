@@ -6,8 +6,8 @@
 namespace ymcc::capabilities::motion {
 enum class Kind { None, Reviewed, Legacy, Default, Generic, Private };
 struct Descriptor { Kind kind; std::size_t slot; std::string_view capabilityId, deviceId, origin, deviceClass, selectorId, gyroMatrixId, accelMatrixId, sourceSha256; bool controllerPreferred; Kind primaryKind; };
-inline constexpr std::string_view catalogSha256 = "04681b0f2e0d54ffde0a99a759dc5baaabe37c429b370bb92f9682e554aac16b";
-inline constexpr std::array<Descriptor, 95> descriptors = {{
+inline constexpr std::string_view catalogSha256 = "f47120a9b81ac2c178cf0718b052922e60fb3f01666360b1f2496d7a9a2f54b5";
+inline constexpr std::array<Descriptor, 96> descriptors = {{
     {Kind::Reviewed, 0, "motion.reviewed.AYANEO3.0", "ymcc.device.AYANEO3", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEO3", "hc-a250b19a:model:AYANEO3", "hc-a250b19a:ayaneo3:gyro:x-neg-z-y", "hc-a250b19a:ayaneo3:accel:neg-x-neg-z-y", "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803", false, Kind::Reviewed},
     {Kind::Reviewed, 1, "motion.reviewed.AYANEOAIR2.1", "ymcc.device.AYANEOAIR2", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEOAIR2", "hc-a250b19a:model:AYANEOAIR2", "hc-a250b19a:ayaneo-air2:gyro:x-neg-z-y", "hc-a250b19a:ayaneo-air2:accel:neg-x-neg-z-y", "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803", false, Kind::Reviewed},
     {Kind::Reviewed, 2, "motion.reviewed.AYANEOAIRPro1S.2", "ymcc.device.AYANEOAIRPro1S", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEOAIRPro1S", "hc-a250b19a:model:AYANEOAIRPro1S", "hc-a250b19a:ayaneo-airpro1s:gyro:x-neg-z-y", "hc-a250b19a:ayaneo-airpro1s:accel:x-neg-z-neg-y", "88163c634f3a7801f8db797ea98034822ac5f58faca1c4fc9d30e21899ff0b60", false, Kind::Reviewed},
@@ -35,6 +35,7 @@ inline constexpr std::array<Descriptor, 95> descriptors = {{
     {Kind::Reviewed, 24, "motion.reviewed.OneXPlayerMiniIntel.24", "hc.device.OneXPlayerMiniIntel", "frozen-HC-identity", "HandheldCompanion.Devices.OneXPlayerMiniIntel", "hc-a250b19a:reviewed:OneXPlayerMiniIntel", "hc-a250b19a:reviewed-OneXPlayerMiniIntel:gyro:z-neg-x-neg-y", "hc-a250b19a:reviewed-OneXPlayerMiniIntel:accel:x-neg-z-neg-y", "4908ebbc8d5560218345b49fa0142d8e946c491a5f08d1310e832f1cea35112a", false, Kind::Reviewed},
     {Kind::Reviewed, 25, "motion.reviewed.OneXPlayerMiniPro.25", "hc.device.OneXPlayerMiniPro", "frozen-HC-identity", "HandheldCompanion.Devices.OneXPlayerMiniPro", "hc-a250b19a:reviewed:OneXPlayerMiniPro", "hc-a250b19a:reviewed-OneXPlayerMiniPro:gyro:x-z-y", "hc-a250b19a:reviewed-OneXPlayerMiniPro:accel:x-neg-z-y", "d3939ee42a4495b87d495e3abc54e3c919348352981eb8b98411eb509cf61b20", false, Kind::Reviewed},
     {Kind::Reviewed, 26, "motion.reviewed.OneXPlayerX1Mini.26", "hc.device.OneXPlayerX1Mini", "frozen-HC-identity", "HandheldCompanion.Devices.OneXPlayerX1Mini", "hc-a250b19a:reviewed:OneXPlayerX1Mini", "hc-a250b19a:reviewed-OneXPlayerX1Mini:gyro:x-z-y", "hc-a250b19a:reviewed-OneXPlayerX1Mini:accel:x-neg-z-y", "2dd5e2ef9634c0077275790b50dff3bfb950b9f85159d614bae904d1e2bc902a", false, Kind::Reviewed},
+    {Kind::Reviewed, 27, "motion.reviewed.GPDWin5.27", "hc.device.GPDWin5", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin5", "hc-fdf0bf66:reviewed:GPDWin5", "hc-fdf0bf66:gpd-win5:gyro:y-neg-z-neg-x", "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y", "d0524d599683d07b67fb191b77a9f1efef6ee7068849d2dd618ba6cb650e109f", false, Kind::Reviewed},
     {Kind::Legacy, 0, "motion.legacy.AOKZOEA1.0", "hc.device.AOKZOEA1", "frozen-HC-identity", "HandheldCompanion.Devices.AOKZOEA1", "hc-legacy-0.32:model:AOKZOEA1:83a03f3a43942587", "hc-06c0b954:aokzoe-a1:gyro:x-neg-z-y", "hc-06c0b954:aokzoe-a1:accel:x-neg-y-neg-z-swap-yz", "a5e20a475b60b9d83b7c9d7f4bb4aac2c6b9bed38fba98d4b643f14edf55ba35", false, Kind::Legacy},
     {Kind::Legacy, 1, "motion.legacy.AOKZOEA1Pro.1", "hc.device.AOKZOEA1Pro", "frozen-HC-identity", "HandheldCompanion.Devices.AOKZOEA1Pro", "hc-legacy-0.32:model:AOKZOEA1Pro:922470624e7f063e", "hc-06c0b954:aokzoe-a1:gyro:x-neg-z-y", "hc-06c0b954:aokzoe-a1:accel:x-neg-y-neg-z-swap-yz", "21b61c14dee831f00976a0c09013e53b3fb626c6ede79783504d5c5a78854f73", false, Kind::Legacy},
     {Kind::Legacy, 2, "motion.legacy.AOKZOEA1X.2", "hc.device.AOKZOEA1X", "frozen-HC-identity", "HandheldCompanion.Devices.AOKZOEA1X", "hc-legacy-0.32:model:AOKZOEA1X:efeb85b33631083b", "hc-06c0b954:aokzoe-a1:gyro:x-neg-z-y", "hc-06c0b954:aokzoe-a1:accel:x-neg-y-neg-z-swap-yz", "5144a6cbe2a7c91d3890ef45b3f636a93e68c9cae59dee2d44d37b09cefb967d", false, Kind::Legacy},
@@ -60,7 +61,7 @@ inline constexpr std::array<Descriptor, 95> descriptors = {{
     {Kind::Legacy, 22, "motion.legacy.AynLoki.22", "hc.device.AynLoki", "frozen-HC-identity", "HandheldCompanion.Devices.AynLoki", "hc-legacy-0.32:model:AynLoki:a6797c6435b99798", "hc-06c0b954:ayn-loki:gyro:z-neg-x-neg-y", "hc-06c0b954:ayn-loki:accel:neg-x-z-neg-y", "e555d5af55aed34ccff4477c932ced5ec65a93e4913a5f542ad17c33e4d99158", false, Kind::Legacy},
     {Kind::Legacy, 23, "motion.legacy.GPDWin4.23", "hc.device.GPDWin4", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin4", "hc-legacy-0.32:model:GPDWin4:ce1599adfccad3a6", "hc-06c0b954:gpd-win4-2023:gyro:z-neg-x-neg-y", "hc-06c0b954:gpd-win4-2023:accel:neg-x-neg-z-y", "f1ac299b0ed81ab22909ef6f25ac6fbdf30a50c991a1a0fdef7b821cbda6fad1", false, Kind::Legacy},
     {Kind::Legacy, 24, "motion.legacy.GPDWin4.24", "hc.device.GPDWin4", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin4", "hc-legacy-0.32:model:GPDWin4:439a3041bb1b30e6", "hc-06c0b954:gpd-win4:gyro:neg-x-y-z-swap-yz", "hc-06c0b954:gpd-win4:accel:neg-x-neg-z-y", "a172380842559523858123b03bc881856c004b6f6aca898b631af8671a5d4670", false, Kind::Legacy},
-    {Kind::Legacy, 25, "motion.legacy.GPDWin5.25", "hc.device.GPDWin5", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin5", "hc-legacy-0.32:model:GPDWin5:bd41aac1c1f274e5", "hc-06c0b954:gpd-win5:gyro:z-neg-x-neg-y", "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y", "845d4e3575cb9763cb3cc7b719a73788501e845c71446cbf072a5777bf0b4454", false, Kind::Legacy},
+    {Kind::Legacy, 25, "motion.legacy.GPDWin5.25", "hc.device.GPDWin5", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin5", "hc-legacy-0.32:model:GPDWin5:bd41aac1c1f274e5", "hc-06c0b954:gpd-win5:gyro:z-neg-x-neg-y", "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y", "845d4e3575cb9763cb3cc7b719a73788501e845c71446cbf072a5777bf0b4454", false, Kind::Reviewed},
     {Kind::Legacy, 26, "motion.legacy.GPDWinMax2.26", "hc.device.GPDWinMax2", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWinMax2", "hc-legacy-0.32:model:GPDWinMax2:a613729e6dcb131f", "hc-06c0b954:gpd-winmax2-hx370:gyro:x-neg-z-y", "hc-06c0b954:gpd-winmax2-hx370:accel:neg-x-neg-z-y", "5213e16a07019b68be6b9e784bb790e0234f80e691021bf12f9f216411ee3d37", false, Kind::Legacy},
     {Kind::Legacy, 27, "motion.legacy.GPDWinMax2.27", "hc.device.GPDWinMax2", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWinMax2", "hc-legacy-0.32:model:GPDWinMax2:e15a08d92102156d", "hc-06c0b954:gpd-winmax2:gyro:z-neg-x-neg-y", "hc-06c0b954:gpd-winmax2:accel:neg-x-y-z-swap-yz", "55ef3b3a629ce083be1e93ee24749762a38a1c1da246bd8f85d5ba652a3869fc", false, Kind::Legacy},
     {Kind::Legacy, 28, "motion.legacy.GPDWinMax2Intel.28", "hc.device.GPDWinMax2Intel", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWinMax2Intel", "hc-legacy-0.32:model:GPDWinMax2Intel:0b5a428f80a764e6", "hc-06c0b954:gpd-winmax2-intel:gyro:x-y-z-swap-yz", "hc-06c0b954:gpd-winmax2-intel:accel:neg-x-neg-y-z", "6f9c4deb86945d0b532b2afc8a1080404c2f2396430ca93483a02c9fed44b6f5", false, Kind::Legacy},
@@ -107,16 +108,16 @@ inline constexpr std::array<Descriptor, 95> descriptors = {{
 inline constexpr std::size_t offset(Kind kind) noexcept {
     switch(kind) {
     case Kind::Reviewed: return 0;
-    case Kind::Legacy: return 27;
-    case Kind::Default: return 84;
-    case Kind::Generic: return 87;
-    case Kind::Private: return 89;
+    case Kind::Legacy: return 28;
+    case Kind::Default: return 85;
+    case Kind::Generic: return 88;
+    case Kind::Private: return 90;
     default: return descriptors.size();
     }
 }
 inline constexpr std::size_t count(Kind kind) noexcept {
     switch(kind) {
-    case Kind::Reviewed: return 27;
+    case Kind::Reviewed: return 28;
     case Kind::Legacy: return 57;
     case Kind::Default: return 3;
     case Kind::Generic: return 2;

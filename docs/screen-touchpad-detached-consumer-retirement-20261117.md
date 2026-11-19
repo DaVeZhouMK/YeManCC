@@ -1,0 +1,15 @@
+# 修复输入接收窗口已关闭后的错误退休失败
+
+已写入主线，未导出部署。两个产品头六处上下文，不改main、UI、监控、Steam、公共睡眠或正式夹具。新增每Input一个atomic consumerClosed和每Surface一个channelCloseFailed标记；无新句柄、线程、timer、poll、刷新率、等待或自动3repair/3episode/5秒额度。
+
+真实原对照：在隐藏桌面只协作暂停本夹具自有输入worker，跨过原750ms invoke期限。原Surface.close先取消已按下的联系人并自行销毁child；worker随后退出，queue/action/completion/input引用实际全空，但retire给已销毁child发loss通知失败，真实错误0x80070578使closed=false。12项3必要FAIL，显式同设置与三轮退出确认均不能成功。没有伪造State、HRESULT或替换系统API，不据该受控时序声称Win5 E_UNEXPECTED首因已找到。
+
+候选在原Surface关闭门置位后才明确标记该consumer已经退场，普通cancel/quiesce不标记；worker仍fence旧信号并执行全部原资源关闭，只免去向已关闭consumer投loss通知。仍在使用的consumer继续原通知路径。Surface将未完成的channel调用和原terminal真实失败分开；只有原owning-STA closeInput成功，或原完整closed State使InputChannel.close成功，才清该channel标记。attach不会清债务，真实worker COM/capture关闭失败仍保cleaned=false，原其他terminal失败标记不变。
+
+最终r2同CPP复现12过，旧满消息队列worker退场11过，原手动恢复17过且用例名逐项同原。实际满队列9997/error1816并释放，说明活跃consumer的loss取消仍保。5实际编译图/5owned Job均自然关前active0、未触发工具清理；原负例businessfalse/root1与首候选r1的12过独立保，不冒签最终默认父门、完整Native或实体触摸。各私有friend端口整头逆除同对应产品，正式CPP/PS1未写；关闭时序新场景只存在本目录私有消费者。
+
+独审首r1抓到attach清channel标记缺证书，保原finding并在r2消除；原普通close的异常不粘及Cancel异常补偿归因经原基线反查更正：原drain已拒closing，旧notice本不能补偿，未以扩大修复改共享普通close。中间冗余else-if候选未运行即弃，原已运行七hunk文件按原declared pins全还；准备JS引号/patch拒绝及费用保留。最终独审两产品六hunk未见新增阻塞，仅静态，不代验运行；完整审查区间未独立计时，不声称120/180内。
+
+2target+21dep全部share0同持125.8061ms/23HANDLE归还，整源正逆、导后23来源及git差异空白核同。仅输入通道停止/关闭时多固定标记访问，无闲置新增工作；本轮不测CPU、不宣称已测CPU收益。SD光标19、震动/穿透/自动隐藏/退出三轮确认保持。
+
+前向Pending只接原TerminalStatusReuse的channel产品与Surface依赖；旧Ready/Pending/raw不改。R21固定包不含本后继，不追包、部署或操作实际应用/设备/睡眠。原Windows E_UNEXPECTED内部根因、Win5匹配新链实体全屏呼出/触摸捕获/睡眠、永久OS拒绝及长期CPU仍OPEN，持续修复ACTIVE。

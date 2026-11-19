@@ -19,25 +19,6 @@ public static class YmccTrainerInteractiveNative {
 }
 "@
 }
-function Test-TrainerSteamForeground([string]$AppDirectory) {
-    # Backward compatibility for already-installed frontends: their existing
-    # request includes AppDirectory but not the new InteractiveShell switch.
-    # This read does not start Steam, register a URI, or change any setting.
-    if(-not $AppDirectory -or -not [IO.File]::Exists((Join-Path $AppDirectory 'YeManCC.exe'))){return $false}
-    try{
-        Initialize-TrainerInteractiveNative
-        $owner=[uint32]0
-        [YmccTrainerInteractiveNative]::GetWindowThreadProcessId([YmccTrainerInteractiveNative]::GetForegroundWindow(),[ref]$owner)|Out-Null
-        $process=Get-Process -Id $owner -ErrorAction Stop
-        if($process.ProcessName -notin @('steam','steamwebhelper') -or $process.SessionId -ne [Diagnostics.Process]::GetCurrentProcess().SessionId){return $false}
-        $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Valve\Steam')
-        if(-not $key){return $false}
-        try{$steamRoot=[string]$key.GetValue('SteamPath','')}finally{$key.Dispose()}
-        if(-not $steamRoot){return $false}
-        $prefix=[IO.Path]::GetFullPath($steamRoot).TrimEnd('\')+'\'
-        return $process.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)
-    }catch{return $false}
-}
 function Get-TrainerLaunchOwnerState([string]$AppDirectory) {
     if(-not $AppDirectory){return $null}
     $expected=Join-Path $AppDirectory 'YeManCC.exe'
@@ -143,11 +124,19 @@ function Invoke-TrainerShellPlan($Plan,$Shell) {
         Start-Sleep -Milliseconds 80
     }
     if(-not $process){throw 'Windows 已接收交互启动，但进程未确认；请检查权限确认或任务切换，不会重复启动'}
-    $foreground=$false;$focusRequested=$false
+    $foreground=$false;$focusRequested=$false;$continuationStopped=$false
     for($attempt=0;$attempt -lt 25;$attempt++){
-        if(Get-TrainerProcessForeground ([uint32]$process.Id)){$foreground=$true;break}
+        if(Get-TrainerProcessForeground ([uint32]$process.Id)){
+            # A foreground observation can arrive after page/game cancellation.
+            # Preserve the real launch, but do not acknowledge a current action.
+            try{Assert-TrainerLaunchContinuation $Plan}catch{$continuationStopped=$true;break}
+            $foreground=$true;break
+        }
         $process.Refresh();if($process.HasExited){break}
         if(-not $focusRequested -and (Test-TrainerProcessWindowReady ([uint32]$process.Id))){
+            # File/process/window discovery can outlive the request. Recheck
+            # only before a focus effect or final success, not every poll/hash.
+            try{Assert-TrainerLaunchContinuation $Plan}catch{$continuationStopped=$true;break}
             $focusRequested=$true
             # One standard restore request, never Alt/input injection, TOPMOST,
             # shared input queues, another process launch, or repeated focusing.
@@ -156,5 +145,5 @@ function Invoke-TrainerShellPlan($Plan,$Shell) {
         Start-Sleep -Milliseconds 80
     }
     return @{reused=$false;pid=$process.Id;launchBackend='desktop-shell';focusRequested=$focusRequested;window=$(if($foreground){'foreground'}else{'unconfirmed'});
-        notice=$(if($foreground){'修改器窗口已打开'}else{'修改器已启动，前台窗口尚未确认；请从任务切换查看，无需重复启动'})}
+        notice=$(if($continuationStopped){'修改器启动请求已发送，当前会话已改变，已停止窗口切换；请从任务切换确认，无需重复启动'}elseif($foreground){'修改器窗口已打开'}else{'修改器已启动，前台窗口尚未确认；请从任务切换查看，无需重复启动'})}
 }

@@ -12,9 +12,9 @@ import Dropdown from '@/components/Dropdown.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { wakePassword } from '@/bridge/api';
+import { onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import {
   sleepGuardGet,
-  sleepGuardSet,
   sleepGuardSetConfig,
   getPowerBtnIdx,
   setPowerBtnIdx,
@@ -33,9 +33,13 @@ import {
   getStaticWakeAutoScanEnabled,
   setStaticWakeAutoScanEnabled,
   getStaticWakeStatus,
+  captureStaticWakeAdmission,
+  captureSleepPowerWrite,
+  type SleepPowerWrite,
   scanStaticWakeSources,
   restoreStaticWakeSources,
   type StaticWakeStatus,
+  type StaticWakeAdmission,
   type SleepGuardStatus,
   type SleepTimeoutSettings,
   type PowerBtnIdx,
@@ -45,20 +49,17 @@ const sleepSections=[{id:'protection',title:'睡眠保护',description:'',icon:'
 const powerButtonOptions=[{value:0,label:'睡眠'},{value:1,label:'休眠'},{value:2,label:'不操作'},{value:3,label:'关闭屏幕'}];
 const timeoutRows=[{key:'screen',label:'关闭屏幕',icon:'monitor'},{key:'sleep',label:'进入睡眠',icon:'sleep'},{key:'hibernate',label:'进入休眠',icon:'power'}] as const;
 const timeoutValue=(key:string,side:'ac'|'dc')=>sleepTimeouts[`${side}${key[0].toUpperCase()}${key.slice(1)}` as keyof SleepTimeoutSettings] ?? -1;
-const cfg = reactive<SleepGuardStatus>({
-  enabled: false,
-  mode: 'off',
-  suspended: 0,
+type SleepGuardOption = 'pauseGameOnSleep' | 'retryOnEntryFailure' | 'retryOnSleepTimeout' | 'retryOnNonUserWake';
+const cfg = reactive<Pick<SleepGuardStatus, SleepGuardOption>>({
   pauseGameOnSleep: true,
   retryOnEntryFailure: true,
   retryOnSleepTimeout: true,
   retryOnNonUserWake: false,
-  joyXoffAutoClose: true,
 });
 
 // 电源按钮：0=睡眠, 1=休眠, 2=不操作, 3=关闭屏幕
-const acBtnIdx = ref<PowerBtnIdx>(2);
-const dcBtnIdx = ref<PowerBtnIdx>(2);
+const acBtnIdx = ref<PowerBtnIdx | null>(null);
+const dcBtnIdx = ref<PowerBtnIdx | null>(null);
 const sleepPowerPlanOptimizationEnabled = ref(true);
 let sleepPlanRevision = 0;
 const staticWakeAutoScanEnabled = ref(true);
@@ -72,6 +73,7 @@ const staticWakePendingRequest = ref<{ requestId: string; action: 'scan' | 'rest
 let staticWakeRevision = 0;
 let staticWakeViewActive = true;
 let staticWakeRefreshPending = false;
+let stopStaticWakeVisibility: (() => void) | undefined;
 const staticWakeNeedsRestore = computed(() => !staticWakeAutoScanEnabled.value &&
   (staticWakeStatus.value?.enabled || (staticWakeStatus.value?.restorePending ?? 0) > 0 ||
     staticWakeStatus.value?.phase === 'restore-pending' || staticWakeError.value !== ''));
@@ -186,7 +188,7 @@ function toggleTimeoutExpanded(event?: MouseEvent): void {
 const hibernateOn = ref<boolean | null>(null); // null=未检测（不强制设默认值）
 const hibernateSupported = ref<boolean | null>(null); // null=能力未知；未知时仍允许安全开启重试
 const hibLoading = ref(true); // 独立加载；失败时结束 loading 并保留“未知但可安全开启”状态
-const hibSize = ref(50);
+const hibSize = ref<number | null>(null);
 const memGB = ref<number | null>(null); // 物理内存总量（GB），用于预估休眠文件大小
 const confirmOff = ref(false); // 关闭休眠二次确认（避免整行误触关闭休眠这种销毁性操作）
 function onHibernateConfirmBack(event: Event): void {
@@ -203,6 +205,8 @@ function onHibernateConfirmBack(event: Event): void {
 
 const busy = ref(false);
 const msg = ref('');
+const sleepPreferenceWarnings = reactive<Record<string, string>>({});
+const sleepNotice = computed(() => [...new Set([msg.value, ...Object.values(sleepPreferenceWarnings)])].filter(Boolean).join('；'));
 const activeSchemeGuid = ref('');
 const isYemanScheme = computed(() => activeSchemeGuid.value === PW.YEMAN.toLowerCase());
 
@@ -224,6 +228,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('ipc:gamepad-back', onHibernateConfirmBack);
   window.removeEventListener('ipc:sleep.staticWake.updated', onStaticWakeUpdated);
   staticWakeViewActive = false;
+  stopStaticWakeVisibility?.();
   staticWakeRefreshPending = false;
   ++staticWakeRevision;
   ++sleepPlanRevision;
@@ -234,6 +239,11 @@ onMounted(() => {
   window.addEventListener('ipc:gamepad-back', onTimeoutGamepadBack);
   window.addEventListener('ipc:gamepad-back', onHibernateConfirmBack);
   window.addEventListener('ipc:sleep.staticWake.updated', onStaticWakeUpdated);
+  let previousVisibility: boolean | undefined;
+  stopStaticWakeVisibility = onUiVisibilityChange(({ visible }) => {
+    if (visible && previousVisibility === false) void refreshStaticWakeStatus();
+    previousVisibility = visible;
+  });
 });
 
 async function refreshHibernateState() {
@@ -276,7 +286,8 @@ async function onWakePassword(enabled: boolean) {
   busy.value = true;
   msg.value = '';
   try {
-    const state = await wakePassword.set(enabled);
+    const { powerAdmission } = captureSleepPowerWrite();
+    const state = await wakePassword.set(enabled, { powerAdmission });
     if (!state.ok || !state.known || state.ac !== Number(enabled) || state.dc !== Number(enabled)) {
       wakePasswordOn.value = state.known ? state.enabled : previous;
       msg.value = '唤醒密码设置失败：错误 ' + state.win32Error +
@@ -348,14 +359,10 @@ async function refresh() {
   const wakeRevision = wakePasswordRevision;
   try {
     const s = await sleepGuardGet();
-    cfg.enabled = s.enabled;
-    cfg.mode = s.mode;
-    cfg.suspended = s.suspended;
     cfg.pauseGameOnSleep = s.pauseGameOnSleep;
     cfg.retryOnEntryFailure = s.retryOnEntryFailure;
     cfg.retryOnSleepTimeout = s.retryOnSleepTimeout;
     cfg.retryOnNonUserWake = s.retryOnNonUserWake;
-    cfg.joyXoffAutoClose = true;
     if (wakeRevision === wakePasswordRevision && !busy.value) wakePasswordOn.value = s.wakePasswordEnabled === true;
   } catch {
     /* 检测不到保持现状，绝不假定关闭 */
@@ -376,9 +383,9 @@ async function refresh() {
     refreshSleepTimeouts(),
   ]);
   if (schemeRes.status === 'fulfilled') activeSchemeGuid.value = schemeRes.value.toLowerCase();
-  if (acBtnRes.status === 'fulfilled') acBtnIdx.value = acBtnRes.value;
-  if (dcBtnRes.status === 'fulfilled') dcBtnIdx.value = dcBtnRes.value;
-  if (hibSizeRes.status === 'fulfilled') hibSize.value = hibSizeRes.value;
+  acBtnIdx.value = acBtnRes.status === 'fulfilled' ? acBtnRes.value : null;
+  dcBtnIdx.value = dcBtnRes.status === 'fulfilled' ? dcBtnRes.value : null;
+  hibSize.value = hibSizeRes.status === 'fulfilled' ? hibSizeRes.value : null;
   if (memRes.status === 'fulfilled') memGB.value = memRes.value;
   if (timeoutRes.status === 'rejected') timeoutLoading.value = false;
   await hibernateRefresh;
@@ -392,8 +399,9 @@ async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boole
   sleepTimeouts[key] = next;
   busy.value = true;
   try {
-    await setSleepTimeout(field, ac, next);
+    const result = await setSleepTimeout(field, ac, next);
     msg.value = '';
+    showSleepPreferenceResult(key, result);
   } catch (e) {
     // A refresh can fail after the value was saved. Show the real stored
     // indexes instead of rolling the selector back to a value no longer true.
@@ -404,55 +412,12 @@ async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boole
   }
 }
 
-// 睡眠时暂停游戏（与唤醒自动恢复绑定）。
-async function onPauseGame(v: boolean) {
-  cfg.pauseGameOnSleep = v;
+async function setSleepGuardOption(option: SleepGuardOption, value: boolean) {
+  if (busy.value) return;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: v, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: cfg.retryOnNonUserWake });
-    await syncGuardEnabled();
-  } catch {
-    msg.value = '设置保存失败';
-    await refresh();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onEntryFailure(v: boolean) {
-  cfg.retryOnEntryFailure = v;
-  busy.value = true;
-  try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: v, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: cfg.retryOnNonUserWake });
-    await syncGuardEnabled();
-  } catch {
-    msg.value = '设置保存失败';
-    await refresh();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onRetrySleepTimeout(v: boolean) {
-  cfg.retryOnSleepTimeout = v;
-  busy.value = true;
-  try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: v, retryOnNonUserWake: cfg.retryOnNonUserWake });
-    await syncGuardEnabled();
-  } catch {
-    msg.value = '设置保存失败';
-    await refresh();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onNonUserWake(v: boolean) {
-  cfg.retryOnNonUserWake = v;
-  busy.value = true;
-  try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnSleepTimeout: cfg.retryOnSleepTimeout, retryOnNonUserWake: v });
-    await syncGuardEnabled();
+    await sleepGuardSetConfig({ mode: 'custom', [option]: value });
+    cfg[option] = value;
   } catch {
     msg.value = '设置保存失败';
     await refresh();
@@ -462,12 +427,17 @@ async function onNonUserWake(v: boolean) {
 }
 
 function staticWakeFailure(action: 'scan' | 'restore', status: StaticWakeStatus): string {
+  if (status.lastError === 'power-admission-retired') return '电源状态已变化，请在唤醒后重试';
   return (action === 'scan' ? '屏蔽未完成' : '恢复未完成') +
     ' · 失败 ' + status.failed + ' · 待恢复 ' + status.restorePending +
     ' · 设备 ' + status.devices + ' · 软件 ' + status.software + ' · 定时器 ' + status.timers;
 }
 
-async function applyStaticWake(action: 'scan' | 'restore') {
+async function applyStaticWake(action: 'scan' | 'restore', admission: StaticWakeAdmission | null) {
+  if (!admission) {
+    if (staticWakeViewActive) staticWakeError.value = '电源状态未确认，请在唤醒后重试';
+    return;
+  }
   const requestId = crypto.randomUUID();
   if (staticWakePendingRequest.value) return;
   staticWakePendingRequest.value = { requestId, action };
@@ -478,7 +448,7 @@ async function applyStaticWake(action: 'scan' | 'restore') {
     staticWakeError.value = '';
   }
   try {
-    const result = await (action === 'scan' ? scanStaticWakeSources(requestId) : restoreStaticWakeSources(requestId));
+    const result = await (action === 'scan' ? scanStaticWakeSources(requestId, admission) : restoreStaticWakeSources(requestId, admission));
     if (!staticWakeViewActive) return;
     staticWakeStatus.value = result.status;
     staticWakePendingRequest.value = null;
@@ -504,12 +474,13 @@ async function applyStaticWake(action: 'scan' | 'restore') {
 async function onStaticWakeRestore() {
   if (!staticWakeViewActive || busy.value || staticWakeLoading.value || staticWakePendingRequest.value || !staticWakeNeedsRestore.value) return;
   busy.value = true;
-  try { await applyStaticWake('restore'); }
+  try { await applyStaticWake('restore', captureStaticWakeAdmission()); }
   finally { if (staticWakeViewActive) busy.value = false; }
 }
 
 async function onStaticWakeAutoScan(v: boolean) {
   if (!staticWakeViewActive || busy.value || staticWakePreferenceLoading.value || staticWakePendingRequest.value) return;
+  const admission = v ? null : captureStaticWakeAdmission();
   ++staticWakePreferenceRevision;
   busy.value = true;
   try {
@@ -522,7 +493,7 @@ async function onStaticWakeAutoScan(v: boolean) {
     }
     // Native cancels the old delay on OFF and schedules one 60s delay on ON.
     // Finish the committed OFF after navigation; never replay an enable scan.
-    if (!v) await applyStaticWake('restore');
+    if (!v) await applyStaticWake('restore', admission);
   } catch {
     if (staticWakeViewActive) msg.value = '自动扫描设置保存失败';
   } finally {
@@ -553,42 +524,40 @@ async function onSleepPowerPlanOptimization(v: boolean) {
   }
 }
 
-// 总闸（Enable.txt）：任一子功能生效即开启，全部关闭即关闭
-async function syncGuardEnabled() {
-  const active = cfg.pauseGameOnSleep || cfg.retryOnEntryFailure || cfg.retryOnSleepTimeout || cfg.retryOnNonUserWake;
-  if (active === cfg.enabled) return;
-  const previous = cfg.enabled;
-  try {
-    await sleepGuardSet(active);
-    cfg.enabled = active;
-  } catch {
-    cfg.enabled = previous;
-    msg.value = '守护总闸设置失败';
-    throw new Error('守护总闸设置失败');
-  }
-}
-
 // ── 电源按钮按下操作 ──
+function showSleepPreferenceResult(key: string, result: { preferenceSaved?: boolean; preferenceReason?: string } | void) {
+  if (!result) return;
+  if (result.preferenceSaved === true) { delete sleepPreferenceWarnings[key]; return; }
+  if (result.preferenceSaved !== false) return;
+  const warning = result.preferenceReason || '系统设置已保存，但开机全局睡眠偏好未保存';
+  sleepPreferenceWarnings[key] = warning;
+  if (!msg.value.includes(warning)) msg.value = [msg.value, warning].filter(Boolean).join('；');
+}
 async function onPwrBtn(ac: boolean, idx: PowerBtnIdx) {
+  if (busy.value) return;
+  const submitted = captureSleepPowerWrite();
   msg.value = '';
   busy.value = true;
   try {
-    await setPowerBtnIdx(ac, idx);
+    showSleepPreferenceResult(ac ? 'acButton' : 'dcButton', await setPowerBtnIdx(ac, idx, submitted));
     if (ac) acBtnIdx.value = idx; else dcBtnIdx.value = idx;
     // 联动：电源按钮选「S4 休眠到硬盘」时，若系统休眠当前为关闭，则自动开启休眠——否则 S4 不会生效。
     // 仅"开启"，绝不在选择其它按钮时关闭休眠；检测未知时不乱写。
     if (idx === 1) {
       if (hibernateOn.value === false) {
-        await setHibernate(true);
-        await setHibernateSize(hibSize.value);
+        showSleepPreferenceResult('hibernate', await setHibernate(true, submitted));
+        if (hibSize.value !== null) showSleepPreferenceResult('hibernateSize', await setHibernateSize(hibSize.value, submitted));
+        else hibSize.value = await readHibernateSize();
         const enabled = await refreshHibernateState();
         if (enabled !== true) throw new Error('Windows 回读仍显示休眠未开启');
       } else if (hibernateOn.value === null) {
         msg.value = '休眠状态未知，未随电源按钮设置自动修改；系统休眠开关仍可单独点击开启。';
       }
     }
-    schedulePwrActivate();
+    schedulePwrActivate(submitted);
   } catch (e) {
+    const observed = await getPowerBtnIdx(ac).catch(() => null);
+    if (ac) acBtnIdx.value = observed; else dcBtnIdx.value = observed;
     msg.value = '电源按钮设置失败：' + (e as Error).message + '（需要管理员权限修改电源方案）';
   } finally {
     busy.value = false;
@@ -596,16 +565,17 @@ async function onPwrBtn(ac: boolean, idx: PowerBtnIdx) {
 }
 
 let pwrActivateTimer: number | null = null;
-function schedulePwrActivate() {
+function schedulePwrActivate(submitted: SleepPowerWrite) {
   if (pwrActivateTimer !== null) window.clearTimeout(pwrActivateTimer);
   pwrActivateTimer = window.setTimeout(() => {
     pwrActivateTimer = null;
-    reactivateCurrentScheme().catch(() => {});
+    reactivateCurrentScheme(submitted).catch(() => {});
   }, 2000);
 }
 
 // ── 系统休眠 ──
 async function onHibernate(v: boolean) {
+  if (busy.value) return;
   if (hibernateSupported.value === false) {
     msg.value = '此设备的 Windows 电源能力明确不支持 S4 休眠。';
     return;
@@ -613,11 +583,13 @@ async function onHibernate(v: boolean) {
   // 状态未知时开关显示为关闭，只允许走“开启并回读”，绝不会误触发关闭。
   if (hibernateOn.value === null && !v) return;
   if (v) {
+    const submitted = captureSleepPowerWrite();
     msg.value = '';
     busy.value = true;
     try {
-      await setHibernate(true);
-      await setHibernateSize(hibSize.value);
+      showSleepPreferenceResult('hibernate', await setHibernate(true, submitted));
+      if (hibSize.value !== null) showSleepPreferenceResult('hibernateSize', await setHibernateSize(hibSize.value, submitted));
+      else hibSize.value = await readHibernateSize();
       const enabled = await refreshHibernateState();
       if (enabled !== true) throw new Error('Windows 回读仍显示休眠未开启');
     } catch (e) {
@@ -636,7 +608,7 @@ async function confirmHibernateOff() {
   msg.value = '';
   busy.value = true;
   try {
-    await setHibernate(false);
+    showSleepPreferenceResult('hibernate', await setHibernate(false));
     const enabled = await refreshHibernateState();
     if (enabled !== false) throw new Error('Windows 回读仍显示休眠未关闭');
   } catch (e) {
@@ -651,11 +623,17 @@ function cancelHibernateOff() {
   confirmOff.value = false;
 }
 async function onHibSize(v: number) {
+  if (busy.value) return;
   msg.value = '';
+  busy.value = true;
   try {
-    await setHibernateSize(v);
+    showSleepPreferenceResult('hibernateSize', await setHibernateSize(v));
+    hibSize.value = await readHibernateSize();
   } catch (e) {
+    hibSize.value = await readHibernateSize();
     msg.value = '休眠大小设置失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -663,7 +641,7 @@ const hibDesc = computed(() => {
   if (hibLoading.value) return '检测中…';
   if (hibernateSupported.value === false) return '此设备不支持休眠';
   if (hibernateOn.value === null) return '状态未知，可点击重新检测';
-  if (memGB.value !== null) {
+  if (memGB.value !== null && hibSize.value !== null) {
     const est = (memGB.value * hibSize.value) / 100;
     return `预计占用 ${est.toFixed(1)} GB`;
   }
@@ -682,12 +660,12 @@ refresh();
 <template>
  <IntegratedPage title="睡眠优化">
   <div class="sleep-console">
-   <Transition name="notice-fade"><div v-if="msg" class="sleep-notice" :class="{'is-ok':/已启用|已关闭|已恢复|已暂停|完成/.test(msg)}" role="status">{{msg}}</div></Transition>
+   <Transition name="notice-fade"><div v-if="sleepNotice" class="sleep-notice" :class="{'is-ok':!Object.keys(sleepPreferenceWarnings).length && /已启用|已关闭|已恢复|已暂停|完成/.test(msg)}" role="status">{{sleepNotice}}</div></Transition>
    <SettingsSections :sections="sleepSections" label="睡眠优化">
     <template #protection>
      <div class="sleep-group">
       <div class="sleep-group-head"><h3><InlineIcon name="gamepad"/>游戏恢复</h3><span>入睡暂停，唤醒恢复</span></div>
-      <Toggle :model-value="cfg.pauseGameOnSleep" label="睡眠暂停游戏" description="唤醒后恢复原游戏" :disabled="busy" @update:model-value="onPauseGame" />
+      <Toggle :model-value="cfg.pauseGameOnSleep" label="睡眠暂停游戏" description="唤醒后恢复原游戏" :disabled="busy" @update:model-value="setSleepGuardOption('pauseGameOnSleep', $event)" />
      </div>
      <div class="sleep-group">
       <div class="sleep-group-head"><h3><InlineIcon name="sleep"/>系统保护</h3><span>按需开启</span></div>
@@ -698,17 +676,17 @@ refresh();
        <div v-if="staticWakeNeedsRestore||staticWakePendingRequest?.action==='restore'" class="sleep-static-action"><button :disabled="busy||staticWakeLoading||!!staticWakePendingRequest" @click="onStaticWakeRestore">{{staticWakeAction==='restore'?'恢复中…':'重试恢复'}}</button></div>
        <p id="sleep-static-wake-status" role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
       </div>
-      <Toggle :model-value="cfg.retryOnEntryFailure" label="入睡失败重试" description="明确入睡失败时重试，电源键唤醒优先" :disabled="busy" @update:model-value="onEntryFailure" />
-      <Toggle :model-value="cfg.retryOnSleepTimeout" label="睡眠超时" description="电源键睡眠满240秒仍在运行时重试，唤醒优先" :disabled="busy" @update:model-value="onRetrySleepTimeout" />
-      <Toggle :model-value="cfg.retryOnNonUserWake" label="供电变动唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
+      <Toggle :model-value="cfg.retryOnEntryFailure" label="入睡失败重试" description="明确入睡失败时重试，电源键唤醒优先" :disabled="busy" @update:model-value="setSleepGuardOption('retryOnEntryFailure', $event)" />
+      <Toggle :model-value="cfg.retryOnSleepTimeout" label="睡眠超时" description="电源键睡眠满240秒仍在运行时重试，唤醒优先" :disabled="busy" @update:model-value="setSleepGuardOption('retryOnSleepTimeout', $event)" />
+      <Toggle :model-value="cfg.retryOnNonUserWake" label="供电变动唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="setSleepGuardOption('retryOnNonUserWake', $event)" />
      </div>
     </template>
     <template #power>
      <div class="sleep-group">
       <div class="sleep-group-head"><h3><InlineIcon name="power"/>电源键操作</h3><span>插电与电池分别设置</span></div>
       <div class="sleep-power-grid">
-       <label><span class="supply-label ac"><InlineIcon name="plug"/>插电 · AC</span><Dropdown :model-value="acBtnIdx" :options="powerButtonOptions" width="100%" aria-label="插电时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(true,Number(v) as PowerBtnIdx)"/></label>
-       <label><span class="supply-label dc"><InlineIcon name="battery"/>电池 · DC</span><Dropdown :model-value="dcBtnIdx" :options="powerButtonOptions" width="100%" color="dc" aria-label="电池时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(false,Number(v) as PowerBtnIdx)"/></label>
+       <label><span class="supply-label ac"><InlineIcon name="plug"/>插电 · AC</span><Dropdown :model-value="acBtnIdx ?? ''" placeholder="未读取，可选择操作" :options="powerButtonOptions" width="100%" aria-label="插电时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(true,Number(v) as PowerBtnIdx)"/></label>
+       <label><span class="supply-label dc"><InlineIcon name="battery"/>电池 · DC</span><Dropdown :model-value="dcBtnIdx ?? ''" placeholder="未读取，可选择操作" :options="powerButtonOptions" width="100%" color="dc" aria-label="电池时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(false,Number(v) as PowerBtnIdx)"/></label>
       </div>
       <p v-if="!isYemanScheme" class="sleep-warning">使用野蛮电源计划后可修改按键</p>
       <p v-if="acBtnIdx===0||dcBtnIdx===0" class="sleep-warning">USB4 电源变动可能触发唤醒</p>
@@ -720,7 +698,7 @@ refresh();
        <strong>关闭系统休眠？</strong><p>删除休眠文件，休眠按键将失效</p>
        <div><button class="sleep-danger" data-gp-row="0" data-gp-col="0" @click="confirmHibernateOff">确认关闭</button><button data-sleep-hibernate-cancel data-gp-row="0" data-gp-col="1" @click="cancelHibernateOff">取消</button></div>
       </div>
-      <div class="sleep-hibernate-size"><Slider v-model="hibSize" :min="30" :max="100" :step="5" label="休眠文件大小" unit="%" :disabled="!hibernateOn" @commit="onHibSize"/><div class="sleep-scale"><span>30%</span><span v-if="memGB">物理内存 {{memGB.toFixed(0)}} GB</span><span>100%</span></div></div>
+      <div class="sleep-hibernate-size"><Slider :model-value="hibSize ?? 50" :value-text="hibSize === null ? '未读取' : undefined" :min="30" :max="100" :step="5" label="休眠文件大小" :unit="hibSize === null ? '' : '%'" :disabled="!hibernateOn || busy" @update:model-value="v=>hibSize=v" @commit="onHibSize"/><div class="sleep-scale"><span>30%</span><span v-if="memGB">物理内存 {{memGB.toFixed(0)}} GB</span><span>100%</span></div></div>
      </div>
     </template>
     <template #timeouts>

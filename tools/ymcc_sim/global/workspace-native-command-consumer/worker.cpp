@@ -12,7 +12,9 @@ extern "C" const char* wsFixtureWorker(const char* raw){
   writeJsonAtomic(data/L"state"/L"fixture-stale-injection.json",{{"beforeSha256",sha256(original)},{"externalEditSha256",sha256(changed)},{"readyToAdd",planned["summary"].value("readyToAdd",0)}});
   result=commitPreparedSteamAddPlan(data,target,output,input.value("confirm",false),planned);
  }else result=input.at("commit").get<bool>()?commitSteamLibraryAddPlan(data,data/L"state"/L"library-scan.json",target,output,input.value("confirm",false),selected,explicitSelection):buildSteamLibraryAddPlan(data,data/L"state"/L"library-scan.json",target,output,selected,explicitSelection);
- reply={{"exitCode",0},{"output","OWNED_ORIGINAL_WORKER_PLAN_OR_COMMIT"},{"result",result}};
+ const auto receipt=input.at("commit").get<bool>()?custom_steam_library::plan_receipt::addCompletionDigest(result):custom_steam_library::plan_receipt::digest(result);
+ const auto token=input.at("commit").get<bool>()?"STEAM_ADD_RESULT_RECEIPT: sha256-v1:":"STEAM_PLAN_RECEIPT: sha256-v1:";
+ reply={{"exitCode",0},{"output",std::string(token)+receipt+"\n"},{"result",result}};
  }
  catch(const std::exception& e){reply={{"exitCode",1},{"output",e.what()}};}
  answer=reply.dump();return answer.c_str();

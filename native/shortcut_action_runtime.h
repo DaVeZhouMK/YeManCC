@@ -10,13 +10,24 @@ static bool nativeShortcutUiDispatch(const NativeKeyboardShortcutRule& rule,uint
     uint64_t wmiGeneration,uint64_t wmiSequence,bool keyboardWmiFallback,OemProducerTokens producerTokens) {
     const auto action=rule.uiAction;const auto params=rule.uiParams;
     const auto generation=currentPowerGeneration();
+    const auto actionRevision=GamepadSerialEvent::captureRevision();
     const auto revision=ymSettingsSection("input").value("revision",0ll);
-    const auto current=[generation,revision,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens] {
-        return !g_exitRequested.load(std::memory_order_acquire) && !g_shortcutRecordingActive.load(std::memory_order_acquire) &&
+    // Issue, claim and verification copy this guard. Once any copy observes
+    // invalidation, the same request stays revoked; a new press owns new state.
+    const auto revoked=std::make_shared<std::atomic<bool>>(false);
+    const auto current=[generation,revision,actionRevision,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens,revoked] {
+        if(revoked->load(std::memory_order_acquire))return false;
+        bool allowed=false;
+        try { allowed=GamepadSerialEvent::currentRevision(actionRevision) && !g_exitRequested.load(std::memory_order_acquire) && !g_shortcutRecordingActive.load(std::memory_order_acquire) &&
             g_inputReady.load(std::memory_order_acquire) && sgVirtualWriterAllowedNow() && currentPowerGeneration()==generation &&
             ymSettingsSection("input").value("revision",0ll)==revision && oemProducerTokensCurrent(producerTokens) &&
             (sourceEpoch==kOemShortcutUnboundEpoch || sourceEpoch==g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)) &&
-            (!wmiGeneration || msiWmiGenerationCurrent(wmiGeneration)) && (!keyboardWmiFallback || !msiWmiShortcutAuthoritative());
+            (!wmiGeneration || msiWmiGenerationCurrent(wmiGeneration)) && (!keyboardWmiFallback || !msiWmiShortcutAuthoritative()) &&
+            !radialHasInputOwner() && ((producerTokens.requiredMask & ((1ull << 20) - 1)) == 0 ||
+                (!g_inputReleaseRequired.load(std::memory_order_acquire) && !customSteamLibraryInputSuppressed()));
+        } catch(...) {} // A failed current-source read cannot revive this request.
+        if(!allowed)revoked->store(true,std::memory_order_release);
+        return allowed&&!revoked->load(std::memory_order_acquire);
     };
     return nativeYmccShortcutSubmit([action,params,generation,revision,current] {
         if(!current())return;
@@ -32,7 +43,8 @@ static bool nativeShortcutUiDispatch(const NativeKeyboardShortcutRule& rule,uint
 static json nativeShortcutTdpEvent(int delta) {
     const auto generation=currentPowerGeneration();const auto revision=ymSettingsSection("input").value("revision",0ll);
     const auto epoch=g_oemShortcutEdgeEpoch.load(std::memory_order_acquire);
-    const auto current=[generation,revision,epoch] {return currentPowerGeneration()==generation && g_inputReady.load(std::memory_order_acquire) &&
+    const auto actionRevision=GamepadSerialEvent::captureRevision();
+    const auto current=[generation,revision,epoch,actionRevision] {return GamepadSerialEvent::currentRevision(actionRevision) && currentPowerGeneration()==generation && g_inputReady.load(std::memory_order_acquire) &&
         sgVirtualWriterAllowedNow() && !g_exitRequested.load(std::memory_order_acquire) && !g_shortcutRecordingActive.load(std::memory_order_acquire) &&
         g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)==epoch && ymSettingsSection("input").value("revision",0ll)==revision;};
     json event={{"delta",delta}};

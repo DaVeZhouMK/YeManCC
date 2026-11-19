@@ -16,16 +16,16 @@ const styles=[];
 const mocks={
   '@/bridge/steamDeckMouse':`export const STEAM_DECK_MOUSE_DEFAULT=100;const get=()=>window.__fixture.mouseState??={ok:true,available:true,percent:100,pending:false,steamRunning:true};export async function steamDeckMouseGet(){return structuredClone(get())};export async function steamDeckMouseSet(percent){const f=window.__fixture;f.mouseWrites=(f.mouseWrites||0)+1;(f.mouseTargets??=[]).push(percent);if(f.mouseDelay)await new Promise(r=>setTimeout(r,f.mouseDelay));f.mouseState=f.mouseLive?{...get(),percent,pending:false,liveAvailable:true,appliedLive:true}:{...get(),pending:true,desiredPercent:percent};return structuredClone(f.mouseState)};export function steamDeckMouseMessage(){return '布局不可用'}`,
   '@/bridge/yeman':`export async function oemKeysGet(){return {familyId:'unknown',supported:false,keys:[]}};export async function summonGet(){return structuredClone(window.__fixture.gamepad)}; export async function summonSet(p){window.__fixture.nativeWrites++;Object.assign(window.__fixture.gamepad,p);return summonGet()}`,
-  '@/bridge/gameproc':`export async function closeJoyxoffIfRunning(){}; export async function getGameInputRedistState(){return {mouseInterfaceAvailable:true}};export async function installGameInputRedist(){};export async function setMouseBackend(backend){return {ok:true,backend,on:true}}`,
+  '@/bridge/gameproc':`export async function closeJoyxoffIfRunning(){}; export async function getGameInputRedistState(){return {mouseInterfaceAvailable:true}};export async function installGameInputRedist(){};export async function setMouseBackend(backend){return {ok:true,backend,on:true}};export async function getMouseModeState(){return null};export async function setMouseModePolicy(){throw Error('Unexpected mouse policy write in controller fixture')}`,
   '@/bridge/settingsRepository':`import {evaluateInputCasWrite} from ${JSON.stringify(path.join(root,'src/bridge/settingsRepository.ts'))};export function onInputSettingsChanged(){return ()=>{}};export class VirtualStartProtectionActive extends Error{};export async function mergeSettings(){throw new Error('Unexpected settings merge in this fixture')};export async function loadSettings(){return structuredClone(window.__fixture.settings)};export async function compareAndSwapInputSettings(revision,patch){const f=window.__fixture;f.writes++;const r=evaluateInputCasWrite(f.settings.input,revision,patch,true);if(r.ok)f.settings.input=r.value;return r}`,
   '@/bridge/gameInputOverride':`export function getGameInputOverrideState(){return {locked:false,identity:''}};export function subscribeGameInputOverrideState(cb){cb(getGameInputOverrideState());return ()=>{}}`,
-  '@/bridge/ipc':`export function on(name,cb){const events=window.__fixture.events??={};events[name]=cb;return ()=>{if(events[name]===cb)delete events[name]}};export function isNativeRuntime(){return false};export async function invoke(name){if(name==='oem.keys.status')return window.__fixture.oemUsage||{};return {}}`,
-  '@/bridge/api':`export const fs={},settingsStore={},shell={open:async()=>{}}`,
+  '@/bridge/ipc':`export function on(name,cb){const events=window.__fixture.events??={};events[name]=cb;return ()=>{if(events[name]===cb)delete events[name]}};export function isNativeRuntime(){return false};export async function invoke(name){if(name==='oem.keys.status'){window.__fixture.statusQueries=(window.__fixture.statusQueries||0)+1;return structuredClone(window.__fixture.oemUsage||{})};return {}}`,
+  '@/bridge/api':`export const fs={},settingsStore={},shell={open:async()=>{}},dialog={openFile:async()=>{throw Error('Unexpected file dialog in controller fixture')}},keyboard={open:async()=>{throw Error('Unexpected OS keyboard in controller fixture')}}`,
   '@/gamepad/focus':`export function focusGamepadElement(node){node?.focus()};export function getGamepadPopupPlacement(){return {style:{},above:false}}`,
   '@/components/ControllerFeedbackCapabilitiesCard.vue':`export default {render(){return null}}`,
   '@/views/ControllerShortcutEditorView.vue':`import {h} from 'vue';export default {emits:['close'],setup(_,ctx){return ()=>h('section',{role:'dialog','aria-label':'editor fixture','data-editor-fixture':true},[h('button',{onClick:()=>ctx.emit('close')},'关闭编辑器')])}}`,
 };
-const result=await build({loader:{'.png':'dataurl'},stdin:{resolveDir:root,loader:'ts',contents:`
+const result=await build({loader:{'.png':'dataurl','.svg':'dataurl'},stdin:{resolveDir:root,loader:'ts',contents:`
 import {createApp} from 'vue';import Page from './src/views/ButtonMappingView.vue';
 import {normalizeSettings} from './src/bridge/settingsRepository.ts';
 import {normalizeOemInputUsage} from './src/bridge/controllerFeatureStatus.ts';
@@ -33,7 +33,7 @@ import {NATIVE_DEFAULT_SHORTCUTS,nativeDefaultRule,newControllerShortcutRule} fr
 const gamepad={enabled:true,mouseBackend:'joyxoff',...Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(d=>[d.defaultKey,true]))};
 const custom={...newControllerShortcutRule('custom-oem','keyboard.numeric'),inputs:[{source:'oem',code:'m1'}],params:{key:'F8'}};
 window.__fixture={gamepad,writes:0,nativeWrites:0,settings:normalizeSettings({input:{outputTarget:{persona:'steamdeck',buttonMappingEnabled:true,oemRearMap:{m1:'left',m2:'right',unknown:'both'}},buttonMapping:{rules:{schemaVersion:2,shortcutRules:[...NATIVE_DEFAULT_SHORTCUTS.map(d=>nativeDefaultRule(d.defaultKey)),custom]}}}})};
-const instance=createApp(Page).mount('#app');window.__featureTest={instance,setUsage(raw){instance.oemUsage=normalizeOemInputUsage(raw)}};`},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'controller-ui-fixture',setup(b){
+const instance=createApp(Page).mount('#app');window.__featureTest={instance,setUsage(raw){window.__fixture.oemUsage=structuredClone(raw);instance.oemUsage=normalizeOemInputUsage(raw)}};`},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'controller-ui-fixture',setup(b){
   b.onResolve({filter:/.*/},args=>{if(args.path in mocks)return {path:args.path,namespace:'fixture'};
     if(args.path==='./api'&&args.importer.endsWith('settingsRepository.ts'))return {path:'@/bridge/api',namespace:'fixture'};});
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));
@@ -81,6 +81,25 @@ try{
     }
     await page.locator('[data-feature=back]').focus();await page.locator('[data-feature=back]').press('Enter');assert.equal(await page.locator('.controller-channel-detail').count(),1);assert.match(await page.locator('.controller-channel-detail').innerText(),/Xbox.*没有独立背键通道/);await page.locator('[data-feature=back]').press('Enter');assert.equal(await page.locator('.controller-channel-detail').count(),0);
     assert.equal(await page.evaluate(()=>window.__fixture.writes),0);assert.equal(await page.evaluate(()=>window.__fixture.nativeWrites),0);cases.push('keyboard expandable detail, no actual settings or native writes');
+    for(const height of [720,800]){
+      await page.setViewportSize({width:1280,height});
+      await page.evaluate(raw=>{
+        window.__featureTest.setUsage({...raw,runtime:{...raw.runtime,keyboardActive:false,msiWmiState:3,msiWmiCurrent:false}});
+        window.__fixture.oemUsage=structuredClone(raw);
+      },raw);
+      assert.equal(await page.locator('[data-feature=dedicated] strong').innerText(),'采集受阻');
+      const queries=await page.evaluate(()=>window.__fixture.statusQueries||0);
+      await page.locator('[data-feature=dedicated]').click();
+      await page.waitForFunction(()=>document.querySelector('[data-feature=dedicated] strong')?.textContent==='待按键确认');
+      assert.equal(await page.evaluate(()=>window.__fixture.statusQueries),queries+1);
+      assert.match(await page.locator('.controller-channel-detail').innerText(),/最近一次查询/);
+      assert(!(await page.locator('.controller-channel-detail').innerText()).includes('WMI事件订阅失败'));
+      await page.locator('[data-feature=dedicated]').click();
+      await page.locator('[data-feature=gyro]').click();
+      assert.equal(await page.evaluate(()=>window.__fixture.statusQueries),queries+1,'close and gyro inspection never query OEM or sensors');
+      await page.locator('[data-feature=gyro]').click();
+      cases.push('opening key explanation refreshes failed source snapshot without gyro query '+height);
+    }
   }else{
   const range=page.getByRole('slider',{name:'SteamDeck鼠标灵敏度'});
   assert.equal(await range.count(),1);assert.equal(await range.getAttribute('min'),'1');assert.equal(await range.getAttribute('max'),'300');assert.equal(await range.inputValue(),'100');

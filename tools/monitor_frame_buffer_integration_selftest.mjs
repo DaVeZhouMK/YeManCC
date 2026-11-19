@@ -15,7 +15,8 @@ function cut(text,a,b){const i=text.indexOf(a),j=text.indexOf(b,i);assert(i>=0&&
 function fn(sig){const start=main.indexOf(sig);assert(start>=0,sig);const tail=main.slice(start),masked=tail.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,m=>' '.repeat(m.length));let depth=0;for(let i=masked.indexOf('{');i<masked.length;i++){if(masked[i]==='{')++depth;else if(masked[i]==='}'&&!--depth)return tail.slice(0,i+1);}throw Error(sig);}
 const oldPart=name=>cut(old,'// '+name+'_BEGIN','// '+name+'_END').slice(('// '+name+'_BEGIN').length);
 const state=cut(main,'struct MonitorSnapshotState {','\n};')+'\n};';
-const ordinary=cut(main,'            monitorFpsText = frameOutput.packetTextView(nowMs);','            if (!monitorFpsText.empty())');
+const ordinary=cut(main,'            if (game.pid && game.processCreated)\n','            if (!monitorFpsText.empty())');
+const currentUnguarded='            monitorFpsText = frameOutput.packetTextView(nowMs);\n';
 const fast=cut(main,'                monitorSnapshotPublishFramesBorrowed(iterGeneration,static_cast<long long>(frameNow),','\n            }\n            continue;');
 assert(!ordinary.includes('packet(nowMs)')&&!fast.includes('framePacket'));
 const publisher=fn('static void monitorSnapshotPublishFramesBorrowed(')+'\n'+fn('static void monitorSnapshotPublishFrames(');
@@ -26,12 +27,16 @@ static std::atomic<unsigned long long> g_monitorSnapshotOversizeDrops{0};
 static std::function<void()> barrier;
 static void monitorTestBarrierPause(int) { if(barrier)barrier(); }
 ${publisher}
-static std::string ordinary(Output& frameOutput,std::uint64_t nowMs){std::string monitorFpsText;${ordinary}\nreturn monitorFpsText;}
+static std::size_t ordinaryTextCalls=0;
+static std::string& observedPacketTextView(Output& output,std::uint64_t now){++ordinaryTextCalls;return output.packetTextView(now);}
+static std::string unguardedOrdinary(Output& frameOutput,std::uint64_t nowMs){std::string monitorFpsText;${currentUnguarded.replace('frameOutput.packetTextView(nowMs)','observedPacketTextView(frameOutput,nowMs)')}return monitorFpsText;}
+static std::string ordinary(Output& frameOutput,std::uint64_t nowMs,TargetIdentity game={2077,99}){std::string monitorFpsText;${ordinary.replace('frameOutput.packetTextView(nowMs)','observedPacketTextView(frameOutput,nowMs)')}\nreturn monitorFpsText;}
 static void fast(Output& frameOutput,std::uint64_t frameNow,unsigned long long iterGeneration){${fast}\n}
 }`;
 const cpp=String.raw`
 #define NOMINMAX
 #include <atomic>
+#include <array>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -54,6 +59,8 @@ void* operator new[](std::size_t n){return ::operator new(n);}
 void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 static void check(bool ok,const char* why){++checks;if(!ok){std::cerr<<"FAIL "<<why<<'\n';std::exit(1);}}
+struct TargetIdentity{std::uint64_t pid=2077,processCreated=99;};
+static TargetIdentity ordinaryTarget;
 ${state}
 ${side('before',oldPart('ORDINARY'),oldPart('FAST'),oldPart('PUBLISH'))}
 ${side('after',ordinary,fast,publisher)}
@@ -64,8 +71,8 @@ static void resetCache(){before::g_monitorSnapshot=after::g_monitorSnapshot=cach
 static bool sameTypes(const json&a,const json&b){if(a.type()!=b.type())return false;if(a.is_object()){if(a.size()!=b.size())return false;for(auto i=a.begin();i!=a.end();++i){auto j=b.find(i.key());if(j==b.end()||!sameTypes(i.value(),*j))return false;}return true;}if(a.is_array()){if(a.size()!=b.size())return false;for(std::size_t i=0;i<a.size();++i)if(!sameTypes(a[i],b[i]))return false;return true;}return a==b;}
 static void compare(Output&a,Output&b,std::uint64_t now,unsigned long long gen=7){
  std::string x,y;bool threwA=false,threwB=false;
- try{x=before::ordinary(a,now);}catch(const json::exception&){threwA=true;}
- try{y=after::ordinary(b,now);}catch(const json::exception&){threwB=true;}
+ try{x=before::ordinary(a,now,ordinaryTarget);}catch(const json::exception&){threwA=true;}
+ try{y=after::ordinary(b,now,ordinaryTarget);}catch(const json::exception&){threwB=true;}
  check(threwA==threwB&&x==y,"ordinary lane retains bytes and strict UTF-8 error behavior");
  if(!threwA&&!x.empty())check(sameTypes(json::parse(x),json::parse(y)),"ordinary packet preserves recursive JSON types");
  const auto priorA=meta(before::g_monitorSnapshot),priorB=meta(after::g_monitorSnapshot);
@@ -78,10 +85,10 @@ static void compare(Output&a,Output&b,std::uint64_t now,unsigned long long gen=7
  if(threwA)check(meta(before::g_monitorSnapshot)==priorA&&meta(after::g_monitorSnapshot)==priorB,"failed serialization cannot publish a partial packet");
  ++comparisons;
 }
-static void bind(Output&a,Output&b,std::uint64_t pid=2077,std::uint64_t birth=99,std::uint64_t at=epoch-10000){a.bind(pid,birth,at);b.bind(pid,birth,at);}
+static void bind(Output&a,Output&b,std::uint64_t pid=2077,std::uint64_t birth=99,std::uint64_t at=epoch-10000){ordinaryTarget={pid,birth};a.bind(pid,birth,at);b.bind(pid,birth,at);}
 static void hardware(Output&a,Output&b,std::uint64_t poll,double fps,double low,double gpu,double power,const std::string&game,std::uint64_t now,double ms,std::uint64_t period=3000){a.hardware(poll,fps,low,gpu,power,game,now,ms,period);b.hardware(poll,fps,low,gpu,power,game,now,ms,period);}
 static void rtss(Output&a,Output&b,std::uint64_t at,double fps=120,double ms=8.3){a.observeRtss({true,ms,fps,at});b.observeRtss({true,ms,fps,at});}
-int main(int argc,char**argv){check(argc==2,"report path required");json cases=json::array(),work=json::array();
+int main(int argc,char**argv){check(argc==2,"report path required");json cases=json::array(),work=json::array(),guardAllocationObservations=json::array();
  resetCache();Output a,b;compare(a,b,epoch);bind(a,b);
  const std::string title="Cyberpunk 2077 / \xe4\xb8\xad\xe6\x96\x87 / \xf0\x9f\x90\x88 / \"\\\n";
  hardware(a,b,epoch/1000,180,101,75,30,title,epoch,5.5);compare(a,b,epoch);
@@ -133,6 +140,55 @@ int main(int argc,char**argv){check(argc==2,"report path required");json cases=j
   compare(a,b,now);
  }
  cases.push_back("2000 mixed true receipts and missing/zero samples preserve complete packet bytes");
+
+ // PRIVATE GUARD BOUNDARIES: same original main, actual Output and actual bind identities.
+ // Allocation counters are observations only; no new benchmark, timing or performance threshold.
+ {
+  Output guardBefore,guardAfter;
+  auto bindGuard=[&](TargetIdentity game,std::uint64_t at){guardBefore.bind(game.pid,game.processCreated,at);guardAfter.bind(game.pid,game.processCreated,at);};
+  auto observeGuard=[&](TargetIdentity game,std::uint64_t now,const char* label,bool expectTextCall){
+   const auto callsBefore=after::ordinaryTextCalls;
+   allocations=allocationBytes=0;tracking=true;
+   const auto prior=after::unguardedOrdinary(guardBefore,now);
+   tracking=false;const auto priorAlloc=allocations,priorBytes=allocationBytes;
+   const auto callsBetween=after::ordinaryTextCalls;
+   allocations=allocationBytes=0;tracking=true;
+   const auto candidate=after::ordinary(guardAfter,now,game);
+   tracking=false;const auto candidateAlloc=allocations,candidateBytes=allocationBytes;
+   check(prior==candidate,"identity guard preserves complete ordinary output bytes");
+   check(callsBetween==callsBefore+1,"unguarded current ordinary invokes actual packetTextView");
+   check(after::ordinaryTextCalls==callsBetween+(expectTextCall?1U:0U),"guard routes by both actual pid and birth, independent of available FPS");
+   guardAllocationObservations.push_back({{"scene",label},{"pid",game.pid},{"processCreated",game.processCreated},{"packetTextViewCalls",after::ordinaryTextCalls-callsBetween},{"before",{{"allocations",priorAlloc},{"bytes",priorBytes}}},{"after",{{"allocations",candidateAlloc},{"bytes",candidateBytes}}}});
+   return candidate;
+  };
+  const TargetIdentity targetA{2077,99},targetB{88,100};
+  bindGuard(targetA,epoch-10000);
+  guardBefore.hardware(epoch/1000,180,101,75,30,"A",epoch,5.5,1000);
+  guardAfter.hardware(epoch/1000,180,101,75,30,"A",epoch,5.5,1000);
+  check(!observeGuard(targetA,epoch,"A-active",true).empty(),"A starts with a genuine FPS packet");
+  const std::array<TargetIdentity,3> invalidTargets{{{0,0},{77,0},{0,99}}};
+  std::uint64_t now=epoch;
+  for(const auto game:invalidTargets)for(unsigned repetition=0;repetition<4;++repetition){
+   now+=1000;bindGuard(game,now);
+   check(observeGuard(game,now,"repeated-invalid-identity",false).empty(),"all repeated incomplete identities emit empty text");
+   check(guardBefore.packet(now).is_null()&&guardAfter.packet(now).is_null(),"Output.bind resets even when only birth or only pid is missing");
+  }
+  now=epoch+20000;bindGuard(targetB,now);
+  check(observeGuard(targetB,now,"active-target-no-FPS",true).empty(),"complete active identity with no FPS still executes original packetTextView");
+  guardBefore.hardware(epoch/1000,999,999,99,99,"old-A",now,1,1000);
+  guardAfter.hardware(epoch/1000,999,999,99,99,"old-A",now,1,1000);
+  check(observeGuard(targetB,now,"B-rejects-pre-bind-poll",true).empty(),"B cannot reuse a poll from before binding");
+  now+=1000;
+  guardBefore.hardware(now/1000,90,60,55,22,"B",now,11.1,1000);
+  guardAfter.hardware(now/1000,90,60,55,22,"B",now,11.1,1000);
+  const auto newText=observeGuard(targetB,now,"B-new-genuine-poll",true);
+  check(!newText.empty(),"B recovers on its own genuine producer poll");
+  const auto newPacket=json::parse(newText);
+  check(newPacket["pid"]==targetB.pid&&newPacket["processCreated"]==std::to_string(targetB.processCreated)&&newPacket["game"]=="B"&&newPacket["fps"]==90,"B packet retains its own identity and FPS");
+  check(observeGuard(targetB,now+6000,"active-target-expired-FPS",true).empty(),"active identity with expired FPS still takes original serialization path");
+ }
+ cases.push_back("private ordinary identity guard: A -> repeated (0,0)/(pid,0)/(0,birth) -> B, absent/expired active FPS; allocation observations only");
+
  // Warm realistic ordinary + 100 ms output paths before counting just actual output/publication work.
  resetCache();a.reset();b.reset();bind(a,b);std::size_t ordinaryA=0,ordinaryB=0,ordinaryBytesA=0,ordinaryBytesB=0,fastA=0,fastB=0,fastBytesA=0,fastBytesB=0;unsigned ordinaryCalls=0,fastCalls=0;
  for(unsigned i=0;i<5200;++i){const auto now=epoch+i*100ULL;
@@ -140,8 +196,8 @@ int main(int argc,char**argv){check(argc==2,"report path required");json cases=j
   rtss(a,b,now,120,8.3+double(i%13)/10);
   const bool count=i>=200;
   if(i%10==0){
-   allocations=allocationBytes=0;tracking=count;auto x=before::ordinary(a,now);tracking=false;ordinaryA+=allocations;ordinaryBytesA+=allocationBytes;
-   allocations=allocationBytes=0;tracking=count;auto y=after::ordinary(b,now);tracking=false;ordinaryB+=allocations;ordinaryBytesB+=allocationBytes;
+   allocations=allocationBytes=0;tracking=count;auto x=before::ordinary(a,now,ordinaryTarget);tracking=false;ordinaryA+=allocations;ordinaryBytesA+=allocationBytes;
+   allocations=allocationBytes=0;tracking=count;auto y=after::ordinary(b,now,ordinaryTarget);tracking=false;ordinaryB+=allocations;ordinaryBytesB+=allocationBytes;
    check(x==y,"measured ordinary lane bytes match");if(count)++ordinaryCalls;
   }
   allocations=allocationBytes=0;tracking=count;before::fast(a,now,7);tracking=false;fastA+=allocations;fastBytesA+=allocationBytes;
@@ -152,10 +208,11 @@ int main(int argc,char**argv){check(argc==2,"report path required");json cases=j
  check(fastA>fastB&&fastBytesA>fastBytesB,"fast production call removes packet tree copy and reuses transferred string buffers");
  work.push_back({{"lane","ordinary"},{"calls",ordinaryCalls},{"before",{{"allocations",ordinaryA},{"bytes",ordinaryBytesA}}},{"after",{{"allocations",ordinaryB},{"bytes",ordinaryBytesB}}}});
  work.push_back({{"lane","fast"},{"calls",fastCalls},{"before",{{"allocations",fastA},{"bytes",fastBytesA}}},{"after",{{"allocations",fastB},{"bytes",fastBytesB}}}});
- json result={{"ok",true},{"checks",checks},{"comparisons",comparisons},{"cases",cases},{"operations",work},{"scope","Exact ordinary/fast callsites and publishers, actual current Output with inert deterministic receipts, complete output bytes/types/proofs/ownership/caps. Allocation work only for output paths after warmup; no hardware/RTSS mapping reads, IPC/CPU percentage/timing benchmark or deployed runtime."}};
+ json result={{"ok",true},{"checks",checks},{"comparisons",comparisons},{"cases",cases},{"operations",work},{"privateGuardAllocationObservations",guardAllocationObservations},{"scope","Exact ordinary/fast callsites and publishers, actual current Output with inert deterministic receipts, complete output bytes/types/proofs/ownership/caps. Allocation work only for output paths after warmup; no hardware/RTSS mapping reads, IPC/CPU percentage/timing benchmark or deployed runtime."}};
  std::ofstream(argv[1])<<result.dump(2);std::cout<<result.dump(2)<<'\n';
 }
 `;
+
 fs.writeFileSync(out+'/frame-buffer.cpp',cpp);
 const batch=out+'/compile-run.bat';fs.writeFileSync(batch,['@echo off','call "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat" >nul','if errorlevel 1 exit /b %ERRORLEVEL%',`cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DUNICODE /D_UNICODE "${out}/frame-buffer.cpp" /I"${root}/native" /Fo"${out}/frame-buffer.obj" /Fe"${out}/frame-buffer.exe"`,'if errorlevel 1 exit /b %ERRORLEVEL%',`"${out}/frame-buffer.exe" "${out}/RESULT.json"`,'exit /b %ERRORLEVEL%',''].join('\r\n'));
 const run=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c','""'+batch+'""'],{windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:60000,maxBuffer:3e6});

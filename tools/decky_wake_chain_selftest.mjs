@@ -4,6 +4,7 @@ export async function wakeChainTests(root,out){
  const native=JSON.parse(fs.readFileSync(path.join(out,'native-wake-commit.json'),'utf8'));assert.equal(native.passed,true);assert.equal(native.productionBlockExtracted,true);assert.equal(native.bindingCalls,2);assert.equal(native.preflights,1);
  const req=createRequire(path.join(root,'package.json')),{build}=req('esbuild'),compiled=await build({entryPoints:[path.join(root,'decky-plugin/src/mirrorClient.ts')],bundle:true,write:false,platform:'node',format:'esm'}),{MirrorClient}=await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].contents).toString('base64'));
  const source=fs.readFileSync(path.join(root,'src/bridge/deckyMirrorHost.ts'),'utf8'),flush=async()=>{for(let i=0;i<260;i++)await Promise.resolve();};
+ const resumedSubscription="stops.push(on('power.resumed',refreshPower('ready')));";assert.equal(source.split(resumedSubscription).length,2,'original committed wake subscription must be unique');
  let checks=0;const check=(value,name)=>{checks++;assert(value,name);};
  async function exercise(hostSource=source){
   let connectionSequence=0,current=null,client=null;const sockets=[],timers=new Map;let timerId=0;
@@ -55,7 +56,7 @@ export async function wakeChainTests(root,out){
    return {nativeGeneration:178,authenticated:true,ready:true,userIntentsSent:1,userIntentsReplayed:0,actualWrites:0};
   }finally{client?.dispose();f.stop();}
  }
- const positive=await exercise();const negative=source.replace("stops.push(on('power.resumed',invalidate));",'/* negative: lost committed wake subscription */');assert.notEqual(negative,source);
+ const positive=await exercise();const negative=source.replace(resumedSubscription,'/* negative: lost committed wake subscription */');assert.notEqual(negative,source);
  let failure='';try{await exercise(negative);}catch(e){failure=e.message;}
  assert.match(failure,/native committed event must release the existing held production snapshot/,'missing production wake event subscription must fail at original held controls');
  const result={passed:true,checks,productionNativeWakeBlock:true,productionHost:true,productionClient:true,committedEventNegativeDetected:true,negativeFailure:failure,positive,actualWindowsSleep:false,actualSteamActions:0,physicalHardwareWrites:0};fs.writeFileSync(path.join(out,'wake-chain.json'),JSON.stringify(result,null,2));return result;

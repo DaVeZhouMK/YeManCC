@@ -74,7 +74,11 @@ static void fixtureFamilyCall(double gx,double gy,double gz,double ax,double ay,
         {"dps",{{"x",gx},{"y",gy},{"z",gz}}},{"g",{{"x",ax},{"y",ay},{"z",az}}}});
 }
 '''
-    out+=kernel(parts['impl'] if owned else parts['append'],owned)+'}\n'
+    out+=kernel(parts['impl'] if owned else parts['append'],owned)
+    pending = re.search(r'^static std::atomic<bool> g_inputCaptureSampleQueuePending\{false\};\r?$', parts['queueState'], re.M) is not None
+    # Fixture state injection must preserve the production queue hint invariant.
+    out+='static void fixtureSetPendingForTest(bool value) { (void)value; '+('g_inputCaptureSampleQueuePending.store(value,std::memory_order_release);' if pending else '')+' }\n'
+    out+='}\n'
     return out
 
 def corpus(run):

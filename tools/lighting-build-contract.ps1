@@ -137,3 +137,22 @@ function Assert-YmccLightingMainlinePayload {
   Assert-YmccLightingBuildCandidate -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -CandidateReceiptPath $receipt -PayloadRoot $PayloadRoot
  }
 }
+
+# The helper and the approved HC runtime must agree before compiling or promoting
+# a payload. A valid DLL/manifest pair alone does not prove the helper accepts it.
+function Assert-YmccLightingHcRuntimePin {
+ param([Parameter(Mandatory=$true)][string]$ProjectRoot)
+ $program=Resolve-YmccLightingChild $ProjectRoot 'FanLab/LightSetter/Program.cs'
+ $profileFile=Resolve-YmccLightingChild $ProjectRoot 'deps/ymcc-device-core-runtime/profile.json'
+ $profile=Get-Content -LiteralPath $profileFile -Raw -Encoding UTF8|ConvertFrom-Json
+ $rows=@($profile.replacements|Where-Object {$_.path -ceq 'HandheldCompanion.dll'})
+ if($rows.Count -ne 1 -or [string]$rows[0].sha256 -cnotmatch '^[a-f0-9]{64}$'){throw 'LIGHTING_HC_RUNTIME_PIN_PROFILE_INVALID'}
+ $source=Get-Content -LiteralPath $program -Raw -Encoding UTF8
+ $pins=[regex]::Matches($source,'ExpectedYmccHcCoreSha256\s*=\s*"([a-f0-9]{64})"')
+ if($pins.Count -ne 1){throw 'LIGHTING_HC_RUNTIME_PIN_SOURCE_INVALID'}
+ $wanted=[string]$rows[0].sha256
+ if($pins[0].Groups[1].Value -cne $wanted){throw ('LIGHTING_HC_RUNTIME_PIN_MISMATCH expected='+$wanted+' helper='+$pins[0].Groups[1].Value)}
+ $runtime=Resolve-YmccLightingChild $ProjectRoot ([string]$rows[0].generatedSource)
+ if((Get-YmccLightingFileHash $runtime) -cne $wanted){throw 'LIGHTING_HC_RUNTIME_PIN_BINARY_MISMATCH'}
+ return [pscustomobject]@{runtimePinSha256=$wanted;programSourceSha256=(Get-YmccLightingFileHash $program);profileSha256=(Get-YmccLightingFileHash $profileFile);runtimePath=[string]$rows[0].generatedSource;runtimeSha256=(Get-YmccLightingFileHash $runtime)}
+}

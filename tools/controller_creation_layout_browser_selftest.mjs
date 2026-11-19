@@ -1,7 +1,8 @@
 // Real creation wizard at physical sizes and Windows scaling equivalents.
 // Native recording/settings boundaries are memory-only.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import crypto from 'node:crypto';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {buildEditorPreview} from './controller_shortcut_editor_preview.mjs';
-const root=process.cwd(),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Build/Tasks/ControllerEditorCreationLayout-20261028');fs.mkdirSync(out,{recursive:true});const settingsPath=path.join(out,'memory-settings.json');fs.writeFileSync(settingsPath,JSON.stringify({input:{},gamepad:{enabled:true,bDoubleMinimize:true,startDoubleF7:true,tdpShortcut:true,fpsShortcut:true,killGame:true,openKeyboard:true,returnDesktop:true,mouseToggle:true,mouseBackend:'joyxoff'},quickApps:{apps:[]}}));await buildEditorPreview({root,settingsPath,out:path.join(out,'after')});
+const outputStepFocus=process.argv.includes('--output-step-focus');if(process.argv.slice(3).some(arg=>arg!=='--output-step-focus'))throw Error('Unknown creation selection');
+const root=process.cwd(),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Build/Tasks/ControllerEditorCreationLayout-20261028');fs.mkdirSync(out,{recursive:true});const settingsPath=path.join(out,'memory-settings.json');fs.writeFileSync(settingsPath,JSON.stringify({input:{},gamepad:{enabled:true,bDoubleMinimize:true,startDoubleF7:true,tdpShortcut:true,fpsShortcut:true,killGame:true,openKeyboard:true,returnDesktop:true,mouseToggle:true,mouseBackend:'joyxoff'},quickApps:{apps:[]}}));await buildEditorPreview({root,settingsPath,out:path.join(out,'after'),withGamepadEngine:outputStepFocus});
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_creation.cjs')('playwright');const browser=await chromium.launch({channel:'msedge',headless:true});const results=[],errors=[],checks=[],failures=[];let page;
 const matrix=[{width:1280,height:720,name:'1280x720'},{width:1280,height:800,name:'1280x800'},{width:1920,height:1080,name:'1920x1080'},{width:2560,height:1440,name:'2560x1440'},{width:3840,height:2160,name:'3840x2160'},{width:1024,height:576,dpr:1.25,name:'1280x720-at-125pct'},{width:1024,height:640,dpr:1.25,name:'1280x800-at-125pct'},{width:853,height:480,dpr:1.5,name:'1280x720-at-150pct'},{width:853,height:533,dpr:1.5,name:'1280x800-at-150pct'},{width:960,height:540,dpr:2,name:'1920x1080-at-200pct'},{width:1366,height:768,name:'1366x768'},{width:1600,height:900,name:'1600x900'}];
 function check(ok,name,detail){checks.push({name,pass:!!ok});if(!ok)failures.push({name,detail})}
@@ -14,6 +15,28 @@ async function inspect(name,size){
  const outside=panels.filter(p=>p.x<r.x-1||p.right>r.right+1);const thin=buttons.filter(b=>b.w<35||b.h<32);const overlapPanels=[];for(let i=1;i<children.length;i++)if(children[i].y<children[i-1].bottom-1)overlapPanels.push([children[i-1].tag,children[i].tag]);
  return{card:r,panels,clipped,overlaps,outside,thin,overlapPanels,dialog:{scroll:document.querySelector('.editor-dialog').scrollWidth,client:document.querySelector('.editor-dialog').clientWidth},body:{scroll:document.documentElement.scrollWidth,client:innerWidth},step:document.querySelector('.creation-guide b')?.textContent,trigger:[...root.querySelectorAll('.seg-btn')].filter(shown).find(el=>el.classList.contains('active'))?.textContent};});
  results.push({size:size.name,state:name,...metrics});check(metrics.panels.every(p=>p.w>=metrics.card.w-40),size.name+' '+name+' all step panels fill available width',metrics);check(!metrics.clipped.length,size.name+' '+name+' complete labels',metrics.clipped);check(!metrics.overlaps.length&&!metrics.overlapPanels.length,size.name+' '+name+' controls and sections do not overlap',{buttons:metrics.overlaps,panels:metrics.overlapPanels});check(!metrics.outside.length&&!metrics.thin.length,size.name+' '+name+' controls retain usable dimensions',{outside:metrics.outside,thin:metrics.thin});check(metrics.dialog.scroll<=metrics.dialog.client+2&&metrics.body.scroll<=metrics.body.client+2,size.name+' '+name+' no horizontal overflow',metrics.dialog);return metrics;
+}
+if(outputStepFocus){
+ try{
+  for(const size of [{width:1280,height:720,name:'1280x720'},{width:1280,height:800,name:'1280x800'},{width:1920,height:1080,name:'1080p100pct'},{width:1280,height:720,dpr:1.5,name:'1080p150pct'}]){
+   const context=await browser.newContext({viewport:{width:size.width,height:size.height},deviceScaleFactor:size.dpr||1});page=await context.newPage();page.on('pageerror',error=>errors.push(String(error)));
+   await page.goto(pathToFileURL(path.join(out,'after/editor.html')).href);await page.locator('.rule-row').first().waitFor();await page.locator('.new-action').click();await page.locator('.creation-record-entry').click();
+   await page.evaluate(()=>{const p=window.__editorPreview,inputs=[{source:'controller',code:'a'}];p.emit('shortcut.recording.gamepad',{inputs,released:false});p.emit('shortcut.recording.gamepad',{inputs,released:true})});await page.locator('.creation-next').waitFor();await page.locator('.creation-next').focus();
+   await page.evaluate(()=>window.__editorPreview.controllerAction('confirm'));await page.waitForFunction(()=>document.querySelector('.creation-guide b')?.textContent.includes('3 / 4'));
+   const focus=await page.evaluate(()=>({target:document.activeElement?.className,focused:document.activeElement?.classList.contains('focused'),output:document.activeElement?.matches('.output-summary'),text:document.activeElement?.tagName==='BODY'?'[body]':document.activeElement?.textContent?.slice(0,120)}));results.push({size,focus});check(focus.output&&focus.focused,size.name+' next-step controller confirm focuses change-output action',focus);
+   if(failures.length)break;
+   await page.evaluate(()=>window.__editorPreview.controllerAction('confirm'));check(await page.locator('.output-picker').count()===1,size.name+' following A opens output picker');
+   await page.evaluate(()=>window.__editorPreview.controllerAction('back'));check(await page.locator('.output-picker').count()===0&&await page.locator('.editor-dialog').count()===1,size.name+' B only closes output picker');
+   await page.waitForFunction(()=>document.activeElement?.matches('.output-summary.focused'));
+   check(await page.locator('.output-summary').evaluate(el=>el===document.activeElement&&el.classList.contains('focused')),size.name+' B restores change-output focus');
+   check(await page.locator('.rule-row.creating').count()===1&&await page.evaluate(()=>window.__editorPreview.writes===0),size.name+' retains new action without saving or cancelling');
+   await context.close();
+  }
+  check(errors.length===0,'no browser exceptions',errors);
+  fs.writeFileSync(path.join(out,'OUTPUT-STEP-FOCUS.json'),JSON.stringify({pass:failures.length===0,checks,failures,results,errors,selection:'output-step-focus',defaultLayoutExecuted:false,sourceManifest:JSON.parse(fs.readFileSync(path.join(out,'after/source-manifest.json'),'utf8'))},null,2),{flag:'wx'});
+  console.log(JSON.stringify({checks:checks.length,failures,results},null,2));assert.equal(failures.length,0,'output-step focus regression');
+ }finally{await browser.close()}
+ process.exit(0);
 }
 try{
  for(const size of matrix){const context=await browser.newContext({viewport:{width:size.width,height:size.height},deviceScaleFactor:size.dpr||1});page=await context.newPage();page.on('pageerror',e=>errors.push({size:size.name,message:String(e)}));await page.goto(pathToFileURL(path.join(out,'after/editor.html')).href);await page.locator('.new-action').click();await inspect('1-record',size);

@@ -31,6 +31,7 @@ inline Ticket observeLocked() {
     return {revision,ac};
 }
 inline bool enabled(){std::lock_guard lock(mutex);return pauseOnBattery;}
+inline bool ownsPreference(){std::lock_guard lock(mutex);return preferenceOwner;}
 inline Ticket ticket(){std::lock_guard lock(mutex);return observeLocked();}
 inline bool configure(bool enabled){
     std::lock_guard lock(mutex);const bool changed=pauseOnBattery!=enabled;

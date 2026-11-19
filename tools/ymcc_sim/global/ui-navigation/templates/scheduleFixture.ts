@@ -26,7 +26,10 @@ export async function updateContinuousPerformanceControls(identity,patch) {
  return getContinuousPerformanceSnapshot(identity.followEffective?'effective':identity.scope,identity.side);
 }
 export const onPerformanceScheduleChanged=cb=>{fixture().listeners.add(cb);return()=>fixture().listeners.delete(cb)};
-export const getGameCustomConfig=()=>({version:1,entries:profile()?{[key(fixture().game)]:profile()}:{},rtss:fixture().profileDeleted?{}:{[key(fixture().game)]:copy(fixture().customRtss||{})}});
+export const getGameCustomConfig=()=>({version:1,autoMemory:fixture().customAutoMemory===true,entries:profile()?{[key(fixture().game)]:profile()}:{},rtss:fixture().profileDeleted?{}:{[key(fixture().game)]:copy(fixture().customRtss||{})}});
+// Current profile-panel ports remain explicit in-memory settings operations.
+export async function setGameCustomAutoMemory(enabled:boolean,generation=1){if(typeof enabled!=='boolean'||generation!==1)throw Error('专属自动记忆状态或配置代次无效');fixture().customAutoMemory=enabled;fixture().writes.push({scope:'custom-auto-memory',enabled});await publish();}
+export async function createGameCustomProfile(expected,displayName,options={}){verify(expected);const f=fixture();if(!f.profileDeleted)return false;if(options.automatic&&f.customAutoMemory!==true||options.admit?.()===false)throw new SkipApplyError();f.profileDeleted=false;f.profileInput={displayName,enabled:true,padPersona:'follow',gyroOverride:'follow'};f.dedicatedControls=copy(f.controls);f.dedicatedFrames=copy(f.frames);f.writes.push({scope:'create-profile',exe:expected.exe});await publish();return true;}
 export const loadGameCustomConfig=async()=>getGameCustomConfig();
 // Full document reads/writes remain fixture-owned memory, matching the newer
 // radial consumer contract without touching product configuration files.
@@ -69,3 +72,17 @@ export async function stopPerformanceScheduleAndUseWindowsBalanced(){
 // These newly imported performance ports are outside the UI navigation fixture's memory contract.
 export class SkipApplyError extends Error { constructor() { super('outdated'); } }
 export async function applyPerformanceConfiguration() { throw new Error('Performance configuration apply is outside the UI navigation fixture'); }
+
+
+// Memory receipt subscription used by the real BootModes owner. Applying
+// performance configuration remains explicitly unsupported in this UI fixture.
+const continuousReceiptPort=((window as any).__uiContinuousReceiptPort??={
+ listeners:new Set(), invalidations:new Set(),
+ publish(signature:string,context?:unknown){for(const listener of [...this.listeners] as any[])listener(signature,context)},
+ invalidate(){for(const listener of [...this.invalidations] as any[])listener()},
+});
+export function onContinuousPerformanceApplied(listener:(signature:string,context?:unknown)=>void,onInvalidated?:()=>void):()=>void {
+ continuousReceiptPort.listeners.add(listener);
+ if(onInvalidated)continuousReceiptPort.invalidations.add(onInvalidated);
+ return ()=>{continuousReceiptPort.listeners.delete(listener);if(onInvalidated)continuousReceiptPort.invalidations.delete(onInvalidated)};
+}

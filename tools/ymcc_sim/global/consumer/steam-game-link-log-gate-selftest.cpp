@@ -6,6 +6,9 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include "steam_game_link_log_policy.h"
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +22,7 @@
 #include "json.hpp"
 #include "log_frequency_policy.h"
 #include "log_snapshot_state.h"
+#include "sleep_fact_log_record.h"
 #include "log_jsonl_boundary.h"
 #include "steam_overlay_provider_cache_diagnostic.h"
 using json = nlohmann::json;
@@ -30,6 +34,8 @@ enum class PowerLifecycle { Ready };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static const char* powerLifecycleName(PowerLifecycle) { return "ready-fixture"; }
 static std::atomic<unsigned long long> g_powerGeneration{1};
+static std::atomic<bool> g_sleepRecoveryAutoEnabled{true};
+static std::atomic<unsigned long long> g_sleepRecoveryAutoConfigEpoch{1};
 static std::atomic<bool> g_domainLogEnabled[2]{};
 // Domain mirrors are outside this consumer; no domain files/configuration are opened.
 static void mirrorLifecycleToDomains(const char*, const json&) {}
@@ -39,6 +45,13 @@ static uint32_t g_nativeLifecycleFrameWrites = 0, g_nativeDetailWrites = 0;
 static ULONGLONG g_nativeDetailLastFlushTick = 0;
 static constexpr unsigned long long kLogMaxBytes = 5ull * 1024ull * 1024ull;
 static void rotateOneLogFile(const std::wstring&, unsigned long long = kLogMaxBytes);
+// Existing sidecar observers and InputHost dispatch are outside this consumer.
+static void modelAdaptationObserveRecord(const char*,const json&) noexcept {}
+static void virtualAdaptationObserveRecord(const char*,const json&) noexcept {}
+namespace ymcc::inputHost::diagnostics {struct Scope {static bool active() noexcept{return false;}};}
+static bool domainLogEnabled(const char*) {return false;}
+static void inputHostDeferNativeDiagnostic(const char*,json,bool,bool=false) noexcept {}
+#include "extracted-startup-type.h"
 #include "extracted-main.h"
 namespace SteamGameLink {
 #include "extracted-publish.h"
@@ -58,7 +71,9 @@ static std::shared_ptr<SteamGameLink::Control> scenario(const fspath::path& root
     g_nativeLifecycleFrameWrites = g_nativeDetailWrites = 0; g_nativeDetailLastFlushTick = 0;
     g_domainLogEnabled[1].store(detail); fixtureRoot = root / name;
     fspath::create_directories(fixtureRoot);
-    return std::make_shared<SteamGameLink::Control>();
+    auto current = std::make_shared<SteamGameLink::Control>();
+    SteamGameLink::control = current;
+    return current;
 }
 static json idle() { return {{"phase", "idle"}, {"reason", "waiting-unique-original-instance"}, {"linked", false}, {"active", false}}; }
 int main(int argc, char** argv) {
@@ -97,7 +112,7 @@ int main(int argc, char** argv) {
             auto c = scenario(root, "snapshot-history-bound");
             for (unsigned i = 0; i < 40; ++i) { auto next = idle(); next["reason"] = "fixture-edge-" + std::to_string(i); SteamGameLink::publish(c, next, true); }
             const auto log = rows(L"native-lifecycle.log");
-            check("production-history-ring-stays-at-16", c->history.size() == 16 && c->snapshot["history"].size() == 16);
+            check("production-history-ring-stays-at-16", c->history.size() == 16 && SteamGameLink::get()["history"].size() == 16);
             check("logged-state-never-nests-snapshot-history", log.size() == 40 && std::all_of(log.begin(), log.end(), [](const json& row) { return !row.contains("history"); }));
         }
         {
@@ -114,7 +129,12 @@ int main(int argc, char** argv) {
                 {"targetMembership", "present-in-two-cache-reads"}, {"originalIdentityBracketMatched", true}, {"steamContactVerified", false}, {"foreignRows", json::array({secret})},
                 {"targetFieldsTagged", {{"m_unPID", {{"rawType", "number"}, {"value", 1234}, {"extra", secret}}}, {"m_gameID", {{"rawType", "bigint"}, {"value", "18446744069414584320"}}}, {"foreign", secret}}}};
             detail["nativeAppLifetimeFeedback"] = {{"latestEventSequence", 7}, {"lastEvent", {{"otherPid", secret}}}};
-            SteamGameLink::publish(c, detail, true);
+            // Ordinary publication intentionally omits rich diagnostic objects.
+            SteamGameLink::publish(c, detail, false);
+            const auto ordinary = ymcc::steamlink::logpolicy::compact(detail);
+            check("privacy-and-diagnostics-ordinary-projection-omits-rich-objects", !ordinary.contains("overlayPopupCacheDiagnostic") && !ordinary.contains("overlayProviderCacheDiagnostic"));
+            // Preserve the original rich-field assertions on the real direct writer.
+            appendNativeLifecycleLog("steam-game-link-state", SteamGameLink::get());
             const auto log = rows(L"native-lifecycle.log"); check("privacy-fixture-actually-emitted", log.size() == 1);
             if (!log.empty()) {
                 const auto& row = log[0];
@@ -152,7 +172,12 @@ int main(int argc, char** argv) {
             // Inject a private extra only after the production sanitizer. The
             // real log-copy projection must still discard it.
             detail["overlayProviderCacheDiagnostic"]["sameGameIdCandidatesTagged"][0]["private"] = "CANDIDATE_PRIVATE_SENTINEL";
-            SteamGameLink::publish(c, detail, true); const auto log = rows(L"native-lifecycle.log");
+            // Ordinary publication intentionally omits rich diagnostic objects.
+            SteamGameLink::publish(c, detail, false);
+            const auto ordinary = ymcc::steamlink::logpolicy::compact(detail);
+            check("same-gameid-candidate-privacy-ordinary-projection-omits-rich-objects", !ordinary.contains("overlayPopupCacheDiagnostic") && !ordinary.contains("overlayProviderCacheDiagnostic"));
+            // Preserve the original rich-field assertions on the real direct writer.
+            appendNativeLifecycleLog("steam-game-link-state", SteamGameLink::get()); const auto log = rows(L"native-lifecycle.log");
             check("same-gameid-candidate-gets-base-log", log.size() == 1 && log[0]["overlayProviderCacheDiagnostic"]["sameGameIdCandidatesTagged"][0]["m_unPID"]["value"] == 202);
             check("same-gameid-candidate-private-fields-not-exported", log.size() == 1 && log[0].dump().find("CANDIDATE_PRIVATE_SENTINEL") == std::string::npos);
             check("same-gameid-candidate-does-not-change-target-or-contact", log.size() == 1 && log[0]["overlayProviderCacheDiagnostic"]["targetMembership"] == "absent-in-two-cache-reads" && !log[0].value("contactConnected", true));
@@ -179,7 +204,12 @@ int main(int argc, char** argv) {
         {
             auto c = scenario(root, "oversized-scalar"); auto detail = idle(); detail["reason"] = std::string(257, 'x');
             detail["overlayProviderCacheDiagnostic"] = {{"targetFieldsTagged", {{"m_gameID", {{"rawType", "string"}, {"value", std::string(257, 'x')}}}}}};
-            SteamGameLink::publish(c, detail, true); const auto log = rows(L"native-lifecycle.log");
+            // Ordinary publication intentionally omits rich diagnostic objects.
+            SteamGameLink::publish(c, detail, false);
+            const auto ordinary = ymcc::steamlink::logpolicy::compact(detail);
+            check("oversized-scalar-ordinary-projection-omits-rich-objects", !ordinary.contains("overlayPopupCacheDiagnostic") && !ordinary.contains("overlayProviderCacheDiagnostic"));
+            // Preserve the original rich-field assertions on the real direct writer.
+            appendNativeLifecycleLog("steam-game-link-state", detail); const auto log = rows(L"native-lifecycle.log");
             check("oversized-scalars-are-omitted-without-truncating-values", log.size() == 1 && !log[0].contains("reason") && !log[0]["overlayProviderCacheDiagnostic"]["targetFieldsTagged"]["m_gameID"].contains("value"));
         }
         {

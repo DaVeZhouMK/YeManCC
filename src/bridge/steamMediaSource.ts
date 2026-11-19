@@ -1,4 +1,4 @@
-import { fs, registry, type HttpResponse } from './api';
+import { fs, steamInformation, type HttpResponse } from './api';
 import { requestSteamHttp, requestSteamJson } from './steamHttp';
 import {
   type DynamicBackgroundTarget,
@@ -297,23 +297,22 @@ function parseVdfValue(text: string, key: string): string {
 }
 
 async function steamLibraryRoots(): Promise<string[]> {
-  const roots: string[] = [];
-  for (const root of ['HKCU', 'HKLM']) {
-    try {
-      const steamPath = await registry.read(root, 'Software\\Valve\\Steam', 'SteamPath');
-      if (typeof steamPath === 'string' && steamPath.trim()) roots.push(steamPath.trim().replace(/\//g, '\\'));
-    } catch { /* try the next registry root */ }
-  }
-  const unique = [...new Set(roots)];
-  for (const steamPath of [...unique]) {
-    try {
-      const text = await fs.readTextFile(`${steamPath}\\steamapps\\libraryfolders.vdf`, 2 * 1024 * 1024);
-      const matches = text.matchAll(/"path"\s+"([^"]+)"/gi);
-      for (const match of matches) {
-        const path = match[1].replace(/\\\\/g, '\\').replace(/\//g, '\\');
-        if (path && !unique.includes(path)) unique.push(path);
-      }
-    } catch { /* the default Steam library still remains */ }
+  // Installation metadata comes from the common native owner, without the
+  // optional Presence mask or any live-account/write permission.
+  const installations=await steamInformation.installationRoots();
+  if(installations===null)return [];
+  const unique:string[]=[],seen=new Set<string>();
+  const add=(value:string)=>{
+    const root=value.trim().replace(/\//g,'\\');
+    if(!root||root.length>32768||/[\x00-\x1f]/.test(root)||!(/^[a-z]:\\/i.test(root)||/^\\\\[^\\]+\\[^\\]+/.test(root)))return;
+    const key=root.replace(/\\+$/,'').toLowerCase();if(!seen.has(key)){seen.add(key);unique.push(root);}
+  };
+  for(const root of installations)add(root);
+  for(const steamPath of [...unique]){
+    try{
+      const text=await fs.readTextFile(`${steamPath}\\steamapps\\libraryfolders.vdf`,2*1024*1024);
+      for(const match of text.matchAll(/"path"\s+"([^"]+)"/gi))add(match[1].replace(/\\\\/g,'\\'));
+    }catch{/* Missing optional libraryfolders leaves its installation candidate. */}
   }
   return unique;
 }

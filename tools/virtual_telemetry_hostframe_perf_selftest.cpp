@@ -21,6 +21,7 @@
 #include <type_traits>
 #include <vector>
 #include "json.hpp"
+#include "ipc_result_mailbox.h"
 using json=nlohmann::json;
 static_assert(std::is_same_v<json::allocator_type,std::allocator<json>>);
 struct Count { std::uint64_t calls=0,bytes=0; };
@@ -62,7 +63,12 @@ struct ChildView {bool view=true;};
 static ChildView childA,childB;
 using LPARAM=std::intptr_t;
 static constexpr int WM_GAMEPAD_SERIAL_EVENT=0x410;
+static constexpr int FALSE=0;
 #include "event-struct-extracted.h"
+#ifdef YMCC_SERIAL_ACTION_POWER
+static_assert(std::is_same_v<decltype(GamepadSerialEvent::actionPower),unsigned long long>);
+static_assert(std::is_same_v<decltype(g_gamepadSerialActionPower),unsigned long long>);
+#endif
 
 struct Fixture {
     struct Config {std::string targetStick="right";bool motionTriggerResolved=true,aimingSightsTriggerResolved=true;}g_realStickTest;
@@ -83,6 +89,7 @@ struct Fixture {
     std::vector<std::pair<int,ChildView*>> g_children;
     Counter g_c17aOwnedEvents,g_c17aParityChecks,g_c17aParityFailures;
     GamepadSerialEvent* posted=nullptr;
+    std::uintptr_t postedToken=0;
     const void* wrapperHostAddress=nullptr;const void* envelopeHostAddress=nullptr;
     unsigned sensorSnapshots=0,postCalls=0,ipcCalls=0;
     std::vector<std::pair<int,std::string>> wire;
@@ -91,9 +98,16 @@ struct Fixture {
     struct SensorMeta {bool gyroPresent;};
     SensorMeta inputCaptureSensorMetaSnapshot(){++sensorSnapshots;if(dropWindowDuringSnapshot)g_hwnd=false;return{sensorPresent};}
     bool PostMessageW(bool hwnd,int message,int,LPARAM value){
-        ++postCalls;auto* payload=reinterpret_cast<GamepadSerialEvent*>(value);
+        ++postCalls;
+#ifdef YMCC_SERIAL_EVENT_MAILBOX
+        // ResultMailbox::post holds its lock here: never take in this callback.
+        if(postSuccess)postedToken=static_cast<std::uintptr_t>(value);
+#else
+        auto* payload=reinterpret_cast<GamepadSerialEvent*>(value);
         wrapperHostAddress=objectAddress(payload->data.at("hostFrame"));
-        if(postSuccess)posted=payload;return postSuccess;
+        if(postSuccess)posted=payload;
+#endif
+        return postSuccess;
     }
     void appendNativeLifecycleLog(const char*,const json&){throw std::runtime_error("Unexpected IPC parity mismatch");}
     void ipc_post_json(int id,const json& envelope){
@@ -104,6 +118,16 @@ struct Fixture {
     void ipc_emit(const std::string&,const json&){throw std::runtime_error("Unexpected generic IPC branch");}
 #include "owned-wrappers-extracted.h"
 #include "event-extracted.h"
+    void capturePosted(){
+#ifdef YMCC_SERIAL_EVENT_MAILBOX
+        if(!postedToken)return;
+        const auto token=postedToken;postedToken=0;
+        auto event=g_gamepadSerialEventMailbox->take(token);
+        if(posted)throw std::runtime_error("fixture message slot already occupied");
+        posted=event.release();
+        if(posted)wrapperHostAddress=objectAddress(posted->data.at("hostFrame"));
+#endif
+    }
     void consumePosted(){
         auto* event=posted;posted=nullptr;
         if(!event)return;
@@ -115,7 +139,12 @@ struct Fixture {
         }catch(...){delete event;throw;}
         delete event;
     }
-    ~Fixture(){delete posted;}
+    ~Fixture(){
+#ifdef YMCC_SERIAL_EVENT_MAILBOX
+        if(postedToken)(void)g_gamepadSerialEventMailbox->take(postedToken);
+#endif
+        delete posted;
+    }
 };
 using Builder=json(Fixture::*)();using Poster=void(Fixture::*)();
 struct Outcome {json data;int errorId=0;std::string exception,message;};
@@ -251,15 +280,15 @@ int main(int argc,char**argv){
             }
 #endif
             const bool candidate=std::string(argv[3])=="candidate";const auto index=std::stoll(argv[4]);
-            bool failed=false,consumed=false;std::uint64_t eventAllocations=0;liveBalance=0;liveEnabled=true;
+            bool failed=false,consumed=false,deliveryQueued=false;unsigned observedPostCalls=0;std::uint64_t eventAllocations=0;liveBalance=0;liveEnabled=true;
             {
                 Fixture f=base;failAfter=index;count={};countEnabled=true;
                 try{(f.*(candidate?&Fixture::candidatePost:&Fixture::beforePost))();}catch(const std::bad_alloc&){failed=true;}
-                failAfter=-1;countEnabled=false;eventAllocations=count.calls;consumed=f.hostFrame.is_null();
+                failAfter=-1;countEnabled=false;eventAllocations=count.calls;consumed=f.hostFrame.is_null();deliveryQueued=f.posted!=nullptr;observedPostCalls=f.postCalls;
             }
             liveEnabled=false;
             std::cout<<json({{"pass",true},{"variant",candidate?"candidate":"before"},{"faultIndex",index},
-                {"badAllocCaught",failed},{"eventAllocationCalls",eventAllocations},{"sourceConsumed",consumed},{"liveAllocationBalance",liveBalance}}).dump()<<'\n';return 0;
+                {"badAllocCaught",failed},{"deliveryQueued",deliveryQueued},{"postCalls",observedPostCalls},{"eventAllocationCalls",eventAllocations},{"sourceConsumed",consumed},{"liveAllocationBalance",liveBalance}}).dump()<<'\n';return 0;
         }
         equivalent(base);wrapperEquivalent(base,false);wrapperEquivalent(base,true);
         Fixture empty=base;empty.hostFrame=json::object();equivalent(empty);wrapperEquivalent(empty,true);

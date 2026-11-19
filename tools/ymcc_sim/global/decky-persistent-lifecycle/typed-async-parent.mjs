@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
+import {originalCommittedReadyConsumer} from './owned-run.mjs';
 
 const MODULE = 'tools/ymcc_sim/global/decky-persistent-lifecycle';
 const LEGACY = 'tools/decky_binding_cancel_selftest.cpp';
@@ -32,6 +33,19 @@ export function verifyTypedAsyncReadyExtraction(row,{repo,workRoot,sourcePins}) 
   samePath(row.path,path.join(workRoot,'s/native/decky_wake_ready_consumer.inc'),fail('READY_PATH'));
   assert(inside(workRoot,row.path),fail('READY_SCOPE'));samePath(fs.realpathSync(row.path),row.path,fail('READY_REPARSE'));
   assert.equal(row.sha256,hash(Buffer.from(match[0]+'\n')),fail('READY_BYTES'));assert.equal(digest(row.path),row.sha256,fail('READY_CHANGED'));
+  return row;
+}
+
+// Rebuild the wrapped committed consumer from the pinned frozen main source.
+export function verifyTypedAsyncCommittedReadyExtraction(row,{repo,workRoot,sourcePins}) {
+  const origin='native/main.cpp',sourceFile=path.join(repo,origin),frozenSource=path.join(workRoot,'s',origin);
+  assert.equal(digest(sourceFile),sourcePins.get(origin),fail('COMMITTED_SOURCE_PREBINDING'));
+  samePath(fs.realpathSync(frozenSource),frozenSource,fail('COMMITTED_SOURCE_REPARSE'));
+  assert.equal(digest(frozenSource),sourcePins.get(origin),fail('COMMITTED_FROZEN_SOURCE'));
+  const expected=originalCommittedReadyConsumer(path.join(workRoot,'s'));
+  assert.equal(expected.originSha256,sourcePins.get(origin),fail('COMMITTED_ORIGIN'));
+  assert.deepEqual(row,expected,fail('COMMITTED_EXTRACTION'));
+  assert(inside(workRoot,row.path),fail('COMMITTED_SCOPE'));samePath(fs.realpathSync(row.path),row.path,fail('COMMITTED_REPARSE'));
   return row;
 }
 
@@ -277,7 +291,7 @@ export function validateTypedAsyncRequestParentReceipt(value, {
   const declarationPath = path.join(repo,MODULE,'typed-async-source-inputs.json');
   // Declaration is optional for older sidecar runs; every frozen source still
   // needs an external pin, and both compiler graphs require complete membership.
-  if (sourcePins.has(MODULE+'/typed-async-source-inputs.json') && fs.existsSync(declarationPath)) {
+  if (sourcePins.has(MODULE+'/typed-async-source-inputs.json')) {
     assert.equal(digest(declarationPath), sourcePins.get(MODULE+'/typed-async-source-inputs.json'));
     assert.deepEqual([...sourceSeen].sort(), [...read(declarationPath).files].sort(), fail('SOURCE_DECLARATION_MEMBERSHIP'));
   }
@@ -302,7 +316,9 @@ export function validateTypedAsyncRequestParentReceipt(value, {
   ];
   const readyDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalReadyConsumer(path.join(work,'s'),{write:true})");
   if(sourceMode==='current')assert(readyDeclared,fail('CURRENT_READY_EXTRACTION_REQUIRED'));
-  assert.equal(value.generated.length, 3+(readyDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
+  const committedDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalCommittedReadyConsumer(path.join(work,'s'),{write:true})");
+  if(sourceMode==='current')assert(committedDeclared,fail('CURRENT_COMMITTED_EXTRACTION_REQUIRED'));
+  assert.equal(value.generated.length, 3+(readyDeclared?1:0)+(committedDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
   extractions.forEach((expected, i) => {
     const row = value.generated[i]; assert(expected.begin >= 0 && expected.end > expected.begin, fail('EXTRACTION_BOUNDARY'));
     assert.equal(row.origin, expected.origin); assert.equal(row.originSha256, sourcePins.get(expected.origin));
@@ -313,6 +329,7 @@ export function validateTypedAsyncRequestParentReceipt(value, {
     verify(row, workRoot); compilePins.set(key(row.path), row);
   });
   if(readyDeclared){const ready=verifyTypedAsyncReadyExtraction(value.generated[3],{repo,workRoot,sourcePins});compilePins.set(key(ready.path),ready);}
+  if(committedDeclared){const committed=verifyTypedAsyncCommittedReadyExtraction(value.generated[3+(readyDeclared?1:0)],{repo,workRoot,sourcePins});compilePins.set(key(committed.path),committed);}
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
   const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');

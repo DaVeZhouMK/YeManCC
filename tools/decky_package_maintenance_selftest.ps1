@@ -109,6 +109,14 @@ function Quote-TaskPackageLiteral([string]$Value){return "'"+$Value.Replace("'",
 Write-TaskPackageProgress 'consumer-start' @{skipMutationProof=[bool]$SkipMutationProof;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;executionScope=$taskExecutionScope}
 
 function Need([bool]$Condition,[string]$Message) { if (!$Condition) { throw $Message } }
+# Reject an obsolete compiler manifest before running ordinary file transactions.
+# Actual compiler inputs are still rechecked immediately before Add-Type below.
+if (!$SkipMutationProof) {
+ $fixtureToolManifest=Join-Path $root 'tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.json'
+ $taskFixtureToolExpectedSha256='1d11f644c53635da9ba0c660a0f8f0f515915c8f430289a1124572ed83a37074'
+ Need ((Get-YmccDeckyHash $fixtureToolManifest) -ceq $taskFixtureToolExpectedSha256) 'Fixture compiler manifest identity changed'
+ Write-TaskPackageProgress 'fixture-manifest-admitted' @{manifestSha256=$taskFixtureToolExpectedSha256;compilerStarted=$false;ordinaryCasesStarted=0}
+}
 function Reject([scriptblock]$Action,[string]$Reason) {
   $message=''
   try { & $Action | Out-Null } catch { $message=$_.Exception.Message }
@@ -614,8 +622,7 @@ $taskOrdinaryExecutedCount=@($cases|Where-Object{$_.executed -eq $true}).Count
 # Candidate fixture owner only. New Add-Type/compiler authority must be reviewed
 # and pinned before execution; this proposal has only AST validation.
 if (!$SkipMutationProof -and !$taskBudgetExhausted) {
-$fixtureToolManifest=Join-Path $root 'tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.json'
-Need ((Get-YmccDeckyHash $fixtureToolManifest) -ceq '2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a') 'Fixture compiler manifest identity changed'
+Need ((Get-YmccDeckyHash $fixtureToolManifest) -ceq $taskFixtureToolExpectedSha256) 'Fixture compiler manifest identity changed'
 . (Join-Path $root 'tools/ymcc_sim/global/release-host-environment.ps1')
 $fixtureAuthority=Get-YmccPackageFixtureToolAuthority $fixtureToolManifest
 $fixtureAuthoritySha256=Get-YmccDeckyHash $fixtureToolManifest

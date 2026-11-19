@@ -3,23 +3,40 @@ import{forwardCssRequiredReceipts}from'./css-required-forwarding.mjs';
 import{checkStructuredEvidence}from'../runner.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
 const core='G:\\YeManCC-Work\\Testing\\YMCC';
-const base=path.join(core,'Workspace','DeckyCssRequiredForwarding-20261023');fs.mkdirSync(base,{recursive:true});
-const root=fs.mkdtempSync(path.join(base,'controls-'));let serial=0;
+const evidenceRoot=path.join(core,'Evidence');
+const base=process.env.YMCC_CSS_FORWARDING_EVIDENCE_PARENT||evidenceRoot;
+assert(path.isAbsolute(base),'CSS control evidence parent must be absolute');
+const basePath=path.resolve(base),relativeBase=path.relative(evidenceRoot,basePath);
+assert(basePath===evidenceRoot||relativeBase&&!relativeBase.startsWith('..'+path.sep)&&relativeBase!=='..'&&!path.isAbsolute(relativeBase),'CSS control evidence parent must stay in core Evidence');
+assert.equal(fs.realpathSync(basePath),basePath,'CSS control evidence parent must be canonical');
+const root=fs.mkdtempSync(path.join(basePath,'CssRequiredForwarding-'));let serial=0;
+const capturedCase=process.env.YMCC_CSS_CAPTURED_CASE;
+const capturedMapSha=process.env.YMCC_CSS_CAPTURED_MAP_SHA256;
+const capturedRequested=capturedCase!==undefined||capturedMapSha!==undefined;
+const captureSkip=capturedRequested?false:'NOT_RUN: explicit absolute YMCC_CSS_CAPTURED_CASE and YMCC_CSS_CAPTURED_MAP_SHA256 were not supplied';
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const required=['appearance-retired-ui.json','appearance-observe-only-validation.json','appearance-refresh/result.json','appearance-native/result.json'];
 const dependencies=['appearance-observe-only-result/observe-only-business-failure.json','appearance-observe-only-harness.ps1','appearance-observe-only-negative/steam-appearance.ps1'];
-const write=(p,b)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);};
+const write=(p,b)=>{const relative=path.relative(root,path.resolve(p));assert(relative&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative),'Only this invocation owns mutable scratch');fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);};
+const plainSource=(p)=>{assert(path.isAbsolute(p),'Captured source must be absolute');const absolute=path.resolve(p);assert.equal(fs.realpathSync(absolute),absolute,'Captured source alias');for(let current=absolute;;current=path.dirname(current)){assert(!fs.lstatSync(current).isSymbolicLink(),'Captured source reparse alias');if(path.dirname(current)===current)break;}return absolute;};
 const json=(p,j)=>write(p,JSON.stringify(j,null,2)+'\n');
 function fixture(captured=false){
  const caseDir=path.join(root,'case-'+(++serial)),out=path.join(caseDir,'decky-update-recovery'),canonical=path.join(out,'css-appearance-worker','css'),mapPath=path.join(out,'css-appearance-worker','CSS-RAW-MAP.json');
  fs.mkdirSync(canonical,{recursive:true});let source=path.join(root,'absent-original-source');let originalMap=null,originalCase=null;
  if(captured){
-  originalCase=path.join(core,'Evidence','Build','DeckyCssParallelIntegration-20261023','formal-r8','2026-10-23T09-45-51-779Z-548d72fb','cases','plugins.decky-update-recovery','decky-update-recovery');
-  originalMap=JSON.parse(fs.readFileSync(path.join(originalCase,'css-appearance-worker','CSS-RAW-MAP.json'),'utf8'));source=originalMap.source;
+  assert(typeof capturedCase==='string'&&typeof capturedMapSha==='string','Explicit captured case and map SHA must be supplied together');
+  assert(/^[a-f0-9]{64}$/.test(capturedMapSha),'Explicit captured map SHA256 required');
+  originalCase=plainSource(capturedCase);assert.equal(path.basename(originalCase),'decky-update-recovery');
+  const originalMapPath=plainSource(path.join(originalCase,'css-appearance-worker','CSS-RAW-MAP.json')),originalMapBytes=fs.readFileSync(originalMapPath);
+  assert.equal(hash(originalMapBytes),capturedMapSha,'Captured map identity changed');
+  originalMap=JSON.parse(originalMapBytes.toString('utf8').replace(/^\uFEFF/,''));
+  assert.equal(originalMap.schemaVersion,1);assert.equal(originalMap.byteExact,true);assert(Array.isArray(originalMap.files));
+  assert.equal(originalMap.canonical,path.join(originalCase,'css-appearance-worker','css'));plainSource(originalMap.canonical);
+  assert(path.isAbsolute(originalMap.source));source=originalMap.source;
  }
  const contents=new Map();
  for(const relative of [...required,...dependencies]){
-  let bytes;if(captured)bytes=fs.readFileSync(path.join(originalMap.canonical,relative));
+  let bytes;if(captured){const originalPath=plainSource(path.join(originalMap.canonical,relative)),rows=originalMap.files.filter(row=>row.path===originalPath);assert.equal(rows.length,1,'Unique captured map row required');const row=rows[0];assert.equal(row.source,path.join(originalMap.source,relative));bytes=fs.readFileSync(originalPath);assert.equal(bytes.length,row.bytes,'Captured bytes changed');assert.equal(hash(bytes),row.sha256,'Captured raw identity changed');}
   else if(relative===required[1])continue;
   else bytes=Buffer.from(relative===dependencies[0]?'{"status":"FAIL","originalNegative":true}\n':relative.endsWith('.json')?'{"status":"PASS","syntheticControl":true}\n':'# synthetic dependency '+relative+'\n');
   contents.set(relative,bytes);
@@ -56,11 +73,18 @@ test('authoritative map and in-memory files cannot disagree',()=>{const f=fixtur
 test('duplicate JSON map keys refuse rather than last-value wins',()=>{const f=fixture();const s=fs.readFileSync(f.mapPath,'utf8').replace('"schemaVersion": 1','"schemaVersion": 1, "schemaVersion": 1');write(f.mapPath,s);f.cssRaw.map.sha256=hash(Buffer.from(s));assert.throws(()=>run(f),/DUPLICATE_JSON_KEY/);});
 test('existing output is preserved and all destinations preflight before publication',()=>{const f=fixture();const p=path.join(f.out,required[3]);write(p,'sentinel');assert.throws(()=>run(f),/OUTPUT_EXISTS/);assert.equal(fs.readFileSync(p,'utf8'),'sentinel');assert(!fs.existsSync(path.join(f.out,required[0])));});
 test('real junction outside exact case refuses',()=>{const f=fixture(),own=path.join(f.canonical,'appearance-observe-only-result'),foreign=path.join(root,'foreign-'+serial);fs.mkdirSync(foreign);fs.copyFileSync(path.join(own,'observe-only-business-failure.json'),path.join(foreign,'observe-only-business-failure.json'));fs.unlinkSync(path.join(own,'observe-only-business-failure.json'));fs.rmdirSync(own);fs.symlinkSync(foreign,own,'junction');assert.throws(()=>run(f),/REALPATH_ALIAS_OR_ESCAPE|REPARSE_ALIAS_OR_ESCAPE/);});
-test('captured real r8 receipts retain original bytes and negative while unmodified public gate accepts derived transfer',()=>{
+test('captured real receipts retain original bytes and negative while unmodified public gate accepts derived transfer',{skip:captureSkip},()=>{
  const f=fixture(true),originals=new Map([...f.contents].map(([rel])=>{const p=path.join(f.originalMap.canonical,rel);return[p,hash(fs.readFileSync(p))];}));
- const prior=check(f,'css-appearance-worker/css/'+required[1]);assert.equal(prior.failed,true);assert.equal(prior.paths[0].sourceMismatches.length,3);
+ const originalMapPath=path.join(f.originalCase,'css-appearance-worker','CSS-RAW-MAP.json');
+ const validation=JSON.parse(f.contents.get(required[1]).toString('utf8').replace(/^\uFEFF/,''));
+ assert.equal(validation.status,'PASS');assert.equal(Object.keys(validation.sourceHashes).length,3);
+ // Original Workspace paths are outside this private case; the unchanged
+ // public source gate must refuse all three before the explicit derivation.
+ const expectedMismatches=Object.keys(validation.sourceHashes).sort();
+ const prior=check(f,'css-appearance-worker/css/'+required[1]);assert.equal(prior.failed,true);assert.equal(prior.paths[0].sourceMismatches.length,3);assert.deepEqual(prior.paths[0].sourceMismatches.slice().sort(),expectedMismatches);
  const rows=run(f);const next=check(f,required[1]);assert.equal(next.failed,false);assert.equal(next.missing,false);assert.equal(rows.filter(x=>x.byteExact).length,3);
  const raw=JSON.parse(fs.readFileSync(path.join(f.canonical,dependencies[0])));assert.equal(raw.status,'FAIL');for(const[p,h]of originals)assert.equal(hash(fs.readFileSync(p)),h);
- const evidence=path.join(core,'Evidence','DeckyCssRequiredForwarding-20261023');fs.mkdirSync(evidence,{recursive:true});
- json(path.join(evidence,'CAPTURED-R8-TRANSFER-CONTROL.json'),{schemaVersion:1,status:'TRANSFER_CONTROL_PASSED',syntheticOwnedCase:f.caseDir,scope:'Seven captured raw receipts/dependencies in a derived seven-row map. Original public run, full worker map and verdict unchanged; no native/process/business rerun.',originalMap:{path:path.join(f.originalCase,'css-appearance-worker','CSS-RAW-MAP.json'),sha256:hash(fs.readFileSync(path.join(f.originalCase,'css-appearance-worker','CSS-RAW-MAP.json')))},priorGate:prior,derivedGate:next,forwarding:rows,rawBusinessStatus:raw.status,originalInputs:[...originals].map(([path,sha256])=>({path,sha256})),originalR8Verdict:'FAIL',newPublicRunExecuted:false});
+ assert.equal(hash(fs.readFileSync(originalMapPath)),capturedMapSha,'Original captured map must remain unchanged');
+ fs.writeFileSync(path.join(root,'CAPTURED-TRANSFER-CONTROL.json'),JSON.stringify({schemaVersion:1,status:'TRANSFER_CONTROL_PASSED',ownedCase:f.caseDir,scope:'Seven genuine captured raw receipts/dependencies in a private derived seven-row map; original source read only; no CSS business/native/parent rerun.',originalMap:{path:originalMapPath,sha256:capturedMapSha,bytes:fs.statSync(originalMapPath).size},priorGate:prior,expectedSourceMismatches:expectedMismatches,derivedGate:next,forwarding:rows,rawBusinessStatus:raw.status,originalInputs:[...originals].map(([path,sha256])=>({path,sha256,bytes:fs.statSync(path).size})),newPublicRunExecuted:false},null,2)+'\n',{flag:'wx'});
 });
+test.after(()=>fs.writeFileSync(path.join(root,'CONTROL-SCOPE.json'),JSON.stringify({schemaVersion:1,root,syntheticRegistered:13,capturedRegistered:1,capturedRequested,capturedSource:capturedRequested?{case:capturedCase,mapSha256:capturedMapSha}:null,capturedSelectionAvailability:capturedRequested?'EXPLICIT_SOURCE_SUPPLIED':'NOT_RUN',noBusinessProducerExecuted:true},null,2)+'\n',{flag:'wx'}));

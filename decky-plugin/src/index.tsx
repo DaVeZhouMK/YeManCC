@@ -24,7 +24,12 @@ declare const __YMCC_DECKY_PANEL_STYLE__: string;
 declare const SP_REACT: any;
 declare const SP_REACTDOM: any;
 declare const DFL: any;
-declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean}; } }
+declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean;connectionReady?:boolean;connectionVerified?:boolean;connectionChecking?:boolean;connectionState?:string;qamReady?:boolean}; } }
+declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean;connectionReady?:boolean;connectionVerified?:boolean;connectionChecking?:boolean;connectionState?:string;qamReady?:boolean}; } }
+// Import evaluation may finish after the public Loader timeout. Acquire owners
+// only when Decky actually invokes its plugin factory, so an abandoned module
+// cannot leave a socket, timer, tab or ready receipt without onDismount ownership.
+export default function createYmccPlugin() {
 const React = SP_REACT;
 const panelStyle=typeof __YMCC_DECKY_PANEL_STYLE__==='string'?__YMCC_DECKY_PANEL_STYLE__:'grouped';
 const disposeHudProbe = typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__
@@ -33,13 +38,30 @@ const { PanelSection, PanelSectionRow, SliderField, DropdownItem, ToggleField, B
 if (typeof useQuickAccessVisible !== 'function') throw new Error('YMCC QAM 可见性需要 Decky API 2；未启动镜像连接');
 if (!SliderField || !DropdownItem || !ToggleField) throw new Error('YMCC 需要 Steam 原生调节控件；未启动镜像连接');
 const client = new MirrorClient({ bootstrap: () => window.__YMCC_DECKY_MIRROR__, socket: url => new WebSocket(url),
+  connectionCheckCompleted:()=>{if(!dismounted)window.dispatchEvent(new Event('ymcc-decky-connection-result'));},
+  transportDisconnected:facts=>{try{window.console.info('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'mirror-disconnect',...facts}));}catch{}},
+  tdpActionSettled:facts=>{try{window.console.info('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'tdp-action-settled',...facts}));}catch{}},
   schedule: (action, delay) => setTimeout(action, delay), cancel: handle => clearTimeout(handle), clientId: crypto.randomUUID(),buildId:typeof __YMCC_DECKY_BUILD_ID__==='string'?__YMCC_DECKY_BUILD_ID__:undefined,steam:() => observeSteamRunning(DFL.Router) });
 // Keep the authenticated link while loaded; hidden QAM requests no business snapshots.
 client.setPassiveDemand('connection',true);
-const disposeMonitorHud = typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__ ? null
-  : installSteamMonitorHud({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
-const disposeWallpaper=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installSteamWallpaper({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
-const disposeLoaderUpdate=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installLoaderUpdateRow({host:window,ui:DFL,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,routerHook,client});
+const {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate}=(()=>{
+  const initialized:Array<()=>void>=[];
+  try{
+    const disposeMonitorHud=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null
+      :installSteamMonitorHud({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
+    if(disposeMonitorHud)initialized.push(disposeMonitorHud);
+    const disposeWallpaper=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installSteamWallpaper({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
+    if(disposeWallpaper)initialized.push(disposeWallpaper);
+    const disposeLoaderUpdate=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installLoaderUpdateRow({host:window,ui:DFL,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,routerHook,client});
+    return {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate};
+  }catch(error){
+    // A rejected module has no onDismount callback. Return the owners already
+    // acquired, including the entry's shared transport, before preserving error.
+    for(const dispose of initialized.reverse()){try{dispose();}catch{}}
+    try{client.dispose('plugin-initialization-failed');}catch{}
+    throw error;
+  }
+})();
 // Views own gestures/subscriptions, the plugin owns accepted commands. Detached
 // queues survive QAM unmount and are reused on reentry, then release all demand.
 type ContentIntents={performance:PerformanceIntentQueue<MirrorSnapshot>;fan:FanChoiceDebounce;attached:boolean;hide:()=>void;detach:()=>void;dispose:()=>void};
@@ -71,6 +93,8 @@ const performanceChoice=new PerformanceIntentQueue<MirrorSnapshot>({confirmOnSna
 }
 const bootstrapListener = () => client.bootstrapChanged();
 window.addEventListener('ymcc-decky-bootstrap',bootstrapListener);
+const qamConnectionListener=()=>{void client.checkConnectionOnOpen().catch(()=>false);};
+window.addEventListener('ymcc-decky-connection-check',qamConnectionListener);
 // Recover a missed initial native notification even when no sidebar, wallpaper
 // or updater owns transport yet. The existing observation lease reads only the
 // native property and shares the client's original capped local retry. It ends
@@ -94,6 +118,7 @@ const consoleIcon = <svg aria-label="野蛮系统控制台" role="img" viewBox="
   <path d="M4.5 4H8L12 10.5L16 4H19.5L13.5 13.25V20H10.5V13.25Z" />
 </svg>;
 const placement = installConsoleTab(DFL, window, directContent, consoleIcon);
+const directConsoleInstalled = placement.active;
 const fieldLabels: Record<string, string> = { audioOptimization:'掌机专用低音强化', monitor:'监控总开关', padPersona: '虚拟手柄', gyroEnabled: '陀螺仪', gyroPreset: '陀螺仪预设', speedFactor: '游戏变速', losslessScaling: 'LosslessScaling 插帧' };
 const labelStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', width: '100%', fontSize: '12px', lineHeight: '16px' };
 const smallLabel = (label: string) => <span className="ymcc-field-label">{label}</span>;
@@ -435,18 +460,36 @@ function Content() {
 // Steam can reload its shared page before Loader calls onDismount. Remove only our
 // own tab/array receipts and connection while the old context is still alive.
 let dismounted = false;
-function dismount() {
+const pagehideListener=()=>dismount('plugin-pagehide');
+function dismount(source:'plugin-disposed'|'plugin-pagehide'='plugin-disposed') {
   if (dismounted) return;
   dismounted = true;
-  stopBootstrapReconcile();
-  window.removeEventListener('pagehide',dismount);
-  if(window.__YMCC_DECKY_FRONTEND__===frontendReceipt)delete window.__YMCC_DECKY_FRONTEND__;
-  window.removeEventListener('ymcc-decky-bootstrap',bootstrapListener);
-  disposeLoaderUpdate?.(); disposeWallpaper?.(); disposeMonitorHud?.(); disposeHudProbe?.(); for(const intents of activeContentIntents)intents.dispose(); activeContentIntents.clear(); client.dispose(); placement.dispose();
+  // Independent owners must all release, even when a stale Steam surface fails.
+  // Fixed stage names give one bounded diagnostic per failure, without raw errors.
+  const cleanup=(stage:string,release:()=>void)=>{try{release();}catch{try{window.console?.warn?.('[YMCC:Decky] cleanup-failed:'+stage);}catch{}}};
+  cleanup('bootstrap-reconcile',stopBootstrapReconcile);
+  cleanup('pagehide-listener',()=>window.removeEventListener('pagehide',pagehideListener));
+  cleanup('frontend-receipt',()=>{if(window.__YMCC_DECKY_FRONTEND__===frontendReceipt)delete window.__YMCC_DECKY_FRONTEND__;});
+  cleanup('bootstrap-listener',()=>window.removeEventListener('ymcc-decky-bootstrap',bootstrapListener));
+  cleanup('connection-listener',()=>window.removeEventListener('ymcc-decky-connection-check',qamConnectionListener));
+  cleanup('loader-update',()=>disposeLoaderUpdate?.());
+  cleanup('wallpaper',()=>disposeWallpaper?.());
+  cleanup('monitor-hud',()=>disposeMonitorHud?.());
+  cleanup('hud-probe',()=>disposeHudProbe?.());
+  for(const intents of activeContentIntents)cleanup('content-intents',()=>intents.dispose());
+  activeContentIntents.clear();
+  cleanup('client',()=>client.dispose(source));
+  cleanup('placement',()=>placement.dispose());
 }
-const frontendReceipt=Object.freeze({buildId:__YMCC_DECKY_BUILD_ID__,active:true});
+const frontendReceipt=Object.freeze({buildId:__YMCC_DECKY_BUILD_ID__,active:true,
+  get connectionReady(){return !dismounted && client.connectionReady(window.__YMCC_DECKY_MIRROR__?.runId);},
+  get connectionVerified(){return !dismounted && client.connectionVerified(window.__YMCC_DECKY_MIRROR__?.runId);},
+  get connectionChecking(){return !dismounted && client.connectionChecking(window.__YMCC_DECKY_MIRROR__?.runId);},
+  get connectionState(){return dismounted?'module-dismounted':client.connectionDiagnostic(window.__YMCC_DECKY_MIRROR__?.runId);},
+  get qamReady(){return !dismounted && (!directConsoleInstalled || placement.active);}});
 Object.defineProperty(window,'__YMCC_DECKY_FRONTEND__',{value:frontendReceipt,configurable:true});
 window.dispatchEvent(new Event('ymcc-decky-frontend-ready'));
-window.addEventListener('pagehide',dismount);
-export default () => ({ alwaysRender: true, name: '野蛮系统控制台', titleView: <></>, content: placement.active ? null : directContent,
-  icon: consoleIcon, onDismount: dismount });
+window.addEventListener('pagehide',pagehideListener);
+return { alwaysRender: true, name: '野蛮系统控制台', titleView: <></>, content: placement.active ? null : directContent,
+  icon: consoleIcon, onDismount: ()=>dismount() };
+}

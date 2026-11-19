@@ -5,15 +5,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, {after} from 'node:test';
 import {verifyNativeResourceReference} from './release-resource-reference.mjs';
 import {resourceCacheReferenceContract} from '../../decky_resource_cache_selftest.mjs';
 import {resourceWorkerReferenceContract} from '../../decky_resource_worker_selftest.mjs';
 import {resourceFixtureEnvironment} from '../global/decky-persistent-lifecycle/baseline-environment.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
 
-const CONTROLS = path.join(simulationCorePath('Evidence'), 'FixtureIntake-20261030', 'Continuation-20261031',
-  'FullReleaseActual-20261031', 'CostFollowup', 'ResourceControls');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const pin = file => ({path:path.resolve(file),sha256:hash(file)});
 const write = (file, value) => {
@@ -23,10 +21,38 @@ const write = (file, value) => {
 };
 const key = file => path.resolve(file).toLowerCase();
 const time = ms => new Date(Date.UTC(2026, 9, 31, 12, 0, 0) + ms).toISOString();
+const batchPrefix = 'resource-reference-controls-';
+let ownedBatch, resourceTestFailed = false;
+function fixtureBatch() {
+  if (!ownedBatch) {
+    const workspace = simulationCorePath('Workspace'), parent = fs.lstatSync(workspace);
+    assert(parent.isDirectory() && !parent.isSymbolicLink() && key(fs.realpathSync.native(workspace)) === key(workspace));
+    const root = fs.mkdtempSync(path.join(workspace,batchPrefix));
+    ownedBatch = {workspace,root,identity:fs.lstatSync(root,{bigint:true})};
+  }
+  return ownedBatch.root;
+}
+function resourceTest(name, run) {
+  test(name,t => {
+    let passed = false;
+    try { run(); passed = true; }
+    finally { if (!passed || t.signal.aborted) resourceTestFailed = true; }
+  });
+}
+after(() => {
+  if (!ownedBatch) return;
+  const {workspace,root,identity} = ownedBatch;
+  if (resourceTestFailed) { console.error('Retained failed resource reference controls: ' + root); return; }
+  assert.equal(path.dirname(path.resolve(root)),workspace);
+  assert(path.basename(root).startsWith(batchPrefix));
+  const current = fs.lstatSync(root,{bigint:true});
+  assert(current.isDirectory() && !current.isSymbolicLink() && current.dev === identity.dev && current.ino === identity.ino);
+  assert.equal(key(fs.realpathSync.native(root)),key(root));
+  fs.rmSync(root,{recursive:true,force:false});
+});
 
-function fixture(family = 'worker', parameterizedCache = false) {
-  fs.mkdirSync(CONTROLS, {recursive:true});
-  const root = fs.mkdtempSync(path.join(CONTROLS, 'inert-' + family + '-'));
+function fixture(family = 'worker', {parameterizedCache = false, deferReceipts = false} = {}) {
+  const root = fs.mkdtempSync(path.join(fixtureBatch(), 'inert-' + family + '-'));
   const repo = path.join(root, 'repository'), core = path.join(root, 'core');
   const baselineFile = path.join(core, 'Evidence', 'parent', 'baseline', 'result.json');
   const baselineProcessFile = path.join(core, 'Evidence', 'parent', 'processes', 'original.json');
@@ -213,15 +239,15 @@ function fixture(family = 'worker', parameterizedCache = false) {
   }
   const options = {family,repoRoot:repo,coreRoot:core,baselineResult:baselineFile,baselineValue,originalProcess,baselineProcessFile,
     sourceInputs,toolArtifacts,expectedEnvironment,nativeTools,contract};
-  refresh();
+  if (!deferReceipts) refresh();
   return {root,repo,core,out,work,entry,result,baselineValue,originalProcess,baselineProcessFile,sourceInputs,toolArtifacts,
     options,owner,workspace,graph,controls,contract,frozen,audit,cpp,refresh,verify:() => verifyNativeResourceReference(options)};
 }
 function rejected(change, pattern = /RESOURCE_REFERENCE_/, family = 'worker') {
-  const f = fixture(family); change(f); f.refresh(); assert.throws(f.verify,pattern); return f;
+  const f = fixture(family,{deferReceipts:true}); change(f); f.refresh(); assert.throws(f.verify,pattern); return f;
 }
 
-test('INERT resource valid cache and worker metadata retain every original negative FAIL and produce references only', () => {
+resourceTest('INERT resource valid cache and worker metadata retain every original negative FAIL and produce references only', () => {
   for (const family of ['cache','worker']) {
     const f = fixture(family), reference = f.verify();
     assert.equal(reference.status,'SHARED_REFERENCE'); assert.equal(reference.executedThisRun,false);
@@ -242,7 +268,7 @@ test('INERT resource valid cache and worker metadata retain every original negat
   }
 });
 
-test('INERT resource old receipts, missing real PIDs, owner identity and incomplete environment reject', () => {
+resourceTest('INERT resource old receipts, missing real PIDs, owner identity and incomplete environment reject', () => {
   rejected(f => { delete f.baselineValue.resourceExecutions; }, /RESOURCE_REFERENCE_ENVELOPE_MISSING/);
   rejected(f => { delete f.originalProcess.pid; }, /RESOURCE_REFERENCE_PARENT_PID_MISSING/);
   rejected(f => { delete f.entry.caller.pid; }, /RESOURCE_REFERENCE_PARENT_PID_MISSING/);
@@ -253,7 +279,7 @@ test('INERT resource old receipts, missing real PIDs, owner identity and incompl
   rejected(f => { delete f.controls[0].execution.build.environment.SystemRoot; }, /RESOURCE_REFERENCE_ENVIRONMENT_INCOMPLETE/);
 });
 
-test('INERT resource original process/result/raw logs and source or mutation bytes cannot be substituted', () => {
+resourceTest('INERT resource original process/result/raw logs and source or mutation bytes cannot be substituted', () => {
   const f = fixture(); write(f.entry.files.result.path,'{"pass":true}\n'); assert.throws(f.verify,/RESOURCE_REFERENCE_PIN_HASH/);
   const p = fixture(); write(p.baselineProcessFile,{...p.originalProcess,pid:9999}); assert.throws(p.verify,/RESOURCE_REFERENCE_PARENT_PROCESS_OBJECT_CHANGED/);
   rejected(g => { g.baselineValue.resourceWorker = {...g.result,installedWrites:1}; }, /RESOURCE_REFERENCE_RESULT_NOT_ORIGINAL/);
@@ -262,7 +288,7 @@ test('INERT resource original process/result/raw logs and source or mutation byt
   const source = fixture(); fs.appendFileSync(path.join(source.repo,source.contract.module),'tamper'); assert.throws(source.verify,/RESOURCE_REFERENCE_PIN_HASH/);
 });
 
-test('INERT resource positive-only opts, omitted or duplicate negatives and reduced worker14 scope reject', () => {
+resourceTest('INERT resource positive-only opts, omitted or duplicate negatives and reduced worker14 scope reject', () => {
   rejected(f => { f.entry.options.mutations = false; }, /RESOURCE_REFERENCE_OPTIONS/);
   rejected(f => { f.originalProcess.arguments.push('--positive-only'); }, /RESOURCE_REFERENCE_PARENT_ARGUMENTS/);
   rejected(f => { f.controls.pop(); }, /RESOURCE_REFERENCE_RUN_SCOPE/);
@@ -274,19 +300,19 @@ test('INERT resource positive-only opts, omitted or duplicate negatives and redu
   rejected(f => { f.controls[0].native.cases.find(row => row.name === 'stalled callback actual resources at deadline').name = 'INERT unknown replacement'; }, /RESOURCE_REFERENCE_NATIVE_CASE_SCOPE/);
 });
 
-test('INERT resource undeclared tools and unknown compiler/link dependency scope reject', () => {
+resourceTest('INERT resource undeclared tools and unknown compiler/link dependency scope reject', () => {
   rejected(f => { f.toolArtifacts.splice(f.toolArtifacts.findIndex(row => row.path === f.graph.selected.compiler),1); }, /RESOURCE_REFERENCE_TOOL_UNDECLARED/);
   rejected(f => { f.controls[0].dependencies.Data.Includes.push(path.join(f.root,'unknown.h')); }, /RESOURCE_REFERENCE_COMPILER_INPUT_UNDECLARED/);
   rejected(f => { f.graph.selected = {...f.graph.selected,compiler:path.join(f.root,'unknown-cl.exe')}; }, /RESOURCE_REFERENCE_SELECTED_TOOLS/);
   rejected(f => { f.controls[0].execution.actualLinkLibraries = []; }, /RESOURCE_REFERENCE_LINK_TRACE_SCOPE/);
 });
 
-test('INERT resource producer/child time windows reject; receipt overhead alone does not change original spawn budgets', () => {
+resourceTest('INERT resource producer/child time windows reject; receipt overhead alone does not change original spawn budgets', () => {
   rejected(f => { f.entry.startedAt = time(-1); }, /RESOURCE_REFERENCE_PRODUCER_OUTSIDE_PARENT/);
   rejected(f => { f.entry.finishedAt = time(700000); }, /RESOURCE_REFERENCE_PRODUCER_OUTSIDE_PARENT/);
   rejected(f => { f.controls[0].execution.run.startedAt = time(500001); }, /RESOURCE_REFERENCE_PROCESS_WINDOW/);
   rejected(f => { f.controls[0].execution.run.startedAt = time(9); }, /RESOURCE_REFERENCE_PROCESS_WINDOW/);
-  const overhead = fixture();
+  const overhead = fixture('worker',{deferReceipts:true});
   for (const [i,control] of overhead.controls.entries()) {
     control.execution.build.startedAt = time(20 + i * 100000); control.execution.build.elapsedMs = 60000.5;
     control.execution.run.startedAt = time(60022 + i * 100000); control.execution.run.elapsedMs = 30000.5;
@@ -296,18 +322,18 @@ test('INERT resource producer/child time windows reject; receipt overhead alone 
   rejected(f => { f.controls[0].execution.build.budgetMs = 60001; }, /RESOURCE_REFERENCE_PROCESS_BUDGET/);
 });
 
-test('INERT resource unknown family/path/case/environment and reparse artifact ancestry reject', () => {
+resourceTest('INERT resource unknown family/path/case/environment and reparse artifact ancestry reject', () => {
   const family = fixture(); assert.throws(() => verifyNativeResourceReference({...family.options,family:'other'}),/RESOURCE_REFERENCE_UNKNOWN_FAMILY/);
   rejected(f => { f.controls[0].paths.temp = path.join(f.root,'outside-temp'); }, /RESOURCE_REFERENCE_PATHS_SCOPE/);
   rejected(f => { f.controls[0].native.cases[0].name = 'INERT unknown scope'; }, /RESOURCE_REFERENCE_NATIVE_CASE_SCOPE/);
   rejected(f => { f.entry.environment.UNDECLARED = 'inert'; }, /RESOURCE_REFERENCE_ENVIRONMENT_SCOPE/);
   rejected(f => { f.sourceInputs.push({path:'../unknown.cpp',sha256:'0'.repeat(64)}); }, /RESOURCE_REFERENCE_SOURCE_PATH_INVALID/);
-  const linked = fixture(), dir = path.join(linked.root,'reparse-alias'); fs.symlinkSync(path.dirname(linked.controls[0].execution.build.stdout.path),dir,'junction');
+  const linked = fixture('worker',{deferReceipts:true}), dir = path.join(linked.root,'reparse-alias'); fs.symlinkSync(path.dirname(linked.controls[0].execution.build.stdout.path),dir,'junction');
   linked.controls[0].execution.build.stdout = {...linked.controls[0].execution.build.stdout,path:path.join(dir,'build.stdout.log')};
   linked.refresh(); assert.throws(linked.verify,/RESOURCE_REFERENCE_PIN_PATH|RESOURCE_REFERENCE_REPARSE_PATH/);
 });
 
-test('INERT resource actual FAIL, wrong semantic failure and non-natural exits are never admitted as a shared success', () => {
+resourceTest('INERT resource actual FAIL, wrong semantic failure and non-natural exits are never admitted as a shared success', () => {
   rejected(f => { f.result.pass = false; }, /RESOURCE_REFERENCE_RESULT_NOT_PASS/);
   rejected(f => { f.originalProcess.exitCode = 2; }, /RESOURCE_REFERENCE_PARENT_EXIT/);
   rejected(f => { const c=f.controls[0].native.cases[0];c.pass=false;c.error='INERT failure';f.controls[0].native.passed--;f.controls[0].native.pass=false; }, /RESOURCE_REFERENCE_NATIVE_VERDICT/);
@@ -326,8 +352,8 @@ function changeBoundCpp(f, change) {
   const audit = f.audit.rows.find(item => item.path === f.cpp);
   audit.beforeSha256 = audit.afterSha256 = row.sha256; audit.captured = pin(row.captured);
 }
-test('INERT cache five parameter families expand exact93 names; missing duplicate unknown or runtime substitutions reject', () => {
-  const good = fixture('cache', true); assert.equal(good.verify().ordinaryCases, 93);
+resourceTest('INERT cache five parameter families expand exact93 names; missing duplicate unknown or runtime substitutions reject', () => {
+  const good = fixture('cache',{parameterizedCache:true}); assert.equal(good.verify().ordinaryCases, 93);
   const badSource = [
     [text => text.replace('"trailing"};\nfor(const auto& kind:slotStorm)', '"duplicate"};\nfor(const auto& kind:slotStorm)'), /SOURCE_PARAMETER_VALUES/],
     [text => text.replace('"storm IO "+kind+', '"unknown IO "+kind+'), /SOURCE_PARAMETER_FAMILY/],
@@ -335,18 +361,18 @@ test('INERT cache five parameter families expand exact93 names; missing duplicat
     [text => text.replace('"storm IO "+kind+', '"storm IO "+other+'), /SOURCE_PARAMETER_EXPRESSION/],
   ];
   for (const [change, pattern] of badSource) {
-    const f = fixture('cache', true); changeBoundCpp(f, change); f.refresh(); assert.throws(f.verify, pattern);
+    const f = fixture('cache',{parameterizedCache:true,deferReceipts:true}); changeBoundCpp(f, change); f.refresh(); assert.throws(f.verify, pattern);
   }
   for (const action of [
     rows => { rows.find(row => row.name.startsWith('storm slot ')).name = 'unknown runtime substitution'; },
     rows => { const i = rows.findIndex(row => row.name.startsWith('storm slot ')); rows[i].name = rows[i + 1].name; },
     rows => { rows.splice(rows.findIndex(row => row.name.startsWith('storm slot ')), 1); },
   ]) {
-    const f = fixture('cache', true); action(f.controls[0].native.cases); f.refresh();
+    const f = fixture('cache',{parameterizedCache:true,deferReceipts:true}); action(f.controls[0].native.cases); f.refresh();
     assert.throws(f.verify, /RESOURCE_REFERENCE_NATIVE_(CASE_SCOPE|CASE_COUNT|COUNT)/);
   }
 });
-test('INERT official Loader data requires exact parent source binding and cannot borrow tool authority', () => {
+resourceTest('INERT official Loader data requires exact parent source binding and cannot borrow tool authority', () => {
   const good = fixture(); assert(!good.toolArtifacts.some(row => row.path === good.graph.officialData.path));
   assert.equal(good.verify().status, 'SHARED_REFERENCE');
   rejected(f => { f.sourceInputs.splice(f.sourceInputs.findIndex(row => row.path === 'PowerControl/decky/PluginLoader_noconsole.exe'), 1); f.toolArtifacts.push(f.graph.officialData); }, /SOURCE_UNDECLARED/);
@@ -356,8 +382,8 @@ test('INERT official Loader data requires exact parent source binding and cannot
 });
 
 // These owned-producer receipts are INERT metadata too; the existing verifier is the consumer.
-function ownedMetadataFixture(family){
- const f=fixture(family),base=path.dirname(f.out),owned=path.join(base,'owned-resource-'+family);
+function ownedMetadataFixture(family,{deferOwnedReceipts=false}={}){
+ const f=fixture(family,{deferReceipts:true}),base=path.dirname(f.out),owned=path.join(base,'owned-resource-'+family);
  const shell=pin(write(path.join(f.root,'INERT-tools/pwsh.exe'),'INERT shell, never executed\n'));
  f.toolArtifacts.push(shell);
  const hostRelative='tools/ymcc_sim/global/host-process.ps1',host=pin(write(path.join(f.repo,hostRelative),'INERT helper source, never executed\n'));
@@ -380,25 +406,39 @@ function ownedMetadataFixture(family){
   proof.rawExecution={terminal:pin(terminalFile),request:pin(requestFile),arguments:pin(argumentFile),collectionComplete:true,actualBusiness:business,helperSource:host,helperPid:terminal.launcher.pid,job,completion:{kind:'NATURAL',forcedToolFinalization:false,productResourcesWaived:false}};
   write(processFile,proof);f.entry.ownedProducer={schemaVersion:1,mode:'complete-original-cli',process:pin(processFile)};f.refresh();
  }
- refreshOwned();return {...f,terminal,proof,filetime,refreshOwned};
+ if(!deferOwnedReceipts)refreshOwned();
+ return {...f,terminal,proof,filetime,refreshOwned};
 }
-test('INERT owned resource full-reference binds actual child owner and native lifetime without replay',()=>{
+resourceTest('INERT owned resource full-reference binds actual child owner and native lifetime without replay',()=>{
  for(const family of ['cache','worker']){const good=ownedMetadataFixture(family),result=good.verify();assert.equal(result.status,'SHARED_REFERENCE');assert.equal(result.ordinaryCases,good.contract.positiveCaseCount);assert.equal(result.originalNegativeFailuresPreserved.length,good.contract.mutants.length);assert.equal(result.originalProducerExecutionsByThisReference,0);}
- const staleOwner=ownedMetadataFixture('worker');staleOwner.owner.processId=staleOwner.originalProcess.pid;staleOwner.refreshOwned();assert.throws(staleOwner.verify,/RESOURCE_REFERENCE_OWNER_PID/);
+ const staleOwner=ownedMetadataFixture('worker',{deferOwnedReceipts:true});staleOwner.owner.processId=staleOwner.originalProcess.pid;staleOwner.refreshOwned();assert.throws(staleOwner.verify,/RESOURCE_REFERENCE_OWNER_PID/);
  const missing=ownedMetadataFixture('worker');delete missing.entry.ownedProducer;missing.refresh();assert.throws(missing.verify,/RESOURCE_REFERENCE_OWNED_PRODUCER_REQUIRED_BY_SCHEDULE/);
  const costOnly=ownedMetadataFixture('worker');costOnly.entry.ownedProducer.mode='positive-only-cost-measurement';costOnly.refresh();assert.throws(costOnly.verify,/RESOURCE_REFERENCE_OWNED_MODE/);
- const afterExit=ownedMetadataFixture('worker');afterExit.terminal.businessExitFileTimeUtc=afterExit.filetime(15);afterExit.refreshOwned();assert.throws(afterExit.verify,/RESOURCE_REFERENCE_PROCESS_WINDOW/);
+ const afterExit=ownedMetadataFixture('worker',{deferOwnedReceipts:true});afterExit.terminal.businessExitFileTimeUtc=afterExit.filetime(15);afterExit.refreshOwned();assert.throws(afterExit.verify,/RESOURCE_REFERENCE_PROCESS_WINDOW/);
 });
 
 
 import {nativeHealthCompileRequest,nativeRuntimeCompileRequest,nativeHealthEnvironment,verifyNativeHealthReference,verifyNativeRuntimeReference} from './release-resource-reference.mjs';
 
-test('INERT native health single producer shared reference metadata control',()=>{
-  const evidence=path.join(simulationCorePath('Evidence'),'ParentSecondaryDedup-20261103/NativeHealthSharedReference/Helper');
-  fs.mkdirSync(evidence,{recursive:true});
-  const batch=fs.mkdtempSync(path.join(evidence,'metadata-'));
+test('INERT native health single producer shared reference metadata control',t=>{
+  const workspace=simulationCorePath('Workspace'),evidence=simulationCorePath('Evidence');
+  for(const root of [workspace,evidence])assert(!fs.lstatSync(root).isSymbolicLink()&&key(fs.realpathSync(root))===key(root));
+  const prefix='native-reference-inputs-',batch=fs.mkdtempSync(path.join(workspace,prefix)),created=fs.lstatSync(batch,{bigint:true});
+  t.after(()=>{
+    assert.equal(path.dirname(path.resolve(batch)),workspace);assert(path.basename(batch).startsWith(prefix));
+    const current=fs.lstatSync(batch,{bigint:true});
+    assert(current.isDirectory()&&!current.isSymbolicLink()&&current.dev===created.dev&&current.ino===created.ino);
+    assert.equal(key(fs.realpathSync(batch)),key(batch));fs.rmSync(batch,{recursive:true,force:false});
+  });
   const coverage={schemaVersion:1,scope:'INERT metadata only; all executable files are text and never executed',positive:0,rejections:[]};
-  const saveCoverage=()=>write(path.join(batch,'COVERAGE.json'),coverage);
+  let completed=false;
+  t.after(()=>{
+    assert(!fs.lstatSync(evidence).isSymbolicLink()&&key(fs.realpathSync(evidence))===key(evidence));
+    const output=fs.mkdtempSync(path.join(evidence,'native-reference-coverage-'));
+    const file=path.join(output,'COVERAGE.json'),fd=fs.openSync(file,'wx');
+    try{fs.writeFileSync(fd,JSON.stringify({...coverage,completed},null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+    console.log('NATIVE_HEALTH_METADATA_COVERAGE '+JSON.stringify({positive:coverage.positive,rejections:coverage.rejections.length,file,completed}));
+  });
   const clone=value=>JSON.parse(JSON.stringify(value));
   function nativeFixture(family){
     const runtime=family==='runtime',toolchainField=runtime?'nativeRuntimeToolchain':'nativeHealthToolchain',inputsField=runtime?'nativeRuntimeInputs':'nativeHealthInputs';
@@ -440,13 +480,12 @@ test('INERT native health single producer shared reference metadata control',()=
     parent.cases.push({id:compile.id,passed:true,...(runtime?{legacyMacro:true}:{}),compilerGraph:pin(recipe.graph),exe:pin(recipe.image)},
       {id:run.id,passed:true,...(runtime?{legacyRegressionOnly:true,currentTypedAcceptance:false}:{}),exe:pin(recipe.image),process:null});
     const refresh=()=>{for(const row of parent.processes)write(processPath(row.id),row);parent.cases[1].process=pin(processPath(run.id));write(parentResult,parent);};
-    refresh();
     return {family,header,marker,toolchainField,inputsField,verifyReference,root,repo,core,work,sourceRoot,outputRoot,sourceInputs,toolArtifacts,authority,recipe,graph,env,parent,parentResult,compile,run,external,compiler,linker,processPath,refresh,
       verify:()=>verifyReference({repoRoot:repo,coreRoot:core,parentResult,parent,sourceInputs,toolArtifacts,nativeAuthority:authority})};
   }
   for(const family of ['health','runtime']){
   const healthFixture=()=>nativeFixture(family),positiveBefore=coverage.positive,rejectionsBefore=coverage.rejections.length;
-  const good=healthFixture(),result=good.verify();
+  const good=healthFixture();good.refresh();const result=good.verify();
   assert.equal(result.status,'SHARED_REFERENCE');assert.equal(result.requiredReleaseBuildStep,'official-native-'+family+'-build');assert.equal(result.requiredReleaseRunStep,'official-native-'+family);
   for(const field of ['cached','executedThisRun','actualPassedThisRun'])assert.equal(result[field],false);
   for(const field of ['originalProducerExecutionsByThisReference','compilerInvocationsByThisReference'])assert.equal(result[field],0);
@@ -462,7 +501,7 @@ test('INERT native health single producer shared reference metadata control',()=
     '/I'+path.join(good.sourceRoot,'native'),'/I'+path.join(good.sourceRoot,'deps/json'),good.recipe.source,
     '/sourceDependencies',good.recipe.graph,'/Fo'+good.recipe.image+'.obj','/Fe'+good.recipe.image,'/link','/SUBSYSTEM:CONSOLE','/MACHINE:x64',
     'advapi32.lib','user32.lib','userenv.lib','winhttp.lib','ws2_32.lib','bcrypt.lib',...(family==='runtime'?['shell32.lib']:[])];
-  assert.deepEqual(good.recipe.arguments,independentArguments);assert.deepEqual(good.recipe.runArguments,[]);assert.equal(result.fullProductAcceptance,false);coverage.positive++;saveCoverage();
+  assert.deepEqual(good.recipe.arguments,independentArguments);assert.deepEqual(good.recipe.runArguments,[]);assert.equal(result.fullProductAcceptance,false);coverage.positive++;
   const unused=healthFixture(),unusedPath=write(path.join(unused.root,'unrelated-tool.bin'),'INERT unused tool'),unusedPin=pin(unusedPath);unused.toolArtifacts.push(unusedPin);unused.refresh();
   const originalReadFile=fs.readFileSync;let unusedReads=0;
   try{fs.readFileSync=function(file,...args){if(typeof file==='string'&&key(file)===key(unusedPath))unusedReads++;return originalReadFile.call(this,file,...args);};assert.equal(unused.verify().status,'SHARED_REFERENCE');}finally{fs.readFileSync=originalReadFile;}
@@ -472,7 +511,7 @@ test('INERT native health single producer shared reference metadata control',()=
     const f=healthFixture();change(f);f.refresh();if(after)after(f);
     let observed;
     assert.throws(f.verify,error=>{observed=String(error.message);return observed.startsWith('NATIVE_'+family.toUpperCase()+'_REFERENCE_') && reason.test(observed);},name);
-    coverage.rejections.push({family,name,expected:reason.source,observed});saveCoverage();
+    coverage.rejections.push({family,name,expected:reason.source,observed});
   };
   reject('extra producer with original ID',f=>f.parent.processes.push(clone(f.compile)),/PRODUCER_EXECUTIONS_NOT_UNIQUE/);
   reject('extra producer with alternate ID',f=>f.parent.processes.push({...clone(f.compile),id:'unexpected.health'}),/PRODUCER_EXECUTIONS_NOT_UNIQUE/);
@@ -531,7 +570,7 @@ test('INERT native health single producer shared reference metadata control',()=
   reject('marker suffix spoof',f=>{write(f.run.stdout.path,f.marker+(family==='runtime'?' 42_SPOOF':'_SPOOF')+'\n');f.run.stdout=pin(f.run.stdout.path);},/STDOUT_MARKER/);
   reject('stdout original pin drift',f=>write(f.run.stdout.path,'changed log'),/PIN_HASH/);
   reject('stderr original pin drift',f=>write(f.compile.stderr.path,'changed log'),/PIN_HASH/);
-  reject('evidence escapes core',f=>{const outside=write(path.join(f.root,'outside-result.json'),f.parent);f.verify=()=>f.verifyReference({repoRoot:f.repo,coreRoot:f.core,parentResult:outside,parent:f.parent,sourceInputs:f.sourceInputs,toolArtifacts:f.toolArtifacts,nativeAuthority:f.authority});},/PARENT_OUTSIDE_CORE/);
+  reject('evidence escapes core',f=>{f.refresh();const outside=write(path.join(f.root,'outside-result.json'),f.parent);f.verify=()=>f.verifyReference({repoRoot:f.repo,coreRoot:f.core,parentResult:outside,parent:f.parent,sourceInputs:f.sourceInputs,toolArtifacts:f.toolArtifacts,nativeAuthority:f.authority});},/PARENT_OUTSIDE_CORE/);
   reject('work escapes core',f=>f.parent.work=f.repo,/WORK_OUTSIDE_CORE/);
   // Both wrappers must reject borrowed family identities and keep the same original-file gates.
   const otherFamily=family==='health'?'runtime':'health';
@@ -553,7 +592,7 @@ test('INERT native health single producer shared reference metadata control',()=
   reject('graph schema version changed',f=>changeGraph(f,g=>g.Version='1.3'),/GRAPH_VERSION/);
   reject('graph dependency list missing',f=>changeGraph(f,g=>delete g.Data.Includes),/GRAPH_REQUIRED/);
   reject('run stdout borrowed from another original',f=>{f.run.stdout=pin(write(path.join(f.root,'borrowed.stdout.bin'),f.marker+' 42\n'));},/PIN_PATH/);
-  reject('compile process case pin forged',f=>{f.parent.cases[0].process={...pin(f.processPath(f.compile.id)),sha256:'0'.repeat(64)};},/PIN_HASH/);
+  reject('compile process case pin forged',f=>{f.refresh();f.parent.cases[0].process={...pin(f.processPath(f.compile.id)),sha256:'0'.repeat(64)};},/PIN_HASH/);
   reject('original run object mismatch',f=>{},/PROCESS_ORIGINAL_CHANGED/,f=>{const p=clone(f.run);p.arguments=['--forged'];write(f.processPath(p.id),p);});
   const clipped=healthFixture();clipped.compile.timeoutMs=50000;clipped.run.timeoutMs=10000;clipped.refresh();assert.equal(clipped.verify().status,'SHARED_REFERENCE');coverage.positive++;
   const lf=healthFixture();write(lf.run.stdout.path,'INERT prior output\n'+lf.marker+' 42\r\n');lf.run.stdout=pin(lf.run.stdout.path);lf.refresh();assert.equal(lf.verify().status,'SHARED_REFERENCE');coverage.positive++;
@@ -576,5 +615,5 @@ test('INERT native health single producer shared reference metadata control',()=
   }
   coverage.families??={};coverage.families[family]={positive:coverage.positive-positiveBefore,rejections:coverage.rejections.length-rejectionsBefore};
   }
-  saveCoverage();console.log('NATIVE_HEALTH_METADATA_COVERAGE '+JSON.stringify({positive:coverage.positive,rejections:coverage.rejections.length,file:path.join(batch,'COVERAGE.json')}));
+  completed=true;
 });

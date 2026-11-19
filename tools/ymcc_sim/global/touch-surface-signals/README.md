@@ -13,10 +13,15 @@ node tools/ymcc_sim/global/touch-surface-signals/touch-surface.mjs --work-dir <s
 node --test tools/ymcc_sim/global/touch-surface-signals/touch-surface.test.mjs
 ```
 
-Use `YMCC_TOUCH_WORK_DIR` to give the tool tests an explicit scratch directory.
+Without a work directory, the runner retains an exclusive execution directory
+under the simulation core Workspace. `YMCC_TOUCH_WORK_DIR` gives the tool tests
+an explicit outside-repository parent. Reusing that parent never reuses an older
+executable, import audit, or result. The formal native executable is still
+shared with the bridge only within the same invocation.
 The descriptor uses `--work-dir {outDir}/touch-work --output
 {outDir}/touch-surface-result.json`, resultFiles `['touch-surface-result.json']`.
-All 37 conservative source fingerprints are enumerated statically.
+All conservative source fingerprints are enumerated statically and checked
+before and after the invocation, not separately for each compile.
 
 The native consumer suite runs byte-identical production Core/config/transport,
 output ownership, release, configure, shutdown and owner resume functions. It

@@ -26,9 +26,11 @@ function extractNative(source,start,end){const s=source.indexOf(start),e=source.
 function runNativeCcdFixture(out){
  const source=read('native/main.cpp');
  const blocks=[
-  extractNative(source,'static int popcountPtr(ULONG_PTR m) {','static std::string toHexU(ULONG_PTR v) {'),
+  extractNative(source,'static int popcountPtr(ULONG_PTR m) {','static std::vector<ULONG_PTR> ccdProcessorRelationMasks('),
   extractNative(source,'struct CcdTopology {','static CcdTopology detectCcdTopology() {'),
+  extractNative(source,'static CcdHardwareLayout ccdReadHardwareLayout() {','static bool ccdTopologySupported(const CcdTopology& t) {'),
   extractNative(source,'static bool ccdTopologySupported(const CcdTopology& t) {','static std::atomic<int>       g_ccdMode{0};'),
+  extractNative(source,'static CcdTopology detectCcdTopology() {','static CcdHardwareLayout ccdReadHardwareLayout() {'),
   extractNative(source,'struct CcdRestoreRecord {','struct CcdSweepResult {'),
   extractNative(source,'static bool ccdSkipProcessValue(DWORD pid','static bool ccdSkipProcess(DWORD pid'),
   extractNative(source,'static bool ccdGenerationMatches(unsigned long long sweepGeneration,','static bool ccdGenerationCurrent(unsigned long long generation) {'),
@@ -43,12 +45,239 @@ function runNativeCcdFixture(out){
  const compileLog=path.join(workDir,'ccd-native-compile.log');
  const runLog=path.join(workDir,'ccd-native-run.log');
  const body=[
-  '#include <algorithm>','#include <cctype>','#include <cwctype>','#include <iostream>','#include <string>','#include <vector>',
-  'using DWORD = unsigned long;','using ULONGLONG = unsigned long long;','using ULONG_PTR = unsigned long long;',
+  ...String.raw`
+#define NOMINMAX
+#include <Windows.h>
+#include <array>
+#include <atomic>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <mutex>
+#include "json.hpp"
+#include "log_snapshot_state.h"
+#include "log_frequency_policy.h"
+#include "monitor_notice_log.h"
+#include "tdp_static_observation.h"
+#include "sleep_fact_log_record.h"
+#include "log_jsonl_boundary.h"
+#include "TdpCapabilityCatalog.generated.h"
+using json=nlohmann::json;
+#include <algorithm>
+#include <cctype>
+#include <cwctype>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+std::vector<std::array<int,4>> cpuLevels, cacheLevels;
+unsigned maxExt=0x80000026u, currentIndex=0, groupCount=1;
+DWORD activeLogical=32;
+ULONG_PTR systemAffinity=0xffffffff;
+WORD cacheGroupCount=1;bool truncateCache=false;
+ULONG_PTR fakeAffinity=0xffffffff, failPinMask=0;
+bool wrongProcessor=false, failRestore=false, mixedArchitecture=false, architectureKnown=true, badApicSubleaf=false;
+unsigned pinCalls=0;
+std::vector<unsigned> apicIds;
+std::vector<ULONG_PTR> osCaches, osDies, osPackages, osCores;
+static void fixtureCpuid(int* r,int leaf){for(int i=0;i<4;++i)r[i]=0;if(!leaf){r[1]=0x68747541;r[3]=0x69746E65;r[2]=0x444D4163;}else r[0]=static_cast<int>(maxExt);}
+static void fixtureCpuidex(int* r,int leaf,int sub){
+ for(int i=0;i<4;++i)r[i]=0;
+ const bool topology=static_cast<unsigned>(leaf)==0x80000026u;
+ const auto& rows=topology?cpuLevels:cacheLevels;
+ if(sub>=0&&static_cast<size_t>(sub)<rows.size()){
+  std::copy(rows[sub].begin(),rows[sub].end(),r);
+  if(topology)r[3]=(apicIds.empty()?currentIndex:apicIds.at(currentIndex))+(badApicSubleaf&&sub==2?1:0);
+ }
+}
+static ULONG_PTR fixtureSetThreadAffinityMask(HANDLE,ULONG_PTR mask){
+ ++pinCalls;if(mask==failPinMask||(!(mask&(mask-1))?false:failRestore))return 0;
+ const auto old=fakeAffinity;fakeAffinity=mask;
+ if(mask&&!(mask&(mask-1))){currentIndex=0;while(!(mask&(static_cast<ULONG_PTR>(1)<<currentIndex)))++currentIndex;}
+ return old;
+}
+static DWORD fixtureGetCurrentProcessorNumber(){return wrongProcessor?63:currentIndex;}
+static WORD fixtureGetActiveProcessorGroupCount(){return static_cast<WORD>(groupCount);}
+static DWORD fixtureGetActiveProcessorCount(WORD){return activeLogical;}
+static BOOL fixtureGetProcessAffinityMask(HANDLE,PDWORD_PTR process,PDWORD_PTR system){*process=fakeAffinity;*system=systemAffinity;return TRUE;}
+struct CoreArchitecture{bool detected=true,heterogeneous=false;std::string source="fixture-windows";std::vector<int> classes;};
+static CoreArchitecture detectCoreArchitecture(){return {architectureKnown,mixedArchitecture};}
+struct SmtLive{int logic=0;};static SmtLive detectSmtLive(){return {};}
+static std::vector<ULONG_PTR> ccdProcessorRelationMasks(LOGICAL_PROCESSOR_RELATIONSHIP relation){return relation==RelationProcessorPackage?osPackages:osDies;}
+static BOOL fixtureGetLogicalProcessorInformationEx(LOGICAL_PROCESSOR_RELATIONSHIP relation,PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX out,DWORD* bytes){
+ const auto& masks=relation==RelationCache?osCaches:osCores;
+ const auto needed=static_cast<DWORD>(masks.size()*sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX));
+ if(!out||*bytes<needed){*bytes=needed;SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}
+ for(size_t i=0;i<masks.size();++i){
+  auto& row=out[i];ZeroMemory(&row,sizeof(row));row.Size=sizeof(row);row.Relationship=relation;
+  if(relation==RelationCache){row.Cache.Level=3;row.Cache.GroupCount=cacheGroupCount;row.Cache.GroupMasks[0].Mask=masks[i];if(truncateCache)row.Size=offsetof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,Cache)+offsetof(CACHE_RELATIONSHIP,GroupMasks);}
+  else {row.Processor.GroupCount=1;row.Processor.GroupMask[0].Mask=masks[i];}
+ }
+ *bytes=needed;return TRUE;
+}
+#define __cpuid fixtureCpuid
+#define __cpuidex fixtureCpuidex
+#define SetThreadAffinityMask fixtureSetThreadAffinityMask
+#define GetCurrentProcessorNumber fixtureGetCurrentProcessorNumber
+#define GetActiveProcessorGroupCount fixtureGetActiveProcessorGroupCount
+#define GetActiveProcessorCount fixtureGetActiveProcessorCount
+#define GetProcessAffinityMask fixtureGetProcessAffinityMask
+#define GetLogicalProcessorInformationEx fixtureGetLogicalProcessorInformationEx
+`.split(String.fromCharCode(10)),
   ...blocks,
+  ...String.raw`
+struct CcdLeaseState{bool active=false;unsigned long long generation=0;int mode=0;};
+static CcdLeaseState g_ccdLease;
+static std::mutex g_ccdMutex;
+static struct {std::string processor="fixture AMD",deviceClass="fixture";} g_machineIdentity;
+static std::vector<json> capabilityRows;
+static std::function<json(const json&)> topologyHandler;
+static void ipc_on(const char*,std::function<json(const json&)> fn){topologyHandler=fn;}
+static void appendNativeLifecycleLog(const char* event,const json& row){auto copy=row;copy["event"]=event;capabilityRows.push_back(copy);}
+static void registerFixtureTopology(){
+`.split(String.fromCharCode(10)),
+  extractNative(source,'    ipc_on("cpu.topology", [](const json&) -> json {','    // ── cpu.architecture：'),
+  '}',
+  ...String.raw`
+namespace fspath=std::filesystem;
+static std::mutex g_webviewFailureLogMx;
+static std::atomic<unsigned long long> g_webviewGeneration{1},g_powerGeneration{1};
+static std::atomic<bool> g_domainLogEnabled[2]{};
+static int g_webviewGpuMode=0;
+static std::string g_webviewRouteStatus="fixture";
+static const char* webViewGpuModeName(int){return "fixture";}
+static std::wstring webview_data_dir(){return L"owned-ccd-trace";}
+static std::string webViewLocalTimestamp(bool){return "2000-01-01T00:00:00.000";}
+static void rotateOneLogFile(const std::wstring&,unsigned long long){}
+`.split(String.fromCharCode(10)),
+  extractNative(source,'static void decorateFrontendLogWriter(json& entry) {','static void appendWebViewDiagnostic(json entry) {'),
+  extractNative(source,'static std::string boundedJsonString(const json& value, const char* key, size_t limit) {','static bool appendFrontendDiagnostic(const json& input) noexcept {'),
   'int main(){int failed=0;auto check=[&](const char* name,bool ok){std::cout<<name<<(ok?"=PASS":"=FAIL")<<"\\n";if(!ok)++failed;};',
   'CcdTopology valid;valid.architectureDetected=true;valid.multiCcdConfirmed=true;valid.logical=24;valid.l3Domains=3;valid.groupRepresentable=true;valid.ccdMasks={"0xff","0xff00","0xff0000"};valid.domainLogical={8,8,8};check("real_three_domains",ccdTopologySupported(valid));',
   'check("uniform_multi_ccd_performance",ccdPerformanceSupported(valid));',
+  ...String.raw`
+ CcdHardwareLayout halo;halo.ccdShift=4;halo.socketShift=5;halo.l3Sharing=16;halo.ccdLogical=16;halo.socketLogical=32;
+ auto samplesFor=[](CcdHardwareLayout layout,std::vector<ULONG_PTR> masks){
+  std::vector<CcdHardwareSample> samples;
+  for(size_t domain=0;domain<masks.size();++domain){unsigned local=0;for(unsigned i=0;i<64;++i){auto bit=static_cast<ULONG_PTR>(1)<<i;if(masks[domain]&bit){auto row=layout;row.apicId=(static_cast<unsigned>(domain)<<layout.ccdShift)+local++;samples.push_back({bit,row});}}}
+  return samples;
+ };
+ auto haloSamples=samplesFor(halo,{0xffff,0xffff0000});
+ check("395_without_os_die_uses_cpuid",ccdHardwareMasksMatchL3(haloSamples,{0xffff,0xffff0000},0xffffffff));
+ CcdHardwareLayout cut=halo;cut.ccdLogical=12;cut.socketLogical=24;auto cutSamples=samplesFor(cut,{0xfff,0xfff000});
+ check("partial_cores_noncontiguous_apic_model",ccdHardwareMasksMatchL3(cutSamples,{0xfff,0xfff000},0xffffff));
+ check("unequal_active_ccd_masks",ccdHardwareMasksMatchL3(samplesFor(halo,{0xff,0xffff00}),{0xff,0xffff00},0xffffff));
+ check("disabled_cores_capacity_not_equal_active",ccdHardwareMasksMatchL3(samplesFor(halo,{0xfff,0xfff000}),{0xfff,0xfff000},0xffffff));
+ CcdHardwareLayout sharing12=cut;sharing12.l3Sharing=12;
+ check("non_power_two_sharing_uses_address_width",ccdHardwareMasksMatchL3(samplesFor(sharing12,{0xfff,0xfff000}),{0xfff,0xfff000},0xffffff));
+ auto asymmetric=samplesFor(halo,{0xfff,0xffff000});
+ for(size_t i=0;i<asymmetric.size();++i){asymmetric[i].layout.socketLogical=28;if(i<12){asymmetric[i].layout.ccdLogical=12;asymmetric[i].layout.l3Sharing=12;}}
+ check("different_ccds_can_report_different_sharing_and_counts",ccdHardwareMasksMatchL3(asymmetric,{0xfff,0xffff000},0xfffffff));
+ auto inconsistent=samplesFor(cut,{0xfff,0xfff000});inconsistent[0].layout.l3Sharing=15;
+ check("same_ccd_inconsistent_l3_sharing_hidden",!ccdHardwareMasksMatchL3(inconsistent,{0xfff,0xfff000},0xffffff));
+ inconsistent=samplesFor(cut,{0xfff,0xfff000});inconsistent[0].layout.ccdLogical=14;
+ check("same_ccd_inconsistent_logical_count_hidden",!ccdHardwareMasksMatchL3(inconsistent,{0xfff,0xfff000},0xffffff));
+ CcdHardwareLayout smtOff=halo;smtOff.ccdLogical=8;smtOff.socketLogical=16;
+ check("smt_disabled_retains_hardware_address_width_model",ccdHardwareMasksMatchL3(samplesFor(smtOff,{0xff,0xff00}),{0xff,0xff00},0xffff));
+ check("single_os_die_does_not_hide_hardware_ccds",!ccdDieMasksMatchL3({0xffffffff},{0xffff,0xffff0000},0xffffffff)&&ccdHardwareMasksMatchL3(haloSamples,{0xffff,0xffff0000},0xffffffff));
+ CcdHardwareLayout split=halo;split.l3Sharing=8;
+ check("old_two_ccx_per_ccd_still_hidden",!ccdHardwareMasksMatchL3(samplesFor(split,{0xff,0xff00,0xff0000,0xff000000}),{0xff,0xff00,0xff0000,0xff000000},0xffffffff));
+ CcdHardwareLayout one=halo;one.socketShift=4;one.socketLogical=16;
+ check("single_ccd_two_l3_not_promoted",!ccdHardwareMasksMatchL3(samplesFor(one,{0xff,0xff00}),{0xff,0xff00},0xffff));
+ check("no_cpuid_samples_hidden",!ccdHardwareMasksMatchL3({}, {0xffff,0xffff0000},0xffffffff));
+ check("cpuid_overlapping_masks_hidden",!ccdHardwareMasksMatchL3(haloSamples,{0xffff,0xffff0001},0xffffffff));
+ check("cpuid_incomplete_masks_hidden",!ccdHardwareMasksMatchL3(haloSamples,{0xffff,0xff0000},0xffffffff));
+ auto corrupt=haloSamples;corrupt[16].layout.apicId=0;
+ check("duplicate_apic_id_hidden",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ corrupt=haloSamples;corrupt[16].layout.apicId=32;
+ check("different_socket_hidden",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ corrupt=haloSamples;std::swap(corrupt[0].layout.apicId,corrupt[16].layout.apicId);
+ check("capacity_without_l3_identity_match_rejected",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ corrupt=haloSamples;corrupt.pop_back();
+ check("missing_processor_sample_hidden",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ corrupt=haloSamples;corrupt[0].processorMask|=2;
+ check("nonsingle_processor_mask_hidden",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ corrupt=haloSamples;corrupt[0].layout.socketShift=31;
+ check("cpuid_overflow_shift_hidden",!ccdHardwareMasksMatchL3(corrupt,{0xffff,0xffff0000},0xffffffff));
+ cpuLevels={{{1,2,0x100,0}},{{4,16,0x201,0}},{{4,16,0x302,0}},{{5,32,0x403,0}}};cacheLevels={{{0x3c163,0,0,0}}};
+ auto decoded=ccdReadHardwareLayout();check("actual_cpuid_reader_395_dump",decoded.ccdLogical==16&&decoded.socketLogical==32&&decoded.l3Sharing==16);
+ badApicSubleaf=true;check("cross_subleaf_apic_mismatch_unknown",ccdReadHardwareLayout().ccdLogical==0);badApicSubleaf=false;
+ maxExt=0x8000001e;check("unsupported_cpuid_leaf_unknown",ccdReadHardwareLayout().ccdLogical==0);maxExt=0x80000026u;
+ cacheLevels={{{0x3c163,0,0,0}},{{0x1c163,0,0,0}}};check("conflicting_l3_capacity_unknown",ccdReadHardwareLayout().ccdLogical==0);
+ cacheLevels={{{0x3c163,0,0,0}}};cpuLevels.push_back({4,12,0x304,0});check("duplicate_ccd_topology_level_unknown",ccdReadHardwareLayout().ccdLogical==0);cpuLevels.pop_back();
+ auto configure=[&](bool partial){
+  cpuLevels[2][1]=partial?12:16;cpuLevels[3][1]=partial?24:32;currentIndex=0;
+  osCaches=partial?std::vector<ULONG_PTR>{0xfff,0xfff000}:std::vector<ULONG_PTR>{0xffff,0xffff0000};
+  fakeAffinity=partial?0xffffff:0xffffffff;systemAffinity=fakeAffinity;activeLogical=partial?24:32;osPackages={fakeAffinity};osDies.clear();osCores.clear();apicIds.clear();
+  for(unsigned i=0;i<(partial?24u:32u);++i){apicIds.push_back(partial&&i>=12?i+4:i);if(!(i%2))osCores.push_back(static_cast<ULONG_PTR>(3)<<i);}
+  failPinMask=0;wrongProcessor=failRestore=false;pinCalls=0;groupCount=1;architectureKnown=true;mixedArchitecture=false;cacheGroupCount=1;truncateCache=false;
+ };
+ configure(false);auto observed=ccdReadHardwareSamples(0xffffffff);
+ check("actual_sampler_reads_every_lp_and_restores",observed.size()==32&&fakeAffinity==0xffffffff&&pinCalls==33&&ccdHardwareMasksMatchL3(observed,osCaches,0xffffffff));
+ configure(true);observed=ccdReadHardwareSamples(0xffffff);
+ check("actual_sampler_handles_apic_holes",observed.size()==24&&observed[12].layout.apicId==16&&fakeAffinity==0xffffff&&ccdHardwareMasksMatchL3(observed,osCaches,0xffffff));
+ configure(true);failPinMask=0x1000;check("sampler_pin_failure_unknown",ccdReadHardwareSamples(0xffffff).empty()&&fakeAffinity==0xffffff);
+ configure(true);wrongProcessor=true;check("sampler_wrong_lp_unknown",ccdReadHardwareSamples(0xffffff).empty()&&fakeAffinity==0xffffff);
+ configure(true);failRestore=true;check("sampler_restore_failure_unknown",ccdReadHardwareSamples(0xffffff).empty());
+ configure(false);cacheGroupCount=0;auto topology=detectCcdTopology();
+ check("legacy_zero_group_count_reads_actual_masks",ccdPerformanceSupported(topology)&&topology.legacyCacheRecords==2&&topology.ccdMasks==std::vector<std::string>{"0xFFFF","0xFFFF0000"}&&topology.hardwareSampleCount==32);
+ check("legacy_mask_diagnostics_report_available",ccdPerformanceReason(topology)=="available"&&topology.cacheGroupCounts==std::vector<int>{0,0});
+ configure(false);cacheGroupCount=0;osCaches={0xff00ff,0xff00ff00};topology=detectCcdTopology();
+ check("legacy_records_do_not_guess_equal_masks",!ccdPerformanceSupported(topology)&&ccdPerformanceReason(topology)=="cpuid_l3_identity_mismatch");
+ configure(false);truncateCache=true;topology=detectCcdTopology();
+ check("truncated_legacy_cache_record_rejected",!ccdPerformanceSupported(topology)&&ccdPerformanceReason(topology)=="truncated_cache_record");
+ configure(false);cacheGroupCount=64;topology=detectCcdTopology();
+ check("group_count_exceeds_record_bytes_rejected",!ccdPerformanceSupported(topology)&&ccdPerformanceReason(topology)=="invalid_cache_group_count");
+ configure(false);cacheGroupCount=0;groupCount=2;topology=detectCcdTopology();
+ check("legacy_cross_group_remains_rejected",!ccdPerformanceSupported(topology)&&ccdPerformanceReason(topology)=="cross_group_unrepresentable");
+ configure(false);topology=detectCcdTopology();
+ check("actual_detector_missing_die_cpuid_wired",ccdPerformanceSupported(topology)&&topology.multiCcdSource=="amd_cpuid_80000026_and_l3"&&topology.physicalCores==16);
+ configure(true);osDies=osPackages;topology=detectCcdTopology();
+ check("actual_detector_single_os_die_partial_model",ccdPerformanceSupported(topology)&&topology.logical==24&&topology.physicalCores==12&&topology.multiCcdSource=="amd_cpuid_80000026_and_l3");
+ configure(false);osDies=osCaches;topology=detectCcdTopology();
+ check("actual_detector_existing_windows_die_fastpath",ccdPerformanceSupported(topology)&&topology.multiCcdSource=="windows_processor_die"&&pinCalls==0);
+ configure(false);for(auto& apic:apicIds)apic%=16;topology=detectCcdTopology();check("actual_detector_l3_only_not_promoted",!ccdPerformanceSupported(topology));
+ configure(false);mixedArchitecture=true;topology=detectCcdTopology();check("actual_detector_hybrid_no_probe",!ccdPerformanceSupported(topology)&&pinCalls==0&&ccdPerformanceReason(topology)=="heterogeneous_efficiency_classes");
+ configure(false);architectureKnown=false;topology=detectCcdTopology();check("actual_detector_unknown_architecture_no_probe",!ccdPerformanceSupported(topology)&&pinCalls==0&&ccdPerformanceReason(topology)=="core_architecture_unknown");
+ configure(false);groupCount=2;topology=detectCcdTopology();check("actual_detector_cross_group_no_probe",!ccdPerformanceSupported(topology)&&pinCalls==0);
+ configure(false);maxExt=0x8000001e;topology=detectCcdTopology();check("actual_detector_missing_leaf_hidden",!ccdPerformanceSupported(topology));maxExt=0x80000026u;
+ configure(false);osCaches={0xffffffff};topology=detectCcdTopology();
+ check("aggregated_windows_l3_independent_hardware_masks",ccdPerformanceSupported(topology)&&topology.hardwareSampleCount==32&&topology.reportedCacheMasks==std::vector<std::string>{"0xFFFFFFFF"}&&topology.ccdMasks==std::vector<std::string>{"0xFFFF","0xFFFF0000"}&&topology.maskSource=="amd_cpuid_80000026_and_8000001d");
+ configure(false);osCaches={0xffff};topology=detectCcdTopology();
+ check("missing_second_windows_cache_is_recovered_without_equal_split",ccdPerformanceSupported(topology)&&topology.logical==32&&topology.reportedCacheMasks==std::vector<std::string>{"0xFFFF"});
+ configure(false);osCaches={0xffffffff};osPackages={0xffff};topology=detectCcdTopology();
+ check("incomplete_package_uses_observed_system_mask_for_complete_hardware_proof",ccdPerformanceSupported(topology)&&topology.reportedPackageMasks==std::vector<std::string>{"0xFFFF"}&&topology.hardwareSampleCount==32);
+ configure(false);osCaches={0xffff};activeLogical=16;fakeAffinity=systemAffinity=0xffff;osPackages={0xffff};osCores.resize(8);topology=detectCcdTopology();
+ check("field_one_cache_8c16t_does_not_invent_an_offline_ccd",!ccdPerformanceSupported(topology)&&topology.hardwareSampleCount==16&&topology.physicalCores==8&&topology.activeLogical==16&&ccdPerformanceReason(topology)=="single_active_ccd");
+ configure(false);osCaches={0xffff};activeLogical=16;fakeAffinity=systemAffinity=0xffff;osPackages={0xffff};osCores.resize(8);for(unsigned i=8;i<16;++i)apicIds[i]=i+8;topology=detectCcdTopology();
+ check("field_16_active_lps_across_two_real_ccds_remain_usable",ccdPerformanceSupported(topology)&&topology.logical==16&&topology.ccdMasks==std::vector<std::string>{"0xFF","0xFF00"});
+ configure(false);osCaches={0xffff};failPinMask=0x10000;topology=detectCcdTopology();
+ check("single_cache_failed_pin_is_unknown_never_guessed",!ccdPerformanceSupported(topology)&&topology.hardwareSampleCount==0&&ccdPerformanceReason(topology)=="cpuid_sampling_unavailable");
+ configure(false);osCaches={0xff00ff};topology=detectCcdTopology();
+ check("single_conflicting_partial_cache_is_not_overridden",!ccdPerformanceSupported(topology)&&ccdPerformanceReason(topology)=="cpuid_l3_identity_mismatch");
+ configure(false);osCaches={0xffff};activeLogical=16;topology=detectCcdTopology();
+ check("active_processor_count_mismatch_blocks_partial_proof",!ccdPerformanceSupported(topology)&&pinCalls==0&&ccdPerformanceReason(topology)=="active_processor_coverage_mismatch");
+ configure(false);cacheGroupCount=0;registerFixtureTopology();auto response=topologyHandler(json::object());
+ check("actual_ipc_reports_legacy_masks_and_reason",response["performanceReason"]=="available"&&response["readerRevision"]=="ccd-independent-hardware-20261111-r3"&&response["readDiagnostics"]["legacySingleMaskRecords"]==2&&response["readDiagnostics"]["hardwareSampleCount"]==32&&response["readDiagnostics"]["activeLogical"]==32&&response["readDiagnostics"]["reportedCacheMasks"]==response["ccdMasks"]);
+ check("native_capability_log_preserves_actual_diagnostics",capabilityRows.size()==1&&capabilityRows.back()["event"]=="machine-capability"&&capabilityRows.back()["capability"]=="cpu.ccd"&&capabilityRows.back()["ccdMasks"]==response["ccdMasks"]);
+ topologyHandler(json::object());g_ccdLease.active=true;g_ccdLease.generation=1;topologyHandler(json::object());
+ check("unchanged_probe_and_lease_do_not_repeat_capability_logs",capabilityRows.size()==1);
+ configure(false);mixedArchitecture=true;response=topologyHandler(json::object());
+ check("native_hidden_reason_is_durable_change",capabilityRows.size()==2&&response["performanceReason"]=="heterogeneous_efficiency_classes"&&!response["performanceSupported"].get<bool>());
+ json visibility={{"schema",1},{"scope","global"},{"hybrid",false},{"visible",true},{"reason","visible"},{"readerRevision","ccd-real-mask-compat-20261110-r2"},{"multiCcdSource","amd_cpuid_80000026_and_l3"},{"supported",true},{"available",true},{"performanceSupported",true},{"logical",32},{"l3Domains",2},{"masks",{"0xFFFF","0xFFFF0000"}}};
+ auto sendVisibility=[&](const json& row){return appendFrontendTrace({{"where","cpu-ccd-visibility"},{"message",row.dump()}});};
+ check("actual_frontend_native_sink_accepts_ccd_trace",sendVisibility(visibility));
+ auto tracePath=fspath::path(webview_data_dir())/L"frontend-trace.log";auto bytesBefore=fspath::file_size(tracePath);sendVisibility(visibility);
+ check("actual_native_sink_deduplicates_same_visibility",bytesBefore==fspath::file_size(tracePath));
+ visibility["visible"]=false;visibility["reason"]="core_architecture_unknown";visibility["performanceSupported"]=false;check("actual_native_sink_records_hidden_reason",sendVisibility(visibility));
+ std::ifstream traceIn(tracePath);std::vector<json> traceRows;for(std::string line;std::getline(traceIn,line);)traceRows.push_back(json::parse(line));
+ check("actual_native_trace_file_has_both_decisions",traceRows.size()==2&&traceRows[0]["trace"]["visible"]==true&&traceRows[1]["trace"]["reason"]=="core_architecture_unknown"&&traceRows[1]["origin"]=="renderer-observation");
+ auto invalid=visibility;invalid.erase("visible");check("native_sink_rejects_missing_visibility",!sendVisibility(invalid));
+ invalid=visibility;invalid["masks"]=json::array();for(int i=0;i<65;++i)invalid["masks"].push_back("0x1");check("native_sink_rejects_excess_masks",!sendVisibility(invalid));
+ invalid=visibility;invalid["reason"]=std::string(5000,'x');check("native_sink_rejects_oversize_payload",!sendVisibility(invalid));
+ check("native_sink_rejects_unregistered_trace",!appendFrontendTrace({{"where","not-registered"},{"message",visibility.dump()}}));
+
+`.split(String.fromCharCode(10)),
   'CcdTopology ccx=valid;ccx.multiCcdConfirmed=false;check("multi_l3_without_ccd_proof_hidden",!ccdPerformanceSupported(ccx));',
   'check("die_l3_matches_reordered",ccdDieMasksMatchL3({0xff00,0xff},{0xff,0xff00},0xffff));',
   'check("single_die_two_ccx_hidden",!ccdDieMasksMatchL3({0xffff},{0xff,0xff00},0xffff));',
@@ -93,7 +322,7 @@ function runNativeCcdFixture(out){
   'cd /d "'+workDir+'"',
   'call "'+vcvars+'" >nul',
   'if errorlevel 1 exit /b 1',
-  'cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "'+fixture+'" /I"'+sdk+'\\Include\\'+sdkVersion+'\\ucrt" /I"'+sdk+'\\Include\\'+sdkVersion+'\\um" /I"'+sdk+'\\Include\\'+sdkVersion+'\\shared" /Fo"'+obj+'" /Fe"'+exe+'" /link /LIBPATH:"'+sdk+'\\Lib\\'+sdkVersion+'\\um\\x64" /LIBPATH:"'+sdk+'\\Lib\\'+sdkVersion+'\\ucrt\\x64" > "'+compileLog+'" 2>&1',
+  'cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 "'+fixture+'" /I"'+sdk+'\\Include\\'+sdkVersion+'\\ucrt" /I"'+sdk+'\\Include\\'+sdkVersion+'\\um" /I"'+sdk+'\\Include\\'+sdkVersion+'\\shared" /I"'+path.join(root,'deps/json')+'" /I"'+path.join(root,'native')+'" /I"'+path.join(root,'capabilities')+'" /Fo"'+obj+'" /Fe"'+exe+'" /link /LIBPATH:"'+sdk+'\\Lib\\'+sdkVersion+'\\um\\x64" /LIBPATH:"'+sdk+'\\Lib\\'+sdkVersion+'\\ucrt\\x64" > "'+compileLog+'" 2>&1',
   'if errorlevel 1 exit /b 2',
   '"'+exe+'" > "'+runLog+'" 2>&1',
  ].join('\r\n')+'\r\n','utf8');
@@ -279,6 +508,22 @@ await check('CCD receipt rejects physical power-off, missing identity, invalid s
 await check('CCD runtime native refusal cannot be promoted by otherwise valid library-domain masks',async()=>{
  const saved=topology;const valid=ccdTopology(2,16,32,['ffff','ffff0000'],[{index:1,mask:'ffff',logical:16},{index:2,mask:'ffff0000',logical:16}]);
  try{for(const override of [{supported:false},{available:false},{singleGroupRepresentable:false},{supported:'true'},{available:undefined}]){topology={...valid,...override,reason:'native-unrepresentable'};const p=await retained.probeCcd();assert.equal(p.supported,false);assert.equal(p.available,false);assert.equal(p.reason,'native-unrepresentable');}topology={...valid,singleGroupRepresentable:true};assert.equal((await retained.probeCcd()).supported,true);}finally{topology=saved;}
+});
+await check('CCD native refusal preserves observed diagnostics without granting control',async()=>{
+ const saved=topology;
+ try {
+  topology={...ccdTopology(1,8,16,['0xFFFF'],[{index:1,mask:'0xFFFF',logical:16}]),
+    supported:false,available:false,performanceSupported:false,multiCcdConfirmed:false,
+    reason:'fewer_than_two_domains',performanceReason:'single_active_ccd',readerRevision:'ccd-independent-hardware-20261111-r3'};
+  const p=await retained.probeCcd();
+  assert.equal(p.supported,false);assert.equal(p.available,false);assert.equal(p.performanceSupported,false);
+  assert.equal(p.readerRevision,topology.readerRevision);assert.equal(p.performanceReason,'single_active_ccd');
+  assert.equal(p.l3Domains,1);assert.equal(p.logical,16);assert.equal(p.physicalCores,8);
+  assert.deepEqual(normalize(p.ccdMasks),['0xFFFF']);assert.equal(p.lease,null);assert.equal(p.operation,'');
+  topology={...topology,logical:Infinity,ccdMasks:['x'.repeat(1000),1,'0xFFFF'],readerRevision:'r'.repeat(1000)};
+  const bounded=await retained.probeCcd();assert.equal(bounded.logical,0);assert.equal(bounded.readerRevision.length,160);
+  assert.deepEqual(normalize(bounded.ccdMasks),['0xFFFF']);
+ } finally {topology=saved;}
 });
 await check('CCD requires confirmed uniform architecture and unique matching domain metadata',async()=>{
  const valid=topology;try{

@@ -5,12 +5,12 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {extractFunction} from './ymcc_sim/global/controller-startup-return/extend-fixture.mjs';
-import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {startupToolchainPreamble,verifyStartupToolchain} from './ymcc_sim/global/controller-startup-return/toolchain.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url)), DEFAULT_REPO=path.resolve(HERE,'..');
 const MODULE='tools/ymcc_sim/global/controller-startup-return';
 const FUNCTIONS=['sgWriteFileAtomicFlags','sgWriteFileAtomic','msiCrashReadOwnedRecord'];
 const INPUTS=['native/main.cpp','native/msi_crash_recovery_runtime.h','native/msi_crash_recovery_journal.h','deps/json/json.hpp',
- 'tools/msi_crash_record_io_selftest.cpp','tools/msi_crash_record_io_selftest.mjs',MODULE+'/extend-fixture.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+ 'tools/msi_crash_record_io_selftest.cpp','tools/msi_crash_record_io_selftest.mjs',MODULE+'/extend-fixture.mjs',MODULE+'/toolchain.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const CASES=[['journal/new-durable',6],['journal/replace-old',4],['journal/real-sharing-and-release',6],
  ['leaf/write-failure',6],['leaf/short-write',6],['leaf/flush-failure',6],['leaf/rename-failure',6],['leaf/replace-fallback',3],
  ['reader/exact-64KiB',3],['reader/oversize',3],['reader/empty',3],['reader/missing-and-sharing',2],
@@ -112,10 +112,10 @@ export function runRecordIo({out,repo=DEFAULT_REPO,toolchainFile=path.join(repo,
    fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);return {path:relative,source,snapshot:target,sha256:hash(source)};
   });
   need(hash(path.join(repo,'tools/msi_crash_record_io_selftest.mjs'))===hash(fileURLToPath(import.meta.url)),'RUNNER_DIFFERS_FROM_FROZEN_SOURCE');
-  for(const rel of [MODULE+'/extend-fixture.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'])need(hash(path.join(repo,rel))===hash(path.join(DEFAULT_REPO,rel)),'IMPORTED_HELPER_DIFFERS_FROM_FROZEN_SOURCE');
+  for(const rel of [MODULE+'/extend-fixture.mjs',MODULE+'/toolchain.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'])need(hash(path.join(repo,rel))===hash(path.join(DEFAULT_REPO,rel)),'IMPORTED_HELPER_DIFFERS_FROM_FROZEN_SOURCE');
   const toolchain=read(toolchainFile),toolchainHash=hash(toolchainFile);need(toolchain.files.length>0&&toolchain.files.length<=640,'TOOLCHAIN_MEMBERSHIP');
   const node=toolchain.files.find(r=>r.roles.includes('node'));need(node&&path.resolve(node.path).toLowerCase()===path.resolve(process.execPath).toLowerCase(),'NODE_NOT_PINNED');
-  for(const row of toolchain.files)need(hash(row.path)===row.sha256,'TOOLCHAIN_CHANGED:'+row.path);
+  verifyStartupToolchain(toolchain);
   write(path.join(root,'input-snapshot.json'),{sourceBindings,toolchainFile,toolchainHash,toolchain});
   const funcs=FUNCTIONS.map(name=>extract(fs.readFileSync(path.join(snapshot,name==='msiCrashReadOwnedRecord'?'native/msi_crash_recovery_runtime.h':'native/main.cpp'),'utf8'),name));
   const exact=funcs.map(f=>f.code).join('\n\n')+'\n',generated={};
@@ -128,7 +128,7 @@ export function runRecordIo({out,repo=DEFAULT_REPO,toolchainFile=path.join(repo,
   const env={...process.env};for(const key of Object.keys(env))if(/^(?:CL|_CL_|LINK|_LINK_|NODE_OPTIONS|NODE_PATH|YMCC_VCVARS64)$/i.test(key))delete env[key];
   const temp=path.join(root,'t');fs.mkdirSync(temp);Object.assign(env,{TEMP:temp,TMP:temp,VSCMD_SKIP_SENDTELEMETRY:'1'});
   const quote=p=>{need(!/["%\r\n]/.test(p),'UNSAFE_COMPILER_PATH');return '"'+p+'"';};
-  const preamble=calibrationToolchainPreamble(toolchain.vcvars64),profiles={},compilerRows=[],dependencyFiles=[];
+  const preamble=startupToolchainPreamble(toolchain),profiles={},compilerRows=[],dependencyFiles=[];
   const artifacts=new Map(toolchain.files.map(r=>[path.resolve(r.path).toLowerCase(),r.sha256]));
   function bind(file,kind){const resolved=path.resolve(file),sha256=hash(resolved);need(inside(root,resolved)||artifacts.get(resolved.toLowerCase())===sha256,'UNPINNED_COMPILER_INPUT:'+resolved);compilerRows.push({path:resolved,sha256,kind});}
   function execute(label,exe,args,cwd,timeout){
@@ -160,7 +160,7 @@ export function runRecordIo({out,repo=DEFAULT_REPO,toolchainFile=path.join(repo,
    }
   }
   need(libraries>0,'LIBRARY_CLOSURE_MISSING');for(const row of sourceBindings)need(hash(row.source)===row.sha256&&hash(row.snapshot)===row.sha256,'SOURCE_CHANGED:'+row.path);
-  for(const row of toolchain.files)need(hash(row.path)===row.sha256,'TOOL_CHANGED:'+row.path);need(hash(toolchainFile)===toolchainHash,'TOOLCHAIN_DESCRIPTOR_CHANGED');
+  verifyStartupToolchain(toolchain);need(hash(toolchainFile)===toolchainHash,'TOOLCHAIN_DESCRIPTOR_CHANGED');
   const compilerInputs={dependencyFiles:dependencyFiles.length,libraries,rows:compilerRows};write(path.join(root,'evaluated-compiler-inputs.json'),compilerInputs);write(path.join(root,'process-ledger.json'),{steps});
   const result={schemaVersion:1,status:'PASS',passed:true,actualFunctionsVerbatim:true,functions:funcs.map(({code,...r})=>r),sourceBindings,profiles,generated,compilerInputs,
    originalAssertionsUnchanged:true,inputHashesStable:true,toolchainArtifacts:toolchain.files.length,productBugObserved:false,

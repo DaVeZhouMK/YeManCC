@@ -19,12 +19,16 @@ const pending=():FanState=>({...stopped(),state:'AwaitingCloseCleanup',hcCloseCl
 (api.app as any).aiFanMockSession=async()=>{probes++;const sessionId='01234567-89ab-cdef-0123-456789abcdef',stateDirectory='C:\\inert\\ai-fan-sessions\\'+sessionId+'\\fan-host';return{schemaVersion:1,enabled:true,mode:'mock-handshake',sessionId,parentPid:1,stateDirectory,requestPath:stateDirectory+'\\ai-request.json',responsePath:stateDirectory+'\\ai-response.json',hostPid:mono>=readyAt?0:PID,hostCreationTime100ns:mono>=readyAt?'0':CREATED};};
 const {FanHostLifecycle,NativeFanHostLauncher,resolveFanHostConfig}=await import('../src/bridge/fanHost');
 const cases:{name:string,ok:boolean,error?:string,evidence?:unknown}[]=[];
-const realTimeout=globalThis.setTimeout,originalDateNow=Date.now,perfDescriptor=Object.getOwnPropertyDescriptor(globalThis,'performance');
+const realTimeout=globalThis.setTimeout,realClearTimeout=globalThis.clearTimeout,originalDateNow=Date.now,perfDescriptor=Object.getOwnPropertyDescriptor(globalThis,'performance');
 async function virtual(name:string,clock:string,budget:number,available:boolean,run:()=>Promise<unknown>){
  mono=0;wallOrigin=1_800_000_000_000;wall=wallOrigin;mode=clock;readyAt=available?Math.floor(budget/2):Infinity;ceiling=budget*2+1000;probes=terminates=shutdowns=closes=delays=0;
  Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>mono}});Date.now=()=>wall;
- (globalThis as any).setTimeout=(fn:()=>void,ms=0)=>{if(mono+ms>ceiling)throw new Error('VIRTUAL_DURATION_EXCEEDED');const handle={unref(){}};queueMicrotask(()=>{mono+=Number(ms);delays++;wall=mode==='backward'?wallOrigin-mono:mode==='forward'?wallOrigin+(mono?86_400_000:0)+mono:wallOrigin+mono;fn();});return handle;};
- let result:unknown,error:unknown;try{result=await run();}catch(e){error=e;}finally{globalThis.setTimeout=realTimeout;Date.now=originalDateNow;if(perfDescriptor)Object.defineProperty(globalThis,'performance',perfDescriptor);}
+ const timers=new Set<{cancelled:boolean;unref():void}>();
+ // Promise reads settle before timers. Cancelled read deadlines must not advance
+ // virtual time or beat an already resolved native snapshot.
+ (globalThis as any).setTimeout=(fn:()=>void,ms=0)=>{if(mono+ms>ceiling)throw new Error('VIRTUAL_DURATION_EXCEEDED');const handle={cancelled:false,unref(){}};timers.add(handle);setImmediate(()=>{timers.delete(handle);if(handle.cancelled)return;mono+=Number(ms);delays++;wall=mode==='backward'?wallOrigin-mono:mode==='forward'?wallOrigin+(mono?86_400_000:0)+mono:wallOrigin+mono;fn();});return handle;};
+ (globalThis as any).clearTimeout=(handle:any)=>{if(timers.has(handle)){handle.cancelled=true;timers.delete(handle);}else realClearTimeout(handle);};
+ let result:unknown,error:unknown;try{result=await run();}catch(e){error=e;}finally{for(const timer of timers)timer.cancelled=true;globalThis.setTimeout=realTimeout;globalThis.clearTimeout=realClearTimeout;Date.now=originalDateNow;if(perfDescriptor)Object.defineProperty(globalThis,'performance',perfDescriptor);}
  const measuredWindow=name==='manual-after-close'?(result as {closeObservation?:{start:number;end:number}}|undefined)?.closeObservation:undefined;
  const observedDuration=measuredWindow?measuredWindow.end-measuredWindow.start:mono;
  const evidence={clock,budget,available,mono,observedDuration,measuredWindow,probes,delays,terminates,shutdowns,closes,error:error?String(error):null,result};

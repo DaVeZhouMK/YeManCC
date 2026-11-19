@@ -30,7 +30,7 @@ const record=(log,result)=>{fs.writeFileSync(path.join(out,log),(result.stdout||
 const run=(exe,argv,log,cwd=out,env=process.env)=>{const r=record(log,spawnSync(exe,argv,{cwd,env,encoding:'utf8',windowsHide:true,timeout:30000,maxBuffer:64*1024*1024}));if(r.status!==0)throw Error(`${log}: process exit ${r.status}`);return r.stdout;};
 async function compile(argv,log,cwd,env){const r=await new Promise((resolve,reject)=>{const child=spawn('cl.exe',argv,{cwd,env,windowsHide:true,stdio:['ignore','pipe','pipe']});let stdout='',stderr='';const timer=setTimeout(()=>{child.kill();reject(Error(`${log}: compiler timeout`));},120000);child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);child.on('error',e=>{clearTimeout(timer);reject(e);});child.on('close',status=>{clearTimeout(timer);resolve({status,stdout,stderr});});});record(log,r);if(r.status!==0)throw Error(`${log}: compiler exit ${r.status}`);}
 try{
-  const headers=['onex_x2_windows.h','onex_x2_session.h','onex_x2_protocol.h'];
+  const headers=['onex_x2_windows.h','onex_x2_session.h','onex_x2_protocol.h','desktop_function_shortcut.h','sleep_power_state.h'];
   const fixtureNames=['extract.mjs','handoff.mjs','boundary.h','harness.cpp','stubs.cpp.txt','README.md'];
   const mainPath=path.join(repo,'native/main.cpp'),beforePath=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017/OneXApplication/main.before-application.cpp');
   const oldMock=path.join(repo,'tools/fixtures/hc_onex_x2_windows/mock_win32.h'),jsonPath=path.join(repo,'deps/json/json.hpp');

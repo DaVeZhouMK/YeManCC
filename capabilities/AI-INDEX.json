@@ -793,7 +793,9 @@
       "policy": [
         "capabilities/hc-motion-policy.json"
       ],
-      "contracts": [],
+      "contracts": [
+        "capabilities/upstream/fdf0bf66/Win5MotionReview.json"
+      ],
       "consumers": [
         {
           "file": "native/main.cpp",
@@ -1577,11 +1579,191 @@
     "goalStatus": "active",
     "wholeGoalComplete": false
   },
-  "currentBatteryCapabilityAudit": {
-    "dateHongKong": "2026-11-05",
+  "currentBatteryIdentityAudit": {
+    "dateHongKong": "2026-11-19",
     "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
     "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
-    "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "sha256": "12b658c0429433950b19ae50ab03011f196b87df3852f274b7d72bd2a6e11c42",
+    "runtimeRouteSha256": "11c0709b6b5c5100fc2b3e9430f8bfaf9867d64919ae691567775e6de291994e",
+    "scope": "current static identity audit; multiple matches never select a route. The upstream device inventory source hashes match the recorded Git commit tree. Field matrices are historical observations, not current payload or hardware acceptance.",
+    "previousIdentityAudit": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-221-BATTERY-ROUTE-IDENTITY/BATTERY-CAPABILITY-AUDIT.json",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-221-BATTERY-ROUTE-IDENTITY/REPORT.zh-CN.md",
+      "sha256": "a141676c48bde3f7c883079b94723bdf7a265d13449b8090eff9c712cce2c4bb",
+      "historicalSnapshot": true
+    },
+    "fieldSessionAudit": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-288-BATTERY-FIELD-STOP-BOUNDARY/REPORT.zh-CN.md",
+      "matrix": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-288-BATTERY-FIELD-STOP-BOUNDARY/MATRIX-AFTER.json",
+      "matrixSha256": "4eb6ec8f4a2b378935c2625b9c02d88be6481d8f5440f140966b39a749c2375f",
+      "scope": "same-member PID session observations; explicit stop ends evidence attribution until a new start. Never proves runtime route activation."
+    },
+    "fieldConsumptionAudit": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-222-BATTERY-FIELD-CONSUMPTION/REPORT.zh-CN.md",
+      "matrix": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-222-BATTERY-FIELD-CONSUMPTION/FIELD-ROUTE-MATRIX.json",
+      "matrixSha256": "477fc7b0b980d94fc5c97604472f0aa40fd476bb3c1aef5cf1318f11ccd0d48d",
+      "scope": "historical per-device observations versus the current rule IDs; does not certify present payloads"
+    },
+    "pairedPayloadAndPowerAudit": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-223-BATTERY-PAYLOAD-AND-POWER/REPORT.zh-CN.md",
+      "x2MiniProOriginalLog": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-223-BATTERY-PAYLOAD-AND-POWER/X2-MINI-PRO-ORIGINAL-LOG.zh-CN.md",
+      "x2MiniProTestArchiveSha256": "f3d0d8a86e1f0204d7e863d6b2ce59f2b1c313bf1f7de0505cd506b3b790b09d",
+      "scope": "exact paired-test archive only; AIR Pro power-source diagnostic audit; no hardware or ordinary release acceptance"
+    },
+    "exportPayloadAudit": {
+      "tool": "tools/battery-export-payload-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-230-BATTERY-EXPORT-PAYLOAD/REPORT.zh-CN.md",
+      "payloads": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-230-BATTERY-EXPORT-PAYLOAD/PAYLOADS.json",
+      "payloadsSha256": "e815cc43f4ed440f3ba4a8365a6afc53a5e433cd2486514ca717a4137efee541",
+      "scope": "four fixed local packages: only targeted retest includes X2 Mini Pro; selected ordinary test export matches its older source snapshot; no public or physical acceptance"
+    },
+    "firmwareExactnessAudit": {
+      "tool": "tools/battery-firmware-exactness-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-224-BATTERY-EXACT-FIRMWARE/REPORT.zh-CN.md",
+      "beforeSha256": "41d9fdb6e74995e96654def2239127aa02e64efa855b31a01d9ea4b8ee1932eb",
+      "scope": "isolated production predicate versus declared exact BIOS/EC; baseline GPD mismatch, not a live or repaired consumer result"
+    },
+    "oemFamilySourceCrosswalk": {
+      "tool": "tools/battery-oem-family-source-audit.mjs",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-225-BATTERY-FAMILY-SOURCE-CROSSWALK/REPORT.zh-CN.md",
+      "matrix": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-225-BATTERY-FAMILY-SOURCE-CROSSWALK/FAMILY-SOURCE-CROSSWALK.json",
+      "matrixSha256": "df7f49f2a3e24bba084366434f0f4de2dc7ec6f5b73f1f1f0a3d3e2e73da5c01",
+      "scope": "OneX/AOKZOE OEM and Linux oxpec, and AYANEO Linux probe versus Windows catalog and historical DMI; no admission, protocol or physical acceptance"
+    },
+    "providerAdmissionAndBindingAudit": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-226-BATTERY-PROVIDER-ADMISSION/REPORT.zh-CN.md",
+      "admissionTool": "tools/battery-provider-admission-audit.ps1",
+      "beforeSha256": "34482e77b215d5db7518786fdeb26c1961867a0f5b0d4529d44e41a86440907f",
+      "bindingTool": "tools/battery-provider-binding-audit.ps1",
+      "bindingsSha256": "2f7def2c52bb8bfa63c971ac1b8c9181f958ad78ac7a1f47d57ffcd591efd591",
+      "scope": "inert Controller admission and provider selection/Deck gate baseline; no corrected consumer, packaging or hardware acceptance"
+    },
+    "providerFinalSubmissionAudit": {
+      "tool": "tools/battery-provider-submit-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-228-BATTERY-PROVIDER-SUBMIT/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-228-BATTERY-PROVIDER-SUBMIT/BEFORE.json",
+      "beforeSha256": "e99f370c16523c21efa634383546616d4e4a87feb2cdc239c08684fb25399d13",
+      "scope": "inert Lenovo and Deck late submission counterexamples after provider pre-read or Deck write mapping; not a device incident or repaired consumer result"
+    },
+    "superXFinalSubmissionAudit": {
+      "tool": "tools/battery-superx-submit-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-229-BATTERY-SUPERX-SUBMIT/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-229-BATTERY-SUPERX-SUBMIT/BEFORE.json",
+      "beforeSha256": "35edb19c4a8b0896c8d76469580977a4b371fa0d12a1df856d181999a29e3cca",
+      "scope": "inert Super X guarded provider and checked writer; revoked ownership after ISA acquisition or slot setup still starts the port sequence"
+    },
+    "sharedEcFinalAdmissionAudit": {
+      "tool": "tools/battery-ec-edge-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-231-BATTERY-EC-EDGE/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-231-BATTERY-EC-EDGE/BEFORE.json",
+      "beforeSha256": "ab349ea844271091f3e0d23316a3730d895b95288c92fd98c6e58dd16a46b226",
+      "scope": "six current EC route families/28 identity rules; inert late endpoint access after bus grant and late ACPI commit before write command; not owned bypass return or hardware evidence"
+    },
+    "msiTemplateAdmissionAudit": {
+      "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-232-BATTERY-MSI-TEMPLATE/AUDIT.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-232-BATTERY-MSI-TEMPLATE/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-232-BATTERY-MSI-TEMPLATE/BEFORE.json",
+      "beforeSha256": "2ebbad75d036cad5a7d70050642e05750bb0f1bea8d666ac5d4b70ce018e77a2",
+      "scope": "two existing MSI WMI routes; four inert late Get_WMI template calls after revocation; zero late setters; not a firmware incident or fixed consumer result"
+    },
+    "msiPrereadAdmissionAudit": {
+      "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-233-BATTERY-MSI-PREREAD/AUDIT.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-233-BATTERY-MSI-PREREAD/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-233-BATTERY-MSI-PREREAD/BEFORE.json",
+      "beforeSha256": "0774b148586b1edecf8328e83a0f905ec531e21ecae8d6ef8cf25993f1d1c3b6",
+      "scope": "two existing MSI WMI routes; six inert preread revocation cases with new WMI operations after revocation, but zero late setters; no fix or physical acceptance"
+    },
+    "firmwarePostSubmitAdmissionAudit": {
+      "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-234-BATTERY-POST-SUBMIT/AUDIT.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-234-BATTERY-POST-SUBMIT/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-234-BATTERY-POST-SUBMIT/BEFORE.json",
+      "beforeSha256": "64a54e877f3c2eeb0db3c440e03fffd61966068185b8ce42833881008b4f254b",
+      "scope": "six inert ASUS/Intel OP3 late verification calls after setter acknowledgement, separate from HC226 diagnostic reopen; shared firmware branch source only for other routes; no late writes or hardware evidence"
+    },
+    "softwareBypassOwnershipAudit": {
+      "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-235-BATTERY-BYPASS-OWNERSHIP/AUDIT.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-235-BATTERY-BYPASS-OWNERSHIP/REPORT.zh-CN.md",
+      "before": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-235-BATTERY-BYPASS-OWNERSHIP/BEFORE.json",
+      "beforeSha256": "8b665dcc55c2e1a2f3488fc6ad3a8535f6f830c30ac3d435a3a2bc8d9021905c",
+      "scope": "both software bypass route families, 21 registered rules; six inert restorations of independently written matching bytes after an unsubmitted YMCC pause; legitimate prior-owner restoration control preserved; not device evidence"
+    },
+    "bindingAmbiguityAudit": {
+      "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-236-BATTERY-BINDING-AMBIGUITY/AUDIT.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-236-BATTERY-BINDING-AMBIGUITY/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-236-BATTERY-BINDING-AMBIGUITY/RESULT.json",
+      "resultSha256": "8b96ea5ce8991ce944f86dcc26add174365c0142fffed886cf48a12f64b78c96",
+      "scope": "seven synthetic OneX conflicting identities bind according to order in production; isolated candidate refuses conflicts while preserving all 148 registered aliases and 23 historical profiles; not imported or paired",
+      "consumptionFollowup": {
+        "tool": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-237-BATTERY-BINDING-CONSUMPTION/AUDIT.ps1",
+        "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-237-BATTERY-BINDING-CONSUMPTION/REPORT.zh-CN.md",
+        "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-237-BATTERY-BINDING-CONSUMPTION/RESULT.json",
+        "resultSha256": "10ce304661702b25e6b6cb3bfac0c4a66065dcf1fa73b7eea159e18428ea073f",
+        "scope": "exact Policy, Controller and embedded catalog with inert external calls; six current conflicts reach the provider factory, one rejected by existing firmware gate; candidate blocks all seven and preserves eight normal and two negative inputs"
+      }
+    },
+    "op3DmiFieldAudit": {
+      "tool": "tools/battery-op3-dmi-source-audit.mjs",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-238-BATTERY-OP3-DMI-FIELD/REPORT.zh-CN.md",
+      "projection": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-238-BATTERY-OP3-DMI-FIELD/PROJECTION.json",
+      "projectionSha256": "d3cd2a3c95a75021c918ba87c77d624b28dc0b00ac7ee9295f01b18636491659",
+      "scope": "fixed HC uses baseboard Product, current YMCC OP3 charging uses computer-system Model; 16 synthetic projections, no Intel OP3 field or admission change"
+    },
+    "op3OverlayProvenanceAudit": {
+      "tool": "tools/battery-op3-overlay-audit.mjs",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-240-BATTERY-OP3-OVERLAY-PROVENANCE/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-240-BATTERY-OP3-OVERLAY-PROVENANCE/RESULT.json",
+      "resultSha256": "288716757ba924d60fc4a0641babbafb177b95719fbaf095a9dedc9ff248df11",
+      "scope": "manual offline review gate; current overlay passes; seven isolated provenance and policy mutations accepted by original regeneration/check and rejected by the new audit; no runtime, CI, or field change"
+    },
+    "op3OverlayGeneratorCandidate": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-241-BATTERY-OP3-OVERLAY-GENERATOR/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-241-BATTERY-OP3-OVERLAY-GENERATOR/RESULT.json",
+      "resultSha256": "24b196d9d8334e369bb3a9adfb96fc909f1549528a4e3118df9d97bab07ec523",
+      "scope": "private original-generator candidate; identical 43 rule bytes, rejects all seven mutations before write, six-file net source and generated closure; paired identity must be regenerated on actual merged source, not imported or packaged"
+    },
+    "jointBatteryLibraryHandoff": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-242-BATTERY-JOINT-LIBRARY/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-242-BATTERY-JOINT-LIBRARY/R3/RESULT.json",
+      "resultSha256": "253888fbb3abe47de1b3b77278b65fa6218f5218f27703986a9c4f154095a8b4",
+      "sourcePatch": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-242-BATTERY-JOINT-LIBRARY/R3/LIBRARY-SOURCES.patch",
+      "sourcePatchSha256": "6c44e347b1886e2d3bb2a0fe932fd6bc49f7c2c7b6a8b4eebbe6b4e99d3835ba",
+      "scope": "HC236 and HC241 combined on 47 live input pins in isolation; 43 route rules unchanged; verified patch and paired contracts, no product import, consumer build, release or physical acceptance"
+    },
+    "reviewedBatteryInputGuardSuccessor": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-243-BATTERY-BASELINE-SOURCE-GUARD/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-243-BATTERY-BASELINE-SOURCE-GUARD/RESULT.json",
+      "resultSha256": "e19cbbb08868ae57f7f434e3fd54f46c1224e839d7d4aa3637f3a7fbb4d4975f",
+      "handoff": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-243-BATTERY-BASELINE-SOURCE-GUARD/HANDOFF.json",
+      "scope": "HC242 R3 successor: four research or MSI AP input mutations accepted by original generation, check and battery-domain construction are rejected before write; current 43 rules unchanged; isolated candidate, consumer pairing pending"
+    },
+    "batteryConsumerFixtureCompatibility": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-244-BATTERY-CONSUMER-EXPECTATIONS/REPORT.zh-CN.md",
+      "result": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-244-BATTERY-CONSUMER-EXPECTATIONS/RESULT.json",
+      "resultSha256": "e8e12f57924a8e49f457a3a1fb4936a1680c4b397e9ea259b449286af2135767",
+      "scope": "Existing APEX-priority fixture predicate passes on current selector and fails on the reviewed reject-ambiguity candidate; 43 route choice sets unchanged; consumer fixture update required in paired import, no product or fixture changes"
+    },
+    "hcFactoryIdentityMatrix": {
+      "tool": "tools/battery-hc-factory-identity-audit.ps1",
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-239-BATTERY-FACTORY-IDENTITY-MATRIX/REPORT.zh-CN.md",
+      "matrix": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-239-BATTERY-FACTORY-IDENTITY-MATRIX/MATRIX-r2.json",
+      "matrixSha256": "4adfe09ea24e0423464d72635ee1d155d9b177df26be58b90722731c9aea7654",
+      "scope": "43 rules and 148 declared manufacturer/product pairs against both pinned HC factories; OP3 is the sole field divergence; Super X is a separate source extension; no firmware, provider or field acceptance"
+    },
+    "lenovoEvidenceByMachineType": {
+      "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-227-BATTERY-LENOVO-EVIDENCE/REPORT.zh-CN.md",
+      "matrix": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-227-BATTERY-LENOVO-EVIDENCE/MATRIX.json",
+      "matrixSha256": "999c1872c0d2e3b202f8348c002922d477127d9228bbfe4349cf9a3b0237b9ac",
+      "scope": "four existing rules, seven machine types; OEM identity and historical 83E1 GET distinguished from unobserved current Windows write and independent readback"
+    }
+  },
+  "currentBatteryCapabilityAudit": {
+    "historicalSnapshot": true,
+    "supersededBy": "currentBatteryIdentityAudit",
+    "dateHongKong": "2026-11-05",
+    "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.json",
+    "sha256": "4acd927b35db10946fe151d08c8f6547b5ad98671fd9b9470dbe02d927c5c20e",
+    "previousIndexSha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "legacyReportPreimage": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.md",
     "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
     "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
     "upstreamDeviceFiles": 104,

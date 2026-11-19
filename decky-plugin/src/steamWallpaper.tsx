@@ -31,12 +31,14 @@ const imageIdentity=(entry:any)=>entry?.kind==='image'?JSON.stringify([entry.ass
 export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,client,entrance='fade'}:{host:any;react:any;reactDom?:any;ui?:any;routerHook:any;client:MirrorClient;entrance?:WallpaperEntrance}):()=>void {
   // Event-only diagnostics: bounded history, no source URLs/tokens and no timer.
   const traceNow=()=>globalThis.performance?.now?.()??Date.now(),traceStarted=traceNow();
-  let traceCount=0;const trace=(stage:string,detail:Record<string,unknown>={})=>{
-    if(traceCount>=96)return;
-    const ordinal=++traceCount;
+  let traceCount=0,recoveryTraceCount=0,failureTraceCount=0;const trace=(stage:string,detail:Record<string,unknown>={})=>{
+    // Route churn and recovery attempts must not consume terminal failure diagnostics.
+    const failure=stage==='playback-failed',recovery=stage==='video-recovery',limit=failure?8:recovery?16:96;
+    if((failure?failureTraceCount:recovery?recoveryTraceCount:traceCount)>=limit)return;
+    const ordinal=failure?++failureTraceCount:recovery?++recoveryTraceCount:++traceCount;
     // Reserve the final record for explicit truncation. Silence after the
     // bounded trace is not evidence that playback or background work stopped.
-    const record=ordinal===96?{stage:'trace-limit',ordinal,limit:96,suppressedStage:stage}:{stage,ordinal,...detail};
+    const record=ordinal===limit?{stage:failure?'failure-trace-limit':recovery?'recovery-trace-limit':'trace-limit',ordinal,limit,suppressedStage:stage}:{stage,ordinal,...detail};
     try{host.console?.info?.('[YMCC:Wallpaper] '+JSON.stringify({...record,sinceInstallMs:Math.round(traceNow()-traceStarted)}));}catch{}
   };
   const capable=typeof routerHook?.addPatch==='function'&&typeof routerHook?.removePatch==='function'&&typeof reactDom?.createPortal==='function';
@@ -212,12 +214,12 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     const imageFailed=(event:any)=>{
       if(!ownsImage(event.currentTarget))return;
       const failed=frame;setImageReady(null);(surface as HTMLElement|null)?.removeAttribute('data-ymcc-wallpaper-ready');frame=null;
-      trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq,kind:'image'});
-      client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status:'playback-failed'});refresh();
+      // Image error does not distinguish a failed request from bad bytes.
+      trace('image-load-failed',{appId:failed.appId,seq:failed.contextSeq});refresh();
     };
     React.useEffect(()=>{
       const doc=root.current?.ownerDocument;if(!doc)return;
-      if(!players.current)players.current=new WallpaperPlayers(doc,(failed:any)=>{if(!disposed&&enabled&&currentOwner===owner&&currentVisible&&failed.contextSeq===currentSeq&&failed.appId===current?.appId){trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq});client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status:'playback-failed'});}},{entrance,allowed:()=>admitted.current,presented:(shown:any)=>trace('video-ready',{appId:shown.appId,seq:shown.contextSeq})});
+      if(!players.current)players.current=new WallpaperPlayers(doc,(failed:any)=>{if(!disposed&&enabled&&currentOwner===owner&&currentVisible&&failed.contextSeq===currentSeq&&failed.appId===current?.appId){trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq});client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status:'playback-failed'});}},{entrance,allowed:()=>admitted.current,presented:(shown:any)=>trace('video-ready',{appId:shown.appId,seq:shown.contextSeq}),recovering:(shown,detail)=>trace('video-recovery',{appId:shown.appId,seq:shown.contextSeq,...detail})});
       const player=players.current;
       if(!enabled||!visible||!onScreen||disposed){player.stop();return;}
       if(active&&displayed?.entry.kind==='video'&&output.current){player.show(output.current,displayed);}else player.clearCurrent();
@@ -239,12 +241,34 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     return React.createElement(React.Fragment,null,React.createElement('span',{ref:root,style:{display:'none'}}),surface&&active?reactDom.createPortal(content,surface):null);
   }
   const patches:Array<{path:string;patch:any}>=[];
+  let offExtra=()=>{},offConnection=()=>{},disposeFallback=()=>{},bootstrap=()=>{},bootstrapInstalled=false;
+  function dispose(){
+    if(disposed)return;disposed=true;
+    // A stale Steam route may reject its own removal. Still release every
+    // local owner before returning that first error to the plugin cleanup log.
+    let failed=false,firstError:unknown;
+    const cleanup=(release:()=>void)=>{try{release();}catch(error){if(!failed){failed=true;firstError=error;}}};
+    const stop=stopBootstrapWait;stopBootstrapWait=null;cleanup(()=>stop?.());
+    cleanup(disposeFallback);
+    for(const foreground of foregrounds.values())cleanup(()=>foreground.stop());foregrounds.clear();
+    for(const reset of [...resets])cleanup(reset);resets.clear();
+    frame=null;enabled=false;
+    for(const listener of [...listeners])cleanup(listener);
+    for(const listener of [...routeListeners])cleanup(listener);routeListeners.clear();
+    cleanup(offExtra);cleanup(offConnection);
+    if(bootstrapInstalled)cleanup(()=>host.removeEventListener('ymcc-decky-bootstrap',bootstrap));
+    for(const {path,patch} of patches)cleanup(()=>routerHook.removePatch(path,patch));patches.length=0;
+    listeners.clear();owners.clear();roots.clear();
+    cleanup(()=>client.setPassiveDemand('wallpaper',false));
+    if(failed)throw firstError;
+  }
+  try{
   for(const path of ['/library/home','/library/app/:appid']){
     const patch=(route:any)=>{
       const original=route.children;const Original=original?.type;if(!Original)return route;
       const Wrapped=(props:any)=>{
         const [,updateRoute]=React.useState(0);
-        React.useEffect(()=>{const listener=()=>updateRoute((n:number)=>n+1);routeListeners.add(listener);return()=>{routeListeners.delete(listener);};},[]);
+        React.useEffect(()=>{if(disposed)return;const listener=()=>updateRoute((n:number)=>n+1);routeListeners.add(listener);return()=>{routeListeners.delete(listener);};},[]);
         const renderer=props.renderFunc??original.props?.renderFunc;
         // Steam's detail route passes its confirmed overview to renderFunc, including shortcuts.
         const detailRenderer=React.useMemo(()=>typeof renderer==='function'?(overview:any,...args:any[])=>React.createElement(React.Fragment,null,
@@ -257,9 +281,11 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
       };
       return {...route,children:React.createElement(Wrapped,original.props)};
     };
-    patches.push({path,patch:routerHook.addPatch(path,patch)});
+    // Track our callback before registration, including a commit-then-throw.
+    // A successful API return replaces it with the actual registered handle.
+    const owned={path,patch};patches.push(owned);owned.patch=routerHook.addPatch(path,patch);
   }
-  const offExtra=client.subscribeExtra((message:any)=>{
+  offExtra=client.subscribeExtra((message:any)=>{
     if(!message||disposed||!transportAvailable)return;
     if(message.type!=='wallpaper-ready'&&message.type!=='wallpaper')return;
     if(message.type==='wallpaper'&&(message.contextSeq!==currentSeq||message.appId&&message.appId!==current?.appId))return;
@@ -290,7 +316,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     if(message.type==='wallpaper-ready'){playbackKnown=true;needReady=false;readyContextSentAt=null;trace('ready',{enabled:message.enabled===true});const changed=enabled!==(message.enabled===true);enabled=message.enabled===true;
       const resumed=enabled&&Number.isSafeInteger(generation)&&generation>resumeGeneration;
       if(resumed){resumeGeneration=generation;trace('native-resume',{generation});}if(!enabled||resumed){resetPlayers();frame=null;}
-      if((changed||resumed)&&current&&currentOwner)report(current,currentOwner,currentVisible,true);refresh();return;}
+      if((changed||resumed||enabled&&message.requestContext===true)&&current&&currentOwner)report(current,currentOwner,currentVisible,true);refresh();return;}
     if(message.type!=='wallpaper'||message.contextSeq!==currentSeq||message.appId&&message.appId!==current?.appId)return;
     // Older hosts can miss the initial ready push while passive demand is off.
     // A legacy frame correlated to the current request can bootstrap unknown intent;
@@ -303,8 +329,8 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     const same=frame?.contextSeq===message.contextSeq&&frame?.entry?.url===entry.url&&frame?.entry?.assetId===entry.assetId&&frame?.entry?.revision===entry.revision&&frame?.entry?.bindingRevision===entry.bindingRevision&&frame?.opacity===message.opacity&&frame?.blur===message.blur&&JSON.stringify(frame?.entry?.playback)===JSON.stringify(entry.playback);
     frame=message;if(!same){trace('frame',{appId:current?.appId,seq:currentSeq,kind:entry.kind});refresh();}
   });
-  const offConnection=client.subscribe(state=>{transportAvailable=state.connected;if(!state.connected){nativeAdmission=false;for(const foreground of foregrounds.values())foreground.confirmNative(false);playbackKnown=false;needReady=true;readyContextSentAt=null;resetPlayers();frame=null;enabled=false;resumeGeneration=0;stateRevision=0;stateOwner=null;retiredStateOwners.clear();refresh();}else if(current&&currentOwner)report(current,currentOwner,currentVisible,true);},{connectionOnly:true});
-  const bootstrap=()=>{
+  offConnection=client.subscribe(state=>{transportAvailable=state.connected;if(!state.connected){nativeAdmission=false;for(const foreground of foregrounds.values())foreground.confirmNative(false);playbackKnown=false;needReady=true;readyContextSentAt=null;resetPlayers();frame=null;enabled=false;resumeGeneration=0;stateRevision=0;stateOwner=null;retiredStateOwners.clear();refresh();}else if(current&&currentOwner)report(current,currentOwner,currentVisible,true);},{connectionOnly:true});
+  bootstrap=()=>{
     const wanted=!disposed&&roots.size>0&&host.__YMCC_DECKY_MIRROR__?.wallpaperProtocol===1&&host.__YMCC_DECKY_MIRROR__?.revoked!==true;
     if(wanted&&!wallpaperDemand){needReady=true;readyContextSentAt=null;}wallpaperDemand=wanted;
     client.setPassiveDemand('wallpaper',wanted);
@@ -313,8 +339,8 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
     if(wanted&&contextPending&&current&&currentOwner)report(current,currentOwner,currentVisible,true);
     syncBootstrapWait();
   };
-  host.addEventListener('ymcc-decky-bootstrap',bootstrap);bootstrap();
-  const disposeFallback=installWallpaperRouteFallback({host,react:React,reactDom,ui,routerHook,homeRootClass:classes.homeRoot,Surface,isDisposed:()=>disposed,trace});
-  return()=>{if(disposed)return;disposed=true;const stop=stopBootstrapWait;stopBootstrapWait=null;stop?.();disposeFallback();for(const foreground of foregrounds.values())foreground.stop();foregrounds.clear();resetPlayers();frame=null;enabled=false;refresh();for(const listener of routeListeners)listener();routeListeners.clear();offExtra();offConnection();host.removeEventListener('ymcc-decky-bootstrap',bootstrap);for(const {path,patch} of patches)routerHook.removePatch(path,patch);listeners.clear();owners.clear();client.setPassiveDemand('wallpaper',false);};
+  bootstrapInstalled=true;host.addEventListener('ymcc-decky-bootstrap',bootstrap);bootstrap();
+  disposeFallback=installWallpaperRouteFallback({host,react:React,reactDom,ui,routerHook,homeRootClass:classes.homeRoot,Surface,isDisposed:()=>disposed,trace});
+    return dispose;
+  }catch(error){try{dispose();}catch{}throw error;}
 }
-

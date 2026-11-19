@@ -1,8 +1,24 @@
-# YMCC 全家族充电能力复核（2026-11-05）
+# YMCC 全家族充电能力复核（2026-11-19）
 
 逐类解析继承链、充电声明、最终固件判断方法和 YMCC 精确身份规则。候选仍需运行时验证，不等于硬件支持或实测通过。本文件在唯一 capabilities 总库内，只记录审计，不提供另一套运行注册。完整方法、身份、行号、哈希、条件和档位见同名 JSON。
 
-当前运行规则 42 组，协议 12 条；联网 HC 提交 db93cadd55cb9f199beb1cb1dff016bc0150048e，完整设备源码 104 文件。
+> 证据范围：锁定 HC、固定上游 HC、当前运行规则、固定 OneXConsole OEM 分支。其他 OEM 未因本报告而获得覆盖或排除结论。
+
+当前运行规则 43 组，协议 13 条；联网 HC 提交 db93cadd55cb9f199beb1cb1dff016bc0150048e，完整设备源码 104 文件，解析清单逐文件匹配该提交树。
+
+## 运行规则重叠
+
+静态检查 903 对规则：同字段 0 对、跨字段 7 对存在候选交集。下表为人工组合的 DMI 反例；匹配多条规则时不选路，不按注册顺序回退。不能据此认定现场出现过这些身份；单一匹配也不等于通过固件或 provider 门。
+
+| 厂商 | boardProduct | systemProduct | 交集规则 | 静态选择 |
+| --- | --- | --- | --- | --- |
+| ONE-NETBOOK | ONEXPLAYER X1 A | ONEXPLAYER 3 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER X1 mini | ONEXPLAYER 3 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER X1Pro | ONEXPLAYER 3 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER APEX | ONEXPLAYER 3 | battery.rule.oxp-x1-amd-ec.OneXPlayerApex, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER X1 i | ONEXPLAYER 3 | battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER X2Mini PRO | ONEXPLAYER 3 | battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro, battery.rule.oxp3-wmi-ec.OneXPlayer3 | ambiguous: 无路由 |
+| ONE-NETBOOK | ONEXPLAYER SUPER X | ONEXPLAYER 3 | battery.rule.oxp3-wmi-ec.OneXPlayer3, battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX | ambiguous: 无路由 |
 
 ## OneX 优先结论
 
@@ -23,9 +39,9 @@
 | OneXPlayerX1Intel | oxp-x1-intel-ec，50/55/60/65/70/75/80/85/90/95/100% | YMCC registers direct EC16 0x04A3 threshold only; HC 0x04A4 modes 0x00/0x01/0x03 are not product-exposed |
 | OneXPlayerX1Mini | oxp-x1-amd-ec，50/55/60/65/70/75/80/85/90/95/100% | YMCC registers direct EC16 0x04A3 threshold only; HC 0x04A4 modes 0x00/0x01/0x03 are not product-exposed |
 | OneXPlayerX1Pro | oxp-x1-amd-ec，50/55/60/65/70/75/80/85/90/95/100% | YMCC registers direct EC16 0x04A3 threshold only; HC 0x04A4 modes 0x00/0x01/0x03 are not product-exposed |
-| OneXPlayerX2 | 未登记 | 上游明确 false，不继承启用 |
-| OneXPlayerX2MiniPro | 未登记 | 上游明确 false，不继承启用 |
-| OneXPlayerSuperX | oxp-superx-dual-ec，75–100% | 独立已审查来源；沿原双传输消费者，实机尚未证明 |
+| OneXPlayerX2 | 未登记 | HC 拒绝继承 X1；另核原厂 |
+| OneXPlayerX2MiniPro | oxp-x2-mini-pro-direct-ec，50/55/60/65/70/75/80/85/90/95/100% | HC 拒绝继承 X1；YMCC 已有独立路由，表中档位不代表实机读回 |
+| OneXPlayerSuperX | oxp-superx-dual-ec，75–100% | 独立于 HC 的已审查来源；仅限本行的身份、固件门和 provider，实机尚未证明 |
 
 ## APEX Windows 原厂配置补证
 
@@ -56,13 +72,63 @@ OneXPlayer 3 的独立 WMI 协议已适配，当前已不是 10 月 16 日的“
 
 HC/APEX当前沿用X1 EC16 0x04A3；原厂Windows JavaScript的精确APEX配置0x04E5已证，Linux ACPI8 0xE5另记。实际Windows原生EC事务未恢复；当前现场仍是provider打开前的准入拒绝，未改门/寄存器，实机失败保持未修复。
 
+## 独立原厂证据对账
+
+固定 OneXConsole 0.10.4-fix3 共 29 个启用分支，39 个精确 Product 标签，其中 24 个没有同字面量运行规则。另有 0 个只定位到厂商范围的分支。
+
+字面量相符不是 DMI、原生协议或实体通过证明；表中候选不自动登记。
+
+| 厂商 | 原厂标签 | 条件 | 当前规则 |
+| --- | --- | --- | --- |
+| AOKZOE | AOKZOE A1X | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER F1 | null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER F1 EVA-01 | null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1 i | null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=67 | battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER X1 A | oe.BIOSVersion&&oe.BIOSVersion>=1.06&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER X1 mini | oe.BIOSVersion&&oe.BIOSVersion>=1.04&&null!=oe.EcMajorVersion&&oe.EcMajorVersion>=1&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=3 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1Mini (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER F1L | null!=oe.EcMajorVersion&&oe.EcMajorVersion>=0&&null!=oe.EcMinorVersion&&oe.EcMinorVersion>=30 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER F1 OLED | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER F1 EVA-02 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER F1Pro | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1Pro | 未在本分支提取固件条件 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1Pro (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER X1Pro B | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1Mini Pro | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1z | 未在本分支提取固件条件 | battery.rule.oxp-x1-amd-ec.OneXPlayerX1AMD (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER X1Pro i | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1Pro EVA-02 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER G1 A | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER G1 i | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1Pro A EVA-02 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X1Air | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2Air | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER SUPER X | 未在本分支提取固件条件 | battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER APEX | 未在本分支提取固件条件 | battery.rule.oxp-x1-amd-ec.OneXPlayerApex (boardProduct) |
+| ONE-NETBOOK | ONEXPLAYER Apex i | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER Apex Air | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER SUPER V | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2 EVA | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2 EVA-02 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2Mini | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER 3 | 未在本分支提取固件条件 | battery.rule.oxp3-wmi-ec.OneXPlayer3 (systemProduct) |
+| ONE-NETBOOK | ONEXPLAYER 3 EVA-01 | 未在本分支提取固件条件 | 无同字面量规则，需核身份与协议 |
+| ONE-NETBOOK | ONEXPLAYER X2Mini PRO | 未在本分支提取固件条件 | battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro (boardProduct) |
+| ASUSTeK COMPUTER INC. | RC71L | 未在本分支提取固件条件 | battery.rule.asus-ally-acpi.ROGAlly (boardProduct) |
+| ASUSTeK COMPUTER INC. | RC72LA | 未在本分支提取固件条件 | battery.rule.asus-ally-acpi.ROGAllyX (boardProduct) |
+| Micro-Star International Co., Ltd. | MS-1T41 | 未在本分支提取固件条件 | battery.rule.msi-claw-wmi.ClawA1M (boardProduct) |
+| Micro-Star International Co., Ltd. | MS-1T42 | 未在本分支提取固件条件 | battery.rule.msi-claw-wmi.ClawA2VM (boardProduct) |
+| Micro-Star International Co., Ltd. | MS-1T52 | 未在本分支提取固件条件 | battery.rule.msi-claw-wmi.ClawA2VM (boardProduct) |
+| Micro-Star International Co., Ltd. | MS-1T8K | 未在本分支提取固件条件 | battery.rule.msi-claw-wmi.ClawBZ2EM (boardProduct) |
+
 ## 全家族边界
 
-- ROG / MSI：用户反馈基本可用，保留现有 ASUS 回执语义与 G3E 独立 AP 回读；本轮不扩大成全部型号实机通过。
+- ROG / MSI：ASUS 写入回执不是上限回读；MSI 旧 WMI 与 G3E AP 分开，历史有效回读不覆盖其他固件。
 - Lenovo：固定 80/100%；AYANEO：CEc 与 CEii 软件阈值 50–95%，100% 释放，不能称固件保存阈值。
-- Steam Deck：精确板号/固件和驱动门，单字节阈值；GPD：仅 Mini 2025 HX370 精确 BIOS/EC，Win5 仍无 HC 充电协议。
-- SuiPlay：继承源码仍未开放 Windows；X2/X2MiniPro 明确禁用；其他无声明机型不能因家族相近补寄存器。
-- 本报告的已登记/候选均是源码层级；下方每个类列出来源和运行边界。
+- Steam Deck：精确板号/固件和驱动门，单字节阈值；GPD：只登记 Mini 2025 HX370，规则声明精确 BIOS/EC，实际比较与拒绝先于打开 provider 需另按 HC224 核验。Win5 原厂 BIOS 可有阈值，不等于已有 YMCC Windows 事务。
+- SuiPlay：继承源码仍未开放 Windows；HC 的 X2/X2MiniPro 明确不继承 X1 支持，这不是对原厂能力的否定。
+- 本报告的已登记/候选均是源码层级，不证明普通包已带入、provider 已执行或实机停充。
+
+**X2 Mini Pro：** 登记的是主板 `ONEXPLAYER X2Mini PRO` 单独路线，声明 BIOS `0.22`、EC `0.12`，50–100%，每 5% 一档。当前路线仅设置阈值，不写相邻旁路或强充地址。与 Intel OneXPlayer 3、APEX 路线不同；不把旧包查询拒绝、模拟回读或原厂配置当作新普通包实机证据。
 
 ## YMCC 锁定 HC
 
@@ -239,7 +305,7 @@ HC/APEX当前沿用X1 EC16 0x04A3；原厂Windows JavaScript的精确APEX配置0
 | OneXPlayerX1Mini | onex-direct-ec-threshold-and-bypass | oxp-x1-amd-ec | YMCC registers direct EC16 0x04A3 threshold only; HC 0x04A4 modes 0x00/0x01/0x03 are not product-exposed |
 | OneXPlayerX1Pro | onex-direct-ec-threshold-and-bypass | oxp-x1-amd-ec | YMCC registers direct EC16 0x04A3 threshold only; HC 0x04A4 modes 0x00/0x01/0x03 are not product-exposed |
 | OneXPlayerX2 | 最终判断返回 false | 未登记 |  |
-| OneXPlayerX2MiniPro | 最终判断返回 false | 未登记 |  |
+| OneXPlayerX2MiniPro | 最终判断返回 false | oxp-x2-mini-pro-direct-ec |  |
 | ROGAlly | asus-rsoc-ack-only | asus-ally-acpi |  |
 | ROGAllyX | asus-rsoc-ack-only | asus-ally-acpi |  |
 | SteamDeck | steamdeck-firmware-threshold | valve-deck-firmware | YMCC writes one threshold byte; HC setter builds an Int32 byte array |
@@ -253,6 +319,6 @@ HC/APEX当前沿用X1 EC16 0x04A3；原厂Windows JavaScript的精确APEX配置0
 复用 tools/PcCapabilityAudit 生成 locked/upstream-inventory.json；审计不加载 HC、不开设备。
 
 ```powershell
-node tools/battery-hc-coverage-audit.mjs --evidence G:/YeManCC-Work/Testing/YMCC/Evidence/BatteryCapability-20261105 --out G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-084-ONEX-NATIVE-SOURCE-RECOVERY/audit-with-auxiliary --date 2026-11-05 --stem BATTERY-CAPABILITY-AUDIT --field-evidence G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-084-ONEX-NATIVE-SOURCE-RECOVERY/field-battery-with-windows-auxiliary-contract.json
+node tools/battery-hc-coverage-audit.mjs --evidence G:/YeManCC-Work/Testing/YMCC/Evidence/BatteryCapability-20261105 --out G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities --date 2026-11-19 --stem BATTERY-CAPABILITY-AUDIT --field-evidence G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-084-ONEX-NATIVE-SOURCE-RECOVERY/field-battery-with-windows-auxiliary-contract.json --onex-oem-background "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-080-ONEX-REQUIREMENTS-CONSUMPTION-AUDIT/oem-official/asar-selected/background.js"
 ```
 

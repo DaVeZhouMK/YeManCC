@@ -1,0 +1,391 @@
+// Directed extension of steam_original_recovery_dual_route_selftest.py only.
+// Real std::thread/cv/Windows event; clock and request/subscription owners are leaves.
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <climits>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "steam_original_recovery_policy.h"
+@@COMMAND_PRELUDE@@
+#define FIXTURE_COMMAND_READY @@COMMAND_READY@@
+#define FIXTURE_SIGNAL_LOCKS_CONTROL @@SIGNAL_LOCKS_CONTROL@@
+#define FIXTURE_NATIVE_COMMAND_CLOSURE @@NATIVE_COMMAND_CLOSURE@@
+using namespace std::chrono_literals;
+using U64=unsigned long long;
+static U64 realTick(){return GetTickCount64();}
+static std::atomic<U64> tickValue{1000},clockCalls{0};
+static std::atomic<bool> realClock{false};
+static constexpr bool hasDeadline=@@HAS_DEADLINE@@;
+static std::mutex clockMx;static std::condition_variable clockCv;
+static U64 fixtureTick(){
+ {std::lock_guard<std::mutex> lock(clockMx);++clockCalls;}clockCv.notify_all();
+ return realClock?realTick():tickValue.load();
+}
+#define GetTickCount64 fixtureTick
+namespace SteamOriginalRecovery {
+using Trigger=ymcc::steamOriginal::Trigger;
+#if FIXTURE_COMMAND_READY
+@@COMMAND_TYPES@@
+#else
+// Original legacy storage port remains default-constructible for unchanged cases.
+struct StartupFreshRequest {std::atomic<bool> cancelled{false};
+#if FIXTURE_NATIVE_COMMAND_CLOSURE
+ std::atomic<bool> terminal{false};
+ U64 sequence=0,configEpoch=0,rulesEpoch=0,powerGeneration=0;
+ NativeGameSelectionReceipt selection;
+ std::shared_ptr<ymcc::steamnative::ReadScope> operationReadScope;
+#endif
+};
+@@PHASE@@
+struct SubscriptionPort {std::atomic<int> cancels{0};void cancel()noexcept{++cancels;}};
+struct StartupFreshWait {StartupFreshPhase phase=StartupFreshPhase::Watching;SubscriptionPort subscription;
+#if FIXTURE_NATIVE_COMMAND_CLOSURE
+ std::shared_ptr<StartupFreshRequest> request;
+ ymcc::steamOriginal::RecoveryRoute route=ymcc::steamOriginal::RecoveryRoute::LegacyDynamic;
+ std::shared_ptr<ymcc::steamnative::ReadScope> nativeReadScope;
+ ymcc::steamgamefacts::TrackerCompletionWitness witness;
+#endif
+};
+@@PENDING@@
+enum class GroupRequestTarget {GlobalSelection,SleepOriginal};
+struct CancellationPort {std::atomic<int> cancels{0};void cancel()noexcept{++cancels;}};
+struct ActiveGroupRequest {std::shared_ptr<CancellationPort> cancellation;GroupRequestTarget targetDomain=GroupRequestTarget::GlobalSelection;};
+// Control storage port: precisely the fields accessed by the extracted functions.
+// No runOne, tracker, route, SourceLease or engine implementation is replaced here.
+struct Control {
+ std::mutex mx;std::condition_variable cv;bool stop=false;std::deque<Pending> pending;
+ std::shared_ptr<void> observationEvent;
+#if FIXTURE_NATIVE_COMMAND_CLOSURE
+ std::shared_ptr<ymcc::steamcommand::AvailabilityEvent> mutationAvailability;
+ std::shared_ptr<StartupCommandWait> startupCommandWait;
+#endif
+ std::shared_ptr<ActiveGroupRequest> activeGroupRequest;
+ std::shared_ptr<StartupFreshRequest> startupFreshRequest;
+ std::array<std::shared_ptr<StartupFreshWait>,2> startupFreshWaits;
+ U64 sequence=0,observationSequence=0,latestPower=0;std::atomic<bool> ownsRunning{false};
+ ymcc::steamOriginal::Identity boundGame,boundSteam;
+ std::atomic<bool> active{false};bool bindingQualified=false;U64 bindingSerial=0;
+ std::string boundGameId;std::uint32_t boundAppId=0;
+ std::shared_ptr<void> boundSleepRequest;
+};
+#endif
+static std::shared_ptr<Control> currentPort;
+static std::shared_ptr<Control> current(){return currentPort;}
+@@COMMAND_FUNCTIONS@@
+@@CANCEL_GROUP@@
+@@CANCEL_FRESH@@
+@@ENQUEUE@@
+@@TAKE@@
+}
+namespace SleepSteamRecovery {
+static void originalTargetCommit(bool,const std::function<void()>& commit){commit();}
+}
+@@STOP@@
+#define YMCC_TRACKER_HAS_ABSENCE @@TRACKER_HAS_ABSENCE@@
+@@TRACKER@@
+using namespace SteamOriginalRecovery;
+static unsigned checks=0;static std::vector<U64> realDurations;
+static void check(bool good,const char* why){++checks;if(!good)throw std::runtime_error(why);}
+static void awaitClock(U64 count){
+ if(!hasDeadline)return; // Old-source control: assert its actual early dispatch, not a missing clock callback.
+ std::unique_lock<std::mutex> lock(clockMx);
+ check(clockCv.wait_for(lock,1500ms,[&]{return clockCalls>=count;}),"worker-did-not-reach-real-wait-helper");
+}
+struct Worker {
+ std::shared_ptr<Control> c;std::mutex mx;std::condition_variable cv;
+ std::vector<Pending> seen;std::vector<U64> at;std::thread thread;
+ explicit Worker(std::shared_ptr<Control> owner):c(std::move(owner)){
+  currentPort=c;
+  thread=std::thread([this]{Pending p;while(takeNext(c,p)){
+   {std::lock_guard<std::mutex> lock(mx);seen.push_back(p);at.push_back(realClock?realTick():tickValue.load());}cv.notify_all();
+  }});
+ }
+ void halt(){if(thread.joinable()){steamOriginalRecoveryRequestStop();thread.join();currentPort.reset();}}
+ ~Worker(){halt();}
+ bool countAtLeast(std::size_t n,std::chrono::milliseconds ms=1500ms){std::unique_lock<std::mutex> lock(mx);return cv.wait_for(lock,ms,[&]{return seen.size()>=n;});}
+ std::size_t count(){std::lock_guard<std::mutex> lock(mx);return seen.size();}
+};
+static void resetClock(){realClock=false;tickValue=1000;clockCalls=0;}
+static void advanceTick(const std::shared_ptr<Control>& c,U64 now){
+ {std::lock_guard<std::mutex> lock(c->mx);tickValue=now;}c->cv.notify_all();
+}
+#if !FIXTURE_COMMAND_READY
+static void burst(){
+ resetClock();auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);
+ Worker w(c);awaitClock(2);check(!w.countAtLeast(1,10ms),"ordinary-ran-before-fixed-window");
+ for(U64 n:{1010ull,1020ull,1049ull}){advanceTick(c,n);enqueue(c,Trigger::TargetChanged);}
+ advanceTick(c,1099);check(!w.countAtLeast(1,15ms),"ordinary-ran-before-100ms");
+ advanceTick(c,1100);check(w.countAtLeast(1),"ordinary-not-released-at-100ms");
+ check(!w.countAtLeast(2,20ms),"burst-started-more-than-one-round");
+ check(c->sequence==1&&c->observationSequence==1,"duplicate-changed-sequences");
+ check(w.seen[0].sequence==1&&!w.seen[0].startupFresh,"ordinary-suffix-or-sequence-changed");
+}
+static void continuous(){
+ resetClock();auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);Worker w(c);awaitClock(2);
+ for(U64 n=1010;n<=1090;n+=10){advanceTick(c,n);enqueue(c,Trigger::TargetChanged);}
+ advanceTick(c,1099);enqueue(c,Trigger::TargetChanged);
+ check(!w.countAtLeast(1,10ms),"continuous-ran-early");
+ advanceTick(c,1100);check(w.countAtLeast(1,200ms),"duplicates-refreshed-original-deadline");
+ check(c->sequence==1,"continuous-duplicate-created-new-sequence");
+}
+static void urgent(Trigger kind){
+ resetClock();auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged,1);enqueue(c,Trigger::TargetChanged,2);
+ Worker w(c);awaitClock(3);check(!w.countAtLeast(1,10ms),"ordinary-predecessor-ran-early");
+ enqueue(c,kind,(kind==Trigger::Wake||kind==Trigger::SuspendCapture)?10:0);
+ check(w.countAtLeast(3,200ms),"urgent-waited-for-ordinary-deadline");
+ check(w.seen[0].kind==Trigger::TargetChanged&&w.seen[0].generation==1&&w.seen[1].generation==2&&w.seen[2].kind==kind,"urgent-reordered-fifo");
+ check(w.seen[0].sequence==1&&w.seen[1].sequence==2&&w.seen[2].sequence==3,"urgent-sequence-order-changed");
+ check(tickValue==1000,"urgent-test-advanced-clock");
+}
+static void urgentStartup(){urgent(Trigger::Startup);}
+static void urgentSteam(){urgent(Trigger::SteamChanged);}
+static void urgentSuspend(){urgent(Trigger::SuspendCapture);}
+static void urgentWake(){urgent(Trigger::Wake);}
+static void suffix(){
+ resetClock();auto c=std::make_shared<Control>();auto s=std::make_shared<StartupFreshWait>();
+ // Four-field aggregate is the exact-flight completion enqueue shape.
+ c->pending.push_back({Trigger::TargetChanged,0,77,s});
+ {Worker w(c);check(w.countAtLeast(1,200ms),"front-suffix-was-delayed");check(w.seen[0].startupFresh==s&&w.seen[0].sequence==77,"suffix-qualification-changed");check(clockCalls==0,"suffix-read-clock");}
+ c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);auto calls=clockCalls.load();
+ c->pending.push_back({Trigger::TargetChanged,0,88,s});
+ {Worker w(c);check(w.countAtLeast(2,200ms),"tail-suffix-did-not-release-predecessor");check(w.seen[0].sequence==1&&w.seen[1].sequence==88&&w.seen[1].startupFresh==s,"tail-suffix-reordered-or-rebound");check(clockCalls==calls,"urgent-suffix-read-clock");}
+}
+static void cancellationAndBound(){
+ {
+  auto held=std::make_shared<Control>();currentPort=held;
+  held->boundGame={1604,1,134392591369607798ULL,L"D:\\game\\kitty.exe"};
+  held->boundSteam={15164,1,134391926586954109ULL,L"D:\\game\\steam.exe"};
+  held->active=true;held->bindingQualified=true;held->ownsRunning=true;held->bindingSerial=10;
+  held->boundSleepRequest=std::make_shared<int>(1);
+  auto request=std::make_shared<ActiveGroupRequest>();request->cancellation=std::make_shared<CancellationPort>();held->activeGroupRequest=request;
+  // Both cases model caller complete=true/status=removed. The old boolean
+  // API can express only exact=false; the new API carries that existing fact.
+#if YMCC_TRACKER_HAS_ABSENCE
+  steamOriginalRecoveryTrackerObserved(1604,134392591369607798ULL,15164,134391926586954109ULL,"",0,false,true);
+#else
+  steamOriginalRecoveryTrackerObserved(1604,134392591369607798ULL,15164,134391926586954109ULL,"",0,false);
+#endif
+  check(!held->bindingQualified&&!held->ownsRunning&&held->bindingSerial==11&&request->cancellation->cancels==1,"definitive-removal-not-revoked");
+  check(held->pending.empty()&&held->sequence==0,"removal-created-recovery-work");
+  currentPort.reset();
+ }
+ // Same production revocation callback, before any queue work. Unavailable
+ // shared observations contain no contrary identity and cannot cancel an
+ // already qualified original. Exact conflicting identities still revoke.
+ for(const bool sleeping:{false,true})for(const bool exact:{false,true}){
+  auto held=std::make_shared<Control>();currentPort=held;
+  held->boundGame={1604,1,134392591369607798ULL,L"D:\\game\\kitty.exe"};
+  held->boundSteam={15164,1,134391926586954109ULL,L"D:\\game\\steam.exe"};
+  held->boundGameId="15669115425508032512";held->boundAppId=3648250230u;
+  held->active=true;held->bindingQualified=true;held->ownsRunning=true;held->bindingSerial=10;
+  if(sleeping)held->boundSleepRequest=std::make_shared<int>(1);
+  auto request=std::make_shared<ActiveGroupRequest>();request->cancellation=std::make_shared<CancellationPort>();
+  held->activeGroupRequest=request;
+  const auto beforeClock=clockCalls.load();
+  // Original exact mapping, then an incomplete read (or exact contradiction).
+  steamOriginalRecoveryTrackerObserved(1604,134392591369607798ULL,15164,134391926586954109ULL,
+      held->boundGameId,held->boundAppId,true);
+  check(held->bindingQualified&&held->bindingSerial==10&&request->cancellation->cancels==0,"matching-tracker-revoked-original");
+  steamOriginalRecoveryTrackerObserved(1604,134392591369607798ULL,15164,134391926586954109ULL,
+      exact?"17454939209159671808":"",exact?4064044731u:0u,exact);
+  if(exact)check(!held->bindingQualified&&!held->ownsRunning&&held->bindingSerial==11&&request->cancellation->cancels==1,"exact-conflicting-tracker-not-revoked");
+  else check(held->bindingQualified&&held->ownsRunning&&held->bindingSerial==10&&request->cancellation->cancels==0,"unknown-tracker-revoked-qualified-original");
+  check(held->pending.empty()&&held->sequence==0&&held->observationSequence==0&&clockCalls==beforeClock,"tracker-observation-created-work-or-budget");
+  if(!exact){
+   steamOriginalRecoveryTrackerObserved(1700,134392591369607799ULL,15164,134391926586954109ULL,
+       "17454939209159671808",4064044731u,true);
+   if(sleeping)check(held->bindingQualified&&held->bindingSerial==10&&request->cancellation->cancels==0,"other-global-target-cancelled-sleep-original");
+   else check(!held->bindingQualified&&held->bindingSerial==11&&request->cancellation->cancels==1,"ordinary-target-change-not-revoked");
+  }
+  currentPort.reset();
+ }
+ resetClock();auto c=std::make_shared<Control>();
+ auto request=std::make_shared<StartupFreshRequest>();auto s=std::make_shared<StartupFreshWait>();
+ c->startupFreshRequest=request;c->startupFreshWaits[0]=s;
+ auto closeCount=std::make_shared<std::atomic<int>>(0);HANDLE event=CreateEventW(nullptr,TRUE,FALSE,nullptr);check(event!=nullptr,"event-create-failed");
+ c->observationEvent=std::shared_ptr<void>(event,[closeCount](void* h){if(CloseHandle(h))++*closeCount;});
+ enqueue(c,Trigger::TargetChanged);
+ check(request->cancelled&&s->phase==StartupFreshPhase::Cancelled&&s->subscription.cancels==1,"accepted-enqueue-did-not-cancel-immediately");
+ check(c->startupFreshRequest==request&&c->startupFreshWaits[0]==s,"enqueue-released-retained-owners");
+ check(WaitForSingleObject(event,0)==WAIT_OBJECT_0,"observation-event-not-signalled-immediately");
+ auto calls=clockCalls.load();enqueue(c,Trigger::TargetChanged);
+ check(c->sequence==1&&c->observationSequence==1&&s->subscription.cancels==1&&clockCalls==calls,"duplicate-admission-contract-changed");
+ for(U64 n=1;n<16;++n)enqueue(c,Trigger::TargetChanged,n);
+ calls=clockCalls.load();enqueue(c,Trigger::TargetChanged,16);
+ check(c->pending.size()==16&&c->sequence==16&&c->observationSequence==16&&clockCalls==calls,"queue-cap-or-drop-contract-changed");
+ c->latestPower=30;enqueue(c,Trigger::Wake,29);enqueue(c,Trigger::SuspendCapture,0);
+ check(c->pending.size()==16&&c->latestPower==30&&c->sequence==16,"stale-generation-was-admitted");
+ currentPort=c;steamOriginalRecoveryRequestStop();
+ check(c->stop&&c->pending.empty()&&s->subscription.cancels==17,"stop-did-not-cancel-and-drain");
+ calls=clockCalls.load();enqueue(c,Trigger::TargetChanged,90);check(c->pending.empty()&&c->sequence==16&&clockCalls==calls,"stopped-owner-enqueued-work");
+ currentPort.reset();c.reset();check(*closeCount==1,"observation-handle-not-returned");
+}
+static void generations(){
+ resetClock();auto c=std::make_shared<Control>();c->latestPower=20;
+ enqueue(c,Trigger::Wake,19);enqueue(c,Trigger::SuspendCapture,0);
+ check(c->sequence==0&&c->pending.empty()&&clockCalls==0,"old-power-hint-changed-queue");
+ enqueue(c,Trigger::Wake,20);enqueue(c,Trigger::Wake,20);enqueue(c,Trigger::SuspendCapture,21);
+ check(c->pending.size()==2&&c->latestPower==21&&c->sequence==2&&c->observationSequence==2&&clockCalls==0,"power-dedup-sequence-or-clock-changed");
+ c->observationSequence=ULLONG_MAX;enqueue(c,Trigger::SteamChanged);
+ check(c->observationSequence==ULLONG_MAX&&c->sequence==3,"observation-sequence-wrapped");
+}
+static void laterNew(){
+ resetClock();auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);Worker w(c);awaitClock(2);
+ advanceTick(c,1100);check(w.countAtLeast(1),"first-window-not-consumed");
+ advanceTick(c,1200);enqueue(c,Trigger::TargetChanged);check(!w.countAtLeast(2,15ms),"new-notification-reused-old-window");
+ advanceTick(c,1299);check(!w.countAtLeast(2,10ms),"new-notification-ran-early");
+ advanceTick(c,1300);check(w.countAtLeast(2),"genuinely-new-notification-lost");
+ check(w.seen[0].sequence==1&&w.seen[1].sequence==2&&c->observationSequence==2,"new-notification-sequences-changed");
+}
+static void idleStop(){
+ resetClock();auto c=std::make_shared<Control>();Worker w(c);
+ for(int i=0;i<5;++i)c->cv.notify_all();
+ check(!w.countAtLeast(1,40ms)&&clockCalls==0,"empty-queue-clock-polled-or-dispatched");
+ const auto began=std::chrono::steady_clock::now();w.halt();
+ check(std::chrono::steady_clock::now()-began<500ms&&clockCalls==0,"empty-stop-delayed-or-clock-polled");
+}
+static void deferredStop(){
+ resetClock();auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);Worker w(c);awaitClock(2);
+ auto req=std::make_shared<ActiveGroupRequest>();req->cancellation=std::make_shared<CancellationPort>();c->activeGroupRequest=req;
+ const auto began=std::chrono::steady_clock::now();w.halt();
+ check(std::chrono::steady_clock::now()-began<500ms&&w.count()==0&&req->cancellation->cancels==1,"deferred-stop-not-immediate-or-cancelled");
+}
+static void saturation(){
+ resetClock();tickValue=ULLONG_MAX-30;auto c=std::make_shared<Control>();enqueue(c,Trigger::TargetChanged);Worker w(c);awaitClock(2);
+ check(!w.countAtLeast(1,10ms),"saturating-add-wrapped");
+ advanceTick(c,ULLONG_MAX-1);check(!w.countAtLeast(1,10ms),"saturated-deadline-ran-early");
+ advanceTick(c,ULLONG_MAX);check(w.countAtLeast(1),"saturated-deadline-never-released");
+}
+static void shortRealTiming(){
+ resetClock();realClock=true;auto c=std::make_shared<Control>();const auto tick=realTick();const auto began=std::chrono::steady_clock::now();
+ enqueue(c,Trigger::TargetChanged);Worker w(c);check(w.countAtLeast(1,1500ms),"real-boundary-did-not-complete");
+ const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-began).count();
+ check(w.at[0]>=tick+100&&elapsed>=90&&elapsed<1500,"real-short-window-outside-boundary");realDurations.push_back(static_cast<U64>(elapsed));
+ w.halt();realClock=false;
+}
+#endif
+
+#if FIXTURE_COMMAND_READY
+namespace SC=ymcc::steamcommand;
+struct CommandGap {
+ const void* owner=nullptr;std::mutex mx;std::condition_variable cv;
+ bool armed=true,reached=false,release=false,returned=false,timedOut=false;
+ std::atomic<unsigned> order{0},attempt{0},completed{0},predicateExit{0};
+};
+static CommandGap* commandGap=nullptr;
+static void fixtureCommandPredicate(const void* owner,bool observed)noexcept {
+ auto* gate=commandGap;if(!gate||owner!=gate->owner||observed)return;
+ std::unique_lock<std::mutex> lock(gate->mx);if(!gate->armed)return;gate->armed=false;gate->reached=true;gate->cv.notify_all();
+ if(!gate->cv.wait_for(lock,2000ms,[&]{return gate->release;}))gate->timedOut=true;
+ gate->predicateExit=++gate->order;gate->returned=true;gate->cv.notify_all();
+}
+static void gapReached(CommandGap& gap){std::unique_lock<std::mutex> lock(gap.mx);check(gap.cv.wait_for(lock,1500ms,[&]{return gap.reached;}),"predicate-did-not-read-false-under-Control-mx");}
+static void gapRelease(CommandGap& gap){{std::lock_guard<std::mutex> lock(gap.mx);gap.release=true;}gap.cv.notify_all();}
+static void gapReturned(CommandGap& gap){std::unique_lock<std::mutex> lock(gap.mx);check(gap.cv.wait_for(lock,1500ms,[&]{return gap.returned;}),"predicate-did-not-return");check(!gap.timedOut,"fixture-predicate-barrier-timeout");}
+struct GapReset {~GapReset(){commandGap=nullptr;}};
+static SC::Target commandTarget(){return {123,456,LR"(X:\InertSteam)"};}
+struct CommandScene {
+ SC::Coordinator coordinator;std::shared_ptr<Control> control=std::make_shared<Control>();
+ SC::Ticket holder;std::shared_ptr<StartupCommandWait> wait;
+ CommandScene(){
+  currentPort=control;control->sequence=7;
+  auto request=std::make_shared<StartupFreshRequest>(7,1,1,0,NativeGameSelectionReceipt{},std::shared_ptr<ymcc::steamnative::ReadScope>{});control->startupFreshRequest=request;
+  holder=coordinator.reserve(commandTarget(),SC::Plan::Single);check(bool(holder),"ordinary-parent-reserved");
+  auto signal=std::make_shared<StartupCommandSignal>(control);auto intent=coordinator.prepareIntent(commandTarget(),signal);check(bool(intent),"actual-core-intent-prepared");
+  wait=std::make_shared<StartupCommandWait>(request,Pending{Trigger::Startup,0,7},RecoveryRoute::LegacyDynamic,Scope{},"fixture",1,0,false,signal,intent);wait->phase=StartupCommandPhase::Watching;control->startupCommandWait=wait;
+  check(intent->promote()==SC::IntentStatus::Waiting,"actual-core-waiter-registered");
+ }
+ ~CommandScene(){currentPort.reset();}
+};
+static void commandReadyRegistration(){
+ resetClock();json results=json::array();
+ const auto boundary=[&](const char* name,const std::function<void()>& body){body();results.push_back({{"name",name},{"passed",true}});};
+ try{
+ boundary("predicate-false-before-wait-registration",[&]{
+  CommandScene scene;auto c=scene.control;CommandGap gap;gap.owner=c.get();commandGap=&gap;GapReset clear;
+  Worker worker(c);gapReached(gap);std::thread notifier([&]{gap.attempt=++gap.order;gap.cv.notify_all();scene.holder.parentReturned();gap.completed=++gap.order;gap.cv.notify_all();});
+  struct Join {std::thread& t;CommandGap& gap;~Join(){gapRelease(gap);if(t.joinable())t.join();}}join{notifier,gap};
+  {std::unique_lock<std::mutex> lock(gap.mx);check(gap.cv.wait_for(lock,1500ms,[&]{return gap.attempt.load()!=0;}),"notifier-attempt-not-observed");
+#if !FIXTURE_SIGNAL_LOCKS_CONTROL
+   check(gap.cv.wait_for(lock,1500ms,[&]{return gap.completed.load()!=0;}),"r1-callback-did-not-complete-while-worker-held-Control-mx");
+#endif
+  }
+  // r2 deliberately waits for attempt only. Its callback may acquire c.mx only
+  // after this original predicate returns and the original cv.wait unlocks.
+  gapRelease(gap);gapReturned(gap);{std::lock_guard<std::mutex> lock(c->mx);}
+  const bool timely=worker.countAtLeast(1,FIXTURE_SIGNAL_LOCKS_CONTROL?1500ms:200ms);
+  notifier.join();const auto ready=scene.wait->intent->status();const auto beforeCleanup=worker.count();
+  const unsigned attempt=gap.attempt.load(),complete=gap.completed.load(),predicate=gap.predicateExit.load();
+  results.push_back({{"name","registration-order"},{"signalLocksControl",FIXTURE_SIGNAL_LOCKS_CONTROL!=0},{"notifierAttemptOrder",attempt},{"notifierCompleteOrder",complete},{"predicateExitOrder",predicate},{"timelyDispatch",timely},{"dispatchCountBeforeCleanup",beforeCleanup},{"intentReadyBeforeCleanup",ready==SC::IntentStatus::Ready},{"windowMs",FIXTURE_SIGNAL_LOCKS_CONTROL?1500:200},{"cleanupCannotChangeTimelyResult",true}});
+  worker.halt();check(!gap.timedOut,"bounded-gap-missed-release");check(attempt&&complete&&predicate,"notifier-order-incomplete");
+#if FIXTURE_SIGNAL_LOCKS_CONTROL
+  check(complete>predicate&&timely&&beforeCleanup==1,"r2-did-not-close-real-predicate-to-wait-registration-gap");
+#else
+  check(complete<predicate&&ready==SC::IntentStatus::Ready&&!timely&&beforeCleanup==0,"r1-necessary-interleaving-not-observed");
+  check(false,"P1-ready-command-lost-notification-before-original-wait-registration");
+#endif
+ });
+ boundary("notify-before-first-wait",[&]{
+  CommandScene scene;scene.holder.parentReturned();check(scene.wait->signal->notified&&scene.wait->intent->status()==SC::IntentStatus::Ready,"ready-before-first-worker");Worker worker(scene.control);check(worker.countAtLeast(1)&&worker.seen[0].startupCommand==scene.wait,"first-wait-consumes-existing-ready-signal");worker.halt();
+ });
+ boundary("readiness-after-wait-registration",[&]{
+  CommandScene scene;CommandGap gap;gap.owner=scene.control.get();commandGap=&gap;GapReset clear;Worker worker(scene.control);gapReached(gap);gapRelease(gap);gapReturned(gap);{std::lock_guard<std::mutex> lock(scene.control->mx);}
+  std::thread release([&]{scene.holder.parentReturned();});release.join();check(worker.countAtLeast(1)&&worker.seen[0].startupCommand==scene.wait,"registered-original-cv-wakes-for-real-promotion");worker.halt();
+ });
+ boundary("cancel-before-takeReady-no-suffix",[&]{
+  CommandScene scene;scene.holder.parentReturned();scene.wait->request->cancelled=true;Pending next{Trigger::Startup};check(!takeReadyStartupCommand(scene.control,next)&&!next.startupCommand,"cancelled-request-cannot-dispatch-ready-suffix");check(!scene.control->startupCommandWait&&scene.wait->phase==StartupCommandPhase::Cancelled&&scene.wait->intent->status()==SC::IntentStatus::Revoked,"original-retirement-cancels-intent-after-Control-lock");
+ });
+ boundary("permanent-old-command-debt-does-not-block-local-cancel",[&]{
+  CommandScene scene;check(scene.holder.attachChild(91)&&scene.holder.grant(SC::Effect::Mutation,0),"old-child-grant-debt");scene.holder.parentReturned();enqueue(scene.control,Trigger::SteamChanged);Pending next{Trigger::Startup};check(takeNext(scene.control,next)&&next.kind==Trigger::SteamChanged&&!next.startupCommand,"ordinary-enqueue-does-not-wait-for-old-command-debt");check(scene.wait->intent->status()==SC::IntentStatus::Revoked&&!scene.control->startupCommandWait,"local-waiter-cancelled");check(scene.holder.held()&&!scene.coordinator.reserve(commandTarget(),SC::Plan::Single),"old-permanent-logical-debt-neither-cleared-nor-refunded");
+ });
+ boundary("ordinary-enqueue-prioritizes-and-retires-ready-suffix",[&]{
+  CommandScene scene;scene.holder.parentReturned();check(scene.wait->intent->status()==SC::IntentStatus::Ready,"suffix-ready-before-ordinary-enqueue");enqueue(scene.control,Trigger::SteamChanged);Pending next{Trigger::Startup};check(takeNext(scene.control,next)&&next.kind==Trigger::SteamChanged&&!next.startupCommand,"original-queue-picks-ordinary-after-original-cancel");check(scene.wait->cancelled&&scene.wait->phase==StartupCommandPhase::Cancelled&&!scene.control->startupCommandWait,"old-ready-suffix-retired-not-rebound");
+ });
+ std::cerr<<json{{"selected","command-ready-registration"},{"passed",true},{"boundaries",results},{"qualificationLeaf","exact fixture-current memory only; not real scope/account"},{"runOneOrEngineExecuted",false}}.dump()<<'\n';
+ }catch(...){std::cerr<<json{{"selected","command-ready-registration"},{"passed",false},{"boundaries",results},{"qualificationLeaf","exact fixture-current memory only; not real scope/account"},{"runOneOrEngineExecuted",false}}.dump()<<'\n';throw;}
+}
+#endif
+
+struct Case {const char* name;void(*run)();};
+static const Case cases[]={
+#if FIXTURE_COMMAND_READY
+ {"command-ready-registration",commandReadyRegistration},
+#else
+ {"ordinary-burst",burst},{"continuous-deadline",continuous},
+ {"urgent-startup",urgentStartup},{"urgent-steam-changed",urgentSteam},
+ {"urgent-suspend-capture",urgentSuspend},{"urgent-wake",urgentWake},
+ {"exact-flight-suffix",suffix},{"immediate-cancel-and-cap",cancellationAndBound},
+ {"generation-and-sequences",generations},{"later-new-notification",laterNew},
+ {"idle-no-clock-and-stop",idleStop},{"deferred-stop",deferredStop},
+ {"saturating-deadline",saturation},{"short-real-timing",shortRealTiming}
+#endif
+};
+int main(int argc,char** argv){
+ if(argc!=3||std::string(argv[1])!="--case"||std::string(argv[2]).empty()){std::cerr<<"invalid-selection\n";return 2;}
+ std::string selection=argv[2];bool known=selection=="all";
+ for(const auto& c:cases)if(selection==c.name)known=true;
+ if(!known){std::cerr<<"unknown-selection\n";return 2;}
+ bool first=true;unsigned failed=0;std::cout<<"{\"cases\":[";
+ for(const auto& c:cases)if(selection=="all"||selection==c.name){
+  if(!first)std::cout<<',';first=false;const auto before=checks;
+  std::string error;try{c.run();}catch(const std::exception& e){error=e.what();++failed;}
+  std::cout<<"{\"name\":\""<<c.name<<"\",\"passed\":"<<(error.empty()?"true":"false")<<",\"checks\":"<<(checks-before)<<",\"error\":\""<<error<<"\"}";
+ }
+ std::cout<<"],\"checks\":"<<checks<<",\"failed\":"<<failed<<",\"realTimingMs\":[";
+ for(std::size_t i=0;i<realDurations.size();++i){if(i)std::cout<<',';std::cout<<realDurations[i];}
+ std::cout<<"],\"clockIsControlledLeaf\":true,\"physicalSleepActions\":0,\"engineRouteExecutions\":0}\n";
+ return failed?1:0;
+}

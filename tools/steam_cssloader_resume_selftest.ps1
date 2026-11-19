@@ -7,6 +7,7 @@ $node='G:\YeManCC-Work\Environment\Toolchains\nodejs\node-v22.14.0-win-x64\node.
 if($LASTEXITCODE -ne 0){throw 'Production Ready extraction failed'}
 $recipe=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'steam_cssloader_use_selftest.ps1') -Raw
 $recipe=$recipe.Substring($recipe.IndexOf('@"')+3);$recipe=$recipe.Substring(0,$recipe.IndexOf('"@'))
+$recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments',('"'+$Out+'"'))
 $recipe=$recipe.Replace('$root',$repo).Replace('$OutputDirectory',$Out).Replace('steam_cssloader_use_selftest.cpp','steam_cssloader_resume_selftest.cpp').Replace(' /I"'+$repo+'\native"',' /I"'+$Out+'" /I"'+$repo+'\native" /I"'+$repo+'\deps\json"')
 $cmd=Join-Path $Out 'compile.cmd';[IO.File]::WriteAllText($cmd,$recipe,[Text.Encoding]::ASCII)
 & $cmd 2>&1|Tee-Object -FilePath (Join-Path $Out 'result.log')
@@ -17,9 +18,9 @@ if($LASTEXITCODE -ne 0){throw 'CSS committed resume regression failed'}
 $header=Join-Path $Out 'production-css-resume.h'
 $negativeHeader=Join-Path $Out 'production-css-resume-disabled.h'
 $text=[IO.File]::ReadAllText($header)
-$operand='const bool requested = g_steamCssGuard.requestResumeRecovery(session, generation);'
+$operand='requested = g_steamCssGuard.requestPublicResumeRecovery(session, power);'
 if(($text.Split(@($operand),[StringSplitOptions]::None)).Count -ne 2){throw 'Unique production resume dispatch operand required'}
-[IO.File]::WriteAllText($negativeHeader,$text.Replace($operand,'const bool requested = false;'),(New-Object Text.UTF8Encoding($false)))
+[IO.File]::WriteAllText($negativeHeader,$text.Replace($operand,'requested = false;'),(New-Object Text.UTF8Encoding($false)))
 $negativeSource=Join-Path $Out 'negative.cpp'
 [IO.File]::WriteAllText($negativeSource,([IO.File]::ReadAllText((Join-Path $repo 'tools\steam_cssloader_resume_selftest.cpp')).Replace('#include "production-css-resume.h"','#include "production-css-resume-disabled.h"')),(New-Object Text.UTF8Encoding($false)))
 $negativeRecipe=$recipe.Replace((Join-Path $repo 'tools\steam_cssloader_resume_selftest.cpp'),$negativeSource).Replace((Join-Path $Out 'use.obj'),(Join-Path $Out 'negative.obj')).Replace((Join-Path $Out 'use.exe'),(Join-Path $Out 'negative.exe'))

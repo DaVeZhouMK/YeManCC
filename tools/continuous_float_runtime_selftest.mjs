@@ -3,23 +3,31 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
 const require=createRequire(path.resolve('package.json'));
 const {transformSync}=require('esbuild');
+const evaluatedInputs=new Map();
 let now=100000,side='ac',game={pid:101,processCreated:'birth',name:'fixture.exe'},fps=60,low=60,cpuBusy=20,cpuValid=true,gpu=null,frameAt=null,packetPid=101,cpuFailure=false,tdpFailure=false;
 let fileWrites=[],fileRemoves=[],markerCost=null;
 let savedTdp=120,acceptedDelta=0,holdTdpDispatch=false,releaseTdpDispatch=null,rejectTdp=null,deferVendorOnce=false,releaseVendor=null;
-let packagePower=0,powerValid=true,hardwareAt=null,monitorDown=false,ownerValid=true;
+let packagePower=0,powerValid=true,hardwareAt=null,monitorDown=false,ownerValid=true,monitorRead=null;
 let sideProbes=0;let acceptedCeiling=35,parameterWrites=[],initialParameterWrites=[],tdpWrites=[],holdTdp=false,releaseTdp=null;
 class Clock extends Date {static now(){return now}}
 function evaluate(file,imports={},suffix=''){
  const module={exports:{}};
- vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8')+'\n'+suffix,{loader:'ts',format:'cjs'}).code,
+  const data=fs.readFileSync(file);evaluatedInputs.set(path.resolve(file),{bytes:data.length,sha256:crypto.createHash('sha256').update(data).digest('hex')});
+  const exactInput=data.toString('utf8')+'\n'+suffix,transformed=transformSync(exactInput,{loader:'ts',format:'cjs'}).code;
+  if(process.argv.includes('--boot-performance-resident-only')){const directory=path.join(process.argv[2],'float-evaluated-inputs');fs.mkdirSync(directory,{recursive:true});const stem=path.join(directory,String(fs.readdirSync(directory).length/3).padStart(4,'0'));fs.writeFileSync(stem+'.input.ts',exactInput,{flag:'wx'});fs.writeFileSync(stem+'.output.cjs',transformed,{flag:'wx'});fs.writeFileSync(stem+'.mapping.json',JSON.stringify({file:path.resolve(file),suffix,loader:'ts',format:'cjs'}),{flag:'wx'});}
+  vm.runInNewContext(transformed,
  {module,exports:module.exports,require:key=>{if(key in imports)return imports[key];throw Error('Unexpected dependency '+key)},console,structuredClone,Date:Clock,performance:{now:()=>now},
  setInterval:()=>1,clearInterval(){},setTimeout:()=>1,clearTimeout(){},window:{setTimeout:()=>1,clearTimeout(){}}});
  return module.exports;
 }
-const controls=evaluate('src/bridge/performanceControls.ts');
+const controlsIndex=process.argv.indexOf('--controls-source'),controlsSource=controlsIndex<0?'src/bridge/performanceControls.ts':process.argv[controlsIndex+1];
+assert(controlsIndex<0||typeof controlsSource==='string'&&path.isAbsolute(controlsSource),'Explicit absolute controls candidate');
+const controls=evaluate(controlsSource);
 const frameTime=evaluate('src/bridge/monitorFrameTime.ts');
 const fpsHardware=evaluate('src/bridge/monitorFpsHardware.ts');
 const snapshotSignals=fs.existsSync('src/bridge/monitorSnapshotSignals.ts')
@@ -30,23 +38,169 @@ const yeman={PW:{YEMAN:'fixture'},readTdp:async()=>{if(savedTdp==='throw')throw 
  getTdpExecutionCapability:async()=>capability,resolveTdpTarget:w=>({intentW:w,effectiveW:Math.max(2,Math.min(150,w))}),clampTdp:w=>w,
  readPowerParams:async()=>({}),readRtssLimit:async()=>60,setRtssLimit:async()=>{},ensureTdpDaemon:async()=>{},
  applyFloatPowerParams:async value=>{parameterWrites.push(structuredClone(value));return !cpuFailure},
- setTdp:async(s,w,opts)=>{if(holdTdpDispatch)await new Promise(resolve=>{releaseTdpDispatch=resolve});if(opts.isCurrent&&!opts.isCurrent())return false;tdpWrites.push({side:s,requested:w,at:now});if(holdTdp)await new Promise((resolve,reject)=>{releaseTdp=resolve;rejectTdp=reject});if(tdpFailure==='throw')throw Error('transport rejected');if(tdpFailure===true)return false;if(tdpFailure==='no-receipt')return true;opts.onAccepted?.(Math.min(w,acceptedCeiling)-acceptedDelta);return true}};
-const runtime=evaluate('src/bridge/autofloat.ts',{
- './gamePolicyTarget':{getPolicyGame:()=>game},'./performanceControls':controls,'./monitorFpsHardware':fpsHardware,'./monitorFrameTime':frameTime,'./monitorSnapshotSignals':snapshotSignals,'./monitorControlFramerate':evaluate('src/bridge/monitorControlFramerate.ts'),
+ setTdp:async(s,w,opts)=>{if(holdTdpDispatch)await new Promise(resolve=>{releaseTdpDispatch=resolve});if(opts.isCurrent&&!opts.isCurrent())return false;tdpWrites.push({side:s,requested:w,at:now});if(holdTdp)await new Promise((resolve,reject)=>{releaseTdp=resolve;rejectTdp=reject});if(tdpFailure==='throw'||tdpFailure==='rollback-throw'&&tdpWrites.length>1)throw Error('transport rejected');if(tdpFailure===true||tdpFailure==='rollback-false'&&tdpWrites.length>1)return false;if(tdpFailure==='no-receipt')return true;opts.onAccepted?.(Math.min(w,acceptedCeiling)-acceptedDelta);return true}};
+const gameSource={read:()=>game},repository={getSettingsGeneration:()=>1,assertSettingsGeneration(){},readSettingsSection:async()=>({}),saveSettingsSection:async()=>{}};
+const sourceIndex=process.argv.indexOf('--autofloat-source'),runtimeSource=sourceIndex<0?'src/bridge/autofloat.ts':process.argv[sourceIndex+1];assert(sourceIndex<0||typeof runtimeSource==='string'&&path.isAbsolute(runtimeSource),'Explicit absolute float candidate');
+const runtime=evaluate(runtimeSource,{
+ './gamePolicyTarget':{getPolicyGame:()=>gameSource.read()},'./performanceControls':controls,'./monitorFpsHardware':fpsHardware,'./monitorFrameTime':frameTime,'./monitorSnapshotSignals':snapshotSignals,'./monitorControlFramerate':evaluate('src/bridge/monitorControlFramerate.ts'),
  './api':{fs:{writeTextFile:async(file)=>{fileWrites.push(file)},remove:async(file)=>{fileRemoves.push(file)}}},'./ipc':{invoke:async()=>true},'./yeman':yeman,
- './settingsRepository':{getSettingsGeneration:()=>1,assertSettingsGeneration(){},readSettingsSection:async()=>({}),saveSettingsSection:async()=>{}},
+ './settingsRepository':repository,
  './monitorData':{acquireMonitorDemand:()=>()=>{},monitorDemandConfirmed:()=>({fps:true}),monitorSnapshotEpoch:()=>1,setMonitorDataPowerControlDir(){},
- readMonitorSnapshot:async()=>({collectedAt:now,heartbeatAt:now,hwinfoOkAt:now,hwDown:false,top:{tdpW:packagePower,cpuPowerValid:powerValid,hwDown:monitorDown,displayedFramerate:{source:'hwinfo-displayed',fps,fps1:low,pid:packetPid,processCreated:'birth',game:'fixture.exe',observedAt:frameAt??now,validUntil:(frameAt??now)+5000,pollPeriodMs:1000},cpuUsageValid:cpuValid,cpuUsageTs:now,ts:hardwareAt??now,cpuUsage:cpuBusy,freqMhz:5000,cpuClockValid:true,gpuSelectionPresent:gpu!==null,gpuName:'Selected iGPU',gpuUsagePct:gpu},
+ readMonitorSnapshot:async()=>monitorRead?monitorRead():({collectedAt:now,heartbeatAt:now,hwinfoOkAt:now,hwDown:false,top:{tdpW:packagePower,cpuPowerValid:powerValid,hwDown:monitorDown,displayedFramerate:{source:'hwinfo-displayed',fps,fps1:low,pid:packetPid,processCreated:'birth',game:'fixture.exe',observedAt:frameAt??now,validUntil:(frameAt??now)+5000,pollPeriodMs:1000},cpuUsageValid:cpuValid,cpuUsageTs:now,ts:hardwareAt??now,cpuUsage:cpuBusy,freqMhz:5000,cpuClockValid:true,gpuSelectionPresent:gpu!==null,gpuName:'Selected iGPU',gpuUsagePct:gpu},
  fps:{ts:frameAt??now,fps,fps1:low,gpu:95,game:'fixture.exe',pid:packetPid,processCreated:'birth',fpsSource:'hwinfo-presented',fpsObservedAt:frameAt??now,fpsValidUntil:now+5000,fpsPollPeriodMs:1000,fps1Source:'hwinfo-presented-1percent-low',fps1ObservedAt:frameAt??now,fps1ValidUntil:now+5000,fps1PollPeriodMs:1000,hardwareObservedAt:now,hardwareValidUntil:now+5000,hardwarePollPeriodMs:1000}})},
 },'export const __test={tick,applyTdpLimit,corruptBank:value=>{if(continuousOwner)continuousOwner.bank.tdp=value},settled:async()=>{await peripheralInit},bank:()=>continuousOwner?.bank,state:()=>continuousOwner?.state,vendor:()=>tdpVendor,force:state=>{if(continuousOwner){Object.assign(continuousOwner.state,state);if(state.watts!==undefined)tdpLimit=state.watts}}};');
-const cases=[];
-async function check(name,run){try{await run();cases.push({name,pass:true})}catch(error){cases.push({name,pass:false,error:error.stack})}}
+const cases=[],notRun=[];let failed=false;
+const filterIndex=process.argv.indexOf('--filter'),filter=filterIndex<0?null:process.argv[filterIndex+1];assert(filterIndex<0||filter,'--filter requires a case-name substring');
+async function check(name,run){if(failed||filter&&!name.includes(filter)){notRun.push(name);return;}try{await run();cases.push({name,pass:true})}catch(error){failed=true;cases.push({name,pass:false,error:error.stack})}}
 const step=async()=>{now+=1000;await runtime.__test.tick()};
-async function start(bias=50,watts=35,saving='aggressive',initial=true,saved=120){
- await runtime.disableFloat();fileWrites=[];fileRemoves=[];parameterWrites=[];tdpWrites=[];side='ac';packagePower=0;powerValid=true;hardwareAt=null;monitorDown=false;ownerValid=true;game={pid:101,processCreated:'birth',name:'fixture.exe'};fps=60;low=60;cpuBusy=20;cpuValid=true;gpu=null;frameAt=null;packetPid=101;cpuFailure=false;tdpFailure=false;holdTdp=false;releaseTdp=null;rejectTdp=null;acceptedCeiling=35;savedTdp=saved;acceptedDelta=0;holdTdpDispatch=false;releaseTdpDispatch=null;now+=20000;
+function resetState(saved=120){fileWrites=[];fileRemoves=[];parameterWrites=[];tdpWrites=[];side='ac';packagePower=0;powerValid=true;hardwareAt=null;monitorDown=false;ownerValid=true;game={pid:101,processCreated:'birth',name:'fixture.exe'};fps=60;low=60;cpuBusy=20;cpuValid=true;gpu=null;frameAt=null;packetPid=101;cpuFailure=false;tdpFailure=false;holdTdp=false;releaseTdp=null;rejectTdp=null;acceptedCeiling=35;savedTdp=saved;acceptedDelta=0;holdTdpDispatch=false;releaseTdpDispatch=null;now+=20000;}
+async function start(bias=50,watts=35,saving='aggressive',initial=true,saved=120,onTdpAccepted,noGame=false){
+ await runtime.disableFloat();resetState(saved);
+ if(noGame)game=null;
  const bank=controls.defaultContinuousBank('ac');bank.tdp=watts;bank.auto.bias=bias;bank.auto.saving=saving;
- await runtime.enableContinuousFloat(bank,'ac',60,Object.assign(async()=>side==='ac'&&ownerValid,{isCurrent:()=>side==='ac'&&ownerValid}),async()=>{}, initial?{requested:120,accepted:watts}:undefined);await runtime.__test.settled();initialParameterWrites=structuredClone(parameterWrites);parameterWrites=[];tdpWrites=[];return bank;
+ await runtime.enableContinuousFloat(bank,'ac',60,Object.assign(async()=>side==='ac'&&ownerValid,{isCurrent:()=>side==='ac'&&ownerValid}),async()=>{}, initial?{requested:120,accepted:watts}:undefined,onTdpAccepted);await runtime.__test.settled();initialParameterWrites=structuredClone(parameterWrites);parameterWrites=[];tdpWrites=[];return bank;
 }
+// The original memory ports may be shared with the actual performance service.
+// Importing this module only supplies this fixture; direct execution runs tests.
+export const floatFixture={runtime,step,advance:ms=>{assert(Number.isFinite(ms)&&ms>=0);now+=ms;},reset:async()=>{await runtime.disableFloat();resetState();monitorRead=null;},bind:ports=>{Object.assign(yeman,ports.yeman??{});Object.assign(repository,ports.repository??{});if(ports.game)gameSource.read=ports.game;if(ports.monitor)monitorRead=ports.monitor;},writes:()=>({tdp:structuredClone(tdpWrites),cpu:structuredClone(parameterWrites)}),now:()=>now};
+if(process.argv[1]&&path.resolve(fileURLToPath(import.meta.url))===path.resolve(process.argv[1])){
+await check('无效数据慢校对: 持续缺CPU六秒恢复界面35而非旧试降30，六十秒只查缓存一百二十秒重申',async()=>{
+ await start(0,35);await step();await step();assert.equal(runtime.__test.state().watts,30);
+ tdpWrites=[];parameterWrites=[];cpuValid=false;sideProbes=0;
+ for(let n=0;n<6;n++)await step();assert.equal(tdpWrites.length,0);
+ await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35]);assert.equal(parameterWrites.length,0);
+ const first=tdpWrites[0].at;
+ while(now<first+119000)await step();assert.equal(tdpWrites.length,1);assert.equal(sideProbes,0);
+ await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35,35]);assert(tdpWrites[1].at-first>=120000);
+});
+await check('无效数据慢校对: 有效数据不进入维护，恢复后取消旧重申且GPU缺失不触发',async()=>{
+ await start(0,35,'medium');fps=40;gpu=null;for(let n=0;n<300;n++)await step();assert.equal(tdpWrites.length,0);
+ cpuValid=false;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length,1);
+ cpuValid=true;for(let n=0;n<180;n++)await step();assert.equal(tdpWrites.length,1,'valid data left an invalid-data maintenance loop alive');
+});
+await check('无效数据慢校对: 短缺失不写，旧帧与无Low同样进入保底但不碰CPU',async()=>{
+ for(const channel of ['fps','low','cpu','old']){
+  await start(0,35,'medium');if(channel==='fps')fps=0;if(channel==='low')low=0;if(channel==='cpu')cpuValid=false;if(channel==='old')frameAt=now-6000;
+  for(let n=0;n<5;n++)await step();assert.equal(tdpWrites.length,0,channel);
+  for(let n=0;n<3;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35],channel);assert.equal(parameterWrites.length,0);
+ }
+});
+await check('无效数据慢校对: 失败三十六十一百二十秒退避，关闭和旧电源owner不能迟到补写',async()=>{
+ await start(0,35,'medium');cpuValid=false;tdpFailure=true;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length,1);
+ let last=tdpWrites.at(-1).at;while(now<last+29000)await step();assert.equal(tdpWrites.length,1);await step();assert.equal(tdpWrites.length,2);
+ last=tdpWrites.at(-1).at;while(now<last+59000)await step();assert.equal(tdpWrites.length,2);await step();assert.equal(tdpWrites.length,3);
+ last=tdpWrites.at(-1).at;while(now<last+119000)await step();assert.equal(tdpWrites.length,3);tdpFailure=false;await step();assert.equal(tdpWrites.length,4);
+ runtime.invalidateFloatPowerSource('dc');for(let n=0;n<180;n++)await step();assert.equal(tdpWrites.length,4);assert.equal(parameterWrites.length,0);
+ await runtime.disableFloat();for(let n=0;n<180;n++)await step();assert.equal(tdpWrites.length,4);
+});
+await check('无效数据慢校对: 手动改15只维护15，外来监控不驱动旧试探，复用PID新出生拒绝旧补写',async()=>{
+ await start(0,35,'medium');const edit=await runtime.pauseContinuousFloatForTdpEdit(15);assert(edit);edit.accept(15,15);edit.release();cpuValid=false;
+ for(let n=0;n<130;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[15,15]);assert.equal(parameterWrites.length,0);
+ await start(0,35,'medium');packetPid=202;for(let n=0;n<8;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35]);assert.equal(parameterWrites.length,0);
+ await start(0,35,'medium');cpuValid=false;for(let n=0;n<6;n++)await step();holdTdpDispatch=true;const pending=step();for(let n=0;n<100&&!releaseTdpDispatch;n++)await Promise.resolve();assert.equal(typeof releaseTdpDispatch,'function');
+ game={...game,processCreated:'new-birth'};holdTdpDispatch=false;releaseTdpDispatch();await pending;assert.equal(tdpWrites.length,0);
+});
+await check('无效数据慢校对: 六十秒缓存检查不触发设置电源与能力重扫',async()=>{
+ await start(0,35,'medium');cpuValid=false;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length,1);
+ const original={capability:yeman.getTdpExecutionCapability,read:yeman.readTdp,source:yeman.detectPowerModeReliable,settings:repository.readSettingsSection};
+ let unexpected=0;const denied=async()=>{unexpected++;throw Error('unexpected full probe')};yeman.getTdpExecutionCapability=yeman.readTdp=yeman.detectPowerModeReliable=repository.readSettingsSection=denied;
+ try{for(let n=0;n<100;n++)await step();assert.equal(unexpected,0);assert.equal(tdpWrites.length,1)}finally{yeman.getTdpExecutionCapability=original.capability;yeman.readTdp=original.read;yeman.detectPowerModeReliable=original.source;repository.readSettingsSection=original.settings}
+});
+await check('激进同步降低CPU和TDP：60帧快速联合试降，缺GPU同样执行',async()=>{
+ for(const bias of [50,0,100])for(const load of [22,null,99])for(const poll of [1000,3000]){
+  await start(bias,30,'aggressive');gpu=load;sideProbes=0;const began=now;
+  const policy=controls.automaticCpuControls(runtime.__test.bank());
+  const cpuEligible=policy.maxMHz===0||policy.maxMHz>policy.minMHz||policy.aggressiveness>30;
+  for(let n=0;n<6;n++){
+   const cpuCount=parameterWrites.length,tdpCount=tdpWrites.length;
+   frameAt=began+Math.floor((now+1000-began)/poll)*poll;await step();
+   if(tdpWrites.length>tdpCount)assert.equal(parameterWrites.length-cpuCount,cpuEligible?1:0,'both eligible axes change in the same tick');
+  }frameAt=null;
+  assert.equal(tdpWrites[0]?.requested,26,`bias=${bias},gpu=${load}: first aggressive trial must lower30W to26W`);
+  assert(tdpWrites[0].at-began<=6000,'aggressive TDP must not wait for CPU probes to exhaust');
+  const axes=[];let prior=runtime.__test.state();
+  for(let n=0;n<55;n++){
+   const writes=parameterWrites.length+tdpWrites.length;await step();
+   assert(parameterWrites.length+tdpWrites.length-writes<=2,'at most one write per axis in a successful joint tick');
+   const next=runtime.__test.state();if(next.trial&&next.trial.at!==prior.trial?.at)axes.push(next.trial.axis);prior=next;
+  }
+  assert(tdpWrites.length>=2,'CPU work cannot starve subsequent TDP trials');
+  if(cpuEligible)assert(parameterWrites.length>0,`bias=${bias},gpu=${load}: eligible CPU must also decrease`);
+  assert(tdpWrites.every(w=>w.requested>=15&&w.requested<=30));assert.equal(sideProbes,0);
+ }
+});
+await check('激进联合试降掉帧撤回两轴，恢复后缩步减速，不重复快速冲击',async()=>{
+ await start(50,30,'aggressive');for(let n=0;n<2;n++)await step();
+ assert.equal(runtime.__test.state().watts,26);assert.equal(runtime.__test.state().frequencyMHz,2800);assert.equal(runtime.__test.state().trial.axis,'both');
+ fps=40;low=30;await step();assert.equal(runtime.__test.state().watts,30);assert.equal(runtime.__test.state().frequencyMHz,2900);assert.equal(runtime.__test.state().trial,null);assert.equal(runtime.__test.state().savingBackoff,true);
+ const count=tdpWrites.length+parameterWrites.length;for(let n=0;n<7;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,count);
+ fps=60;low=60;await step();await step();assert.equal(runtime.__test.state().watts,28);assert.equal(runtime.__test.state().frequencyMHz,2800);
+ for(let n=0;n<4;n++)await step();assert.equal(runtime.__test.state().trial.axis,'both');await step();assert.equal(runtime.__test.state().trial,null);
+});
+await check('激进联合写入任一失败不记联合成功，CPU失败撤回已降TDP并减速',async()=>{
+ await start(50,30,'aggressive');tdpFailure=true;await step();await step();assert.equal(parameterWrites.length,0);assert.equal(runtime.__test.state().watts,30);
+ await start(50,30,'aggressive');cpuFailure=true;await step();await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[26,30]);
+ assert.equal(runtime.__test.state().watts,30);assert.equal(runtime.__test.state().frequencyMHz,2900);assert.equal(runtime.__test.state().trial,null);assert.equal(runtime.__test.state().savingBackoff,true);
+ const count=tdpWrites.length+parameterWrites.length;cpuFailure=false;for(let n=0;n<3;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,count);
+ for(let n=0;n<2;n++)await step();assert.equal(runtime.__test.state().watts,28);assert.equal(runtime.__test.state().frequencyMHz,2800);
+ for(const failure of ['rollback-false','rollback-throw']){
+  await start(50,30,'aggressive');cpuFailure=true;tdpFailure=failure;await step();await step();
+  assert.equal(runtime.getFloatInfo().tdpApplied,0,'failed rollback must stay unconfirmed');assert.equal(runtime.__test.state().trial,null);
+  cpuFailure=false;tdpFailure=false;await step();await step();assert.equal(tdpWrites.length,2);await step();
+  assert.equal(runtime.getFloatInfo().tdpApplied,30);assert.equal(runtime.__test.state().savingBackoff,true);assert(tdpWrites.every(w=>w.requested>=15&&w.requested<=30));
+ }
+});
+await check('TDP lifecycle: delayed correction keeps current float target and never restarts CPU or exceeds a lowered slider',async()=>{
+ await start(0,15,'medium');runtime.__test.force({watts:12});parameterWrites=[];tdpWrites=[];
+ assert.equal(await runtime.reassertContinuousFloatTdp(),true);assert.equal(tdpWrites.length,1);assert.equal(tdpWrites[0].requested,12);assert.equal(parameterWrites.length,0);
+ const edit=await runtime.pauseContinuousFloatForTdpEdit(10);assert.ok(edit);assert.equal(await runtime.reassertContinuousFloatTdp(),false);edit.accept(10,10);edit.release();
+ assert.equal(await runtime.reassertContinuousFloatTdp(),true);assert.equal(tdpWrites.at(-1).requested,10);assert.equal(parameterWrites.length,0);
+ ownerValid=false;assert.equal(await runtime.reassertContinuousFloatTdp(),false);assert.equal(tdpWrites.length,2);
+ await runtime.disableFloat();assert.equal(await runtime.reassertContinuousFloatTdp(),null);
+});
+await check('TDP lifecycle: no game at admission still protects the valid global budget using fresh power only',async()=>{
+ await start(0,15,'medium',true,120,undefined,true);fps=0;low=0;packagePower=30;
+ for(let n=0;n<14;n++)await step();assert.equal(tdpWrites.length,1);assert.equal(tdpWrites[0].requested,15);assert.equal(parameterWrites.length,0);
+});
+await check('TDP recovery: enabled flag cannot claim an expired cached float owner; no probes or extra writes',async()=>{
+ await start(0,30,'medium');assert.equal(runtime.getFloatInfo().tdpOwnerCurrent,true);sideProbes=0;
+ ownerValid=false;assert.equal(runtime.getFloatInfo().enabled,true);assert.equal(runtime.getFloatInfo().tdpOwnerCurrent,false);
+ for(let n=0;n<60;n++){runtime.getFloatInfo();await step();}
+ assert.equal(sideProbes,0);assert.equal(tdpWrites.length,0);assert.equal(parameterWrites.length,0);
+});
+await check('TDP recovery: first write failure with no FPS/GPU retries30 with original backoff then sustained44 only reasserts30',async()=>{
+ await start(0,30,'medium',false);fps=0;low=0;gpu=null;packagePower=44;tdpFailure=true;
+ await step();assert.equal(tdpWrites.length,1);assert.equal(runtime.getFloatInfo().tdpApplied,0);const first=now;
+ tdpFailure=false;await step();await step();assert.equal(tdpWrites.length,1);await step();assert.equal(tdpWrites.length,2);assert(now-first>=3000);
+ assert.equal(runtime.getFloatInfo().tdpApplied,30);parameterWrites=[];tdpWrites=[];sideProbes=0;
+ for(let n=0;n<75;n++)await step();assert(tdpWrites.length>0&&tdpWrites.length<=3);assert(tdpWrites.every(w=>w.requested===30));
+ for(let n=1;n<tdpWrites.length;n++)assert(tdpWrites[n].at-tdpWrites[n-1].at>=30000);
+ assert.equal(parameterWrites.length,0);assert.equal(sideProbes,0);
+});
+await check('TDP receipt callback observes only actual current accepted writes',async()=>{
+ const receipts=[];await start(50,35,'aggressive',false,120,receipt=>receipts.push(receipt));
+ await runtime.__test.applyTdpLimit(35,true);assert.equal(receipts.length,1,'actual float TDP receipt must reach its owner callback');assert.deepEqual(structuredClone(receipts[0]),{requested:35,accepted:35});
+});
+for(const fault of ['no-receipt','false','throw','invalid','under-floor'])await check('TDP receipt callback rejects '+fault,async()=>{
+ const receipts=[];await start(50,35,'aggressive',false,120,receipt=>receipts.push(receipt));
+ tdpFailure=fault==='false'?true:fault==='no-receipt'||fault==='throw'?fault:false;
+ if(fault==='invalid')acceptedDelta=100;if(fault==='under-floor')acceptedDelta=30;
+ if(fault==='throw')await assert.rejects(runtime.__test.applyTdpLimit(35,true));else await runtime.__test.applyTdpLimit(35,true);
+ assert.equal(receipts.length,0,'unconfirmed/unsafe TDP must not notify its owner');
+});
+for(const boundary of ['game-change','power-change','close'])await check('TDP receipt callback '+boundary+' rejects late accepted writes',async()=>{
+ const receipts=[];await start(50,35,'aggressive',false,120,receipt=>receipts.push(receipt));holdTdp=true;const pending=runtime.__test.applyTdpLimit(35,true);let closing;
+ try{
+  for(let n=0;n<100&&!releaseTdp;n++)await Promise.resolve();assert.equal(typeof releaseTdp,'function');
+  if(boundary==='game-change')game={...game,pid:202,processCreated:'new-birth'};
+  if(boundary==='power-change'){side='dc';runtime.invalidateFloatPowerSource('dc');}
+  if(boundary==='close')closing=runtime.disableFloat();
+ }finally{holdTdp=false;releaseTdp?.();await pending;if(closing)await closing;}
+ assert.equal(receipts.length,0,'old float TDP ACK escaped its current-owner guard');
+});
+await check('TDP receipt callback observer failure cannot revoke accepted hardware write',async()=>{
+ await start(50,35,'aggressive',false,120,()=>{throw Error('owned observer failure');});assert.equal(await runtime.__test.applyTdpLimit(35,true),35);assert.equal(runtime.getFloatInfo().tdpApplied,35);
+});
 await check('OEM回执直接作为启动基准，不再发一次120W请求',async()=>{await start();const i=runtime.getFloatInfo();assert.equal(i.tdpRequestedMax,120);assert.equal(i.tdpMax,35);assert.equal(i.tdpApplied,35);assert.equal(tdpWrites.length,0)});
 await check('浮动CPU参数实际变化也不另发电源探测',async()=>{await start();sideProbes=0;for(let n=0;n<12;n++)await step();assert.ok(parameterWrites.length>0);assert.equal(sideProbes,0)});
 await check('全21档手动倾向直接决定CPU上限/积极性/睿频；不再全部不限频',()=>{
@@ -60,12 +214,13 @@ await check('原掌机/台式AC与DC默认参数恢复，已有手动倾向不�
   assert.equal(controls.normalizeContinuousBank({...b,auto:{...b.auto,bias:90}},side).auto.bias,90);
  }
 });
-await check('无浮动/小中大激进按原节能档分别用0/3/5/8/12W试探，不改玩家CPU基线',()=>{
+await check('原节能档分别用0/3/5/8/12W试探；激进联合调节不改玩家CPU参数映射',()=>{
  for(const [saving,watts] of [['none',100],['small',97],['medium',95],['large',92],['aggressive',88]]){
   const b=controls.defaultContinuousBank('ac');b.tdp=100;b.tdpCeiling=100;b.auto.bias=0;b.auto.saving=saving;
   let s={watts:100,frequencyMHz:0,aggressiveness:100,stable:0,lastDown:0,recoverUntil:0};
   for(const now of [100000,101000])s=controls.stepContinuousFloat(b,s,{now,fps:60,low:60,target:60,minimum:2,cpuBusy:20,gpuBusy:null});
-  assert.equal(s.watts,watts);assert.equal(s.frequencyMHz,0);assert.equal(s.aggressiveness,100);
+  assert.equal(s.watts,watts);assert.equal(s.frequencyMHz,0);assert.equal(s.aggressiveness,saving==='aggressive'?95:100);
+  assert.equal(controls.automaticCpuControls(b).aggressiveness,100);assert.equal(b.auto.bias,0);
  }
 });
 await check('CPU/GPU倾向只改变内部后续试探幅度100/200/300MHz，策略不暴露调度步长',()=>{
@@ -93,20 +248,20 @@ await check('全部倾向下低帧恢复不越过用户CPU上限及积极性',()
  for(const gpuBusy of [null,99]){const n=controls.stepContinuousFloat(b,st,{now:100000,fps:40,low:35,target:60,minimum:2,cpuBusy:92,gpuBusy});if(c.maxMHz>0)assert.ok(n.frequencyMHz>0&&n.frequencyMHz<=c.maxMHz);assert.ok(n.aggressiveness<=c.aggressiveness)}
  }
 });
-await check('真实tick单项试降CPU100MHz，只写当前AC；五秒观察期不再试降',async()=>{await start();for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().frequencyMHz,2800);assert.equal(tdpWrites.length,0);assert.equal(parameterWrites.length,1);assert.deepEqual(Array.from(parameterWrites[0].sides),['ac']);for(let n=0;n<4;n++)await step();assert.equal(parameterWrites.length,1);await step();assert.equal(runtime.__test.state().trial,null)});
+await check('大档真实tick单项试降CPU100MHz，只写当前AC；五秒观察期不再试降',async()=>{await start(50,35,'large');for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().frequencyMHz,2800);assert.equal(tdpWrites.length,0);assert.equal(parameterWrites.length,1);assert.deepEqual(Array.from(parameterWrites[0].sides),['ac']);for(let n=0;n<4;n++)await step();assert.equal(parameterWrites.length,1);await step();assert.equal(runtime.__test.state().trial,null)});
 await check('GPU有效参与主决策：固定预算低帧时试降CPU；缺GPU不冒认核显瓶颈',async()=>{await start();fps=40;gpu=99;await step();assert.equal(runtime.__test.state().frequencyMHz,2800);assert.equal(tdpWrites.length,0);await start();fps=40;gpu=null;await step();assert.equal(parameterWrites.length,0);assert.equal(tdpWrites.length,0)});
 await check('试探恶化立即撤回，低帧无改善五秒后同样撤回',async()=>{await start();fps=40;gpu=99;await step();fps=35;await step();assert.equal(runtime.__test.state().frequencyMHz,2900);assert.equal(runtime.__test.state().trial,null);await start();fps=40;gpu=99;await step();for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().frequencyMHz,2900);assert.equal(runtime.__test.state().trial,null)});
 await check('无GPU仍可先恢复TDP，再在CPU压力证据下恢复CPU；不同时写两个轴',async()=>{await start();runtime.__test.force({watts:25,frequencyMHz:2600});fps=40;cpuBusy=92;await step();assert.equal(tdpWrites.at(-1).requested,35);assert.equal(parameterWrites.length,0);await step();assert.equal(parameterWrites.at(-1).acFreq,2900);assert.equal(tdpWrites.length,1)});
-await check('CPU无效不是0%，不允许新试降；Low缺失/滞后同样不放行',async()=>{await start();cpuValid=false;for(let n=0;n<12;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,0);cpuValid=true;low=-1;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,0);low=40;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,0)});
-await check('同一个FPS观察不能累计稳定计数，快包不续旧帧',async()=>{await start();frameAt=now;for(let n=0;n<12;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,0)});
-await check('外来游戏帧不恢复旧bank；AC/DC边界拒绝旧owner，关闭不重放TDP',async()=>{await start();packetPid=202;for(let n=0;n<10;n++)await step();assert.equal(tdpWrites.length+parameterWrites.length,0);packetPid=101;side='dc';await step();await runtime.disableFloat();assert.equal(tdpWrites.length+parameterWrites.length,0)});
-await check('CPU返回false不能成为成功；三秒退避，保持旧状态',async()=>{await start();cpuFailure=true;for(let n=0;n<5;n++)await step();assert.equal(parameterWrites.length,1);assert.equal(runtime.__test.state().frequencyMHz,2900);await step();await step();assert.equal(parameterWrites.length,1);cpuFailure=false;await step();assert.equal(runtime.__test.state().frequencyMHz,2800)});
-await check('TDP失败不记成功，后续较小回执只更新当前值，不重定义已确认基线',async()=>{await start(0);tdpFailure=true;for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().watts,35);assert.equal(runtime.getFloatInfo().tdpApplied,0);assert.equal(tdpWrites.length,1);tdpFailure=false;acceptedCeiling=20;for(let n=0;n<3;n++)await step();assert.equal(runtime.getFloatInfo().tdpApplied,20);assert.equal(runtime.__test.bank().tdp,35);assert.equal(runtime.getFloatInfo().tdpMax,35);assert.equal(runtime.getFloatInfo().tdpTarget,17)});
+await check('CPU无效不是0%，不允许新试降；Low缺失/滞后只维护界面TDP',async()=>{await start();cpuValid=false;for(let n=0;n<12;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35]);assert.equal(parameterWrites.length,0);cpuValid=true;low=-1;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length,1);assert.equal(parameterWrites.length,0);low=40;for(let n=0;n<8;n++)await step();assert.equal(tdpWrites.length,1);assert.equal(parameterWrites.length,0)});
+await check('同一个FPS观察不能累计稳定计数，失联只恢复界面TDP',async()=>{await start();frameAt=now;for(let n=0;n<12;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35]);assert.equal(parameterWrites.length,0)});
+await check('外来游戏帧不驱动试探；只保当前界面TDP，AC/DC边界拒绝旧owner',async()=>{await start();packetPid=202;for(let n=0;n<10;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[35]);assert.equal(parameterWrites.length,0);packetPid=101;side='dc';await step();await runtime.disableFloat();assert.equal(tdpWrites.length,1);assert.equal(parameterWrites.length,0)});
+await check('CPU返回false不能成为成功；三秒退避，保持旧状态',async()=>{await start(50,35,'large');cpuFailure=true;for(let n=0;n<5;n++)await step();assert.equal(parameterWrites.length,1);assert.equal(runtime.__test.state().frequencyMHz,2900);await step();await step();assert.equal(parameterWrites.length,1);cpuFailure=false;await step();assert.equal(runtime.__test.state().frequencyMHz,2800)});
+await check('TDP失败不记成功，后续较小回执只更新当前值，不重定义已确认基线',async()=>{await start(0);tdpFailure=true;for(let n=0;n<2;n++)await step();assert.equal(runtime.__test.state().watts,35);assert.equal(runtime.getFloatInfo().tdpApplied,0);assert.equal(tdpWrites.length,1);tdpFailure=false;acceptedCeiling=20;for(let n=0;n<3;n++)await step();assert.equal(runtime.getFloatInfo().tdpApplied,20);assert.equal(runtime.__test.bank().tdp,35);assert.equal(runtime.getFloatInfo().tdpMax,35);assert.equal(runtime.getFloatInfo().tdpTarget,17)});
 await check('激进档仍遵守OEM基线50%/硬件2W下限，单步观察避免2秒连写',async()=>{await start(0,4);for(let n=0;n<45;n++)await step();assert.equal(runtime.getFloatInfo().tdpApplied,2);assert.equal(runtime.getFloatInfo().tdpTarget,2);assert.ok(tdpWrites.every(w=>w.requested>=2&&w.requested<=4));const count=tdpWrites.length;for(let n=0;n<12;n++)await step();assert.equal(tdpWrites.length,count)});
-await check('缺少本次TDP回执/传输抛错均未确认，三秒内不重试',async()=>{for(const failure of ['no-receipt','throw']){await start(0);tdpFailure=failure;for(let n=0;n<7;n++)await step();assert.equal(tdpWrites.length,1);assert.equal(runtime.getFloatInfo().tdpApplied,0);assert.equal(runtime.__test.state().watts,35);await step();assert.equal(tdpWrites.length,2)}});
+await check('缺少本次TDP回执/传输抛错均未确认，三秒内不重试',async()=>{for(const failure of ['no-receipt','throw']){await start(0);tdpFailure=failure;for(let n=0;n<4;n++)await step();assert.equal(tdpWrites.length,1);assert.equal(runtime.getFloatInfo().tdpApplied,0);assert.equal(runtime.__test.state().watts,35);await step();assert.equal(tdpWrites.length,2)}});
 await check('CPU/GPU都忙时只小步验证CPU，不无条件拉满；无收益回退',async()=>{await start();runtime.__test.force({frequencyMHz:2600});gpu=99;cpuBusy=92;fps=40;await step();assert.equal(runtime.__test.state().frequencyMHz,2700);assert.equal(tdpWrites.length,0);for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().frequencyMHz,2600)});
 await check('关闭等待已发出的TDP请求，迟到完成不再派生CPU或核心写入',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();holdTdp=true;const inFlight=step();
+ await start(0);await step();holdTdp=true;const inFlight=step();
  for(let n=0;n<100&&!releaseTdp;n++)await Promise.resolve();assert.equal(typeof releaseTdp,'function');
  let closed=false;const stopping=runtime.disableFloat().then(()=>{closed=true});for(let n=0;n<20;n++)await Promise.resolve();assert.equal(closed,false);
  const count=parameterWrites.length;holdTdp=false;releaseTdp();await inFlight;await stopping;assert.equal(closed,true);assert.equal(parameterWrites.length,count);assert.equal(runtime.getFloatInfo().enabled,false);
@@ -119,19 +274,19 @@ await check('ACDC事件撤销旧浮动，循环不检测电源，也不因同侧
  runtime.invalidateFloatPowerSource('ac');await step();assert.equal(parameterWrites.length,cpu);assert.equal(tdpWrites.length,tdp);
 });
 await check('电源事件发生在TDP迟到响应期间，旧结果不能派生CPU或核心动作',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();holdTdp=true;const pending=step();
+ await start(0);await step();holdTdp=true;const pending=step();
  for(let n=0;n<100&&!releaseTdp;n++)await Promise.resolve();assert.equal(typeof releaseTdp,'function');
  runtime.invalidateFloatPowerSource('dc');const count=parameterWrites.length;holdTdp=false;releaseTdp();await pending;
  for(let n=0;n<10;n++)await step();assert.equal(parameterWrites.length,count);
 });
 await check('TDP编辑暂停保留CPU状态、等待当前tick，不重启浮动且暂停时不采样写入',async()=>{
- await start();for(let n=0;n<5;n++)await step();const frequency=runtime.__test.state().frequencyMHz;
+ await start(50,35,'large');for(let n=0;n<5;n++)await step();const frequency=runtime.__test.state().frequencyMHz;assert.equal(frequency,2800);
  const edit=await runtime.pauseContinuousFloatForTdpEdit();assert.ok(edit);const cpu=parameterWrites.length,tdp=tdpWrites.length;
  for(let n=0;n<15;n++)await step();assert.equal(parameterWrites.length,cpu);assert.equal(tdpWrites.length,tdp);
  edit.accept(40,30);assert.equal(runtime.getFloatInfo().tdpRequestedMax,40);assert.equal(runtime.getFloatInfo().tdpApplied,30);assert.equal(runtime.getFloatInfo().tdpMax,30);assert.equal(runtime.__test.state().frequencyMHz,frequency);assert.equal(runtime.__test.state().trial,null);assert.equal(runtime.getFloatInfo().enabled,true);edit.release();await step();assert.equal(runtime.__test.state().frequencyMHz,frequency);
 });
 await check('TDP编辑先等旧TDP完成再返回暂停权，不把迟到结果压到新目标之后',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();holdTdp=true;const tick=step();for(let n=0;n<100&&!releaseTdp;n++)await Promise.resolve();assert.equal(typeof releaseTdp,'function');
+ await start(0);await step();holdTdp=true;const tick=step();for(let n=0;n<100&&!releaseTdp;n++)await Promise.resolve();assert.equal(typeof releaseTdp,'function');
  let acquired=false;const preparing=runtime.pauseContinuousFloatForTdpEdit().then(value=>{acquired=true;return value});for(let n=0;n<20;n++)await Promise.resolve();assert.equal(acquired,false);
  holdTdp=false;releaseTdp();await tick;const edit=await preparing;assert.ok(edit);edit.accept(40,35);assert.equal(runtime.getFloatInfo().tdpApplied,35);assert.equal(runtime.getFloatInfo().tdpRequestedMax,40);edit.release();
 });
@@ -158,7 +313,7 @@ await check('无启动回执时不拿配置读取失败/零/旧低值覆盖35W�
  }
 });
 await check('临时试降低回执不缩恢复基线；越过原节能下限则撤回，不递降至2W',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();acceptedCeiling=8;await step();
+ await start(0);await step();acceptedCeiling=8;await step();
  assert.equal(tdpWrites[0]?.requested,30);assert.equal(runtime.getFloatInfo().tdpApplied,8);
  assert.equal(runtime.__test.bank().tdp,35);assert.equal(runtime.getFloatInfo().tdpMax,35);assert.equal(runtime.getFloatInfo().tdpTarget,17);
  acceptedCeiling=35;fps=0;low=0;await step();assert.equal(tdpWrites.at(-1).requested,35);assert.equal(runtime.__test.state().trial,null);
@@ -174,21 +329,21 @@ await check('无启动回执首次真实全额写入的OEM接受值仍可建立3
  assert.equal(tdpWrites[0]?.requested,35);assert.equal(runtime.__test.bank().tdp,20);assert.equal(runtime.getFloatInfo().tdpMax,20);assert.equal(runtime.getFloatInfo().tdpTarget,10);
 });
 await check('TDP试降后FPS失联只撤回该试探，已有10秒观察超时不永久停留低瓦',async()=>{
- await start(0);for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().watts,30);
+ await start(0);for(let n=0;n<2;n++)await step();assert.equal(runtime.__test.state().watts,30);
  fps=0;low=0;for(let n=0;n<10;n++)await step();
  assert.equal(runtime.__test.state().watts,35);assert.equal(runtime.__test.state().trial,null);assert.equal(tdpWrites.at(-1).requested,35);
 });
 await check('浮动低瓦请求排队时ACDC撤销，端口前复用内存isCurrent不再派发',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();holdTdpDispatch=true;const pending=step();
+ await start(0);await step();holdTdpDispatch=true;const pending=step();
  for(let n=0;n<100&&!releaseTdpDispatch;n++)await Promise.resolve();assert.equal(typeof releaseTdpDispatch,'function');
  runtime.invalidateFloatPowerSource('dc');holdTdpDispatch=false;releaseTdpDispatch();await pending;assert.equal(tdpWrites.length,0);
 });
 await check('重复旧FPS也按原10秒超时撤回TDP试降，不停在低瓦',async()=>{
- await start(0);for(let n=0;n<5;n++)await step();assert.equal(runtime.__test.state().watts,30);
+ await start(0);for(let n=0;n<2;n++)await step();assert.equal(runtime.__test.state().watts,30);
  frameAt=now;for(let n=0;n<10;n++)await step();assert.equal(runtime.__test.state().watts,35);assert.equal(runtime.__test.state().trial,null);assert.equal(tdpWrites.at(-1).requested,35);
 });
 await check('旧run的TDP异常回执不能清零新owner的35W确认值',async()=>{
- await start(0);for(let n=0;n<4;n++)await step();holdTdp=true;const pending=step();for(let n=0;n<30&&!rejectTdp;n++)await Promise.resolve();assert.equal(typeof rejectTdp,'function');const rejectOld=rejectTdp;
+ await start(0);await step();holdTdp=true;const pending=step();for(let n=0;n<30&&!rejectTdp;n++)await Promise.resolve();assert.equal(typeof rejectTdp,'function');const rejectOld=rejectTdp;
  runtime.invalidateFloatPowerSource('dc');assert.equal(runtime.getFloatInfo().tdpApplied,35);rejectOld(Error('old request rejected'));await pending;
  assert.equal(runtime.getFloatInfo().tdpApplied,35);await start(0);assert.equal(runtime.getFloatInfo().tdpApplied,35);assert.equal(runtime.__test.bank().tdp,35);assert.equal(runtime.getFloatInfo().enabled,true);
 });
@@ -204,23 +359,24 @@ await check('15W回执后实测持续30W且无Displayed帧率，复用快照纠�
  assert.equal(runtime.__test.bank().tdp,15);assert.equal(runtime.getFloatInfo().tdpMax,15);
 });
 await check('功耗正常三分钟零额外TDP写入，仍无每tick电源检测',async()=>{
- await start(0,15,'medium');fps=0;low=0;packagePower=15;sideProbes=0;
+  await start(0,15,'medium');fps=40;low=40;packagePower=15;sideProbes=0;
  for(let n=0;n<180;n++)await step();assert.equal(tdpWrites.length,0);assert.equal(sideProbes,0);
 });
 await check('短峰值、恢复低功耗和重复旧硬件样本不触发异常纠正',async()=>{
- await start(0,15,'medium');fps=0;low=0;packagePower=30;for(let n=0;n<4;n++)await step();
+  await start(0,15,'medium');fps=40;low=40;packagePower=30;for(let n=0;n<4;n++)await step();
  packagePower=15;await step();assert.equal(tdpWrites.length,0);
- packagePower=30;hardwareAt=now;for(let n=0;n<20;n++)await step();assert.equal(tdpWrites.length,0);
+  packagePower=30;hardwareAt=now;for(let n=0;n<5;n++)await step();assert.equal(tdpWrites.length,0);
+  for(let n=0;n<15;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[15],'stale data allows only the delayed full UI target, not repeated overshoot correction');
 });
-await check('无功耗数据直接轮空，保留已有TDP不制造0和盲目补写',async()=>{
+await check('无功耗和浮动数据时只按界面TDP慢速保底，不制造0或高瓦',async()=>{
  for(const invalid of ['missing','down']){
   await start(0,15,'medium');fps=0;low=0;packagePower=30;powerValid=invalid!=='missing';monitorDown=invalid==='down';
-  for(let n=0;n<59;n++)await step();assert.equal(tdpWrites.length,0);
-  for(let n=0;n<90;n++)await step();assert.equal(tdpWrites.length,0);assert.equal(runtime.__test.bank().tdp,15);
+   for(let n=0;n<59;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[15]);
+   for(let n=0;n<90;n++)await step();assert.deepEqual(tdpWrites.map(w=>w.requested),[15,15]);assert(tdpWrites[1].at-tdpWrites[0].at>=120000);assert.equal(runtime.__test.bank().tdp,15);assert.equal(parameterWrites.length,0);
  }
 });
 await check('持续超额最多每30秒一次纠正，实测恢复后立即停止额外写入',async()=>{
- await start(0,15,'medium');fps=0;low=0;packagePower=30;
+  await start(0,15,'medium');fps=40;low=40;packagePower=30;
  for(let n=0;n<75;n++)await step();assert.ok(tdpWrites.length>=2&&tdpWrites.length<=3);
  for(let n=1;n<tdpWrites.length;n++)assert.ok(tdpWrites[n].at-tdpWrites[n-1].at>=30000);
  assert.ok(tdpWrites.every(x=>x.requested===15));const count=tdpWrites.length;
@@ -291,14 +447,14 @@ await check('兼容入口读取空值或错误TDP也不创建零瓦基线、不�
  assert.equal(runtime.getFloatInfo().enabled,false);assert.equal(parameterWrites.length,cpu);assert.equal(tdpWrites.length,0);
 });
 await check('用户把35W改15W时，排队中的30W在实际发送前受新缓存上限约束',async()=>{
- await start(0,35,'aggressive');for(let n=0;n<4;n++)await step();holdTdpDispatch=true;const pending=step();
+ await start(0,35,'aggressive');await step();holdTdpDispatch=true;const pending=step();
  for(let n=0;n<100&&!releaseTdpDispatch;n++)await Promise.resolve();assert.equal(typeof releaseTdpDispatch,'function');
  const editing=runtime.pauseContinuousFloatForTdpEdit(15);holdTdpDispatch=false;releaseTdpDispatch();await pending;
  const edit=await editing;assert.ok(edit);assert.equal(tdpWrites.length,0);edit.accept(15,15);edit.release();
  assert.equal(runtime.__test.bank().tdp,15);assert.equal(runtime.getFloatInfo().tdpApplied,15);
 });
 for(const boundary of ['game-pid','game-birth','owner-revoked'])await check('排队后'+boundary+'变化，旧浮动TDP不得进入发送口',async()=>{
- await start(0,35,'aggressive');for(let n=0;n<4;n++)await step();holdTdpDispatch=true;const pending=step();
+ await start(0,35,'aggressive');await step();holdTdpDispatch=true;const pending=step();
  for(let n=0;n<100&&!releaseTdpDispatch;n++)await Promise.resolve();assert.equal(typeof releaseTdpDispatch,'function');
  if(boundary==='game-pid')game={...game,pid:202};else if(boundary==='game-birth')game={...game,processCreated:'new-birth'};else ownerValid=false;
  holdTdpDispatch=false;releaseTdpDispatch();await pending;assert.equal(tdpWrites.length,0);
@@ -308,6 +464,16 @@ await check('原生无标志消费者，60次真实浮动tick没有float-active�
  markerCost={ticks:60,writes:fileWrites.filter(p=>p.endsWith('float-active')).length,removes:fileRemoves.filter(p=>p.endsWith('float-active')).length};
  assert.deepEqual(markerCost,{ticks:60,writes:0,removes:0});
 });
+await check('finite CPU selection bounds stale high/unlimited state and rollback even without monitor or floating',()=>{
+ for(const bias of [5,25,50,75,100])for(const frequencyMHz of [0,7200])for(const saving of ['none','medium']){
+  const bank=controls.defaultContinuousBank('ac');bank.auto.bias=bias;bank.auto.saving=saving;const cpu=controls.automaticCpuControls(bank);
+  const state={watts:bank.tdp,frequencyMHz,aggressiveness:100,stable:0,lastDown:0,recoverUntil:0,trial:{at:0,axis:'cpu',watts:bank.tdp,frequencyMHz:7200,aggressiveness:100,fps:60,low:60,needsGain:false}};
+  const result=controls.stepContinuousFloat(bank,state,{now:100000,fps:null,low:null,target:60,minimum:2,cpuBusy:null});
+  assert(result.frequencyMHz>0&&result.frequencyMHz<=cpu.maxMHz);assert(result.aggressiveness<=cpu.aggressiveness);assert(!result.trial||result.trial.frequencyMHz>0&&result.trial.frequencyMHz<=cpu.maxMHz);
+ }
+});
 await runtime.disableFloat();
-const record={pass:cases.every(c=>c.pass),count:cases.length,cases,markerCost,scope:'Actual controller and resident tick; virtual clock and memory-only hardware; no现场 changes'};
+const record={pass:cases.length>0&&cases.every(c=>c.pass),count:cases.length,cases,markerCost,selection:filter??'all',notRun,scope:'Actual controller and resident tick; virtual clock and memory-only hardware; no现场 changes'};
+record.sources=Object.fromEntries(evaluatedInputs);record.fixtureSha256=crypto.createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex');record.nodeSha256=crypto.createHash('sha256').update(fs.readFileSync(process.execPath)).digest('hex');
 console.log(JSON.stringify(record,null,2));if(!record.pass)process.exitCode=1;
+}

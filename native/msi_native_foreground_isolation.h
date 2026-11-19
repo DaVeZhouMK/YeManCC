@@ -76,11 +76,14 @@ inline constexpr bool kNativeForegroundHidHideBorrowEnabled = true;
 inline bool nativeOffShouldSkipResidentCloak(bool knownMsiBoard, bool virtualEnabled, bool nativeChoice) noexcept {
     return knownMsiBoard && !virtualEnabled && nativeChoice;
 }
-inline bool nativeForegroundMayEnter(const NativeForegroundFacts& f) {
-    return kNativeForegroundHidHideBorrowEnabled && f.knownBoard && f.nativeChoice &&
-        !f.virtualEnabled && f.hostAbsent && f.powerReady && f.uiOwned &&
-        !f.exitFence && !f.borrowBusy && f.power && f.edge &&
-        f.power==f.currentPower && f.edge==f.currentEdge;
+inline bool nativeForegroundScopeCurrent(const NativeForegroundFacts& facts) {
+    return kNativeForegroundHidHideBorrowEnabled && facts.knownBoard && facts.nativeChoice &&
+        !facts.virtualEnabled && facts.hostAbsent && facts.uiOwned &&
+        !facts.exitFence && !facts.borrowBusy && facts.power && facts.edge &&
+        facts.power==facts.currentPower && facts.edge==facts.currentEdge;
+}
+inline bool nativeForegroundMayEnter(const NativeForegroundFacts& facts) {
+    return facts.powerReady && nativeForegroundScopeCurrent(facts);
 }
 inline bool nativeForegroundMayHide(const NativeForegroundFacts& f) {
     return nativeForegroundMayEnter(f) && f.currentUniqueSource && f.gameInput &&

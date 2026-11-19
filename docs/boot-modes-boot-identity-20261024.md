@@ -15,6 +15,8 @@
 - `native/boot_mode_identity.h` 通过 `HKLM\SOFTWARE\YeManCC\Runtime\BootSessionV2` 的 volatile key 保存 GUID；命名 mutex 最多等待 5 秒。生产原生已有 requireAdministrator 清单。返回 `windows-volatile-v2|{GUID}`，在进程之间复用；缺失、无效或读取失败保留 error，不猜测新开机。
 - `native/main.cpp` 只给开机模式更换生产者并记录 provider／created／error。GPU 专用显存的旧身份接口保持原样。
 - `native/input_startup_policy.h` 对旧 v1 选择回执做一次保守锚定，升级当天不突变当前配置；新版本明确选择模式即写 v2 边界，下一次确认的新 Windows 启动应用已选预设。
+- 迁移锚定与 `bootModesDeferredBoot` 同事务落盘，前端不把它当成停用模式的旧残留回补。已落盘但没有延后标记的 v1 迁移回执，只有来源合法、策略正确且目标及领取标识均匹配本次启动才有效；新的启动标识仍按既有规则选用预设，停用场景继承已保存的全局配置。
+- 旧版原生可能先写入 `input.startupAppliedBoot`，前端尚未领取四模式配置就退出。没有四模式领取标识时，原生也可用格式有效的输入 v1 标识完成迁移；不覆盖已有的 v2 选择，不把读不到标识或损坏数据当成新的启动证据。
 - 当前版本验收流程为：使用包含新原生的新包，选择“设为开机模式”，然后完整重启 Windows；不需要编辑保存。直接刷新 H5 无法更新原生生产者。
 
 ## 配套界面与默认值

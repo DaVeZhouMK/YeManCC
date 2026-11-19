@@ -5,7 +5,7 @@ using System.Text.Json;
 using YeManFanBackend.Asus;
 using YeManFanBackend.Capabilities;
 
-internal static class FanCapabilityRoundtrip
+internal static partial class FanCapabilityRoundtrip
 {
     private static readonly List<string> Checks = new();
     private static readonly List<object> Trace = new();
@@ -1073,6 +1073,7 @@ internal static class FanCapabilityRoundtrip
                 "legacy-one-x-exact-close-and-settled-cleanup-retire-debt");
         }
         finally { closing.Dispose(); }
+        RunOneXCloseReturnChecks();
     }
 
     private static void InvokeRawOpenEventsEntry(RealHcBackend host)
@@ -1119,12 +1120,49 @@ internal static class FanCapabilityRoundtrip
                 host.ApplyPowerProfileForSelfTest(Profile(Array.Empty<double>(), "Hardware"));
                 Require(boundary.CallbackInvocationCount == 2,
                     "legacy-applied-default-after-return-is-idempotent:" + pair.Key);
+                // Same registered consumer: a returned callback failure is an
+                // attempted release, never the previous cycle's success/no-op.
+                host.ApplyPowerProfileForSelfTest(Profile(Original, "Software"));
+                var releaseFailure = new IOException("current-release-callback-failure:" + pair.Key);
+                boundary.CallbackFailure = releaseFailure;
+                Exception? observedFailure = null;
+                try { host.RestoreOem(); } catch (Exception error) { observedFailure = error; }
+                Require(ReferenceEquals(observedFailure, releaseFailure),
+                    "legacy-applied-release-keeps-original-exception:" + pair.Key);
+                Require(FanHostEngine.ParseReleaseAction(host.OemReleaseActionKind) == OemReleaseAction.Failed &&
+                    host.OemReleaseActionEvidence.Contains("compat-route-callback-not-returned", StringComparison.Ordinal),
+                    "legacy-applied-attempted-release-failure-is-recorded:" + pair.Key);
+                Require(!host.OemRestoreVerified && host.AppliedProfileReturnOwedForSelfTest &&
+                    !FanHostEngine.IsOemReleaseSafe(true, host.OemReleaseActionKind),
+                    "legacy-applied-release-failure-cannot-claim-safe-or-clear-debt:" + pair.Key);
+                boundary.CallbackFailure = null;
+                host.RestoreOem();
+                Require(host.OemRestoreVerified && !host.AppliedProfileReturnOwedForSelfTest &&
+                    host.OemOwnershipStatus == "hc-callback-only-physical-unknown",
+                    "legacy-applied-qualified-release-after-exception-still-recovers:" + pair.Key);
                 host.Close(false);
                 Require(device.CloseCount == 1 && !host.AppliedProfileReturnOwedForSelfTest,
                     "legacy-applied-original-virtual-close-retained:" + pair.Key);
             }
             finally { host.Dispose(); }
         }
+        var unknownRoute = registry.Single(x => x.Key == "HandheldCompanion.Devices.AYANEOAIR1S").Value
+            with { Evidence = FanEvidenceMode.UnsupportedNoScope };
+        var (unknownHost, unknownDevice, unknownBoundary) = LegacyOneXSession(unknownRoute);
+        try
+        {
+            unknownHost.ApplyPowerProfileForSelfTest(Profile(Original, "Software"));
+            var failure = new IOException("unregistered-release-callback-failure");
+            unknownBoundary.CallbackFailure = failure;
+            Exception? observed = null;
+            try { unknownHost.RestoreOem(); } catch (Exception error) { observed = error; }
+            Require(ReferenceEquals(observed, failure), "legacy-applied-unknown-release-keeps-original-exception");
+            Require(FanHostEngine.ParseReleaseAction(unknownHost.OemReleaseActionKind) == OemReleaseAction.Unknown &&
+                unknownHost.OemReleaseActionEvidence.Contains("unregistered-route-no-scope", StringComparison.Ordinal) &&
+                !unknownHost.OemRestoreVerified && !FanHostEngine.IsOemReleaseSafe(true, unknownHost.OemReleaseActionKind),
+                "legacy-applied-unknown-release-remains-unknown-not-success");
+        }
+        finally { unknownHost.Dispose(); }
         var groups = added.GroupBy(x => (x.Value.RestoreStrategy, x.Value.Precondition)).Select(x => x.First()).ToArray();
         Require(groups.Length == 8, "legacy-applied-eight-distinct-other-contract-pairs");
         foreach (var pair in groups)

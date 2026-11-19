@@ -66,14 +66,34 @@ static std::size_t g_nativeControlRetiredBegin=0,g_nativeControlRetiredCount=0;
 static std::uint64_t g_nativeControlRetiredOverwritten=0,g_nativeControlRetiredObservationsLost=0;
 static std::atomic<std::uint64_t> g_nativeControlWindowContention{0};
 static std::atomic<bool> g_nativeControlWindowWasEnabled{false};
+// Protected by the existing mutex. Saturation retains bounded observations;
+// it must never let an old ticket authorize clearing a newer window.
+static std::uint64_t g_nativeControlWindowRevision=0;
+struct NativeControlWindowDrainTicket {std::uint64_t revision=0;bool valid=false;};
+static void nativeControlWindowMutating() noexcept {
+    if(g_nativeControlWindowRevision!=(std::numeric_limits<std::uint64_t>::max)())++g_nativeControlWindowRevision;
+}
+static bool nativeControlWindowCommitDrain(NativeControlWindowDrainTicket& ticket) noexcept {
+    const bool valid=ticket.valid;ticket.valid=false;
+    if(!valid)return false;
+    std::unique_lock<std::mutex> lock(g_nativeControlWindowMutex,std::try_to_lock);
+    if(!lock){g_nativeControlWindowContention.fetch_add(1,std::memory_order_relaxed);return false;}
+    if(ticket.revision!=g_nativeControlWindowRevision||g_nativeControlWindowRevision==(std::numeric_limits<std::uint64_t>::max)())return false;
+    nativeControlWindowMutating();
+    g_nativeControlWindow.clearWindow();g_nativeControlWindow.discardedOnBindingChange=0;
+    g_nativeControlRetiredBegin=g_nativeControlRetiredCount=0;
+    g_nativeControlRetiredOverwritten=g_nativeControlRetiredObservationsLost=0;
+    return true;
+}
 static void nativeControlWindowDisabled() noexcept {
     if(!g_nativeControlWindowWasEnabled.exchange(false,std::memory_order_acq_rel))return;
     std::unique_lock<std::mutex> lock(g_nativeControlWindowMutex,std::try_to_lock);
-    if(lock)g_nativeControlWindow.disabled();else {g_nativeControlWindowWasEnabled.store(true,std::memory_order_release);g_nativeControlWindowContention.fetch_add(1,std::memory_order_relaxed);}
+    if(lock){nativeControlWindowMutating();g_nativeControlWindow.disabled();}else {g_nativeControlWindowWasEnabled.store(true,std::memory_order_release);g_nativeControlWindowContention.fetch_add(1,std::memory_order_relaxed);}
 }
 static void nativeControlWindowObserve(const FocusFrameContent& frame,const json& receipt,unsigned long long tick,unsigned long long sample,unsigned long long power,bool attempted,bool accepted,unsigned long long observedTick,const XINPUT_GAMEPAD* sourcePad,bool sourceLive,unsigned long long sourceRead) {
     std::unique_lock<std::mutex> lock(g_nativeControlWindowMutex,std::try_to_lock);
     if(!lock){g_nativeControlWindowContention.fetch_add(1,std::memory_order_relaxed);return;}
+    nativeControlWindowMutating();
     g_nativeControlWindowWasEnabled.store(true,std::memory_order_release);
     const auto index=(g_nativeControlRetiredBegin+g_nativeControlRetiredCount)%g_nativeControlRetired.size();
     const auto previousObservations=g_nativeControlRetired[index].observations;
@@ -82,21 +102,26 @@ static void nativeControlWindowObserve(const FocusFrameContent& frame,const json
         else ++g_nativeControlRetiredCount;
     }
 }
-static json nativeControlWindowSnapshot(bool drain) {
+static json nativeControlWindowSnapshot(NativeControlWindowDrainTicket* prepared=nullptr) {
+    if(prepared)*prepared={};
     NativeControlWindowEvidence copy;std::array<NativeControlWindowEvidence,2> retired;
-    std::size_t retiredCount=0;std::uint64_t overwritten=0,observationsLost=0;
+    std::size_t retiredCount=0;std::uint64_t overwritten=0,observationsLost=0,revision=0;
     {
         std::unique_lock<std::mutex> lock(g_nativeControlWindowMutex,std::try_to_lock);
         if(!lock){g_nativeControlWindowContention.fetch_add(1,std::memory_order_relaxed);return {{"snapshotKnown",false},{"reason","contended"}};}
         copy=g_nativeControlWindow;retiredCount=g_nativeControlRetiredCount;
         for(std::size_t i=0;i<retiredCount;++i)retired[i]=g_nativeControlRetired[(g_nativeControlRetiredBegin+i)%g_nativeControlRetired.size()];
         overwritten=g_nativeControlRetiredOverwritten;observationsLost=g_nativeControlRetiredObservationsLost;
-        if(drain){g_nativeControlWindow.clearWindow();g_nativeControlWindow.discardedOnBindingChange=0;g_nativeControlRetiredBegin=g_nativeControlRetiredCount=0;g_nativeControlRetiredOverwritten=g_nativeControlRetiredObservationsLost=0;}
+        revision=g_nativeControlWindowRevision;
     }
-    auto result=copy.takeJson();result["snapshotKnown"]=true;result["drained"]=drain;
+    auto result=copy.takeJson();result["snapshotKnown"]=true;result["drained"]=false;
     result["diagnosticContentionSinceProcessStart"]=g_nativeControlWindowContention.load(std::memory_order_relaxed);
     auto retiredRows=json::array();for(std::size_t i=0;i<retiredCount;++i)retiredRows.push_back(retired[i].takeJson());
     result["retiredBindingWindows"]=std::move(retiredRows);result["overwrittenRetiredBindingWindows"]=overwritten;
     result["lostRetiredBindingObservations"]=observationsLost;
-    result["pendingTailAtExport"]=!drain;return result;
+    result["pendingTailAtExport"]=true;
+    if(prepared){result["drainPendingLogOfferReturn"]=true;
+        result["drainScope"]="prepared-copy;clear-only-after-original-log-offer-returns-and-window-unchanged;not-file-delivery-proof";
+        prepared->revision=revision;prepared->valid=revision!=(std::numeric_limits<std::uint64_t>::max)();}
+    return result;
 }

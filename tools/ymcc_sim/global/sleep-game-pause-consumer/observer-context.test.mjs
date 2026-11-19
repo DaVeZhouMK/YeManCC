@@ -17,7 +17,7 @@ test('materializes complete reviewed helper and real policy without changing the
  for(const row of context.definitions.filter(x=>x.token))assert(text.includes(row.text));
  assert(text.includes('#include "msi_visibility_wake_diagnostics.h"'));
  assert.equal(context.expectedContextChecks,12);
- assert.equal(context.originalScript.sha256,'84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d');
+ assert.equal(context.originalScript.sha256,review.originalScript.sha256);
 });
 test('refuses a changed real helper before original compilation',()=>{
  const config=prepare(),runtime=path.join(config.project,'native/msi_visibility_wake_runtime.h');

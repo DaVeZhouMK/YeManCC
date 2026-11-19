@@ -2,7 +2,7 @@
 
 固定主页桥接器，不依赖安装 AnyFSE。采用 `windows.gamingApp` 扩展与 `Microsoft.appCategory.gamingHome_8wekyb3d8bbwe` 能力，由系统主页选择激活 `YeManGamingHome.exe`。参考项目源码在 `Build/V/XboxBoot22/xbox-source-review-20261022`，本组件独立实现，不包含第三方的 HID hook、ETW 追踪或 Xbox 结束服务。
 
-启动顺序：验证当前包被选为主页、Windows 全屏 API 可用且处于全屏、同会话激活互斥；若固定路径的 YMCC 未运行，调用当前用户最高权限的无触发器任务；在原60秒预算内等待，YMCC 最多15秒；调用原BAT，或对已经存在的Steam窗口仅请求一次大屏；窗口交接完成后组件退出。取消/退出全屏不重试、不停主程序。确认进程存在不等于手柄就绪，窗口样式不等于Valve UI模式证据。
+启动顺序：验证当前包被选为主页、Windows 全屏 API 可用且处于全屏、同会话激活互斥；若固定路径的 YMCC 未运行，调用当前用户最高权限的无触发器任务；在原 60 秒预算内等待，YMCC 最多 15 秒。根据 YMCC 公共 Steam 状态选择动作：Steam 已运行时，即使仍无窗口，也仅向公共入口提交一次带 PID 和出生戳的大屏请求；只有公共状态确认缺席才请求原 BAT。状态未知时继续等待，不自行扫描 Steam。窗口交接完成后组件退出；取消、失败或结果不明不会重放启动请求。确认进程存在不等于手柄就绪，窗口样式不等于 Valve UI 模式证据。
 
 固定安装合同为 `C:/SOFT/YeMan/YeManCC/YeManCC.exe` 和 `C:/SOFT/YeMan/PowerControl/YeManSteam.bat`。外层BAT与 `.earlystart` 保持。内层BAT只增加YMCC已运行检查，主程序、InputHost、风扇、TDP及设备生命周期继续由现有YMCC负责。日志复用普通导出已收集的 `steam-launch.log`。
 

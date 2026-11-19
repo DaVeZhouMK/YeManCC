@@ -14,10 +14,16 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <cstring>
+#include <chrono>
+#include <vector>
 #include <json.hpp>
 // Only the explicitly selected exception branch arms this thread-local fault.
+static thread_local bool receiptAllocationTracking=false;
+static thread_local unsigned receiptAllocations=0;
 static thread_local int allocationCountdown = -1;
 void* operator new(std::size_t bytes) {
+ if(receiptAllocationTracking)++receiptAllocations;
  if(allocationCountdown>=0 && allocationCountdown--==0){allocationCountdown=-1;throw std::bad_alloc();}
  if(void* p=std::malloc(bytes?bytes:1))return p;throw std::bad_alloc();
 }
@@ -32,7 +38,15 @@ static constexpr UINT hintMessage = WM_APP + 80;
 static constexpr DWORD fixturePid = 4242;
 static std::atomic<DWORD> observerThread{0};
 static WINEVENTPROC eventCallback = nullptr;
+static constexpr UINT receiptBatchMessage=WM_APP+81;
+struct ReceiptBatch {unsigned allocations=0;double wallMs=0,cpuMs=0;};
+static ReceiptBatch receiptBatch;
+static std::atomic<unsigned> receiptBatchDone{0};
 static std::atomic<unsigned> opens{0},imageReads{0},dispatches{0},notifications{0};
+static std::atomic<unsigned> processTimeReads{0};
+static std::atomic<bool> countColdImageAllocations{false};
+static std::atomic<unsigned> coldImageAllocations{0};
+static std::atomic<bool> refuseFixtureTimes{false},signalFixtureDuringTimes{false};
 static std::mutex fixtureMutex;
 static std::map<HANDLE,DWORD> processHandles;
 static std::map<DWORD,HANDLE> lifetimes;
@@ -42,6 +56,11 @@ static HWINEVENTHOOK fixtureSetWinEventHook(DWORD,DWORD,HMODULE,WINEVENTPROC cal
  eventCallback=callback;observerThread=GetCurrentThreadId();return reinterpret_cast<HWINEVENTHOOK>(1);
 }
 static BOOL unhook(HWINEVENTHOOK){return TRUE;}
+// Keep inventory discovery inside the fixture-owned Toolhelp ports.
+static FARPROC fixtureGetProcAddress(HMODULE module,LPCSTR name){
+ if(std::strcmp(name,"NtQuerySystemInformation")==0)return nullptr;
+ return ::GetProcAddress(module,name);
+}
 static HWND ancestor(HWND window,UINT){return window;}
 static DWORD windowPid(HWND hwnd,LPDWORD pid){*pid=static_cast<DWORD>(reinterpret_cast<UINT_PTR>(hwnd));return 1;}
 static HANDLE fixtureEvent(LPSECURITY_ATTRIBUTES attributes,BOOL manual,BOOL initial,LPCWSTR name){
@@ -51,7 +70,7 @@ static LSTATUS fixtureRegOpen(HKEY parent,LPCWSTR subkey,DWORD options,REGSAM ac
  const auto code=::RegOpenKeyExW(parent,subkey,options,access,result);if(code==ERROR_SUCCESS){std::lock_guard lock(fixtureMutex);observerKeys.insert(*result);}return code;
 }
 static LSTATUS fixtureRegClose(HKEY key){{std::lock_guard lock(fixtureMutex);observerKeys.erase(key);}return ::RegCloseKey(key);}
-static HANDLE snapshot(DWORD,DWORD){
+static HANDLE fixtureProcessSnapshot(DWORD,DWORD){
  if(!snapshotEnabled)return INVALID_HANDLE_VALUE;
  const auto h=::CreateEventW(nullptr,TRUE,FALSE,nullptr);if(h){std::lock_guard lock(fixtureMutex);snapshotHandles.insert(h);}return h?h:INVALID_HANDLE_VALUE;
 }
@@ -61,8 +80,18 @@ static BOOL firstProcess(HANDLE h,LPPROCESSENTRY32W pe){
 }
 static BOOL nextProcess(HANDLE,LPPROCESSENTRY32W){SetLastError(ERROR_NO_MORE_FILES);return FALSE;}
 static BOOL processTimes(HANDLE h,LPFILETIME birth,LPFILETIME exit,LPFILETIME kernel,LPFILETIME user){
- {std::lock_guard lock(fixtureMutex);if(processHandles.count(h)){*birth={123,1};*exit={};*kernel={};*user={};return TRUE;}}
+ {std::lock_guard lock(fixtureMutex);if(const auto found=processHandles.find(h);found!=processHandles.end()){
+   ++processTimeReads;if(refuseFixtureTimes)return FALSE;
+   if(signalFixtureDuringTimes)SetEvent(lifetimes.at(found->second));
+   *birth={123,1};*exit={};*kernel={};*user={};return TRUE;
+ }}
  return ::GetProcessTimes(h,birth,exit,kernel,user);
+}
+static HANDLE fixtureSourceMutex(LPSECURITY_ATTRIBUTES attributes,BOOL initial,LPCWSTR name){
+ // Real mutex contention, isolated from the resident Steam source slot.
+ static const std::wstring isolated=L"Local\\YMCCWindowBudgetFixture.Source."+std::to_wstring(GetCurrentProcessId())+L"."+std::to_wstring(GetTickCount64());
+ if(!name||!std::wstring_view(name).starts_with(L"Local\\YeManCC.SteamSource.v1.")){SetLastError(ERROR_INVALID_NAME);return nullptr;}
+ return ::CreateMutexW(attributes,initial,isolated.c_str());
 }
 static HANDLE openProcess(DWORD access,BOOL,DWORD pid) {
  ++opens;std::lock_guard lock(fixtureMutex);if(deny||!lifetimes.count(pid))return nullptr;
@@ -71,16 +100,32 @@ static HANDLE openProcess(DWORD access,BOOL,DWORD pid) {
 }
 static BOOL imageName(HANDLE h,DWORD,LPWSTR path,PDWORD length) {
  ++imageReads;std::lock_guard lock(fixtureMutex);const auto it=processHandles.find(h);if(it==processHandles.end())return FALSE;
- const auto& image=images.at(it->second);if(*length<=image.size())return FALSE;wcscpy_s(path,*length,image.c_str());*length=static_cast<DWORD>(image.size());const int fault=failAfterImage.exchange(-1);if(fault>=0){allocationCountdown=fault;faultUsed=true;}return TRUE;
+ const auto& image=images.at(it->second);if(*length<=image.size())return FALSE;wcscpy_s(path,*length,image.c_str());*length=static_cast<DWORD>(image.size());const int fault=failAfterImage.exchange(-1);if(fault>=0){allocationCountdown=fault;faultUsed=true;}
+ if(countColdImageAllocations){receiptAllocations=0;receiptAllocationTracking=true;}return TRUE;
 }
 static BOOL closeHandle(HANDLE h) { {std::lock_guard lock(fixtureMutex);processHandles.erase(h);observerEvents.erase(h);snapshotHandles.erase(h);}return ::CloseHandle(h); }
 static LRESULT dispatch(const MSG* message) {
+ if(message->message==receiptBatchMessage){
+   constexpr unsigned count=200000;
+   FILETIME birth{},exit{},k0{},u0{},k1{},u1{};
+   const auto ticks=[](FILETIME f){return (ULONGLONG(f.dwHighDateTime)<<32)|f.dwLowDateTime;};
+   if(!GetThreadTimes(GetCurrentThread(),&birth,&exit,&k0,&u0))throw std::runtime_error("receipt cost thread clock");
+   receiptAllocations=0;const auto start=std::chrono::steady_clock::now();receiptAllocationTracking=true;
+   for(unsigned n=0;n<count;++n)eventCallback(nullptr,EVENT_OBJECT_NAMECHANGE,reinterpret_cast<HWND>(message->lParam),OBJID_WINDOW,CHILDID_SELF,0,0);
+   receiptAllocationTracking=false;
+   const auto wall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+   if(!GetThreadTimes(GetCurrentThread(),&birth,&exit,&k1,&u1))throw std::runtime_error("receipt cost closing thread clock");
+   receiptBatch={receiptAllocations,wall,(ticks(k1)+ticks(u1)-ticks(k0)-ticks(u0))/10000.0};
+   receiptBatchDone.fetch_add(1,std::memory_order_release);return 0;
+ }
  if(message->message==hintMessage){
    try{eventCallback(nullptr,static_cast<DWORD>(message->wParam),reinterpret_cast<HWND>(message->lParam),OBJID_WINDOW,CHILDID_SELF,0,0);}catch(...){++callbackEscapes;}
+   if(receiptAllocationTracking){receiptAllocationTracking=false;coldImageAllocations=receiptAllocations;}
    ++dispatches;return 0;
  }
  return ::DispatchMessageW(message);
 }
+#define GetProcAddress fixtureGetProcAddress
 #define CreateEventW fixtureEvent
 #define RegOpenKeyExW fixtureRegOpen
 #define RegCloseKey fixtureRegClose
@@ -91,12 +136,16 @@ static LRESULT dispatch(const MSG* message) {
 #define UnhookWinEvent unhook
 #define GetAncestor ancestor
 #define GetWindowThreadProcessId windowPid
-#define CreateToolhelp32Snapshot snapshot
+#define CreateToolhelp32Snapshot fixtureProcessSnapshot
 #define OpenProcess openProcess
 #define QueryFullProcessImageNameW imageName
 #define CloseHandle closeHandle
 #define DispatchMessageW dispatch
+#define CreateMutexW fixtureSourceMutex
+#include "steam_source_owner.h"
+#undef CreateMutexW
 #include "steam_session_observer.h"
+#undef GetProcAddress
 #undef CreateEventW
 #undef RegOpenKeyExW
 #undef RegCloseKey
@@ -173,6 +222,26 @@ static int exceptionCases(const std::filesystem::path& out){
   const auto retryDispatch=dispatches.load();send(1);until([&]{return dispatches>retryDispatch;});Sleep(230);
   expect(notifications==1,"later window event recovers after the callback fault");observer.stop();expect(empty(),"normal stop returns observer subscription and event resources");}
  reclaim();
+ // Use NAMECHANGE to isolate callback classification from CREATE/SHOW discovery.
+ lifetime(fixturePid,steam);ready=false;notifications=0;
+ {Observer observer(reg.path);check(observer.start([&](bool){ready=true;},[]{return false;},[]{++notifications;}),"held-primary callback observer starts");
+  until([&]{return ready.load()&&observerThread.load();});
+  {Observer contender(reg.path);expect(!contender.start([](bool){},[]{return false;}),"isolated source slot still rejects a second observer");}
+  const auto p0=opens.load(),i0=imageReads.load(),t0=processTimeReads.load(),n0=dispatches.load();
+  send(1,fixturePid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>n0;});until([&]{return notifications==1;});
+  expect(opens==p0+1&&imageReads==i0+1&&processTimeReads==t0+1,"unregistered primary uses one process open, image and creation-time query");
+  auto n=dispatches.load();send(20,fixturePid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches==n+20;});until([&]{return notifications>=2;});
+  expect(opens==p0+1&&imageReads==i0+1&&processTimeReads==t0+1,"warm primary hints do not repeat discovery queries");
+  Sleep(230);const auto notificationCount=notifications.load();
+  lifetime(fixturePid,steam);refuseFixtureTimes=true;n=dispatches.load();
+  send(1,fixturePid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>n;});Sleep(230);
+  expect(opens==p0+2&&imageReads==i0+2&&processTimeReads==t0+2&&notifications==notificationCount,
+      "signaled cached PID retries on a new object but a failed creation-time query produces no hint");
+  refuseFixtureTimes=false;lifetime(fixturePid,steam);signalFixtureDuringTimes=true;n=dispatches.load();
+  send(1,fixturePid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>n;});Sleep(230);
+  expect(processTimeReads==t0+3&&notifications==notificationCount,"process exit during successful creation-time query produces no hint");
+  signalFixtureDuringTimes=false;observer.stop();expect(empty(),"primary hint path returns all held resources on stop");}
+ reclaim();
  // Exercise the real run() unwind after it owns a process, registry key and notify event.
  HKEY active=nullptr;check(RegCreateKeyExW(HKEY_CURRENT_USER,(reg.path+L"\\ActiveProcess").c_str(),0,nullptr,0,KEY_SET_VALUE,nullptr,&active,nullptr)==ERROR_SUCCESS,"isolated active-process key");
  DWORD pid=fixturePid;RegSetValueExW(active,L"pid",0,REG_DWORD,reinterpret_cast<const BYTE*>(&pid),sizeof(pid));RegCloseKey(active);
@@ -191,7 +260,100 @@ static int exceptionCases(const std::filesystem::path& out){
  std::ofstream f(out/L"window-exceptions.json");f<<report.dump(2);std::cout<<report.dump(2)<<'\n';return failures?1:0;
 }
 
+// Original window-budget consumer: optional callback-only allocation/cost case.
+static int receiptBorrowCases(const std::filesystem::path& out){
+ Registry reg;
+ const auto setRoot=[&](const std::wstring& value){
+  HKEY key=nullptr;check(::RegCreateKeyExW(HKEY_CURRENT_USER,reg.path.c_str(),0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS,"receipt private registry opens");
+  const auto result=::RegSetValueExW(key,L"SteamPath",0,REG_SZ,reinterpret_cast<const BYTE*>(value.c_str()),static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)));::RegCloseKey(key);check(result==ERROR_SUCCESS,"receipt private root stored");
+ };
+ const std::wstring root=L"X:\\YMCC Window Receipt Cost Fixture With A Stable Long Steam Installation Root";
+ const std::wstring helper=root+L"\\bin\\cef\\steamwebhelper.exe";
+ setRoot(root);lifetime(fixturePid,helper);lifetime(fixturePid+1,L"X:\\Unrelated.exe");
+ Observer observer(reg.path);std::atomic<bool> ready{false};
+ check(observer.start([&](bool){ready=true;},[]{return false;},[]{++notifications;}),"receipt production observer starts");
+ struct StopGuard {Observer& observer;~StopGuard(){observer.stop();}} guard{observer};
+ until([&]{const auto receipt=observer.identitySnapshot();return ready.load()&&observerThread.load()&&receipt&&receipt->session.root.size()==root.size();});
+ check(observer.sessionSnapshot()==observer.identitySnapshot()->session,"legacy and immutable snapshot are the same publication");
+ auto retained=observer.identitySnapshot();check(retained&&!retained->session.root.empty(),"initial receipt retained outside callback");
+ nlohmann::json results=nlohmann::json::array();
+ const auto measure=[&](const char* name,DWORD pid){
+  const auto n=dispatches.load();send(1,pid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>n;});Sleep(230);
+  const auto initialOpens=opens.load(),initialImages=imageReads.load();
+  nlohmann::json batches=nlohmann::json::array();
+  for(unsigned index=0;index<5;++index){
+   const auto before=receiptBatchDone.load(std::memory_order_acquire);
+   check(PostThreadMessageW(observerThread,receiptBatchMessage,0,pid)!=FALSE,"receipt batch posts to original observer thread");
+   until([&]{return receiptBatchDone.load(std::memory_order_acquire)>before;},10000);
+   batches.push_back({{"allocations",receiptBatch.allocations},{"wallMs",receiptBatch.wallMs},{"cpuMs",receiptBatch.cpuMs}});
+  }
+  check(opens==initialOpens&&imageReads==initialImages,"warmed callbacks add no process acquisition or image query");
+  results.push_back({{"scenario",name},{"iterationsPerBatch",200000},{"batches",batches},{"processOpens",opens.load()-initialOpens},{"imageQueries",imageReads.load()-initialImages}});
+ };
+ measure("unrelated-window",fixturePid+1);
+ measure("steam-helper-window",fixturePid);
+ // Same real registry publisher retires the root; held immutable bytes remain
+ // old facts only, while callbacks read the current publication.
+ setRoot(L"");until([&]{const auto receipt=observer.identitySnapshot();return receipt&&receipt->session.root.empty();});
+ check(!retained->session.root.empty()&&observer.sessionSnapshot().root.empty(),"old receipt remains immutable while current root is empty");
+ Sleep(230);const auto beforeEmptyNotifications=notifications.load();measure("empty-root",fixturePid);
+ check(notifications==beforeEmptyNotifications,"empty current root cannot deliver stale helper hints");
+ observer.stop();check(!observer.identitySnapshot()&&observer.sessionSnapshot().root.empty(),"stop clears both current publication forms");
+ check(!retained->session.root.empty(),"consumer-held immutable receipt survives observer teardown");
+ setRoot(root);ready=false;check(observer.start([&](bool){ready=true;},[]{return false;},[]{++notifications;}),"receipt observer restarts");
+ until([&]{const auto receipt=observer.identitySnapshot();return ready.load()&&receipt&&receipt->session.root==retained->session.root;});
+ const auto beforeRestart=notifications.load(),n=dispatches.load();send(1,fixturePid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>n;});until([&]{return notifications>beforeRestart;});
+ check(observer.identitySnapshot()->revision!=retained->revision,"restart callback uses current publication revision");observer.stop();
+ {std::lock_guard lock(fixtureMutex);check(processHandles.empty()&&observerEvents.empty()&&snapshotHandles.empty()&&observerKeys.empty(),"receipt callback selection returns owned resources");for(const auto& [pid,h]:lifetimes)CloseHandle(h);lifetimes.clear();}
+ const nlohmann::json report{{"status","RECEIPT_BORROW_DIRECTED_COMPLETE"},{"checks",checks},{"scenarios",results},{"realSteamOperations",0},{"wholeProcessCpuMeasured",false},{"privateRegistryOnly",true}};
+ std::ofstream output(out/L"receipt-borrow.json");output<<report.dump(2);std::cout<<"RECEIPT_BORROW_RESULT "<<report.dump()<<'\n';return 0;
+}
+
+static int coldImageCases(){
+ const std::wstring root=L"x:\\ymcc window event image fixture long installation path";
+ Registry reg;HKEY key=nullptr;check(::RegCreateKeyExW(HKEY_CURRENT_USER,reg.path.c_str(),0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS,"cold image private key");
+ const auto status=::RegSetValueExW(key,L"SteamPath",0,REG_SZ,reinterpret_cast<const BYTE*>(root.c_str()),static_cast<DWORD>((root.size()+1)*sizeof(wchar_t)));::RegCloseKey(key);check(status==ERROR_SUCCESS,"cold image private root");
+ const std::wstring unrelated=L"X:/Ymcc Window Event Image Fixture Long Installation Path/unrelated/outside.exe";
+ std::atomic<bool> ready=false,rawCreate=false;Observer observer(reg.path);
+ check(observer.start([&](bool){ready=true;},[]{return false;},[]{++notifications;},{},
+   [&](WindowProcessCache&,DWORD id,DWORD event,const std::wstring& image,std::shared_ptr<const IdentitySnapshot>){
+     rawCreate=(id==fixturePid+10&&event==EVENT_OBJECT_CREATE&&image==unrelated);
+   }),"cold image observer starts");
+ until([&]{return ready.load()&&observerThread.load();});
+ struct Scenario {const char* label;std::wstring image;unsigned role;};
+ const std::wstring mixed=L"X:/YMCC Window Event IMAGE Fixture Long Installation Path";
+ const Scenario cases[]={
+   {"unrelated suffix",unrelated,0},
+   {"mixed primary",mixed+L"/Steam.ExE",1},
+   {"different root primary",root+L"-other\\steam.exe",0},
+   {"direct CEF helper",mixed+L"/BIN/cef/SteamWebHelper.exe",2},
+   {"nested CEF helper",mixed+L"/bin/CEF/cef.win64/steamwebhelper.exe",2},
+   {"false CEF prefix",root+L"\\binn\\cef\\steamwebhelper.exe",0},
+   {"false CEF suffix",root+L"\\bin\\cef\\steamwebhelper.exe.tmp",0},
+   {"false CEF root",root+L"-other\\bin\\cef\\steamwebhelper.exe",0},
+   {"short foreign path",L"Y:\\steam.exe",0},
+ };
+ // The older observation/notification boundaries are covered by exceptions-only.
+ DWORD pid=fixturePid+10,priorHelper=0;
+ for(const auto& test:cases){
+   lifetime(pid,test.image);const auto d=dispatches.load(),o=opens.load(),p=imageReads.load(),t=processTimeReads.load();
+   countColdImageAllocations=true;send(1,pid,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>d;});countColdImageAllocations=false;
+   if(test.role==2)priorHelper=pid;
+   check(opens==o+1&&imageReads==p+1&&processTimeReads==t+(test.role==1),test.label);
+   check(observer.diagnosticWindowSnapshot().uiWindow.pid==priorHelper,"only a matching CEF window replaces the hint");
+   std::cout<<"COLD_IMAGE "<<test.label<<" allocations="<<coldImageAllocations.load()<<'\n';++pid;
+ }
+ const auto d=dispatches.load(),o=opens.load(),p=imageReads.load();
+ send(1,fixturePid+10,EVENT_OBJECT_CREATE);until([&]{return dispatches>d;});
+ check(rawCreate&&opens==o&&imageReads==p,"CREATE forwards the exact cached image without requery");
+ observer.stop();
+ {std::lock_guard lock(fixtureMutex);check(processHandles.empty()&&observerEvents.empty()&&snapshotHandles.empty()&&observerKeys.empty(),"cold image callback returns resources");for(const auto& [id,h]:lifetimes)CloseHandle(h);lifetimes.clear();}
+ return 0;
+}
+
 int wmain(int argc,wchar_t** argv){try{
+ if(argc==3&&std::wstring_view(argv[2])==L"--cold-image-only")return coldImageCases();
+ if(argc==3&&std::wstring_view(argv[2])==L"--receipt-borrow-only"){const std::filesystem::path selectedOut(argv[1]);std::filesystem::create_directories(selectedOut);return receiptBorrowCases(selectedOut);}
  if(argc==3&&std::wstring_view(argv[2])==L"--exceptions-only"){const std::filesystem::path selectedOut(argv[1]);std::filesystem::create_directories(selectedOut);return exceptionCases(selectedOut);}
  check(argc==2,"isolated output supplied");const std::filesystem::path out(argv[1]);std::filesystem::create_directories(out);
 #ifndef YMCC_BASELINE_METRICS

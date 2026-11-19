@@ -1,5 +1,6 @@
 import { watch } from 'vue';
-import { invoke, isNativeRuntime, on } from './ipc';
+import { invoke, isNativeRuntime } from './ipc';
+import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, requestSharedPowerLifecycleReconcile } from './powerLifecycleState';
 import { APP_VERSION } from '@/version';
 import { ensureUpdateManager, refreshAdoptedUpdate, checkForUpdate, prepareUpdate, cancelBackgroundUpdate, updateInfo, updateSnapshot, probeBackgroundSuccessor, restoreBackgroundTarget, setBackgroundGamePaused, updateCacheState } from './updateManager';
 import { validateUpdateManifest } from './yeman';
@@ -11,7 +12,9 @@ let active: { stop(): void } | null = null;
 export function startUpdatePredownload(): { stop(): void } {
   if (active) return active;
   if (!isNativeRuntime) return { stop() {} };
-  let ended=false,suspending=false,admission=false,policy:PredownloadPolicy|null=null;
+  const initialPower=getSharedPowerLifecycle();
+  let ended=false,suspending=!isSharedPowerLifecycleAdmitted(initialPower),admission=false,policy:PredownloadPolicy|null=null;
+  let powerRevision=0;
   let probeTimer:ReturnType<typeof setTimeout>|null=null,probeRunning=false;
   const idleEvidence=()=>!suspending&&isPolicyGameInitialized()&&!getPolicyGame();
   const canRun=()=>!updateCacheState.busy&&admission&&idleEvidence();
@@ -25,7 +28,11 @@ export function startUpdatePredownload(): { stop(): void } {
     saveSchedule: (failureCount, nextCheckAt) => invoke('app.updatePredownloadSchedule', { failureCount, nextCheckAt }, { timeoutMs: 5000 }),
     initialize: async()=>{await ensureUpdateManager();await restoreHint();}, refresh: refreshAdoptedUpdate,
     current: () => ({ info: updateInfo.value, progress: updateSnapshot }),
-    check: () => checkForUpdate(APP_VERSION, true),
+    check: async () => {
+      const ticket=powerRevision,current=()=>!ended&&ticket===powerRevision;
+      const checked=await checkForUpdate(APP_VERSION,true,current);
+      return current()?checked:'retired';
+    },
     prepare: cacheOnly => prepareUpdate({ background: true, cacheOnly }),
     cancel: cancelBackgroundUpdate, notify: presentUpdateReady,
     notified: (policy, info) => invoke<boolean>('app.updatePredownloadNotified', { bootId: policy.bootId, version: info.version, sha256: info.sha256 }, { timeoutMs: 5000 }),
@@ -50,14 +57,20 @@ export function startUpdatePredownload(): { stop(): void } {
     finally{reconcileProbe();}
   };
   const recover = () => { if(!ended)void syncActivity(); };
+  let projectedPowerGeneration=getSharedPowerLifecycle()?.generation??null;
   let observedGame=false;
   const offGame=subscribePolicyGameStatus(()=>{observedGame=true;void syncActivity();});
   // The shared source immediately reports an already initialized target.
   // Do not send the same native activity transaction twice on startup.
   if(!observedGame)void syncActivity();
-  const offResume = on('power.resumed', ()=>{suspending=false;recover();});
-  const suspend = () => { suspending=true;void syncActivity(); };
-  const offSuspend = on('power.suspending', suspend);
+  const offPower = onSharedPowerLifecycle(snapshot=>{
+    if(ended)return;
+    const next=!isSharedPowerLifecycleAdmitted(snapshot);
+    const changed=next!==suspending||snapshot.generation!==projectedPowerGeneration;
+    suspending=next;projectedPowerGeneration=snapshot.generation;
+    if(changed){++powerRevision;recover();}
+  });
+  requestSharedPowerLifecycleReconcile('update-predownload');
   window.addEventListener('online', recover);
   const offline=()=>{reconcileProbe();scheduler.wake();};
   window.addEventListener('offline', offline);
@@ -86,7 +99,7 @@ export function startUpdatePredownload(): { stop(): void } {
     if (active !== owner) return;
     ended=true;activityRevision++;if(probeTimer!==null)clearTimeout(probeTimer);probeTimer=null;
     setBackgroundGamePaused(true);void invoke('app.updatePredownloadActivity',{known:false,idle:false},{timeoutMs:5000}).catch(()=>{});
-    active = null; stopProgress(); stopMaintenance(); stopProbeState(); offGame(); offResume(); offSuspend(); window.removeEventListener('online', recover); window.removeEventListener('offline', offline);
+    active = null; stopProgress(); stopMaintenance(); stopProbeState(); offGame(); offPower(); window.removeEventListener('online', recover); window.removeEventListener('offline', offline);
     scheduler.stop(); unregister();
   } };
   active = owner;

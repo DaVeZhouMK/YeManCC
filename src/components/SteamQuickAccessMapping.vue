@@ -55,6 +55,8 @@ function acceptReceipt(raw: unknown) {
   if (value.button !== 5 || typeof value.ok !== 'boolean') return;
   const reasons: Record<string, string> = {
     'input-power-gate': '输入尚未就绪，请稍后重试',
+    'steam-menu-unavailable': 'Steam 菜单通道暂不可用，请检查 Steam 状态',
+    'steam-menu-result-uncertain': 'Steam 接收结果未确认，请查看菜单状态',
     'matching-virtual-gamepad-not-ready': '对应虚拟手柄尚未就绪',
     'virtual-target-changed': '虚拟手柄已切换，请重试',
     'guide-pulse-already-pending': '上一条按键指令仍在处理',

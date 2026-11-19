@@ -16,6 +16,7 @@ import re
 import zipfile
 
 FILES = re.compile(r"^(?:native-(?:lifecycle|detail)|virtual-gamepad|input-host-signal)\.log(?:\.(?:\d+|prev))?$", re.I)
+FOCUS_FILES = re.compile(r"^focus-trace\.log(?:\.(?:\d+|prev))?$", re.I)
 EVENTS = {
     "input-native-signal-window", "input-host-signal",
     "input-host-frame-evidence", "wake-input-chain-first-frame", "wake-input-chain-sustained",
@@ -40,6 +41,38 @@ def token(value):
 
 def location(record):
     return {"file": record["file"], "line": record["line"], "time": record["data"].get("time")}
+
+def native_foreground_observation(row):
+    value = object_value(row.get("foregroundObservation"))
+    if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
+        return None
+
+    def unsigned(name, bits):
+        v = value.get(name)
+        return v if integer(v) and v < 1 << bits else None
+
+    before, after = unsigned("windowBefore", 64), unsigned("windowAfter", 64)
+    pid, tid = unsigned("pid", 32), unsigned("threadId", 32)
+    stable = value.get("windowStableDuringRead")
+    class_ok = value.get("classReadSucceeded")
+    class_error = unsigned("classReadError", 32)
+    name = value.get("className")
+    return {"schemaVersion": 1, "windowBefore": before, "windowAfter": after, "pid": pid, "threadId": tid,
+            "windowStableDuringRead": stable if type(stable) is bool else None,
+            "stableWindowObserved": bool(stable is True and before and before == after and pid and tid),
+            "classReadSucceeded": class_ok if type(class_ok) is bool else None, "classReadError": class_error,
+            "className": name if class_ok is True and class_error == 0 and token(name) and len(name) <= 127 else None,
+            "scope": "selected-witness-observation;not-focus-decision-or-Xbox-session-identity",
+            "consumerReceiptProven": False}
+
+def native_signal_writer(row):
+    pid = row.get("pid")
+    if not integer(pid, 1) or pid >= 1 << 32 or ("writerPid" in row and
+            (not integer(row["writerPid"], 1) or row["writerPid"] != pid)):
+        return None
+    birth = row.get("writerProcessCreation100ns")
+    known = isinstance(birth, str) and re.fullmatch(r"[1-9][0-9]{0,19}", birth) and int(birth) < 1 << 64
+    return {"pid": pid, "processCreation100ns": birth if known else None}
 
 def frame_check(row):
     proof = object_value(row.get("frameProof"))
@@ -357,7 +390,8 @@ def signal_analysis(records):
         else:
             source = object_value(row.get("source"))
             pad_mapping = [(a, b, "byte" if a.endswith("Byte") else "short" if a.endswith("Short") else "int") for a,b in PAD_MAP]
-            item.update({"request": row.get("request"), "protocolPowerGeneration": row.get("protocolPowerGeneration"),
+            item.update({"nativeWriter": native_signal_writer(row), "foregroundObservation": native_foreground_observation(row),
+                         "request": row.get("request"), "protocolPowerGeneration": row.get("protocolPowerGeneration"),
                          "wireMonotonicTick": row.get("wireMonotonicTick"), "wireSampleSequence": row.get("wireSampleSequence"),
                          "source": source, "sourcePadScope": "selected-native-source;not-raw-DInput",
                          "sampleBucket": row.get("sampleBucket"),
@@ -465,6 +499,18 @@ def signal_analysis(records):
             "driverDeliveryProven": False, "gameConsumptionProven": False}
 
 
+def activity_drain_bound(row):
+    writer_pid = row.get("writerPid")
+    birth = row.get("writerProcessCreation100ns")
+    return (type(row.get("schemaVersion")) is int and row["schemaVersion"] == 1 and
+            type(row.get("writerEnvelopeSchema")) is int and row["writerEnvelopeSchema"] == 1 and
+            integer(writer_pid, 1) and writer_pid < 1 << 32 and
+            ("pid" not in row or (integer(row["pid"], 1) and row["pid"] == writer_pid)) and
+            isinstance(birth, str) and re.fullmatch(r"[1-9][0-9]{0,19}", birth) is not None and int(birth) < 1 << 64 and
+            integer(row.get("configEpoch"), 1) and row["configEpoch"] < 1 << 64 and
+            integer(row.get("windowId")) and row["windowId"] < 1 << 64 and
+            integer(row.get("drainTick"), 1) and row["drainTick"] < 1 << 64)
+
 def mirror_payload(row):
     # appendDomainLog adds writerPid and gets its own wall-clock timestamp.
     # Drop wall time only when an existing event-internal monotonic/request
@@ -476,7 +522,7 @@ def mirror_payload(row):
     identifiable = (
         event == "input-host-frame-evidence" and integer(row.get("observedTick"), 1) or
         event == "input-idle-window" and integer(row.get("windowStartTick"), 1) and integer(row.get("windowEndTick"), 1) or
-        event == "input-signal-activity" and integer(row.get("windowId"), 1) and integer(row.get("drainTick"), 1) or
+        event == "input-signal-activity" and activity_drain_bound(row) or
         event in ["wake-input-chain-first-frame", "wake-input-chain-sustained"] and chain_ack_check(row) or
         event == "input-native-signal-window" and signal_key(row)[0] is not None or
         event == "input-host-signal" and signal_key(row, True)[0] is not None
@@ -490,11 +536,14 @@ def read_archive(archive):
     records = []
     counts = collections.Counter()
     coverage = {"malformedRows": 0, "oversizedRows": 0, "skippedFiles": [], "crossFileDuplicates": 0, "truncatedTailRows": 0, "readFiles": []}
+    drains = {"focusRows": 0, "virtualRows": 0, "otherRows": 0, "unboundRows": 0, "crossFileDuplicates": 0}
+    coverage["activityDrains"] = drains
     seen = collections.defaultdict(collections.Counter)
     with zipfile.ZipFile(archive) as bundle:
         for info in sorted(bundle.infolist(), key=lambda x: x.filename):
             base = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
-            if not FILES.fullmatch(base):
+            focus = FOCUS_FILES.fullmatch(base) is not None
+            if not focus and not FILES.fullmatch(base):
                 continue
             if info.file_size > MAX_FILE_BYTES:
                 coverage["skippedFiles"].append(info.filename)
@@ -517,15 +566,25 @@ def read_archive(archive):
                         row["event"] = "input-host-signal"
                     if not isinstance(row, dict) or not isinstance(row.get("event"), str) or row.get("event") not in EVENTS:
                         continue
-                    # Native/domain mirroring and rotated overlap are duplicate
-                    # rows, not independent signal counts. Preserve same-file repeats.
-                    digest = hashlib.sha256(json.dumps(mirror_payload(row), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).digest()
-                    occurrences = seen[digest]
-                    occurrences[info.filename] += 1
-                    mirrored_occurrences = max((count for filename, count in occurrences.items() if filename != info.filename), default=0)
-                    if occurrences[info.filename] <= mirrored_occurrences:
-                        coverage["crossFileDuplicates"] += 1
+                    activity = row["event"] == "input-signal-activity"
+                    if focus and not activity:
                         continue
+                    mergeable = not activity or activity_drain_bound(row)
+                    if activity:
+                        carrier = "focusRows" if focus else "virtualRows" if base.lower().startswith("virtual-gamepad.log") else "otherRows"
+                        drains[carrier] += 1
+                        drains["unboundRows"] += int(not mergeable)
+                    if mergeable:
+                        # Keep same-file repetitions; only collapse copies in other members.
+                        digest = hashlib.sha256(json.dumps(mirror_payload(row), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).digest()
+                        occurrences = seen[digest]
+                        occurrences[info.filename] += 1
+                        mirrored_occurrences = max((count for filename, count in occurrences.items() if filename != info.filename), default=0)
+                        if occurrences[info.filename] <= mirrored_occurrences:
+                            coverage["crossFileDuplicates"] += 1
+                            if activity:
+                                drains["crossFileDuplicates"] += 1
+                            continue
                     counts[row["event"]] += 1
                     records.append({"file": info.filename, "line": line_number, "data": row})
     return records, counts, coverage

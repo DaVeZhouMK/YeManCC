@@ -1,5 +1,6 @@
 // Extract current production shared-settings functions for an isolated C++ test.
-// Mutex/filesystem mocks never touch the installed app, its mutex or hardware.
+// Settings/filesystem ports are isolated; game rules retain the real FilesGuard
+// and WinAPI mutex in an owned Evidence namespace, with counting/failure ports.
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -8,25 +9,37 @@ import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/t
 const rulesOnly=process.argv.includes('--game-rules-only');
 const startupOnly=process.argv.includes('--startup-config-only');
 if(rulesOnly&&startupOnly)throw Error('Choose only one native configuration scope');
-const root=process.cwd(),sourcePath=startupOnly&&process.env.YMCC_STARTUP_CONFIG_SOURCE?path.resolve(process.env.YMCC_STARTUP_CONFIG_SOURCE):path.join(root,'native/main.cpp'),source=fs.readFileSync(sourcePath,'utf8');
+if(process.env.YMCC_GAME_RULES_SOURCE&&!rulesOnly)throw Error('YMCC_GAME_RULES_SOURCE requires --game-rules-only');
+const rulesCase=Object.hasOwn(process.env,'YMCC_GAME_RULES_CASE')?process.env.YMCC_GAME_RULES_CASE:null;
+if(rulesCase!==null&&(!rulesOnly||!rulesCase))throw Error('YMCC_GAME_RULES_CASE requires --game-rules-only and a nonempty exact case name');
+const sourceOverride=rulesOnly?process.env.YMCC_GAME_RULES_SOURCE:startupOnly?process.env.YMCC_STARTUP_CONFIG_SOURCE:null;
+const sourceSelection=sourceOverride?(rulesOnly?'YMCC_GAME_RULES_SOURCE':'YMCC_STARTUP_CONFIG_SOURCE'):'default-mainline';
+const root=process.cwd(),sourcePath=sourceOverride?path.resolve(sourceOverride):path.join(root,'native/main.cpp'),sourceBytes=fs.readFileSync(sourcePath),source=sourceBytes.toString('utf8');
+const rulesSpecPath=path.join(root,'tools/ymcc_sim/global/game-rule-storage-consumer/spec.json');
+if(rulesCase!==null){const cases=JSON.parse(fs.readFileSync(rulesSpecPath,'utf8')).originalCases;if(!Array.isArray(cases)||cases.filter(name=>name===rulesCase).length!==1)throw Error('Unknown/ambiguous YMCC_GAME_RULES_CASE: '+rulesCase);}
 const coreMode=Boolean(process.env.YMCC_SIM_EVIDENCE_DIR);
 const artifactRoot=process.env.YMCC_GLOBAL_CONFIG_ARTIFACT_ROOT||process.env.YMCC_SIM_EVIDENCE_DIR;
 const artifactRootSource=process.env.YMCC_GLOBAL_CONFIG_ARTIFACT_ROOT?'YMCC_GLOBAL_CONFIG_ARTIFACT_ROOT':coreMode?'YMCC_SIM_EVIDENCE_DIR':'legacy-default';
-const out=artifactRoot?path.resolve(artifactRoot,'native-current'):path.resolve(root,'../../../_scratch/global-cache-config-audit-20261006/native-current');fs.mkdirSync(out,{recursive:true});
+const out=artifactRoot?path.resolve(artifactRoot,'native-current'):path.resolve(root,'../../../_scratch/global-cache-config-audit-20261006/native-current');
+if(rulesOnly){fs.mkdirSync(path.dirname(out),{recursive:true});fs.mkdirSync(out);}else fs.mkdirSync(out,{recursive:true});
+const writeArtifact=(file,data)=>fs.writeFileSync(path.join(out,file),data,rulesOnly?{flag:'wx'}:undefined);
 function fn(name){const matches=[...source.matchAll(new RegExp('^static [^'+String.fromCharCode(10)+']+ '+name+'[(]', 'gm'))].filter(hit=>{const a=hit.index,brace=source.indexOf('{',a),semi=source.indexOf(';',a);if(brace<0||(semi>=0&&semi<brace))return false;return name!=='W2U'||source.startsWith('static std::string W2U(const wchar_t*',a)});if(matches.length!==1)throw Error('Missing/ambiguous definition '+name);const a=matches[0].index,b=source.indexOf(String.fromCharCode(10)+'}',a);if(b<0)throw Error('Missing function end '+name);return source.slice(a,b+2)}
-const guard=source.slice(source.indexOf('class SettingsFileGuard {'),source.indexOf('\n};',source.indexOf('class SettingsFileGuard {'))+3);
+const guard=rulesOnly?'':source.slice(source.indexOf('class SettingsFileGuard {'),source.indexOf('\n};',source.indexOf('class SettingsFileGuard {'))+3);
 const names=['ymSettingsApplyDelta','ymSettingsFillMissing','ymSettingsReadUnlocked','ymSettingsHasCompatibleWriteBase','ymSettingsPreserveMainBeforeWrite','ymSettingsArchiveDamagedSources','ymSettingsWriteDocumentUnlocked','ymSettingsWriteDocument','ymSettingsReadSnapshot','ymSettingsResetApplication','ymSettingsRead','ymSettingsWriteSection','ymSettingsSection','ymSettingsPatchSection'];
 // ymSettingsSection has a forward declaration before the definition.
 function body(name){if(name!=='ymSettingsSection')return fn(name);const a=source.indexOf('static json ymSettingsSection(const char* section) {');return source.slice(a,source.indexOf('\n}',a)+2)}
 const rulesPrefix=source.slice(source.indexOf('static const std::wstring SG_GAME_RULE_JOURNAL'),source.indexOf('// Validate the complete rollback record'));
-const rulesFunctions=['sgValidateGameRuleText','sgGameRuleJournalValid','sgParseGameRuleDocument','sgParseGameRuleJournal','sgManagedGameRuleJournal','sgFutureGameRuleJournal','sgGameRuleArchivePath','sgGameRuleImageMatches','sgWriteGameRuleVerified','sgRestoreGameRuleFile','sgRemoveGameRuleJournal','sgArchiveGameRuleJournal','sgRecoverGameRuleFilesUnlocked','sgReadGameRulesText','sgNormalizeGameRule','sgReadGameRuleFile','sgGameSystemBlacklist','sgGamePlayerBlacklist','sgGameWhitelist','sgRemoveSameGameRules','sgGameRuleFileContent','sgGameRuleWhitelistContent','sgWriteGameRuleFiles','sgWriteGameRuleFile','sgGameRulesSnapshot'];
-const raw=fn('ymSettingsReadRaw');
+const rulesFunctions=['sgValidateGameRuleText','sgGameRuleJournalValid','sgParseGameRuleDocument','sgParseGameRuleJournal','sgManagedGameRuleJournal','sgFutureGameRuleJournal','sgGameRuleArchivePath','sgGameRuleImageMatches','sgWriteGameRuleVerified','sgRestoreGameRuleFile','sgRemoveGameRuleJournal','sgArchiveGameRuleJournal','sgRecoverGameRuleFilesUnlocked','sgReadGameRulesTextUnlocked','sgReadGameRulesText','sgExcludesFromText','sgExcludes','sgNormalizeGameRule','sgParseGameRuleText','sgReadGameRuleFile','sgGameSystemBlacklist','sgGamePlayerBlacklist','sgGameWhitelist','sgReadRecognitionGameRules','sgRemoveSameGameRules','sgGameRuleFileContent','sgGameRuleWhitelistContent','sgWriteGameRuleFiles','sgWriteGameRuleFile','sgGameRulesSnapshot'];
+const raw=rulesOnly?'':fn('ymSettingsReadRaw');
 const utf8Functions=fn('W2U')+'\n'+source.match(/^static std::string W2U\(const std::wstring& w\).*$/m)[0];
 const ruleNames=['trim_ascii','sgBaseName','sgNamePatternMatches','sgNameExcludedBy'].map(fn).join('\n\n');
 function ipcBody(name){const start=source.indexOf('    ipc_on("'+name+'",');if(start<0)throw Error('Missing native IPC '+name);const begin=source.indexOf('{',start),end=source.indexOf('\n    });',begin);if(end<0)throw Error('Missing IPC end');return source.slice(begin+1,end)}
-const pathWire=fn('normalizeWindowsPathForCompare')+'\n'+fn('sameWindowsPath')+'\n'+fn('U2W')+'\nstatic const std::wstring POWER_CONTROL_DIR=L"fixture-native-root";\n'+['location','read','reset'].map(name=>'static json fixtureSettings'+name+'(const json& a){'+ipcBody('settings.'+name)+'\n}').join('\n');
+const pathWire=rulesOnly?fn('U2W'):fn('normalizeWindowsPathForCompare')+'\n'+fn('sameWindowsPath')+'\n'+fn('U2W')+'\nstatic const std::wstring POWER_CONTROL_DIR=L"fixture-native-root";\n'+['location','read','reset'].map(name=>'static json fixtureSettings'+name+'(const json& a){'+ipcBody('settings.'+name)+'\n}').join('\n');
 
-let cpp=String.raw`#define NOMINMAX
+const ruleOwnerNames=["nativeGameRulesDiskStamp", "nativeGameRulesDiskStampEquals", "nativeCustomExeStem", "nativeConfiguredGameExes", "nativeReadGameRulesSnapshotLocked", "nativeGameRulesUnknownLocked", "nativeReconcileGameRulesLocked", "nativeWriteGameRulesLocked"];
+const ruleStamp=source.slice(source.indexOf("struct NativeGameRulesFileStamp {"),source.indexOf("\n};",source.indexOf("struct NativeGameRulesFileStamp {"))+3);
+const ruleOwner=ruleStamp+"\nstatic std::vector<NativeGameRulesFileStamp> g_gameRulesDiskStamp;static bool g_gameRulesDiskStampReady=false;\n"+ruleOwnerNames.map(fn).join("\n\n");
+let cpp=(rulesOnly?'#define YMCC_FIXTURE_RULES_ONLY\n':'')+String.raw`#define NOMINMAX
 #include <windows.h>
 #include <string>
 #include <array>
@@ -39,12 +52,50 @@ let cpp=String.raw`#define NOMINMAX
 #include <stdexcept>
 #include <system_error>
 #include <vector>
+#include <sstream>
+#include <clocale>
+#include <thread>
+#include <cstdlib>
+#include <memory>
+#include <algorithm>
+#include <climits>
+#include "game_original_rules_lease.h"
 #include "json.hpp"
 #include "monitor_identity.h"
+#include "game_rule_literal.h"
+static std::wstring sgNormalizeGameRule(const std::string&);
+#ifdef YMCC_FIXTURE_RULES_ONLY
+#include "game_application_catalog.h"
+#endif
+// Only the real rule guard's four WinAPI calls pass through these ports.
+// The success/abandoned paths always use actual kernel mutex ownership.
+struct FixtureRuleGuardCounts { unsigned creates=0,opens=0,waits=0,releases=0,closes=0,held=0,abandoned=0; };
+static FixtureRuleGuardCounts fixtureRuleGuard;
+static int fixtureRuleGuardFault=0; // 1=create failure, 2=wait failure, 3=timeout.
+static HANDLE fixtureRuleCreateMutexW(LPSECURITY_ATTRIBUTES a,BOOL owner,LPCWSTR name){
+ ++fixtureRuleGuard.creates;if(fixtureRuleGuardFault==1){SetLastError(ERROR_ACCESS_DENIED);return nullptr;}
+ const auto handle=::CreateMutexW(a,owner,name);if(handle)++fixtureRuleGuard.opens;return handle;
+}
+static DWORD fixtureRuleWaitForSingleObject(HANDLE handle,DWORD timeout){
+ ++fixtureRuleGuard.waits;if(fixtureRuleGuardFault==2){SetLastError(ERROR_INVALID_HANDLE);return WAIT_FAILED;}if(fixtureRuleGuardFault==3)return WAIT_TIMEOUT;
+ const auto waited=::WaitForSingleObject(handle,timeout);if(waited==WAIT_OBJECT_0||waited==WAIT_ABANDONED){++fixtureRuleGuard.held;if(waited==WAIT_ABANDONED)++fixtureRuleGuard.abandoned;}return waited;
+}
+static BOOL fixtureRuleReleaseMutex(HANDLE handle){const auto ok=::ReleaseMutex(handle);if(ok){++fixtureRuleGuard.releases;--fixtureRuleGuard.held;}return ok;}
+static BOOL fixtureRuleCloseHandle(HANDLE handle){const auto ok=::CloseHandle(handle);if(ok)++fixtureRuleGuard.closes;return ok;}
+#define CreateMutexW fixtureRuleCreateMutexW
+#define WaitForSingleObject fixtureRuleWaitForSingleObject
+#define ReleaseMutex fixtureRuleReleaseMutex
+#define CloseHandle fixtureRuleCloseHandle
 #include "game_rule_file_guard.h"
+#undef CreateMutexW
+#undef WaitForSingleObject
+#undef ReleaseMutex
+#undef CloseHandle
+#ifndef YMCC_FIXTURE_RULES_ONLY
 #include "settings_baseline.h"
 #include "controller_persona_settings.h"
 #include "boot_mode_shortcuts.h"
+#endif
 #include <chrono>
 #include <limits>
 using json=nlohmann::json;
@@ -54,6 +105,18 @@ struct InputHostTargetWriteGuard { bool admit(const json&,const json&){return tr
 struct FixtureFxSound { void configure(bool){} };static FixtureFxSound g_fxSoundRecovery;
 static bool fxSoundRecoveryEnabled(){return false;}
 static void appendNativeLifecycleLog(const char*,const json&){}
+#ifdef YMCC_FIXTURE_RULES_ONLY
+static void mousePolicyGameContextChanged(){}
+// This storage-only fixture has no active Steam recovery control. Preserve the
+// synchronous publication leaf; this is not cancellation-owner coverage.
+static void steamOriginalRecoveryBusinessCommit(bool,const std::function<void()>& publication){publication();}
+#endif
+static std::shared_ptr<const NativeGameRulesSnapshot> g_gameRulesSnapshot;
+static bool g_gameRulesSnapshotInitialized=false,g_gameRulesEpochExhausted=false;
+static void nativeReconcileGameRulesLocked(bool);
+static void nativeGameRulesUnknownLocked();
+static bool nativeWriteGameRulesLocked(const std::function<bool()>&);
+static void steamOriginalRecoveryRulesCommit(const NativeGameRulesSnapshot&,unsigned long long,unsigned long long,const std::function<void()>& publication){publication();}
 static HWND g_hwnd=nullptr;
 namespace ymcc::gesturesummon { inline constexpr UINT kRefreshMessage=WM_APP+1; }
 static BOOL fixturePostMessageW(HWND,UINT,WPARAM,LPARAM){return TRUE;}
@@ -66,6 +129,14 @@ static const std::wstring SG_DIR=L"memory-only-rules";
 static const std::wstring SG_GAME_PLAYER_BLACKLIST=L"memory-blacklist";
 static const std::wstring SG_GAME_WHITELIST=L"memory-whitelist";
 static const std::wstring SG_GAME_SYSTEM_BLACKLIST=L"memory-system-blacklist";
+static const std::wstring GAME_CUSTOM_CONFIG_JSON=L"memory-custom-config";
+static std::function<void(const std::wstring&)> fixtureRuleReadProbe;
+static std::function<void()> fixtureRuleParseProbe;
+static std::wstring sgSelfBase(){if(fixtureRuleParseProbe)fixtureRuleParseProbe();return L"yemancc";}
+static std::wstring fixtureRuleReadFailure;
+static std::vector<std::wstring> fixtureRuleReadPaths;
+static unsigned fixtureRuleJournalProbes=0;
+static bool fixtureRuleJournalPath(const std::wstring& p){return p==SG_DIR+L"\\game-rules.transaction.json"||p==SG_DIR+L"\\game-rules.transaction.before.json";}
 static std::mutex g_gameRulesMx;static std::atomic<unsigned long long> g_gameRulesEpoch{1};
 static unsigned ruleEvents=0;
 static void ipc_emit(const char*,const json&){++ruleEvents;}
@@ -78,18 +149,19 @@ static int journalWrites=0;
 static bool silentRulesDrop=false,corruptRulesPrepared=false,changeRulesDuringPrepare=false,corruptRulesCommit=false,failRuleBackupCommit=false;
 namespace fspath {
 static void create_directories(const std::wstring&,std::error_code& ec){ec.clear();}
-static bool exists(const std::wstring& p,std::error_code& ec){ec.clear();return files.count(p)>0;}
-static bool exists(const std::wstring& p){return files.count(p)>0;}
+static bool exists(const std::wstring& p,std::error_code& ec){ec.clear();if(fixtureRuleJournalPath(p))++fixtureRuleJournalProbes;return files.count(p)>0;}
+static bool exists(const std::wstring& p){if(fixtureRuleJournalPath(p))++fixtureRuleJournalProbes;return files.count(p)>0;}
 }
 static std::string W2U(const std::wstring& v){return std::string(v.begin(),v.end());}
 static bool failBackup=false,failMain=false,failCorrupt=false,failRead=false,failReadBackup=false;
 static bool failMutexCreate=false;static DWORD mutexWait=WAIT_OBJECT_0;
 static unsigned long long stamp=1;static int rawReads=0;
+static std::map<std::wstring,unsigned long long> fileStamps;
 static std::timed_mutex g_settingsFileMtx;
 static bool ymSettingsFileExceedsLimit(const std::wstring&){return false;}
 static bool ymSettingsArchiveFile(const std::wstring&,const std::wstring&){return false;}
 static bool ymSettingsWriteBoundedRecovery(json,const json*,json*,bool,long long,bool* handled,bool*){*handled=false;return false;}
-static std::string ymSettingsReadRaw(const std::wstring& p){rawReads++;if(p==SG_GAME_PLAYER_BLACKLIST&&failRulesRead)throw std::runtime_error("rules unreadable");if((p==YM_SETTINGS_FILE&&failRead)||(p==YM_SETTINGS_BACKUP_FILE&&failReadBackup))throw std::runtime_error("fixture unreadable main/backup");return files.count(p)?files[p]:std::string{};}
+static std::string ymSettingsReadRaw(const std::wstring& p){rawReads++;fixtureRuleReadPaths.push_back(p);if(fixtureRuleReadProbe)fixtureRuleReadProbe(p);if((p==SG_GAME_PLAYER_BLACKLIST&&failRulesRead)||(!fixtureRuleReadFailure.empty()&&p==fixtureRuleReadFailure))throw std::runtime_error("rules unreadable");if((p==YM_SETTINGS_FILE&&failRead)||(p==YM_SETTINGS_BACKUP_FILE&&failReadBackup))throw std::runtime_error("fixture unreadable main/backup");return files.count(p)?files[p]:std::string{};}
 static bool sgWriteFileAtomic(const std::wstring& p,const std::string& s){
  if(p==SG_DIR+L"\\game-rules.transaction.before.json"&&s.find("\"phase\":\"committed\"")!=std::string::npos&&failRuleBackupCommit){failRuleBackupCommit=false;return false;}
  if(p==SG_DIR+L"\\game-rules.transaction.json") {
@@ -103,8 +175,13 @@ static bool sgWriteFileAtomic(const std::wstring& p,const std::string& s){
  if(p==SG_GAME_WHITELIST&&s.starts_with("new-white")&&failWhiteNew){failWhiteNew=false;return false;}
  if(p==SG_GAME_PLAYER_BLACKLIST&&s.starts_with("old-black")&&failBlackOld)return false;
  if((p==YM_SETTINGS_BACKUP_FILE&&failBackup)||(p==YM_SETTINGS_FILE&&failMain)||(p!=YM_SETTINGS_FILE&&p!=YM_SETTINGS_BACKUP_FILE&&failCorrupt))return false;
- files[p]=s;if(p==YM_SETTINGS_FILE)stamp++;return true;
+ files[p]=s;fileStamps[p]=++stamp;return true;
 }
+namespace fspath {
+static std::uintmax_t file_size(const std::wstring& p,std::error_code& e){e.clear();return files.at(p).size();}
+static std::chrono::system_clock::time_point last_write_time(const std::wstring& p,std::error_code& e){e.clear();return std::chrono::system_clock::time_point(std::chrono::system_clock::duration(fileStamps[p]));}
+}
+static std::string sgReadFile(const std::wstring& p){auto s=ymSettingsReadRaw(p);if(s.starts_with(std::string("\xef\xbb\xbf",3)))s.erase(0,3);return s;}
 static BOOL fixtureDeleteFileW(LPCWSTR p){if(std::wstring(p)==SG_DIR+L"\\game-rules.transaction.json"&&failJournalDelete){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}if(files.erase(p))return TRUE;SetLastError(ERROR_FILE_NOT_FOUND);return FALSE;}
 static HANDLE fixtureCreateMutexW(LPSECURITY_ATTRIBUTES,BOOL,LPCWSTR){return failMutexCreate?nullptr:reinterpret_cast<HANDLE>(1);}
 static DWORD fixtureWaitForSingleObject(HANDLE,DWORD){return mutexWait;}
@@ -112,7 +189,7 @@ static BOOL fixtureReleaseMutex(HANDLE){return TRUE;}
 static BOOL fixtureCloseHandle(HANDLE){return TRUE;}
 static BOOL fixtureGetAttributes(LPCWSTR p,GET_FILEEX_INFO_LEVELS,LPVOID target){
  if(!files.count(p)){SetLastError(ERROR_FILE_NOT_FOUND);return FALSE;}
- auto* a=static_cast<WIN32_FILE_ATTRIBUTE_DATA*>(target);*a={};a->nFileSizeLow=static_cast<DWORD>(files[p].size());a->ftLastWriteTime.dwLowDateTime=static_cast<DWORD>(stamp);a->ftCreationTime.dwLowDateTime=1;return TRUE;
+ auto* a=static_cast<WIN32_FILE_ATTRIBUTE_DATA*>(target);*a={};a->nFileSizeLow=static_cast<DWORD>(files[p].size());a->ftLastWriteTime.dwLowDateTime=static_cast<DWORD>(fileStamps[p]);a->ftCreationTime.dwLowDateTime=1;return TRUE;
 }
 #define DeleteFileW fixtureDeleteFileW
 #define CreateMutexW fixtureCreateMutexW
@@ -120,17 +197,33 @@ static BOOL fixtureGetAttributes(LPCWSTR p,GET_FILEEX_INFO_LEVELS,LPVOID target)
 #define ReleaseMutex fixtureReleaseMutex
 #define CloseHandle fixtureCloseHandle
 #define GetFileAttributesExW fixtureGetAttributes
-`+guard+'\nstatic json ymSettingsSection(const char* section);\n'+names.map(body).join('\n\n')+'\n'+pathWire+'\n'+ruleNames+'\n'+rulesPrefix+rulesFunctions.map(fn).join('\n\n')+'\nstatic json fixtureRuleSet(const json& a){'+ipcBody('game.rules.set')+'\n}'+String.raw`
+`+(rulesOnly?'':guard+'\nstatic json ymSettingsSection(const char* section);\n'+names.map(body).join('\n\n'))+'\n'+pathWire+'\n'+ruleNames+'\n'+rulesPrefix+rulesFunctions.map(fn).join('\n\n')+'\n'+ruleOwner+'\nstatic json fixtureRuleSet(const json& a){'+ipcBody('game.rules.set')+'\n}'+String.raw`
 #undef CloseHandle
 #undef DeleteFileW
+#undef CreateMutexW
+#undef WaitForSingleObject
+#undef ReleaseMutex
+static void fixtureResetRuleObservation(){if(fixtureRuleGuard.held)throw std::runtime_error("Game-rule guard ownership leaked");fixtureRuleGuard={};fixtureRuleReadPaths.clear();fixtureRuleJournalProbes=0;rawReads=0;}
+static bool fixtureRuleFilesMutexHeld(){bool held=false;std::thread peer([&]{if(g_gameRuleFilesMtx.try_lock())g_gameRuleFilesMtx.unlock();else held=true;});peer.join();return held;}
+// Keep one real handle alive while a joined thread exits owning this mutex.
+// Closing its handle without ReleaseMutex causes a real WAIT_ABANDONED.
+struct FixtureAbandonedRuleMutex {
+ HANDLE handle=nullptr;
+ FixtureAbandonedRuleMutex(){const auto name=ymcc::gamerules::FilesGuard::name(SG_DIR);handle=::CreateMutexW(nullptr,FALSE,name.c_str());if(!handle)throw std::runtime_error("Cannot create abandoned rule mutex");bool owned=false;std::thread owner([&]{const auto local=::CreateMutexW(nullptr,FALSE,name.c_str());if(local){const auto waited=::WaitForSingleObject(local,2000);owned=waited==WAIT_OBJECT_0||waited==WAIT_ABANDONED;::CloseHandle(local);}});owner.join();if(!owned){::CloseHandle(handle);handle=nullptr;throw std::runtime_error("Cannot acquire abandoned rule mutex");}}
+ ~FixtureAbandonedRuleMutex(){if(handle)::CloseHandle(handle);}
+ FixtureAbandonedRuleMutex(const FixtureAbandonedRuleMutex&)=delete;
+};
 static json base;
-static void reset(){g_gameRulesEpoch=1;ruleEvents=0;silentRulesDrop=corruptRulesPrepared=changeRulesDuringPrepare=corruptRulesCommit=failRuleBackupCommit=false;files.clear();g_gameRuleRecoveryNeeded=true;failWhiteNew=failBlackOld=failJournalPrepare=failJournalCommit=failJournalDelete=failRulesRead=false;journalWrites=0;failBackup=failMain=failCorrupt=failRead=failReadBackup=failMutexCreate=false;mutexWait=WAIT_OBJECT_0;rawReads=0;stamp++;
+static void reset(){g_gameRulesSnapshot.reset();g_gameRulesSnapshotInitialized=false;g_gameRulesDiskStampReady=false;g_gameRulesEpochExhausted=false;fileStamps.clear();fixtureRuleGuardFault=0;fixtureRuleReadFailure.clear();fixtureRuleReadProbe={};fixtureRuleParseProbe={};fixtureResetRuleObservation();g_gameRulesEpoch=1;ruleEvents=0;silentRulesDrop=corruptRulesPrepared=changeRulesDuringPrepare=corruptRulesCommit=failRuleBackupCommit=false;files.clear();g_gameRuleRecoveryNeeded=true;failWhiteNew=failBlackOld=failJournalPrepare=failJournalCommit=failJournalDelete=failRulesRead=false;journalWrites=0;failBackup=failMain=failCorrupt=failRead=failReadBackup=failMutexCreate=false;mutexWait=WAIT_OBJECT_0;rawReads=0;stamp++;
  base={{"schemaVersion",1},{"ui",{{"theme","blue-black"},{"opacity",0.5}}},{"background",{{"asset","old"}}},{"tdp",{{"max",37},{"float",{{"target",120}}}}},{"input",{{"revision",7},{"opaque","input-sentinel"}}},{"fan",{{"opaque","fan-sentinel"}}},{"domainLogs",{{"enabled",true}}},{"steamDeckMouse",{{"receipt","native"}}},{"future",{{"keep",1}}}};files[YM_SETTINGS_FILE]=base.dump();}
 static json disk(){return json::parse(files.at(YM_SETTINGS_FILE));}
+#ifndef YMCC_FIXTURE_RULES_ONLY
 static bool commit(const json& next){return ymSettingsWriteDocument(next.dump(),nullptr,&base);}
+#endif
 static void require(bool v){if(!v)throw std::runtime_error("invariant failed");}
-int main(int argc,char** argv){const bool selected=argc>1&&std::string(argv[1])=="--game-rules-only";json cases=json::array();auto check=[&](const char* name,std::function<void()> f){if(selected&&std::string(name).find("game rules")==std::string::npos&&std::string(name).find("game-rule")==std::string::npos)return;reset();try{f();cases.push_back({{"name",name},{"ok",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"ok",false},{"error",e.what()}});}};
+int main(int argc,char** argv){const bool selected=argc>1&&std::string(argv[1])=="--game-rules-only";const auto* exactCase=std::getenv("YMCC_GAME_RULES_CASE");if(exactCase&&(!selected||!*exactCase)){std::cerr<<"Invalid exact game-rule case selection";return 2;}json cases=json::array();auto check=[&](const char* name,std::function<void()> f){if(selected&&std::string(name).find("game rules")==std::string::npos&&std::string(name).find("game-rule")==std::string::npos)return;if(exactCase&&std::string(name)!=exactCase)return;reset();try{f();cases.push_back({{"name",name},{"ok",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"ok",false},{"error",e.what()}});}};
 
+#ifndef YMCC_FIXTURE_RULES_ONLY
  check("native location response exposes exact effective settings paths",[]{auto r=fixtureSettingslocation({});require(r["directory"]==W2U(POWER_CONTROL_DIR)&&r["file"]==W2U(YM_SETTINGS_FILE)&&r["backup"]==W2U(YM_SETTINGS_BACKUP_FILE));});
  check("actual native read handler accepts its canonical path",[]{auto r=fixtureSettingsread({{"path",W2U(YM_SETTINGS_FILE)}});require(json::parse(r["content"].get<std::string>())==base);});
  check("actual native read handler rejects fixed-root alias when backend differs",[]{bool rejected=false;try{fixtureSettingsread({{"path","C:/SOFT/YeMan/PowerControl/yeman-settings.json"}});}catch(...){rejected=true;}require(rejected);});
@@ -169,6 +262,7 @@ int main(int argc,char** argv){const bool selected=argc>1&&std::string(argv[1])=
  check("initialization backfills without overwriting newer native fields",[]{json old={{"tdp",{{"max",55}}},{"future",{{"keep",9}}}};files[YM_SETTINGS_FILE]=old.dump();json empty=json::object();require(ymSettingsWriteDocument(base.dump(),nullptr,&empty,nullptr,true));require(disk()["tdp"]["max"]==55&&disk()["future"]["keep"]==9&&disk()["ui"]==base["ui"]);});
  check("strict real file read distinguishes a sharing violation",[]{wchar_t dir[MAX_PATH],name[MAX_PATH];require(GetTempPathW(MAX_PATH,dir)>0);require(GetTempFileNameW(dir,L"YMC",0,name)>0);HANDLE lock=CreateFileW(name,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);require(lock!=INVALID_HANDLE_VALUE);bool rejected=false;try{fixtureRealReadRaw(name);}catch(...){rejected=true;}CloseHandle(lock);DeleteFileW(name);require(rejected);});
 
+#endif
  check("game rules journal preparation failure changes neither text file",[]{files[SG_GAME_PLAYER_BLACKLIST]="old-black\n";files[SG_GAME_WHITELIST]="old-white\n";auto before=files;failJournalPrepare=true;require(!sgWriteGameRuleFiles({L"new-black"},{L"new-white"}));require(files==before);});
  check("unreadable game rules are not replaced by empty lists",[]{files[SG_GAME_PLAYER_BLACKLIST]="old-black\n";auto before=files;failRulesRead=true;bool rejected=false;try{sgWriteGameRuleFiles({L"new-black"},{L"new-white"});}catch(...){rejected=true;}require(rejected&&files==before);});
  check("second game-rule file failure rolls back both files",[]{files[SG_GAME_PLAYER_BLACKLIST]="old-black\n";files[SG_GAME_WHITELIST]="old-white\n";auto before=files;failWhiteNew=true;require(!sgWriteGameRuleFiles({L"new-black"},{L"new-white"}));require(files==before);});
@@ -229,7 +323,78 @@ int main(int argc,char** argv){const bool selected=argc>1&&std::string(argv[1])=
  check("game-rule actual setter preserves library managed marker ownership",[]{files[SG_GAME_WHITELIST]="manual\n# BEGIN YMCC custom-steam-library managed rules\nalpha\n# END YMCC custom-steam-library managed rules\n";auto result=fixtureRuleSet({{"whitelist",json::array({"manual","alpha","new-manual"})}});require(result.at("ok")==true);const auto& text=files[SG_GAME_WHITELIST];require(text=="manual\nnew-manual\n# BEGIN YMCC custom-steam-library managed rules\nalpha\n# END YMCC custom-steam-library managed rules\n");});
  check("game-rule actual setter rejects ambiguous managed block before writes",[]{files[SG_GAME_WHITELIST]="manual\n# BEGIN YMCC custom-steam-library managed rules\nalpha\n";const auto before=files;bool refused=false;try{fixtureRuleSet({{"whitelist",json::array({"manual","alpha"})}});}catch(...){refused=true;}require(refused&&files==before&&ruleEvents==0);});
  check("game-rule managed FEFF name has no extra mid-file BOM",[]{const std::string mark="\xef\xbb\xbf";const auto original=std::string("manual\n# BEGIN YMCC custom-steam-library managed rules\n")+mark+"game\n# END YMCC custom-steam-library managed rules\n";const auto text=sgGameRuleWhitelistContent(original,{L"manual",L"\ufeffgame"});require(text==original);});
- int failed=0;for(auto& c:cases)if(!c["ok"].get<bool>())failed++;std::cout<<json{{"passed",cases.size()-failed},{"failed",failed},{"cases",cases}}.dump(2)<<"\n";return failed?1:0;
+
+ // Extend the original group in place. No product/window/device entry is run.
+ const std::array<std::wstring,3> batchPaths={SG_GAME_SYSTEM_BLACKLIST,SG_GAME_PLAYER_BLACKLIST,SG_GAME_WHITELIST};
+ const auto batchDefaults=[](){std::vector<std::wstring> rules;for(const auto* rule:SG_BLACKLIST)rules.emplace_back(rule);rules.emplace_back(L"yemancc");return rules;};
+ const auto batchSeed=[](){files[SG_GAME_SYSTEM_BLACKLIST]="system.exe\n";files[SG_GAME_PLAYER_BLACKLIST]="player.exe\n";files[SG_GAME_WHITELIST]="allowed.exe\n";};
+ const auto batchGuardReleased=[](){require(fixtureRuleGuard.creates==1&&fixtureRuleGuard.opens==1&&fixtureRuleGuard.waits==1&&fixtureRuleGuard.releases==1&&fixtureRuleGuard.closes==1&&fixtureRuleGuard.held==0);};
+ const auto batchFresh=[&](){batchGuardReleased();require(rawReads==3&&fixtureRuleReadPaths==std::vector<std::wstring>(batchPaths.begin(),batchPaths.end()));};
+ check("game-rule batch matches independent semantics with three fresh reads and one coordination",[&]{
+  files[SG_GAME_SYSTEM_BLACKLIST]=std::string("\xef\xbb\xbf",3)+"# system\r\n C:\\Games\\SYSTEM*.EXE # comment\r\nShared.EXE\n\xe6\xb8\xb8\xe6\x88\x8f.exe\n";
+  files[SG_GAME_PLAYER_BLACKLIST]="\tPlayer.EXE\r\nshared.exe\n";
+  files[SG_GAME_WHITELIST]=std::string("\xef\xbb\xbf",3)+"# whitelist\r\n ALLOW*.EXE\nallow*.exe\n\xe6\xb8\xb8\xe6\x88\x8f.EXE # Unicode\n";
+  const auto before=files;const auto independentExcludes=sgExcludes(),independentWhitelist=sgGameWhitelist();
+  require(rawReads==3&&fixtureRuleGuard.creates==3&&fixtureRuleGuard.releases==3&&fixtureRuleGuard.closes==3);
+  auto expected=batchDefaults();for(const auto* rule:{L"system*",L"shared",L"\u6e38\u620f",L"player",L"shared"})expected.emplace_back(rule);
+  require(independentExcludes==expected&&independentWhitelist==std::vector<std::wstring>({L"allow*",L"\u6e38\u620f"}));
+  fixtureResetRuleObservation();std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};sgReadRecognitionGameRules(excludes,whitelist);
+  batchFresh();require(excludes==independentExcludes&&whitelist==independentWhitelist&&files==before&&fixtureRuleJournalProbes==0);
+ });
+ check("game-rule batch missing and empty files retain defaults without creating files",[&]{
+  for(unsigned mask=0;mask<8;++mask){for(unsigned i=0;i<batchPaths.size();++i){files.erase(batchPaths[i]);if(mask&(1u<<i))files[batchPaths[i]]="";}const auto before=files;fixtureResetRuleObservation();std::vector<std::wstring> excludes={L"stale"},whitelist={L"stale"};sgReadRecognitionGameRules(excludes,whitelist);batchFresh();require(excludes==batchDefaults()&&whitelist.empty()&&files==before);}
+ });
+ check("game-rule batch sees same-size external edits on every call without journal polling",[&]{
+  std::vector<std::wstring> excludes,whitelist;sgReadRecognitionGameRules(excludes,whitelist);require(!g_gameRuleRecoveryNeeded);
+  for(unsigned i=0;i<6;++i){const auto suffix=std::to_string(i);files[SG_GAME_SYSTEM_BLACKLIST]="system-"+suffix+".exe\n";files[SG_GAME_PLAYER_BLACKLIST]="player-"+suffix+".exe\n";files[SG_GAME_WHITELIST]="white-"+suffix+".exe\n";const auto before=files;fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);auto expected=batchDefaults();expected.push_back(L"system-"+std::to_wstring(i));expected.push_back(L"player-"+std::to_wstring(i));batchFresh();require(excludes==expected&&whitelist==std::vector<std::wstring>({L"white-"+std::to_wstring(i)})&&files==before&&fixtureRuleJournalProbes==0);}
+ });
+ check("game-rule batch holds both locks for reads and releases before parsing and publication",[&]{
+  batchSeed();std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};unsigned readProbes=0,parseProbes=0;
+  fixtureRuleReadProbe=[&](const std::wstring& p){require(fixtureRuleGuard.held==1&&fixtureRuleFilesMutexHeld());if(std::find(batchPaths.begin(),batchPaths.end(),p)!=batchPaths.end())++readProbes;require(excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"}));};
+  fixtureRuleParseProbe=[&]{++parseProbes;require(fixtureRuleGuard.held==0&&!fixtureRuleFilesMutexHeld());require(excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"}));};
+  sgReadRecognitionGameRules(excludes,whitelist);fixtureRuleReadProbe={};fixtureRuleParseProbe={};batchFresh();require(readProbes==3&&parseProbes==1&&sgNameExcludedBy(L"player",excludes)&&whitelist==std::vector<std::wstring>({L"allowed"}));
+ });
+ for(unsigned failed=0;failed<batchPaths.size();++failed){const auto label=std::string("game-rule batch invalid UTF8 retains both outputs at ")+std::to_string(failed);check(label.c_str(),[&]{
+  batchSeed();files[batchPaths[failed]]=std::string("\xff",1);const auto before=files;std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}batchGuardReleased();
+  require(rejected&&rawReads==static_cast<int>(failed+1)&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"})&&files==before);
+  files[batchPaths[failed]]="repaired.exe\n";fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);batchFresh();require(excludes!=std::vector<std::wstring>({L"old-excludes"})&&whitelist!=std::vector<std::wstring>({L"old-whitelist"}));
+ });}
+ for(unsigned failed=0;failed<batchPaths.size();++failed){const auto label=std::string("game-rule batch IO failure retains both outputs at ")+std::to_string(failed);check(label.c_str(),[&]{
+  batchSeed();fixtureRuleReadFailure=batchPaths[failed];const auto before=files;std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}batchGuardReleased();
+  require(rejected&&rawReads==static_cast<int>(failed+1)&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"})&&files==before);
+  fixtureRuleReadFailure.clear();fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);batchFresh();require(sgNameExcludedBy(L"player",excludes)&&whitelist==std::vector<std::wstring>({L"allowed"}));
+ });}
+ for(int fault:{1,2,3}){const auto label=std::string("game-rule batch coordination failure preserves outputs and closes real handles ")+std::to_string(fault);check(label.c_str(),[&]{
+  batchSeed();fixtureRuleGuardFault=fault;const auto before=files;std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}
+  require(rejected&&rawReads==0&&fixtureRuleJournalProbes==0&&g_gameRuleRecoveryNeeded&&files==before&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"}));
+  require(fixtureRuleGuard.creates==1&&fixtureRuleGuard.opens==(fault==1?0u:1u)&&fixtureRuleGuard.waits==(fault==1?0u:1u)&&fixtureRuleGuard.closes==(fault==1?0u:1u)&&fixtureRuleGuard.releases==0&&fixtureRuleGuard.held==0);
+  fixtureRuleGuardFault=0;fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);batchFresh();require(sgNameExcludedBy(L"player",excludes)&&whitelist==std::vector<std::wstring>({L"allowed"}));
+ });}
+ check("game-rule batch completes pending recovery before its first system read",[&]{
+  files[SG_GAME_RULE_JOURNAL]=managedJournal().dump();files[SG_GAME_RULE_BACKUP]=managedJournal().dump();files[SG_GAME_PLAYER_BLACKLIST]="new-black\n";files[SG_GAME_WHITELIST]="new-white\n";unsigned restoredReads=0;
+  fixtureRuleReadProbe=[&](const std::wstring& p){require(fixtureRuleGuard.held==1);if(p==SG_GAME_SYSTEM_BLACKLIST){++restoredReads;require(files[SG_GAME_PLAYER_BLACKLIST]=="old-black\n"&&files[SG_GAME_WHITELIST]=="old-white\n"&&!g_gameRuleRecoveryNeeded);}};
+  std::vector<std::wstring> excludes,whitelist;sgReadRecognitionGameRules(excludes,whitelist);fixtureRuleReadProbe={};batchGuardReleased();require(restoredReads==1&&sgNameExcludedBy(L"old-black",excludes)&&!sgNameExcludedBy(L"new-black",excludes)&&whitelist==std::vector<std::wstring>({L"old-white"})&&!files.count(SG_GAME_RULE_JOURNAL)&&!files.count(SG_GAME_RULE_BACKUP));
+ });
+ check("game-rule batch failed restoration retains both outputs and retries pending recovery",[&]{
+  files[SG_GAME_RULE_JOURNAL]=managedJournal().dump();files[SG_GAME_RULE_BACKUP]=managedJournal().dump();files[SG_GAME_PLAYER_BLACKLIST]="new-black\n";files[SG_GAME_WHITELIST]="new-white\n";const auto before=files;failBlackOld=true;
+  std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}batchGuardReleased();require(rejected&&g_gameRuleRecoveryNeeded&&files==before&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"})&&std::find(fixtureRuleReadPaths.begin(),fixtureRuleReadPaths.end(),SG_GAME_SYSTEM_BLACKLIST)==fixtureRuleReadPaths.end());
+  failBlackOld=false;fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);batchGuardReleased();require(!g_gameRuleRecoveryNeeded&&sgNameExcludedBy(L"old-black",excludes)&&whitelist==std::vector<std::wstring>({L"old-white"}));
+ });
+ check("game-rule batch real abandoned mutex reopens the completed boolean recovery gate",[&]{
+  std::vector<std::wstring> excludes,whitelist;sgReadRecognitionGameRules(excludes,whitelist);require(!g_gameRuleRecoveryNeeded);
+  files[SG_GAME_RULE_JOURNAL]=managedJournal().dump();files[SG_GAME_RULE_BACKUP]=managedJournal().dump();files[SG_GAME_PLAYER_BLACKLIST]="new-black\n";files[SG_GAME_WHITELIST]="new-white\n";FixtureAbandonedRuleMutex abandoned;fixtureResetRuleObservation();
+  sgReadRecognitionGameRules(excludes,whitelist);batchGuardReleased();require(fixtureRuleGuard.abandoned==1&&!g_gameRuleRecoveryNeeded&&sgNameExcludedBy(L"old-black",excludes)&&!sgNameExcludedBy(L"new-black",excludes)&&whitelist==std::vector<std::wstring>({L"old-white"})&&!files.count(SG_GAME_RULE_JOURNAL)&&!files.count(SG_GAME_RULE_BACKUP));
+ });
+ check("game-rule batch real abandoned mutex blocks corrupt debt without partial publication",[&]{
+  std::vector<std::wstring> excludes,whitelist;sgReadRecognitionGameRules(excludes,whitelist);require(!g_gameRuleRecoveryNeeded);excludes={L"old-excludes"};whitelist={L"old-whitelist"};files[SG_GAME_RULE_JOURNAL]="{late-corrupt-debt";const auto before=files;FixtureAbandonedRuleMutex abandoned;fixtureResetRuleObservation();
+  bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}batchGuardReleased();require(rejected&&fixtureRuleGuard.abandoned==1&&g_gameRuleRecoveryNeeded&&files==before&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"})&&std::find(fixtureRuleReadPaths.begin(),fixtureRuleReadPaths.end(),SG_GAME_SYSTEM_BLACKLIST)==fixtureRuleReadPaths.end());
+  files.erase(SG_GAME_RULE_JOURNAL);fixtureResetRuleObservation();sgReadRecognitionGameRules(excludes,whitelist);batchFresh();require(fixtureRuleGuard.abandoned==0&&!g_gameRuleRecoveryNeeded&&excludes==batchDefaults()&&whitelist.empty());
+ });
+ check("game-rule batch future recovery ownership retains both outputs and original bytes",[&]{
+  batchSeed();auto future=managedJournal();future["schemaVersion"]=3;files[SG_GAME_RULE_BACKUP]=future.dump();const auto before=files;std::vector<std::wstring> excludes={L"old-excludes"},whitelist={L"old-whitelist"};bool rejected=false;try{sgReadRecognitionGameRules(excludes,whitelist);}catch(const std::exception&){rejected=true;}batchGuardReleased();require(rejected&&g_gameRuleRecoveryNeeded&&files==before&&excludes==std::vector<std::wstring>({L"old-excludes"})&&whitelist==std::vector<std::wstring>({L"old-whitelist"})&&std::find(fixtureRuleReadPaths.begin(),fixtureRuleReadPaths.end(),SG_GAME_SYSTEM_BLACKLIST)==fixtureRuleReadPaths.end());
+ });
+ if(cases.empty()||(exactCase&&cases.size()!=1)){std::cerr<<"Game-rule case selection matched no unique original assertion";return 2;}
+ int failed=0;for(auto& c:cases)if(!c["ok"].get<bool>())failed++;std::cout<<json{{"passed",cases.size()-failed},{"failed",failed},{"cases",cases},{"selectedCase",exactCase?json(exactCase):json()}}.dump(2)<<"\n";return failed?1:0;
 }
 `;
 cpp=cpp.replace('static std::string W2U(const std::wstring& v){return std::string(v.begin(),v.end());}',utf8Functions);
@@ -422,8 +587,22 @@ if(coreMode&&!startupOnly){
  if(cpp.split(marker).length!==2)throw Error('Missing/ambiguous game-rule fixture namespace');
  cpp=cpp.replace(marker,'static const std::wstring SG_DIR=LR"YMCC_RULE_SCOPE('+mutexScope+')YMCC_RULE_SCOPE";');
 }
-const file=path.join(out,'native-settings-current.cpp');fs.writeFileSync(file,cpp);
-fs.writeFileSync(path.join(out,'source-identity.json'),JSON.stringify({sourceSha256:createHash('sha256').update(source).digest('hex'),sourcePath,functions:startupOnly?startupFunctions:rulesOnly?rulesFunctions:names,gameRulesOnly:rulesOnly,startupConfigOnly:startupOnly,guardSha256:createHash('sha256').update(guard).digest('hex'),artifactRootSource,coreMode,mutexScope},null,2));
+const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+const pin=file=>({path:fs.realpathSync(file),bytes:fs.statSync(file).size,sha256:digest(fs.readFileSync(file))});
+const file=path.join(out,'native-settings-current.cpp');writeArtifact('native-settings-current.cpp',cpp);
+const rulesClosure=rulesOnly?[
+ ['W2U overloads',utf8Functions],['U2W',pathWire],['name matching helpers',ruleNames],['game-rule globals',rulesPrefix],
+ ...rulesFunctions.map(name=>[name,fn(name)]),...ruleOwnerNames.map(name=>[name,fn(name)]),['NativeGameRulesFileStamp',ruleStamp],['game.rules.set',ipcBody('game.rules.set')]
+].map(([name,text])=>({name,bytes:Buffer.byteLength(text),sha256:digest(text)})):undefined;
+const rulesIdentity=rulesOnly?{
+ selectedCase:rulesCase,selectionSpec:rulesCase!==null?pin(rulesSpecPath):null,
+ extractedClosure:rulesClosure,generatedCppSha256:digest(cpp),runner:pin(new URL(import.meta.url)),node:pin(process.execPath),
+ repositoryInputs:['native/game_original_rules_lease.h','native/monitor_identity.h','native/game_rule_literal.h','native/game_application_catalog.h','native/game_library_blacklist_entries.h','native/game_detection_blacklist_entries.h','native/game_rule_file_guard.h','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'].map(p=>pin(path.join(root,p))),
+ ports:['original in-memory filesystem/raw read/atomic write ports','fixed sgSelfBase() == L"yemancc"','real FilesGuard with counted CreateMutexW/WaitForSingleObject/ReleaseMutex/CloseHandle','precise create/wait failure ports; real WAIT_ABANDONED from joined mutex-owning thread','rulesOnly inert mousePolicyGameContextChanged notification'],
+ unselectedSettingsGroupCompiled:false,
+ compileEnvironment:{CL:process.env.CL||null,_CL_:process.env._CL_||null,LINK:process.env.LINK||null,VSLANG:process.env.VSLANG||null}
+}:{};
+writeArtifact('source-identity.json',JSON.stringify({sourceSha256:digest(sourceBytes),sourcePath,sourceSelection,sourceBytes:sourceBytes.length,sourceRealPath:fs.realpathSync(sourcePath),functions:startupOnly?startupFunctions:rulesOnly?rulesFunctions:names,gameRulesOnly:rulesOnly,startupConfigOnly:startupOnly,guardSha256:digest(guard),artifactRootSource,coreMode,mutexScope,...rulesIdentity},null,2));
 const explicitEnvironment=process.env.YMCC_GLOBAL_CONFIG_ENV_CMD;
 const vc=explicitEnvironment || 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
 if(!fs.existsSync(vc)||/["\r\n]/.test(vc))throw Error('Invalid explicit compiler environment');
@@ -432,9 +611,22 @@ const compilerEnvironmentSource=explicitEnvironment?'YMCC_GLOBAL_CONFIG_ENV_CMD'
 const preamble=!explicitEnvironment&&coreMode?calibrationToolchainPreamble(vc):'@echo off\r\ncall "'+vc+'" >nul\r\nif errorlevel 1 exit /b 1\r\n';
 const provenancePath=path.join(out,'compiler-environment.txt'),clPath=path.join(out,'cl-path.txt'),linkPath=path.join(out,'link-path.txt');
 const provenanceCommands=[`where cl.exe > "${clPath}"`,'if errorlevel 1 exit /b 1',`where link.exe > "${linkPath}"`,'if errorlevel 1 exit /b 1',`set VCToolsInstallDir > "${provenancePath}"`,`set WindowsSdkDir >> "${provenancePath}"`,`set WindowsSDKVersion >> "${provenancePath}"`].join('\r\n')+'\r\n';
-const command=`cl /nologo /EHsc /std:c++20 /utf-8 ${startupOnly?'/DSINGLE_EXE /sourceDependencies "'+path.join(out,'native-dependencies.json')+'" ':''}/I"${path.join(root,'deps/json')}" ${startupOnly?'/I"'+path.join(root,'deps/webview2/build/native/include')+'" ':''} /I"${path.join(root,'native')}" "${file}" /Fo:"${path.join(out,'native-settings-current.obj')}" /Fe:"${path.join(out,'native-settings-current.exe')}"`;
-const buildScript=path.join(out,'compile.cmd');fs.writeFileSync(buildScript,preamble+provenanceCommands+command+'\r\nexit /b %errorlevel%\r\n');
+const command=`cl /nologo /EHsc /std:c++20 /utf-8 ${(startupOnly||rulesOnly)?(startupOnly?'/DSINGLE_EXE ':'')+'/sourceDependencies "'+path.join(out,'native-dependencies.json')+'" ':''}/I"${path.join(root,'deps/json')}" ${startupOnly?'/I"'+path.join(root,'deps/webview2/build/native/include')+'" ':''} /I"${path.join(root,'native')}" "${file}" /Fo:"${path.join(out,'native-settings-current.obj')}" /Fe:"${path.join(out,'native-settings-current.exe')}"`;
+const buildScript=path.join(out,'compile.cmd');writeArtifact('compile.cmd',preamble+provenanceCommands+command+'\r\nexit /b %errorlevel%\r\n');
 const readText=file=>fs.existsSync(file)?fs.readFileSync(file,'utf8').trim():null;
-const buildStartedAt=new Date().toISOString(),buildT0=performance.now();const build=spawnSync('cmd.exe',['/d','/c',buildScript],{encoding:'utf8',timeout:120000});if(startupOnly)fs.writeFileSync(path.join(out,'compile-process.json'),JSON.stringify({pid:build.pid,startedAt:buildStartedAt,endedAt:new Date().toISOString(),elapsedMs:performance.now()-buildT0,status:build.status,signal:build.signal,error:build.error?String(build.error):null,command:['cmd.exe','/d','/c',buildScript],timeoutMs:120000},null,2));fs.writeFileSync(path.join(out,'compiler-provenance.json'),JSON.stringify({compilerEnvironmentSource,explicitEnvironment:explicitEnvironment||null,vcvars:vc,sharedToolchainHelper:!explicitEnvironment&&coreMode?'tools/fixtures/hc_reviewed_calibration/toolchain.mjs':null,sharedToolchainHelperSha256:!explicitEnvironment&&coreMode?createHash('sha256').update(fs.readFileSync(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'))).digest('hex'):null,compilerCandidates:readText(clPath),linkerCandidates:readText(linkPath),sdkAndCompilerEnvironment:readText(provenancePath),buildExitCode:build.status,buildTimedOut:build.error?.code==='ETIMEDOUT',scope:'Paths and child compiler/SDK environment observed in the actual compile command. Not a complete SDK/linker/dynamic dependency identity closure.'},null,2));process.stdout.write(build.stdout||'');process.stderr.write(build.stderr||'');if(build.status!==0)process.exit(build.status||1);
-if(startupOnly)fs.writeFileSync(path.join(out,'native-execution-identity.json'),JSON.stringify({sourcePath,sourceSha256:createHash('sha256').update(source).digest('hex'),generatedCppSha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),executablePath:path.join(out,'native-settings-current.exe'),executableSha256:createHash('sha256').update(fs.readFileSync(path.join(out,'native-settings-current.exe'))).digest('hex'),observation:'after successful actual compile; immediately before original native spawn',selectedCase:process.env.YMCC_STARTUP_CONFIG_CASE||null},null,2));
-const nativeStartedAt=new Date().toISOString(),nativeT0=performance.now();const run=spawnSync(path.join(out,'native-settings-current.exe'),rulesOnly?['--game-rules-only']:[],{encoding:'utf8',timeout:60000});if(startupOnly)fs.writeFileSync(path.join(out,'native-process.json'),JSON.stringify({pid:run.pid,startedAt:nativeStartedAt,endedAt:new Date().toISOString(),elapsedMs:performance.now()-nativeT0,status:run.status,signal:run.signal,error:run.error?String(run.error):null,command:[path.join(out,'native-settings-current.exe')],scope:process.env.YMCC_STARTUP_CONFIG_SCOPE||null,selectedCase:process.env.YMCC_STARTUP_CONFIG_CASE||null,timeoutMs:60000},null,2));process.stdout.write(run.stdout||'');process.stderr.write(run.stderr||'');if(run.stdout)fs.writeFileSync(path.join(out,'native-results.json'),run.stdout);if(run.error)process.stderr.write(String(run.error));process.exitCode=run.status===0?0:(run.status||1);
+const processReceipt=(result,startedAt,t0,command,timeoutMs)=>({pid:result.pid,startedAt,endedAt:new Date().toISOString(),elapsedMs:performance.now()-t0,status:result.status,signal:result.signal,error:result.error?String(result.error):null,errorCode:result.error?.code||null,timedOut:result.error?.code==='ETIMEDOUT',command,timeoutMs});
+const sourceStable=()=>fs.readFileSync(sourcePath).equals(sourceBytes);
+if(rulesOnly&&!sourceStable())throw Error('Selected game-rule source changed before compile');
+const buildStartedAt=new Date().toISOString(),buildT0=performance.now();const build=spawnSync('cmd.exe',['/d','/c',buildScript],{encoding:'utf8',timeout:120000});
+if(startupOnly||rulesOnly)writeArtifact('compile-process.json',JSON.stringify(processReceipt(build,buildStartedAt,buildT0,['cmd.exe','/d','/c',buildScript],120000),null,2));
+if(rulesOnly){writeArtifact('compile-stdout.log',build.stdout||'');writeArtifact('compile-stderr.log',build.stderr||'');}
+const toolPin=text=>{const candidate=String(text||'').split(/\r?\n/)[0].trim();return candidate&&fs.existsSync(candidate)?pin(candidate):null;};
+writeArtifact('compiler-provenance.json',JSON.stringify({compilerEnvironmentSource,explicitEnvironment:explicitEnvironment||null,vcvars:vc,sharedToolchainHelper:!explicitEnvironment&&coreMode?'tools/fixtures/hc_reviewed_calibration/toolchain.mjs':null,sharedToolchainHelperSha256:!explicitEnvironment&&coreMode?digest(fs.readFileSync(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'))):null,compilerCandidates:readText(clPath),linkerCandidates:readText(linkPath),sdkAndCompilerEnvironment:readText(provenancePath),buildExitCode:build.status,buildTimedOut:build.error?.code==='ETIMEDOUT',...(rulesOnly?{compiler:toolPin(readText(clPath)),linker:toolPin(readText(linkPath)),compilerEnvironmentScript:pin(vc)}:{}),scope:'Paths and child compiler/SDK environment observed in the actual compile command. Not a complete SDK/linker/dynamic dependency identity closure.'},null,2));
+process.stdout.write(build.stdout||'');process.stderr.write(build.stderr||'');if(build.status!==0)process.exit(build.error?.code==='ETIMEDOUT'?124:(build.status||1));
+if(rulesOnly&&!sourceStable())throw Error('Selected game-rule source changed during compile');
+if(startupOnly||rulesOnly)writeArtifact('native-execution-identity.json',JSON.stringify({sourcePath,sourceSelection,sourceSha256:digest(sourceBytes),generatedCppSha256:digest(fs.readFileSync(file)),executablePath:path.join(out,'native-settings-current.exe'),executableSha256:digest(fs.readFileSync(path.join(out,'native-settings-current.exe'))),observation:'after successful actual compile; immediately before original native spawn',selectedCase:rulesOnly?rulesCase:process.env.YMCC_STARTUP_CONFIG_CASE||null},null,2));
+const nativeStartedAt=new Date().toISOString(),nativeT0=performance.now();const run=spawnSync(path.join(out,'native-settings-current.exe'),rulesOnly?['--game-rules-only']:[],{encoding:'utf8',timeout:60000});
+if(startupOnly||rulesOnly)writeArtifact('native-process.json',JSON.stringify({...processReceipt(run,nativeStartedAt,nativeT0,[path.join(out,'native-settings-current.exe'),...(rulesOnly?['--game-rules-only']:[])],60000),scope:rulesOnly?'game-rules-only':process.env.YMCC_STARTUP_CONFIG_SCOPE||null,selectedCase:rulesOnly?rulesCase:process.env.YMCC_STARTUP_CONFIG_CASE||null},null,2));
+if(rulesOnly){writeArtifact('native-stderr.log',run.stderr||'');writeArtifact('source-stability.json',JSON.stringify({sourcePath,selectedSha256:digest(sourceBytes),afterRun:pin(sourcePath),unchanged:sourceStable()},null,2));}
+process.stdout.write(run.stdout||'');process.stderr.write(run.stderr||'');if(run.stdout)writeArtifact('native-results.json',run.stdout);if(run.error)process.stderr.write(String(run.error));process.exitCode=run.status===0?0:run.error?.code==='ETIMEDOUT'?124:(run.status||1);
+if(rulesOnly&&!sourceStable())throw Error('Selected game-rule source changed during native execution');

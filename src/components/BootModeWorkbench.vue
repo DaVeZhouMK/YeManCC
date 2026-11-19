@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { equalSettingsDocuments } from '../bridge/settingsBaseline';
 import BootModePreview from './BootModePreview.vue';
 import '@/styles/bootModeGlow.css';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
@@ -7,7 +8,7 @@ import BootModeFields from './BootModeFields.vue';
 import { windowApi } from '@/bridge/api';
 import { isNativeRuntime } from '@/bridge/ipc';
 import { focusGamepadElement } from '@/gamepad/focus';
-import { BOOT_MODE_IDS, BOOT_MODE_LABELS, BOOT_MODE_CATEGORIES, cloneBootValue, resolveBootMode, setBootModeModuleScope, type BootModeDocument, type BootModeSnapshot, type BootModeId, type BootModeCategory, type BootModeModule, type BootConfig } from '@/bridge/bootModeModel';
+import { BOOT_MODE_IDS, BOOT_MODE_LABELS, BOOT_MODE_CATEGORIES, cloneBootValue, previewBootMode, bootGlobalModuleUnresolved, adoptBootGlobalModule, setBootModeModuleScope, sameBootModeEditableContent, type BootModeDocument, type BootModeSnapshot, type BootModeId, type BootModeCategory, type BootModeModule, type BootConfig } from '@/bridge/bootModeModel';
 import type { BootDeviceCapabilities } from '@/bridge/bootModeModel';
 
 const props = withDefaults(defineProps<{
@@ -16,7 +17,7 @@ const props = withDefaults(defineProps<{
   active?: boolean; saving?: boolean; saveReceipt?: number; error?: string; externalModal?: boolean; returnFocus?: HTMLElement | null;
 }>(), { active: true, saving: false, saveReceipt: 0, error: '', externalModal: false });
 const emit = defineEmits<{
-  (event: 'save', document: BootModeDocument): void;
+  (event: 'save', document: BootModeDocument, origin: BootModeDocument): void;
   (event: 'category-change', category: BootModeCategory): void;
   (event: 'close'): void;
   (event: 'minimize', draft: BootModeDocument): void;
@@ -28,17 +29,18 @@ const notice = ref(''), supportDialog = ref('');
 const confirmation = ref<'discard' | 'baseline' | 'preset' | 'replace' | ''>('');
 const sceneName = ref(''), scenePreset = ref('');
 const root = ref<HTMLElement | null>(null), dialog = ref<HTMLElement | null>(null), scroll = ref<HTMLElement | null>(null);
-const initialGlobal = cloneBootValue(props.baseline || props.document.global);
-const snapshot = computed(() => resolveBootMode(draft.value, selected.value));
+const initialGlobal = cloneBootValue(props.document.global);
+const initialUnresolvedGlobal = props.document.unresolvedGlobal ? [...props.document.unresolvedGlobal] : undefined;
+const snapshot = computed(() => previewBootMode(draft.value, selected.value, props.baseline || props.document.global));
 const currentCategory = computed(() => BOOT_MODE_CATEGORIES.find(item => item.id === category.value)!);
-const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(props.document));
+const dirty = computed(() => !equalSettingsDocuments(draft.value, props.document));
 const blocked = computed(() => props.saving || props.externalModal);
 const localModal = computed(() => !!supportDialog.value || !!confirmation.value);
 const own = (module: BootModeModule) => selected.value === 'global' || !!draft.value.scenes[selected.value].overrides[module];
-const readOnly = (module: BootModeModule) => !own(module);
+const readOnly = (module: BootModeModule) => !own(module) || selected.value === 'global' && bootGlobalModuleUnresolved(draft.value, module);
 const presetOptions = computed(() => Object.keys(draft.value.presets[selected.value] || {}).map(value => ({ value, label: value })));
-const names: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇控制', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
-const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', fan: 'fan', charge: 'charge', gyro: 'gyro', sleep: 'hibernate' };
+const names: Record<BootModeModule, string> = { performance: '性能调度', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
+const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', charge: 'charge', gyro: 'gyro', sleep: 'hibernate' };
 function warning(module: BootModeModule) {
   const key = supportKeys[module];
   if (!key) return null;
@@ -54,7 +56,18 @@ function update(module: BootModeModule, value: BootConfig) {
   else draft.value.scenes[selected.value].overrides[module] = cloneBootValue(value);
 }
 function scope(module: BootModeModule, value: boolean) {
-  if (!blocked.value) setBootModeModuleScope(draft.value, selected.value, module, value);
+  if (!blocked.value) setBootModeModuleScope(draft.value, selected.value, module, value, props.baseline);
+}
+function adoptGlobal(module: BootModeModule) {
+  if (blocked.value || selected.value !== 'global') return;
+  adoptBootGlobalModule(draft.value, module, snapshot.value[module]);
+  notice.value = names[module] + '已确认为全局草稿，请保存更改。';
+  void nextTick(() => {
+    const article = root.value?.querySelector<HTMLElement>('[data-boot-module="' + module + '"]');
+    const field = article?.querySelector<HTMLElement>('input[type="range"]:not(:disabled)') ||
+      article?.querySelector<HTMLElement>('input:not(:disabled), .dd-trigger:not(:disabled), .ymcc-switch:not(:disabled)');
+    if (props.active && !disposed && field) focusGamepadElement(field);
+  });
 }
 function changeCategory(value: BootModeCategory) {
   category.value = value;
@@ -64,30 +77,36 @@ watch(category, value => emit('category-change', value), { immediate: true });
 watch(selected, () => { scenePreset.value = ''; sceneName.value = ''; notice.value = ''; if (scroll.value) scroll.value.scrollTop = 0; });
 // A successful save supplies the normalized document and its new revision.
 // Replacing the draft here makes the next save use that revision as well.
-let saveRequested = false, observedSaveReceipt = props.saveReceipt;
+let saveRequested = false, observedSaveReceipt = props.saveReceipt, draftSource = cloneBootValue(props.document);
 watch(() => props.document, (value, previous) => {
   const savedByThisEditor = saveRequested && props.saveReceipt !== observedSaveReceipt;
   observedSaveReceipt = props.saveReceipt;
-  if (savedByThisEditor || JSON.stringify(draft.value) === JSON.stringify(previous)) {
+  if (savedByThisEditor || equalSettingsDocuments(draft.value, previous)) {
     draft.value = cloneBootValue(value);
+    draftSource = cloneBootValue(value);
     if (savedByThisEditor) {
-      notice.value = '预设已保存，重启后生效；开机模式可在主面板选择。';
+      notice.value = draft.value.unresolvedGlobal?.length
+        ? '预设已保存；待确认的全局栏目没有被当前模式值覆盖。'
+        : '预设已保存，重启后生效；开机模式可在主面板选择。';
       saveRequested = false;
     }
     return;
   }
-  // Minimized drafts retain edits when only the panel's current/boot choice changes.
-  const config = (doc: BootModeDocument) => JSON.stringify([doc.global, doc.scenes, doc.presets]);
-  if (config(value) === config(previous)) {
+  // Compare to the content this draft was based on. A later metadata-only
+  // refresh cannot make an earlier external content conflict safe to save.
+  if (sameBootModeEditableContent(value, draftSource)) {
     const updated = cloneBootValue(value);
+    if (draft.value.unresolvedGlobal) updated.unresolvedGlobal = cloneBootValue(draft.value.unresolvedGlobal);
+    else delete updated.unresolvedGlobal;
     draft.value = { ...updated, global: draft.value.global, scenes: draft.value.scenes, presets: draft.value.presets };
+    draftSource = cloneBootValue(value);
   } else notice.value = '配置已在外部更新，草稿已保留；保存冲突时请收回并重新载入。';
 });
 watch(() => props.saving, value => { if (!value && props.error) saveRequested = false; });
 function save() {
   if (blocked.value || !dirty.value) return;
   saveRequested = true;
-  emit('save', cloneBootValue(draft.value));
+  emit('save', cloneBootValue(draft.value), cloneBootValue(draftSource));
 }
 function requestClose() {
   if (blocked.value) return;
@@ -101,20 +120,34 @@ function saveScene() {
   const entries = draft.value.presets[selected.value] || {};
   if (Object.prototype.hasOwnProperty.call(entries, name) && confirmation.value !== 'replace') { confirmation.value = 'replace'; return; }
   if (!Object.prototype.hasOwnProperty.call(entries, name) && Object.keys(entries).length >= 30) { notice.value = '每个模式最多保存 30 个场景预设，请覆盖已有名称。'; return; }
-  draft.value.presets[selected.value] = { ...entries, [name]: { name, overrides: cloneBootValue(selected.value === 'global' ? draft.value.global : draft.value.scenes[selected.value].overrides) } };
+  const savedModules = selected.value === 'global' ? Object.fromEntries(Object.entries(draft.value.global)
+    .filter(([module]) => !bootGlobalModuleUnresolved(draft.value, module as BootModeModule))) : draft.value.scenes[selected.value].overrides;
+  const remembered = selected.value === 'global' ? undefined : draft.value.scenes[selected.value].rememberedOverrides;
+  draft.value.presets[selected.value] = { ...entries, [name]: { name, overrides: cloneBootValue(savedModules),
+    ...(remembered ? { rememberedOverrides: cloneBootValue(remembered) } : {}) } };
   scenePreset.value = name; sceneName.value = ''; notice.value = '整套场景及各模块的跟随关系已加入草稿，请保存更改。';
 }
 function restoreScene() {
   const preset = draft.value.presets[selected.value]?.[scenePreset.value];
   if (!preset || blocked.value) return;
-  if (selected.value === 'global') draft.value.global = { ...draft.value.global, ...cloneBootValue(preset.overrides) };
+  if (selected.value === 'global') {
+    for (const [module, value] of Object.entries(preset.overrides)) {
+      if (Object.keys(value!).length) adoptBootGlobalModule(draft.value, module as BootModeModule, value!);
+      else draft.value.global[module as BootModeModule] = cloneBootValue(value!);
+    }
+  }
   else draft.value.scenes[selected.value] = cloneBootValue(preset);
   notice.value = '已恢复场景预设到草稿，请保存更改。';
 }
 function confirm() {
   const action = confirmation.value;
   if (action === 'discard') { emit('close'); return; }
-  if (action === 'baseline') { draft.value.global = cloneBootValue(initialGlobal); notice.value = '已恢复本次载入的全局配置到草稿，请保存更改。'; }
+  if (action === 'baseline') {
+    draft.value.global = cloneBootValue(initialGlobal);
+    if (initialUnresolvedGlobal) draft.value.unresolvedGlobal = [...initialUnresolvedGlobal];
+    else delete draft.value.unresolvedGlobal;
+    notice.value = '已恢复本次载入的全局配置到草稿，请保存更改。';
+  }
   if (action === 'preset') restoreScene();
   if (action === 'replace') saveScene();
   confirmation.value = '';
@@ -272,7 +305,7 @@ onBeforeUnmount(() => {
     <strong><span>{{ ({global:'全局',xbox:'Xbox',steam:'Steam','xbox-steam':'Steam'})[id] }}</span><em v-if="id === 'steam'">Windows</em><em v-else-if="id === 'xbox-steam'">Xbox全屏</em></strong>
   </button>
 </div>
-    <div class="preview-editor-actions"><span class="preview-save-state" :class="{dirty}"><i></i>{{ dirty ? '未保存' : '已保存' }}</span><button v-if="selected === 'global'" :disabled="blocked" @click="confirmation = 'baseline'">恢复预设</button><button :disabled="blocked" @click="emit('minimize', cloneBootValue(draft))">收回</button><button data-boot-close :disabled="blocked" @click="requestClose">返回</button><button class="primary" :disabled="blocked || !dirty" @click="save">{{ saving ? '保存中…' : '保存预设' }}</button></div>
+    <div class="preview-editor-actions"><button v-if="selected === 'global'" :disabled="blocked" @click="confirmation = 'baseline'">恢复预设</button><button :disabled="blocked" @click="emit('minimize', cloneBootValue(draft))">收回</button><button data-boot-close :disabled="blocked" @click="requestClose">返回</button><button class="primary" :disabled="blocked || !dirty" @click="save">保存预设</button></div>
   </header>
   
         <div class="boot-workbench-columns">
@@ -289,6 +322,10 @@ onBeforeUnmount(() => {
                 <div v-if="selected !== 'global'" class="boot-scope"><button :aria-pressed="!own(module)" :disabled="blocked" @click="scope(module, false)">跟随全局</button><button :aria-pressed="own(module)" :disabled="blocked" @click="scope(module, true)">模式单独设置</button></div>
                 <p v-if="module === 'touch'" class="boot-touch-note">此处为屏幕触摸按钮；实体按键与校准请在全局「控制器」页面设置。</p>
                 <div v-if="module === 'performance' && support.hybridCores?.state !== 'supported'" class="boot-core-notice"><span>大小核调度</span><button class="boot-support" :disabled="blocked" @click="supportDialog = support.hybridCores?.reason || 'CPU 架构尚未确认'"><i>!</i>{{ support.hybridCores?.state === 'unsupported' ? '不支持' : '支持待确认' }}</button></div>
+                <div v-if="bootGlobalModuleUnresolved(draft, module)" class="boot-origin-warning" :data-boot-unresolved="module">
+                  <span>{{ selected === 'global' ? '旧配置缺少此栏目的全局数据。当前显示值仅供参考，尚未保存为全局。' : '全局数据待确认；单独设置以当前显示值为起点，不会改写全局。' }}</span>
+                  <button v-if="selected === 'global'" type="button" :data-boot-adopt-global="module" :disabled="blocked" @click="adoptGlobal(module)">采用当前显示值</button>
+                </div>
                 <BootModeFields :module="module" :value="snapshot[module]" :disabled="readOnly(module) || blocked" :persona="String(snapshot.input.persona)" :support="support" :apps="apps" @change="update(module, $event)" @shared-apps="emit('shared-apps')"/>
               </article>
             </div>
@@ -333,9 +370,6 @@ footer{display:flex;align-items:center;justify-content:space-between;gap:12px;pa
 .preview-editor-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto!important;min-width:0;margin-left:auto}
 .preview-editor-actions>button{font-size:14px;min-height:36px;padding:7px 11px;white-space:nowrap;border-radius:7px}
 .preview-editor-actions>.primary{border-color:var(--accent);background:linear-gradient(130deg,color-mix(in srgb,var(--accent) 28%,var(--bg-input)),color-mix(in srgb,var(--accent) 16%,var(--bg-input)));color:var(--text)}
-.preview-save-state{display:flex;align-items:center;gap:5px;font-size:13px;color:#92a8b9;margin-right:3px;white-space:nowrap}
-.preview-save-state>i{width:5px;height:5px;background:#7ba2ac;border-radius:50%}
-.preview-save-state.dirty>i{background:#f8c56d}
 .preview-editor-modes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;padding:0!important;background:var(--bg-input);border:1px solid var(--border);border-radius:9px;overflow:visible}
 .preview-editor-modes button{position:relative;isolation:isolate;display:flex;align-items:center;justify-content:center;gap:9px;min-width:0;min-height:48px;padding:5px 9px!important;border:0!important;border-right:1px solid #ffffff09!important;border-radius:0;background:transparent!important;box-shadow:none;white-space:nowrap;color:#9eafbf}
 .preview-editor-modes button:first-child{border-radius:8px 0 0 8px}
@@ -359,6 +393,10 @@ footer{display:flex;align-items:center;justify-content:space-between;gap:12px;pa
 .preview-modes-inline{flex:1;max-width:588px;min-width:440px;margin:0}
 .boot-workbench-image{height:100px}
 
-@media(max-width:1100px){.preview-editor-header{gap:9px}.preview-editor-title{flex-basis:82px!important}.preview-modes-inline{min-width:370px}.preview-save-state{display:none}}
+@media(max-width:1100px){.preview-editor-header{gap:9px}.preview-editor-title{flex-basis:82px!important}.preview-modes-inline{min-width:370px}}
 
+</style>
+
+<style scoped>
+.boot-origin-warning{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 12px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--border));border-radius:7px;background:color-mix(in srgb,var(--accent) 8%,var(--bg-input));font-size:14px;line-height:1.5;color:var(--text-dim)}.boot-origin-warning span{min-width:0}.boot-origin-warning button{flex:0 0 auto;min-height:34px;padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--bg-input);color:var(--text);font:inherit;cursor:pointer}
 </style>

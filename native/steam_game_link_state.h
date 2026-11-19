@@ -9,7 +9,7 @@ namespace ymcc::steamlink {
 enum class IdentityStatus { Same, Exited, Changed, Unknown };
 enum class AccountStatus { Same, Changed, Unknown };
 enum class TrackerStatus { Exact, Absent, Unknown };
-enum class PrimaryStatus { Exact, Different, Unknown };
+enum class PrimaryStatus { Exact, Different, Unknown, VerifiedOriginalGroup };
 enum class ValidatorStatus { Accepted, Rejected, Unknown };
 enum class UiStatus { RunningAndListed, RunningMissingList, NotRunning, Unknown };
 enum class CandidateStatus { Same, Different, None, Unknown };
@@ -107,7 +107,8 @@ public:
         if (evidence.account != AccountStatus::Same) return pending("account-unknown", 2000);
         if (evidence.tracker != TrackerStatus::Exact && evidence.tracker != TrackerStatus::Absent)
             return pending("tracker-unknown", 2000);
-        if (evidence.primary != PrimaryStatus::Exact && evidence.primary != PrimaryStatus::Different)
+        if (evidence.primary != PrimaryStatus::Exact && evidence.primary != PrimaryStatus::Different &&
+            evidence.primary != PrimaryStatus::VerifiedOriginalGroup)
             return pending("native-primary-unknown", 2000);
         if (evidence.validator != ValidatorStatus::Accepted && evidence.validator != ValidatorStatus::Rejected)
             return pending("validator-unknown", 2000);
@@ -120,7 +121,8 @@ public:
         // not proof that the original OS process or the transport disappeared.
         // The contact still requires the complete same-instance evidence set,
         // including the shared candidate, so it cannot retarget another game.
-        const bool exactContact = evidence.tracker == TrackerStatus::Exact && evidence.primary == PrimaryStatus::Exact &&
+        const bool exactContact = evidence.tracker == TrackerStatus::Exact &&
+            (evidence.primary == PrimaryStatus::Exact || evidence.primary == PrimaryStatus::VerifiedOriginalGroup) &&
             evidence.validator == ValidatorStatus::Accepted && evidence.sharedCandidate == CandidateStatus::Same;
         if (evidence.ui == UiStatus::RunningMissingList) return exactContact ?
             degraded("same-original-contact-running-list-missing", true) : degraded("missing-running-list");
@@ -142,6 +144,7 @@ public:
 
     bool active() const noexcept { return state_.active; }
     Snapshot snapshot() const { return state_; }
+    bool linked() const noexcept { return state_.linked; }
 
 private:
     Snapshot state_;

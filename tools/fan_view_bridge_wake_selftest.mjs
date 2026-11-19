@@ -74,7 +74,7 @@ try{
     await page.evaluate(()=>{for(const name of ['ipc:fan.resume-ready','ipc:power.resume-ready','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:2}}));});
     after=await snapshot();reads=await page.evaluate(()=>window.__chain.duplicateUiReads);
     await page.locator('.fan-toggle').click();await page.waitForFunction(previous=>window.__chain.lifecycle.controlCancellationRevision>previous.cancellationRevision||window.__chain.lifecycle.controlIntentRevision>previous.intentRevision,before,{timeout:3000});clickBoundary=await snapshot();
-    assert.equal(after.pressed,'true','a late same-generation wake must not revoke confirmed control');assert.equal(after.text,'风扇已开启');assert.equal(after.busy,'false');assert.equal(after.disabled,false,'a repeated edge cannot restart button protection');
+    assert.equal(after.pressed,'true','a late same-generation wake must not revoke confirmed control');assert.equal(after.text,'点击关闭');assert.equal(after.busy,'false');assert.equal(after.disabled,false,'a repeated edge cannot restart button protection');
     assert.equal(after.active,true,'same-generation event cannot revoke navigation control');assert.equal(after.writes,true);assert.equal(after.cancellationRevision,before.cancellationRevision);assert.equal(after.intentRevision,before.intentRevision);
     assert.equal(after.trace.filter(t=>t.op==='enable').length,before.trace.filter(t=>t.op==='enable').length,'late notifications cannot reapply the current curve');
     assert.equal(reads,0,'already confirmed duplicate edge must not add a state query');
@@ -127,7 +127,7 @@ try{
     await page.waitForFunction(()=>!document.querySelector('.fan-toggle').disabled,null,{timeout:2300});
    }
    await page.evaluate(()=>window.__wakeStatusTask);await success();
-   assert.equal(await page.locator('.fan-toggle').textContent(),'风扇已开启');
+   assert.equal(await page.locator('.fan-toggle').textContent(),'点击关闭');
    assert.equal(await page.locator('.fan-toggle').getAttribute('aria-busy'),'false');
    assert.equal(await page.locator('.fan-toggle').evaluate(button=>button.classList.contains('fan-toggle-pending')),false);
    await enabled();
@@ -266,7 +266,7 @@ try{
   await page.evaluate(()=>{window.__chain.holdAt='heartbeat';window.__chain.heartbeatFailure=true;window.__heartbeat=window.__chain.lifecycle.heartbeat().catch(()=>{});});
   await page.waitForFunction(()=>window.__chain.gateReached==='heartbeat');
   await page.locator('.fan-toggle').click();await enabled();
-  assert.equal(await page.locator('.fan-toggle').innerText(),'风扇未操控','off remains actionable while the renewal is pending');
+  assert.equal(await page.locator('.fan-toggle').innerText(),'点击启用','off remains actionable while the renewal is pending');
   await page.evaluate(()=>window.__chain.releaseGate?.());
   await page.waitForFunction(()=>!window.__chain.lifecycle.hasControlIntent);
   assert.equal(await page.evaluate(()=>window.__chain.trace.filter(t=>t.op==='enable').length),1,'late failed heartbeat must not write the cancelled curve');
@@ -280,14 +280,14 @@ try{
  }
  for(const family of ['ROGAlly','ClawA2VM','GPDWin5','AYANEOAIR','OneXPlayer2','LokiMax6800U','GamingZone','LegionGoTablet']){
   await page.goto(url(family));await enabled();assert.deepEqual(await ops(),[],family+': mounting must not launch, probe or write');
-  assert.equal(await page.locator('.fan-toggle').textContent(),'风扇未操控');
+  assert.equal(await page.locator('.fan-toggle').textContent(),'点击启用');
   assert.equal(await page.locator('.fan-close').count(),0);
   assert.equal(await page.locator('.fan-status-banner span').count(),0);
   await page.locator('.fan-toggle').click();await success();await enabled();
   await page.evaluate(()=>window.__chain.sleep(1));await page.evaluate(()=>window.__chain.autoWake());await success();
   await page.evaluate(()=>window.__chain.sleep(2,false));
   if(await page.locator('.fan-toggle').getAttribute('aria-pressed')==='true'){
-   await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控');await enabled();
+   await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用');await enabled();
   }
   await page.locator('.fan-toggle').click();await success();await enabled();
   const trace=await page.evaluate(()=>window.__chain.trace.filter(t=>t.generation===2));
@@ -299,7 +299,7 @@ try{
   assert.equal(await page.evaluate(()=>window.__chain.trace.filter(t=>t.op==='enable').length),n+1,family+': subsequent curve must write');
   await page.locator('.fan-toggle').click();await page.waitForFunction(()=>!window.__chain.lifecycle.hasControlIntent);
   assert.equal(await page.evaluate(()=>window.__chain.boundary.writes),false,family+': close stops curve control');
-  assert.equal(await page.locator('.fan-toggle').textContent(),'风扇未操控');
+  assert.equal(await page.locator('.fan-toggle').textContent(),'点击启用');
   cases.push(family+': real UI/bridge cold enable -> auto wake -> missed-edge manual wake -> next curve -> close');
  }
  // Authenticated Host terminal state only; the hardware remains available.
@@ -315,7 +315,7 @@ try{
   });
   // Cancel the old on-intent, then make one explicit off->on request.
   await page.locator('.fan-toggle').click();await enabled();
-  assert.equal(await page.locator('.fan-toggle').textContent(),'风扇未操控','failed release must leave the control switch actionable');
+  assert.equal(await page.locator('.fan-toggle').textContent(),'点击启用','failed release must leave the control switch actionable');
   await page.locator('.fan-toggle').click();await success();await enabled();
   const trace=await page.evaluate(()=>window.__chain.trace);
   assert.equal(trace.filter(t=>t.op==='Close').length,1,'one explicit terminal retry must own one virtual Close');
@@ -337,7 +337,7 @@ try{
   await page.evaluate(()=>window.__chain.releaseGate());await page.evaluate(()=>window.__externalOff);await enabled();
   await page.waitForFunction(()=>window.__chain.trace.some(t=>t.op==='restore')&&!window.__chain.lifecycle.hasControlIntent);
   assert.equal(await page.evaluate(()=>window.__chain.trace.filter(t=>t.op==='enable').length),0,'cancelled before the writer: no late enable');
-  assert.equal(await page.locator('.fan-toggle').textContent(),'风扇未操控','late completion must not revive an old UI intent');
+  assert.equal(await page.locator('.fan-toggle').textContent(),'点击启用','late completion must not revive an old UI intent');
   await page.locator('.fan-toggle').click();await success();await enabled();
   assert.equal(await page.evaluate(()=>window.__chain.trace.filter(t=>t.op==='enable').length),1,'the next explicit click must write exactly once');
   assert.equal(await page.evaluate(()=>window.__chain.trace.filter(t=>t.op==='launch').length),1,'retry must reuse the single owned Host');
@@ -388,7 +388,7 @@ try{
   const trace=await page.evaluate(()=>window.__chain.trace);
   for(const op of ['launch','Open','OpenEvents','acquire','enable'])assert.equal(trace.filter(t=>t.op===op).length,1,family+': one click must complete exactly one '+op);
   assert.equal(trace.filter(t=>t.op==='resume').length,0,'new Host cannot resume a sleep it never observed');
-  assert.equal(await page.locator('.fan-toggle').textContent(),'风扇已开启','only after current Host confirmation');
+  assert.equal(await page.locator('.fan-toggle').textContent(),'点击关闭','only after current Host confirmation');
   await page.locator('.fan-toggle').click();await enabled();
   cases.push('FAN956 '+family+' cold Stopped after S4: first real click -> actual HC Open/Events/lease/enable once, no fictitious resume');
  }

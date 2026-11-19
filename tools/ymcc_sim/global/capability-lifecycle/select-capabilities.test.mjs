@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {simulationCorePath} from '../release-host-environment.mjs';
 import {getAdapters} from '../adapters.mjs';
 import {getExtraAdapters} from '../extra-adapters.mjs';
 import {CapabilitySelectionError, SUPPORTED_CAPABILITIES, parseCapabilities,
@@ -15,10 +16,18 @@ import {CapabilitySelectionError, SUPPORTED_CAPABILITIES, parseCapabilities,
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const data = JSON.parse(fs.readFileSync(path.join(repoRoot,
   'tools/ymcc_sim/global/capability-lifecycle/ownership-catalog.json'), 'utf8'));
-const references = [...new Set(data.features.flatMap(feature => feature.testReferences))];
-// Real current getters; the public index is not substituted for descriptors.
-const adapters = [...getAdapters(repoRoot), ...getExtraAdapters(repoRoot, {selectedIds: references})];
-const choose = options => selectCapabilities({repoRoot, adapters, capabilities: 'fan', mode: 'plan', ...options});
+const registrationCache = new Map();
+function registrationsFor(capabilities = ['fan']) {
+  const ids = [...new Set([...data.features.filter(feature => capabilities.includes(feature.id)).flatMap(feature => feature.testReferences),
+    'controller.ui-navigation'])].sort();
+  const key = ids.join(',');
+  if (!registrationCache.has(key)) {
+    registrationCache.set(key, [...getAdapters(repoRoot, {selectedIds: ids}), ...getExtraAdapters(repoRoot, {selectedIds: ids})]);
+  }
+  return registrationCache.get(key);
+}
+const choose = ({adapters = registrationsFor(), ...options} = {}) =>
+  selectCapabilities({repoRoot, adapters, capabilities: 'fan', mode: 'plan', ...options});
 function rejects(code, callback, inspect = () => {}) {
   assert.throws(callback, error => {
     assert.ok(error instanceof CapabilitySelectionError);
@@ -35,18 +44,65 @@ function rejects(code, callback, inspect = () => {}) {
     return true;
   });
 }
-function sourceFixture() {
-  const evidence = path.resolve(repoRoot, '../../../Testing/YMCC/Evidence/CapabilitySelection-20261023');
-  fs.mkdirSync(evidence, {recursive: true});
-  const root = fs.mkdtempSync(path.join(evidence, 'source-control-'));
-  const feature = data.features.find(row => row.id === 'fan');
-  for (const relative of new Set(feature.bindingIds.map(id => data.bindings[id].path))) {
-    const destination = path.join(root, relative);
-    fs.mkdirSync(path.dirname(destination), {recursive: true});
-    fs.copyFileSync(path.join(repoRoot, relative), destination);
-  }
-  return root;
+const prefix = 'ymcc-capability-selection-';
+let fixture, referenceVerified = false, retain = false;
+function directDirectory(dir) {
+  const stat = fs.lstatSync(dir, {bigint: true});
+  assert(stat.isDirectory() && !stat.isSymbolicLink() && path.relative(dir, fs.realpathSync.native(dir)) === '', 'Redirected directory: ' + dir);
+  return stat;
 }
+function sourceFixture() {
+  if (fixture) {
+    assert(referenceVerified, 'The original source fixture was not verified or could not be restored');
+    return fixture.root;
+  }
+  const parent = simulationCorePath('Workspace'), parentIdentity = directDirectory(parent);
+  const root = fs.mkdtempSync(path.join(parent, prefix));
+  try {
+    fixture = {root, parent, parentIdentity, identity: directDirectory(root)};
+    const feature = data.features.find(row => row.id === 'fan');
+    for (const relative of new Set(feature.bindingIds.map(id => data.bindings[id].path))) {
+      const destination = path.join(root, relative);
+      fs.mkdirSync(path.dirname(destination), {recursive: true});
+      fs.copyFileSync(path.join(repoRoot, relative), destination, fs.constants.COPYFILE_EXCL);
+    }
+    assert.equal(choose({repoRoot: root}).status, 'SELECTION_ONLY_NOT_EXECUTED');
+    referenceVerified = true;
+    return root;
+  } catch (error) {
+    retain = true;
+    if (!fixture) console.error('Retained selector fixture: ' + root);
+    throw error;
+  }
+}
+// Top-level tests run serially. Every mutation is undone before another case
+// may use the full, unmodified reference tree; the catalog always reads real files.
+function withSourceFixture(relative, run) {
+  const root = sourceFixture(), file = path.join(root, relative);
+  const prior = fs.readFileSync(file), renamed = file + '.missing-source-control';
+  assert(!fs.existsSync(renamed));
+  try { run(root, file); }
+  catch (error) { retain = true; throw error; }
+  finally {
+    try {
+      if (fs.existsSync(renamed)) fs.renameSync(renamed, file);
+      else if (!fs.readFileSync(file).equals(prior)) fs.writeFileSync(file, prior);
+      assert(fs.readFileSync(file).equals(prior), 'Mutation was not restored: ' + file);
+    } catch (error) { referenceVerified = false; retain = true; throw error; }
+  }
+}
+test.after(() => {
+  if (!fixture) return;
+  const {root, parent, parentIdentity, identity} = fixture;
+  if (retain) { console.error('Retained selector fixture: ' + root); return; }
+  assert.equal(path.relative(parent, path.dirname(root)), '');
+  assert(path.basename(root).startsWith(prefix));
+  for (const [dir, owned] of [[parent, parentIdentity], [root, identity]]) {
+    const current = directDirectory(dir);
+    assert(current.dev === owned.dev && current.ino === owned.ino, 'Fixture directory identity changed: ' + dir);
+  }
+  fs.rmSync(root, {recursive: true});
+});
 
 test('absent capability preserves the caller legacy path without reading registration or sources', () => {
   assert.equal(selectCapabilities(), null);
@@ -65,19 +121,20 @@ for (const value of ['', ' ', [], [''], ',', 'fan,', ',fan', 'fan,,motion',
   'fan\n--test controller.ui-navigation', '../fan', 'G:/fan', 'G:\\fan', '/fan',
   '*', 'fan.*', '--test', '@fan', 'FAN', ['fan', 7], null]) {
   test('rejects invalid capability syntax ' + JSON.stringify(value), () => {
-    rejects('CAPABILITY_INVALID_ARGUMENT', () => choose({capabilities: value}));
+    rejects('CAPABILITY_INVALID_ARGUMENT', () => choose({adapters: null, capabilities: value}));
   });
 }
 
 for (const mode of ['audit', 'replay', 'compare', 'corpus', 'replay-plan', 'log-check', 'signal-check', 'unregistered']) {
   test('capability refuses unsupported mode ' + mode, () => {
-    rejects('CAPABILITY_UNSUPPORTED_MODE', () => choose({mode}));
+    rejects('CAPABILITY_UNSUPPORTED_MODE', () => choose({adapters: null, mode}));
     rejects('CAPABILITY_UNSUPPORTED_MODE', () => assertCapabilityMode(mode));
   });
 }
 
 for (const mode of ['inventory', 'plan', 'run']) {
   test(mode + ' selects only the exact existing test and performs zero business execution', () => {
+    const adapters = registrationsFor();
     const before = structuredClone(adapters);
     const result = choose({mode, tests: ['fan.unified-capability-roundtrip']});
     assert.equal(result.status, 'SELECTION_ONLY_NOT_EXECUTED');
@@ -98,7 +155,8 @@ for (const mode of ['inventory', 'plan', 'run']) {
 }
 
 test('all eight enabled capabilities resolve to real current registrations with source-bound ownership and retained gaps', () => {
-  const result = choose({capabilities: SUPPORTED_CAPABILITIES});
+  const adapters = registrationsFor(SUPPORTED_CAPABILITIES);
+  const result = choose({adapters, capabilities: SUPPORTED_CAPABILITIES});
   assert.equal(result.perCapability.length, 8);
   assert.equal(result.candidateIds.length, new Set(result.candidateIds).size);
   for (const row of result.perCapability) {
@@ -117,7 +175,8 @@ test('all eight enabled capabilities resolve to real current registrations with 
 });
 
 test('shared OEM registrations are deduplicated without losing parent capability ownership', () => {
-  const result = choose({capabilities: ['oem.back-buttons', 'oem.dedicated-buttons'],
+  const capabilities = ['oem.back-buttons', 'oem.dedicated-buttons'];
+  const result = choose({adapters: registrationsFor(capabilities), capabilities,
     tests: ['controller.unified-oem-input-binding']});
   assert.deepEqual(result.selectedIds, ['controller.unified-oem-input-binding']);
   assert.ok(result.perCapability.every(row => row.selectedIds.length === 1));
@@ -138,6 +197,7 @@ for (const capability of ['model.secondary-display', 'settings.wake-password-ui'
 }
 
 test('zero real registrations and partial missing registration both refuse explicitly', () => {
+  const adapters = registrationsFor();
   const fanIds = new Set(data.features.find(row => row.id === 'fan').testReferences);
   rejects('CAPABILITY_NO_REGISTERED_IDS', () => choose({adapters: adapters.filter(row => !fanIds.has(row.id))}));
   rejects('CAPABILITY_REGISTRATION_INCOMPLETE', () => choose({adapters: adapters.filter(row => row.id !== 'fan.unified-capability-roundtrip')}), error => {
@@ -152,6 +212,7 @@ test('explicit registered test outside capability candidates cannot widen select
 });
 
 test('profile and domain intersections cannot yield an empty successful selection', () => {
+  const adapters = registrationsFor();
   const domain = adapters.find(row => row.id === 'fan.unified-capability-roundtrip').domain;
   assert.notEqual(domain, 'controller');
   rejects('CAPABILITY_EMPTY_SELECTION', () => choose({domains: ['controller']}), error => {
@@ -169,38 +230,37 @@ test('unknown filters, malformed registration and filter injection refuse', () =
   rejects('CAPABILITY_INVALID_TESTS', () => choose({tests: ['fan.*']}));
   rejects('CAPABILITY_INVALID_DOMAINS', () => choose({domains: ['fan;whoami']}));
   rejects('CAPABILITY_INVALID_PROFILE', () => choose({profile: 'full;whoami'}));
+  const adapters = registrationsFor();
   rejects('CAPABILITY_INVALID_REGISTRATIONS', () => choose({adapters: [...adapters, adapters[0]]}));
   rejects('CAPABILITY_INVALID_REGISTRATIONS', () => choose({adapters: [{id: 'fan;whoami'}]}));
 });
 
 test('actual bound source drift refuses even when the registered ID is unchanged', () => {
-  const root = sourceFixture();
-  assert.equal(choose({repoRoot: root}).status, 'SELECTION_ONLY_NOT_EXECUTED');
-  fs.appendFileSync(path.join(root, 'native/fan_resume_owner.h'), '\n// selector source-drift control\n');
-  rejects('CAPABILITY_STALE', () => choose({repoRoot: root}), error => {
-    const feature = error.selection.ownershipPlan.features[0];
-    assert.equal(feature.persistence, 'unknown');
-    assert.deepEqual(feature.registeredTestIds, []);
-    assert.ok(feature.gaps.some(gap => gap.startsWith('SOURCE_BINDING_STALE:')));
+  withSourceFixture('native/fan_resume_owner.h', (root, file) => {
+    fs.appendFileSync(file, '\n// selector source-drift control\n');
+    rejects('CAPABILITY_STALE', () => choose({repoRoot: root}), error => {
+      const feature = error.selection.ownershipPlan.features[0];
+      assert.equal(feature.persistence, 'unknown');
+      assert.deepEqual(feature.registeredTestIds, []);
+      assert.ok(feature.gaps.some(gap => gap.startsWith('SOURCE_BINDING_STALE:')));
+    });
   });
 });
 
 test('enabled-scope drift refuses rather than trusting an old capability name', () => {
-  const root = sourceFixture();
-  const file = path.join(root, 'capabilities/ACTIVE-INTEGRATION-SCOPE.json');
-  const scope = JSON.parse(fs.readFileSync(file, 'utf8'));
-  scope.confirmedEnabledCapabilities = scope.confirmedEnabledCapabilities.filter(row => row.id !== 'fan');
-  fs.writeFileSync(file, JSON.stringify(scope));
-  rejects('CAPABILITY_STALE', () => choose({repoRoot: root}));
+  withSourceFixture('capabilities/ACTIVE-INTEGRATION-SCOPE.json', (root, file) => {
+    const scope = JSON.parse(fs.readFileSync(file, 'utf8'));
+    scope.confirmedEnabledCapabilities = scope.confirmedEnabledCapabilities.filter(row => row.id !== 'fan');
+    fs.writeFileSync(file, JSON.stringify(scope));
+    rejects('CAPABILITY_STALE', () => choose({repoRoot: root}));
+  });
 });
 
 test('missing source binding refuses; caller cannot replace the ownership report', () => {
-  const root = sourceFixture();
-  const file = path.join(root, 'native/fan_resume_owner.h');
-  // Keep the original fixture bytes as evidence; rename only inside this new,
-  // resolved and verified evidence fixture, never the product source tree.
-  assert.ok(path.relative(root, file) === path.join('native', 'fan_resume_owner.h'));
-  fs.renameSync(file, file + '.missing-source-control');
-  rejects('CAPABILITY_STALE', () => choose({repoRoot: root,
-    ownershipPlan: {features: [{id: 'fan', status: 'CLASSIFIED_SOURCE_BOUND'}]}}));
+  withSourceFixture('native/fan_resume_owner.h', (root, file) => {
+    assert.ok(path.relative(root, file) === path.join('native', 'fan_resume_owner.h'));
+    fs.renameSync(file, file + '.missing-source-control');
+    rejects('CAPABILITY_STALE', () => choose({repoRoot: root,
+      ownershipPlan: {features: [{id: 'fan', status: 'CLASSIFIED_SOURCE_BOUND'}]}}));
+  });
 });

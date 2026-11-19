@@ -33,10 +33,12 @@ const mainFile = path.join(repo, 'native/main.cpp');
 const runtimeFile = path.join(repo, 'native/steam_game_link_runtime.h');
 const cppFile = path.join(repo, 'tools/ymcc_sim/global/consumer/steam-game-link-log-gate-selftest.cpp');
 const runtime = fs.readFileSync(runtimeFile, 'utf8');
+const startupHeaderFile=path.join(repo,'native/steam_startup_handoff.h');
+const startupHeader=runtime.includes('struct StartupCaptureDiagnostic {')?fs.readFileSync(startupHeaderFile,'utf8'):'';
 const sourceBytes = fs.readFileSync(mainFile), current = sourceBytes.toString('utf8');
 const vcvars = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
 if (!fs.existsSync(vcvars)) throw new Error('Existing MSVC toolchain unavailable; no toolchain installation attempted.');
-const inputFiles = [mainFile, runtimeFile, cppFile, fileURLToPath(import.meta.url), ...['log_frequency_policy.h', 'log_snapshot_state.h', 'log_jsonl_boundary.h', 'sleep_steam_tracking.h', 'steam_overlay_provider_cache_diagnostic.h'].map(name => path.join(repo, 'native', name)), path.join(repo, 'deps/json/json.hpp')];
+const inputFiles = [mainFile, runtimeFile, cppFile, fileURLToPath(import.meta.url), ...(startupHeader?[startupHeaderFile]:[]), ...['sleep_fact_log_record.h', 'log_frequency_policy.h', 'log_snapshot_state.h', 'log_jsonl_boundary.h', 'sleep_steam_tracking.h', 'steam_overlay_provider_cache_diagnostic.h', 'steam_game_link_log_policy.h'].map(name => path.join(repo, 'native', name)), path.join(repo, 'deps/json/json.hpp')];
 const inputs = inputFiles.map(file => ({ file, sha256: sha(fs.readFileSync(file)), bytes: fs.statSync(file).size }));
 save(path.join(output, 'bound-main.cpp'), sourceBytes);
 save(path.join(output, 'bound-runtime.h'), fs.readFileSync(runtimeFile));
@@ -53,6 +55,7 @@ const signatures = ['static std::string nativeLifecycleTimestamp() {',
   'static void rotateOneLogFile(const std::wstring& path, unsigned long long maxBytes) {',
   'static bool nativeLifecycleEventIsBase(const char* event) {',
   'static bool nativeLifecycleRecordIsStreaming(const char* event, const json& detail) {',
+  'static void appendNativeLifecyclePrepared(const char* event,const json& detail,bool baseEvent,const std::string* encoded) {',
   'static void appendNativeLifecycleLog(const char* event, const json& observed) {'];
 const results = [];
 for (const variant of variants) {
@@ -60,12 +63,20 @@ for (const variant of variants) {
   const extra = 'static json nativeSteamGameLinkLogDetail(const json& detail) {';
   const selected = [...signatures.slice(0, 3), ...(variant.text.includes(extra) ? [extra] : []), ...signatures.slice(3)];
   const mainFunctions = selected.map(signature => extract(variant.text, signature));
-  const publishFunctions = ['struct Control {', 'static json base() {', 'static void publish(const std::shared_ptr<Control>& c,json value,bool logChange) {'].map(signature => extract(runtime, signature));
+  const publishFunctions = ['struct Control {', 'static json base() {', 'static void publish(const std::shared_ptr<Control>& c,json value,bool logChange) {', 'static json get() {'].map(signature => extract(runtime, signature));
   // The production struct closing semicolon is outside the brace extraction.
   publishFunctions[0] += ';';
-  const bridge = 'using Json = json;\n' + extract(fs.readFileSync(path.join(repo, 'native/sleep_steam_tracking.h'), 'utf8'), 'inline bool flag(const Json& j,const char* key) {');
+  if(startupHeader){
+    publishFunctions[0]=extract(runtime,'struct StartupCaptureDiagnostic {')+';\n'+publishFunctions[0];
+    publishFunctions.splice(1,0,extract(runtime,'static json startupCaptureValue('));
+  }
+  publishFunctions.splice(1, 0, 'static std::mutex lifecycleMx;\nstatic std::shared_ptr<Control> control;');
+  const bridge = 'using Json = json;\n' + extract(fs.readFileSync(path.join(repo, 'native/sleep_steam_tracking.h'), 'utf8'), 'inline bool flag(const Json& j,const char* key) {') + '\n' + extract(fs.readFileSync(path.join(repo, 'native/sleep_steam_tracking.h'), 'utf8'), 'inline std::uint64_t number(const Json& j,const char* key) {');
   save(path.join(dir, 'extracted-main.h'), (variant.text.includes(extra) ? '#define YMCC_STEAM_LOG_PROJECTION 1\n' : '') + mainFunctions.join('\n\n'));
-  save(path.join(dir, 'extracted-publish.h'), `${bridge}\n${publishFunctions.join('\n\n')}\n`);
+  const startupType=startupHeader?'namespace ymcc::steamgamefacts {\n'+extract(startupHeader,'struct StartupLaunchCapture {')+';\n}\n':'';
+  const startupWrapped=publishFunctions.join('\n\n');
+  save(path.join(dir, 'extracted-publish.h'), `${bridge}\n${startupWrapped}\n`);
+  save(path.join(dir, 'extracted-startup-type.h'), startupType);
   save(path.join(dir, 'source-functions.json'), JSON.stringify(selected.map((signature, index) => ({ signature, sha256: sha(mainFunctions[index]) })), null, 2));
   const exe = path.join(dir, 'steam-log-selftest.exe');
   const batch = path.join(dir, 'build.cmd');

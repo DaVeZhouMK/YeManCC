@@ -1,6 +1,7 @@
 #pragma once
 // Included inside ymcc::screenpads, after Core/globals. This is a visual-only
-// fallback during mouse/Deck gestures; active Deck contact also covers flags=0.
+// fallback only for contacts explicitly configured as direct Mouse.
+// Native Deck/PS5 contacts never grant software cursor display or retention.
 // No ShowCursor counter changes, mouse injection, input hook, timer or worker.
 // A scoped WinEvent observer handles visibility edges; it does not drive movement.
 #include "screen_touchpad_cursor_visibility.h"
@@ -27,13 +28,11 @@ inline POINT cursorDeckMotionPoint{};
 // Steam moves the mouse. An old bitmap or a later visibility hint cannot arm it.
 inline HCURSOR cursorDeckContactShape=nullptr;
 inline unsigned long long cursorDeckContactShapeBridgeShows=0;
-// A current-contact shape may bridge an unavailable native cursor. Cleared on
-// every new Deck gesture/cancel; no cross-process ShowCursor counter changes.
-inline HCURSOR cursorDeckVisibilityShape=nullptr;
+// Retired hidden-state override counters remain for diagnostic compatibility.
 inline unsigned long long cursorDeckForcedHiddenSamples=0,cursorDeckForcedShows=0;
 inline unsigned long long cursorDeckStationaryDeferrals=0,cursorDeckMotionStarts=0;
 inline void cursorResetDeckMotion() {
-    cursorDeckMotionPointKnown=false;cursorDeckSuppressedMotion=false;cursorDeckMotionPoint={};cursorDeckContactShape=nullptr;cursorDeckVisibilityShape=nullptr;
+    cursorDeckMotionPointKnown=false;cursorDeckSuppressedMotion=false;cursorDeckMotionPoint={};cursorDeckContactShape=nullptr;
 }
 inline void cursorObserveDeckMotion(const CURSORINFO& ci) {
     const bool suppressed=(ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING);
@@ -193,11 +192,6 @@ inline Json cursorTransitionState() {
             {"lastRaisePredecessor",(ULONG_PTR)cursorLastRaisePredecessor},{"lastRaiseTick",cursorLastRaiseTick},
             {"stackRaises",cursorStackRaises},{"stackRaiseFailures",cursorStackRaiseFailures}}}};
 }
-inline bool cursorDeckFallbackOverride(bool activeDeck,DWORD flags,HCURSOR shape) noexcept {
-    // A valid active touch explicitly owns a visible pointer until the native
-    // cursor has both SHOWING and a drawable shape. Retention alone never arms it.
-    return activeDeck && !((flags&CURSOR_SHOWING) && shape);
-}
 inline bool cursorFallbackRequired(bool tracking,DWORD flags,HCURSOR shape) {
     // Do not draw over a visible system cursor or an explicitly hidden one.
     return tracking && shape && (flags&CURSOR_SUPPRESSED) && !(flags&CURSOR_SHOWING);
@@ -267,16 +261,11 @@ inline void cursorShutdown() {
     cursorWindow=nullptr;cursorShape=nullptr;cursorSize={};cursorHotspot={};cursorPositionValid=false;cursorImageUploaded=false;
 }
 inline void cursorRequestSync(bool afterDeckReport=false,ULONGLONG sampledTick=0) {
-    // Keep HWND/GDI on the UI and coalesce to one message. Reuse the dispatch
-    // timestamp on the UI fallback; BUS requests retain their existing clock.
+    // Only direct Mouse owns tracking. A virtual Deck report cannot request pixels.
+    if(afterDeckReport)return;
     const bool active=cursorTracking.load(std::memory_order_acquire);
     if(!active && !cursorRetained.load(std::memory_order_acquire))return;
     const auto now=sampledTick?sampledTick:GetTickCount64();
-    if(afterDeckReport) {
-        const auto previous=cursorDeckReportPulseTick.load(std::memory_order_relaxed);
-        if(!previous || now<previous || now-previous>=kCursorActiveFallbackMs)
-            cursorDeckReportPulseTick.store(now,std::memory_order_release);
-    }
     if(!active) {
         if(now<cursorNextRetainedPoll.load(std::memory_order_relaxed))return;
         cursorNextRetainedPoll.store(now+kCursorRetainedPollMs,std::memory_order_relaxed);
@@ -288,14 +277,16 @@ inline void cursorRequestSync(bool afterDeckReport=false,ULONGLONG sampledTick=0
     HWND h=cursorDispatchWindow.load(std::memory_order_acquire);
     if(!h || !PostMessageW(h,kCursorSyncMessage,0,0))cursorSyncPending.store(false,std::memory_order_release);
 }
-// The BUS assembles the report before it submits it. Deck mouse output is
-// asynchronous, so do not spend its display slot before that report attempt.
-// Mouse/mixed contacts keep the original pre-report request. No extra poll.
-inline void cursorRequestBeforeReport() {
-    if(!cursorDeckOnlyTracking.load(std::memory_order_acquire))cursorRequestSync();
-}
-inline void cursorRequestAfterReport() {
-    if(cursorDeckOnlyTracking.load(std::memory_order_acquire))cursorRequestSync(true);
+// Reuse the existing BUS only for direct Mouse; native report output is independent.
+inline void cursorRequestBeforeReport() {cursorRequestSync();}
+inline void cursorRequestAfterReport() {}
+// UI-only display entitlement. A retained Mouse frame ends when any native-pad
+// contact takes over. Recheck after GDI preparation because it can reenter.
+inline bool cursorMouseDisplayAllowed() {
+    if(cursorDeckOnlyTracking.load(std::memory_order_acquire))return false;
+    std::lock_guard<std::mutex> lock(mutex);bool any=false;
+    for(int i=0;i<2;++i)if(core.pads[i].down){any=true;if(core.mode(i)==Mode::Mouse)return true;}
+    return !any && cursorRetained.load(std::memory_order_acquire);
 }
 inline bool cursorRepairLayeredSurface() {
     if(!cursorLayeredResetPending)return true;
@@ -324,6 +315,7 @@ inline bool cursorRepairLayeredSurface() {
     cursorLayeredResetPending=false;++cursorLayeredResets;return true;
 }
 inline bool cursorUpload(const CURSORINFO& ci) {
+    if(!cursorMouseDisplayAllowed())return false;
     if(!cursorRepairLayeredSurface())return false;
     ICONINFO icon{};if(!GetIconInfo(ci.hCursor,&icon)){cursorError=GetLastError();return false;}
     BITMAP bitmap{};const HBITMAP source=icon.hbmColor?icon.hbmColor:icon.hbmMask;
@@ -379,32 +371,18 @@ inline bool cursorUpload(const CURSORINFO& ci) {
     if(icon.hbmColor)DeleteObject(icon.hbmColor);if(icon.hbmMask)DeleteObject(icon.hbmMask);
     return ok;
 }
-inline void cursorSyncInfo(CURSORINFO ci,ULONGLONG now=GetTickCount64(),bool liveSample=false,CursorSampleSource source=CursorSampleSource::Periodic) {
+inline void cursorSyncInfo(CURSORINFO ci,ULONGLONG now=GetTickCount64(),bool /*liveSample*/=false,CursorSampleSource source=CursorSampleSource::Periodic) {
+    if(!cursorMouseDisplayAllowed()){cursorStop();return;}
     CURSORINFO observed=ci;CursorSampleScope sampleScope{observed,source};
     ++cursorSyncs;cursorObserveFlags(ci.flags);
     const bool active=cursorTracking.load(std::memory_order_acquire);
     const bool retained=cursorRetained.load(std::memory_order_acquire);
     if(!active && !retained){cursorHide();return;}
     const bool suppressed=(ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING);
-    if(cursorDeckOnlyTracking) {
-        cursorObserveDeckMotion(ci);
-        if(suppressed && active && source==CursorSampleSource::Contact && ci.hCursor)cursorDeckContactShape=ci.hCursor;
-    }
-    const bool forceDeckFallback=cursorDeckFallbackOverride(active && cursorDeckOnlyTracking,ci.flags,ci.hCursor);
-    if(active && cursorDeckOnlyTracking && ci.hCursor)cursorDeckVisibilityShape=ci.hCursor;
-    if(forceDeckFallback && ci.flags==0)++cursorDeckForcedHiddenSamples;
-    if(forceDeckFallback || suppressed)cursorResetHandoff();
+    if(suppressed)cursorResetHandoff();
     else if((ci.flags&CURSOR_SHOWING) && ci.hCursor) {
         if(!cursorVisible){cursorHide();return;}
-        // Steam moves the real cursor asynchronously. A Deck software cursor
-        // held over a SHOWING system cursor can lag behind it between samples.
-        // Retire that duplicate on a valid system sample; do not delay/guess XY.
-        // Direct Mouse (including mixed contacts) retains its existing grace.
-        if(!active || cursorDeckOnlyTracking) {
-            if(active && cursorDeckOnlyTracking)++cursorDeckSystemHandoffs;
-            ++cursorHandoffs;cursorHide();return;
-        }
-        // Missing/late samples do not prove that Windows stayed SHOWING.
+        if(!active){++cursorHandoffs;cursorHide();return;}
         if(cursorShowingObserved && (now<cursorShowingLastSample || now-cursorShowingLastSample>kCursorMaxHandoffSampleGapMs)) {
             ++cursorHandoffGapResets;cursorResetHandoff();
         }
@@ -415,244 +393,85 @@ inline void cursorSyncInfo(CURSORINFO ci,ULONGLONG now=GetTickCount64(),bool liv
             ++cursorHandoffs;cursorHide();return;
         }
     } else if(ci.flags&CURSOR_SHOWING) {
-        // SHOWING alone is not a drawable compositor cursor: a transient NULL
-        // shape must not retire the last valid software frame or complete handoff.
         cursorResetHandoff();
-        // Keeping an existing frame is not permission to start a new Deck one.
-        // After system handoff, a missing handle must not resurrect cached pixels.
-        if(cursorDeckOnlyTracking && !cursorVisible)return;
-    } else {cursorHide();return;} // Respect hidden state (flags=0); its source is not identified.
-    const bool contactShapeBridge=cursorDeckOnlyTracking && !cursorVisible && !cursorDeckSuppressedMotion && cursorDeckContactShape;
-    if(suppressed && cursorDeckOnlyTracking && !forceDeckFallback && !cursorVisible && !cursorDeckSuppressedMotion && !contactShapeBridge) {
-        // Unknown shape plus stationary coordinates is not permission to use an
-        // old bitmap. A shape confirmed on this contact can instead bridge the
-        // interval in which Windows already suppresses the real cursor but Steam
-        // has not moved it yet. Preserve both authorizations through retry.
-        ++cursorDeckStationaryDeferrals;return;
-    }
-    // Suppression can clear hCursor. During a handoff keep the cached bitmap
-    // instead of blinking just because Windows momentarily returns NULL.
-    if(forceDeckFallback && !ci.hCursor) {
-        // Never resurrect the previous gesture's bitmap or the UI thread's
-        // unrelated cursor. Prepare the current contact shape or a system arrow.
-        ci.hCursor=cursorDeckVisibilityShape;
-        if(!ci.hCursor)ci.hCursor=LoadCursorW(nullptr,IDC_ARROW);
-        if(ci.hCursor)cursorDeckVisibilityShape=ci.hCursor;
-    }
-    if(!ci.hCursor){ci.hCursor=cursorDeckContactShape?cursorDeckContactShape:cursorShape;if(!ci.hCursor)ci.hCursor=GetCursor();if(!ci.hCursor)ci.hCursor=LoadCursorW(nullptr,IDC_ARROW);}
+    } else {cursorHide();return;}
+    // This fallback belongs solely to direct Mouse. Native touch reports never
+    // borrow a cached shape, GetCursor or the default Windows arrow.
+    if(!ci.hCursor){ci.hCursor=cursorShape;if(!ci.hCursor)ci.hCursor=GetCursor();if(!ci.hCursor)ci.hCursor=LoadCursorW(nullptr,IDC_ARROW);}
     if(!ci.hCursor){cursorHide();return;}
     const bool preparedImage=!cursorWindow || !cursorImageUploaded || cursorShape!=ci.hCursor;
     const bool imageReady=!preparedImage || cursorUpload(ci);
-    if(!imageReady && (contactShapeBridge || (forceDeckFallback && !cursorVisible))) {
-        // A hidden bridge must not reveal an older, different cached image when
-        // preparing this contact's known shape fails. Retry on the original BUS.
-        cursorHideVisual();cursorResetHandoff();return;
-    }
     if(!imageReady && (!cursorWindow || !cursorImageUploaded || !cursorShape)) {
-        // Resource preparation failure is not a cursor ownership change. Keep
-        // retained polling so a transient failure after UP can recover as well.
         cursorHideVisual();cursorResetHandoff();return;
     }
-    // Resource preparation may dispatch a cancellation or mode change. Recheck
-    // the contact before any first show, including a hidden-state override.
-    if(preparedImage && (!(cursorTracking.load(std::memory_order_acquire) || cursorRetained.load(std::memory_order_acquire)) ||
-       (forceDeckFallback && (!cursorTracking.load(std::memory_order_acquire) || !cursorDeckOnlyTracking)))) {
-        cursorHide();return;
-    }
-    if(liveSample && cursorDeckOnlyTracking && !cursorVisible && preparedImage) {
-        // GDI preparation can outlast the sample that requested this first show.
-        // Recheck once at this edge, without advancing the periodic deadline,
-        // recursively preparing another image, or changing any mouse input.
-        CURSORINFO latest{sizeof(latest)};++cursorQueries;++cursorDeckPresentRechecks;
-        sampleScope.source=CursorSampleSource::Preparation;
-        if(!GetCursorInfo(&latest)) {
-            observed=latest;sampleScope.valid=false;
-            ++cursorQueryFailures;++cursorDeckPresentDeferrals;cursorResetHandoff();return;
-        }
-        observed=latest;cursorObserveFlags(latest.flags);cursorObserveDeckMotion(latest);
-        const bool owned=cursorTracking.load(std::memory_order_acquire) || cursorRetained.load(std::memory_order_acquire);
-        const bool latestForce=cursorDeckFallbackOverride(cursorTracking.load(std::memory_order_acquire) && cursorDeckOnlyTracking,latest.flags,latest.hCursor);
-        if(!owned || (latest.flags==0 && !latestForce) || ((latest.flags&CURSOR_SHOWING) && latest.hCursor)) {
-            ++cursorDeckPresentDeferrals;cursorHide();return;
-        }
-        // An unchanged request may keep an older cached image if replacement failed.
-        if((!latestForce && (!(latest.flags&CURSOR_SUPPRESSED) || (latest.flags&CURSOR_SHOWING))) ||
-           (latest.hCursor && latest.hCursor!=ci.hCursor)) {
-            ++cursorDeckPresentDeferrals;return; // Keep the next existing sync opportunity.
-        }
-        const HCURSOR preparedShape=ci.hCursor;
-        ci=latest;
-        if(latestForce && !ci.hCursor)ci.hCursor=preparedShape;
+    if(!cursorMouseDisplayAllowed() || !(cursorTracking.load(std::memory_order_acquire) || cursorRetained.load(std::memory_order_acquire))) {
+        cursorStop();return;
     }
     if(!cursorVisible && !ymcc::screeninput::ensureDisplay(cursorWindow)) {
         cursorError=GetLastError();if(!cursorError)cursorError=ERROR_ACCESS_DENIED;return;
     }
     const LONG x=ci.ptScreenPos.x-cursorHotspot.x,y=ci.ptScreenPos.y-cursorHotspot.y;
-    // Unchanged samples still perform no positioning or drawing work.
     if(!cursorVisible || !cursorPositionValid || cursorPosition.x!=x || cursorPosition.y!=y) {
-        const bool deckMove=cursorDeckOnlyTracking && cursorVisible;
-        // Preserve the old topmost recovery if another window has moved above us.
-        const HWND predecessor=deckMove?GetWindow(cursorWindow,GW_HWNDPREV):nullptr;
-        const bool needsRaise=predecessor!=nullptr;
-        bool moved=false;
-        if(deckMove && !needsRaise && cursorDeckPositionOnlyEnabled) {
-            POINT destination{x,y};
-            moved=UpdateLayeredWindow(cursorWindow,nullptr,&destination,nullptr,nullptr,nullptr,0,nullptr,0)!=FALSE;
-            if(moved)++cursorDeckPositionOnlyMoves;
-            else {
-                cursorDeckPositionLastError=GetLastError();++cursorDeckPositionFallbacks;
-                cursorDeckPositionOnlyEnabled=false; // Retry only after a successful full image upload.
-            }
+        if(!SetWindowPos(cursorWindow,HWND_TOPMOST,x,y,0,0,SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW)) {
+            ++cursorWindowPlacementFailures;cursorError=GetLastError();cursorPositionValid=false;return;
         }
-        if(!moved) {
-            UINT flags=SWP_NOSIZE|SWP_NOACTIVATE;
-            if(!deckMove)flags|=SWP_SHOWWINDOW; // Direct Mouse keeps its original path.
-            else if(!needsRaise)flags|=SWP_NOZORDER;
-            if(!SetWindowPos(cursorWindow,HWND_TOPMOST,x,y,0,0,flags)) {
-                ++cursorWindowPlacementFailures;cursorError=GetLastError();cursorPositionValid=false;return;
-            }
-            ++cursorWindowPlacements;
-            if(needsRaise){++cursorRaisePlacements;cursorLastRaisePredecessor=predecessor;cursorLastRaiseTick=now;}
-        }
-        cursorPosition={x,y};cursorPositionValid=true;if(imageReady)cursorError=0;
+        ++cursorWindowPlacements;cursorPosition={x,y};cursorPositionValid=true;if(imageReady)cursorError=0;
     } else ++cursorPositionUnchanged;
-    if(!cursorVisible){++cursorShows;if(contactShapeBridge)++cursorDeckContactShapeBridgeShows;if(forceDeckFallback)++cursorDeckForcedShows;}
+    if(!cursorVisible)++cursorShows;
     cursorVisible=true;
 }
 inline void cursorVisibilitySync(HWND receiver,WPARAM generation) {
-    if(!cursorvisibility::consume(receiver,generation))return;
-    if(!cursorDeckOnlyTracking || (!cursorTracking.load(std::memory_order_acquire) && !cursorRetained.load(std::memory_order_acquire))) {
-        cursorvisibility::stop();return;
-    }
-    const auto now=GetTickCount64();
-    if(!cursorVisible && cursorTracking.load(std::memory_order_acquire) && now<cursorDeckNextPositionTick) {
-        // Active hidden helpers cannot show before the existing position slot.
-        // Skip only reads that cannot change pixels; visible/retained feedback
-        // still handles ownership edges immediately. Do not extend the slot.
-        ++cursorvisibility::hiddenQueryDeferrals;++cursorvisibility::positionDeferrals;return;
-    }
-    CURSORINFO ci{sizeof(ci)};++cursorQueries;++cursorvisibility::queries;
-    if(!GetCursorInfo(&ci)) {
-        ++cursorQueryFailures;cursorResetHandoff();cursorRecordSample(ci,false,CursorSampleSource::Visibility);return;
-    }
-    // Account for valid observations even when this event cannot place pixels
-    // (including SHOWING with a transient NULL handle). A later suppressed
-    // sample must not reuse motion eligibility from before a non-suppressed one.
-    cursorObserveDeckMotion(ci);
-    // A queued event is only a hint. Decide from NOW, not the old SHOW/HIDE id.
-    // Already-visible suppression never moves the bitmap on this event path:
-    // the normal 24ms budget still owns continuous position updates.
-    const bool suppressed=(ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING);
-    const bool systemVisible=(ci.flags&CURSOR_SHOWING) && ci.hCursor;
-    const bool forcedHidden=cursorDeckFallbackOverride(cursorTracking.load(std::memory_order_acquire),ci.flags,ci.hCursor);
-    if((suppressed || forcedHidden) && !cursorVisible && now<cursorDeckNextPositionTick) {
-        // Showing at a new position spends the same budget as periodic motion.
-        // Never show an old coordinate merely to react earlier to this event.
-        ++cursorvisibility::positionDeferrals;cursorObserveFlags(ci.flags);cursorRecordSample(ci,true,CursorSampleSource::Visibility);return;
-    }
-    if(((suppressed || forcedHidden) && !cursorVisible) || systemVisible || (ci.flags==0 && !forcedHidden)) {
-        if(suppressed || forcedHidden) {
-            cursorDeckNextPositionTick=now+kCursorActiveFallbackMs;
-            if(cursorTracking.load(std::memory_order_acquire))cursorNextActivePoll.store(cursorDeckNextPositionTick,std::memory_order_relaxed);
-            else cursorNextRetainedPoll.store(cursorDeckNextPositionTick,std::memory_order_relaxed);
-        }
-        const bool before=cursorVisible;
-        cursorSyncInfo(ci,GetTickCount64(),true,CursorSampleSource::Visibility);
-        if(before!=cursorVisible)++cursorvisibility::edgeUpdates;
-        else ++cursorvisibility::unchanged;
-    } else {
-        ++cursorvisibility::unchanged;cursorObserveFlags(ci.flags);cursorRecordSample(ci,true,CursorSampleSource::Visibility);
-    }
+    // Retired Deck visibility messages cannot query or restore a cursor.
+    if(cursorvisibility::consume(receiver,generation))cursorvisibility::stop();
 }
 inline void cursorSync(CursorSampleSource source=CursorSampleSource::Periodic) {
-    // A queued BUS message can outlive cancellation. The UI already hid and
-    // released its display; do not query or spend a future budget while idle.
     if(!cursorTracking.load(std::memory_order_acquire) && !cursorRetained.load(std::memory_order_acquire))return;
-    const auto now=GetTickCount64();
-    if(cursorDeckOnlyTracking && source==CursorSampleSource::Periodic && now<cursorDeckNextPositionTick) {
-        // An event may have spent the slot after this BUS message was queued.
-        if(cursorTracking.load(std::memory_order_acquire))cursorNextActivePoll.store(cursorDeckNextPositionTick,std::memory_order_relaxed);
-        else if(cursorRetained.load(std::memory_order_acquire))cursorNextRetainedPoll.store(cursorDeckNextPositionTick,std::memory_order_relaxed);
-        return;
-    }
-    if(cursorDeckOnlyTracking)cursorDeckNextPositionTick=now+kCursorActiveFallbackMs;
-    ++cursorQueries; // UI-only attempt count, including transient GetCursorInfo failure.
-    cursorNextActivePoll.store(GetTickCount64()+kCursorActiveFallbackMs,std::memory_order_relaxed);
+    if(!cursorMouseDisplayAllowed()){cursorStop();return;}
+    ++cursorQueries;
+    const auto sampledAt=GetTickCount64();
+    cursorNextActivePoll.store(sampledAt+kCursorActiveFallbackMs,std::memory_order_relaxed);
+    // A delayed owner message starts its next slot at the actual query, not
+    // the old BUS enqueue time. Failed reads use the same bounded retry slot.
+    if(cursorRetained.load(std::memory_order_acquire))
+        cursorNextRetainedPoll.store(sampledAt+kCursorRetainedPollMs,std::memory_order_relaxed);
     CURSORINFO ci{sizeof(ci)};if(!GetCursorInfo(&ci)){
-        ++cursorQueryFailures;cursorResetHandoff();cursorRecordSample(ci,false,source);return; // Keep the visual, discard unproven stability.
+        ++cursorQueryFailures;cursorResetHandoff();cursorRecordSample(ci,false,source);return;
     }
     cursorSyncInfo(ci,GetTickCount64(),true,source);
 }
 inline bool cursorRetainAfterUp(HWND dispatch,const CURSORINFO& ci,bool liveSample=false) {
     const bool waiting=((ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING)) ||
         ((ci.flags&CURSOR_SHOWING) && !ci.hCursor && cursorVisible);
-    if(!cursorTracking.load(std::memory_order_acquire) || !waiting)return false;
+    if(!cursorTracking.load(std::memory_order_acquire) || cursorDeckOnlyTracking || !waiting)return false;
+    const auto sampledAt=GetTickCount64();
+    // UP already supplied this sample. Keep any pending query, but publish
+    // the next deadline before allowing BUS reads to observe retention.
+    cursorNextRetainedPoll.store(sampledAt+kCursorRetainedPollMs,std::memory_order_relaxed);
     cursorTracking.store(false,std::memory_order_release);cursorRetained.store(true,std::memory_order_release);
-    cursorDispatchWindow.store(dispatch,std::memory_order_release);cursorNextRetainedPoll.store(0,std::memory_order_relaxed);
-    cursorSyncInfo(ci,GetTickCount64(),liveSample,CursorSampleSource::Release);cursorRequestSync();return true;
+    cursorDispatchWindow.store(dispatch,std::memory_order_release);
+    cursorSyncInfo(ci,sampledAt,liveSample,CursorSampleSource::Release);cursorRequestSync();return true;
 }
-inline void cursorContactChanged(HWND dispatch,bool normalUp=false,bool deferDeckMove=false,ULONGLONG dispatchTick=0) {
-    bool mouse=false,deck=false;{std::lock_guard<std::mutex> lock(mutex);
-        for(int i=0;i<2;i++)if(core.pads[i].down){const auto mode=core.mode(i);mouse=mouse || mode==Mode::Mouse;deck=deck || mode==Mode::Deck;}}
-    const bool tracking=mouse || deck;
-    if(!tracking) {
-        if(normalUp) {
+inline void cursorContactChanged(HWND dispatch,bool normalUp=false,bool /*deferDeckMove*/=false,ULONGLONG /*dispatchTick*/=0) {
+    bool mouse=false,any=false;{std::lock_guard<std::mutex> lock(mutex);
+        for(int i=0;i<2;i++)if(core.pads[i].down){any=true;mouse=mouse || core.mode(i)==Mode::Mouse;}}
+    if(!mouse) {
+        // Native Deck/PS5 DOWN/MOVE/UP never start a cursor, observer or poll.
+        // In particular they cannot inherit the last direct-Mouse bitmap.
+        if(!any && normalUp && cursorTracking.load(std::memory_order_acquire) && !cursorDeckOnlyTracking) {
             CURSORINFO ci{sizeof(ci)};++cursorQueries;
             if(GetCursorInfo(&ci)) {
                 if(cursorRetainAfterUp(dispatch,ci,true))return;
-            } else {
-                ++cursorQueryFailures;cursorResetHandoff();
-                // A failed release query is not evidence of system handoff.
-                // Preserve only an existing valid Deck frame, with no new show,
-                // upload or position slot; the existing BUS can resolve ownership.
-                if(cursorDeckOnlyTracking && cursorTracking.load(std::memory_order_acquire) &&
-                   cursorVisible && cursorImageUploaded && cursorShape) {
-                    cursorTracking.store(false,std::memory_order_release);
-                    cursorRetained.store(true,std::memory_order_release);
-                    cursorDispatchWindow.store(dispatch,std::memory_order_release);
-                    cursorNextRetainedPoll.store(cursorDeckNextPositionTick,std::memory_order_relaxed);
-                    cursorRecordSample(ci,false,CursorSampleSource::Release);
-                    cursorRequestSync();return;
-                }
-                cursorRecordSample(ci,false,CursorSampleSource::Release);
-            }
+            } else {++cursorQueryFailures;cursorResetHandoff();cursorRecordSample(ci,false,CursorSampleSource::Release);}
         }
-        cursorStop();return;
+        if(cursorTracking.load(std::memory_order_acquire) || cursorRetained.load(std::memory_order_acquire) || cursorVisible || cursorDeckOnlyTracking)
+            cursorStop();
+        return;
     }
-    const bool starting=!cursorTracking.load(std::memory_order_acquire);
-    const bool deckOnly=deck && !mouse;
-    const bool modeChanged=cursorDeckOnlyTracking.load(std::memory_order_relaxed)!=deckOnly;
-    if(modeChanged) {
-        cursorResetHandoff();cursorResetDeckMotion();cursorDeckOnlyTracking.store(deckOnly,std::memory_order_release);
-    }
-    if(starting || modeChanged){cursorDeckReportPulseTick.store(0,std::memory_order_release);cursorcontext::begin(deckOnly);}
-    if(deferDeckMove && !starting && deckOnly && !modeChanged) {
-        // This stable contact already owns active tracking and the observer.
-        // Avoid rewriting its state or letting a UI MOVE spend the report's
-        // display slot before that report. Keep the old UI fallback if the BUS
-        // is paused/early-returning; it still shares the original 24ms budget.
-        if(cursorDispatchWindow.load(std::memory_order_relaxed)!=dispatch)
-            cursorDispatchWindow.store(dispatch,std::memory_order_release);
-        ++cursorDeckDeferredMoves;
-        const auto now=dispatchTick?dispatchTick:GetTickCount64();
-        const auto reportTick=cursorDeckReportPulseTick.load(std::memory_order_acquire);
-        if(reportTick && (now<reportTick || now-reportTick<kCursorDeckMoveFallbackMs)) {
-            ++cursorDeckMovePostReportDeferrals;return;
-        }
-        ++cursorDeckMoveFallbackRequests;cursorRequestSync(false,now);return;
-    }
-    if(starting && deckOnly && !cursorVisible)cursorResetDeckMotion();
-    if(starting && deckOnly)cursorDeckVisibilityShape=nullptr;
+    cursorDeckOnlyTracking.store(false,std::memory_order_release);
     cursorRetained.store(false,std::memory_order_release);cursorNextRetainedPoll.store(0,std::memory_order_relaxed);
     cursorDispatchWindow.store(dispatch,std::memory_order_release);cursorTracking.store(true,std::memory_order_release);
-    if(deckOnly)cursorvisibility::start(dispatch);else cursorvisibility::stop();
-    // Deck MOVE only publishes a contact; Steam produces mouse output later.
-    // An immediate query can read the pre-output cursor and, on every MOVE,
-    // push the BUS deadline forward forever. Coalesce these reads without
-    // advancing that deadline. DOWN/UP/cancel and direct Mouse keep their path.
-    if(deferDeckMove && !starting)++cursorDeckDeferredMoves;
-    else cursorSync(CursorSampleSource::Contact);
-    cursorRequestSync();
+    cursorvisibility::stop();
+    cursorSync(CursorSampleSource::Contact);cursorRequestSync();
 }
 
 

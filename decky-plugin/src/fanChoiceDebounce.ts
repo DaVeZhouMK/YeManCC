@@ -14,7 +14,8 @@ export class FanChoiceDebounce {
   snapshot(){return this.pending?structuredClone(this.pending):null;}
   hasWork(){return this.pending!==null||this.applying;}
   subscribe(listener:()=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
-  private notify(){for(const listener of this.listeners)listener();}
+  // Display subscriptions must not interrupt sending, settlement or demand release.
+  private notify(){for(const listener of this.listeners){try{listener();}catch{}}}
   private valid(choice:PendingFanChoice,state:ClientState){
     const current=state.snapshot,expected=choice.snapshot;
     return state.connected&&!state.busy&&current?.actions?.fan===true&&current.fan.canToggle===true&&
@@ -33,6 +34,12 @@ export class FanChoiceDebounce {
     choice.snapshot=structuredClone(state.snapshot!);
     // Hold background demand through send/reply, not only through the timer.
     this.pending=null;this.applying=true;this.notify();
+    // Display callbacks can unload this queue or revoke the current fan source.
+    // Recheck after notification, before handing this intent to the shared owner.
+    if(this.disposed||!this.applying)return;
+    const admitted=this.deps.state();
+    if(!this.valid(choice,admitted)){this.applying=false;this.notify();return;}
+    choice.snapshot=structuredClone(admitted.snapshot!);
     let result:Promise<unknown>;
     try{result=this.deps.send(choice);}catch(error){result=Promise.reject(error);}
     void Promise.resolve(result).catch(()=>{}).finally(()=>{this.applying=false;this.notify();});

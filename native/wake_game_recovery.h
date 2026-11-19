@@ -1,4 +1,5 @@
 #pragma once
+#include "input_host_shared_power.h"
 // Included after the native sleep-lease helpers. All batch state is guarded by
 // g_sgOpMtx; wake timing runs only on the existing sleep lifecycle worker.
 struct SgWakeRecoveryEntry {
@@ -11,6 +12,10 @@ struct SgWakeRecoveryEntry {
     // A retained sleep lease may belong to an earlier power generation.
     // Capture its owner independently from this recovery batch generation.
     unsigned long long sleepOwnerGeneration = 0;
+    bool canceledLease = false;
+    ULONGLONG canceledThrough = 0;
+    uint64_t canceledBoundarySequence = 0;
+    bool resumeBlockedByNewPause = false;
 };
 struct SgWakeRecoveryBatch {
     unsigned long long generation = 0;
@@ -20,7 +25,13 @@ struct SgWakeRecoveryBatch {
     std::vector<SgWakeRecoveryEntry> entries;
     std::string requestId;
     bool focusOnComplete = true;
+    ymcc::sleeppower::SharedPowerV1 focusPower;
+    bool canceledLeasesOnly = false;
     unsigned long long autoConfigEpoch = 0;
+    bool explicitWake = false;
+    bool resumeDispatched = false;
+    bool waitingForNextWake = false;
+    std::shared_ptr<ymcc::inputHost::sharedPower::Scope> userRepairPower;
 };
 static SgWakeRecoveryBatch g_sgWakeRecovery;
 static unsigned long long g_sgLastGameWakeGeneration = 0;
@@ -35,6 +46,59 @@ static void sgWakeRecoveryClearTarget(const SgWakeRecoveryEntry& e) {
         target.markerOwned && target.powerGeneration == e.sleepOwnerGeneration)
         sgClearSleepTargetIfMatches(target);
 }
+// A canceled sleep owns only its captured old PID lease, never a fresh scan.
+// Caller holds g_sgOpMtx; the witness remains read-only at every native call.
+static bool sgCanceledSleepRecoveryEntryCurrent(const SgWakeRecoveryEntry& e) {
+    if (!e.canceledLease) return true;
+    if (!e.canceledThrough || g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)>e.canceledThrough ||
+        g_sleepPowerDispatch.observedSleepBoundarySequence()!=e.canceledBoundarySequence) return false;
+    SgSleepTarget owner;
+    if (!sgReadSleepTarget(owner) || !owner.markerOwned || owner.pid!=e.pid ||
+        owner.processCreated!=e.created || owner.powerGeneration!=e.sleepOwnerGeneration) return false;
+    std::error_code ec;
+    const bool manual=fspath::exists(SG_MANUAL_DIR+L"\\"+std::to_wstring(e.pid)+L".txt",ec);
+    return !ec&&!manual &&
+        g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)<=e.canceledThrough &&
+        g_sleepPowerDispatch.observedSleepBoundarySequence()==e.canceledBoundarySequence;
+}
+static bool sgQueueCanceledSleepLeaseRecoveryUnlocked(const SgSleepTarget& target,
+    unsigned long long generation,ULONGLONG canceledThrough,uint64_t boundarySequence,std::string retainedMarkerText) {
+    if (!generation || generation!=currentPowerGeneration() || g_exitRequested.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ||
+        sgSleepRetryActive() || g_sleepPowerDispatch.pendingSuspend()) return false;
+    SgWakeRecoveryEntry entry;
+    entry.dir=SG_SLEEP_LEASE_DIR;entry.pid=target.pid;entry.created=target.processCreated;
+    entry.sleepOwnerGeneration=target.powerGeneration;entry.canceledLease=true;
+    entry.canceledThrough=canceledThrough;entry.canceledBoundarySequence=boundarySequence;
+    if (!entry.pid || !entry.created || !entry.sleepOwnerGeneration || !sgCanceledSleepRecoveryEntryCurrent(entry)) return false;
+    entry.markerText=std::move(retainedMarkerText);
+    // A failed first checked read keeps only this held lease's exact witness.
+    // The existing worker must validate its generation before capturing bytes.
+    if (!sgCanceledSleepRecoveryEntryCurrent(entry)) return false;
+    if (g_sgWakeRecoveryPending.load(std::memory_order_acquire) && g_sgWakeRecovery.generation==generation) {
+        for (auto& current:g_sgWakeRecovery.entries) if (current.dir==entry.dir&&current.pid==entry.pid) {
+            // Another creation or lease at this PID keeps its own original
+            // checks. It cannot absorb the current held tuple; append below
+            // preserves this batch's existing clock, attempt and capacity.
+            if(current.created!=entry.created||current.sleepOwnerGeneration!=entry.sleepOwnerGeneration)continue;
+            if(current.done ||
+               (!current.markerText.empty()&&!entry.markerText.empty()&&current.markerText!=entry.markerText))return false;
+            if(current.markerText.empty()&&!entry.markerText.empty())current.markerText=std::move(entry.markerText);
+            current.canceledLease=true;current.canceledThrough=canceledThrough;current.canceledBoundarySequence=boundarySequence;
+            sgNotifyWork();return true; // Keep the existing attempt/deadline, without rearming.
+        }
+        if(g_sgWakeRecovery.entries.size()>=64)return false;
+        g_sgWakeRecovery.entries.push_back(std::move(entry)); // Existing batch keeps its original clock and attempt.
+    } else {
+        SgWakeRecoveryBatch batch;batch.generation=generation;batch.started=GetTickCount64();
+        batch.focusOnComplete=false;batch.canceledLeasesOnly=true;batch.entries.push_back(std::move(entry));
+        // A stale-generation batch has no current action permit. Drop only its
+        // volatile plan; all of its exact marker/owner debt remains untouched.
+        g_sgWakeRecovery=std::move(batch);
+    }
+    g_sgWakeRecoveryPending.store(true,std::memory_order_release);sgNotifyWork();return true;
+}
+
 static void sgReconcileSleepGameFlagsAfterRecoveryCancel(const char* reason) {
     // A confirmed-running old lease is no longer a sleep pause.  The previous
     // recovery implementation retired its exact marker/owner but left these
@@ -61,8 +125,45 @@ static void sgReconcileSleepGameFlagsAfterRecoveryCancel(const char* reason) {
         });
     }
 }
-static void sgCancelWakeGameRecoveryUnlocked(const char* reason) {
+enum class SgWakeMarkerRetirement { Retained, Superseded, Retired };
+
+static SgWakeMarkerRetirement sgRetireAcceptedWakeMarkerUnlocked(
+    const SgWakeRecoveryEntry& e, const std::function<bool()>& requestCurrent) {
+    using Retirement = SgWakeMarkerRetirement;
+    const auto current = [&] { return !requestCurrent || requestCurrent(); };
+    if (!e.pid || !e.created || e.markerText.empty() || !current()) return Retirement::Retained;
+    const auto marker = sgWakeRecoveryMarker(e);
+    auto files = sgAcquireResumeFiles(e.dir, e.pid, current, e.created);
+    if (files.result == ymcc::sleepLegacyResume::Result::Cleaned) {
+        sgWakeRecoveryClearTarget(e);
+        return Retirement::Retired;
+    }
+    const auto stillCurrent = [&] { return files.current(current); };
+    if (!stillCurrent()) return Retirement::Retained;
+    std::string text;
+    if (!sgReadResumeMarkerChecked(marker, text)) {
+        std::error_code ec;
+        return !fspath::exists(marker, ec) && !ec && stillCurrent()
+            ? Retirement::Superseded : Retirement::Retained;
+    }
+    if (!stillCurrent()) return Retirement::Retained;
+    if (text != e.markerText) return Retirement::Superseded;
+    const ymcc::sleepLegacyResume::File process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, e.pid));
+    if (!process || nativeProcessCreatedFromHandle(process.get()) != e.created || !stillCurrent() ||
+        !WakeGameResume::queryThreads(e.pid).allRunning()) return Retirement::Retained;
+    if (!sgReadResumeMarkerChecked(marker, text) || text != e.markerText || !stillCurrent())
+        return Retirement::Retained;
+    std::error_code ec;
+    if (!fspath::remove(marker, ec) || ec) return Retirement::Retained;
+    sgWakeRecoveryClearTarget(e);
+    return Retirement::Retired;
+}
+
+static void sgCancelWakeGameRecoveryUnlocked(const char* reason,
+    const std::function<bool()>& requestCurrent = std::function<bool()>()) {
+    if (requestCurrent && !requestCurrent()) return;
     if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire)) {
+        if (g_sgWakeRecovery.waitingForNextWake) g_sgWakeRecovery = {};
         // Recovery may already have drained its batch while an old in-memory
         // flag still survives. Reconcile even on the no-pending path.
         sgReconcileSleepGameFlagsAfterRecoveryCancel(reason);
@@ -73,36 +174,59 @@ static void sgCancelWakeGameRecoveryUnlocked(const char* reason) {
     // only already-running confirmations here as well, so an old marker can
     // never masquerade as the new sleep's successful freeze. No resume API.
     for (auto& e : g_sgWakeRecovery.entries) {
-        if (e.done || !e.acceptedOnce || sgReadFile(sgWakeRecoveryMarker(e)) != e.markerText) continue;
-        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, e.pid);
-        const bool matches = h && nativeProcessCreatedFromHandle(h) == e.created;
-        if (h) CloseHandle(h);
-        if (!matches || !WakeGameResume::queryThreads(e.pid).allRunning()) continue;
-        std::error_code ec; fspath::remove(sgWakeRecoveryMarker(e), ec);
-        if (!ec) { sgWakeRecoveryClearTarget(e); ++retired; }
+        if (requestCurrent && !requestCurrent()) return;
+        if (e.done || !e.acceptedOnce) continue;
+        if (sgRetireAcceptedWakeMarkerUnlocked(e, requestCurrent) == SgWakeMarkerRetirement::Retired)
+            ++retired;
     }
+    if (requestCurrent && !requestCurrent()) return;
     sgRecordFact("sleep-game-recovery-canceled", {
         {"generation", g_sgWakeRecovery.generation}, {"reason", reason ? reason : "unknown"},
         {"retiredConfirmedRunning", retired}, {"unconfirmedMarkersRetained", true}
     });
+    if (requestCurrent && !requestCurrent()) return;
     g_sgWakeRecovery = {};
     g_sgWakeRecoveryPending.store(false, std::memory_order_release);
     sgReconcileSleepGameFlagsAfterRecoveryCancel(reason);
 }
-static bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD pid) {
-    if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire)) return true;
+static bool sgWakeGameRecoveryCanWaitForNextWakeUnlocked() {
+    const auto& batch = g_sgWakeRecovery;
+    return batch.explicitWake && !batch.autoConfigEpoch && !batch.resumeDispatched &&
+        !g_exitRequested.load(std::memory_order_acquire) &&
+        batch.generation == currentPowerGeneration();
+}
+static void sgInterruptWakeGameRecoveryUnlocked() {
+    auto& batch = g_sgWakeRecovery;
+    if (sgWakeGameRecoveryCanWaitForNextWakeUnlocked()) {
+        // The worker has no runnable work until another explicit, admitted
+        // wake. Retain only the original snapshot, including completed entries.
+        batch.waitingForNextWake = true;
+        g_sgWakeRecoveryPending.store(false, std::memory_order_release);
+        sgRecordFact("sleep-game-recovery-awaiting-wake", {{"generation", batch.generation},
+            {"reason", "suspend-or-retry-before-dispatch"}, {"targets", batch.entries.size()}});
+        sgReconcileSleepGameFlagsAfterRecoveryCancel("zero-dispatch-wake-interrupted");
+        return;
+    }
+    sgCancelWakeGameRecoveryUnlocked("exit-new-sleep-or-retry");
+}
+static bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD pid, const std::function<bool()>& requestCurrent) {
+    if (requestCurrent && !requestCurrent()) return false;
+    if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire) && !g_sgWakeRecovery.waitingForNextWake) return true;
     bool safe = true;
     for (auto& e : g_sgWakeRecovery.entries) {
         if (e.done || e.pid != pid) continue;
         // A NEW manual pause must not reuse an already-resumed confirmation
         // marker or be consumed by a delayed attempt from the old wake.
-        if (e.acceptedOnce && sgReadFile(sgWakeRecoveryMarker(e)) == e.markerText) {
-            if (WakeGameResume::queryThreads(pid).allRunning()) {
-                std::error_code ec; fspath::remove(sgWakeRecoveryMarker(e), ec);
-                if (!ec) sgWakeRecoveryClearTarget(e);
-                else safe = false;
-            } else safe = false; // don't report a new pause that was a no-op
+        if (e.acceptedOnce &&
+            sgRetireAcceptedWakeMarkerUnlocked(e, requestCurrent) == SgWakeMarkerRetirement::Retained) {
+            if (requestCurrent && !requestCurrent()) return false;
+            // Keep the unresolved marker, but a later tick of this wake may
+            // no longer resume this PID after a newer pause was requested.
+            e.resumeBlockedByNewPause = true;
+            safe = false;
+            continue;
         }
+        if (requestCurrent && !requestCurrent()) return false;
         e.done = true;
         sgRecordFact("sleep-game-recovery-superseded", {
             {"generation", g_sgWakeRecovery.generation}, {"pid", pid}, {"reason", "new-pause"}
@@ -111,15 +235,19 @@ static bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD pid) {
     sgReconcileSleepGameFlagsAfterRecoveryCancel("new-pause");
     return safe;
 }
-static void sgPrepareWakeRecoveryForSleep(unsigned long long generation) {
+static bool sgPrepareWakeRecoveryForSleep(unsigned long long generation,
+    const std::function<bool()>& requestCurrent = std::function<bool()>()) {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    if (requestCurrent && !requestCurrent()) return false;
     if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire) ||
         g_sgWakeRecovery.generation == generation) {
         sgReconcileSleepGameFlagsAfterRecoveryCancel("new-sleep-check");
-        return;
+        return !requestCurrent || requestCurrent();
     }
     // Cancellation retires only confirmed-running markers before capture.
-    sgCancelWakeGameRecoveryUnlocked("new-sleep-before-capture");
+    // Keep this queue item's original veto through IO, thread probes and journals.
+    sgCancelWakeGameRecoveryUnlocked("new-sleep-before-capture", requestCurrent);
+    return !requestCurrent || requestCurrent();
 }
 static void sgWakeRecoverySnapshotDirectory(const std::wstring& dir) {
     std::error_code ec;
@@ -223,14 +351,41 @@ static void sgWakeRecoveryDiscoverFallback() {
         if (++admitted >= 64) { sgRecordFact("sleep-game-recovery-fallback-limit", {{"limit", 64}}); break; }
     }
 }
-static void sgBeginWakeGameRecovery(unsigned long long generation) {
+static bool sgBeginWakeGameRecovery(unsigned long long generation) {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     if (!generation || generation != currentPowerGeneration() || g_exitRequested.load() ||
-        g_sgLastGameWakeGeneration == generation) return;
+        sgSleepRetryActive() || g_sleepPowerDispatch.pendingSuspend()) return false;
+    const auto captureFocusPower = [generation] {
+        ymcc::sleeppower::SharedPowerV1 power;
+        if (!ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower, power) ||
+            power.generation != generation) return ymcc::sleeppower::SharedPowerV1{};
+        return power;
+    };
+    if (g_sgLastGameWakeGeneration == generation) {
+        auto& batch = g_sgWakeRecovery;
+        if (!batch.waitingForNextWake || batch.generation != generation) return true;
+        const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
+        if (phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended) return false;
+        batch.waitingForNextWake = false;
+        if (std::none_of(batch.entries.begin(), batch.entries.end(), [](const auto& e) {return !e.done;})) {
+            batch = {};
+            return true;
+        }
+        batch.started = GetTickCount64();
+        batch.nextAttempt = 0;
+        batch.focusPower = captureFocusPower();
+        g_sgWakeRecoveryPending.store(true, std::memory_order_release);
+        sgRecordFact("sleep-game-recovery-continued", {{"generation", generation},
+            {"reason", "explicit-wake-after-zero-dispatch"}, {"targets", batch.entries.size()}});
+        sgNotifyWork();
+        return true;
+    }
     sgCancelWakeGameRecoveryUnlocked("new-user-wake");
     g_sgLastGameWakeGeneration = generation;
     g_sgWakeRecovery = {};
     g_sgWakeRecovery.generation = generation;
+    g_sgWakeRecovery.explicitWake = true;
+    g_sgWakeRecovery.focusPower = captureFocusPower();
     g_sgWakeRecovery.started = GetTickCount64();
     g_sgWakeRecovery.manualState = sgReadFile(SG_DIR + L"\\quickapp_suspended.json");
     SgSleepTarget target;
@@ -261,14 +416,17 @@ static void sgBeginWakeGameRecovery(unsigned long long generation) {
             WakeGameResume::attemptOffsetsMs + WakeGameResume::attemptCount)}, {"includesPreWakeManual", true}
     });
     sgNotifyWork();
+    return true;
 }
 // Caller holds g_sgOpMtx and supplies only its native inspection snapshot.
 // No manual-pause directory, orphan discovery, Steam restart or game launch.
 static bool sgBeginUserSleepGameRecoveryUnlocked(unsigned long long generation,
-    const std::vector<SgWakeRecoveryEntry>& expected,const std::string& requestId,unsigned long long autoEpoch=0) {
+    const std::vector<SgWakeRecoveryEntry>& expected,const std::string& requestId,unsigned long long autoEpoch,
+    const std::shared_ptr<ymcc::inputHost::sharedPower::Scope>& admission) {
+    const auto current=[&]{return admission&&admission->power().generation==generation&&admission->current();};
     if(!generation||generation!=currentPowerGeneration()||g_exitRequested.load()||
         g_powerLifecycle.load()!=PowerLifecycle::Ready||!g_inputReady.load()||sgSleepRetryActive()||
-        g_sgWakeRecoveryPending.load()||expected.empty()||expected.size()>64)return false;
+        g_sgWakeRecoveryPending.load()||expected.empty()||expected.size()>64||!current())return false;
     if(autoEpoch&&!sleepRecoveryAutoAllows(generation,autoEpoch))return false;
     auto entries=expected;
     for(auto& e:entries){
@@ -289,14 +447,16 @@ static bool sgBeginUserSleepGameRecoveryUnlocked(unsigned long long generation,
     }
     // Complete validation of EVERY inspected entry before restoring a lost marker.
     for(auto& e:entries)if(e.markerText.empty()){
-        if(!sgWriteWakeRecoveryMarker(e.pid,e.created,e.sleepOwnerGeneration))return false;
+        if(!current()||!sgWriteWakeRecoveryMarker(e.pid,e.created,e.sleepOwnerGeneration))return false;
         e.markerText=sgReadFile(sgWakeRecoveryMarker(e));
         if(e.markerText.empty())return false;
         sgRecordFact("sleep-game-user-marker-rebuilt",{{"requestId",requestId},{"pid",e.pid},{"sleepOwnerGeneration",e.sleepOwnerGeneration}});
     }
+    if(!current())return false;
     g_sgWakeRecovery={};g_sgWakeRecovery.generation=generation;
     g_sgWakeRecovery.started=GetTickCount64();g_sgWakeRecovery.entries=std::move(entries);
     g_sgWakeRecovery.requestId=requestId;g_sgWakeRecovery.focusOnComplete=false;g_sgWakeRecovery.autoConfigEpoch=autoEpoch;
+    g_sgWakeRecovery.userRepairPower=admission;
     g_sgWakeRecoveryPending.store(true,std::memory_order_release);
     sgRecordFact("sleep-game-user-recovery-queued",{{"generation",generation},{"requestId",requestId},
         {"targets",expected.size()},{"scope","sleep-markers-only"},{"healthVerified",false}});
@@ -311,6 +471,8 @@ static ULONGLONG sgWakeGameRecoveryWaitMs(ULONGLONG now) {
     const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
     if (g_exitRequested.load() || g_sgWakeRecovery.generation != currentPowerGeneration() ||
         phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended || sgSleepRetryActive() ||
+        g_sleepPowerDispatch.pendingSuspend() ||
+        (g_sgWakeRecovery.userRepairPower && !g_sgWakeRecovery.userRepairPower->current()) ||
         (g_sgWakeRecovery.autoConfigEpoch && !sleepRecoveryAutoAllows(g_sgWakeRecovery.generation,g_sgWakeRecovery.autoConfigEpoch)) ||
         now < g_sgWakeRecovery.started) return 0;
     const auto elapsed = now - g_sgWakeRecovery.started;
@@ -328,13 +490,38 @@ static void sgWakeGameRecoveryTick() {
     if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire)) return;
     const auto generation = g_sgWakeRecovery.generation;
     const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
+    const auto userRepairPowerCurrent = [&] {
+        return !g_sgWakeRecovery.userRepairPower || g_sgWakeRecovery.userRepairPower->current();
+    };
+    if (!userRepairPowerCurrent()) {
+        sgCancelWakeGameRecoveryUnlocked("user-repair-power-revoked"); return;
+    }
     if (g_exitRequested.load() || generation != currentPowerGeneration() ||
-        phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended || sgSleepRetryActive()) {
-        sgCancelWakeGameRecoveryUnlocked("exit-new-sleep-or-retry"); return;
+        phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended || sgSleepRetryActive() ||
+        g_sleepPowerDispatch.pendingSuspend()) {
+        sgInterruptWakeGameRecoveryUnlocked(); return;
     }
     if(g_sgWakeRecovery.autoConfigEpoch&&!sleepRecoveryAutoAllows(generation,g_sgWakeRecovery.autoConfigEpoch)){
         sgCancelWakeGameRecoveryUnlocked("automatic-recovery-disabled");return;
     }
+    // The operation mutex protects this batch, not concurrent power/exit or
+    // automatic-recovery admission. Revalidate native dispatch and the
+    // observed marker ownership before retiring this batch's resources.
+    const auto batchCurrent = [&] {
+        const auto currentPhase = g_powerLifecycle.load(std::memory_order_acquire);
+        return generation == currentPowerGeneration() && !g_exitRequested.load(std::memory_order_acquire) &&
+            currentPhase != PowerLifecycle::Suspending && currentPhase != PowerLifecycle::Suspended &&
+            !sgSleepRetryActive() && !g_sleepPowerDispatch.pendingSuspend() && userRepairPowerCurrent() &&
+            (!g_sgWakeRecovery.autoConfigEpoch ||
+             sleepRecoveryAutoAllows(generation, g_sgWakeRecovery.autoConfigEpoch));
+    };
+    const auto cancelChangedBatch = [&] {
+        const bool automaticDisabled = g_sgWakeRecovery.autoConfigEpoch &&
+            !sleepRecoveryAutoAllows(generation, g_sgWakeRecovery.autoConfigEpoch);
+        if (automaticDisabled) sgCancelWakeGameRecoveryUnlocked("automatic-recovery-disabled");
+        else if (!userRepairPowerCurrent()) sgCancelWakeGameRecoveryUnlocked("user-repair-power-revoked");
+        else sgInterruptWakeGameRecoveryUnlocked();
+    };
     const auto elapsed = GetTickCount64() - g_sgWakeRecovery.started;
     const auto attempt = g_sgWakeRecovery.nextAttempt;
     if (elapsed < WakeGameResume::attemptOffsetsMs[attempt]) return;
@@ -346,11 +533,72 @@ static void sgWakeGameRecoveryTick() {
     unsigned confirmed = 0;
     for (auto& e : g_sgWakeRecovery.entries) {
         if (e.done) continue;
+        if (!sgCanceledSleepRecoveryEntryCurrent(e)) { e.done=true; continue; }
+        if (e.resumeBlockedByNewPause) continue;
+        // Only this boundary may retire the vector. The drain may only mark
+        // that an NT call is about to run.
+        if (!batchCurrent()) { cancelChangedBatch(); return; }
         // A user repair must never consume a manual pause introduced AFTER inspection.
         if(!g_sgWakeRecovery.requestId.empty()&&sgMarkerIsSuspended(SG_MANUAL_DIR,e.pid)){
             continue;
         }
+        const auto fileWorkCurrent = [&] {
+            return batchCurrent() && sgCanceledSleepRecoveryEntryCurrent(e) &&
+                g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+                g_inputReady.load(std::memory_order_acquire);
+        };
+        auto files = sgAcquireResumeFiles(e.dir, e.pid, fileWorkCurrent, e.created);
+        const auto cancelAfterFileReturn = [&] {
+            files = {}; // Cancellation can acquire the same PID's files for retirement.
+            cancelChangedBatch();
+        };
+        if (files.result == ymcc::sleepLegacyResume::Result::Cleaned) {
+            if (files.completedBirth == e.created) sgWakeRecoveryClearTarget(e);
+            e.done = true;
+            continue;
+        }
+        if (!files.current(fileWorkCurrent)) continue;
         const auto marker = sgWakeRecoveryMarker(e);
+        if (e.canceledLease && e.markerText.empty()) {
+            // Deferred capture grants no action by itself. It belongs only to
+            // this exact held owner and the original cancellation boundary.
+            if (!ready) continue;
+            std::string captured;
+            if (!sgReadResumeMarkerChecked(marker, captured)) continue;
+            ULONGLONG capturedGeneration = 0, capturedCreated = 0;
+            const auto generationPos = captured.find("|generation=");
+            const auto createdPos = captured.find("created=");
+            try {
+                if (generationPos != std::string::npos)
+                    capturedGeneration = std::stoull(captured.substr(generationPos + 12));
+                if (createdPos != std::string::npos)
+                    capturedCreated = std::stoull(captured.substr(createdPos + 8));
+            } catch (const std::bad_alloc&) { continue; }
+              catch (...) { e.done = true; continue; }
+            const auto statePos = captured.find("|state=suspended");
+            const auto stateEnd = statePos == std::string::npos ? 0 : statePos + 16;
+            const bool suspended = statePos != std::string::npos &&
+                (stateEnd == captured.size() || captured[stateEnd] == '|' ||
+                 captured[stateEnd] == '\r' || captured[stateEnd] == '\n');
+            if (capturedGeneration != e.sleepOwnerGeneration || capturedCreated != e.created || !suspended) {
+                e.done = true; continue; // Keep replacement marker and owner untouched.
+            }
+            if (!nativeValveValidateOwnedSuspendedTarget(e.dir, e.pid, e.created) ||
+                !sgCanceledSleepRecoveryEntryCurrent(e) || !batchCurrent() ||
+                g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
+                !g_inputReady.load(std::memory_order_acquire) || sgReadFile(marker) != captured ||
+                !sgCanceledSleepRecoveryEntryCurrent(e) || !batchCurrent()) continue;
+            e.markerText = std::move(captured); // Immutable after the first validated capture.
+        }
+        const auto entryCurrent = [&] {
+            return files.current(fileWorkCurrent) &&
+                g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+                g_inputReady.load(std::memory_order_acquire) &&
+                (g_sgWakeRecovery.requestId.empty() || !sgMarkerIsSuspended(SG_MANUAL_DIR, e.pid)) &&
+                sgReadFile(marker) == e.markerText &&
+                g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+                g_inputReady.load(std::memory_order_acquire) && batchCurrent();
+        };
         const auto textNow = sgReadFile(marker);
         if (textNow != e.markerText) {
             std::error_code markerError;
@@ -370,7 +618,10 @@ static void sgWakeGameRecoveryTick() {
             ULONGLONG currentCreated = 0;
             const bool sameIdentity = focusQueryProcessIdentity(e.pid, nullptr, &currentCreated) &&
                 currentCreated == e.created;
-            if (sameIdentity && WakeGameResume::queryThreads(e.pid).allRunning()) {
+            const bool alreadyRunning = sameIdentity && WakeGameResume::queryThreads(e.pid).allRunning();
+            std::error_code currentMarkerError;
+            const bool markerStillMissing = !fspath::exists(marker, currentMarkerError);
+            if (alreadyRunning && !currentMarkerError && markerStillMissing && batchCurrent()) {
                 // Manual resume already completed. Retire ONLY our old owner.
                 sgWakeRecoveryClearTarget(e); e.done = true;
                 continue;
@@ -378,21 +629,37 @@ static void sgWakeGameRecoveryTick() {
             // Lost file during recovery: retain/reconstruct the captured exact
             // lease, including old identity. A reused PID will still fail the
             // opened-handle check below; no replacement identity is invented.
-            if (!sgWriteFileAtomic(marker, e.markerText)) {
+            if (!batchCurrent()) { cancelAfterFileReturn(); return; }
+            if (currentMarkerError || !markerStillMissing) continue;
+            if (!files.current(fileWorkCurrent) || !sgWriteFileAtomic(marker, e.markerText)) {
                 continue;
             }
             sgRecordFact("sleep-game-recovery-marker-rebuilt", {{"generation", generation}, {"pid", e.pid}});
         }
-        HANDLE h = ready ? OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION |
-                                      SYNCHRONIZE, FALSE, e.pid) : nullptr;
-        const DWORD openError = h || !ready ? ERROR_SUCCESS : GetLastError();
+        const bool entryReady = batchCurrent() &&
+            g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+            g_inputReady.load(std::memory_order_acquire);
+        HANDLE h = entryReady ? OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION |
+                                           SYNCHRONIZE, FALSE, e.pid) : nullptr;
+        const DWORD openError = h || !entryReady ? ERROR_SUCCESS : GetLastError();
+        if (!batchCurrent()) {
+            if (h) CloseHandle(h);
+            cancelAfterFileReturn(); return;
+        }
         const bool identityMatches = h && nativeProcessCreatedFromHandle(h) == e.created;
         const bool exited = h && WaitForSingleObject(h, 0) == WAIT_OBJECT_0;
         if ((h && (!identityMatches || exited)) || openError == ERROR_INVALID_PARAMETER) {
             if (h) CloseHandle(h);
-            std::error_code ec; fspath::remove(marker, ec);
-            sgWakeRecoveryClearTarget(e); e.done = true;
-            sgRecordFact("sleep-game-recovery-stale", {{"generation", generation}, {"pid", e.pid}});
+            if (!batchCurrent()) { cancelAfterFileReturn(); return; }
+            if (sgReadFile(marker) != e.markerText || !files.current(fileWorkCurrent)) continue;
+            std::error_code ec;
+            const bool removed = fspath::remove(marker, ec);
+            // Keep file failures in the original bounded cleanup window.
+            if (!ec) { sgWakeRecoveryClearTarget(e); e.done = true; }
+            sgRecordFact("sleep-game-recovery-stale", {
+                {"generation", generation}, {"pid", e.pid}, {"markerRemoved", removed},
+                {"markerRemovalError", ec.value()}, {"cleanupRetained", static_cast<bool>(ec)}
+            });
             continue;
         }
         DWORD targetSession = 0, ownSession = 0;
@@ -409,8 +676,15 @@ static void sgWakeGameRecoveryTick() {
             fallbackStillAllowed = !excluded && WakeGameResume::sameUser(h) &&
                 CheckRemoteDebuggerPresent(h, &debugged) && !debugged;
         }
+        const auto dispatchCurrent = [&] {
+            if (!entryCurrent()) return false;
+            // The original drain calls NT immediately after this check. A
+            // failed call still consumes the right to replay the whole wake.
+            g_sgWakeRecovery.resumeDispatched = true;
+            return true;
+        };
         const bool accepted = identityMatches && sameSession && fallbackStillAllowed &&
-            fnNtResume && sgDrainProcessSuspendCount(h);
+            fnNtResume && entryCurrent() && sgDrainProcessSuspendCountIfCurrent(h, dispatchCurrent);
         e.acceptedOnce = e.acceptedOnce || accepted;
         const auto threads = identityMatches ? WakeGameResume::queryThreads(e.pid) : WakeGameResume::ThreadState{};
         if (h) CloseHandle(h);
@@ -419,7 +693,7 @@ static void sgWakeGameRecoveryTick() {
             {"owner", e.fallback ? "orphan-fallback" : e.dir == SG_MANUAL_DIR ? "manual" : "sleep"},
             {"sleepOwnerGeneration", e.sleepOwnerGeneration},
             {"attempt", attempt + 1}, {"elapsedMs", elapsed}, {"apiAccepted", accepted},
-            {"ready", ready}, {"openError", openError}, {"sameSession", sameSession},
+            {"ready", entryReady}, {"openError", openError}, {"sameSession", sameSession},
             {"fallbackStillAllowed", fallbackStillAllowed}, {"threadStateKnown", threads.known},
             {"threads", threads.total}, {"suspendedThreads", threads.suspended}, {"final", final}
         });
@@ -433,7 +707,9 @@ static void sgWakeGameRecoveryTick() {
                 g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
                 g_inputReady.load(std::memory_order_acquire) &&
                 (g_sgWakeRecovery.requestId.empty() || !sgMarkerIsSuspended(SG_MANUAL_DIR, e.pid)) &&
-                sgReadFile(marker) == e.markerText) {
+                sgReadFile(marker) == e.markerText && sgCanceledSleepRecoveryEntryCurrent(e) &&
+                g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+                g_inputReady.load(std::memory_order_acquire) && files.current(fileWorkCurrent)) {
                 std::error_code ec;
                 const bool removed = fspath::remove(marker, ec);
                 if (removed && !ec) {
@@ -443,11 +719,14 @@ static void sgWakeGameRecoveryTick() {
                         {"attempt", attempt + 1}, {"elapsedMs", elapsed}, {"final", final},
                         {"basis", "current-attempt-zero-suspend-counts"}, {"markerRemoved", true}
                     });
-                    if(g_sgWakeRecovery.focusOnComplete) focusSingleResumedGame({e.pid}, e.created, generation);
+                    if(g_sgWakeRecovery.focusOnComplete&&!e.canceledLease&&
+                       ymcc::sleeppower::powerObservationKnown(g_sgWakeRecovery.focusPower))
+                        focusSingleResumedGame({e.pid}, e.created, g_sgWakeRecovery.focusPower);
                 }
             }
         }
     }
+    if (!batchCurrent() && sgWakeGameRecoveryCanWaitForNextWakeUnlocked()) { cancelChangedBatch(); return; }
     // A late worker must never replay overdue attempts in a tight burst.
     ++g_sgWakeRecovery.nextAttempt;
     while (g_sgWakeRecovery.nextAttempt < WakeGameResume::attemptCount - 1 &&
@@ -461,7 +740,7 @@ static void sgWakeGameRecoveryTick() {
     });
     if (final || pending == 0) {
         const bool manualPending = sgHasMarkerFiles(SG_MANUAL_DIR);
-        if (!manualPending) {
+        if (!manualPending&&!g_sgWakeRecovery.canceledLeasesOnly) {
             g_manualPausedPid.store(0, std::memory_order_release);
             const auto statePath = SG_DIR + L"\\quickapp_suspended.json";
             if (!g_sgWakeRecovery.manualState.empty() && sgReadFile(statePath) == g_sgWakeRecovery.manualState) {
@@ -477,10 +756,9 @@ static void sgWakeGameRecoveryTick() {
             {"attempt", attempt + 1}, {"pendingTargets", pending}, {"final", final},
             {"retainedTargets", pending}, {"manualPending", manualPending}, {"healthVerified", false}
         });
-        ipc_emit("game.wake-recovery", {{"generation", generation}, {"manualPending", manualPending},
-            {"requestId", g_sgWakeRecovery.requestId}, {"attempt", attempt + 1}, {"pendingTargets", pending},
-            {"basis", pending == 0 ? "all-targets-done" : "attempt-window-exhausted"}, {"healthVerified", false}});
+        auto requestId = std::move(g_sgWakeRecovery.requestId);
         g_sgWakeRecovery = {};
         g_sgWakeRecoveryPending.store(false, std::memory_order_release);
+        postWakeGameRecoveryStatus(generation, manualPending, requestId, attempt + 1, pending);
     }
 }

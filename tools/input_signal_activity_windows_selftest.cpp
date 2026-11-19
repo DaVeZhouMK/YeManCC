@@ -23,6 +23,16 @@ static ke::Recorder g_keyboardModifierEvents;
 static std::atomic<bool> g_keyboardModifierEventGate{false};
 static std::atomic<std::uint64_t> g_keyboardModifierDeviceGeneration{1};
 static std::atomic<bool> g_keyboardModifierHookInstalled{false},g_keyboardModifierRawSubscribed{false};
+static std::atomic<bool> g_inputEdgeKeyboardInstalled{false},g_inputEdgeMouseInstalled{false};
+// Keep unrelated input policies inactive while exercising the actual activity writer.
+static void steamControllerCursorMouseHook(WPARAM,const POINT&) noexcept {}
+static void ayaOemKeyboardSourceObserve(DWORD,bool,bool,bool) noexcept {}
+static void inputEdgeObserveSelf(ke::SourceId,const INPUT*,UINT,UINT) noexcept {}
+static bool nativeDesktopMouseEvent(const MSLLHOOKSTRUCT&,WPARAM,ULONGLONG,bool&) {return false;}
+static struct {
+    std::size_t size() const {return 0;}
+    void observeHookOutcome(std::size_t,ULONGLONG,bool) {}
+} g_desktopFunctionEdges;
 namespace fake {
 static DWORD error=12345;static ULONGLONG tick=100;static bool throwLog=false;
 static unsigned nexts=0,maintains=0,replays=0,consumes=0;static bool consume=false;static std::vector<json>rows;static std::vector<std::string>domains;
@@ -58,6 +68,7 @@ static void oemMouseConsumeReplay(ULONGLONG){++fake::replays;fake::error=8003;}
 #define GetAsyncKeyState fake::asyncKey
 #define GetKeyboardState fake::keyboardState
 #include "input_signal_key_state_evidence.h"
+#include "keyboard_modifier_snapshot.h"
 #include "actual_activity.inc"
 #include "before_mouse_hook.inc"
 #undef GetLastError
@@ -140,19 +151,26 @@ static void mouseCases(){
  cases.push_back({{"case","actual-before-after-mouse-hook"},{"combinations",combinations},{"policySubstituted",true},{"pass",true}});
 }
 static void serializationCases(){
- reset();json idle={{"msiRearWindow",{{"pressEdgesM1M2",{0,1}},{"releaseEdgesM1M2",{0,0}},{"sourceGenerationFirst",5}}},{"windowStartTick",99000},{"windowEndTick",100000},{"windowMs",1000},{"keyboardModifiers",{{"asyncDownMask",17},{"asyncZeroIsAbsenceProof",false}}},{"hostSnapshotKnown",true},{"hostProcessPresent",false},{"physicalBeforePublication",{{"samples",100}}},{"actualSubmitAttempts",{{"samples",0}}},{"hostAcceptedContent",{{"samples",0}}}};
+ reset();ymcc::keyboardEvidence::Snapshot snapshot;snapshot.asyncDownMask=17;snapshot.queueError=5;
+ json idle={{"msiRearWindow",{{"pressEdgesM1M2",{0,1}},{"releaseEdgesM1M2",{0,0}},{"sourceGenerationFirst",5}}},{"windowStartTick",99000},{"windowEndTick",100000},{"windowMs",1000},{"keyboardModifiers",ymcc::keyboardEvidence::toPeriodicJson(snapshot)},{"hostSnapshotKnown",true},{"hostProcessPresent",false},{"physicalBeforePublication",{{"samples",100}}},{"actualSubmitAttempts",{{"samples",0}}},{"hostAcceptedContent",{{"samples",0}}}};
  fake::asyncValues['W']=static_cast<SHORT>(0x8001u);fake::queueKeys['W']=0x80;
- INPUT a=key('W');inputSignalObserveScreenTouchpad(&a,1,1,0,false);inputSignalFlushEvidence(idle,100000);
+ INPUT a=key('W');inputSignalObserveScreenTouchpad(&a,1,1,0,false);
+ const auto asyncBefore=fake::asyncReads,queueBefore=fake::queueReads,foregroundBefore=fake::foregroundReads;
+ const auto firstDrainReads=[&]{return fake::asyncReads==asyncBefore+1&&fake::queueReads==queueBefore+1&&fake::foregroundReads==foregroundBefore+2;};
+ inputSignalFlushEvidence(idle,100000);
  check(fake::rows.size()==2&&fake::rows[0]==fake::rows[1]&&fake::domains==std::vector<std::string>{"virtual","focus"},"activity mirror mismatch");auto row=fake::rows.back();check(row.at("completeInputCoverage")==false&&row.at("osHeldStateProven")==false&&row.at("keyboardModifiers").at("asyncDownMask")==17&&row.at("physicalBeforePublication").at("samples")==100,"correlation/scope missing");
+ check(row.at("keyboardModifiers")==ymcc::keyboardEvidence::toJson(snapshot)&&idle.at("keyboardModifiers").at("schemaVersion")==2,"signal receipt is standalone without changing periodic context");
  check(row.at("mouseHookInstalledCached")==false,"mouse coverage incorrectly inferred from other channel");
  const auto keyState=row.at("keyStateEvidence");
+ check(row.at("schemaVersion")==1&&row.at("activityScopeSchema")==1&&!row.contains("scope")&&!row.contains("contextScope")&&!row.contains("hookDecisionRouteEncoding"),"activity scope must be guide-bound without changing the row schema");
+ check(keyState.at("schemaVersion")==1&&!keyState.contains("scope")&&!keyState.contains("selectionReasonBits")&&keyState.at("keys").at(0).contains("selectionReasonBits"),"key-state dictionary must move without removing measured reason bits");
  check(keyState.at("sampled")==true&&keyState.at("selectedKeys")==1&&keyState.at("keys").at(0).at("virtualKey")=='W',"candidate state not attached/deduplicated");
  check(keyState.at("keys").at(0).at("asyncDownBit")==true&&keyState.at("keys").at(0).at("callingThreadQueueDown")==true,"actual drain lost synthetic async/queue state");
- check(fake::asyncReads==1&&fake::queueReads==1&&fake::foregroundReads==2,"key-state drain exceeded bounded API calls");
+ check(firstDrainReads(),"key-state drain exceeded bounded API calls");
 
  check(row.at("msiRearWindow").at("pressEdgesM1M2")==json::array({0,1})&&row.at("windowStartTick")==99000&&row.at("windowMs")==1000,"rear-window correlation or latest-one-second boundary lost");
  check(row.at("eventRows").at(0).at("observedHeld").is_null()&&row.at("selfSendBatches").at(0).at("source")=="screen-touchpad-output","self activity mislabeled OS state/source");
- inputSignalFlushEvidence(idle,101000);check(fake::rows.size()==2,"activity flush bypassed five-second gate");check(fake::asyncReads==1&&fake::queueReads==1,"five-second gate permitted additional key-state sampling");inputSignalFlushEvidence(idle,105000);check(fake::rows.size()==4,"held carry not retained");
+ inputSignalFlushEvidence(idle,101000);check(fake::rows.size()==2,"activity flush bypassed five-second gate");check(firstDrainReads(),"five-second gate permitted additional key-state sampling");inputSignalFlushEvidence(idle,105000);check(fake::rows.size()==4,"held carry not retained");
  a.ki.dwFlags=KEYEVENTF_KEYUP;inputSignalObserveScreenTouchpad(&a,1,1,0,false);inputSignalFlushEvidence(idle,110000);check(fake::rows.size()==6,"release aggregate lost");inputSignalFlushEvidence(idle,115000);check(fake::rows.size()==6,"quiet/no-held emitted repeated rows");
  reset();for(WORD vk=0;vk<100;++vk){KBDLLHOOKSTRUCT kb{};kb.vkCode=vk;ke::HookObservation obs{};obs.decision=ke::HookDecision::PassToNextHook;keyboardModifierObserveLowLevel(kb,WM_KEYDOWN,obs);}inputSignalFlushEvidence(idle,120000);row=fake::rows.back();check(row.at("totalRows")==100&&row.at("omittedRows")==36&&row.at("eventRows").size()==64,"truncation not explicit");
  reset(false);inputSignalFlushEvidence(idle,130000);check(fake::rows.empty(),"disabled signal flush emitted");check(fake::asyncReads==0&&fake::queueReads==0&&fake::foregroundReads==0,"disabled signal flush sampled key state");

@@ -29,14 +29,49 @@ inline constexpr std::size_t kPayloadBudget=kPendingSlots*kMessageBytes;
 // Four retained generations plus the current lease. Close debt consumes the
 // same fixed entries instead of growing an unbounded side list.
 inline constexpr std::size_t kLeaseSlots=kPendingSlots+1;
+// Request-local receive storage. Only the transferred prefix is readable.
+// Win32 pending operations continue to own their separate Runtime buffers.
+class ResponseBuffer final {
+    std::unique_ptr<char[]> bytes_;
+public:
+    ResponseBuffer() : bytes_(new char[kMessageBytes]) {}
+    char* data() noexcept { return bytes_.get(); }
+    const char* data() const noexcept { return bytes_.get(); }
+    constexpr DWORD size() const noexcept { return kMessageBytes; }
+};
+
 enum class Kind {Read,Write,Connect};
 using IssueGuard=bool(*)(void*) noexcept;
+// Explicit same-read scheduling tolerance; never stored in a retained IO owner.
+// No signal activity/axis value is a disconnect criterion. Only the caller's
+// unchanged request scope and an actual terminal IO result govern this wait.
+struct SlowReadAllowance {
+    DWORD totalMs=0;
+    DWORD (*current)(void*) noexcept=nullptr;
+    void* context=nullptr;
+};
+inline constexpr DWORD kMaxSchedulingReadMs=65000;
+// Borrowed, manual-reset, one-way public cancellation mirror. Never close or
+// reset event here. The shared owner must retain its registration/event until
+// every issued operation is proven terminal, including deferred reaping.
+struct Cancellation {
+    HANDLE event=nullptr;
+    std::shared_ptr<void> lifetime;
+    // Read only, after this exact request may already have reached the Host.
+    // Caller supplies the original request's remaining timeout; this flag
+    // grants only ACK drainage, never a new command or business acceptance.
+    bool drain=false;
+};
 struct Result {
     bool ok=false,admitted=false,byteCountKnown=false,terminal=false,retired=false;
     bool apiReturnedTrue=false,queryAttempted=false,queryReturnedTrue=false;
     DWORD error=ERROR_SUCCESS,transferred=0,initialError=ERROR_SUCCESS,queryError=ERROR_SUCCESS;
     DWORD firstWait=WAIT_OBJECT_0,cancelError=ERROR_SUCCESS;
     bool cancelAttempted=false,contextRejected=false;
+    bool schedulingGraceEntered=false;
+    // Observation only: remote I/O may have completed successfully. This is
+    // neither CancelIoEx success nor proof that a remote command was undone.
+    bool scopeRevoked=false;
     std::uint64_t operation=0,lease=0;
 };
 struct Snapshot {
@@ -80,6 +115,8 @@ class Runtime final {
         Handle event;
         OVERLAPPED ov{};
         Kind kind=Kind::Read;
+        Cancellation cancellation;
+        bool scopeRevoked=false;
         std::uint64_t id=0;
         bool issued=false,terminal=false,accounted=false,apiTrue=false,queryAttempted=false,queryTrue=false,known=false,cancelled=false;
         DWORD initial=ERROR_SUCCESS,completion=ERROR_SUCCESS,queryError=ERROR_SUCCESS,count=0,cancelError=ERROR_SUCCESS;
@@ -110,6 +147,7 @@ class Runtime final {
     }
     void releaseOperation(std::unique_ptr<Operation>& op)noexcept{
         if(!op||pendingOperation(*op))return;
+        op->cancellation={}; // Terminal/unissued close debt must not pin scope.
         closeHandle(op->event);
         if(!op->event.valid())op.reset();
     }
@@ -137,7 +175,7 @@ class Runtime final {
         DWORD n=0;const BOOL ok=GetOverlappedResult(op.lease->issue.get(),&op.ov,&n,FALSE);
         const DWORD e=ok?ERROR_SUCCESS:GetLastError();
         op.queryAttempted=true;op.queryTrue=ok!=FALSE;op.queryError=e;
-        const DWORD signal=WaitForSingleObject(op.event.get(),0);
+        const DWORD signal=ok?WAIT_OBJECT_0:WaitForSingleObject(op.event.get(),0);
         // Unknown/infrastructure errors never free a genuinely pending op.
         const bool terminal=ok||e==ERROR_OPERATION_ABORTED||(terminalError(e)&&signal==WAIT_OBJECT_0);
         if(terminal){op.terminal=true;op.completion=e;observeBytes(op,ok!=FALSE,e,n);}
@@ -147,6 +185,17 @@ class Runtime final {
         if(!op.issued||op.terminal||(op.cancelled&&(!retryFailed||op.cancelError==ERROR_SUCCESS)))return;
         op.cancelled=true;const BOOL ok=CancelIoEx(op.lease->issue.get(),&op.ov);
         op.cancelError=ok?ERROR_SUCCESS:GetLastError();
+    }
+    static DWORD observeCancellation(Operation& op)noexcept{
+        if(!op.cancellation.event)return WAIT_TIMEOUT;
+        const DWORD state=WaitForSingleObject(op.cancellation.event,0);
+        if(state==WAIT_OBJECT_0)op.scopeRevoked=true;
+        return state;
+    }
+    static DWORD remaining(ULONGLONG started,DWORD timeoutMs)noexcept{
+        if(timeoutMs==INFINITE)return INFINITE;
+        const ULONGLONG elapsed=GetTickCount64()-started;
+        return elapsed>=timeoutMs?0:timeoutMs-static_cast<DWORD>(elapsed);
     }
     static void issue(Operation& op)noexcept{
         op.issued=true;
@@ -172,6 +221,7 @@ class Runtime final {
     }
     void erase(std::size_t i)noexcept{
         auto& op=operations_[i];if(!op||pendingOperation(*op))return;
+        op->cancellation={}; // Same-lease terminal cache owns no public scope.
         const bool completed=op->accounted;
         if(completed){
             payload_-=op->bytes.size();lastReaped_=op->id;lastReapedLease_=op->lease->id;lastReapedError_=op->completion;++reaped_;
@@ -259,8 +309,22 @@ public:
         }catch(...){error=ERROR_GEN_FAILURE;return false;}
     }
     Result run(HANDLE source,Kind kind,void* data,DWORD size,DWORD timeoutMs,DWORD graceMs=50,
-               IssueGuard issueGuard=nullptr,void* issueContext=nullptr)noexcept{
+               IssueGuard issueGuard=nullptr,void* issueContext=nullptr,
+               Cancellation cancellation={},SlowReadAllowance slowRead={})noexcept{
         Result r;
+        if(slowRead.totalMs && (kind!=Kind::Read || !slowRead.current || !timeoutMs ||
+           timeoutMs==INFINITE || slowRead.totalMs<=timeoutMs || slowRead.totalMs>kMaxSchedulingReadMs)){
+            r.error=ERROR_INVALID_PARAMETER;return r;
+        }
+        // A scoped call's preparation/lock/issue time consumes this same
+        // supplied balance. Legacy unscoped calls keep their old wait budget.
+        const ULONGLONG started=(cancellation.event||slowRead.totalMs)?GetTickCount64():0;
+        // A non-owning alias can have a non-null get() but no control block.
+        // A null alias with a real control block does retain the registration.
+        const bool ownsScope=cancellation.lifetime.use_count()!=0;
+        if(cancellation.event==INVALID_HANDLE_VALUE||
+            (cancellation.drain&&(kind!=Kind::Read||!cancellation.event))||
+            (cancellation.event!=nullptr)!=ownsScope){r.error=ERROR_INVALID_PARAMETER;return r;}
         if((kind!=Kind::Connect&&size&&!data)||size>kMessageBytes){r.error=ERROR_INVALID_PARAMETER;return r;}
         try {
             std::lock_guard<std::mutex> lock(mutex_);sweepLocked();
@@ -297,6 +361,7 @@ public:
             catch(...){r.error=ERROR_GEN_FAILURE;releaseOperation(storage);return r;}
             auto& op=*storage;
             op.ov=OVERLAPPED{};op.kind=kind;op.id=nextOperation_+1;
+            op.cancellation=std::move(cancellation);op.scopeRevoked=false;
             op.issued=false;op.terminal=false;op.apiTrue=false;
             op.queryAttempted=false;op.queryTrue=false;op.known=false;op.cancelled=false;
             op.initial=ERROR_SUCCESS;op.completion=ERROR_SUCCESS;op.queryError=ERROR_SUCCESS;
@@ -306,14 +371,72 @@ public:
             if(kind==Kind::Write && issueGuard && !issueGuard(issueContext)) {
                 r.contextRejected=true;r.error=ERROR_OPERATION_ABORTED;releaseOperation(storage);return r;
             }
+            // Final pre-issue observation applies to Connect/Read/Write alike.
+            // Only an explicitly bound ACK drain may begin after revocation.
+            if(op.cancellation.event){
+                const DWORD scopeState=observeCancellation(op);
+                if(scopeState==WAIT_OBJECT_0){
+                    r.scopeRevoked=true;
+                    if(!op.cancellation.drain){
+                        r.contextRejected=true;r.error=ERROR_OPERATION_ABORTED;
+                        releaseOperation(storage);return r;
+                    }
+                }else if(scopeState!=WAIT_TIMEOUT){
+                    r.error=scopeState==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE;
+                    releaseOperation(storage);return r;
+                }
+            }
             op.accounted=true;payload_+=payloadSize;pending_.fetch_add(1,std::memory_order_release);++nextOperation_;++admitted_;
             r.admitted=true;r.operation=op.id;r.lease=op.lease->id;
+            // Cancellation never grants a new timeout or another issue. Keep
+            // the original I/O deadline, then the existing cancel/grace path.
             issue(op);
+            DWORD ioWait=WAIT_OBJECT_0;
             if(!op.terminal){
-                r.firstWait=WaitForSingleObject(event,timeoutMs);
-                const DWORD firstError=r.firstWait==WAIT_OBJECT_0?ERROR_SUCCESS:
-                    r.firstWait==WAIT_TIMEOUT?WAIT_TIMEOUT:GetLastError();
-                if(r.firstWait==WAIT_OBJECT_0){
+                if(op.cancellation.event&&!op.scopeRevoked){
+                    const HANDLE waits[]={event,op.cancellation.event};
+                    r.firstWait=WaitForMultipleObjects(2,waits,FALSE,remaining(started,timeoutMs));
+                    ioWait=r.firstWait;
+                    if(r.firstWait==WAIT_OBJECT_0+1){
+                        op.scopeRevoked=true;
+                        // Only the exact ACK drain may consume its original
+                        // balance. Other issued I/O enters the existing cancel/
+                        // reap path now; it remains admitted and owns its scope.
+                        if(op.cancellation.drain)
+                            ioWait=WaitForSingleObject(event,remaining(started,timeoutMs));
+                    }
+                }else if(op.cancellation.event){
+                    // A pre-signaled ACK drain already observed revocation;
+                    // do not wait on that sticky event again.
+                    ioWait=r.firstWait=WaitForSingleObject(event,remaining(started,timeoutMs));
+                }else ioWait=r.firstWait=WaitForSingleObject(event,timeoutMs);
+                DWORD delayedWaitError=ERROR_SUCCESS;
+                if(ioWait==WAIT_TIMEOUT && slowRead.totalMs && !op.scopeRevoked){
+                    r.schedulingGraceEntered=true;
+                    // Continue this exact overlapped read, before any CancelIoEx.
+                    // A soft timeout is not a dead Host. No second read/write,
+                    // command replay, worker, deadline renewal or target change.
+                    for(;;){
+                        const DWORD balance=remaining(started,slowRead.totalMs);
+                        if(!balance)break;
+                        if(sealed_.load(std::memory_order_acquire)){
+                            delayedWaitError=ERROR_SHUTDOWN_IN_PROGRESS;break;
+                        }
+                        const DWORD scopeState=observeCancellation(op);
+                        if(scopeState==WAIT_OBJECT_0){delayedWaitError=ERROR_OPERATION_ABORTED;break;}
+                        if(scopeState!=WAIT_TIMEOUT){delayedWaitError=scopeState==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE;break;}
+                        const DWORD current=slowRead.current(slowRead.context);
+                        if(current!=ERROR_SUCCESS){delayedWaitError=current;break;}
+                        ioWait=WaitForSingleObject(event,balance>100?DWORD(100):balance);
+                        if(ioWait==WAIT_OBJECT_0)break;
+                        if(ioWait!=WAIT_TIMEOUT){delayedWaitError=GetLastError();break;}
+                    }
+                }
+                const DWORD firstError=delayedWaitError!=ERROR_SUCCESS?delayedWaitError:
+                    ioWait==WAIT_OBJECT_0?ERROR_SUCCESS:
+                    ioWait==WAIT_OBJECT_0+1?ERROR_OPERATION_ABORTED:
+                    ioWait==WAIT_TIMEOUT?WAIT_TIMEOUT:GetLastError();
+                if(ioWait==WAIT_OBJECT_0){
                     const bool done=query(op);r.error=done?op.completion:op.queryError;
                     if(!done&&r.error==ERROR_SUCCESS)r.error=ERROR_GEN_FAILURE;
                 }else r.error=firstError;
@@ -321,7 +444,7 @@ public:
             r.apiReturnedTrue=op.apiTrue;r.initialError=op.initial;
             r.queryAttempted=op.queryAttempted;r.queryReturnedTrue=op.queryTrue;r.queryError=op.queryError;
             // The original request outcome is fixed before cancellation/cleanup.
-            if(op.terminal&&r.error==op.completion&&r.firstWait==WAIT_OBJECT_0&&op.known){
+            if(op.terminal&&r.error==op.completion&&ioWait==WAIT_OBJECT_0&&op.known){
                 r.byteCountKnown=true;r.transferred=op.count;
                 if(kind==Kind::Read&&op.count)std::memcpy(data,op.bytes.data(),op.count);
             }
@@ -330,6 +453,9 @@ public:
             // receipt. Reject explicitly instead of passing unknown as empty.
             if(r.ok&&kind==Kind::Read&&!r.byteCountKnown){r.ok=false;r.error=ERROR_INVALID_DATA;}
             if(!op.terminal){cancel(op);(void)WaitForSingleObject(event,graceMs);(void)query(op);}
+            // IO wins the lowest wait index if both are signaled; observe the
+            // public event independently even on inline or grace completion.
+            (void)observeCancellation(op);r.scopeRevoked=op.scopeRevoked;
             r.cancelAttempted=op.cancelled;r.cancelError=op.cancelError;r.terminal=op.terminal;r.retired=!op.terminal;
             if(op.terminal)erase(slot);
             if(sealed_.load(std::memory_order_acquire))sweepLocked();

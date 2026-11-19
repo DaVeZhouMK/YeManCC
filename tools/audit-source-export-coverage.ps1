@@ -118,6 +118,7 @@ $rules = @(
   [pscustomobject]@{ match='^capabilities/HcControllerGameFeedbackCapabilityCatalog\.generated\.cs$'; kind='build-input'; dest='PowerControl/feature-assets/virtual-gamepad/YeManInputHost.dll (explicit linked generated source)'; code='' },
   [pscustomobject]@{ match='^capabilities/hc-controller-(?:feedback|motion)-policy\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
   [pscustomobject]@{ match='^capabilities/(?:CONTROLLER-GAME-MOTOR-RECEIPT|CONTROLLER-GAME-OUTPUT-OBSERVATION|FAN-RETURN-CONSUMPTION|USER-SCOPE-DECISIONS|hc-performance-metadata)\.json$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  [pscustomobject]@{ match='^capabilities/AYA-FAMILY-CONSUMPTION\.(?:json|md)$'; kind='excluded'; dest='-'; code='E-DOCS' }
   # Explicit newly linked battery consumer plus offline review records.
   [pscustomobject]@{ match='^capabilities/HcSecondaryDisplayCapabilityCatalog\.cs$'; kind='build-input'; dest='PowerControl/battery-host/YeManBatteryHost.dll (explicit linked capability source)'; code='' },
   [pscustomobject]@{ match='^capabilities/hc-model-method-policy\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },

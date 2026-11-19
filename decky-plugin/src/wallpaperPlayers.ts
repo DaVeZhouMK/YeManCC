@@ -1,10 +1,10 @@
 import {applyGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK,randomGameMediaRange} from '../../src/bridge/gameMediaPlayback';
 import {enterWallpaper,type WallpaperEntrance} from './wallpaperEntrance';
 export interface WallpaperVideoFrame {contextSeq:number;appId:string;opacity?:number;blur?:number;entry:{assetId:string;revision:string;bindingRevision:number;kind:string;url:string;playback?:typeof DEFAULT_GAME_MEDIA_PLAYBACK};}
-interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame)=>void;now?:()=>number;schedule?:(run:()=>void,delay:number)=>ReturnType<typeof setTimeout>;cancel?:(timer:ReturnType<typeof setTimeout>)=>void;}
-type Slot={node:HTMLVideoElement;frame:WallpaperVideoFrame;key:string;ready:boolean;dead:boolean;presented:boolean;animation:Animation|null;playRequested:boolean;styleKey:string;playback:{start:number;end:number;initialStart:number}|null;position:number;progressAt:number;stableAt:number|null;};
+interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame)=>void;recovering?:(frame:WallpaperVideoFrame,detail:{reason:string;inactiveMs:number;retryDelayMs:number;readyState:number;errorCode?:number;position?:number})=>void;now?:()=>number;schedule?:(run:()=>void,delay:number)=>ReturnType<typeof setTimeout>;cancel?:(timer:ReturnType<typeof setTimeout>)=>void;}
+type Slot={node:HTMLVideoElement;frame:WallpaperVideoFrame;key:string;ready:boolean;dead:boolean;presented:boolean;animation:Animation|null;playRequested:boolean;styleKey:string;playback:{start:number;end:number;initialStart:number}|null;position:number;progressAt:number;stableAt:number|null;interruption:{at:number;reason:string}|null;};
 const identity=(frame:WallpaperVideoFrame)=>JSON.stringify([frame.entry.assetId,frame.entry.revision,frame.entry.bindingRevision,frame.entry.url,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK]);
-const progressDeadlineMs=15000,stablePlaybackMs=30000,foregroundRetryMs=60000;
+const progressDeadlineMs=15000,interruptionDeadlineMs=2500,stablePlaybackMs=30000,foregroundRetryMs=60000;
 // Only the selected video owns a source. No neighbor reads or predicted decoder.
 export class WallpaperPlayers {
   private current:Slot|null=null;private container:HTMLElement|null=null;
@@ -29,7 +29,9 @@ export class WallpaperPlayers {
   stop(){this.clearCurrent();this.selectedAt=null;}
   // One deadline belongs to the active decoder or its pending local reopen.
   // timeupdate only records progress; it never allocates a timer per frame.
-  // Healthy foreground video wakes at most once per15s. Hidden/OFF has none.
+  // Healthy foreground video wakes at most once per15s. A browser stall signal
+  // shortens that same watch once; progress/duplicate events allocate no timer.
+  // Hidden/OFF has none.
   private watch(slot:Slot,delay=progressDeadlineMs){
     if(!this.active(slot)||this.mediaTimer!==null)return;
     const version=++this.mediaVersion;
@@ -37,32 +39,43 @@ export class WallpaperPlayers {
       if(version!==this.mediaVersion||!this.active(slot))return;++this.mediaVersion;this.mediaTimer=null;
       if(!this.admitted()){this.stop();return;}
       this.progress(slot);
-      const remaining=progressDeadlineMs-(this.now()-slot.progressAt);
-      if(remaining>0)this.watch(slot,remaining);else this.recover(slot);
+      const remaining=Math.min(progressDeadlineMs-(this.now()-slot.progressAt),slot.interruption?interruptionDeadlineMs-(this.now()-slot.interruption.at):Infinity);
+      if(remaining>0)this.watch(slot,remaining);else this.recover(slot,slot.interruption?.reason??'progress-timeout');
     },delay);
   }
   private progress(slot:Slot){
     if(!this.active(slot)||!slot.ready||slot.node.paused||slot.node.seeking)return;
     const position=slot.node.currentTime;
     if(!Number.isFinite(position)||Math.abs(position-slot.position)<.02)return;
-    slot.position=position;slot.progressAt=this.now();
+    slot.position=position;slot.progressAt=this.now();slot.interruption=null;
     if(slot.stableAt===null)slot.stableAt=slot.progressAt;
     if(slot.progressAt-slot.stableAt>=stablePlaybackMs)this.retries=0;
   }
-  private recover(slot:Slot){
+  private interrupted(slot:Slot,reason:string){
+    if(!this.active(slot)||!slot.ready||slot.node.seeking)return;
+    if(!this.admitted()){this.stop();return;}
+    this.progress(slot);if(slot.interruption)return;
+    slot.interruption={at:this.now(),reason};
+    this.cancelMedia();this.watch(slot,Math.max(0,Math.min(interruptionDeadlineMs,progressDeadlineMs-(this.now()-slot.progressAt))));
+  }
+  private recover(slot:Slot,reason='media-error'){
     if(!this.active(slot))return;
     if(!this.admitted()){this.stop();return;}
     // Read only the current node error before releasing its src/load state.
     // A timeout, abort, network failure or play() rejection does not prove bad bytes.
-    const errorCode=slot.node.error?.code;
+    const errorCode=slot.node.error?.code,readyState=slot.node.readyState,inactiveMs=Math.max(0,Math.round(this.now()-slot.progressAt));
     const frame=slot.frame,container=this.container,key=slot.key;
     const position=slot.ready&&Number.isFinite(slot.node.currentTime)?slot.node.currentTime:undefined;
     this.releaseCurrent();
     if(!container||this.selectedKey!==key)return;
-    if(this.retries>=2&&(errorCode===3||errorCode===4)){this.failedKey=key;this.failed(frame);return;}
+    // SRC_NOT_SUPPORTED can also mean the browser never received media bytes.
+    // Keep that failure local; only an explicit decode error can invalidate the shared asset.
+    const terminal=this.retries>=2&&errorCode===3;
     // Exhausted transient failures retain one selected-foreground retry. Only
     // sustained playback progress restores the quick budget; rerenders do not.
-    const delay=this.retries>=2?foregroundRetryMs:[500,2000][this.retries++];
+    const delay=terminal?0:this.retries>=2?foregroundRetryMs:[500,2000][this.retries++];
+    try{this.options.recovering?.(frame,{reason,inactiveMs,retryDelayMs:delay,readyState,errorCode,position});}catch{}
+    if(terminal){this.failedKey=key;this.failed(frame);return;}
     const recovery={key,frame,container,position};this.recovery=recovery;
     this.mediaTimer=this.schedule(()=>{
       if(this.recovery!==recovery)return;this.mediaTimer=null;this.recovery=null;
@@ -72,12 +85,13 @@ export class WallpaperPlayers {
   }
   private create(frame:WallpaperVideoFrame,position?:number):Slot {
     const node=this.doc.createElement('video');node.muted=true;node.loop=true;node.playsInline=true;node.preload='metadata';node.style.width='100%';node.style.height='100%';node.setAttribute('aria-hidden','true');
-    const slot:Slot={node,frame,key:identity(frame),ready:false,dead:false,presented:false,animation:null,playRequested:false,styleKey:'',playback:null,position:0,progressAt:this.now(),stableAt:null};
+    const slot:Slot={node,frame,key:identity(frame),ready:false,dead:false,presented:false,animation:null,playRequested:false,styleKey:'',playback:null,position:0,progressAt:this.now(),stableAt:null,interruption:null};
     const ready=()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}if(node.readyState<2||node.seeking)return;const range=slot.playback;if(!range)return;if(!slot.ready&&node.currentTime<range.initialStart-.08)return;slot.ready=true;node.dataset.ymccPrepared='true';this.reveal(slot);};
     node.addEventListener('loadedmetadata',()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}if(slot.playback)return;slot.playback=randomGameMediaRange(node.duration,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK);if(position!==undefined&&position>=slot.playback.start&&position<slot.playback.end-.08)slot.playback.initialStart=position;node.dataset.ymccPlaybackStart=String(slot.playback.initialStart);node.dataset.ymccPlaybackEnd=String(slot.playback.end);slot.position=slot.playback.initialStart;node.currentTime=slot.position;});
     for(const event of ['loadeddata','seeked','canplay'])node.addEventListener(event,ready);
     node.addEventListener('timeupdate',()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}applyGameMediaRange(node,slot.playback||DEFAULT_GAME_MEDIA_PLAYBACK);this.progress(slot);});
     node.addEventListener('error',()=>this.recover(slot));
+    for(const event of ['waiting','stalled','pause'])node.addEventListener(event,()=>this.interrupted(slot,event));
     node.src=frame.entry.url;return slot;
   }
   private play(slot:Slot){
@@ -87,7 +101,7 @@ export class WallpaperPlayers {
     slot.playRequested=true;
     // A rejection and a never-settling play use the same bounded recovery as a
     // failed load. Ready-event storms cannot form a microtask retry loop.
-    try{void Promise.resolve(slot.node.play()).catch(()=>this.recover(slot)).finally(()=>{slot.playRequested=false;});}catch{slot.playRequested=false;this.recover(slot);}
+    try{void Promise.resolve(slot.node.play()).catch(()=>this.recover(slot,'play-rejected')).finally(()=>{slot.playRequested=false;});}catch{slot.playRequested=false;this.recover(slot,'play-threw');}
   }
   private reveal(slot:Slot){if(!this.active(slot)||!this.container)return;if(!this.admitted()){this.stop();return;}const node=slot.node;if(node.style.visibility!=='visible')node.style.visibility='visible';if(!slot.presented){slot.presented=true;slot.animation=enterWallpaper(node,this.options.entrance);node.dataset.ymccEntrance=this.options.entrance||'fade';this.options.presented?.(slot.frame);}const target=this.container.parentElement;if(target&&target.getAttribute('data-ymcc-wallpaper-ready')!=='true')target.setAttribute('data-ymcc-wallpaper-ready','true');this.play(slot);}
   show(container:HTMLElement,frame:WallpaperVideoFrame){

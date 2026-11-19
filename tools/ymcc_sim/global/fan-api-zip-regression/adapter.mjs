@@ -8,6 +8,8 @@ export const SOURCE_INPUTS=[
  'tools/ymcc_sim/global/log-corpus.mjs','tools/ymcc_sim/global/log-zip-reader.py','tools/ymcc_sim/global/fan-api-corpus.mjs',
  'tools/ymcc_sim/global/fan-api-log-consumer/fixture.mjs','tools/ymcc_sim/global/fan-api-log-consumer/normalize.mjs',
  'tools/ymcc_sim/global/fan-log-regression.mjs','tools/ymcc_sim/global/consumer/fan-signal-consumer.mjs','tools/ymcc_sim/global/consumer/fan-signal-fixture.mjs',
+ 'src/bridge/fanHost/startupConfiguration.ts','src/bridge/fanHost/deployment.ts','src/bridge/fanHost/capabilityAdmission.ts',
+ 'src/bridge/bootModeGlobalPreferences.ts','src/bridge/inputConfigHash.ts','src/bridge/settingsBaseline.ts','PowerControl/settings-baseline.json',
  'src/bridge/fanHost.ts','src/bridge/fanApi.ts','src/bridge/fanDiagnostics.ts','src/bridge/fanSessionEvidence.ts',
  'src/bridge/hardwareCoordinator.ts','src/bridge/aiFanMock.ts','src/bridge/fanHostInstallerRepair.ts','src/bridge/fanHostInstallerAsset.json','tools/fixtures/fan_no_io_host.ts',
 ];

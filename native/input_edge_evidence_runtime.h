@@ -1,8 +1,10 @@
 #pragma once
+#include "input_edge_log_scope.h"
 // Included after the existing keyboard raw-name observer. Hooks only observe and
 // always forward; no OEM rule, key state, focus or device ownership is changed.
 static HHOOK g_inputEdgeKeyboardHook=nullptr,g_inputEdgeMouseHook=nullptr;
 static std::atomic<bool> g_inputEdgeHooksWanted{false};
+static std::atomic<bool> g_inputEdgeCursorMouseWanted{false};
 static std::atomic<bool> g_inputEdgeKeyboardInstalled{false},g_inputEdgeMouseInstalled{false};
 static std::atomic<DWORD> g_inputEdgeKeyboardError{0},g_inputEdgeMouseError{0};
 static std::atomic<std::uint64_t> g_inputEdgeHookPostsFailed{0},g_inputEdgeLogFailures{0};
@@ -76,6 +78,7 @@ static LRESULT CALLBACK inputEdgeKeyboardHookProc(int code,WPARAM message,LPARAM
     return CallNextHookEx(nullptr,code,message,data);
 }
 static LRESULT CALLBACK inputEdgeMouseHookProc(int code,WPARAM message,LPARAM data) {
+    if(code==HC_ACTION&&data&&!g_oemMouseHook)steamControllerCursorMouseHook(message,reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt);
     if(code==HC_ACTION&&data&&g_inputEdgeEvents.enabled()){
         const DWORD saved=GetLastError();const auto& m=*reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
         if(message==WM_MOUSEMOVE)g_inputEdgeMouseMoves.fetch_add(1,std::memory_order_relaxed);
@@ -92,14 +95,18 @@ static LRESULT CALLBACK inputEdgeMouseHookProc(int code,WPARAM message,LPARAM da
 static void inputEdgeReconcileOnUi(bool destroying) noexcept {
     if(!destroying&&(!g_hwnd||GetCurrentThreadId()!=GetWindowThreadProcessId(g_hwnd,nullptr)))return;
     const DWORD saved=GetLastError();const bool wanted=!destroying&&g_inputEdgeHooksWanted.load(std::memory_order_acquire)&&!g_exitRequested.load();
+    const bool mouseWanted=!destroying&&!g_exitRequested.load()&&(wanted||g_inputEdgeCursorMouseWanted.load(std::memory_order_acquire));
     if(wanted){
         if(!g_inputEdgeKeyboardHook){g_inputEdgeKeyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,inputEdgeKeyboardHookProc,GetModuleHandleW(nullptr),0);g_inputEdgeKeyboardError.store(g_inputEdgeKeyboardHook?ERROR_SUCCESS:GetLastError());}
-        if(!g_inputEdgeMouseHook){g_inputEdgeMouseHook=SetWindowsHookExW(WH_MOUSE_LL,inputEdgeMouseHookProc,GetModuleHandleW(nullptr),0);g_inputEdgeMouseError.store(g_inputEdgeMouseHook?ERROR_SUCCESS:GetLastError());}
     }else{
         if(g_inputEdgeKeyboardHook){if(UnhookWindowsHookEx(g_inputEdgeKeyboardHook))g_inputEdgeKeyboardHook=nullptr;else g_inputEdgeKeyboardError.store(GetLastError());}
-        if(g_inputEdgeMouseHook){if(UnhookWindowsHookEx(g_inputEdgeMouseHook))g_inputEdgeMouseHook=nullptr;else g_inputEdgeMouseError.store(GetLastError());}
     }
+    if(mouseWanted){if(!g_inputEdgeMouseHook){g_inputEdgeMouseHook=SetWindowsHookExW(WH_MOUSE_LL,inputEdgeMouseHookProc,GetModuleHandleW(nullptr),0);g_inputEdgeMouseError.store(g_inputEdgeMouseHook?ERROR_SUCCESS:GetLastError());}}
+    else if(g_inputEdgeMouseHook){if(UnhookWindowsHookEx(g_inputEdgeMouseHook))g_inputEdgeMouseHook=nullptr;else g_inputEdgeMouseError.store(GetLastError());}
     g_inputEdgeKeyboardInstalled.store(g_inputEdgeKeyboardHook!=nullptr);g_inputEdgeMouseInstalled.store(g_inputEdgeMouseHook!=nullptr);g_inputEdgeHookReconcileTick.store(GetTickCount64(),std::memory_order_release);SetLastError(saved);
+}
+static void inputEdgeSetCursorMouseWanted(bool wanted) noexcept {
+    if(g_inputEdgeCursorMouseWanted.exchange(wanted,std::memory_order_acq_rel)!=wanted)inputEdgeReconcileOnUi(false);
 }
 static void inputEdgeUpdateGate(bool wanted,ULONGLONG now) noexcept {
     const DWORD saved=GetLastError();
@@ -136,6 +143,7 @@ static void inputEdgeFlushEvidence(const json& idle,ULONGLONG now,bool force=fal
         if(receipt){receipt->drained=snapshot.drained;receipt->enabled=snapshot.enabled;receipt->events=snapshot.count;receipt->overwritten=snapshot.overwritten;receipt->contention=snapshot.contention;receipt->lastSequence=snapshot.count?snapshot.events[snapshot.count-1].sequence:0;}
         if(!snapshot.drained){if(receipt)receipt->status="recorder-contended";SetLastError(saved);return;}
         static bool previousKeyboard=false,previousMouse=false,haveCoverage=false;
+        static std::uint64_t previousEpoch=0;
         const bool keyboard=g_inputEdgeKeyboardInstalled.load(),mouse=g_inputEdgeMouseInstalled.load();
         const bool coverageChanged=!haveCoverage||keyboard!=previousKeyboard||mouse!=previousMouse;
         if(!snapshot.enabled&&!snapshot.count&&!snapshot.discardedOnConfig){if(receipt)receipt->status="diagnostics-disabled";SetLastError(saved);return;}
@@ -161,18 +169,21 @@ static void inputEdgeFlushEvidence(const json& idle,ULONGLONG now,bool force=fal
             }
         }
         const auto drainId=++g_inputEdgeDrainSequence;
-        json row={{"schemaVersion",1},{"drainId",drainId},{"drainTick",now},{"configEpoch",snapshot.epoch},{"enabled",snapshot.enabled},{"events",std::move(events)},{"rawDeviceNamesAtDrain",std::move(devices)},
+        const auto keyboardError=g_inputEdgeKeyboardError.load(),mouseError=g_inputEdgeMouseError.load();
+        const auto postFailures=g_inputEdgeHookPostsFailed.load(),logFailures=g_inputEdgeLogFailures.load();
+        json row={{"schemaVersion",ymcc::inputEdgeLogScope::rowSchema},{"drainId",drainId},{"drainTick",now},{"configEpoch",snapshot.epoch},{"enabled",snapshot.enabled},{"events",std::move(events)},{"rawDeviceNamesAtDrain",std::move(devices)},
             {"capacity",ymcc::inputEdges::capacity},{"overwrittenOldest",snapshot.overwritten},{"droppedContention",snapshot.contention},{"discardedOnConfig",snapshot.discardedOnConfig},{"coalescedRepeatDowns",snapshot.repeats},
-            {"passiveKeyboardHookInstalledCached",keyboard},{"passiveMouseHookInstalledCached",mouse},{"keyboardHookInstallError",g_inputEdgeKeyboardError.load()},{"mouseHookInstallError",g_inputEdgeMouseError.load()},
+            {"passiveKeyboardHookInstalledCached",keyboard},{"passiveMouseHookInstalledCached",mouse},{"keyboardHookInstallError",keyboardError},{"mouseHookInstallError",mouseError},
             {"lastKeyboardHookTick",g_inputEdgeLastKeyboardTick.load()},{"lastMouseButtonHookTick",g_inputEdgeLastMouseTick.load()},{"hookCallbacksSinceProcessStart",g_inputEdgeHookCallbacks.load()},{"rawCallbacksSinceProcessStart",g_inputEdgeRawCallbacks.load()},
-            {"hookPostFailures",g_inputEdgeHookPostsFailed.load()},{"logFailures",g_inputEdgeLogFailures.load()},{"mouseMoveObservationsCoordinatesOmitted",g_inputEdgeMouseMoves.load()},{"selfUnicodeInputsContentsOmitted",g_inputEdgeUnicodeOmitted.load()},
-            {"hookFlagMeaning","keyboard:1=extended,2=lower-IL-injected,16=injected,128=up;mouse:1=injected,2=lower-IL-injected;flags-are-not-sender-PID"},
-            {"selfReturnMeaning","count-based prefix assumption only;not OS or consumer acceptance;inspection capped at64"},
-            {"coverage","diagnostic-only passive LL callbacks, raw keyboard/mouse and observed YMCC own send returns;upstream hooks may suppress;Windows can silently remove timed-out hooks;installed handle is not liveness proof"},
-            {"sequenceScope","callback-arrival order within this writer;not hardware,network or cross-process ordering"},{"completeSystemCoverage",false},{"externalSenderPidKnown",false},{"unicodePacketScanContentsOmitted",true},{"textDecoded",false},{"mouseCoordinatesRetained",false}};
+            {"hookPostFailures",postFailures},{"logFailures",logFailures},{"mouseMoveObservationsCoordinatesOmitted",g_inputEdgeMouseMoves.load()},{"selfUnicodeInputsContentsOmitted",g_inputEdgeUnicodeOmitted.load()},
+            {"completeSystemCoverage",false},{"externalSenderPidKnown",false},{"unicodePacketScanContentsOmitted",true},{"textDecoded",false},{"mouseCoordinatesRetained",false}};
+        const bool keepScope=force||receipt||coverageChanged||snapshot.epoch!=previousEpoch||!snapshot.enabled||!snapshot.count||
+            snapshot.overwritten||snapshot.contention||snapshot.discardedOnConfig||keyboardError||mouseError||postFailures||logFailures;
+        if(keepScope)row.update(ymcc::inputEdgeLogScope::fields());
+        else row[ymcc::inputEdgeLogScope::marker]=ymcc::inputEdgeLogScope::version;
         for(const char* key:{"hostRunId","hostEpoch","hostPersona","hostProcessPresent","samplePowerGeneration","recentStopSignalContext"})if(idle.contains(key))row[key]=idle[key];
         if(receipt){receipt->drainId=drainId;receipt->emissionAttempted=true;receipt->status="emission-attempted-no-sink-ack";}
-        appendDomainLog("focus","input-edge-window",row);previousKeyboard=keyboard;previousMouse=mouse;haveCoverage=true;
+        appendDomainLog("focus","input-edge-window",row);previousKeyboard=keyboard;previousMouse=mouse;previousEpoch=snapshot.epoch;haveCoverage=true;
     }catch(...){g_inputEdgeLogFailures.fetch_add(1,std::memory_order_relaxed);if(receipt)receipt->status="diagnostic-exception";}
     SetLastError(saved);
 }

@@ -11,7 +11,7 @@ using Json=nlohmann::json;
 inline std::string text(const Json& j,const char* key){const auto it=j.find(key);return it!=j.end()&&it->is_string()?it->get<std::string>():std::string{};}
 inline bool allowed(const std::string& url){return url.size()<=8192&&std::regex_match(url,[]()->const std::regex&{static const std::regex pattern(R"(https://(?:[a-zA-Z0-9-]+\.)*(?:steamstatic\.com|steampowered\.com|steamusercontent\.com|akamaihd\.net|eccdnx\.com|queniuqe\.com)/[^\s<>"\\]+)",std::regex::icase);return pattern;}());}
 inline Json candidates(int appId,const Json& data){
- if(appId<=0||!data.is_object()||data.value("steam_appid",0)!=appId||text(data,"type")!="game")throw std::runtime_error("media-video-identity-unconfirmed");
+ if(appId<=0||!data.is_object()||data.value("steam_appid",0)!=appId||(text(data,"type")!="game"&&text(data,"type")!="demo"))throw std::runtime_error("media-video-identity-unconfirmed");
  Json result={{"appId",appId},{"query",text(data,"name")},{"candidates",Json::array()}};std::set<std::string> seen;
  const auto movies=data.value("movies",Json::array());if(!movies.is_array())throw std::runtime_error("media-video-catalog-invalid");
  for(const auto& movie:movies){if(!movie.is_object())continue;std::string url;Json sources=Json::object();

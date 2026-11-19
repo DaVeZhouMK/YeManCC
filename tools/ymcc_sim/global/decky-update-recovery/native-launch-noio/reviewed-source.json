@@ -4,27 +4,63 @@
   "files": [
     {
       "path": "native/steam_native_launch.h",
-      "sha256": "55d25e3a9095cf73ddcbe998f0b004d31cebe63367afbc8c0cca96f48eedde42"
+      "sha256": "f59e9310ccd5a644850fd0c1d85b1e9d9a3fa9404f0cb363e9034b3206effd81"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce"
+      "sha256": "53a22f98287eaf1b14cdf25a5431f269d1bcf4589cd87c02e8ec777660c7fd00"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f"
+      "sha256": "c1cdfe19cac931d2f6aa5ea9019e6970ee7a082b9e472acdafdd47ebe8f23dae"
     },
     {
       "path": "native/process_efficiency.h",
-      "sha256": "3e48125292aa52b16bf363672e0c8907c700062bd0cf0d8a87438c3ed15af681"
+      "sha256": "434cd2e9b83e103f9d908e60c4507adea29eca06a63770644df1a733ccd89340"
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49"
+      "sha256": "a29a95b2f444e421b41ed5e11ca250ecde42c586bf1601a8dc2270b9d611e03c"
     },
     {
       "path": "deps/json/json.hpp",
       "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    },
+    {
+      "path": "native/process_inventory.h",
+      "sha256": "5a390724722b0d1f4b949c4a3d37267ab9145790e17ab460122df630db6b666d"
+    },
+    {
+      "path": "native/process_handle_inheritance.h",
+      "sha256": "e6558200f01835d7a62ea3cdbe8863ebc995ac5c474af14a4f9985daa3db7747"
+    },
+    {
+      "path": "tools/steam_boot_selected_cases.inc",
+      "sha256": "02550757c2c16b59b2460e11f95ff95b003151b7e1ea2351fe1dcc54922d674c"
+    },
+    {
+      "path": "native/steam_offline_mutation_gate.h",
+      "sha256": "ccc938d98f5280aad6adf981b229f6a77cd97967e2d14f3d179114a01e37dbdc"
+    },
+    {
+      "path": "tools/steam_launch_actual_manual_cases.inc",
+      "sha256": "5318d53854129efe7ee841b9039383004207b9bf9744a29d482ea8e5099dcd23"
+    },
+    {
+      "path": "native/steam_launch_path.h",
+      "sha256": "55ae25edb7e7bde78095a42015c21c3b22aa76a4976e0ac83deea98a69d2d2bb"
+    },
+    {
+      "path": "native/steam_launch_observation.h",
+      "sha256": "d196a44de936a87f048b2fa247d0d14155ec11977acb99db855e1534c235a103"
+    },
+    {
+      "path": "native/steam_launch_owner_observation.h",
+      "sha256": "5f1c2a679d7ef9de19ef61e0420997eeba5c2d8ba958cdadf53b975ab9bb990a"
+    },
+    {
+      "path": "tools/steam_launch_noio_facts.h",
+      "sha256": "53c0cb9b00885ab6fba120a2a00346490b3c240f3e6c6bce9fb35e7a0ad5d151"
     }
   ],
   "reviewNote": "2026-10-24 manual-only fixed Steam Shell fallback, no cooldown for explicit action, unchanged logon grant/fence. Reviewed restricted memory ports; no real Steam/BAT/registry calls.",
@@ -33,5 +69,181 @@
     "scope": "Actual current producer headers; original consumers, negative cases, budgets and production files unchanged",
     "sourceApprovalGranted": false,
     "unexecutedStartupRepair": "CopyFileW is an explicit deny terminal; startup repair success is outside this fixture coverage"
+  },
+  "currentFixtureReview": {
+    "date": "2026-11-07",
+    "scope": "Current unchanged producer startup OFF/delete, guarded raw backup repair and seven added original assertions; creator policy unchanged by fixture.",
+    "originalPositiveCases": 62,
+    "originalSemanticNegatives": 7,
+    "sourceApprovalGranted": false,
+    "priorReviewedSourceSha256": "f21f671ef7d3006172ee36098190b697eee8a5b0705e9cb69dc90c08dc185f16",
+    "priorOriginalPositiveCases": 55,
+    "addedOriginalPositiveCases": 7,
+    "backup": "Exact owned .earlystart -> canonical .ymcc-before-42420-clock-sequence, CREATE_NEW, <=1MiB raw bytes; no native CopyFileW and no foreign path."
+  },
+  "inventorySuccessor20261113": {
+    "priorReviewedSource": {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\decky-update-recovery\\native-launch-noio\\reviewed-source.json",
+      "bytes": 2165,
+      "sha256": "457347847ece58f1b226a4fb2e4f063712865c08436eb02ee834e0319fa643c6"
+    },
+    "scope": "Two launch census readers use only original processInventory fresh0; compiler-proven default body remains unchanged. Existing four stale source pins advanced only to actual compiled candidate graph.",
+    "actualOriginalAssertions": 68,
+    "actualInventoryCases": 12,
+    "defaultInventoryVariantRuns": false,
+    "oldDefaultPositive62IsHistorical": true,
+    "sourceApprovalGranted": false,
+    "actualSourceGraph": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\NativeLaunchInventory-20261113\\GRAPH-original-noio.json",
+      "bytes": 117699,
+      "sha256": "4f17c8c0531c8ce33ed7afc2343549ed47b7adf25120d94a6d820e189ad255cb"
+    }
+  },
+  "bootSelectedSuccessor20261115": {
+    "date": "2026-11-15",
+    "scope": "Independent BootSelected origin; shared receipt and automatic fence, plain selected path with no manual fallback or addon cascade. Final synchronous gate captures real leaf result once; actual WindowsPorts rechecks cheap public power/current after final process census. Default recipe remains unchanged; private actual-Kernel composition adapter is not imported.",
+    "sourceInputs": [
+      {
+        "relative": "native/steam_native_launch.h",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamBootSelectedLaunch-20261115\\composition-source-r3\\native\\steam_native_launch.h",
+          "bytes": 8838,
+          "sha256": "f3b2969daa936998933dd3d60df8a706fc880b1431bb8e497e952a998098fae2"
+        }
+      },
+      {
+        "relative": "native/steam_native_launch_windows.h",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamBootSelectedLaunch-20261115\\composition-source-r3\\native\\steam_native_launch_windows.h",
+          "bytes": 27584,
+          "sha256": "7b0486da9501e0a3fdad23a8bc84068a9ff5a618ba499a501fb862ddb06ab8ec"
+        }
+      },
+      {
+        "relative": "tools/steam_native_launch_selftest.cpp",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamBootSelectedLaunch-20261115\\composition-source-r3\\tools\\steam_native_launch_selftest.cpp",
+          "bytes": 25591,
+          "sha256": "876fc2fcd913958f4182dd9705d3dad9e820efb6a8e40d1659ef107d46c7610f"
+        }
+      },
+      {
+        "relative": "tools/steam_boot_selected_cases.inc",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamBootSelectedLaunch-20261115\\composition-source-r3\\tools\\steam_boot_selected_cases.inc",
+          "bytes": 15653,
+          "sha256": "02550757c2c16b59b2460e11f95ff95b003151b7e1ea2351fe1dcc54922d674c"
+        }
+      }
+    ],
+    "backend": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\BACKEND-EVIDENCE-READY.json",
+      "bytes": 4480,
+      "sha256": "1ceca3e0ffe19ad1ff43886b6feff8171efbce8a0b344c8560735192ebf248c7"
+    },
+    "compositionR2": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\composition-r2\\COMPOSITION-RAW-candidate.json",
+      "bytes": 10994,
+      "sha256": "e02f3ff3fc42a20dc85c7ce50b4f93db1b90eb1098f7b7f81ed76841ec4c80f2"
+    },
+    "settingsControl": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\composition-r2\\COMPOSITION-RAW-settings-control.json",
+      "bytes": 925,
+      "sha256": "79eac7b08ff40d74c4a984123bff2112e7bfeb1ff9eb2310ce167105292bb0e3"
+    },
+    "powerControl": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\composition-r2\\COMPOSITION-RAW-power-control.json",
+      "bytes": 925,
+      "sha256": "048ea2da49b5bc22714d5eb723a489ef30e42cfddd525e6de65b37fbfe5013ac"
+    },
+    "censusBefore": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\census-before-r3\\COMPOSITION-RAW-candidate.json",
+      "bytes": 947,
+      "sha256": "8f26522eae3f57a7450574a02c6cbedbe23a7aac96f2ef4e3335b8144b06cf73"
+    },
+    "censusAfter": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\census-after-r3\\COMPOSITION-RAW-candidate.json",
+      "bytes": 1017,
+      "sha256": "5b5892520dbe1741fce25c79ba162d7368b765f3a0e1a51928af5d67d2190818"
+    },
+    "publicationOnlyAfter": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\current-publication-r3\\COMPOSITION-RAW-candidate.json",
+      "bytes": 859,
+      "sha256": "be9b5523028b8e2aea16ad9300a60476bfdf0725cc6c3c806f4f87b2deaec5a4"
+    },
+    "adapterUnchanged": true,
+    "adapterSha256": "699de4b3a092fb99499020373e410413950589a34cf1b9b659b0fe8a417206e0",
+    "defaultGroupsExecuted": false,
+    "sourceApprovalGranted": false,
+    "newCanonicalIds": 0,
+    "predecessor": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamUnifiedChannel-20261112\\BootSelectedLaunch-20261115\\support-before\\tools\\ymcc_sim\\global\\decky-update-recovery\\native-launch-noio\\reviewed-source.json",
+      "bytes": 3485,
+      "sha256": "6609ca9c94984640170ad99dbb7f54da17e0d09815b4be4b5036054a2e308e13"
+    }
+  },
+  "offlineMutationMemorySuccessor20261115": {
+    "status": "PRIVATE_STATIC_REVIEW_CANDIDATE_NOT_GLOBAL_APPROVAL",
+    "predecessor": {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\decky-update-recovery\\native-launch-noio\\reviewed-source.json",
+      "bytes": 8285,
+      "sha256": "9121e6f04ed0cf932a6673d88cb15129853d085d49754a5ca197d603fddbdeb6"
+    },
+    "scope": "Only new Guard + existing reviewed WindowsPorts product and temporary exact original actual-manual selector; previous historical fields retained",
+    "sourceApprovalGranted": false,
+    "affectedPins": [
+      {
+        "relative": "native/steam_native_launch_windows.h",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r2\\native\\steam_native_launch_windows.h",
+          "bytes": 28264,
+          "sha256": "5f8ba1486ee9c142a6ff869e7242e9670474aa423146ecc9aa9795ccd31e9b22"
+        }
+      },
+      {
+        "relative": "native/steam_offline_mutation_gate.h",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r2\\native\\steam_offline_mutation_gate.h",
+          "bytes": 1392,
+          "sha256": "ccc938d98f5280aad6adf981b229f6a77cd97967e2d14f3d179114a01e37dbdc"
+        }
+      },
+      {
+        "relative": "tools/steam_native_launch_selftest.cpp",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r2\\tools\\steam_native_launch_selftest.cpp",
+          "bytes": 25974,
+          "sha256": "74853127fbd05b95d008fdb1e7aeccf4b3c3134b50e74d6145001189f54ce5e5"
+        }
+      },
+      {
+        "relative": "tools/steam_launch_actual_manual_cases.inc",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r2\\tools\\steam_launch_actual_manual_cases.inc",
+          "bytes": 5621,
+          "sha256": "35c4952b406af2fee6e7527ebd162a84153eea5f2c0bfec969859b527fb7d64f"
+        }
+      }
+    ],
+    "unrelatedHistoricalPinDrift": [],
+    "defaultGroupsExecuted": false,
+    "workerMembershipConflict": "Existing native-launch-worker requires six reviewed files, predecessor currently nine, private successor eleven; not fixed or bypassed"
+  },
+  "canonicalCppScaffoldCleanupSuccessor20261115": {
+    "scope": "Only obsolete FILE_GATE name removed from directed-mode exclusion. No FILE_GATE include or execution branch existed in r3 CPP. Private unconsumed files excluded from deliverable.",
+    "predecessorCpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r3\\tools\\steam_native_launch_selftest.cpp",
+      "bytes": 25974,
+      "sha256": "74853127fbd05b95d008fdb1e7aeccf4b3c3134b50e74d6145001189f54ce5e5"
+    },
+    "currentCpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SteamLibraryColdStartAdmission-20261115\\candidate-r4\\tools\\steam_native_launch_selftest.cpp",
+      "bytes": 25935,
+      "sha256": "4c2fd347af8581c72420d11cd2a8f13e126d0a495c6eabee03c0fcd9f73677b8"
+    },
+    "onlyAdvancedSourcePin": "tools/steam_native_launch_selftest.cpp",
+    "sourceApprovalGranted": false,
+    "defaultGroupsExecuted": false,
+    "oldFileGate7ProofRetained": true
   }
 }

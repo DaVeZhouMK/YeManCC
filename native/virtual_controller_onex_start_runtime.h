@@ -1,5 +1,5 @@
 #pragma once
-// OneX ordinary Start only. All hardware work stays in the existing serialized
+// OneX and the four registered AOKZOE models: ordinary Start only. All hardware work stays in the existing serialized
 // Host owner and R3 ticket. This does not grant native-OFF isolation, change OEM
 // protocols or target preferences, or borrow GPD/ROG recovery authority.
 // VC-ONEX-START-20261105-R1 is a T1 sub-step of VC-LIFECYCLE-20261020-R3:
@@ -20,12 +20,20 @@
 // guard the single dispatch and same-root fresh read. No ancestor/all-device reset.
 // Source-pending motion/touch targets get one bounded pre-hide observation in
 // the same original ticket; absence still retains the generic source-free path.
+// Keep family and canonical model in agreement at every live Start guard.
+// AOKZOE inherits the selected-source refresh, not OneX OEM protocols.
+static bool inputHostOneXMachineEligible() {
+    if(!g_machineIdentity.resolved)return false;
+    const auto binding=ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass);
+    if(!binding.known())return false;
+    return g_machineIdentity.family==(ymcc::capabilities::onexVirtual::isAokzoe(binding)?
+        YmccFamily::Aokzoe:YmccFamily::OneXPlayer);
+}
 static bool externalPrioritySlot(const HidHidePhysicalIdentity&,unsigned&,unsigned*,uint64_t*);
 static bool ymStartAdmitSource();
 static std::vector<std::wstring> inputHostOneXLocations(const std::string& root) {return msiForegroundIsolationLocations(root);}
 static int externalPriorityUsbPortKindWithEvidence(const std::string&,json*,DWORD);
-static thread_local json t_inputHostOneXPortEvidence=json::object();
-static int inputHostOneXPortKind(const std::string& root) {return externalPriorityUsbPortKindWithEvidence(root,&t_inputHostOneXPortEvidence,0);}
+static int inputHostOneXPortKind(const std::string& root,json& evidence) {return externalPriorityUsbPortKindWithEvidence(root,&evidence,0);}
 static bool inputHostOneXSourceSlot(const HidHidePhysicalIdentity& source,unsigned& slot) {return externalPrioritySlot(source,slot,nullptr,nullptr);}
 static bool inputHostOneXRootStarted(const std::string& root) {
     auto wide=U2W(root);DEVINST node=0;ULONG status=0,problem=0;
@@ -92,7 +100,7 @@ static bool inputHostOneXStartCurrent() {
     if(!g_inputHostMx.ownedByCurrentThread() || !e->ticket || !view.locked || !view.remainingMs ||
        view.requestId!=e->ticket || (view.phase!="pending" && view.phase!="verifying") || now>=e->deadline ||
        view.persona!=e->persona || inputHostConfiguredPersona()!=e->persona ||
-       !g_machineIdentity.resolved || g_machineIdentity.family!=YmccFamily::OneXPlayer ||
+       !inputHostOneXMachineEligible() ||
        g_machineIdentity.deviceClass!=e->deviceClass ||
        !ymcc::capabilities::onexVirtual::recognized(e->binding,e->deviceClass) ||
        !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
@@ -257,17 +265,18 @@ static bool inputHostOneXStartMayIssue() {
 // rather than creating a target first and hiding an already-open source later.
 // This only waits/admits; it grants no new device selection or port authority.
 static int inputHostOneXAwaitPreHideSource(uint64_t ticket,std::unique_lock<InputHostMutex>& hostLock){
-    if(!g_machineIdentity.resolved || g_machineIdentity.family!=YmccFamily::OneXPlayer ||
-       !ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass).known())return 0;
+    if(!inputHostOneXMachineEligible())return 0;
     const auto begin=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(begin);
     const auto epoch=g_inputHostEpoch,power=currentPowerGeneration(),intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
     const auto run=g_inputHostRunId,persona=inputHostConfiguredPersona();const auto process=g_inputHostProcess;
+    const auto deviceClass=g_machineIdentity.deviceClass;const auto family=g_machineIdentity.family;
     auto deadline=begin+(std::min)(view.remainingMs,1000ULL);
     if(g_inputHostSwitchRecoveryStartDeadline)deadline=(std::min)(deadline,g_inputHostSwitchRecoveryStartDeadline);
     const auto current=[&](){const auto now=inputHostStartProtectionNow();const auto v=g_virtualStartProtection.view(now);
         return ticket && v.requestId==ticket && v.locked && v.remainingMs && v.persona==persona &&
             (v.phase=="pending" || v.phase=="verifying") &&
-            g_machineIdentity.family==YmccFamily::OneXPlayer && g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+            inputHostOneXMachineEligible() && g_machineIdentity.family==family && g_machineIdentity.deviceClass==deviceClass &&
+            g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
             !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
             intent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) && inputHostConfiguredPersona()==persona &&
             currentPowerGeneration()==power && g_inputHostBoundPowerGeneration==power && g_inputHostEpoch==epoch &&
@@ -279,7 +288,7 @@ static int inputHostOneXAwaitPreHideSource(uint64_t ticket,std::unique_lock<Inpu
     const auto note=[&](const char* reason){appendNativeLifecycleLog("input-host-onex-start-refresh",{
         {"policy","VC-ONEX-START-20261105-R1"},{"repairRevision","VC-ONEX-FAMILY-GAME-CANDIDATE-R1"},
         {"stage","pre-hide-source-observation"},{"reason",reason},{"requestId",ticket},{"hostEpoch",epoch},{"runId",run},
-        {"persona",persona},{"elapsedMs",inputHostStartProtectionNow()-begin},{"observationMaxMs",1000},
+        {"persona",persona},{"deviceClass",deviceClass},{"elapsedMs",inputHostStartProtectionNow()-begin},{"observationMaxMs",1000},
         {"driverOperationMayHaveIssued",false},{"freshSameRootSource",false},{"externalSuppressionVerified",false},
         {"filterAttachmentProven",false},{"newTargetCreatedHere",false}});};
     if(!current()){note("original-execution-not-current");return -1;}
@@ -294,16 +303,16 @@ static int inputHostOneXAwaitPreHideSource(uint64_t ticket,std::unique_lock<Inpu
 // Returns 0 optional no-op, 1 completed with a fresh same-root source, -1 failed.
 static int inputHostOneXPostHideBeforeTarget(uint64_t ticket,std::unique_lock<InputHostMutex>& hostLock) {
     using namespace ymcc::capabilities::onexVirtual;
-    if(!g_machineIdentity.resolved || g_machineIdentity.family!=YmccFamily::OneXPlayer)return 0;
+    if(!inputHostOneXMachineEligible())return 0;
     const auto binding=ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass);
-    t_inputHostOneXPortEvidence=json::object();size_t locationCount=0;
+    json portEvidence=json::object();size_t locationCount=0;
     unsigned boundaryRequests=0,boundaryObservedEpoch=0,boundaryRequestedEpoch=0;
     bool boundaryEpochRequested=false;
     json selectedCacheAlignment=nullptr;
     const auto note=[&](const char* stage,const char* reason,bool issued,bool sourceReady){
         appendNativeLifecycleLog("input-host-onex-start-refresh",{{"policy","VC-ONEX-START-20261105-R1"},{"repairRevision","VC-ONEX-SELECTED-CHILD-20261105-R1"},
             {"stage",stage},{"reason",reason},{"requestId",ticket},{"persona",inputHostConfiguredPersona()},
-            {"deviceId",std::string(binding.deviceId())},{"locationPathCount",locationCount},{"usbTopology",t_inputHostOneXPortEvidence},
+            {"deviceId",std::string(binding.deviceId())},{"deviceClass",g_machineIdentity.deviceClass},{"locationPathCount",locationCount},{"usbTopology",portEvidence},
             {"sourceInterfacePathKnown",!g_hidHideVisibilityJournal.physical.baseContainerDevicePath.empty()},
             {"reverseBindingApiResolved",g_ymccOpenXInputAvailable.load(std::memory_order_acquire)},
             {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"driverOperationMayHaveIssued",issued},
@@ -347,7 +356,7 @@ static int inputHostOneXPostHideBeforeTarget(uint64_t ticket,std::unique_lock<In
     e.locations=inputHostOneXLocations(e.root);locationCount=e.locations.size();
     // HC acts on the selected physical controller, not its removable-port label.
     // Retain the exact query evidence without converting 1/unknown into internal.
-    try {(void)inputHostOneXPortKind(e.root);}catch(...) {t_inputHostOneXPortEvidence=json{{"reason","diagnostic-query-exception"}};}
+    try {(void)inputHostOneXPortKind(e.root,portEvidence);}catch(...) {portEvidence=json{{"reason","diagnostic-query-exception"}};}
     if(e.locations.empty())return skip("selected-source-location-unproven");
     OneXSourceSlotProof initialProof;
     if(!inputHostOneXBindSourceSlot(physical,initialProof) || initialProof.power!=e.power)return skip("selected-source-root-slot-unproven");

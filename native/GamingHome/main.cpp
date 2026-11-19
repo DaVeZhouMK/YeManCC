@@ -15,27 +15,41 @@
 #include <algorithm>
 #include <stdexcept>
 #include "flow.h"
+#include "../steam_information_client.h"
+#include "../steam_client_action_channel.h"
+#include "../steam_home_cancel_messages.h"
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
 namespace gh = ymcc::gaminghome;
 namespace {
-struct Handle { HANDLE h=nullptr; ~Handle(){ if(h && h!=INVALID_HANDLE_VALUE) CloseHandle(h); } };
+struct Handle {
+    HANDLE h=nullptr;
+    explicit Handle(HANDLE value=nullptr):h(value){}
+    ~Handle(){ reset(); }
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+    void reset(HANDLE value=nullptr) { if(h && h!=INVALID_HANDLE_VALUE) CloseHandle(h); h=value; }
+};
 struct Bstr { BSTR s; explicit Bstr(const wchar_t* v):s(SysAllocString(v)){} ~Bstr(){SysFreeString(s);} operator BSTR() const{return s;} };
 std::wstring lower(std::wstring x) { std::transform(x.begin(),x.end(),x.begin(),[](wchar_t c){return wchar_t(towlower(c));}); return x; }
-std::wstring image(DWORD pid) {
-    Handle p{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid)};
-    if(!p.h) return {};
+std::wstring processImage(HANDLE process) {
+    if(!process) return {};
     wchar_t text[32768]; DWORD size=32768;
-    return QueryFullProcessImageNameW(p.h,0,text,&size) ? lower(std::wstring(text,size)) : L"";
+    return QueryFullProcessImageNameW(process,0,text,&size) ? lower(std::wstring(text,size)) : L"";
 }
 bool sameSession(DWORD pid) { DWORD a=0,b=0; return ProcessIdToSessionId(GetCurrentProcessId(),&a) && ProcessIdToSessionId(pid,&b) && a==b; }
-bool ymccPresent() {
+HANDLE findYmccProcess() {
     Handle snap{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0)};
-    if(snap.h==INVALID_HANDLE_VALUE) return false;
+    if(snap.h==INVALID_HANDLE_VALUE) return nullptr;
     PROCESSENTRY32W p{sizeof(p)};
-    for(BOOL more=Process32FirstW(snap.h,&p);more;more=Process32NextW(snap.h,&p))
-        if(_wcsicmp(p.szExeFile,L"YeManCC.exe")==0 && sameSession(p.th32ProcessID) && image(p.th32ProcessID)==lower(gh::Ymcc)) return true;
-    return false;
+    for(BOOL more=Process32FirstW(snap.h,&p);more;more=Process32NextW(snap.h,&p)) {
+        if(_wcsicmp(p.szExeFile,L"YeManCC.exe")!=0 || !sameSession(p.th32ProcessID)) continue;
+        Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,p.th32ProcessID)};
+        if(process.h && processImage(process.h)==lower(gh::Ymcc) && WaitForSingleObject(process.h,0)==WAIT_TIMEOUT) {
+            HANDLE result=process.h;process.h=nullptr;return result;
+        }
+    }
+    return nullptr;
 }
 std::wstring registryString(HKEY key,const wchar_t* path,const wchar_t* name) {
     wchar_t text[32768]; DWORD bytes=sizeof(text);
@@ -49,6 +63,9 @@ bool selectedHome() {
     if(GetCurrentPackageFamilyName(&size,name.data())!=ERROR_SUCCESS) return false;
     name.resize(size-1);
     return registryString(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\GamingConfiguration",L"GamingHomeApp")==name+L"!Home";
+}
+gh::SteamPresence homeSteamPresence(const ymcc::steaminfo::Facts& source) noexcept {
+    return gh::steamPresence(source.available,source.startupWindow.completed,source.presence,source.processPid,source.processBirth);
 }
 bool principalIsCurrentUser(const wchar_t* user) {
     if(!user || !*user) return false;
@@ -68,12 +85,6 @@ bool principalIsCurrentUser(const wchar_t* user) {
     std::vector<BYTE> sidData(sidBytes);std::vector<wchar_t> domain(domainChars);
     return LookupAccountNameW(nullptr,user,sidData.data(),&sidBytes,domain.data(),&domainChars,&use) &&
         EqualSid(sidData.data(),reinterpret_cast<TOKEN_USER*>(info.data())->User.Sid);
-}
-std::wstring steamRoot() {
-    auto exe=registryString(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamExe");
-    if(!exe.empty()) return lower(fs::path(exe).parent_path().lexically_normal().wstring());
-    auto root=registryString(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WOW6432Node\\Valve\\Steam",L"InstallPath");
-    return lower(fs::path(root).lexically_normal().wstring());
 }
 void logEvent(const char* event,const std::wstring& detail=L"") noexcept {
     try {
@@ -109,28 +120,30 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
 class WindowsPorts final:public gh::Ports {
     using Flag=BOOL(WINAPI*)();
     HMODULE api_=nullptr;Flag supported_=nullptr,active_=nullptr;
-    Handle mutex_; HWND splash_=nullptr,steam_=nullptr;
-    std::wstring root_;
+    Handle mutex_,ymcc_; HWND splash_=nullptr;
+    DWORD ymccPid_=0;
+    std::uint64_t ymccBirth_=0;
+    ymcc::steaminfo::Facts sourceFacts_;
+    std::uint64_t activationBegin_=0;
+    bool unknown_=false,commandBusy_=false;
     bool cancelled_=false;
-    struct WindowSearch { WindowsPorts* self;HWND found=nullptr; };
-    bool steamWindow(HWND hwnd) {
-        if(!IsWindow(hwnd)||!IsWindowVisible(hwnd)||hwnd==splash_)return false;
-        wchar_t cls[128]{};GetClassNameW(hwnd,cls,128);
-        if(wcscmp(cls,L"SDL_app"))return false;
-        DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
-        if(!sameSession(pid)||root_.empty())return false;
-        const auto path=image(pid);
-        const auto cef=root_+L"\\bin\\cef\\";
-        const bool owned=path==root_+L"\\steam.exe" || (path.starts_with(cef) && fs::path(path).filename()==L"steamwebhelper.exe");
-        RECT r{};if(!GetWindowRect(hwnd,&r))return false;
-        return gh::windowCandidate(true,true,owned,true,
-            (GetWindowLongPtrW(hwnd,GWL_EXSTYLE)&WS_EX_APPWINDOW)!=0,
-            (GetWindowLongPtrW(hwnd,GWL_STYLE)&WS_THICKFRAME)!=0,r.right-r.left,r.bottom-r.top);
+
+    bool ownerLive() const noexcept {
+        return ymcc_.h&&ymccPid_&&ymccBirth_&&WaitForSingleObject(ymcc_.h,0)==WAIT_TIMEOUT;
     }
-    static BOOL CALLBACK enumerate(HWND hwnd,LPARAM p) {
-        auto& search=*reinterpret_cast<WindowSearch*>(p);
-        if(search.self->steamWindow(hwnd)){search.found=hwnd;return FALSE;}return TRUE;
+
+    void captureOwner() {
+        if(!ymcc_.h){
+            ymcc_.reset(findYmccProcess());
+            if(!ymcc_.h)return;
+            FILETIME birth{},exit{},kernel{},cpu{};
+            ymccPid_=GetProcessId(ymcc_.h);
+            if(GetProcessTimes(ymcc_.h,&birth,&exit,&kernel,&cpu))
+                ymccBirth_=(std::uint64_t(birth.dwHighDateTime)<<32)|birth.dwLowDateTime;
+        }
+        if(!ownerLive())cancelled_=true;
     }
+
     void ensureSplash() {
         if(splash_||cancelled_)return;
         WNDCLASSW c{};c.hInstance=GetModuleHandleW(nullptr);c.lpfnWndProc=windowProc;c.lpszClassName=L"YMCCGamingHome";c.hCursor=LoadCursorW(nullptr,IDC_ARROW);
@@ -140,17 +153,12 @@ class WindowsPorts final:public gh::Ports {
         splash_=CreateWindowExW(0,c.lpszClassName,L"YMCC Steam 全屏主页",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,nullptr,nullptr,c.hInstance,nullptr);
         if(splash_)UpdateWindow(splash_);
     }
-    bool shell(const wchar_t* file,const wchar_t* directory=nullptr) {
-        SHELLEXECUTEINFOW s{sizeof(s)};s.fMask=SEE_MASK_NOCLOSEPROCESS|SEE_MASK_NOASYNC|SEE_MASK_FLAG_NO_UI;
-        s.lpVerb=L"open";s.lpFile=file;s.lpDirectory=directory;s.nShow=SW_HIDE;
-        const bool ok=ShellExecuteExW(&s)!=FALSE;if(s.hProcess)CloseHandle(s.hProcess);
-        if(!ok)logEvent("shell-failed",L"win32="+std::to_wstring(GetLastError()));return ok;
-    }
+
 public:
     WindowsPorts() {
         api_=LoadLibraryExW(L"api-ms-win-gaming-experience-l1-1-0.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
         if(api_){supported_=reinterpret_cast<Flag>(GetProcAddress(api_,"IsGamingFullScreenExperienceSupported"));active_=reinterpret_cast<Flag>(GetProcAddress(api_,"IsGamingFullScreenExperienceActive"));}
-        root_=steamRoot();
+
     }
     ~WindowsPorts(){if(IsWindow(splash_))DestroyWindow(splash_);if(api_)FreeLibrary(api_);}
     bool available() override {return supported_&&active_&&supported_();}
@@ -163,13 +171,42 @@ public:
     gh::Snapshot snapshot() override {
         if(splash_&&!IsWindow(splash_))cancelled_=true;
         bool active=active_&&active_()&&::selectedHome();
+        if(!active)cancelled_=true;
         if(active&&!cancelled_)ensureSplash();
-        HWND foreground=GetForegroundWindow();
-        if(steamWindow(foreground))steam_=foreground;
-        else {WindowSearch s{this};EnumWindows(enumerate,reinterpret_cast<LPARAM>(&s));steam_=s.found;}
-        return {active,ymccPresent(),steam_!=nullptr,cancelled_};
+        sourceFacts_={};
+        if(active&&!cancelled_)captureOwner();
+        if(active&&!cancelled_&&ymcc_.h) {
+            sourceFacts_=ymcc::steaminfo::readHomeStartupWindow(ymccPid_,ymccBirth_);
+            if(!ownerLive()){cancelled_=true;sourceFacts_={};}
+        }
+        return {active,!cancelled_&&ymcc_.h,sourceFacts_.available&&sourceFacts_.startupWindow.known,cancelled_,homeSteamPresence(sourceFacts_)};
     }
-    bool startYmccTask() override {
+    bool current(gh::Action action) override {
+        if(ymcc::steamaction::homeCancelPending(splash_))cancelled_=true;
+        if(splash_&&!IsWindow(splash_))cancelled_=true;
+        if(cancelled_ || !(active_&&active_()) || !::selectedHome()) {cancelled_=true;return false;}
+        switch(action) {
+        case gh::Action::EnsureYmcc: return true;
+        case gh::Action::StartSteam:
+        case gh::Action::ShowHome:
+        case gh::Action::FocusWindow:
+            if(!ymcc_.h) return false;
+            if(!ownerLive()) {cancelled_=true;return false;}
+            return true;
+        }
+        return false;
+    }
+    bool dispatch(gh::Action action,const gh::Current& current) override {
+        switch(action) {
+        case gh::Action::EnsureYmcc: return startYmccTask(current);
+        case gh::Action::StartSteam:
+        case gh::Action::ShowHome:
+        case gh::Action::FocusWindow: return requestSteam(action,current);
+        }
+        return false;
+    }
+private:
+    bool startYmccTask(const gh::Current& current) {
         ComPtr<ITaskService> service;HRESULT h=CoCreateInstance(CLSID_TaskScheduler,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&service));
         VARIANT empty;VariantInit(&empty);
         if(SUCCEEDED(h))h=service->Connect(empty,empty,empty,empty);
@@ -202,24 +239,43 @@ public:
         if(owned)h=def->get_Triggers(&triggers);else h=E_ACCESSDENIED;
         if(SUCCEEDED(h))h=triggers->get_Count(&triggerCount);
         owned=SUCCEEDED(h)&&triggerCount==0;
-        ComPtr<IRunningTask> running;if(owned)h=task->Run(empty,&running);else h=E_ACCESSDENIED;
+        ComPtr<IRunningTask> running;
+        if(owned) {
+            if(!current()) return false;
+            h=task->Run(empty,&running);
+        } else h=E_ACCESSDENIED;
         logEvent("ymcc-task-result",L"hresult="+std::to_wstring(static_cast<unsigned long>(h)));
         return SUCCEEDED(h);
     }
-    bool startBat() override {return shell(gh::Bat,L"C:\\SOFT\\YeMan\\PowerControl");}
-    bool showSteam() override {return shell(gh::SteamUri);}
-    bool focusSteam() override {
-        if(!steamWindow(steam_))return false;
-        if(IsIconic(steam_))ShowWindow(steam_,SW_RESTORE);
-        SetForegroundWindow(steam_);
-        if(GetForegroundWindow()!=steam_)return false;
-        DWORD pid=0;GetWindowThreadProcessId(steam_,&pid);
-        Handle p{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid)};FILETIME birth{},exit{},kernel{},user{};
-        if(!p.h||!GetProcessTimes(p.h,&birth,&exit,&kernel,&user))return false;
-        const auto created=(static_cast<unsigned long long>(birth.dwHighDateTime)<<32)|birth.dwLowDateTime;
-        logEvent("handoff-window-identity",L"pid="+std::to_wstring(pid)+L" birth="+std::to_wstring(created)+L" hwnd="+std::to_wstring(reinterpret_cast<UINT_PTR>(steam_))+L" image="+image(pid)+L" mode=unobserved");
-        return true;
+    bool requestSteam(gh::Action action,const gh::Current& current) {
+        namespace sa=ymcc::steamaction;
+        unknown_=false;commandBusy_=false;
+        if(!current()||!ymcc_.h||!activationBegin_||!sourceFacts_.available||!sourceFacts_.actionPowerGeneration)return false;
+        const auto presence=homeSteamPresence(sourceFacts_);
+        if((action==gh::Action::StartSteam&&presence!=gh::SteamPresence::Absent)||
+           (action==gh::Action::ShowHome&&presence!=gh::SteamPresence::Running))return false;
+        const auto now=GetTickCount64(),end=activationBegin_+gh::DeadlineMs;
+        if(now<activationBegin_||now>=end)return false;
+        sa::Request request;request.version=sa::homeProtocol;
+        request.command=static_cast<std::uint32_t>(action==gh::Action::StartSteam?sa::Command::HomeStart:
+            action==gh::Action::ShowHome?sa::Command::HomeShow:sa::Command::HomeFocus);
+        request.deadline=(std::min)(end,now+sa::requestBudgetMs);
+        request.powerGeneration=sourceFacts_.actionPowerGeneration;request.powerSequence=sourceFacts_.actionPowerSequence;
+        request.powerSerial=sourceFacts_.actionPowerSerial;
+        if(action!=gh::Action::StartSteam){
+            if(sourceFacts_.presence!=1||!sourceFacts_.processPid||!sourceFacts_.processBirth)return false;
+            request.targetPid=sourceFacts_.processPid;request.targetBirth=sourceFacts_.processBirth;
+        }
+        const auto result=sa::submit(request,current,ymccPid_,ymccBirth_);
+        unknown_=result==sa::Outcome::Unknown;commandBusy_=result==sa::Outcome::Busy;
+        logEvent("public-steam-action",L"command="+std::to_wstring(request.command)+L" outcome="+std::to_wstring(static_cast<LONG>(result)));
+        return result==sa::Outcome::Submitted;
     }
+
+public:
+    void begin(std::uint64_t value) override{activationBegin_=value;}
+    bool uncertain()const override{return unknown_;}
+    bool commandBusy()const override{return commandBusy_;}
     std::uint64_t now() override{return GetTickCount64();}
     void wait() override {
         MsgWaitForMultipleObjectsEx(0,nullptr,200,QS_ALLINPUT,MWMO_INPUTAVAILABLE);

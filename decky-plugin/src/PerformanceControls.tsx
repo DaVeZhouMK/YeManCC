@@ -22,6 +22,12 @@ export function PerformanceControls(props:{view:PerformanceMirrorView;disabled:b
   const visible=visiblePerformanceControls(view).filter(c=>c.key!=='coreHigh');
   const coreControls=schedulingKeys.flatMap(key=>visible.filter(c=>c.key===key));
   const controls=visible.filter(c=>!schedulingKeys.includes(c.key));
+  // Keep the mode row above TDP; the explicit TDP navRef still owns entry focus.
+  const modeIndex=controls.findIndex(c=>c.key==='mode'),tdpIndex=controls.findIndex(c=>c.key==='tdp');
+  if(tdpIndex>=0&&modeIndex>tdpIndex){
+    const [mode]=controls.splice(modeIndex,1);
+    controls.splice(tdpIndex,0,mode);
+  }
   const savingIndex=controls.findIndex(c=>c.key==='saving');
   if(savingIndex>=0&&controls.some(c=>c.key==='bias')){
     const [saving]=controls.splice(savingIndex,1);

@@ -10,6 +10,7 @@
 #include <cwchar>
 #include <cctype>
 #include <iostream>
+#include <functional>
 #include "json.hpp"
 using json=nlohmann::json;
 namespace fspath=std::filesystem;
@@ -21,7 +22,8 @@ static std::string ascii_lower(std::string s){for(auto& c:s)c=static_cast<char>(
 static std::string sha256File(const std::wstring& p){std::ifstream f(fspath::path(p),std::ios::binary);return {std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>()};}
 static bool sameFinalPath(const std::wstring& a,const std::wstring& b){return !a.empty()&&!b.empty()&&_wcsicmp(fspath::weakly_canonical(a).c_str(),fspath::weakly_canonical(b).c_str())==0;}
 static std::wstring processImagePath(DWORD pid){HANDLE h=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);if(!h)return {};wchar_t p[MAX_PATH]{};DWORD n=MAX_PATH;bool ok=QueryFullProcessImageNameW(h,0,p,&n)!=FALSE;CloseHandle(h);return ok?std::wstring(p,n):std::wstring{};}
-static bool sgRunExeSync(const std::wstring& exe,const std::wstring& args,DWORD ms){
+static bool sgRunExeSync(const std::wstring& exe,const std::wstring& args,DWORD ms,const std::function<bool()>& current={}){
+    if(current&&!current())return false;
     auto command=L"\""+exe+L"\" "+args;std::vector<wchar_t>b(command.begin(),command.end());b.push_back(0);
     STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};
     if(!CreateProcessW(nullptr,b.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return false;
@@ -48,8 +50,24 @@ static bool sgWriteFileAtomic(const std::wstring&path,const std::string&bytes){
 #include "../../native/rtss_client.h"
 static void require(bool ok,const char* label){if(!ok)throw std::runtime_error(label);std::cout<<"PASS "<<label<<"\n";}
 static void write(const fspath::path& p,const std::string& text){std::ofstream f(p,std::ios::binary);f<<text;}
+static void verifyProfileReload(const std::wstring& root){
+    require(nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"isolated profile helper ABI");
+    write(fspath::path(root)/L"mock-fault-sdk","1");
+    require(!nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"faulted helper does not crash parent");
+    fspath::remove(fspath::path(root)/L"mock-fault-sdk");
+    require(nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"recover after helper exception");
+}
 int wmain(int argc,wchar_t**argv){
  try {
+    if(argc==3&&!std::wcscmp(argv[1],L"--profile-reload-only")){
+        const fspath::path root=argv[2];require(sameFinalPath(root.parent_path().wstring(),exe_dir()),"profile-only requires owned fixture beside client");
+        verifyProfileReload(root.wstring());return 0;
+    }
+    if(argc==3&&!std::wcscmp(argv[1],L"--startup-load-only")){
+        const auto start=GetTickCount64();const auto result=nativeRtssLoadOverlay(argv[2],"YeManOBS-W-1.ovl");
+        std::cout<<json{{"result",result},{"elapsedMs",GetTickCount64()-start},{"scope","actual native client against owned delayed x86 host"}}.dump(2)<<"\n";
+        return result.value("ok",false)?0:1;
+    }
     if(argc==3&&!std::wcscmp(argv[1],L"--persist-retry")){
         const fspath::path root=argv[2],privateRoot=exe_dir();
         require(sameFinalPath(root.wstring(),(privateRoot/L"host").wstring())&&file_exists((privateRoot/L".owned-persist-fixture").wstring()),"retry mutations require exact owned private fixture");
@@ -66,6 +84,12 @@ int wmain(int argc,wchar_t**argv){
         const auto repeated=nativeRtssLoadOverlay(root.wstring(),"YeManOBS-W-1.ovl");
         checks.push_back({{"name","repeated explicit layout keeps first byte backup and no repeat normalization"},{"ok",repeated.value("ok",false)&&!repeated.value("configurationEncodingNormalized",true)&&saved==before&&sha256File(backup)==saved},{"result",repeated}});
         bool ok=true;for(const auto&check:checks)ok=ok&&check["ok"].get<bool>();std::cout<<json{{"ok",ok},{"checks",checks},{"scope","same original client, same private x86 host, explicit caller retries only"}}.dump(2)<<"\n";return ok?0:1;
+    }
+    if(argc==2&&!std::wcscmp(argv[1],L"--access-diagnostic-only")){
+        const auto denied=nativeRtssBridgeTransportFailure(ERROR_ACCESS_DENIED),hung=nativeRtssBridgeTransportFailure(ERROR_TIMEOUT);
+        require(!denied.value("ok",true)&&denied.value("errorCode",std::string{})=="RTSS_BRIDGE_ACCESS_DENIED"&&denied.value("bridgeState",std::string{})=="access_denied"&&denied.value("win32Error",0)==5,"cross-integrity failure is explicit and not misreported as unloaded");
+        require(!hung.value("ok",true)&&hung.value("errorCode",std::string{})=="RTSS_BRIDGE_UNRESPONSIVE"&&hung.value("win32Error",0)==ERROR_TIMEOUT,"hung bridge retains separate transport failure");
+        std::cout<<json{{"ok",true},{"denied",denied},{"unresponsive",hung}}.dump(2)<<"\n";return 0;
     }
     // On-machine diagnostics use only window IPC/the actual client, never a
     // mock host, DLL injection, local hook loading, or automatic restarts.
@@ -250,11 +274,7 @@ int wmain(int argc,wchar_t**argv){
     require(!nativeRtssLoadOverlay(root,"YeManOBS-L-1.ovl")["ok"],"reject incomplete template before load");
     write(path,old);
     require(nativeRtssLoadOverlay(root,"Empty.ovl")["ok"],"off after damaged template rejection");
-    require(nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"isolated profile helper ABI");
-    write(fspath::path(root)/L"mock-fault-sdk","1");
-    require(!nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"faulted helper does not crash parent");
-    fspath::remove(fspath::path(root)/L"mock-fault-sdk");
-    require(nativeRtssReloadProfiles(root+L"\\RTSSHooks64.dll")["ok"],"recover after helper exception");
+    verifyProfileReload(root);
     RtssBridgeSearch search{root};EnumWindows(nativeRtssFindBridge,reinterpret_cast<LPARAM>(&search));
     DWORD pid=0;GetWindowThreadProcessId(search.window,&pid);
     HANDLE host=OpenProcess(SYNCHRONIZE,FALSE,pid);

@@ -31,6 +31,7 @@ const currentRule = computed(() => {
 const currentLabel = computed(() => detectedGameName(props.game) || props.game?.name || '当前游戏');
 
 function displayRuleName(value: string): string {
+  if (value.startsWith('@exe:')) return value.slice(5);
   return value.includes('*') ? value : `${value}.exe`;
 }
 

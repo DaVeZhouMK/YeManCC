@@ -70,14 +70,69 @@ static json checks=json::array(),timings=json::array();
 static void check(const char* name,bool pass){checks.push_back({{"name",name},{"pass",pass}});}
 template<class Work> static void measure(const char* label,unsigned count,Work work) {
     for(unsigned i=0;i<100;++i)work();
-    allocations=0;ULONG64 c0=0,c1=0;QueryThreadCycleTime(GetCurrentThread(),&c0);
+    allocations=0;ULONG64 c0=0,c1=0;
+    const BOOL beginRead=QueryThreadCycleTime(GetCurrentThread(),&c0);
     const auto start=std::chrono::steady_clock::now();countAllocations=true;
     for(unsigned i=0;i<count;++i)work();
-    countAllocations=false;const auto end=std::chrono::steady_clock::now();QueryThreadCycleTime(GetCurrentThread(),&c1);
-    timings.push_back({{"path",label},{"calls",count},{"allocations",allocations},{"threadCycles",c1-c0},
+    countAllocations=false;const auto end=std::chrono::steady_clock::now();
+    const BOOL endRead=QueryThreadCycleTime(GetCurrentThread(),&c1);
+    const bool cyclesKnown=beginRead&&endRead&&c1>=c0;
+    const char* cycleState=!beginRead&&!endRead?"both-reads-failed":!beginRead?"begin-read-failed":
+        !endRead?"end-read-failed":c1<c0?"counter-decreased":"reported";
+    timings.push_back({{"path",label},{"calls",count},{"allocations",allocations},
+        {"threadCycles",cyclesKnown?json(c1-c0):json(nullptr)},
+        {"threadCyclesExact",cyclesKnown?json(std::to_string(c1-c0)):json(nullptr)},
+        {"threadCycleEvidence",{{"schemaVersion",1},{"source","QueryThreadCycleTime"},{"unit","thread-cycles"},
+            {"beginReadSucceeded",beginRead!=FALSE},{"endReadSucceeded",endRead!=FALSE},
+            {"begin",beginRead?json(std::to_string(c0)):json(nullptr)},
+            {"end",endRead?json(std::to_string(c1)):json(nullptr)},
+            {"state",cycleState},{"available",cyclesKnown},{"instrumentationOverheadIncluded",true}}},
+        {"wallClock","std::chrono::steady_clock"},{"wallIncludesThreadDescheduling",true},
         {"wallUs",std::chrono::duration<double,std::micro>(end-start).count()}});
 }
 '''
+SNAPSHOT_COUNTER_SHAPE_TESTS = r'''
+static void checkSnapshotCounterShapes(bool beforeControl=false) {
+    using Kind=ymcc::logging::SnapshotKind;
+    const auto changed=[](Kind kind,const json& first,const json& second){
+        ymcc::logging::JsonSnapshotLogState state;state.observe(first,1,kind);return state.observe(second,1,kind);
+    };
+    check("counter-oem-null-is-visible",changed(Kind::oemWake,{{"durationMs",3}},{{"durationMs",nullptr}}));
+    check("counter-oem-missing-is-visible",changed(Kind::oemWake,{{"durationMs",3}},json::object()));
+    check("counter-throttle-negative-is-visible",changed(Kind::throttle,{{"waitMs",3}},{{"waitMs",-1}}));
+    check("counter-queue-container-is-visible",changed(Kind::queue,{{"queueDepth",3}},{{"queueDepth",json::object()}}));
+    check("counter-revision-bool-is-visible",changed(Kind::revision,{{"revision",3}},{{"revision",true}}));
+    check("counter-hud-integer-to-float-is-visible",changed(Kind::hud,{{"hud",{{"seq",3}}}},{{"hud",{{"seq",3.0}}}}));
+    check("counter-oem-unavailable-string-is-visible",changed(Kind::oemWake,{{"requestedEpoch",3}},{{"requestedEpoch","unavailable"}}));
+    check("counter-queue-invalid-object-change-is-visible",changed(Kind::queue,{{"enqueueCount",{{"error",1}}}},{{"enqueueCount",{{"error",2}}}}));
+    if(beforeControl)return;
+    bool normal=true;
+    for(const auto& item:std::vector<std::pair<Kind,const char*>>{{Kind::oemWake,"requestedEpoch"},{Kind::oemWake,"durationMs"},
+        {Kind::throttle,"waitMs"},{Kind::queue,"enqueueCount"},{Kind::queue,"sinceRequestMs"},{Kind::queue,"queueDepth"},{Kind::revision,"revision"}})
+        normal &= !changed(item.first,json{{item.second,1ULL}},json{{item.second,18446744073709551615ULL}});
+    normal &= !changed(Kind::hud,{{"hud",{{"seq",1ULL}}}},{{"hud",{{"seq",9ULL}}}});
+    check("counter-all-valid-documented-counters-still-suppress-values",normal);
+    check("counter-signedness-shape-transition-stays-visible",changed(Kind::revision,{{"revision",1}},{{"revision",1ULL}}));
+    check("counter-schema-recovery-is-visible",changed(Kind::oemWake,{{"durationMs",nullptr}},{{"durationMs",0}}));
+    check("counter-missing-both-remains-equal",!changed(Kind::oemWake,json::object(),json::object()));
+    bool invalidStable=true;
+    for(const json& bad:{json(nullptr),json(true),json(-1),json(1.0),json("unavailable"),json::array(),json({{"error",1}})})
+        invalidStable &= !changed(Kind::oemWake,{{"durationMs",bad}},{{"durationMs",bad}});
+    check("counter-unchanged-invalid-evidence-does-not-become-a-resident-loop",invalidStable);
+    check("counter-lookalike-unknown-container-is-semantic",changed(Kind::oemWake,{{"future",{{"durationMs",1}}}},{{"future",{{"durationMs",2}}}}));
+    check("counter-full-kind-keeps-counter-name-semantic",changed(Kind::full,{{"durationMs",1}},{{"durationMs",2}}));
+    ymcc::logging::JsonSnapshotLogState epoch;
+    const json value={{"durationMs",1}};epoch.observe(value,1,Kind::oemWake);
+    check("counter-real-generation-still-emits",epoch.observe(value,2,Kind::oemWake));
+    ymcc::logging::JsonSnapshotLogState hot;
+    const json first={{"durationMs",1ULL},{"requestedEpoch",1ULL},{"ok",true}},later={{"durationMs",2ULL},{"requestedEpoch",2ULL},{"ok",true}};
+    hot.observe(first,1,Kind::oemWake);unsigned selected=0;allocations=0;countAllocations=true;
+    for(unsigned i=0;i<50000;++i)selected+=hot.observe(later,1,Kind::oemWake)?1:0;
+    countAllocations=false;
+    check("counter-50000-valid-repeats-no-selection-or-allocation",selected==0&&allocations==0);
+}
+'''
+
 TESTS = r'''
 static json frame={{"hostSubmission","frame-accepted"},{"frameProof",{
     {"sampleSequence",1},{"motionPairProofId","pair-unproven-safe-zero"},{"hostReceipt",{
@@ -127,6 +182,7 @@ int main() {
     fixtureTick=5000;after::inputCaptureCommonFrameEvidence(activityFrame,true);
     ++sample.readTopologyGeneration;after::inputCaptureCommonFrameEvidence(activityFrame,true);
     check("activity-retained-in-periodic-and-real-source-transition-immediate",rows.size()==2&&rows[0]["snapshotReason"]=="periodic"&&rows[0]["semanticNeutral"]==true&&rows[1]["snapshotReason"]=="state-change");
+    checkSnapshotCounterShapes();
     // Exact snapshot semantics including unknown fields, nested dynamic keys and types.
     using Kind=ymcc::logging::SnapshotKind;
     ymcc::logging::JsonSnapshotLogState snapshot;
@@ -221,11 +277,120 @@ int main() {
 }
 '''
 
+def run_hid_probe(args):
+    """One original diagnostic function; fake OS/HID ports, no device access."""
+    import os,re,time
+    out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+    source_path=args.source.resolve() if args.source else ROOT/'native/main.cpp'
+    current=source_path.read_bytes();baseline=args.baseline.read_bytes()
+    now=current.decode('utf-8-sig').replace('\r\n','\n');old=baseline.decode('utf-8-sig').replace('\r\n','\n')
+    signatures=['static bool domainLogEnabled(const char* domain) {',
+                'static bool nativeLifecycleEventIsBase(const char* event) {',
+                'static void appendNativeLifecycleLog(const char* event, const json& observed) {']
+    shared=[extract(now,s) for s in signatures]
+    assert shared==[extract(old,s) for s in signatures],'Unrelated envelope/gates changed in this probe comparison'
+    probe='static void inputHostProbeHidSource() {'
+    header='\n'.join(shared)+'\nnamespace before {\n'+extract(old,probe)+'\n}\nnamespace candidate {\n'+extract(now,probe)+'\n}\n'
+    generated={'production.h':header.encode('utf-8'),
+        'fixture.cpp':(ROOT/'tools/fixtures/logging_hid_probe.cpp').read_bytes(),
+        'json.hpp':(ROOT/'deps/json/json.hpp').read_bytes(),
+        'log_frequency_policy.h':(ROOT/'native/log_frequency_policy.h').read_bytes(),
+        'log_snapshot_state.h':(ROOT/'native/log_snapshot_state.h').read_bytes()}
+    for name,data in generated.items():
+        path=out/name
+        if path.exists():
+            assert path.read_bytes()==data,'Previously prepared source drift: '+name
+        else:
+            with path.open('xb') as stream:stream.write(data)
+    def pin(path):
+        path=pathlib.Path(path);data=path.read_bytes()
+        return {'path':str(path),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+    def save(name,value):
+        with (out/name).open('x',encoding='utf-8',newline='\n') as stream:stream.write(json.dumps(value,indent=2)+'\n')
+    if args.hid_probe_prepare_only:
+        save('PREPARED.json',{'status':'PREPARED_ONLY_NOT_EXECUTED','generated':[pin(out/name) for name in generated],
+            'source':pin(source_path),'baseline':pin(args.baseline),'driver':pin(__file__),
+            'selectedCase':'hid-probe','actualTests':0,'productOrHardwareExecuted':False})
+        print(json.dumps({'preparedOnly':True,'actualTests':0,'files':len(generated)}));return 0
+    prepared=json.loads((out/'PREPARED.json').read_bytes())
+    assert prepared['generated']==[pin(out/name) for name in generated]
+    assert prepared['source']==pin(source_path) and prepared['baseline']==pin(args.baseline)
+    if not args.hid_probe_reuse_build:
+        assert prepared['driver']==pin(__file__),'Prepared runner drift'
+    tools=json.loads((ROOT/'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json').read_bytes())['native']
+    exe=out/'fixture.exe'
+    command=[tools['compiler'],'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/showIncludes','/FC',
+        '/sourceDependencies',str(out/'dependencies.json'),str(out/'fixture.cpp'),'/I'+str(out),
+        *['/I'+p for p in tools['include']],'/Fo'+str(out/'fixture.obj'),'/Fe'+str(exe),
+        '/link','/VERBOSE:LIB',*['/LIBPATH:'+p for p in tools['lib']]]
+    if args.hid_probe_reuse_build:
+        qualification=json.loads((out/'REUSE-BUILD-QUALIFICATION.json').read_bytes())
+        assert all(pin(p['path'])==p for p in qualification['artifacts'])
+        assert pin(qualification['originalDriverSnapshot']['path'])==qualification['originalDriverSnapshot']
+        assert qualification['originalDriverSnapshot']['sha256']==prepared['driver']['sha256']
+        prior=json.loads((out/'COMPILE-REQUEST.json').read_bytes())
+        assert prior['command']==command and prior['generated']==prepared['generated']
+        assert json.loads((out/'COMPILE-RESULT.json').read_bytes())['exitCode']==0
+        compile_stdout=(out/'compile.stdout.raw').read_bytes()
+        save('BUILD-REUSE.json',{'status':'EXACT_COMPLETED_COMPILE_REUSED','qualification':pin(out/'REUSE-BUILD-QUALIFICATION.json'),
+            'compilerExecutedThisRun':False,'oldConsumerFailurePreserved':True})
+    else:
+        save('COMPILE-REQUEST.json',{'command':command,'cwd':str(out),'generated':prepared['generated'],'timeoutSeconds':180})
+        env=dict(os.environ);env['VSLANG']='1033'
+        env['PATH']=str(pathlib.Path(tools['compiler']).parent)+';C:\\Windows\\System32;C:\\Windows'
+        started=time.monotonic()
+        built=subprocess.run(command,cwd=out,env=env,capture_output=True,timeout=180,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        for kind,data in (('stdout',built.stdout),('stderr',built.stderr)):
+            with (out/('compile.'+kind+'.raw')).open('xb') as stream:stream.write(data)
+        save('COMPILE-RESULT.json',{'exitCode':built.returncode,'elapsedSeconds':time.monotonic()-started})
+        if built.returncode:
+            print(built.stdout.decode('utf-8',errors='replace'));return built.returncode
+        compile_stdout=built.stdout
+    dependencies=json.loads((out/'dependencies.json').read_bytes().decode('utf-8-sig'))
+    libraries=[]
+    for line in compile_stdout.decode('utf-8',errors='replace').splitlines():
+        found=re.search(r'Searching\s+(.+?\.lib):\s*$',line)
+        if found:
+            path=pathlib.Path(found.group(1).strip())
+            if not path.is_absolute():
+                path=next(pathlib.Path(base)/path for base in tools['lib'] if (pathlib.Path(base)/path).is_file())
+            if str(path).lower() not in [p.lower() for p in libraries]:libraries.append(str(path))
+    assert libraries,'Missing actual linker library trace'
+    save('ACTUAL-GRAPH.json',{'compilerIncludes':[pin(p) for p in dependencies['Data']['Includes']],
+        'translationUnit':pin(dependencies['Data']['Source']),'libraries':[pin(p) for p in libraries],
+        'compiler':pin(tools['compiler']),'linker':pin(tools['linker']),
+        'libraryScope':'actual linker searched library files;not an object-member census'})
+    started=time.monotonic()
+    executed=subprocess.run([str(exe)],cwd=out,capture_output=True,timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    for kind,data in (('stdout',executed.stdout),('stderr',executed.stderr)):
+        with (out/('fixture.'+kind+'.raw')).open('xb') as stream:stream.write(data)
+    report=json.loads(executed.stdout)
+    latest=source_path.read_bytes().decode('utf-8-sig').replace('\r\n','\n')
+    stable=extract(latest,probe)==extract(now,probe) and [extract(latest,s) for s in signatures]==shared
+    report.update(selectedCase='hid-probe',defaultSuiteExecuted=False,sourceStable=stable,
+        productOrHardwareExecuted=False,processExitCode=executed.returncode,elapsedSeconds=time.monotonic()-started,
+        generatedSources=[pin(out/name) for name in generated],compilerExecutedThisRun=not args.hid_probe_reuse_build)
+    save('report.json',report)
+    print(json.dumps({'selectedCase':'hid-probe','checks':len(report['checks']),'failures':report['failures'],
+        'sourceStable':stable,'productOrHardwareExecuted':False}))
+    return executed.returncode or (4 if not stable else 0)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline',required=True,type=pathlib.Path)
     parser.add_argument('--output-dir',required=True,type=pathlib.Path)
-    args=parser.parse_args();out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+    parser.add_argument('--case',choices=['hid-probe'],help='Only diagnostic HID probe; default hot-path suite stays separate')
+    parser.add_argument('--source',type=pathlib.Path,help='Fixed candidate source for the directed HID probe')
+    parser.add_argument('--hid-probe-prepare-only',action='store_true',help='Prepare exact owned inputs; no compiler or test execution')
+    parser.add_argument('--hid-probe-reuse-build',action='store_true',help='Continue a pinned completed build after post-consumer repair; no recompilation')
+    args=parser.parse_args()
+    if (args.source or args.hid_probe_prepare_only or args.hid_probe_reuse_build) and args.case!='hid-probe':parser.error('source/prepare/reuse requires --case hid-probe')
+    if args.hid_probe_prepare_only and args.hid_probe_reuse_build:parser.error('prepare-only and reuse-build are mutually exclusive')
+    if args.case=='hid-probe':return run_hid_probe(args)
+    out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
     run=out/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S'));run.mkdir()
     current=(ROOT/'native/main.cpp').read_bytes();baseline=args.baseline.read_bytes()
     now=current.decode('utf-8-sig').replace('\r\n','\n');old=baseline.decode('utf-8-sig').replace('\r\n','\n')
@@ -233,7 +398,7 @@ def main():
     (run/'bound-main.cpp').write_bytes(current);(run/'baseline-main.cpp').write_bytes(baseline)
     for n,b in headers.items():(run/n).write_bytes(b)
     current_functions=[extract(now,s) for s in SIGNATURES]
-    cpp=PRELUDE+'\nnamespace before {\n'+'\n'.join(extract(old,s) for s in SIGNATURES)+'\n}\nnamespace after {\n'+'\n'.join(current_functions)+'\n}\n'+TESTS
+    cpp=PRELUDE+'\nnamespace before {\n'+'\n'.join(extract(old,s) for s in SIGNATURES)+'\n}\nnamespace after {\n'+'\n'.join(current_functions)+'\n}\n'+SNAPSHOT_COUNTER_SHAPE_TESTS+'\n'+TESTS
     (run/'harness.cpp').write_text(cpp,encoding='utf-8')
     vcvars=pathlib.Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
     exe=run/'harness.exe';batch=run/'build.cmd'

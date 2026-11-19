@@ -1,14 +1,17 @@
 import {wallpaperPowerBlocked,wallpaperPowerReason,subscribeWallpaperPowerChanged,captureWallpaperPower,wallpaperPowerCurrent} from './wallpaperPowerPolicy';
 import {gameMediaDownloads,backgroundDownloadEnabled} from './gameMediaDownloads';
 import {invoke,on} from './ipc';
+import {steamUi,type SteamUiState} from './steamUi';
+import {STEAM_AUTOMATIC_READ_GAP_MS} from './steamReadBudget';
 import {subscribePolicyGameStatus,refreshPolicyGameStrict} from './gamePolicyTarget';
-import {GameMediaPreparationPolicy,subscribeGameMediaResume} from './gameMediaPreparationPolicy';
+import {GameMediaPreparationPolicy} from './gameMediaPreparationPolicy';
+import {onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './powerLifecycleState';
 import {getUiSetting,setUiSettings,uiSettingsLoaded} from './uiSettings';
 import {requestSteamHttp} from './steamHttp';
 import {parseHlsAsset} from './steamMediaPlaylist';
 import {installedSteamWallpaperTargets,steamWallpaperCandidates,normalizeSteamMediaUrl,resolveSteamWallpaperIdentity,type WallpaperTarget} from './steamMediaSource';
 export interface GameMediaAsset {id:string;revision:string;kind:'video'|'image';mime:string;extension:string;bytes:number;qualityPolicy?:number;targetHeight?:number;selectedHeight?:number;}
-export interface GameMediaEntry {key:string;appId?:number;name?:string;executable?:string;bindingRevision:number;status:string;ready?:boolean;asset?:GameMediaAsset;url?:string;localUrl?:string;manual?:boolean;deleted?:boolean;refreshRequested?:boolean;retryAt?:number;leaseUntil?:number;taskId?:string;acquired?:boolean;error?:string;identityVerified?:boolean;wallpaperMode?:'static'|'dynamic';assets?:{static?:GameMediaAsset;dynamic?:GameMediaAsset};staticReady?:boolean;dynamicReady?:boolean;taskSlots?:string[];demandConsumer?:string;videoUnavailableUntil?:number;staticUnavailableUntil?:number;manualSlots?:Record<string,boolean>;deletedSlots?:Record<string,boolean>;playback?:{start:number;end:number;fit:'cover'|'contain'};}
+export interface GameMediaEntry {key:string;appId?:number;name?:string;executable?:string;bindingRevision:number;status:string;ready?:boolean;asset?:GameMediaAsset;url?:string;localUrl?:string;manual?:boolean;deleted?:boolean;refreshRequested?:boolean;retryAt?:number;leaseUntil?:number;taskId?:string;acquired?:boolean;error?:string;identityVerified?:boolean;wallpaperMode?:'static'|'dynamic';assets?:{static?:GameMediaAsset;dynamic?:GameMediaAsset};staticReady?:boolean;dynamicReady?:boolean;taskSlots?:string[];demandConsumer?:string;videoUnavailableUntil?:number;staticUnavailableUntil?:number;manualSlots?:Record<string,boolean>;deletedSlots?:Record<string,boolean>;playback?:{start:number;end:number;fit:'cover'|'contain'};currentGameWallpaperFallback?:true;}
 export function gameMediaPairComplete(entry:GameMediaEntry,now=Date.now()){return ['static','dynamic'].every(slot=>entry[slot==='static'?'staticReady':'dynamicReady']||entry.deletedSlots?.[slot]||entry.manualSlots?.[slot]||Number(slot==='static'?entry.staticUnavailableUntil:entry.videoUnavailableUntil)>now);}
 export function wallpaperSourcePriority(target:Partial<WallpaperTarget>){const tier=target.sourceTier??3;return tier<2?tier:target.catalogSource==='steam-shortcut'?2:tier===2?3:4;}
 export function wallpaperTargetKey(target:Partial<WallpaperTarget>){return target.appId&&target.appId>0?'steam-'+target.appId:'exe-'+String(target.executable||'').replace(/\//g,'\\').toLowerCase();}
@@ -16,6 +19,11 @@ export interface SteamMediaDemand {demandConsumer:'steam';demandEpoch:string;dem
 export function steamMediaDemandCurrent(value:SteamMediaDemand|undefined){return !!value&&value.demandConsumer==='steam'&&typeof value.demandEpoch==='string'&&!!value.demandEpoch&&new TextEncoder().encode(value.demandEpoch).length<=128&&Number.isSafeInteger(value.demandRevision)&&value.demandRevision>=0&&(value.current?.()??true);}
 function steamMediaDemandFields(value:SteamMediaDemand|undefined){return value?{demandConsumer:'steam' as const,demandEpoch:value.demandEpoch,demandRevision:value.demandRevision}:{};}
 interface Job {demand?:SteamMediaDemand;target:WallpaperTarget;consumer:string;priority:boolean;resolve:(entry:GameMediaEntry)=>void;reject:(error:unknown)=>void;promise:Promise<GameMediaEntry>;}
+// Wire bits; keep in order with wallpaper-inventory diagnostics on the native side.
+const enum InventoryOrigin {
+  LibraryNotice=1<<0, PageHint=1<<1, Manual=1<<2, Enabled=1<<3, PowerRecovery=1<<4,
+  SteamProcess=1<<5, SteamAccount=1<<6, SteamDocument=1<<7, SteamMode=1<<8, SteamRevalidated=1<<9,
+}
 export interface MediaPorts {workAllowed:()=>boolean;nativeBackground:boolean;invoke:typeof invoke;enabled:()=>boolean;now:()=>number;candidates:typeof steamWallpaperCandidates;request:typeof requestSteamHttp;installed:typeof installedSteamWallpaperTargets;backgroundEnabled:()=>boolean;schedule:typeof setTimeout;cancel:typeof clearTimeout;}
 export class SharedGameMedia {
   private port:MediaPorts;
@@ -40,7 +48,7 @@ export class SharedGameMedia {
   }
   // Retained as an inert compatibility entry for old callers. No IPC or I/O.
   async prewarm(_targets:WallpaperTarget[]):Promise<GameMediaEntry[]>{return [];}
-  lookup(target:Partial<WallpaperTarget>&{key?:string},demand?:SteamMediaDemand):Promise<GameMediaEntry>{
+  lookup(target:Partial<WallpaperTarget>&{key?:string;currentGameWallpaper?:true;localWallpaperDelivery?:true},demand?:SteamMediaDemand):Promise<GameMediaEntry>{
     if(this.stopped)return Promise.reject(Error('media-owner-stopped'));
     if(!this.port.workAllowed())return Promise.reject(Error('wallpaper-power-paused'));
     const workEpoch=this.workEpoch;
@@ -73,7 +81,7 @@ export class SharedGameMedia {
     if(consumer!=='steam')demand=undefined;
     if(target.executable&&target.appId>0&&target.verified!==true)target={...target,appId:0};
     const workEpoch=this.workEpoch;
-    const cached=await this.lookup(target,demand);
+    const cached=await this.lookup(consumer==='ymcc'?{...target,localWallpaperDelivery:true}:target,demand);
     if(!this.workCurrent(workEpoch))return {...cached,status:'consumer-inactive',ready:false,acquired:false};
     if(demand&&!steamMediaDemandCurrent(demand))throw Error('steam-demand-withdrawn');
     const paired=gameMediaPairComplete(cached,this.port.now());
@@ -173,9 +181,10 @@ export class SharedGameMedia {
     if(job.consumer==='steam'&&!this.port.enabled()){this.jobs.delete(key);job.resolve(await this.lookup(job.target,job.demand));continue;}
     try{job.resolve(await this.prepare(job));}catch(error){job.reject(error);}finally{if(this.jobs.get(key)===job)this.jobs.delete(key);}
   }}finally{this.running=false;this.changed('demand');}}
-  async supplement(includeInstalled=true,manual=false,inventoryRequestId=''){if((!this.port.backgroundEnabled()&&!manual)||this.stopped||!this.port.workAllowed())return;
+  async supplement(includeInstalled=true,manual=false,inventoryRequestId='',originMask=0){if((!this.port.backgroundEnabled()&&!manual)||this.stopped||!this.port.workAllowed())return;
     const workEpoch=this.workEpoch;
-    const [installed,library]=await Promise.all([includeInstalled?this.port.installed().catch(()=>[]):Promise.resolve([]),this.port.invoke<WallpaperTarget[]>('gameMedia.inventory').catch(()=>[])]);
+    const readTargets=async(read:()=>Promise<WallpaperTarget[]>)=>{try{const rows=await read();return Array.isArray(rows)?rows:null;}catch{return null;}};
+    const [installed,library]=await Promise.all([includeInstalled?readTargets(()=>this.port.installed()):Promise.resolve([]),readTargets(()=>this.port.invoke<WallpaperTarget[]>('gameMedia.inventory',originMask?{originMask}:undefined))]);
     const targets=new Map<string,WallpaperTarget>();
     const add=(target:WallpaperTarget)=>{const key=wallpaperTargetKey(target),prior=targets.get(key);
       if(!prior){targets.set(key,target);return;}
@@ -186,14 +195,18 @@ export class SharedGameMedia {
       for(const field of ['executable','steamAccount','shortcutAppId'] as const)if(preferred[field]===undefined)delete merged[field];
       targets.set(key,merged);
     };
-    for(const target of installed)add({...target,sourceTier:1,catalogSource:'steam-native'});
-    for(const target of library)add({...target,sourceTier:2,catalogSource:target.catalogSource==='steam-shortcut'?'steam-shortcut':'ymcc-confirmed'});
+    for(const target of installed||[])add({...target,sourceTier:1,catalogSource:'steam-native'});
+    for(const target of library||[])add({...target,sourceTier:2,catalogSource:target.catalogSource==='steam-shortcut'?'steam-shortcut':'ymcc-confirmed'});
 
     if((!this.port.backgroundEnabled()&&!manual)||this.stopped||!this.port.workAllowed())return;
     if(!this.workCurrent(workEpoch))return;
+    const readFailed=installed===null||library===null;
+    if(readFailed&&!targets.size)return;
+    // Empty successful reads may close the batch; partial or failed reads cannot confirm it.
+    const confirmed=manual&&includeInstalled&&!readFailed?inventoryRequestId:'';
     // The library process owns supplementation; display consumers keep only
     // explicit foreground demand. Both paths share native revision leases.
-    await this.port.invoke('gameMedia.background',{targets:[...targets.values()],...(inventoryRequestId?{inventoryRequestId}:{})},{timeoutMs:30000});
+    await this.port.invoke('gameMedia.background',{targets:[...targets.values()],...(confirmed?{inventoryRequestId:confirmed}:{})},{timeoutMs:30000});
   }
   preparationDescription(){const messages:Record<string,string>={
     'wallpaper-on-battery':'离电关闭已生效，播放、缓存和下载已暂停',
@@ -211,19 +224,30 @@ export class SharedGameMedia {
   stop(){this.stopped=true;this.invalidateLookups();this.nativeAdmissions.clear();if(this.nextRetry!==null)this.port.cancel(this.nextRetry);for(const job of this.jobs.values())job.reject(Error('素材服务已停止'));this.jobs.clear();this.queue=[];this.listeners.clear();}
 }
 // One deferred scan per burst; a change arriving during a read is never lost.
+const PASSIVE_INVENTORY_GAP_MS=10000;
 export class MediaInventoryScan {
-  private timer:ReturnType<typeof setTimeout>|null=null;private running=false;private pending=false;private full=false;private stopped=false;
-  constructor(private read:(includeInstalled:boolean)=>Promise<void>,private enabled:()=>boolean,private clock={schedule:(...args:Parameters<typeof setTimeout>)=>globalThis.setTimeout(...args),cancel:(timer:ReturnType<typeof setTimeout>)=>globalThis.clearTimeout(timer)}){}
-  request(includeInstalled=false){
-    if(this.stopped||!this.enabled())return;this.pending=true;this.full ||= includeInstalled;
-    if(this.running)return;
-    if(this.timer!==null){if(!includeInstalled)return;this.clock.cancel(this.timer);}
-    this.timer=this.clock.schedule(()=>{this.timer=null;void this.run();},includeInstalled?0:250);
+  private timer:ReturnType<typeof setTimeout>|null=null;private dueAt=Infinity;private lastStarted=-Infinity;
+  private running=false;private pending=false;private full=false;private urgent=false;private stopped=false;private originMask=0;
+  constructor(private read:(includeInstalled:boolean,originMask:number)=>Promise<void>,private enabled:()=>boolean,private clock={schedule:(...args:Parameters<typeof setTimeout>)=>globalThis.setTimeout(...args),cancel:(timer:ReturnType<typeof setTimeout>)=>globalThis.clearTimeout(timer)}){}
+  request(includeInstalled=false,passive=false,originMask=0){
+    if(this.stopped||!this.enabled())return;
+    this.pending=true;this.full ||= includeInstalled;this.urgent ||= !passive;this.originMask |= originMask;
+    this.schedulePending();
+  }
+  private schedulePending(){
+    if(!this.pending||this.running||this.stopped||!this.enabled())return;
+    const now=performance.now();
+    const delay=Math.max(this.full?0:250,this.urgent?0:this.lastStarted+PASSIVE_INVENTORY_GAP_MS-now);
+    const dueAt=now+delay;
+    if(this.timer!==null){if(dueAt>=this.dueAt)return;this.clock.cancel(this.timer);}
+    const timer=this.clock.schedule(()=>{if(this.timer!==timer)return;this.timer=null;this.dueAt=Infinity;void this.run();},delay);
+    this.timer=timer;this.dueAt=dueAt;
   }
   private async run(){
-    if(this.stopped||!this.enabled()){this.pending=false;this.full=false;return;}
-    const full=this.full;this.full=false;this.pending=false;this.running=true;
-    try{await this.read(full);}catch{}finally{this.running=false;if(this.pending&&!this.stopped)this.request(this.full);}
+    const full=this.full,originMask=this.originMask;this.pending=this.full=this.urgent=false;this.originMask=0;
+    if(this.stopped||!this.enabled())return;
+    this.running=true;this.lastStarted=performance.now();
+    try{await this.read(full,originMask);}catch{}finally{this.running=false;this.schedulePending();}
   }
   stop(){this.stopped=true;this.pending=false;if(this.timer!==null)this.clock.cancel(this.timer);this.timer=null;}
 }
@@ -234,15 +258,83 @@ export const sharedGameMedia=new SharedGameMedia();
 export const steamWallpaperEnabled=()=>getUiSetting('steamDynamicWallpaperEnabled');
 export async function setSteamWallpaperEnabled(enabled:boolean){await setUiSettings({steamDynamicWallpaperEnabled:enabled});sharedGameMedia.changed('settings');}
 export function startSharedGameMedia(){
-  let disposed=false,lastEnabled=false,refreshing=false,refreshAgain=false;let lastSteam:boolean|undefined;
+  let disposed=false,lastEnabled=false,refreshing=false,refreshAgain=false;
   const revisions=new Map<string,number>();const aliases=new Map<string,string>();
   const stopDownloads=gameMediaDownloads.start();
   const manualAllowed=()=>Number(gameMediaDownloads.state.manualUntil||0)>Date.now();
-  const scans=new MediaInventoryScan(full=>sharedGameMedia.supplement(full,manualAllowed(),gameMediaDownloads.state.inventoryRequestId||''),()=>!disposed&&uiSettingsLoaded()&&!wallpaperPowerBlocked()&&(backgroundDownloadEnabled()||manualAllowed()));
-  const inventoryReadyAt=Date.now()+30000;let inventoryBootTimer:ReturnType<typeof setTimeout>|null=null,inventoryFull=false;
-  const scan=(includeInstalled=true)=>{if(wallpaperPowerBlocked())return;if(Date.now()>=inventoryReadyAt){scans.request(includeInstalled);return;}inventoryFull ||= includeInstalled;if(inventoryBootTimer===null)inventoryBootTimer=setTimeout(()=>{inventoryBootTimer=null;if(!disposed)scans.request(inventoryFull);inventoryFull=false;},Math.max(0,inventoryReadyAt-Date.now()));};
+  const scans=new MediaInventoryScan((full,origins)=>sharedGameMedia.supplement(full,manualAllowed(),gameMediaDownloads.state.inventoryRequestId||'',origins),()=>!disposed&&uiSettingsLoaded()&&!wallpaperPowerBlocked()&&(backgroundDownloadEnabled()||manualAllowed()));
+  const inventoryReadyAt=Date.now()+30000;let inventoryBootTimer:ReturnType<typeof setTimeout>|null=null,inventoryFull=false,bootOrigins=0;
+  const scan=(origins:number,includeInstalled=true,passive=false)=>{
+    if(wallpaperPowerBlocked())return;
+    if(Date.now()>=inventoryReadyAt){scans.request(includeInstalled,passive,origins);return;}
+    inventoryFull ||= includeInstalled;bootOrigins |= origins;
+    if(inventoryBootTimer===null)inventoryBootTimer=setTimeout(()=>{
+      inventoryBootTimer=null;
+      if(!disposed)scans.request(inventoryFull,false,bootOrigins);
+      inventoryFull=false;bootOrigins=0;
+    },Math.max(0,inventoryReadyAt-Date.now()));
+  };
   const policy=new GameMediaPreparationPolicy({read:()=>wallpaperPowerBlocked()?Promise.resolve({blockedReason:wallpaperPowerReason()}):invoke('gameMedia.preparationPolicy',{}, {timeoutMs:5000}),apply:state=>{const value=wallpaperPowerBlocked()?{backgroundBlocked:true,storageBlocked:true,reason:wallpaperPowerReason()}:state;sharedGameMedia.setPreparationState(value);gameMediaDownloads.policy(value.reason);},queued:()=>sharedGameMedia.inspect().queued+Number(gameMediaDownloads.state.remaining||0)+Number(gameMediaDownloads.state.catalogPending===true),enabled:()=>!wallpaperPowerBlocked()&&(backgroundDownloadEnabled()||Number(gameMediaDownloads.state.manualUntil||0)>Date.now()),recheck:async()=>{await Promise.allSettled([refreshPolicyGameStrict(),gameMediaDownloads.recheck()]);if(!disposed)await refresh();}});
-  let admissionGame:Parameters<typeof resolveSteamWallpaperIdentity>[0]|null=null,admissionKey='',admissionEpoch=0,admissionSuspended=false;
+  let admissionGame:Parameters<typeof resolveSteamWallpaperIdentity>[0]|null=null,admissionKey='',admissionEpoch=0,admissionSuspended=true;
+  let steamReading=false,steamPending=false,steamImmediate=false,steamReadEpoch=0;
+  let steamContext:{pid:number;birth:string;account:number;document:string;mode:SteamUiState['mode']}|undefined;
+  let steamContextCurrent=false,steamNeedsPowerRecovery=false;
+  let steamNoticeTimer:ReturnType<typeof setTimeout>|null=null,steamLastRead=-Infinity;
+  const steamInventoryAllowed=()=>!disposed&&!admissionSuspended&&uiSettingsLoaded()&&!wallpaperPowerBlocked()&&(backgroundDownloadEnabled()||manualAllowed());
+  const clearSteamNoticeTimer=()=>{if(steamNoticeTimer!==null){clearTimeout(steamNoticeTimer);steamNoticeTimer=null;}};
+  const retireSteamInventory=()=>{++steamReadEpoch;steamPending=steamImmediate=false;clearSteamNoticeTimer();};
+  const drainSteamInventory=()=>{
+    if(!steamInventoryAllowed()){retireSteamInventory();return;}
+    if(steamReading||!steamPending)return;
+    if(!steamImmediate&&steamNoticeTimer!==null)return;
+    const delay=steamLastRead+STEAM_AUTOMATIC_READ_GAP_MS-performance.now();
+    if(!steamImmediate&&delay>0){
+      if(steamNoticeTimer===null)steamNoticeTimer=setTimeout(()=>{steamNoticeTimer=null;drainSteamInventory();},delay);
+      return;
+    }
+    clearSteamNoticeTimer();void readSteamInventory();
+  };
+  const requestSteamInventory=(immediate=true)=>{
+    if(!steamInventoryAllowed())return;
+    steamPending=true;steamImmediate ||= immediate;++steamReadEpoch;
+    drainSteamInventory();
+  };
+  const applySteamInventoryState=(state:SteamUiState)=>{
+    if(!state.known||!state.running||!state.pid||state.birth==='0'||!['desktop','bigpicture'].includes(state.mode)){
+      if(steamContextCurrent){steamContextCurrent=false;sharedGameMedia.invalidateLookups();}return;
+    }
+    const account=Number.isSafeInteger(state.observedAccount)&&Number(state.observedAccount)>0&&Number(state.observedAccount)<=0xffffffff?state.observedAccount:0;
+    const document=typeof state.modeEpoch==='string'&&state.modeEpoch.length<=96?state.modeEpoch:'';
+    const previous=steamContext,processChanged=!previous||state.pid!==previous.pid||state.birth!==previous.birth;
+    let origins=processChanged?InventoryOrigin.SteamProcess:0;
+    if(previous){
+      if(account!==previous.account)origins|=InventoryOrigin.SteamAccount;
+      if(document!==previous.document)origins|=InventoryOrigin.SteamDocument;
+      if(state.mode!==previous.mode)origins|=InventoryOrigin.SteamMode;
+      if(!steamContextCurrent)origins|=InventoryOrigin.SteamRevalidated;
+    }
+    if(steamNeedsPowerRecovery)origins|=InventoryOrigin.PowerRecovery;
+    if(!origins)return;
+    steamContext={pid:state.pid,birth:state.birth,account,document,mode:state.mode};steamContextCurrent=true;steamNeedsPowerRecovery=false;
+    sharedGameMedia.invalidateLookups();scan(origins,processChanged);
+  };
+  async function readSteamInventory(){
+    steamReading=true;steamPending=steamImmediate=false;steamLastRead=performance.now();const epoch=steamReadEpoch;
+    try{
+      // Reuse the native cache when available. A cache miss may still probe;
+      // ordinary notifications share one pending read and one deadline.
+      const state=await steamUi.read({automatic:true});
+      if(!steamInventoryAllowed()||epoch!==steamReadEpoch)return;
+      applySteamInventoryState(state);
+    }catch{
+      // A temporary Unknown is not logout. Retire the retained lookup and wait
+      // for the shared producer's next signal; no private recovery timer.
+      if(steamInventoryAllowed()&&epoch===steamReadEpoch&&steamContextCurrent){steamContextCurrent=false;sharedGameMedia.invalidateLookups();}
+    }finally{
+      steamReading=false;if(steamPending)drainSteamInventory();
+    }
+  }
+  policy.suspend();
   const reconcileGameAdmission=()=>{
     const game=admissionGame,enabled=!disposed&&!admissionSuspended&&uiSettingsLoaded()&&backgroundDownloadEnabled()&&!wallpaperPowerBlocked();
     const key=enabled&&game?JSON.stringify([game.pid,game.processCreated,game.path.toLowerCase(),game.identityGeneration,game.source,game.whitelistRule]):'';
@@ -258,13 +350,17 @@ export function startSharedGameMedia(){
   const gamePolicy=subscribePolicyGameStatus(game=>{admissionGame=game?{...game}:null;policy.game(!!game);reconcileGameAdmission();});
   const powerPolicy=on('power.sourceChanged',()=>policy.request());
   const saverPolicy=on('gameMedia.preparationPolicyChanged',()=>policy.request());
-  const suspendPolicy=on('power.suspending',()=>{admissionSuspended=true;reconcileGameAdmission();policy.suspend();});
-  const resumePolicy=subscribeGameMediaResume(()=>{
-    admissionSuspended=false;admissionGame=null;admissionKey='';const epoch=++admissionEpoch;policy.resume();
+  let powerPhase='',powerGeneration=0,powerKnown:boolean|undefined,powerAdmitted:boolean|undefined;
+  const lifecyclePolicy=onSharedPowerLifecycle(state=>{
+    const admitted=isSharedPowerLifecycleAdmitted(state);
+    if(disposed||powerPhase===state.phase&&powerGeneration===state.generation&&powerKnown===state.known&&powerAdmitted===admitted)return;
+    powerPhase=state.phase;powerGeneration=state.generation;powerKnown=state.known;powerAdmitted=admitted;
+    if(!admitted){admissionSuspended=true;retireSteamInventory();steamContextCurrent=false;steamNeedsPowerRecovery=true;sharedGameMedia.invalidateLookups();reconcileGameAdmission();policy.suspend();return;}
+    admissionSuspended=false;admissionGame=null;admissionKey='';const epoch=++admissionEpoch;policy.resume();if(lastEnabled||manualAllowed())requestSteamInventory();
     // Reuse the authoritative detector's strict refresh; a retained pre-sleep
     // snapshot must not manufacture a new play observation after a missed exit.
     void refreshPolicyGameStrict().then(game=>{if(disposed||admissionSuspended||epoch!==admissionEpoch)return;admissionGame=game?{...game}:null;reconcileGameAdmission();}).catch(()=>{});
-  },on);
+  });
   const demandPolicy=sharedGameMedia.subscribe(reason=>{if(reason==='demand')policy.demand();else if(reason==='retry')policy.request();});
   const completionPolicy=gameMediaDownloads.watchCompleted(()=>{void refresh();});
   const downloadPolicy=gameMediaDownloads.subscribe(()=>policy.demand());
@@ -274,7 +370,7 @@ export function startSharedGameMedia(){
       reconcileMediaAliases(aliases,state.aliases||{},(previous,key)=>{revisions.delete(previous);sharedGameMedia.changed('asset',previous);window.dispatchEvent(new CustomEvent('game-media:changed',{detail:{key:previous,canonicalKey:key}}));});
       for(const entry of Object.values(state.entries)){
         const old=revisions.get(entry.key);revisions.set(entry.key,entry.bindingRevision);
-        if(old!==entry.bindingRevision){sharedGameMedia.changed('asset',entry.key);window.dispatchEvent(new CustomEvent('game-media:changed',{detail:{key:entry.key,revision:entry.bindingRevision}}));}
+        if(old!==entry.bindingRevision){sharedGameMedia.changed('asset',entry.key);const ready=entry.ready===true&&!entry.deleted;window.dispatchEvent(new CustomEvent('game-media:changed',{detail:{key:entry.key,revision:entry.bindingRevision,ready,executable:ready?entry.executable:undefined}}));}
         const requested=entry.refreshRequested===true;
         const consumer=requested?'library':entry.demandConsumer==='steam'?'steam':entry.demandConsumer==='ymcc'?'ymcc':entry.demandConsumer==='library'||!entry.demandConsumer?'library':null;
         const owned=!wallpaperPowerBlocked()&&(consumer==='steam'?steamWallpaperEnabled():consumer==='ymcc'?getUiSetting('dynamicBackgroundEnabled'):consumer==='library'&&(requested||backgroundDownloadEnabled()||manualAllowed()));
@@ -286,20 +382,26 @@ export function startSharedGameMedia(){
     }catch{}finally{refreshing=false;if(refreshAgain){refreshAgain=false;void refresh();}}
   }
   const off=on('gameMedia.changed',()=>{sharedGameMedia.invalidateLookups();policy.request();void refresh();});
-  const inventory=on('gameMedia.inventoryChanged',()=>{sharedGameMedia.invalidateLookups();scan(true);});
-  let inventoryRequest='';const rescanRequest=gameMediaDownloads.subscribe(()=>{const id=gameMediaDownloads.state.inventoryRequestId;if(id&&id!==inventoryRequest){inventoryRequest=id;scan(true);}});
-  const settings=()=>{const enabled=uiSettingsLoaded()&&backgroundDownloadEnabled()&&!wallpaperPowerBlocked();reconcileGameAdmission();sharedGameMedia.reconcilePreparation();sharedGameMedia.changed('settings');if(enabled&&!lastEnabled)scan();lastEnabled=enabled;};
+  const inventory=on('gameMedia.inventoryChanged',()=>{sharedGameMedia.invalidateLookups();scan(InventoryOrigin.LibraryNotice,true,true);});
+  let inventoryRequest='';const rescanRequest=gameMediaDownloads.subscribe(()=>{const id=gameMediaDownloads.state.inventoryRequestId;if(id&&id!==inventoryRequest){inventoryRequest=id;scan(InventoryOrigin.Manual);}});
+  const settings=()=>{const enabled=uiSettingsLoaded()&&backgroundDownloadEnabled()&&!wallpaperPowerBlocked();reconcileGameAdmission();sharedGameMedia.reconcilePreparation();sharedGameMedia.changed('settings');if(enabled&&!lastEnabled){scan(InventoryOrigin.Enabled);requestSteamInventory();}else if(!enabled){if(steamInventoryAllowed())++steamReadEpoch;else retireSteamInventory();}lastEnabled=enabled;};
   const powerChanged=subscribeWallpaperPowerChanged(blocked=>{
+    if(blocked)retireSteamInventory();
     if(blocked&&inventoryBootTimer!==null){clearTimeout(inventoryBootTimer);inventoryBootTimer=null;}
     sharedGameMedia.reconcilePreparation();reconcileGameAdmission();
     // Keep admission closed until the existing policy owner confirms game/storage state.
     gameMediaDownloads.policy(blocked?wallpaperPowerReason():'capacity-unavailable');
     sharedGameMedia.changed('settings');policy.demand();
-    if(!blocked){scan();policy.request();void refresh();}
+    if(!blocked){scan(InventoryOrigin.PowerRecovery);requestSteamInventory();policy.request();void refresh();}
   });
   window.addEventListener('ui-settings:changed',settings);window.addEventListener('ui-settings:loaded',settings);
-  const steam=on<{steamKnown?:boolean;steamRunning?:boolean}>('deckySidebar.updated',state=>{if(state.steamKnown&&state.steamRunning!==lastSteam){lastSteam=state.steamRunning;if(lastSteam)scan();}});
-  const retry=sharedGameMedia.subscribe(reason=>{if(reason==='retry')void refresh();else if(reason==='inventory')scan(false);});
+  const steam=steamUi.subscribe(published=>{
+    if(!published){requestSteamInventory(false);return;}
+    if(!steamInventoryAllowed())return;
+    retireSteamInventory();
+    applySteamInventoryState(published);
+  },{publishedMediaState:true});
+  const retry=sharedGameMedia.subscribe(reason=>{if(reason==='retry')void refresh();else if(reason==='inventory')scan(InventoryOrigin.PageHint,false,true);});
   void invoke('gameMedia.watch',{enabled:true}).catch(()=>{});settings();void refresh();
-  return()=>{disposed=true;powerChanged();if(inventoryBootTimer!==null)clearTimeout(inventoryBootTimer);stopDownloads();policy.stop();gamePolicy();powerPolicy();saverPolicy();suspendPolicy();resumePolicy();demandPolicy();downloadPolicy();completionPolicy();rescanRequest();scans.stop();off();inventory();steam();retry();window.removeEventListener('ui-settings:changed',settings);window.removeEventListener('ui-settings:loaded',settings);void invoke('gameMedia.watch',{enabled:false}).catch(()=>{});sharedGameMedia.stop();};
+  return()=>{disposed=true;retireSteamInventory();powerChanged();if(inventoryBootTimer!==null)clearTimeout(inventoryBootTimer);stopDownloads();policy.stop();gamePolicy();powerPolicy();saverPolicy();lifecyclePolicy();demandPolicy();downloadPolicy();completionPolicy();rescanRequest();scans.stop();off();inventory();steam();retry();window.removeEventListener('ui-settings:changed',settings);window.removeEventListener('ui-settings:loaded',settings);void invoke('gameMedia.watch',{enabled:false}).catch(()=>{});sharedGameMedia.stop();};
 }

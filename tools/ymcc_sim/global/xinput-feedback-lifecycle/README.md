@@ -39,3 +39,9 @@
 原StopTarget/Finish/调度/物理身份代码保持；总库令牌只标识已选写者，不能授权来源、硬件或游戏反馈。完整InputHost游戏回调和UI仍未闭环。私有fb0/fb2/fm1与独立head检查fb4分别保存，最终公共结果另有自己的实际来源截面，不能用旧sourceStillCurrent布尔值替当前源码续签。
 
 后续停止失败真实反例发现MSI StopTarget忽略zero结果，已限MSI分支修复：同来源失败保持未决，复用原DeferredStop的有限重试；耗尽后无周期timer，由已有MSI来源发布/撤销边沿唤醒原worker。新helper实际执行；两处完整source发布/撤销函数只核验原调用hook，未在本夹具运行完整设备生命周期。新增失败zero、耗尽、晚到通知、排程不可用、替换来源和新pulse归属断言，当前64场景/299检查，9类语义故障在fixed-off实际编译后检出；正例fixed-off/on各自完整运行。早期57/260和原MSI失败反例分别保存，原历史91a4并非完整before-source的边界不变。游戏反馈、跨提供者联合归还和物理效果继续保留未验收。
+
+## 共用退出反馈定向选择（2026-11-10）
+
+原 producer 增加显式 `--feedback-exit`，`--aokzoe-exit` 作为旧参数别名指向同组。例：`node tools/xinput_identity_feedback_lifecycle_selftest.mjs --current <main.cpp私有快照> --feedback-exit --out <新证据目录>`。这 17 场景／41 检查与默认 `original-lifecycle` 分开；未自动挂入原 global 包装或发布父门，也不能据此声称执行了完整全局验收。MSI 使用上述实际原生消费者和受控 Win32 叶子；九种家族身份只验证公共软件边界。
+
+Repair-013 的前像负例保留 Repair-012 的真实 AOKZOE-only helper，经原样提取和兼容包装执行；17 场景中 9 个／17 检查失败。当前两个诊断配置退出组各 17／41、默认生命周期各 77／386 通过，旧 35／162 历史负例仍保留。原始来源、编译／执行结果、初次夹具编译失败及实机未验收边界见 `G:/YeManCC-Work/Testing/YMCC/Evidence/ControllerFiveConsumerAudit-20261109/Repair-013/HANDOFF.json`。

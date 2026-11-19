@@ -1,5 +1,7 @@
 import {simulationCorePath} from '../release-host-environment.mjs';
-import {verifyDeferredResourceGroup,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
+import {typedIds,verifyDeferredResourceGroup,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
+import {OBSERVER_PUBLICATION_GENERATOR,OBSERVER_PUBLICATION_SOURCE,steamSessionObserverPublication} from '../../../fixtures/steam_session_observer_publication.mjs';
+import {cppBlock,uniqueAnchor} from '../decky-update-recovery/native-source-admission.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -58,14 +60,15 @@ export function originalCommittedReadyConsumer(source,{write=false}={}){
  const matches=[...text.matchAll(/case WM_POWER_RESUME_COMMIT:[\s\S]*?(?=\n\s*case WM_POWER_INPUT_RECOVER:)/g)];
  assert.equal(matches.length,1,'ORIGINAL_COMMITTED_READY_EVENT_UNIQUE');const commit=matches[0];
  assert(commit[0].includes('PowerLifecycle::Ready'),'ORIGINAL_COMMITTED_READY_GUARD_REQUIRED');
- const direct='g_deckySidebarRuntime.requestBindingRefresh(currentPowerGeneration())',shared='deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready")',call=commit[0].includes(shared)?shared:direct;
+ const direct='g_deckySidebarRuntime.requestBindingRefresh(currentPowerGeneration())',shared='deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready")',captured='deckySidebarResumeAfterIntent(generation,"committed-ready")',call=commit[0].includes(captured)?captured:commit[0].includes(shared)?shared:direct;
  assert.equal(commit[0].split(call).length-1,1,'ORIGINAL_COMMITTED_READY_CALL_UNIQUE');
  const begin=commit[0].indexOf('// YMCC Decky:'),end=commit[0].indexOf('ipc_emit("power.resumed"');
  assert(begin>=0&&end>begin,'ORIGINAL_COMMITTED_READY_SLICE_REQUIRED');
- const code=commit[0].slice(begin,end).trim(),expected='inline void productionCommittedReady(){\n'+code+'\n}\n';
+ const capturedBegin=commit[0].indexOf(captured),capturedEnd=capturedBegin+captured.length;
+ const code=call===captured?'const auto generation=currentPowerGeneration();\n'+commit[0].slice(capturedBegin,capturedEnd)+';':commit[0].slice(begin,end).trim(),expected='inline void productionCommittedReady(){\n'+code+'\n}\n';
  const target=path.join(source,'native/decky_wake_committed_consumer.inc');
  if(write)fs.writeFileSync(target,expected);assert.equal(fs.readFileSync(target,'utf8'),expected,'ORIGINAL_COMMITTED_READY_CONSUMER_BYTES');
- return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:commit.index+begin,end:commit.index+end},bytePreserved:true};
+ return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:commit.index+(call===captured?capturedBegin:begin),end:commit.index+(call===captured?capturedEnd:end)},bytePreserved:call!==captured,...(call===captured?{adaptation:'Exact captured-generation Decky leaf, with the borrowed current-generation context supplied by the standalone typed fixture; fanout stages are not executed or proven here.'}:{})};
 }
 
 // Verify the other generated include compiled by the complete producer. Its
@@ -76,13 +79,39 @@ export function originalOfflineConsumer(source){
  const diagnostic=main.indexOf('static void deckySidebarOwnedBindingDiagnostic(',begin);
  const diagnosticEnd=main.indexOf('// Existing high-frequency lane only;',diagnostic);
  const admissionStart=main.match(/    config[.]launchAdmission=\s*\[\]\(\) -> ymcc::deckysidebar::LaunchAdmission \{/);
- const admissionClose='\n        };',admissionEnd=main.indexOf(admissionClose,admissionStart?.index??-1)+admissionClose.length;
- assert(begin>=0&&diagnostic>begin&&diagnosticEnd>diagnostic&&admissionStart&&admissionEnd>admissionStart.index,'ORIGINAL_OFFLINE_CONSUMER_BOUNDARIES');
+ assert(begin>=0&&diagnostic>begin&&diagnosticEnd>diagnostic&&admissionStart,'ORIGINAL_OFFLINE_CONSUMER_BOUNDARIES');
+ const admissionClose='\n        };',admissionTerminator=main.indexOf(admissionClose,admissionStart.index);
+ assert(admissionTerminator>admissionStart.index,'ORIGINAL_OFFLINE_CONSUMER_ADMISSION_END');
+ const admissionEnd=admissionTerminator+admissionClose.length;
+ const healthBegin=main.indexOf('    config.connectionHealth='),healthTerminator=main.indexOf('\n    };',healthBegin);
+ assert(healthBegin>=0&&healthTerminator>healthBegin,'ORIGINAL_OFFLINE_CONSUMER_HEALTH_BOUNDARIES');
+ const healthEnd=healthTerminator+7;
  const plan=main.slice(begin,diagnostic).trim(),log=main.slice(diagnostic,diagnosticEnd).trim();
  const admission=main.slice(admissionStart.index,admissionEnd).trim().replace(/^config.launchAdmission=/,'return ');
- const expected=plan+'\n'+log+'\ninline auto actualAdmission(){'+admission+'}\n';
- const target=path.join(source,'native/decky_offline_consumers.inc');assert.equal(fs.readFileSync(target,'utf8'),expected,'ORIGINAL_OFFLINE_CONSUMER_BYTES');
- return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slices:[{begin,end:diagnostic},{begin:diagnostic,end:diagnosticEnd},{begin:admissionStart.index,end:admissionEnd}],derivation:'original plan/diagnostic/admission trimmed; same return-lambda wrapper as producer',bytePreserved:true};
+ const health=main.slice(healthBegin,healthEnd).trim().replace(/^config.connectionHealth=/,'return ');
+ const changedBegin=uniqueAnchor(main,'    config.changed=','offline runtime changed'),demandBegin=main.indexOf('            g_steamModeObserver.setDemand(',changedBegin);
+ const guard=main.match(/            if \(state.phase != "starting"[^\r\n]+g_deckyMirrorBroker.stop\(\); \}/)?.[0];
+ assert(guard&&demandBegin>changedBegin,'ORIGINAL_OFFLINE_CHANGED_PREFIX');
+ const guardBegin=main.indexOf(guard,demandBegin);
+ assert(guardBegin>demandBegin,'ORIGINAL_OFFLINE_CHANGED_GUARD');
+ const changedEnd=guardBegin+guard.length,changed=main.slice(demandBegin,changedEnd);
+ const complete=(anchor,label)=>{
+  const begin=uniqueAnchor(main,anchor,label),end=cppBlock(main,main.indexOf('{',begin),label).end;
+  return {begin,end,text:main.slice(begin,end)};
+ };
+ const identity=complete('[](std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source) {','offline identity publication');
+ const stable=complete('modeObserver.stableBigPicture = []','offline stable Big Picture');
+ const callback=stable.text.trim().replace(/^modeObserver[.]stableBigPicture = /,'return ');
+ const observer=identity.text.includes('deckySidebarObserveSteamSource(')?complete('static void deckySidebarObserveSteamSource(','offline Steam source forwarding'):null;
+ const expected=(observer?.text??'')+'\ninline auto actualIdentityPublished(){return '+identity.text.trim()+';}\n'+
+  'inline void actualRuntimeChanged(const ymcc::deckysidebar::State& state){'+changed+'}\n'+plan+'\n'+log+'\n'+
+  'inline auto actualAdmission(){'+admission+'}\ninline auto actualConnectionHealth(){'+health+'}\ninline auto actualStableBigPicture(){'+callback+';}\n';
+ const target=path.join(source,'native/decky_offline_consumers.inc');assert(fs.readFileSync(target).equals(Buffer.from(expected)),'ORIGINAL_OFFLINE_CONSUMER_BYTES');
+ const metadataFile=path.join(source,'../RESUME-CONSUMER.json'),metadata=read(metadataFile).offlineIdentity;
+ assert(metadata,'ORIGINAL_OFFLINE_CONSUMER_METADATA');
+ for(const [field,text]of [['identityPublishedSha256',identity.text.trim()],['stableSha256',callback],['planSha256',plan],['diagnosticSha256',log],['admissionSha256',admission],['healthSha256',health],['compiledSha256',expected]])assert.equal(metadata[field],sha(Buffer.from(text)),'ORIGINAL_OFFLINE_CONSUMER_METADATA:'+field);
+ const slices=[...(observer?[{begin:observer.begin,end:observer.end}]:[]),{begin:identity.begin,end:identity.end},{begin:demandBegin,end:changedEnd},{begin,end:diagnostic},{begin:diagnostic,end:diagnosticEnd},{begin:admissionStart.index,end:admissionEnd},{begin:healthBegin,end:healthEnd},{begin:stable.begin,end:stable.end}];
+ return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slices,metadata:pin(metadataFile),derivation:'Exact current offline observer, identity/changed/stable callbacks, plan, diagnostic, admission and connection health with their original fixture wrappers',bytePreserved:true};
 }
 
 // Admit only the exact managed-backend slice already generated by the full producer.
@@ -143,10 +172,51 @@ export function validateOriginalResult(value,run){
  const complete=value.selection==='';
  if(complete){
   assert.equal(run.selection,null,'ORIGINAL_FULL_PRODUCER_COMMAND_REQUIRED');
-  if(value.passed)verifyDeferredResourceGroup(value);
+  if(value.passed){
+   const declared=Object.values(typedIds);
+   assert.equal(new Set(declared).size,declared.length,'ORIGINAL_TYPED_CATALOG_DUPLICATE');
+   assert.deepEqual(value.cases.map(row=>row.id).sort(),declared.sort(),'ORIGINAL_TYPED_COMPLETE_MEMBERSHIP');
+   verifyDeferredResourceGroup(value);
+  }
  }else{assert.equal(value.selection,ORIGINAL_SELECTION);assert.equal(run.selection,ORIGINAL_SELECTION);assert.equal(value.tests,ORIGINAL_CASES.length);}
  assert.equal(run.runExit,value.passed?0:1);assert.equal(run.error,null);assert.equal(run.compilerExit,0);assert.deepEqual(run.changedOriginalInputs,[]);assert.equal(run.status,value.passed?'pass':'fail');
  return {cases:value.cases.length,passed,failed:value.cases.length-passed,failedCaseIds:value.cases.filter(row=>!row.passed).map(row=>row.id),completeCurrentProducer:complete,aggregateCases:selected.length,additionalCases:value.cases.length-selected.length};
+}
+export function verifyOriginalFrozenSources({repo,original,frozen,originalRun,sourcePins}){
+ const source=path.join(original,'source');
+ assert.equal(key(frozen.repo),key(repo),'ORIGINAL_FROZEN_REPO');
+ assert.equal(key(frozen.source),key(source),'ORIGINAL_FROZEN_ROOT');
+ assert.deepEqual(frozen.files.map(row=>row.path).sort(),[...OWNED_SOURCES].sort(),'ORIGINAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED');
+ const generator=path.join(repo,OBSERVER_PUBLICATION_GENERATOR);
+ assert.equal(key(fs.realpathSync(generator)),key(generator),'ORIGINAL_PUBLICATION_GENERATOR_REPARSE');
+ assert.equal(pin(generator).sha256,sourcePins.get(OBSERVER_PUBLICATION_GENERATOR)?.sha256,'ORIGINAL_PUBLICATION_GENERATOR_NOT_PINNED');
+ const product=path.join(repo,OBSERVER_PUBLICATION_SOURCE);
+ assert.equal(key(fs.realpathSync(product)),key(product),'ORIGINAL_PUBLICATION_PREIMAGE_REPARSE');
+ const publication=steamSessionObserverPublication(fs.readFileSync(product));
+ const publicationPath=path.join(source,OBSERVER_PUBLICATION_SOURCE);
+ const publicationPort={path:publicationPath,bytes:publication.derived.bytes,sha256:publication.derived.sha256,
+  generator:publication.generator,transformation:publication.transformation,original:publication.original,derived:publication.derived};
+ // A derived compiler input is not a replacement for the product preimage pin.
+ assert.deepEqual(frozen.fixturePorts,[publicationPort],'ORIGINAL_FROZEN_PUBLICATION_DECLARATION');
+ assert.deepEqual(originalRun.fixturePorts,[publicationPort],'ORIGINAL_RUN_PUBLICATION_DECLARATION');
+ const files=new Map();
+ for(const row of frozen.files){
+  assert(!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).includes('..'));
+  assert.equal(sourcePins.get(row.path)?.sha256,row.sha256,'ORIGINAL_SOURCE_PREIMAGE_CHANGED:'+row.path);
+  const file=path.join(source,row.path);
+  assert.equal(key(fs.realpathSync(file)),key(file),'ORIGINAL_FROZEN_FILE_REPARSE:'+row.path);
+  const bytes=fs.readFileSync(file);
+  if(row.path===OBSERVER_PUBLICATION_SOURCE){
+   assert.deepEqual({path:row.path,bytes:row.bytes,sha256:row.sha256},publication.original,'ORIGINAL_PUBLICATION_PREIMAGE');
+   assert(bytes.equals(publication.bytes),'ORIGINAL_PUBLICATION_EXACT_BYTES');
+   files.set(key(file),publicationPort);
+  }else{
+   assert.equal(bytes.length,row.bytes,'ORIGINAL_FROZEN_FILE_LENGTH:'+row.path);
+   assert.equal(sha(bytes),row.sha256,'ORIGINAL_FROZEN_FILE_CHANGED:'+row.path);
+   files.set(key(file),row);
+  }
+ }
+ return {files,publicationPort};
 }
 // Reuse is deliberately confined to the sibling parent in this exact global
 // invocation. Standalone calls keep executing the original producer. This is
@@ -205,11 +275,10 @@ export async function executeOwnedRuntime({repoRoot=path.resolve(import.meta.dir
   const originalResult=read(path.join(original,'typed-runtime-result.json')),originalRun=read(path.join(original,'RESULT.json'));
   report.summary=validateOriginalResult(originalResult,originalRun);assert.equal(report.summary.completeCurrentProducer,true,'ORIGINAL_FULL_PRODUCER_REQUIRED');
   assert.equal(report.originalExecution.exitCode,originalResult.passed?0:1);
-  const frozen=read(path.join(original,'SOURCE-PINS.json'));assert.equal(key(frozen.repo),key(repo));assert.equal(key(frozen.source),key(path.join(original,'source')));
-  assert.deepEqual(frozen.files.map(row=>row.path).sort(),[...OWNED_SOURCES].sort(),'ACTUAL_FROZEN_SOURCE_MEMBERSHIP_CHANGED');
-  for(const row of frozen.files){assert(!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).includes('..'));assert.equal(sourcePins.get(row.path)?.sha256,row.sha256);assert.equal(pin(path.join(original,'source',row.path)).sha256,row.sha256);}
+  const frozen=read(path.join(original,'SOURCE-PINS.json'));
+  const {files:frozenFiles,publicationPort}=verifyOriginalFrozenSources({repo,original,frozen,originalRun,sourcePins});
+  report.originalPublicationPort=publicationPort;
   const graph=read(path.join(original,'dependencies.json'));assert.equal(graph.Version,'1.2');
-  const frozenFiles=new Map(frozen.files.map(row=>[key(path.join(original,'source',row.path)),row]));
   const readyConsumer=originalReadyConsumer(path.join(original,'source'));frozenFiles.set(key(readyConsumer.path),readyConsumer);report.generatedReadyConsumer=readyConsumer;
   const committedConsumer=originalCommittedReadyConsumer(path.join(original,'source'));frozenFiles.set(key(committedConsumer.path),committedConsumer);report.generatedCommittedReadyConsumer=committedConsumer;
   const offlineConsumer=originalOfflineConsumer(path.join(original,'source'));frozenFiles.set(key(offlineConsumer.path),offlineConsumer);report.generatedOfflineConsumer=offlineConsumer;

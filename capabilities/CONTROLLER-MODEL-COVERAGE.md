@@ -1,3 +1,81 @@
+HC164（2026-11-14，香港时间）：家族无虚拟手柄录入定义后继已精确导入主线，限定源码/受控软件范围 `ACCEPTED_SOFTWARE_SCOPE`，整库仍 `PARTIAL`。原 `oemUnifiedInputBindingFor`、profile、catalog 与 canonical 位提供只读表达式；保留 OR 替代、原规则顺序/group 先行竞争、左右修饰键、subset/exact 两层和接口/代次条件，不新增型号/协议表或输入权限。
+
+Win5 raw F13 显示 Gamepad 映射而仍保存 keyboard:F13/press；OEM Gamepad、Home、Keyboard、L4/R4 及额外 Ctrl/左右 Meta 保留，不按名称/时间自动删并。F14/F15 raw 入口补条件名及背键接口/发布代次说明，鼠标与键盘/鼠标贡献措辞分开，HC163 两条件在这份固定源码关闭。旧 Native 没有新解释字段时保留原始录入。
+
+核收 native-r4 的158项定义投影（受控端口）、ui-final 的31项实际组件/正式engine（720/800、合成DOM/内存IPC）、model19与固定类型检查，各epoch不相加；14自有Job关前零。8文件前/后净改动与逆向字节保持已核。原脚本 ed22 全文由两处精确逆补丁重建并严格核SHA，重建身份与幸存原件分列；最终生成体仅一条自有头路径差异，未重跑158。旧155/31、FAIL与UNKNOWN保留。
+
+本后继没有新完整Native/Web包、部署或设备动作；下次自然配套构建接入，不追包。HC161本人同一Win5鼠标/手柄切换键成功仍限原现场epoch，不代签此新源码实机。物理同源、长按/原厂抑制、完整退出与全族验收继续OPEN。
+
+固定原件：`G:\YeManCC-Work\Testing\YMCC\Evidence\ControllerFiveConsumerAudit-20261109\Repair-019-NoVirtualBoundOem\recording-definitions-20261113\SOURCE_READY.json`（SHA256 `60801d165dbbeba9e06cfa4f8a840251b0921851def9b2a4f7e50100818df969`）。裁决：[HC164](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE.json)；条件与来源见同名 observations。以下历史原文保留。
+
+---
+
+HC142（2026-11-13）：Win5新ZIP07b37b05/PID9876已有本人未开虚拟能呼出的正向反馈；OEM-only/no Host启动及3次summon预检早于SD请求已核，晚期导出SD与早期分开。具体键未知、规则0不签自定义绑定/五键/OEM屏蔽或全族；盘Native7a匹配共享睡眠包709a，15共用函数同HC137原源，仅有限身份/阶段核收。原Fan已获人类授权向唯一睡眠层发送HC141，不重复派工/确认，接口仍OPEN。整体PARTIAL、原目标active。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD.json。
+
+---
+
+HC139（2026-11-13）：Win5两导出同writer、普通rules{}及旧盘Native已核；仅无导出自定义绑定，不能判默认能力缺失/历史无绑定/候选消费失败，HID closed只限源归还。HC137-C05说明路径多一层目录，正确HC133交接为Repair-019-NoVirtualBoundOem/package-intake-20261113/HANDOFF.json（3ca54447）；旧封存不改，详见本后继勘误。无新运行/产品变更，174限定软件范围保持，实机/全退出OPEN，目标active。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM.json。
+
+---
+
+HC137（2026-11-13）：原稳定Host-OFF交接a6d7b20d/e619bdf7限定软件核收。AYA AIRPro ckbig与Win5 l4两键盘来源在私有SDK-free Host实际OFF/归还后，通过原窗口/规则/串行执行器到受控OS叶；174检查、forbiddenIo0、自然exit0与Job关前0。首172/2 forbiddenIo/selector FAIL/pin漂移UNKNOWN保留，不拼整父。13共用函数/30引用/来源及托管身份已核；原13家族/profile差异保持。实体hook、GPD固件、WMI/HID、OS效果、全Shutdown与原厂屏蔽仍OPEN；HC133包不重编、不回填，整体PARTIAL，原目标active。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION.json。
+
+---
+
+<!-- HC125-OEM-NO-VIRTUAL-SUPPORT:BEGIN -->
+## 无虚拟手柄绑定：当前机型来源支持（2026-11-13）
+
+专用键/背键配置动作复用唯一总库 oemUnifiedInputBindingFor，原“背部按键”任务负责无Host冷启动及真正切回本机后的采集、动作和归还。当前102来源行/352机型键条目包含基类、非factory及既有扩展，不是硬件通过数；不新增运行注册、影子能力或默认开关。
+
+逐型号/键ID/当前键表、键盘表达式、click/full声明及具体来源见 JSON noVirtualOemSupport125 指向的 MODEL-MATRIX.json。MSI WMI与ROG前键仅press/double；Win5 F14/F15保留接口/代次门；OP3 Home/G-Key held、X2/MiniPro Home click、MiniPro F15/F16不可混用X1初始化；AOKZOE六操作不是六物理键。SteamDeck两Embedded键仍capture未接入；十个无OEM表来源行不补空接口。
+
+本次仅同步覆盖资料中的两处当前源码差额：AYA3独立kAyaneo3Keys且背部操作位置未证（backIndex0）；NEXT2四LC/RC槽为1/3/2/4，不能继承给AYA3。原捕获日期、sourcePins与其它历史字段保留，具体差额前像在本轮证据中。
+
+收到事件、执行动作与原厂默认行为屏蔽分别验收；读取共享WMI/HID不能证明屏蔽其它消费者。full声明不证明固件持续按下。普通动作不应借虚拟输出门，真正发送虚拟按钮的动作仍要求对应输出。无Host冷启动、真OFF后接续、完整动作结果及各机型物理/原厂抑制均未由本库说明签通过。
+
+支持原件：G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT/CONSUMER-SUPPORT-CONTRACT.json。
+<!-- HC125-OEM-NO-VIRTUAL-SUPPORT:END -->
+
+<!-- HC122-WIN5-OEM-COVERAGE:BEGIN -->
+## Win5 五个已有专用键：来源与现场证据补齐（2026-11-10）
+
+Win5仍为同一factory类、GpdWin5 profile和五个既有key ID。Gamepad同时有F13与vendor-HID body7，L4/R4为body8/9及有界F14/F15兼容；Keyboard/Home只有本类键盘声明，实体持续键/脉冲未定。Menu继续silenced，(1,17)固件元组不写作十进制1.11门槛。
+
+日志去重后239条HID状态公式吻合，99组L4和19组Gamepad按下→松开；R4 HID非零、395各HID键、动作执行与物理标签仍缺证。不是全五键/家族实机通过。详情与当前消费边界见[现有支持页](CONTROLLER-REPAIR-SUPPORT.md)和其JSON `win5.oemKeyContract122`；历史表的form/clickOnly、日期、sourcePins、数量与FAIL/UNKNOWN保留。
+<!-- HC122-WIN5-OEM-COVERAGE:END -->
+
+<!-- HC123-WIN5-R4-LOG-DELTA:BEGIN -->
+Win5 新增日志补证：41 ZIP按内容去重为39份原件；相对HC122新增13份原件。R4现有F15键盘解释观察到4组命中→归零（81/712/352/360ms），同时有native装配backButtons2→0。395机器上下文均在同成员同PID/电源代次：3组hwnd相同，81ms那组为初始化hwnd=0后出现窗口，单独保留边界。1024是F15内部状态位，不是虚拟键码/扫描码。
+R4 HID正向、Keyboard/Home物理持续形态、键盘设备/进程出生身份及最终Host/驱动/动作仍未验收；旧239条HID、99组L4/19组Gamepad不重复累计，五键与原运行路线保持。证据：`G:/YeManCC-Work/Testing/YMCC/Evidence/HC-Win5-OemKeys-20261110/continuation-20261111/R4-KEYBOARD-FIELD-FINAL.json`。
+<!-- HC123-WIN5-R4-LOG-DELTA:END -->
+
+<!-- HC099-INTEL-OP3:BEGIN -->
+## Intel OP3 与此前 AMD Apex 的独立合同（2026-11-07）
+
+本次只刷新精确 OneXPlayer3 来源和消费导航；原全表历史快照、AMD 实测与其他机型状态保留。机器合同：[INTEL-OP3-CONTRACT.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONTRACT.json)。
+
+- Intel 精确类为 HandheldCompanion.Devices.OneXPlayer3，deviceId 为 ymcc.device.OneXPlayer3；固定 f2e58468 工厂产品串仅 ONEXPLAYER 3 / ONEXPLAYER-3，厂商串仅 ONE-NETBOOK / ONE-NETBOOK TECHNOLOGY CO., LTD.。已有精确识别不使用 CPU 或 G3E 名称兜底。此前留存的 AMD Max+395 日志实际为 OneXPlayerApex，不能代签 Intel。
+- 当前原消费者已选 OneXX3 / kOneXX3Keys 六逻辑键：Turbo=Ctrl+Win+Alt、Keyboard=Ctrl+Win+O、Home=vendor0x21/0x24、M1/L4=0x22、M2/R4=0x23、G-Key=0x25。Intel Home/G-Key 都保留真实按下/抬起；厂商集合为 VID1A86/PIDFE00/FF00:0001，PID1305 不授予 Intel OP3。
+- 固定源 OneXPlayer3.BuildRemapPage3 将 G-Key 映射为键盘类型以取得 down/up；不能复用 X2 的 gamepad Guide 映射，也不能套用 Apex 的 Orange/后键顺序。HcOneXVendorInputContract 未包含 Intel OP3 是独立 X2 reader 已消费的边界。
+- 厂商手册分别描述 Home 返回桌面、G-Key(Xbox) 呼出/隐藏 Xbox、键鼠键长按切换模式/短按键盘、OneX 键长按游戏库/短按面板。它们是原厂 UI 行为；OneX 实体标签到现有 Turbo 逻辑ID、G-Key 到标准 Guide 的电气映射仍 UNKNOWN，不据此改默认动作。
+- 原有风扇 WmiBankedEc（44A/44B、最大184）、灯光 oxp3-hid-v1、充电 oxp3-wmi-ec（最低40%）和 neg-y-neg-z-x 运动转换均有当前静态消费者；本次不新增空登记。HC093 连续8字节 WMI 回执兼容仍待原消费端，未把它签为已修复；不借给 Apex。
+- 当前 Home 消费与 UI 元数据为 held，onexX2LogOwner 的固定 vendor-click 日志标签已由原虚拟手柄 owner 在当前主线修正：复用原 supported/clickOnly 模型判定，OP3 为 vendor-held，X2/MiniPro 仍为 vendor-click；已核净差异可逐字节逆还原前像，夹具/编译/导出均 NOT_RUN。该标签问题本身不证明输入动作失败。
+
+本次为源码与导航合同修正；Intel 实机按键/标准 Guide、实体风扇/灯光/充电与安装包仍未验收。完整家族、原未决问题和原测试 FAIL/UNKNOWN 保持；不扩大测试预算。
+
+源级 Vendor 按键差异（不由实体标签猜测）：
+
+| ID | Intel OP3 | AMD Apex |
+|---|---|---|
+| 0x21 | Home，真实按下/抬起 | Orange，真实按下/抬起 |
+| 0x22 | M1/L4 | R4 |
+| 0x23 | M2/R4 | L4 |
+| 0x24 | Home，真实按下/抬起 | Keyboard，真实按下/抬起 |
+| 0x25 | G-Key，真实按下/抬起 | 无此 vendor 映射 |
+
+消费端静态核收：[INTEL-OP3-CONSUMER-INTAKE.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONSUMER-INTAKE.json)。
+<!-- HC099-INTEL-OP3:END -->
+
 # 虚拟手柄全机型消费覆盖表
 
 <!-- HC083-APEX-OEM-CURRENT:BEGIN -->
@@ -223,3 +301,72 @@ G3E 的实际消费：第二包 `native-lifecycle.log:2248/2249` 的 `capability
 本侧维护 class/alias/模型差异、现有绑定入口和缺口。虚拟手柄修复方维护 native/Host/驱动/归还实现；同一执行文件保持单写者。已把三机差异、102 行覆盖、OneX/AYA fallback 和 ROG 隔离边界交给“虚拟手柄”任务。当前联合目标仍 ACTIVE，不因本表交付而宣称修复完成；需要当前源码软件验证、包身份和分别标记的物理验收。
 
 已读取修复方 R5 `COORDINATOR-DELIVERY.json` 并独立核对其来源及回执哈希（具体匹配项见证据目录 `R5-DELIVERY-REFERENCE.json`）。该交付仅为 GPD native helper writer 跟踪的软件范围；它明确保留 first-hide ledger、native→virtual/OFF 强退归还、实际设备恢复及 OneX/AYA 物理协议缺口，且未导出。R5 不能被总库覆盖表升级成全家族验收。最新推进优先级沿用用户交给修复方的 ROG、微星优先，Win5 问题保留。
+
+
+## AYA AIR PRO 专用键现场补证（HC127，2026-11-13）
+
+用户11月13日103536日志确认旧款AIR PRO／5825U，沿用AYANEOAIRPro → AYANEOAIR及AyaneoAir（profile6）。四键为大键ckbig＝Ctrl+Win+F12、小键cksmall＝Win+D、左上cktl＝Ctrl+Win+F11、右上cktr＝Ctrl+Win+F10；复用CEc目录只共享键ID，AIR1S／AIRPro1S的F17／F15／F16不适用于此机。四键backIndex均0，不据此添加虚拟背键槽。
+
+原类型日志有6种组合、覆盖4个既有键；首见是11月11日，额外Ctrl／两个上键并存仍是原规则的子集解释，不新增按键。当前11月13日PID6512／power15782只见13条OS和弦消费记录，matched合计0、回放22个OS事件；这不是13次物理按键失败或最终动作判定。快照只配置大键→返回桌面，trigger=press，holdMs2000不将它改成长按。键盘设备来源disabled／known=false，详细输入日志关闭，按住时长、成对释放、最终动作和无Host／OFF后消费仍UNKNOWN。
+
+现场与源码合同：G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-127-AYA-AIRPRO-OEM-FIELD/AYA-AIRPRO-OEM-CONTRACT.json。仅补当前能力资料与原消费任务线索，没有新的runtime映射；原按键任务及其他在办项继续，不能将本包签为当前候选或全AYA实机通过。
+
+
+## 无虚拟绑定的家族修复范围（HC128，2026-11-13）
+
+按用户“同类型一起修复”要求，asset／可选STA初始化与原冷启动归还等共同根因应在共享inputCapture消费端修复，现有总库各家族沿同一绑定继承，不只针对日志中的AIRPro。源码影响分组为102来源行／352机型键，其中91行声明有可实现OEM键；这些是静态来源行，包含基类和扩展，不是实机通过数。原无键／未实现来源继续明确排除，不能为凑家族覆盖激活新能力。
+
+旧AIR／AIRLite／AIRPro使用AyaneoAir，AIR1S／Pro1S使用AyaneoCec；AYA3、NEXT2及其他AYA profile同样按原表保留，源/按键/代次和click-only差异不合并。六个初始化代表、GPD21行／43操作、WMI/ROG点击与键盘屏蔽分别只证明其实际范围，不能相加为全家族验收。
+
+家族／来源路线分组和完成条件：G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY/FAMILY-CONSUMER-SUPPORT-CONTRACT.json。由原“背部按键”任务实施共同消费者；本侧只补能力资料与核验，现有在办事项全部继续，当前全库仍PARTIAL。
+
+
+## 同类型家族消费修正后继（HC129，2026-11-13）
+
+共同OEM初始化的两种已知STA失败分支已接回原冷启动归还队列，修在共享消费者，各既有家族沿原绑定继承。AYA来源日志按当前profile表扩到F10～F24，旧AIR／AIRLite／AIRPro的F10～F12由同一路径覆盖；原AIR1S／Pro1S、AYA3、NEXT2及其他profile差异保留，不增键位、运行注册或默认能力。
+
+原optional24只验证内存归还入口调用；AYA493有效前缀留在失败父组，扩展275与诊断10／源码37按各自来源分列，不拼整父或全族实机PASS。注入拒绝、RawInput／钩子区别保持，Win+D与鼠标不在功能键日志范围。日志类型不证明次数、完整和弦、实体来源或动作成功。
+
+仅源修正与限定软件范围核收，实际归还／完整Shutdown、真OFF后动作、OEM原厂屏蔽、普通配套Native／包与实机继续OPEN。早期中间执行器文本及SDK原前像缺证单列UNKNOWN，不以后继源补签旧轮；原FAIL／超时／工具清理与费用保留。
+
+当前边界：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\SOURCE-AND-CONSUMER-CONDITIONS.json。原按键任务及其它在办任务继续；库侧不接手消费实现，全库PARTIAL。
+
+
+## 执行来源补证后继（HC131，2026-11-13）
+
+HC129保留的中间执行器／夹具文本缺证已获得后继：原owner事后重建的12份不同源，对应14条原request引用；库侧按原请求及terminal前后pin逐一核对SHA／大小全吻合。接受可重建的原脚本文本身份，不能写成当时已留存快照；原SDK前pin、完整编译／载荷与实机资格仍UNKNOWN，原FAIL／费用不变，也没有补跑业务。
+
+原家族gate切换消费者仍在核查；positive003／004先到达动作内存叶，之后的matched断言观察了正常drain后的计数，不能据此判能力或OEM硬件故障。具体条件由原执行者在原夹具修正，库侧不改产品。全库PARTIAL、原任务active继续。补证与观察条件：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-131-SOURCE-RECONSTRUCTION-AND-GATE-OBSERVATION\SOURCE-RECONSTRUCTION-INTAKE.json；G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-131-SOURCE-RECONSTRUCTION-AND-GATE-OBSERVATION\GATE-OBSERVATION-CONDITION.json。
+
+
+## 家族gate软件核收（HC132，2026-11-13）
+
+共同产品gate／consume六函数未改。原失败父保留AYA AIRPro／MSI A1M／Win5三场景78条，另1仅canonical名字解析；独立tail的OneX MiniAMD／AOKZOE／Zotac及ROG84条另按原来源保留，不拼整父PASS。MiniAMD代表使用原Orange，不增Turbo别名或能力。观察在正常matched清零前，并核完整DOWN/UP消费／归零／无重放；解绑只签原400ms周期内存读取。
+
+所有阶段Host句柄均不存在，故“输出意图回本机”不等于真实虚拟后端ON/OFF／归还。动作是触摸键盘内存叶，ROG身份为模拟；即时正式规则发布、实际归还／完整关闭、普通配套包、OEM来源屏蔽及实机继续OPEN。当前软件范围接受、全库PARTIAL、原任务active。条件：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-132-GATE-REFRESH-BOUNDARY\SOURCE-AND-CONSUMER-CONDITIONS.json。
+
+
+## 无虚拟绑定普通测试包来源（HC133，2026-11-13）
+
+原consumer已从一次稳定主线快照普通导出0.0.39测试包；库侧逐核1785来源、235构建载荷、619ZIP文件及Native构建标识，既有OEM消费修正／冷归还catch／AYA当前profileF10～F24已入包。ZIP SHA9004a15422a437eb351c2d77b30810d168c93aba6a80d90a79ab09b98839b41d，buildId cdf949b08b451ecc92eaff94d59a55c0d4fdef01aac5d2aa5ef71083813e381d。包路径：G:\YeManCC-Work\Deliverables\YMCC-OEM-Native-Test-20261113-060357Z\YeManCC.zip。
+
+只接受包来源，夹具NOT_RUN／未安装部署／实际无虚拟及启用后关闭的实体动作、真实Host归还／OEM原厂屏蔽／完整Shutdown仍OPEN。既有库键表、来源和未实现边界不扩大，原家族检查范围与FAIL分期保持；普通测试包不等于正式发布或全族实机通过。条件：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\observations\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\SOURCE-AND-CONSUMER-CONDITIONS.json。
+
+
+## HC143：Win5 Gamepad 无虚拟呼出的实机澄清（2026-11-13）
+
+原按键任务的人类已确认手柄切换键为Gamepad；6日志成员/24原行支持本次无虚拟输出呼出。HC142的“具体键未知”只在此人类归属范围由本条后继替代，旧原件保留。无逐报文因果、自定义绑定、原功能屏蔽、背键或全族实机结论。共用家族路径及真实profile/HID/键盘差异保持，不新增特例、映射或DLL。
+
+裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION.json
+
+
+## HC144：家族消费核收与勘误（2026-11-13）
+
+原GPD共用短按反馈过滤已由原按键owner修复并经旧源FAIL/候选定向PASS核收；仅软件观察，不扩为动作/原厂屏蔽/全族实机。混合OEM+手柄归属门由原owner继续，纯OEM独立保持。Win5后段Home规则0与早段Gamepad人类成功分开。3处旧签名截取已补全定义勘误，历史原件/FAIL不改；家族来源/profile不变。
+裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT.json
+
+
+## HC145：共用保留边沿的混合输入归属（2026-11-13）
+
+原执行者两入口复用原松键/子窗口准入，纯OEM独立及neutral/代次保持；旧源反例与候选56分开核收，仅ACCEPTED_SOFTWARE_SCOPE。OneX HID/GPD F13受控代表不签全族实机、真实Host或现场F24；准入后队列、Shutdown、原功能屏蔽仍OPEN。无新机型/键/DLL/能力协议，首准备FAIL与旧174保持。
+裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION.json

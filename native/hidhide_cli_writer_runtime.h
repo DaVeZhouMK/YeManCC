@@ -37,9 +37,9 @@ static ymcc::hidHideCliWriterRuntime::JobState hidHideCliWriterProbeJob(const st
     return !known?State::Unknown:info.ActiveProcesses?State::Active:State::Idle;
 }
 namespace ymcc::hidHideCliWriterRuntime {
-static void note(const char* phase,const char* reason,const writer::Attempt* attempt=nullptr) noexcept {
+static void note(const std::wstring& recordPath,const char* phase,const char* reason,const writer::Attempt* attempt=nullptr) noexcept {
     try {appendNativeLifecycleLog("hidhide-cli-writer",{
-        {"phase",phase},{"reason",reason},{"recordPath",W2U(hidHideCliWriterRecordPath())},
+        {"phase",phase},{"reason",reason},{"recordPath",W2U(recordPath)},
         {"attemptId",attempt?attempt->attemptId:std::string{}},
         {"parentPid",attempt?attempt->parent.pid:0},{"parentBirth",attempt?attempt->parent.creationTime:std::string{}},
         {"childPid",attempt&&attempt->child?attempt->child->pid:0},
@@ -49,12 +49,15 @@ static void note(const char* phase,const char* reason,const writer::Attempt* att
     }catch(...){}
 }
 static std::unique_ptr<writer::Session> open() {
+    std::wstring path;
     try {
+        path=hidHideCliWriterRecordPath();
         auto result=std::unique_ptr<writer::Session>(new writer::Session(
-            writer::Session::open(hidHideCliWriterRecordPath(),hidHideCliWriterMachineBinding())));
-        if(!result->ready()){note("deferred",result->error().reason.c_str());return {};}
+            writer::Session::open(path,hidHideCliWriterMachineBinding())));
+        if(!result->ready()){note(path,"deferred",result->error().reason.c_str());return {};}
+        if(!result->historyBindingMatched())note(result->recordPath(),"history-hint","empty-history-cache-miss-current-owner-acquired");
         return result;
-    }catch(...){note("deferred","writer-record-open-exception");return {};}
+    }catch(...){note(path,"deferred","writer-record-open-exception");return {};}
 }
 // A Reserved record precedes process creation; MayRun is committed BEFORE any
 // ResumeThread. Old native death never proves its child/subtree has finished.
@@ -66,27 +69,27 @@ static bool clearSettled(writer::Session& session) {
     const auto current=hidHideCliWriterCapture(GetCurrentProcess());
     const bool same=current&&ymcc::targetReturn::detail::sameProcess(*current,attempt.parent);
     if(!same&&hidHideCliWriterProbe(attempt.parent).state!=process::State::Dead) {
-        note("deferred","recorded-native-owner-alive-or-unknown",&attempt);return false;
+        note(session.recordPath(),"deferred","recorded-native-owner-alive-or-unknown",&attempt);return false;
     }
     if(attempt.child&&hidHideCliWriterProbe(*attempt.child).state!=process::State::Dead) {
-        note("deferred","recorded-CLI-child-alive-or-unknown",&attempt);return false;
+        note(session.recordPath(),"deferred","recorded-CLI-child-alive-or-unknown",&attempt);return false;
     }
     const auto job=hidHideCliWriterProbeJob(attempt.jobName);
     if(job!=JobState::Absent&&job!=JobState::Idle) {
-        note("deferred","recorded-CLI-subtree-active-or-unknown",&attempt);return false;
+        note(session.recordPath(),"deferred","recorded-CLI-subtree-active-or-unknown",&attempt);return false;
     }
     if(!session.settle(record->revision,attempt.attemptId)) {
-        note("deferred",session.error().reason.c_str(),&attempt);return false;
+        note(session.recordPath(),"deferred",session.error().reason.c_str(),&attempt);return false;
     }
-    note("settled","exact-native-child-and-job-writer-quiescent",&attempt);return true;
+    note(session.recordPath(),"settled","exact-native-child-and-job-writer-quiescent",&attempt);return true;
 }
 static bool settleOwned(writer::Session& session,const std::string& id) {
     const auto* record=session.record();if(!record)return false;
     if(!record->active)return true;
     if(record->active->attemptId!=id)return false;
     const auto attempt=*record->active;
-    if(!session.settle(record->revision,id)){note("deferred",session.error().reason.c_str(),&attempt);return false;}
-    note("settled","exact-owned-CLI-root-and-subtree-exited",&attempt);return true;
+    if(!session.settle(record->revision,id)){note(session.recordPath(),"deferred",session.error().reason.c_str(),&attempt);return false;}
+    note(session.recordPath(),"settled","exact-owned-CLI-root-and-subtree-exited",&attempt);return true;
 }
 static bool quiescent() {
     auto session=open();return session&&clearSettled(*session);

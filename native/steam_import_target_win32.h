@@ -11,9 +11,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "steam_compatibility_core.h"
 
 namespace ymcc::steamcompat {
-struct ImportSlot { std::uint32_t rva = 0; std::uint64_t originalThunk = 0; std::string library, symbol; };
 struct LoadedDiagnostic {
     const char* reason = "contract-import-unchecked";
     const char* stage = "none";

@@ -60,19 +60,44 @@ HANDLE onlyJob(){if(jobs.size()!=1)throw std::runtime_error("exactly one owned g
 #undef UpdateProcThreadAttribute
 #undef QueryInformationJobObject
 #undef TerminateJobObject
+// Private selection only: instrument the ACTUAL store leaves, not a Session or
+// LaunchScope decision model. Original/default modes forward every API as before.
+namespace bindingIo {
+inline bool selected=false,failFlush=false;
+inline unsigned writes=0,flushes=0,failedFlushes=0,moves=0,creates=0,foreignOpens=0,censusResolutions=0;
+void reset(){failFlush=false;writes=flushes=failedFlushes=moves=creates=foreignOpens=censusResolutions=0;}
+BOOL write(HANDLE h,LPCVOID bytes,DWORD count,LPDWORD done,LPOVERLAPPED overlap){if(selected)++writes;return ::WriteFile(h,bytes,count,done,overlap);}
+BOOL flush(HANDLE h){if(selected){++flushes;if(failFlush){++failedFlushes;SetLastError(ERROR_WRITE_FAULT);return FALSE;}}return ::FlushFileBuffers(h);}
+BOOL move(LPCWSTR from,LPCWSTR to,DWORD flags){if(selected)++moves;return ::MoveFileExW(from,to,flags);}
+BOOL create(LPCWSTR application,LPWSTR command,LPSECURITY_ATTRIBUTES process,LPSECURITY_ATTRIBUTES thread,BOOL inherit,DWORD flags,LPVOID environment,LPCWSTR directory,LPSTARTUPINFOW startup,LPPROCESS_INFORMATION result){if(selected)++creates;return ::CreateProcessW(application,command,process,thread,inherit,flags,environment,directory,startup,result);}
+HANDLE open(DWORD access,BOOL inherit,DWORD pid){if(selected){++foreignOpens;throw std::logic_error("binding-only selected an unneeded recorded-process probe");}return ::OpenProcess(access,inherit,pid);}
+HMODULE module(LPCWSTR name){if(selected){++censusResolutions;throw std::logic_error("binding-only selected an unneeded process census");}return ::GetModuleHandleW(name);}
+}
+#define WriteFile bindingIo::write
+#define FlushFileBuffers bindingIo::flush
+#define MoveFileExW bindingIo::move
+#define OpenProcess bindingIo::open
+#define GetModuleHandleW bindingIo::module
 #include "native_refresh_writer_runtime.h"
+#undef WriteFile
+#undef FlushFileBuffers
+#undef MoveFileExW
+#undef OpenProcess
+#undef GetModuleHandleW
 namespace writer=ymcc::nativeRefreshWriter;namespace cli=ymcc::hidHideCli;using J=nlohmann::json;
 static_assert(!std::is_copy_constructible_v<cli::JobGuard>&&!std::is_copy_assignable_v<cli::JobGuard>);
 static_assert(std::is_nothrow_move_constructible_v<cli::JobGuard>&&std::is_nothrow_move_assignable_v<cli::JobGuard>);
 namespace {
-J cases=J::array(),failures=J::array(),observations=J::array(),omitted=J::array();unsigned assertions=0,spawned=0;std::string active;bool trackingOnly=false,defaultNegativeOnly=false;
+J cases=J::array(),failures=J::array(),observations=J::array(),omitted=J::array();unsigned assertions=0,spawned=0;std::string active;bool trackingOnly=false,defaultNegativeOnly=false,bindingLaunchOnly=false;
 void check(bool value,const std::string& text){++assertions;if(!value)failures.push_back({{"case",active},{"assertion",text}});}
 void need(bool value,const char* text){check(value,text);if(!value)throw std::runtime_error(text);}
 void run(const std::string& name,const std::function<void()>& body){
  const bool legacy=name=="prepare/ordinary-startup-and-owned-zero-process-job"||name=="crash/ExitProcess-kills-child-before-late-write";
  const bool selected=legacy||name=="tracking/required-name-policy-and-collision"||name=="tracking/repeated-named-reset-no-handle-leak"||name.rfind("tracking/stdhandles-",0)==0||name=="tracking/no-unfenced-fallback/update-job-list"||name=="tracking/no-unfenced-fallback/update-handle-list"||name.rfind("tracking/owner-lease/",0)==0||name.rfind("tracking/launch-scope/",0)==0;
  if((defaultNegativeOnly&&!legacy)||(trackingOnly&&!selected)){omitted.push_back(name);return;}
- active=name;const auto before=assertions;const auto failed=failures.size();try{body();}catch(const std::exception& e){check(false,std::string("fixture-exception:")+e.what());}check(apiTest::jobs.empty()&&apiTest::lists.empty()&&apiTest::allocationsHeld.empty(),"guard releases every owned job/list/allocation after case");apiTest::reset();cases.push_back({{"name",name},{"assertions",assertions-before},{"failures",failures.size()-failed}});
+ active=name;const auto before=assertions;const auto failed=failures.size();if(bindingLaunchOnly)bindingIo::reset();try{body();}catch(const std::exception& e){check(false,std::string("fixture-exception:")+e.what());}check(apiTest::jobs.empty()&&apiTest::lists.empty()&&apiTest::allocationsHeld.empty(),"guard releases every owned job/list/allocation after case");
+ if(bindingLaunchOnly){check(bindingIo::foreignOpens==0&&bindingIo::censusResolutions==0,"binding-only invokes no recorded-process lookup or process census");check(apiTest::stops==0,"binding-only never requests job termination");observations.push_back({{"case",active},{"phase","production-api-totals-after-seed"},{"recordWrites",bindingIo::writes},{"flushCalls",bindingIo::flushes},{"failedFlushes",bindingIo::failedFlushes},{"commits",bindingIo::moves},{"createProcessCalls",bindingIo::creates},{"recordedProcessOpens",bindingIo::foreignOpens},{"censusResolutions",bindingIo::censusResolutions}});}
+ apiTest::reset();cases.push_back({{"name",name},{"assertions",assertions-before},{"failures",failures.size()-failed}});
 }
 struct Handle {
  HANDLE h=nullptr;explicit Handle(HANDLE value=nullptr):h(value){}~Handle(){if(h&&h!=INVALID_HANDLE_VALUE)CloseHandle(h);}Handle(const Handle&)=delete;Handle&operator=(const Handle&)=delete;Handle(Handle&& v)noexcept:h(std::exchange(v.h,nullptr)){};Handle&operator=(Handle&& v)noexcept{if(this!=&v){if(h&&h!=INVALID_HANDLE_VALUE)CloseHandle(h);h=std::exchange(v.h,nullptr);}return *this;}bool valid()const{return h&&h!=INVALID_HANDLE_VALUE;}
@@ -104,7 +129,7 @@ struct Output {
 };
 struct Process {
  Handle process,thread;DWORD pid=0;Process()=default;Process(const Process&)=delete;Process&operator=(const Process&)=delete;Process(Process&&)=default;
- bool launch(const std::vector<std::wstring>& args,STARTUPINFOW* si,DWORD flags,BOOL inherit){auto cmd=command(args);PROCESS_INFORMATION pi{};const BOOL ok=CreateProcessW(nullptr,cmd.data(),nullptr,nullptr,inherit,flags,nullptr,nullptr,si,&pi);if(ok){process=Handle(pi.hProcess);thread=Handle(pi.hThread);pid=pi.dwProcessId;++spawned;}return ok!=FALSE;}
+ bool launch(const std::vector<std::wstring>& args,STARTUPINFOW* si,DWORD flags,BOOL inherit){auto cmd=command(args);PROCESS_INFORMATION pi{};const BOOL ok=bindingIo::create(nullptr,cmd.data(),nullptr,nullptr,inherit,flags,nullptr,nullptr,si,&pi);if(ok){process=Handle(pi.hProcess);thread=Handle(pi.hThread);pid=pi.dwProcessId;++spawned;}return ok!=FALSE;}
  DWORD wait(DWORD budget=6000){if(!process.valid()||WaitForSingleObject(process.h,budget)!=WAIT_OBJECT_0)throw std::runtime_error("owned fixture process did not finish in test budget");DWORD code=0;if(!GetExitCodeProcess(process.h,&code))throw std::runtime_error("owned process exit unavailable");return code;}
  void resume(){if(ResumeThread(thread.h)==DWORD(-1))throw std::runtime_error("resume failed");thread=Handle();}
 };
@@ -281,7 +306,212 @@ void trackingTests(const std::wstring& root){
 }
 
 }
+namespace {
+namespace bindingLaunch {
+constexpr const char* foreignMachine="binding-launch-foreign-machine";
+constexpr std::uint64_t seedRevision=17;
+constexpr const char* fixtureRoot="USB\\FIXTURE_ROOT\\0";
+constexpr const char* fixtureTarget="USB\\FIXTURE_CHILD\\0";
+struct Snapshot {std::string bytes;BY_HANDLE_FILE_INFORMATION info{};};
+Snapshot snapshot(const std::wstring& dir) {
+ const auto path=recordPath(dir);Snapshot result;result.bytes=text(path);
+ Handle file(CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+ need(file.valid()&&GetFileInformationByHandle(file.h,&result.info)!=FALSE,"private record file identity and bytes captured");return result;
+}
+void unchanged(const std::wstring& dir,const Snapshot& before) {
+ const auto after=snapshot(dir);check(before.bytes==after.bytes,"foreign history bytes are unchanged before commit or after refusal");
+ check(ymcc::targetReturn::fileDetail::sameInfo(before.info,after.info),"foreign record identity/size/write-time are unchanged");
+}
+void noWritesOrCreate() {
+ check(bindingIo::writes==0&&bindingIo::flushes==0&&bindingIo::moves==0,"open and prepare perform zero production data writes/flushes/replacements");
+ check(bindingIo::creates==0,"no CreateProcess before a successful reserve");
+}
+writer::Record empty(unsigned schema=writer::kSchemaVersion) {writer::Record record;record.schemaVersion=schema;record.machineBinding=foreignMachine;record.revision=seedRevision;return record;}
+writer::ProcessIdentity selfIdentity(){return {GetCurrentProcessId(),birth(GetCurrentProcess())};}
+void seed(const std::wstring& dir,const writer::Record& record) {
+ std::string encoded,error;need(writer::encode(record,encoded,&error),"seed is a strictly valid actual writer Record");
+ need(writer::store(recordPath(dir),record).committed(),"foreign seed is durable through actual writer store");
+ const auto actual=writer::load(recordPath(dir),foreignMachine);need(actual.state==writer::LoadState::Valid&&actual.record.has_value(),"seed reloads under its original binding");
+ const auto mismatch=writer::load(recordPath(dir),privateMachine);check(mismatch.state==writer::LoadState::Invalid&&!mismatch.record&&mismatch.reason=="record-machine-binding-mismatch","public load stays strictly Invalid for foreign binding");
+ bindingIo::reset(); // Seeding is setup; subsequent counters are actual consumer operations.
+}
+void readyEmpty(unsigned schema,const std::wstring& root,const wchar_t* suffix) {
+ const auto dir=makeDir(root,suffix);seed(dir,empty(schema));const auto before=snapshot(dir);
+ {
+  writer::LaunchScope scope(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  need(scope.ready(),"actual LaunchScope accepts strictly EMPTY foreign history");
+  check(scope.attempt()&&scope.inheritedLease()!=INVALID_HANDLE_VALUE&&!scope.reserved(),"ready actual scope creates only a fresh attempt and owner duplicate");
+  check(!scope.job().ready()&&apiTest::jobCreates==0,"constructor does not prepare a Job or start a helper");
+  DWORD flags=0;check(GetHandleInformation(scope.inheritedLease(),&flags)!=FALSE&&(flags&HANDLE_FLAG_INHERIT),"actual Session duplicate is inheritable");
+  noWritesOrCreate();unchanged(dir,before);
+ }
+ unchanged(dir,before);noWritesOrCreate();
+ const auto current=writer::load(recordPath(dir),privateMachine);check(current.state==writer::LoadState::Invalid&&!current.record,"opening alone never rebinds public persisted history");
+ observations.push_back({{"case",active},{"actualLaunchScope",true},{"schema",schema},{"seedRevision",seedRevision},{"readyWithoutPersistence",true}});
+}
+
+// Reuse the original tracked-worker, named events, exact Process and stdhandle
+// plumbing. This helper does no device work and receives no writeNow request.
+struct Inert {
+ std::wstring dir;Events events;Output output;Process child;bool resumed=false;
+ Inert(const std::wstring& path,const wchar_t* suffix):dir(path),events(unique(suffix)),output(path){seedInput(output.input.h);}
+ ~Inert(){
+  if(child.process.valid()&&WaitForSingleObject(child.process.h,0)==WAIT_TIMEOUT){
+   SetEvent(events.finish.h);
+   if(!resumed&&child.thread.valid()){const auto result=ResumeThread(child.thread.h);check(result!=DWORD(-1),"owned suspended inert helper resumes only for bounded natural cleanup");}
+   check(WaitForSingleObject(child.process.h,5000)==WAIT_OBJECT_0,"owned inert helper is reaped on an exceptional path without termination");
+  }
+ }
+ void prepare(writer::LaunchScope& scope){
+  need(scope.ready(),"actual scope is ready before tracked preparation");
+  const auto lease=scope.inheritedLease();
+  need(scope.job().prepareTracked(output.startup(),scope.jobName(),{output.input.h,output.output.h,lease}),"actual JobGuard prepares JOB_LIST and exact inherited owner HANDLE_LIST");
+  check(scope.job().tracksExactLease(scope.jobName(),lease),"actual guard binds exactly the scope's inherited owner lease");
+  check(apiTest::attributeCount==2&&apiTest::jobListUpdates==1&&apiTest::handleListUpdates==1,"actual startup contains both original tracking attributes");
+  check(jobPolicy(scope.jobName())==0,"inert helper uses original nonkilling tracked Job policy");
+ }
+ void startReserved(writer::LaunchScope& scope){
+  need(scope.reserved(),"sole actual CreateProcess is gated by successful durable reserve");
+  auto args=trackedArgs(dir,events,nullptr,apiTest::onlyJob());args.back()=handleArg(scope.inheritedLease());
+  const bool created=child.launch(args,scope.job().startup(),CREATE_SUSPENDED|CREATE_NO_WINDOW|scope.job().flags(),TRUE);
+  const bool published=scope.creationReturned(created?child.process.h:nullptr);
+  need(created,"owned inert helper is actually created once with tracked extended startup");
+  need(published,"actual creationReturned durably records exact root identity");
+  check(scope.inheritedLease()==INVALID_HANDLE_VALUE,"actual creationReturned closes the temporary parent owner duplicate");
+  beforeResume(child);resumed=true;
+  need(WaitForSingleObject(events.ready.h,5000)==WAIT_OBJECT_0,"owned inert helper reports controlled entry");entryChecks(dir);
+ }
+ void finish(){need(SetEvent(events.finish.h)!=FALSE,"inert helper receives only its normal finish event");need(child.wait()==0,"exact owned inert helper exits normally and is reaped");check(!exists(dir+L"\\tracked-write.txt"),"no optional tracked write is requested or performed");}
+};
+void fullCycle(const std::wstring& root) {
+ const auto dir=makeDir(root,L"foreign-full-cycle");seed(dir,empty());const auto before=snapshot(dir);
+ {
+  Inert helper(dir,L"binding-full-cycle");
+  writer::LaunchScope scope(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  need(scope.ready(),"actual foreign-empty LaunchScope is ready");unchanged(dir,before);noWritesOrCreate();
+  helper.prepare(scope);unchanged(dir,before);noWritesOrCreate();
+  need(scope.reserve()&&scope.reserved(),"actual reserve commits BEFORE the only helper creation");
+  check(bindingIo::writes==1&&bindingIo::flushes==1&&bindingIo::moves==1&&bindingIo::creates==0,"reservation alone writes/flushes/replaces once, with zero process creation");
+  const auto reserved=writer::load(recordPath(dir),privateMachine);need(reserved.state==writer::LoadState::Valid&&reserved.record&&reserved.record->active,"reservation rebinds and persists an actual active attempt");
+  check(reserved.record->revision==seedRevision+1&&!reserved.record->active->child,"rebind preserves old revision and increments exactly once before child creation");
+  check(reserved.record->active->attemptId==scope.attempt()->attemptId,"disk reservation is the actual LaunchScope attempt");
+  helper.startReserved(scope);
+  const auto started=writer::load(recordPath(dir),privateMachine);need(started.state==writer::LoadState::Valid&&started.record&&started.record->active&&started.record->active->child,"actual root is durable before helper is resumed");
+  check(started.record->revision==seedRevision+2&&started.record->active->child->pid==helper.child.pid&&started.record->active->child->creationTime==birth(helper.child.process.h),"actual root PID/birth and second revision are durable");
+  check(!scope.retire(helper.child.process.h)&&!scope.settled(),"live exact root cannot be retired");
+  helper.finish();need(boundedIdle(scope.job()),"original exact Job accounting independently proves zero active processes");
+  need(scope.retire(helper.child.process.h)&&scope.settled(),"actual retire requires exact root exit, positive owned Job idle and durable settlement");
+  check(bindingIo::writes==3&&bindingIo::flushes==3&&bindingIo::moves==3&&bindingIo::creates==1,"reserve, markChild and retire make exactly three commits and one CreateProcess");
+  const auto durable=writer::load(recordPath(dir),privateMachine);need(durable.state==writer::LoadState::Valid&&durable.record,"retired current-binding history reloads");
+  check(durable.record->revision==seedRevision+3&&!durable.record->active&&!durable.record->nativeVisibility,"retirement is durable and strictly empty under current binding");
+ }
+ const auto settled=snapshot(dir);
+ {
+  writer::LaunchScope reopened(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  need(reopened.ready(),"actual LaunchScope reopens under the current binding after the complete cycle");
+  check(bindingIo::writes==3&&bindingIo::flushes==3&&bindingIo::moves==3&&bindingIo::creates==1,"current-binding reopen adds no write or helper launch");unchanged(dir,settled);
+ }
+ observations.push_back({{"case",active},{"actualLaunchScope",true},{"completePrepareReserveCreateCreationReturnedRetire",true},{"currentBindingReopened",true},{"finalRevision",seedRevision+3}});
+}
+void flushFailure(const std::wstring& root) {
+ const auto dir=makeDir(root,L"foreign-reserve-flush-failure");seed(dir,empty());const auto before=snapshot(dir);
+ Inert helper(dir,L"binding-flush-failure");writer::LaunchScope scope(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});helper.prepare(scope);noWritesOrCreate();
+ bindingIo::failFlush=true;const bool reserved=scope.reserve();bindingIo::failFlush=false;
+ check(!reserved&&!scope.reserved(),"actual store flush failure rejects reservation");
+ check(scope.reason()=="temporary-flush-failed"&&scope.error()==ERROR_WRITE_FAULT,"actual LaunchScope preserves precise reserve persistence failure");
+ // The same real producer branch is exercised; it never fabricates a reserve.
+ // If a broken candidate reports success, the inert child is still bounded.
+ if(reserved){helper.startReserved(scope);helper.finish();}
+ check(bindingIo::writes==1&&bindingIo::flushes==1&&bindingIo::failedFlushes==1&&bindingIo::moves==0,"failed temp flush never publishes the rebound record");
+ check(bindingIo::creates==0&&!helper.child.process.valid(),"reserve failure forbids the sole actual CreateProcess call; no unfenced fallback");
+ unchanged(dir,before);const auto current=writer::load(recordPath(dir),privateMachine);check(current.state==writer::LoadState::Invalid&&!current.record,"failed reserve keeps foreign binding and history intact");
+ const auto old=writer::load(recordPath(dir),foreignMachine);need(old.state==writer::LoadState::Valid&&old.record,"original binding remains readable after failed commit");check(old.record->revision==seedRevision&&!old.record->active,"failed reserve cannot advance durable revision or add an active writer");
+}
+void duplicateExclusion(const std::wstring& root) {
+ const auto dir=makeDir(root,L"foreign-duplicate-exclusion");seed(dir,empty());const auto before=snapshot(dir);Handle retained;
+ {
+  writer::LaunchScope first(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});need(first.ready(),"actual first scope supplies owner duplicate");
+  need(DuplicateHandle(GetCurrentProcess(),first.inheritedLease(),GetCurrentProcess(),&retained.h,0,TRUE,DUPLICATE_SAME_ACCESS)!=FALSE,"exact inherited owner file object is retained by one real duplicate");
+  DWORD flags=0;check(GetHandleInformation(retained.h,&flags)!=FALSE&&(flags&HANDLE_FLAG_INHERIT),"retained duplicate is inheritable");check(leaseIdentity(retained.h)==leaseIdentity(first.inheritedLease()),"retained duplicate has the same owner file identity");
+ }
+ {
+  writer::LaunchScope second(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  check(!second.ready()&&second.error()==ERROR_SHARING_VIOLATION,"retained duplicate blocks actual second scope after first scope destruction");
+  check(!second.attempt()&&second.inheritedLease()==INVALID_HANDLE_VALUE,"blocked scope creates no attempt or further owner lease");
+ }
+ retained=Handle();
+ {writer::LaunchScope reopened(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});check(reopened.ready(),"only closing the retained duplicate allows the next actual scope");}
+ noWritesOrCreate();unchanged(dir,before);
+}
+void childExclusion(const std::wstring& root) {
+ const auto dir=makeDir(root,L"foreign-child-exclusion");seed(dir,empty());Inert helper(dir,L"binding-child-exclusion");
+ auto scope=std::make_unique<writer::LaunchScope>(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,std::vector<std::string>{"fixture-location"});
+ helper.prepare(*scope);noWritesOrCreate();need(scope->reserve(),"actual child-exclusion scope durably reserves");helper.startReserved(*scope);
+ scope.reset(); // tracked Job is nonkilling; the actual child retains its lease.
+ check(WaitForSingleObject(helper.child.process.h,0)==WAIT_TIMEOUT,"inert child stays alive after parent scope releases its own leases and guard");
+ check(apiTest::jobs.empty(),"parent no longer owns any original guard Job handle");
+ {
+  writer::LaunchScope second(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  check(!second.ready()&&second.error()==ERROR_SHARING_VIOLATION,"actual child-inherited owner lease blocks second scope without a parent duplicate");
+ }
+ helper.finish();
+ {auto reopened=writer::Session::open(recordPath(dir),privateMachine);need(reopened.ready()&&reopened.record()->active,"child exit releases file exclusion but does not pretend the abandoned active record settled");check(reopened.record()->revision==seedRevision+2,"lease-only exit adds no settlement commit");}
+ check(bindingIo::writes==2&&bindingIo::flushes==2&&bindingIo::moves==2&&bindingIo::creates==1,"child lease proof uses one actual launch and only reserve/markChild commits");
+ observations.push_back({{"case",active},{"actualLaunchScope",true},{"childInheritedOwnerBlocksSecondScope",true},{"parentJobHandleReleased",true},{"childExitedNaturally",true},{"abandonedActiveHistoryPreserved",true},{"jobIdleAfterGuardRelease","NOT_CLAIMED"}});
+}
+void blocked(const std::wstring& root,const wchar_t* suffix,bool visibility,bool path,bool activeAttempt) {
+ const auto dir=makeDir(root,suffix);auto record=empty(visibility?writer::kVisibilitySchemaVersion:writer::kSchemaVersion);
+ if(visibility){writer::Visibility v;v.transactionId="binding-foreign-visibility";v.parent=selfIdentity();v.physicalRoot="USB\\VID_045E&PID_028E\\BINDING_ROOT";v.locationPaths={"binding-fixture-location"};if(path)v.paths.push_back({"HID\\VID_045E&PID_028E\\BINDING_PATH",writer::VisibilityPathPhase::Reserved});record.nativeVisibility=std::move(v);}
+ if(activeAttempt){const std::string id="binding-foreign-active";record.active=writer::Attempt{id,selfIdentity(),std::nullopt,std::string(writer::jobPrefix)+id,fixtureRoot,fixtureTarget,{"fixture-location"}};}
+ seed(dir,record);const auto before=snapshot(dir);
+ {
+  writer::LaunchScope scope(recordPath(dir),privateMachine,fixtureRoot,fixtureTarget,{"fixture-location"});
+  check(!scope.ready()&&scope.reason()=="record-machine-binding-mismatch","foreign nonempty history remains blocked through actual LaunchScope");
+  check(!scope.attempt()&&scope.inheritedLease()==INVALID_HANDLE_VALUE&&!scope.job().ready(),"rejected history supplies no launch attempt, duplicate owner or prepared Job");
+  check(!scope.reserve()&&!scope.reserved(),"blocked scope cannot reserve or authorize process creation");
+ }
+ noWritesOrCreate();unchanged(dir,before);check(apiTest::jobCreates==0,"nonempty mismatch is refused before any Job preparation");
+ const auto old=writer::load(recordPath(dir),foreignMachine);need(old.state==writer::LoadState::Valid&&old.record,"blocked history remains strictly valid under original binding");
+ check(old.record->active.has_value()==activeAttempt&&old.record->nativeVisibility.has_value()==visibility,"blocked active/visibility obligations are preserved");
+ if(visibility)check(old.record->nativeVisibility->paths.size()==(path?1u:0u),"visibility object is nonempty history even when its path vector is empty");
+}
+void tests(const std::wstring& root) {
+ run("binding-launch/foreign-schema1-empty-ready",[&]{readyEmpty(writer::kSchemaVersion,root,L"foreign-schema1-empty");});
+ run("binding-launch/foreign-schema2-empty-ready",[&]{readyEmpty(writer::kVisibilitySchemaVersion,root,L"foreign-schema2-empty");});
+ run("binding-launch/foreign-empty-real-launch-retire-reopen",[&]{fullCycle(root);});
+ run("binding-launch/reserve-flush-failure-forbids-create",[&]{flushFailure(root);});
+ run("binding-launch/duplicated-owner-blocks-second-scope",[&]{duplicateExclusion(root);});
+ run("binding-launch/child-inherited-owner-blocks-second-scope",[&]{childExclusion(root);});
+ run("binding-launch/foreign-visibility-zero-paths-blocked",[&]{blocked(root,L"foreign-visibility-zero-paths",true,false,false);});
+ run("binding-launch/foreign-visibility-with-path-blocked",[&]{blocked(root,L"foreign-visibility-path",true,true,false);});
+ run("binding-launch/foreign-active-mismatch-blocked",[&]{blocked(root,L"foreign-active",false,false,true);});
+ run("binding-launch/foreign-active-and-visibility-blocked",[&]{blocked(root,L"foreign-active-visibility",true,false,true);});
+}
+void exclusiveReport(const std::wstring& path,const J& result) {
+ const auto bytes=result.dump(2)+"\n";Handle file(CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr));
+ if(!file.valid())throw std::runtime_error("binding-only terminal result must be an exclusive new file");DWORD done=0;
+ if(!WriteFile(file.h,bytes.data(),DWORD(bytes.size()),&done,nullptr)||done!=bytes.size()||!FlushFileBuffers(file.h))throw std::runtime_error("binding-only terminal result write/flush failed");
+}
+int main(const std::wstring& rawRoot,const std::wstring& rawResult) {
+ std::wstring root,resultPath;DWORD error=0;bool invalid=false;
+ if(!ymcc::targetReturn::fileDetail::normalize(rawRoot,root)||!ymcc::targetReturn::fileDetail::normalize(rawResult,resultPath)||
+    !ymcc::targetReturn::fileDetail::parents(root,error,invalid)||!ymcc::targetReturn::fileDetail::parents(resultPath,error,invalid))return 2;
+ const auto attributes=GetFileAttributesW(root.c_str());
+ if(attributes==INVALID_FILE_ATTRIBUTES||!(attributes&FILE_ATTRIBUTE_DIRECTORY)||(attributes&FILE_ATTRIBUTE_REPARSE_POINT)||exists(resultPath)||!std::filesystem::is_empty(std::filesystem::path(root)))return 2;
+ bindingLaunchOnly=true;bindingIo::selected=true;tests(root);
+ check(cases.size()==10&&omitted.empty(),"binding-only executes exactly ten finite cases and no legacy group");
+ check(spawned==2,"positive selection launches exactly two owned inert fixture helpers");
+ const J result={{"pass",failures.empty()},{"bindingLaunchOnly",true},{"selection","--binding-launch-only"},{"caseCount",cases.size()},{"assertions",assertions},{"cases",cases},{"failures",failures},{"processObservations",observations},{"notExecutedCases",omitted},
+  {"actualNativeRefreshWriterLaunchScope",true},{"ownFixtureProcessesSpawnedByObserver",spawned},{"expectedOwnedInertHelpers",2},{"realPrivateProcesses",true},{"cleanupJobUsed",false},{"jobTerminationUsed",false},
+  {"processCensusUsed",false},{"archiveOrObserverUsed",false},{"deviceApiCalls",0},{"realCliOrHostLaunched",false},{"productMainRun",false}};
+ try{exclusiveReport(resultPath,result);}catch(const std::exception& errorMessage){std::cerr<<errorMessage.what()<<"\n";return 2;}
+ std::cout<<J({{"pass",failures.empty()},{"bindingLaunchOnly",true},{"selection","--binding-launch-only"},{"caseCount",cases.size()},{"assertions",assertions},{"failures",failures}}).dump()<<"\n";return failures.empty()?0:1;
+}
+} // namespace bindingLaunch
+} // namespace
+
 int wmain(int argc,wchar_t** argv){
+ if(argc>=4&&std::wstring(argv[3]).rfind(L"--binding-launch",0)==0){if(argc!=4||std::wstring(argv[3])!=L"--binding-launch-only")return 2;try{return bindingLaunch::main(argv[1],argv[2]);}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}}
  if(argc==7&&std::wstring(argv[1])==L"--tracked-worker"){try{return trackedWorker(argv[2],argv[3],parseHandle(argv[4]),parseHandle(argv[5]),parseHandle(argv[6]));}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 90;}}
  if(argc==4){const std::wstring mode=argv[1];try{if(mode==L"--worker")return worker(argv[2],argv[3]);if(mode==L"--fork-root")return forkRoot(argv[2],argv[3]);if(mode==L"--crash-parent")return crashParent(argv[2],argv[3]);if(mode==L"--tracked-parent")return trackedParent(argv[2],argv[3],false);if(mode==L"--tracked-parent-before-publication")return trackedParent(argv[2],argv[3],true);}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 90;}}
  if(argc!=3&&!(argc==4&&(std::wstring(argv[3])==L"--tracking-only"||std::wstring(argv[3])==L"--default-negative-only")))return 2;trackingOnly=argc==4&&std::wstring(argv[3])==L"--tracking-only";defaultNegativeOnly=argc==4&&std::wstring(argv[3])==L"--default-negative-only";const std::wstring root=argv[1],resultFile=argv[2];

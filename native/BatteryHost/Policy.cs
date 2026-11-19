@@ -38,6 +38,9 @@ internal static class Policy
         var g=route.FirmwareGate;
         if(g.Kind=="hc-ec-components") return id.EcMajor>=0&&id.EcMajor<255&&id.EcMinor>=0&&id.EcMinor<255&&id.EcMajor>=g.MajorMin&&id.EcMinor>=g.MinorMin;
         if(g.Kind=="exact-reviewed-firmware") return Regex.IsMatch(id.Bios,@"(?:^|[^0-9])2\.10(?:$|[^0-9])")&&id.EcMajor==g.EcMajor&&id.EcMinor==g.EcMinor;
+        if(g.Kind=="oxp-x2-mini-pro-field-firmware") return route.RouteId==EcProvider.X2MiniProRouteId&&
+            route.Identity.Values.Any(v=>Norm(v)==Norm(id.SystemProduct))&&
+            string.Equals(id.Bios.Trim(),g.Bios,StringComparison.Ordinal)&&id.EcMajor==g.EcMajor&&id.EcMinor==g.EcMinor;
         return g.Kind is "provider-probe-required" or "exact-board-firmware";
     }
     public static bool ValueAllowed(Route route,int value)=>route.Choices.Contains(value);

@@ -1,0 +1,112 @@
+
+namespace sourceNotificationFixture {
+using json=nlohmann::json;
+inline bool failLog=false;
+inline unsigned offered=0, forwarded=0, snapshots=0;
+inline std::vector<json> cleanLog;
+inline std::vector<int> forwardedPresence;
+inline std::vector<ymcc::steamsession::Session> forwardedSession;
+inline std::vector<std::string> deliveredOrder;
+inline std::vector<ymcc::steamsession::Session> observedSessions;
+inline std::atomic<bool> g_deckySteamRestartRequired{true};
+struct Observer {
+    std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source;
+    auto identitySnapshot() { ++snapshots;return source; }
+} g_steamSettingsObserver;
+struct Consumer {
+    const char* name;
+    void observe(const ymcc::steamsession::Session& session) { deliveredOrder.emplace_back(name);observedSessions.push_back(session); }
+    void observeSteam(const ymcc::steamsession::Session& session) { observe(session); }
+};
+inline Consumer g_steamLinkAdmission{"link"},g_steamModeObserver{"mode"},g_steamCssGuard{"css-guard"},g_steamCssUse{"css-use"};
+struct Runtime {
+    ymcc::deckysidebar::Runtime actual;
+    void observeSteam(int presence,const ymcc::steamsession::Session& session) {
+        deliveredOrder.emplace_back("decky");
+        ++forwarded;forwardedPresence.push_back(presence);forwardedSession.push_back(session);
+        actual.observeSteam(presence,session);
+    }
+} g_deckySidebarRuntime;
+inline void deckySidebarDiagnostic(const char* event,const json& detail) {
+    ++offered;
+    if(failLog)throw std::bad_alloc();
+    cleanLog.push_back(ymcc::deckydiag::record(event,detail));
+}
+@@DIAGNOSTIC@@
+@@WRAPPER@@
+inline void invoke(unsigned caller,const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>& presenceSource,
+    const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>& initial) {
+    if(caller==0) { @@SESSION_FANOUT@@ }
+    else if(caller==1) { const auto& source=presenceSource; @@PRESENCE_CALL@@ }
+    else { @@INITIAL_CALL@@ }
+}
+inline json run() {
+    // All cases are event-source observations with Decky disabled; actual Runtime
+    // consumes each original notification but never starts a Loader or a child.
+    const auto handles=[] { DWORD value=0;ymcc::deckybinding::fixture::need(GetProcessHandleCount(GetCurrentProcess(),&value)!=FALSE,"source-count");return value; };
+    const auto baseline=handles();json cases=json::array();bool allDelivered=true;
+    ymcc::steamsession::Session full;full.root=L"C:\\fixture-steam";full.pid=123;full.created=456;full.account=789;
+    deckySidebarSessionDiagnostic(full,"binding-identity-incomplete");
+    ymcc::deckybinding::fixture::need(cleanLog.size()==1&&cleanLog[0].value("stage",std::string{})=="binding-identity-incomplete","original-diagnostic-helper-control");
+    const char* expectedStages[]{"observer-session","observer-presence","observer-initial"};
+    const std::vector<std::string> ordered{"link","mode","decky","css-guard","css-use"};
+    const auto clearFanout=[] { deliveredOrder.clear();observedSessions.clear();g_deckySteamRestartRequired.store(true); };
+    const auto checkFanout=[&](unsigned caller,int presence,const ymcc::steamsession::Session& session){
+        const auto expected=caller==0?ordered:std::vector<std::string>{"decky"};
+        ymcc::deckybinding::fixture::need(deliveredOrder==expected,"source-fanout-order");
+        ymcc::deckybinding::fixture::need(observedSessions.size()==(caller==0?4u:0u)&&
+            std::all_of(observedSessions.begin(),observedSessions.end(),[&](const auto& state){return state==session;}),"source-fanout-single-session");
+        ymcc::deckybinding::fixture::need(g_deckySteamRestartRequired.load()==(caller!=0||presence!=0),"source-fanout-clear-restart-on-absence-only");
+    };
+    for(unsigned caller=0;caller<3;++caller) {
+        for(unsigned variant=0;variant<4;++variant) {
+            auto session=full;if(variant==1)session.account=0;
+            const int presence=variant==2?-1:variant==3?0:1;
+            auto writable=std::make_shared<ymcc::steamsession::IdentitySnapshot>();
+            writable->session=session;writable->presence=presence;
+            std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source=writable,initial=writable;
+            g_steamSettingsObserver.source=source;clearFanout();
+            cleanLog.clear();offered=forwarded=snapshots=0;forwardedPresence.clear();forwardedSession.clear();failLog=false;
+            invoke(caller,source,initial);
+            ymcc::deckybinding::fixture::need(forwarded==1&&forwardedPresence[0]==presence&&forwardedSession[0]==session,"source-original-forwarding-changed");
+            ymcc::deckybinding::fixture::need(snapshots==(caller==0?1u:0u),"source-new-session-query");
+            checkFanout(caller,presence,session);
+            const auto state=g_deckySidebarRuntime.actual.snapshot();
+            ymcc::deckybinding::fixture::need(!state.enabled&&state.pid==0&&state.steamKnown==(presence>=0)&&state.steamRunning==(presence==1),"source-runtime-state");
+            const bool delivered=cleanLog.size()==1&&cleanLog[0].value("stage",std::string{})==expectedStages[caller]&&
+                cleanLog[0].value("accountPresent",true)==(session.account!=0);
+            allDelivered=allDelivered&&delivered;
+            cases.push_back({{"caller",caller},{"variant",variant},{"delivered",delivered},{"snapshots",snapshots},{"forwarded",forwarded},{"enabled",state.enabled},{"pid",state.pid}});
+        }
+        cleanLog.clear();offered=forwarded=snapshots=0;forwardedPresence.clear();forwardedSession.clear();failLog=true;
+        auto writable=std::make_shared<ymcc::steamsession::IdentitySnapshot>();writable->session=full;writable->presence=1;
+        std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source=writable;
+        g_steamSettingsObserver.source=source;clearFanout();
+        invoke(caller,source,source);
+        failLog=false;
+        ymcc::deckybinding::fixture::need(forwarded==1&&forwardedSession[0]==full&&snapshots==(caller==0?1u:0u),"optional-log-blocked-original-action");
+        checkFanout(caller,1,full);
+        cases.push_back({{"caller",caller},{"variant","logger-bad-alloc"},{"forwarded",forwarded},{"offered",offered},{"logRows",cleanLog.size()}});
+    }
+    clearFanout();g_steamSettingsObserver.source.reset();snapshots=offered=forwarded=0;
+    invoke(0,{},{});
+    ymcc::deckybinding::fixture::need(snapshots==1&&offered==0&&forwarded==0&&deliveredOrder.empty()&&
+        g_deckySteamRestartRequired.load(),"missing-source-does-not-invent-notification");
+    const json old{{"stage","binding-identity-incomplete"},{"accountPresent",false}};
+    ymcc::deckybinding::fixture::need(ymcc::deckydiag::record("steam-session-check",old).at("stage")=="binding-identity-incomplete","old-stage-regressed");
+    unsigned badRejected=0;
+    for(const auto& bad:json::array({nullptr,true,12,"observer-session-extra",json::array(),"private-token"})) {
+        const auto filtered=ymcc::deckydiag::record("steam-session-check",{{"stage",bad},{"account",789},{"token","private-token"}});
+        ymcc::deckybinding::fixture::need(!filtered.contains("stage")&&!filtered.contains("account")&&!filtered.contains("token"),"stage-whitelist-or-private-data");
+        ++badRejected;
+    }
+    const auto after=handles();
+    std::cout << "SOURCE_NOTIFICATION_RAW " << cases.dump() << " before=" << baseline << " after=" << after << std::endl;
+    ymcc::deckybinding::fixture::need(baseline==after,"source-notification-resource-return");
+    ymcc::deckybinding::fixture::need(allDelivered,"source-notification-caller-stage-missing");
+    return {{"sourceNotificationCases",cases},{"allSourceStagesDelivered",allDelivered},{"badStageValuesRejected",badRejected},{"beforeHandles",baseline},{"afterHandles",after},
+        {"scope","Exact synchronous main fan-out and two other observation calls; actual helper/filter/disabled Runtime; no Observer producer or whole-main/field execution"},
+        {"missingSessionSourceRefused",true},
+        {"realSteamOrDeviceActions",0}};
+}
+}

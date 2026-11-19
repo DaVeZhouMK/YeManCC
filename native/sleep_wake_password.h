@@ -6,6 +6,8 @@
 #include <windows.h>
 #include <powrprof.h>
 #include <mutex>
+#include <functional>
+#include <stdexcept>
 #pragma comment(lib, "powrprof.lib")
 #pragma comment(lib, "advapi32.lib")
 
@@ -48,16 +50,25 @@ struct RegistryKey {
     RegistryKey& operator=(const RegistryKey&) = delete;
     ~RegistryKey() { if (value) RegCloseKey(value); }
 };
+// Bound each explicit native setting request through the adapter as well as
+// the outer transaction. Key cleanup remains unconditional after cancellation.
+inline void requireCurrent(const std::function<bool()>& current);
 struct WindowsPowerApi {
+    std::function<bool()> current_;
+    explicit WindowsPowerApi(const std::function<bool()>& current = {}) : current_(current) {}
     DWORD read(bool ac, DWORD& value) {
+        requireCurrent(current_);
         RegistryKey scheme, setting;
         LONG error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_READ, &scheme.value);
+        requireCurrent(current_);
         if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
         error = RegOpenKeyExW(scheme.value, SettingKey, 0, KEY_QUERY_VALUE, &setting.value);
+        requireCurrent(current_);
         if (error == ERROR_SUCCESS) {
             DWORD type = 0, size = sizeof(value);
             error = RegQueryValueExW(setting.value, ac ? L"ACSettingIndex" : L"DCSettingIndex",
                 nullptr, &type, reinterpret_cast<BYTE*>(&value), &size);
+            requireCurrent(current_);
             if (error == ERROR_SUCCESS)
                 return type == REG_DWORD && size == sizeof(value) ? ERROR_SUCCESS : ERROR_INVALID_DATA;
         }
@@ -65,44 +76,69 @@ struct WindowsPowerApi {
             return static_cast<DWORD>(error);
         // An existing plan can inherit an index without an explicit value yet.
         // Read its default only; a missing scheme above is never created.
-        return ac ? PowerReadACValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value)
-                  : PowerReadDCValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value);
+        requireCurrent(current_);
+        const auto inherited = ac ? PowerReadACValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value)
+                                  : PowerReadDCValueIndex(nullptr, &Scheme, &Subgroup, &Setting, &value);
+        requireCurrent(current_);
+        return inherited;
     }
     DWORD write(bool ac, DWORD value) {
+        requireCurrent(current_);
         if (value > 1) return ERROR_INVALID_DATA;
         RegistryKey scheme, setting;
         LONG error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_READ, &scheme.value);
+        requireCurrent(current_);
         if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
         error = RegOpenKeyExW(scheme.value, SettingKey, 0, KEY_SET_VALUE, &setting.value);
+        requireCurrent(current_);
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             // The root scheme must already exist. Only its one subgroup/setting
             // can be created to materialize inherited defaults.
             RegistryKey writableScheme;
             error = RegOpenKeyExW(HKEY_LOCAL_MACHINE, SchemeKey, 0, KEY_CREATE_SUB_KEY, &writableScheme.value);
-            if (error == ERROR_SUCCESS)
+            requireCurrent(current_);
+            if (error == ERROR_SUCCESS) {
                 error = RegCreateKeyExW(writableScheme.value, SettingKey, 0, nullptr, 0, KEY_SET_VALUE,
                     nullptr, &setting.value, nullptr);
+                requireCurrent(current_);
+            }
         }
         if (error != ERROR_SUCCESS) return static_cast<DWORD>(error);
-        return static_cast<DWORD>(RegSetValueExW(setting.value, ac ? L"ACSettingIndex" : L"DCSettingIndex",
+        requireCurrent(current_);
+        const auto written = static_cast<DWORD>(RegSetValueExW(setting.value, ac ? L"ACSettingIndex" : L"DCSettingIndex",
             0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value)));
+        requireCurrent(current_);
+        return written;
     }
     DWORD activeIsYeman(bool& yeman) {
+        requireCurrent(current_);
         GUID* active = nullptr;
         const DWORD error = PowerGetActiveScheme(nullptr, &active);
         yeman = error == ERROR_SUCCESS && active && IsEqualGUID(*active, Scheme);
         const bool found = active != nullptr;
         if (active) LocalFree(active);
+        requireCurrent(current_);
         return error != ERROR_SUCCESS ? error : found ? ERROR_SUCCESS : ERROR_INVALID_DATA;
     }
-    DWORD reactivateYeman() { return PowerSetActiveScheme(nullptr, &Scheme); }
+    DWORD reactivateYeman() {
+        requireCurrent(current_);
+        const auto error = PowerSetActiveScheme(nullptr, &Scheme);
+        requireCurrent(current_);
+        return error;
+    }
 };
 
+inline void requireCurrent(const std::function<bool()>& current) {
+    if (current && !current()) throw std::runtime_error("BOOT_WAKE_PASSWORD_REQUEST_EXPIRED");
+}
 template<class Api>
-Snapshot read(Api& api) {
+Snapshot read(Api& api, const std::function<bool()>& current = {}) {
     Snapshot state;
-    if ((state.error = api.read(true, state.ac)) != ERROR_SUCCESS) return state;
-    if ((state.error = api.read(false, state.dc)) != ERROR_SUCCESS) return state;
+    const auto readIndex = [&](bool ac, DWORD& value) {
+        requireCurrent(current);const auto error=api.read(ac,value);requireCurrent(current);return error;
+    };
+    if ((state.error = readIndex(true, state.ac)) != ERROR_SUCCESS) return state;
+    if ((state.error = readIndex(false, state.dc)) != ERROR_SUCCESS) return state;
     if (state.ac > 1 || state.dc > 1) { state.error = ERROR_INVALID_DATA; return state; }
     state.known = true;
     return state;
@@ -112,45 +148,52 @@ Snapshot read(Api& api) {
 // once only when it is already active; another selected scheme is never replaced.
 // Reactivation is a separate receipt, not a reason to undo confirmed saved values.
 template<class Api>
-ApplyResult apply(Api& api, bool enabled) {
+ApplyResult apply(Api& api, bool enabled, const std::function<bool()>& current = {}) {
     ApplyResult result;
-    const Snapshot before = read(api);
+    const Snapshot before = read(api,current);
     result.state = before;
     if (!before.known) { result.error = before.error; return result; }
     const DWORD desired = enabled ? 1 : 0;
+    const auto writeIndex = [&](bool ac, DWORD value) {
+        requireCurrent(current);const auto error=api.write(ac,value);requireCurrent(current);return error;
+    };
 
     auto fail = [&](DWORD error, const char* stage) {
         result.error = error;
         result.stage = stage;
-        result.state = read(api);
+        result.state = read(api,current);
         // A rejected first write normally changes nothing. Do not issue two
         // more denied writes and misreport that as a failed rollback.
         if (result.state.known && result.state.ac == before.ac && result.state.dc == before.dc) return result;
-        const DWORD restoreAC = api.write(true, before.ac);
-        const DWORD restoreDC = api.write(false, before.dc);
-        result.state = read(api);
+        const DWORD restoreAC = writeIndex(true, before.ac);
+        const DWORD restoreDC = writeIndex(false, before.dc);
+        result.state = read(api,current);
         result.rollbackOk = restoreAC == ERROR_SUCCESS && restoreDC == ERROR_SUCCESS && result.state.known &&
             result.state.ac == before.ac && result.state.dc == before.dc;
         return result;
     };
 
     if (before.ac != desired || before.dc != desired) {
-        DWORD error = api.write(true, desired);
+        DWORD error = writeIndex(true, desired);
         if (error != ERROR_SUCCESS) return fail(error, "write-ac");
         result.changed = true;
-        error = api.write(false, desired);
+        error = writeIndex(false, desired);
         if (error != ERROR_SUCCESS) return fail(error, "write-dc");
-        const auto stored = read(api);
+        const auto stored = read(api,current);
         if (!stored.known || stored.ac != desired || stored.dc != desired)
             return fail(stored.error ? stored.error : ERROR_INVALID_DATA, "readback");
     }
     bool active = false;
+    requireCurrent(current);
     result.reactivationError = api.activeIsYeman(active);
+    requireCurrent(current);
     if (result.reactivationError == ERROR_SUCCESS && active) {
+        requireCurrent(current);
         result.reactivationError = api.reactivateYeman();
+        requireCurrent(current);
         result.reactivated = result.reactivationError == ERROR_SUCCESS;
     }
-    const auto state = read(api);
+    const auto state = read(api,current);
     if (!state.known || state.ac != desired || state.dc != desired)
         return fail(state.error ? state.error : ERROR_INVALID_DATA, "final-readback");
     result.ok = true; // Confirms saved AC/DC, not effective Windows sign-in policy.

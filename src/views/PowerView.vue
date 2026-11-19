@@ -4,13 +4,17 @@ import SettingsSections from '@/components/SettingsSections.vue';
 import IntegratedPage from '@/components/IntegratedPage.vue';
 import Toggle from '@/components/Toggle.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
-import {computed,ref,reactive,onMounted,onUnmounted,onActivated,inject,watch,type Ref} from 'vue';
+import {computed,ref,reactive,onMounted,onUnmounted,onActivated,onDeactivated,inject,watch,type Ref} from 'vue';
 import {taskExists,toggleTask,searchState,openSearchFolder,readBootMirrorState,toggleBootMirror,BOOT_MIRROR_CHANGED_EVENT,readHardwareGpuSchedule,writeHardwareGpuSchedule,readBootRtssState,toggleBootRtss,deleteAllYemanTasks,restoreAllYemanTasks} from '@/bridge/yeman';
 import {shell} from '@/bridge/api';
+import {isUiVisible,onUiVisibilityChange} from '@/bridge/uiLifecycle';
 import {DESKTOP_MODE_BOOT_TASK,DESKTOP_MODE_BOOT_CHANGED_EVENT,setDesktopModeStartup} from '@/bridge/desktopModeStartup';
 import {NETWORK_ACCELERATION_BOOT_TASK,NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,setNetworkAccelerationStartup} from '@/bridge/networkAccelerationStartup';
 import {readSettingsSection,saveSettingsSection} from '@/bridge/settingsRepository';
+import {readGameBarControllerEnabled,setGameBarControllerEnabled,GAME_BAR_CONTROLLER_CHANGED_EVENT} from '@/bridge/gameBarControllerStartup';
 const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false);
+const steamOverlayOnBoot=ref(true);
+const gameBarControllerOn=ref(false),gameBarControllerKnown=ref(false);
 const hardwareGpuSchedule=ref(false),gpuScheduleKnown=ref(false),gpuScheduleReadFailed=ref(false);
 const gpuScheduleDescription=computed(()=>{
  const state=gpuScheduleReadFailed.value?'状态读取失败，请重新进入页面重试；':!gpuScheduleKnown.value?'正在读取系统状态；':`当前设置：${hardwareGpuSchedule.value?'开启':'关闭'}；`;
@@ -20,20 +24,56 @@ const tasks=reactive({energyStar:false,cleanMem:false});type TaskKey=keyof typeo
 const STEAMCOMMUNITY_TASK=NETWORK_ACCELERATION_BOOT_TASK;
 const searchSt=ref<'hidden'|'trimmed'|'full'>('full');
 const busy=ref(false),errMsg=ref(''),taskToolsBusy=ref(false),taskToolsMsg=ref('');
-let fanBootSettingRevision=0,desktopBootSettingRevision=0,networkBootSettingRevision=0,refreshRevision=0;
+let fanBootSettingRevision=0,desktopBootSettingRevision=0,networkBootSettingRevision=0,steamOverlayBootRevision=0,gameBarControllerRevision=0,refreshRevision=0;
 async function safeExists(name:string){return taskExists(name).catch(()=>false);}
-async function refresh(){
- const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision,networkRevision=networkBootSettingRevision;
- const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),safeExists(STEAMCOMMUNITY_TASK),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK)]);
- if(revision!==refreshRevision||busy.value)return;
- const [energy,memory,community,search,boot,rtss,fan,gpu,desktop]=results;
+// Read-only presentation demand. Writes and their readbacks remain independent.
+let refreshActive=false,refreshStopped=false,refreshDirty=false;
+let refreshFlight:Promise<void>|null=null;
+let refreshVisible=isUiVisible();
+let stopRefreshVisibility:(()=>void)|undefined;
+function canRefresh(){return !refreshStopped&&refreshActive&&isUiVisible();}
+function drainRefresh():Promise<void>{
+ if(refreshFlight)return refreshFlight;
+ if(!refreshDirty||!canRefresh()||busy.value)return Promise.resolve();
+ refreshFlight=Promise.resolve().then(async()=>{
+  try{
+   while(refreshDirty&&canRefresh()&&!busy.value){
+    refreshDirty=false;
+    await readRefresh();
+   }
+  }finally{
+   refreshFlight=null;
+   if(refreshDirty&&canRefresh()&&!busy.value)void drainRefresh();
+  }
+ });
+ return refreshFlight;
+}
+function refresh():Promise<void>{
+ if(refreshStopped)return Promise.resolve();
+ ++refreshRevision;
+ refreshDirty=true;
+ return drainRefresh();
+}
+watch(busy,value=>{
+ if(value){
+  ++refreshRevision;
+  if(refreshFlight)refreshDirty=true;
+ }else void drainRefresh();
+},{flush:'sync'});
+async function readRefresh(){
+ const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision,networkRevision=networkBootSettingRevision,overlayRevision=steamOverlayBootRevision,gameBarRevision=gameBarControllerRevision;
+ const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),safeExists(STEAMCOMMUNITY_TASK),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean;steamOverlayOnBoot?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK),readGameBarControllerEnabled()]);
+ if(revision!==refreshRevision||!canRefresh()||busy.value)return;
+ const [energy,memory,community,search,boot,rtss,fan,gpu,desktop,gameBar]=results;
  if(energy.status==='fulfilled')tasks.energyStar=energy.value;if(memory.status==='fulfilled')tasks.cleanMem=memory.value;
  if(networkRevision===networkBootSettingRevision&&community.status==='fulfilled')steamCommunityBoot.value=community.value;if(search.status==='fulfilled')searchSt.value=search.value;
  if(boot.status==='fulfilled')bootOn.value=boot.value;if(rtss.status==='fulfilled')rtssBootOn.value=rtss.value;
  if(fanRevision===fanBootSettingRevision&&fan.status==='fulfilled')fanControlOnBoot.value=fan.value.fanControl===true;
+ if(overlayRevision===steamOverlayBootRevision&&fan.status==='fulfilled')steamOverlayOnBoot.value=fan.value.steamOverlayOnBoot===undefined||fan.value.steamOverlayOnBoot===true;
  if(gpu.status==='fulfilled'){hardwareGpuSchedule.value=gpu.value;gpuScheduleKnown.value=true;gpuScheduleReadFailed.value=false;}
  else{gpuScheduleKnown.value=false;gpuScheduleReadFailed.value=true;}
  if(desktopRevision===desktopBootSettingRevision&&desktop.status==='fulfilled')desktopBootOn.value=desktop.value;
+ if(gameBarRevision===gameBarControllerRevision){gameBarControllerKnown.value=gameBar.status==='fulfilled';if(gameBar.status==='fulfilled')gameBarControllerOn.value=gameBar.value;}
  if(results.some(result=>result.status==='rejected'))errMsg.value='部分通用启动状态未能读取，可收回后重新打开。';
 }
 async function onDesktopBootToggle(v:boolean) {
@@ -58,6 +98,29 @@ async function onBootToggle(v: boolean) {
   }
 }
 
+async function onSteamOverlayBootToggle(v:boolean):Promise<void>{
+ if(busy.value)return;
+ ++steamOverlayBootRevision;errMsg.value='';busy.value=true;
+ const previous=steamOverlayOnBoot.value;steamOverlayOnBoot.value=v;
+ try{await saveSettingsSection('startupDesired',{steamOverlayOnBoot:v});}
+ catch(error){steamOverlayOnBoot.value=previous;errMsg.value='Steam 游戏中界面开机设置失败：'+(error as Error).message;}
+ finally{busy.value=false;}
+}
+async function onGameBarControllerToggle(v:boolean):Promise<void>{
+ if(busy.value)return;
+ ++gameBarControllerRevision;errMsg.value='';busy.value=true;
+ try{await setGameBarControllerEnabled(v);gameBarControllerOn.value=await readGameBarControllerEnabled();gameBarControllerKnown.value=true;}
+ catch(error){
+  errMsg.value='Game Bar 手柄入口设置失败：'+(error as Error).message;
+  try{gameBarControllerOn.value=await readGameBarControllerEnabled();gameBarControllerKnown.value=true;}
+  catch{gameBarControllerKnown.value=false;}
+ }finally{busy.value=false;}
+}
+function onGameBarControllerChanged(event:Event):void{
+ const enabled=(event as CustomEvent<{enabled?:unknown}>).detail?.enabled;
+ if(typeof enabled!=='boolean')return;
+ ++gameBarControllerRevision;gameBarControllerOn.value=enabled;gameBarControllerKnown.value=true;
+}
 async function onFanControlBootToggle(v: boolean): Promise<void> {
   if (busy.value) return;
   fanBootSettingRevision += 1;
@@ -194,17 +257,24 @@ const globalRefreshKey=inject<Ref<number>>('globalRefreshKey');if(globalRefreshK
 async function onBootMirrorChanged(){bootOn.value=await readBootMirrorState().catch(()=>bootOn.value);}
 function onDesktopModeBootChanged(event:Event){const value=(event as CustomEvent<{enabled:boolean}>).detail?.enabled;if(typeof value==='boolean'){++desktopBootSettingRevision;desktopBootOn.value=value;}}
 function onNetworkAccelerationBootChanged(event:Event){const value=(event as CustomEvent<{enabled:boolean}>).detail?.enabled;if(typeof value==='boolean'){++networkBootSettingRevision;steamCommunityBoot.value=value;}}
-onMounted(()=>{window.addEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.addEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.addEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);});
-onUnmounted(()=>{refreshRevision++;window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.removeEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.removeEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);});
-onActivated(()=>{void refresh();});
+onMounted(()=>{
+ stopRefreshVisibility=onUiVisibilityChange(state=>{
+  if(refreshVisible===state.visible)return;
+  refreshVisible=state.visible;
+  void refresh();
+ });
+ window.addEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.addEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.addEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);window.addEventListener(GAME_BAR_CONTROLLER_CHANGED_EVENT,onGameBarControllerChanged);});
+onUnmounted(()=>{refreshStopped=true;refreshActive=false;refreshDirty=false;refreshRevision++;stopRefreshVisibility?.();window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.removeEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);window.removeEventListener(NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,onNetworkAccelerationBootChanged);window.removeEventListener(GAME_BAR_CONTROLLER_CHANGED_EVENT,onGameBarControllerChanged);});
+onActivated(()=>{if(refreshStopped||refreshActive)return;refreshActive=true;void refresh();});
+onDeactivated(()=>{refreshActive=false;refreshRevision++;refreshDirty=true;});
 </script>
 
 <template>
 <IntegratedPage class="boot-startup-page" title="开机模式" hide-heading><div class="page startup-sections" data-gp-scope="power-startup"><BootModesPanel/><section class="boot-common-startup"><header class="boot-common-heading"><h2>通用开机启动</h2></header><div v-if="errMsg" class="err-bar">{{errMsg}}</div><div v-if="taskToolsMsg" class="info-bar">{{taskToolsMsg}}</div>
- <section class="settings-section-panel" aria-label="启动服务" data-boot-startup-group="services"><div class="startup-setting-list"><Toggle v-model="bootOn" label="启动 YeManCC野蛮系统控制中心" description="登录系统后自动启动控制中心" :disabled="busy" @update:model-value="onBootToggle"/><Toggle :model-value="desktopBootOn" label="全局桌面模式" :disabled="busy" @update:model-value="onDesktopBootToggle"/><Toggle
+ <section class="settings-section-panel" aria-label="启动服务" data-boot-startup-group="services"><div class="startup-setting-list"><Toggle v-model="bootOn" label="YeManCC野蛮系统控制中心" description="开机启动此程序，推荐开启" :disabled="busy" @update:model-value="onBootToggle"/><Toggle :model-value="desktopBootOn" label="全局桌面模式" description="开启后解决桌面模式显示异常，推荐开启" :disabled="busy" @update:model-value="onDesktopBootToggle"/><Toggle :model-value="steamOverlayOnBoot" label="游戏中启用 Steam 界面" description="三点菜单呼出必备；关闭后不显示 SteamOS 界面，推荐开启" :disabled="busy" @update:model-value="onSteamOverlayBootToggle"/><Toggle :model-value="gameBarControllerOn" label="允许手柄打开 Game Bar" description="开启后可能导致 Steam 右下角弹出 Xbox 控制器错误提示，推荐关闭" :disabled="busy || !gameBarControllerKnown" @update:model-value="onGameBarControllerToggle"/><Toggle
         :model-value="fanControlOnBoot"
         label="风扇控制"
-        description="根据适配机型自动启动风扇"
+        description="开机应用风扇挡位并启动"
         color="accent"
         :disabled="busy"
         @update:model-value="onFanControlBootToggle"
@@ -212,15 +282,15 @@ onActivated(()=>{void refresh();});
 <Toggle
         v-model="rtssBootOn"
         label="RTSS 监控"
-        description="登录系统后自动启动 RTSS 监控"
+        description="帧率锁定需要，推荐开启"
         color="accent"
         :disabled="busy"
         @update:model-value="onBootRtssToggle"
       />
-<Toggle v-model="tasks.energyStar" label="能源之星" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
-<Toggle v-model="tasks.cleanMem" label="清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
+<Toggle v-model="tasks.energyStar" label="能源之星" description="开机为软件启用节能标识，推荐开启" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
+<Toggle v-model="tasks.cleanMem" label="清理一次内存" description="开机执行一次内存清理，推荐开启" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
 
-<Toggle :model-value="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
+<Toggle :model-value="steamCommunityBoot" label="网络加速" description="后台运行 Steam 网络加速，可能影响其他网络加速软件" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
 <Toggle class="gpu-schedule-setting" :model-value="hardwareGpuSchedule" label="硬件加速GPU计划" :description="gpuScheduleDescription" color="accent" :disabled="busy || !gpuScheduleKnown" @update:model-value="onHardwareGpuSchedule" /></div></section>
  <section class="settings-section-panel" aria-label="系统工具" data-boot-startup-group="tools"><header class="settings-section-heading"><h3><InlineIcon name="tools"/>系统工具</h3></header><div class="startup-setting-list"><div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>
@@ -239,8 +309,8 @@ onActivated(()=>{void refresh();});
 
 .boot-common-heading{display:flex;align-items:center;margin:6px 0 11px}.boot-common-heading h2{font-size:17px;margin:0}
 .boot-common-startup{margin-top:14px!important;padding-top:12px!important}.settings-section-panel{min-width:0;margin:0 0 10px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--console-surface,var(--bg-panel))}.settings-section-heading{padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border)}.settings-section-heading h3{display:flex;align-items:center;gap:7px;font-size:16px;margin:0;color:var(--text)}.settings-section-heading :deep(.inline-icon){color:var(--accent)}
-.boot-common-startup :deep(.toggle-desc){display:none}
-.boot-common-startup :deep(.gpu-schedule-setting .toggle-desc){display:block}.boot-common-startup :deep(.startup-setting-list>.toggle-row){padding:9px 0;min-width:0;gap:8px}.boot-common-startup .task-tools{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.boot-common-startup .task-tool-btn{text-align:center;font-size:14px;padding:7px 5px}.boot-common-startup .startup-tools-title{font-size:14px;margin:10px 0 6px}.boot-common-startup .row{display:flex;justify-content:space-between;gap:12px}.boot-common-startup .mini-btn{font-size:14px;white-space:nowrap;min-width:110px;text-align:center}
+.boot-common-startup :deep(.toggle-desc){display:block;font-size:12px;line-height:1.5;margin-top:3px;color:var(--text-dim)}
+.boot-common-startup :deep(.startup-setting-list>.toggle-row){padding:9px 0;min-width:0;gap:8px}.boot-common-startup .task-tools{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.boot-common-startup .task-tool-btn{text-align:center;font-size:14px;padding:7px 5px}.boot-common-startup .startup-tools-title{font-size:14px;margin:10px 0 6px}.boot-common-startup .row{display:flex;justify-content:space-between;gap:12px}.boot-common-startup .mini-btn{font-size:14px;white-space:nowrap;min-width:110px;text-align:center}
 
 .boot-common-startup{margin-top:8px;border-top:1px solid var(--border);padding-top:10px}.boot-common-startup>summary{cursor:pointer;font-size:13px;color:var(--text-dim);padding:8px 0}
 

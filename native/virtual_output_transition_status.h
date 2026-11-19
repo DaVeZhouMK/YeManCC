@@ -58,8 +58,9 @@ bool sameJsonValue(const Json& left, const Json& right) {
     if (left.type() != right.type()) return false;
     if (left.is_object()) {
         if (left.size() != right.size()) return false;
-        for (auto item = left.cbegin(); item != left.cend(); ++item) {
-            const auto other = right.find(item.key());
+        auto aligned = right.cbegin();
+        for (auto item = left.cbegin(); item != left.cend(); ++item, ++aligned) {
+            const auto other = aligned.key() == item.key() ? aligned : right.find(item.key());
             if (other == right.cend() || !sameJsonValue(item.value(), other.value())) return false;
         }
         return true;
@@ -100,15 +101,17 @@ bool virtualOutputPublicationEquivalent(const Json& left, const Json& right) {
         positiveInteger(*ae) && positiveInteger(*be);
     if (!sameActiveRequest) return sameJsonValue(left, right);
     if (left.size() != right.size() || a->size() != b->size()) return false;
-    for (auto item = left.cbegin(); item != left.cend(); ++item) {
-        const auto other = right.find(item.key());
+    auto aligned = right.cbegin();
+    for (auto item = left.cbegin(); item != left.cend(); ++item, ++aligned) {
+        const auto other = aligned.key() == item.key() ? aligned : right.find(item.key());
         if (other == right.cend()) return false;
         if (item.key() != "startProtection") {
             if (!sameJsonValue(item.value(), other.value())) return false;
             continue;
         }
-        for (auto member = a->cbegin(); member != a->cend(); ++member) {
-            const auto counterpart = b->find(member.key());
+        auto alignedMember = b->cbegin();
+        for (auto member = a->cbegin(); member != a->cend(); ++member, ++alignedMember) {
+            const auto counterpart = alignedMember.key() == member.key() ? alignedMember : b->find(member.key());
             if (counterpart == b->cend()) return false;
             if (member.key() != "expiresAtUnixMs" && !sameJsonValue(member.value(), counterpart.value()))
                 return false;

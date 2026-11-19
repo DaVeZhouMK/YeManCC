@@ -1,12 +1,7 @@
-﻿{
-    "version":  "0.0.39",
-    "notes":  "0.0.39：修复旧升级数据阻断安装与模块残留，完善失败恢复、手柄操作、降压试用保存、CCD调度、Strix Halo功耗兼容、动态壁纸离电关闭与机型功能。",
-    "sha256":  "CA00B157888229436C55E911CE37026EBB3E4D0A638642F9212EC596B5A9CFAE",
-    "publishedAt":  "2026-11-05",
-    "buildId":  "da18996531174edf77004a249df940cf81a1f02f6671d35e8450b929bed7e795",
-    "nativeSha256":  "eb14450fc3f86dcf7b0ed7a2204029cdee88e03fc9e484341d2ec1f547513945",
-    "pluginSha256":  "54287a5c08fe702e3872d03e9228bfba6bd588b9864a64767371e77b2f4fcfab",
-    "package":  "Packages/YeManCC.zip",
-    "releaseMode":  "fast",
-    "fixtureValidation":  "NOT_RUN"
+{
+  "version": "0.0.40",
+  "notes": "0.0.40：整合当前主线，完善升级时冲突旧配置、深层扩展和容量边界自愈。",
+  "package": "Packages/YeManCC.zip",
+  "releaseMode": "fast",
+  "fixtureValidation": "NOT_RUN"
 }

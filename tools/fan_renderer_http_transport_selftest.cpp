@@ -6,8 +6,10 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <map>
 #include <thread>
 #include "http_request_deadline.h"
+#include "sleep_power_revocation.h"
 #include "fan_response_contract.h"
 #if __has_include("fan_http_body_contract.h")
 #include "fan_http_body_contract.h"
@@ -17,6 +19,16 @@ using json=nlohmann::json;
 INTERNET_PORT fixturePort=0;
 int displayObserved=0,activityAccepted=0,armed=0,disarmed=0,authRejected=0,headerConversions=0;
 std::atomic<bool> g_poolCancel{false};
+std::atomic<bool> sharedPowerKnown{true},sharedPowerPending{false};
+std::atomic<std::uint64_t> sharedSerial{1},sharedSequence{1},sharedPublication{1};
+ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+[[maybe_unused]] static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes)noexcept{
+ if(!sharedPowerKnown.load()||bytes<sizeof(*out))return 0;*out={};out->generation=1;
+ out->suspendSerial=sharedSerial.load();out->observedNotificationSequence=sharedSequence.load();out->publicationRevision=sharedPublication.load();
+ out->flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed|(sharedPowerPending.load()?ymcc::sleeppower::kNotificationPending:0u);return 1;
+}
+[[maybe_unused]] static bool fanHostPowerMayWrite(){return sharedPowerKnown.load()&&!sharedPowerPending.load();}
+[[maybe_unused]] static bool fanHostPowerMayResume(){return fanHostPowerMayWrite();}
 std::function<json(const json&)> fixtureHandler;
 void ipc_on(const std::string&,std::function<json(const json&)> handler){fixtureHandler=std::move(handler);}
 std::wstring U2W(const std::string& s){if(s.empty())return {};const int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring r(static_cast<size_t>(n),0);MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),r.data(),n);return r;}
@@ -52,20 +64,48 @@ unsigned long long currentFanPowerGeneration(){return 1;}
 int headerAliasReads=0,responseBodyMoves=0,responseHeaderMoves=0;
 void fixtureObserveHeaderStorage(const json& headers,const json& args){const auto it=args.find("headers");if(it!=args.end()&&&headers==&*it)++headerAliasReads;}
 void fixtureObserveResponseStorage(const json& result,const char* body,const char* headers){if(result.at("body").get_ref<const std::string&>().data()==body)++responseBodyMoves;if(result.at("headers").get_ref<const std::string&>().data()==headers)++responseHeaderMoves;}
+std::string fixtureKind;
+void fixtureAfterBody(){if(fixtureKind=="shared-revoke-after-body")g_sharedPowerRevocations.revoke();}
+using IpcFn=std::function<json(const json&)>;
+std::map<std::string,IpcFn> fixtureHandlers;std::function<void()> fixtureQueued;json fixtureReceiverReply;
+bool fixtureAsync=true;int g_ipcResultMailbox=0;std::atomic<bool> g_traceOn{false};
+bool ipc_cmd_async(const std::string&){return fixtureAsync;}
+bool poolSubmit(std::function<void()> fn){fixtureQueued=std::move(fn);return true;}
+void ipc_complete_async(int,unsigned long long,int,json reply,std::string){fixtureReceiverReply=std::move(reply);}
+void ipc_post_json(int,const json& reply){fixtureReceiverReply=reply;}
+void appendNativeLifecycleLog(const char*,const json&){}
+template<class...Args>void traceLog(Args&&...){}
 #include "HttpExtract.inc"
 int main(int argc,char** argv){
  if(argc!=4)return 9;
  const auto actualPort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));const std::string kind=argv[2],mode=argv[3];
- fixturePort=mode=="nonfan"?1:actualPort;reg_http();std::thread stop;
+ fixturePort=mode=="nonfan"?1:actualPort;fixtureKind=kind;reg_http();std::thread stop;
  if(kind=="cancel-body")stop=std::thread([]{Sleep(80);g_poolCancel=true;});
+ if(kind=="shared-revoke-body")stop=std::thread([]{Sleep(80);g_sharedPowerRevocations.revoke();});
  const std::string endpoint=mode=="close"?"close":mode=="get"?"state":(mode=="heartbeat"||mode=="repeat")?"heartbeat":"enable";
  json args{{"url","http://127.0.0.1:"+std::to_string(actualPort)+"/api/"+endpoint+"?kind="+kind},{"method",mode=="head"?"HEAD":mode=="get"?"GET":"POST"},{"headers",{{"X-YeMan-Fan-Session","fixture-session"}}},{"body",R"({"leaseId":"fixture-lease-0001","nodes":[{"tempC":0,"dutyPercent":100},{"tempC":100,"dutyPercent":100}]})"},{"timeoutMs",600}};
  if(kind=="missing-headers")args.erase("headers");
  if(kind=="null-headers")args["headers"]=nullptr;
  if(kind=="empty-headers")args["headers"]=json::object();
  if(kind=="invalid-header")args["headers"]["bad\r\nname"]="value";
+ if(kind.rfind("shared-unknown",0)==0||kind.find("receiver-unknown")!=std::string::npos)sharedPowerKnown=false;
+ const bool receiver=kind.rfind("receiver-",0)==0;
+ if(receiver){args["_nativeFanPowerAdmission"]={{"known",true},{"fanGeneration",1u},{"generation",1u},{"publicationRevision",1u},{"suspendSerial",1u},{"observedNotificationSequence",1u},{"phase",0u},{"flags",ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed}};fixtureAsync=kind.find("sync-")!=std::string::npos&&kind.find("async-")==std::string::npos?false:true;fixtureHandlers["http.request"]=fixtureHandler;}
+ if(kind=="shared-pending-post")sharedPowerPending=true;
+#ifdef YMCC_FAN_SHARED_HTTP_CAPTURE
+ if(!receiver)fanHttpCapturePowerAdmission(args);
+#endif
+ if(kind=="shared-queue-serial")++sharedSerial;
+ if(kind=="shared-queue-sequence")++sharedSequence;
+ if(kind=="shared-publication-post")++sharedPublication;
+ if(kind=="shared-missing-receipt")args.erase("_nativeFanPowerAdmission");
  const auto before=args;const auto begin=GetTickCount64();json result;int calls=0;
- try{const int count=mode=="repeat"?3:1;for(int i=0;i<count;++i){result=fixtureHandler(args);++calls;}}
+ try{
+#ifdef YMCC_FAN_RECEIVER_FRAGMENT
+ if(receiver){fixtureReceive(args);if(fixtureQueued){if(kind=="receiver-async-queue")++sharedSerial;fixtureQueued();}result=fixtureReceiverReply.contains("result")?fixtureReceiverReply["result"]:fixtureReceiverReply;}
+ else
+#endif
+ {const int count=mode=="repeat"?3:1;for(int i=0;i<count;++i){result=fixtureHandler(args);++calls;}}}
  catch(const std::exception& e){result={{"threw",true},{"error",e.what()}};}
  if(stop.joinable())stop.join();
  result["elapsed"]=GetTickCount64()-begin;result["headerConversions"]=headerConversions;result["displayObserved"]=displayObserved;result["activityAccepted"]=activityAccepted;result["armed"]=armed;result["disarmed"]=disarmed;result["authRejected"]=authRejected;

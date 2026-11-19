@@ -2,8 +2,8 @@
 namespace YeManFanBackend.Capabilities;
 public static partial class HcBatteryCapabilityCatalog
 {
-    public const string RuleDocumentSha256 = "e698f7735cd307a6b184232419d76b9e5d5a42c85d74d858a77479671869ffe8";
-    public const string CatalogSha256 = "ddc97068d887c9e414b137e59e71e6adfbed4ea5f41fdbf6cfda12c3274e3ada";
+    public const string RuleDocumentSha256 = "11c0709b6b5c5100fc2b3e9430f8bfaf9867d64919ae691567775e6de291994e";
+    public const string CatalogSha256 = "808b14c8406b0a4fe6de0397727332f9b26c23130c86fba5c1b8c36d3c199b03";
     internal static readonly BatteryCapabilityDescriptor[] GeneratedRules = {
         new("battery.rule.asus-ally-acpi.ROGAlly", "hc.device.ROGAlly", "ROGAlly", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC71L" }, null, true),
         new("battery.rule.asus-ally-acpi.ROGAllyX", "hc.device.ROGAllyX", "ROGAllyX", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC72LA" }, null, true),
@@ -45,6 +45,7 @@ public static partial class HcBatteryCapabilityCatalog
         new("battery.rule.oxp-x1-intel-ec.OneXPlayerX1Intel", "hc.device.OneXPlayerX1Intel", "OneXPlayerX1Intel", "frozen-HC-identity", "oxp-x1-intel-ec", "boardProduct", new[] { "ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD." }, new[] { "ONEXPLAYER X1 i" }, null, true),
         new("battery.rule.valve-deck-firmware.SteamDeck", "hc.device.SteamDeck", "SteamDeck", "frozen-HC-identity", "valve-deck-firmware", "boardProduct", new[] { "VALVE" }, new[] { "Jupiter", "Galileo" }, null, true),
         new("battery.rule.gpd-win-mini-2025.GPDWinMini_HX370", "hc.device.GPDWinMini_HX370", "GPDWinMini_HX370", "frozen-HC-identity", "gpd-win-mini-2025", "boardProduct", new[] { "GPD" }, new[] { "G1617-02" }, "\\bHX\\s*370\\b", false),
+        new("battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro", "ymcc.device.OneXPlayerX2MiniPro", "OneXPlayerX2MiniPro", "reviewed-native-extension", "oxp-x2-mini-pro-direct-ec", "boardProduct", new[] { "ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD." }, new[] { "ONEXPLAYER X2Mini PRO" }, null, false),
         new("battery.rule.oxp3-wmi-ec.OneXPlayer3", "ymcc.device.OneXPlayer3", "OneXPlayer3", "reviewed-native-extension", "oxp3-wmi-ec", "systemProduct", new[] { "ONE-NETBOOK", "ONE-NETBOOK TECHNOLOGY CO., LTD." }, new[] { "ONEXPLAYER 3", "ONEXPLAYER-3" }, null, false),
         new("battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX", "ymcc.device.OneXPlayerSuperX", "OneXPlayerSuperX", "reviewed-native-extension", "oxp-superx-dual-ec", "boardProduct", new[] { "ONE-NETBOOK" }, new[] { "ONEXPLAYER SUPER X" }, null, false, "ordinal-contains", "ordinal-exact"),
     };

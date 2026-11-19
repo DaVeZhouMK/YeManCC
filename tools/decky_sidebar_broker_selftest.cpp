@@ -26,6 +26,7 @@ static DWORD observedBrokerWait(DWORD count,const WSAEVENT* events,BOOL all,DWOR
 #include "../native/decky_sidebar_broker.h"
 #undef WSAWaitForMultipleEvents
 #undef send
+#include "../native/decky_sidebar_diagnostics.h"
 #include <iostream>
 #include <stdexcept>
 using namespace ymcc::deckymirror;
@@ -132,6 +133,9 @@ static int peerAdmissionTests(){
         check(accept(oldPacket),"A is accepted only while its native receipt is current");
         first.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual A socket close retires the native peer");
         check(!accept(oldPacket),"queued A cannot dispatch after its actual disconnect");
+        const auto closed=broker.status().at("peerClose");
+        check(closed["closeReason"]=="remote-eof"||closed["closeReason"]=="socket-close","actual remote EOF has a bounded close cause");
+        check(closed.at("socketError")==0&&!closed.at("websocketCloseCodeKnown").get<bool>(),"orderly remote EOF has no fabricated error or WS code");
         LoopbackSocket second(boot);
         second.sendFrame(Json{{"command","snapshot"},{"runId",boot["runId"]},{"isCurrent",false},{"connectionRevision",0}}.dump());
         check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==2;},1000),"authenticated B request reaches native callback");
@@ -145,11 +149,34 @@ static int peerAdmissionTests(){
         forged=newPacket;forged["connectionRevision"]=0;check(!accept(forged),"missing native serial cannot borrow client payload metadata");
         const auto stable=broker.status();for(unsigned i=0;i<100;++i)check(accept(newPacket),"stable reads retain native B");
         check(broker.status()==stable,"dispatch checks do not change transport revision or state");
+        // Each currently exposed command family must cross the REAL native
+        // broker whitelist; callback acceptance is separate from owner mutation.
+        for(const char* command:{"snapshot","game.setField","fan.setEnabled","fan.setPreset","fan.setChoice","frame.setField","touchpad.setField","global.setField","audioOptimization.setEnabled","monitor.setEnabled","performance.setControls","hud.status","hud.ack","wallpaper.context","wallpaper.status","wallpaper.neighbors","updater.status","updater.request"}){
+            size_t before=0;{std::lock_guard lock(queueMutex);before=queued.size();}
+            second.sendFrame(Json{{"command",command},{"runId",boot["runId"]},{"args",Json::object()}}.dump());
+            check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==before+1;},1000),"visible command family reaches native callback");
+            std::lock_guard lock(queueMutex);check(queued.back()["request"]["command"]==command&&accept(queued.back()),"original command and exact native peer reach owner boundary");
+        }
+        size_t beforeDenied=0;{std::lock_guard lock(queueMutex);beforeDenied=queued.size();}
+        second.sendFrame(Json{{"command","unregistered.setField"},{"runId",boot["runId"]}}.dump());
+        check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"unregistered command closes peer before dispatch");
+        {std::lock_guard lock(queueMutex);check(queued.size()==beforeDenied,"denied command never enters host callback");}
+        check(broker.status().at("peerClose").at("closeReason")=="request-command-error","actual denied command identifies the closing stage without command payload");
         second.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual B close is observed");
         check(!accept(newPacket),"B request cannot dispatch after its socket closes");
     }
+    for(const unsigned short closeCode:{1000,4001}){LoopbackSocket closing(boot);std::string payload;payload+=char(closeCode>>8);payload+=char(closeCode&255);payload+="PRIVATE-CLOSE-REASON";
+     closing.sendFrame(payload,8);check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual WS close frame disconnects");
+     const auto facts=broker.status().at("peerClose");check(facts.at("closeReason")=="remote-close"&&facts.at("websocketCloseCode")==closeCode&&facts.at("websocketCloseCodeKnown").get<bool>(),"actual WS numeric code retained");
+     check(facts.dump().find("PRIVATE-CLOSE-REASON")==std::string::npos,"remote close reason text is never retained");
+     check(ymcc::deckydiag::record("mirror-peer",{{"peerClose",facts}}).at("peerClose")==facts,"Actual numeric client cause survives the existing native filter");}
+    {LoopbackSocket owned(boot);broker.stop();const auto facts=broker.status().at("peerClose");check(facts.at("closeReason")=="owner-stop","owner stop differs from peer/network loss");
+     const auto safe=ymcc::deckydiag::record("mirror-peer",{{"peerClose",facts}});check(safe.at("peerClose")==facts,"actual close facts survive the native allowlist");
+     const auto privateFacts=ymcc::deckydiag::record("mirror-peer",{{"peerClose",{{"closeReason","PRIVATE"},{"token","SECRET"},{"socketError",-1},{"websocketCloseCodeKnown","true"}}}});
+     check(!privateFacts.contains("peerClose"),"arbitrary strings and invalid close fact types rejected");
+     check(!ymcc::deckydiag::record("runtime",{{"peerClose",facts}}).contains("peerClose"),"close facts cannot leak into unrelated events");}
     broker.stop();check(!accept(newPacket),"OFF/stop cannot be revived by a queued request");check(broker.bootstrap().empty(),"stopped broker exposes no endpoint");
-    std::cout<<Json{{"ok",true},{"mode","peer-admission"},{"checks",checks},{"actualWinsock",true},{"realSteam",false},{"clientCurrentFlagsTrusted",false},{"queuedRequestsReplayed",false},{"brokerStopped",true}}.dump()<<std::endl;return 0;
+    std::cout<<Json{{"ok",true},{"mode","peer-admission"},{"observedCloseCodes",Json::array({1000,4001})},{"checks",checks},{"actualWinsock",true},{"realSteam",false},{"clientCurrentFlagsTrusted",false},{"queuedRequestsReplayed",false},{"brokerStopped",true}}.dump()<<std::endl;return 0;
 }
 static void fillUntilBlocked(Broker& broker,const Json& boot){
     const auto blocked=writeProbe::blocked.load();const auto connection=broker.status()["connection"].get<std::string>();

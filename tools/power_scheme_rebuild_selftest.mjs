@@ -17,7 +17,15 @@ import {writeFileSync} from 'node:fs';
 const YM='1cb8b882-a900-4b9f-9bac-99d151e64441',BAL='381b4222-f694-41f0-9685-ff5bb260df2e';
 const A='9e3d8a66-1513-451a-b489-f99dbdd37198',B='dfa153a8-6515-46c4-bb03-54a97e0fb8c0';
 const NONE='fea3413e-7e05-4911-9a71-700331f1c294',PERSONALITY='245d8541-3943-4422-b025-13a784f679b7';
-const listeners=[];let fixture=null;const tests=[];const NO_REPLY=Symbol('no IPC response');
+const listeners=[],windowListeners=new Map();let fixture=null,fixtureScope=0;const tests=[];const NO_REPLY=Symbol('no IPC response');
+const readyPower=()=>({phase:'ready',known:true,generation:41,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:8,publicationRevision:12});
+function publishPower(){
+ for(const fn of listeners)fn({data:{event:'power.lifecycleChanged',data:{...fixture.power}}});
+}
+function changePower(state){
+ fixture.power={...fixture.power,...state,publicationRevision:fixture.power.publicationRevision+1};
+ publishPower();
+}
 const realSetTimeout=globalThis.setTimeout,realClearTimeout=globalThis.clearTimeout,ownedTimers=new Set();
 globalThis.setTimeout=(fn,ms,...args)=>{
  fixture?.timerMs?.push(ms);
@@ -30,6 +38,7 @@ const bad=(stderr='fixture failure')=>({exitCode:1,stdout:'',stderr});
 function dispatch(cmd,args){
  if(!fixture)throw Error('IPC before fixture was ready: '+cmd);
  fixture.ipc.push({cmd,args});
+ if(cmd==='power.lifecycle')return {...fixture.power};
  if(cmd==='power.activeScheme')return fixture.active;
  if(cmd==='power.schemeExists'){
   assert.deepEqual(Object.keys(args),['scheme']);assert.equal(typeof args.scheme,'string');
@@ -96,11 +105,15 @@ function dispatch(cmd,args){
   }
   if(verb==='/delete'){
    assert.equal(guid,YM,'External schemes must never be deleted');assert.notEqual(fixture.active,YM,'Do not delete active YMCC');
-   if(fixture.deleteFailure)return bad('delete denied');if(!fixture.deleteIgnored)fixture.plans.delete(YM);return ok();
+   if(fixture.deleteFailure)return bad('delete denied');if(!fixture.deleteIgnored)fixture.plans.delete(YM);
+   if(fixture.wakeAfterDelete)changePower({observedNotificationSequence:fixture.power.observedNotificationSequence+1});
+   return ok();
   }
   if(verb==='/import'){
    assert.equal(args.args[2],YM);assert.notEqual(fixture.active,YM);
-   if(fixture.importFailure)return bad('import denied');if(!fixture.importIgnored)fixture.plans.add(YM);return ok();
+   if(fixture.importFailure)return bad('import denied');if(!fixture.importIgnored)fixture.plans.add(YM);
+   if(fixture.wakeAfterImport)changePower({generation:fixture.power.generation+1,observedNotificationSequence:fixture.power.observedNotificationSequence+1});
+   return ok();
   }
   throw Error('Unexpected powercfg mutation: '+verb);
  }
@@ -109,12 +122,17 @@ function dispatch(cmd,args){
 globalThis.window={chrome:{webview:{addEventListener:(_,fn)=>listeners.push(fn),postMessage:r=>queueMicrotask(()=>{
  try{const result=dispatch(r.cmd,r.args||{});if(result===NO_REPLY)return;for(const fn of listeners)fn({data:{id:r.id,result}})}
  catch(error){for(const fn of listeners)fn({data:{id:r.id,error:String(error.message)}})}
-})}},addEventListener(){},removeEventListener(){},dispatchEvent(){return true},setTimeout,clearTimeout};
+})}},addEventListener(name,fn){if(!windowListeners.has(name))windowListeners.set(name,new Set());windowListeners.get(name).add(fn)},
+ removeEventListener(name,fn){windowListeners.get(name)?.delete(fn)},
+ dispatchEvent(event){for(const fn of windowListeners.get(event.type)||[])fn(event);return true},setTimeout,clearTimeout};
 globalThis.document={visibilityState:'visible',addEventListener(){},removeEventListener(){},querySelector(){return null},createElement(){return {content:{}}}};
 globalThis.CustomEvent=class{constructor(type,opts){this.type=type;this.detail=opts?.detail}};
 const yeman=await import('./src/bridge/yeman.ts');
+const power=await import('./src/bridge/powerLifecycleState.ts');
 function resetFixture(options={}){
  fixture={logs:[],personality:[1,1],active:YM,plans:new Set([A,B,YM]),hasPow:true,settings:{schemaVersion:1},revision:1,calls:[],ipc:[],timerMs:[],schemeChecks:[],directory:'C:\\YMCC-MEMORY-'+tests.length,...options};
+ const offset=++fixtureScope*10;
+ fixture.power={...(options.power??readyPower()),generation:41+offset,observedNotificationSequence:8+offset,publicationRevision:12+offset};
  return fixture;
 }
 async function run(name,options={},expectedError=null,action='rebuildYemanScheme'){
@@ -123,8 +141,14 @@ async function run(name,options={},expectedError=null,action='rebuildYemanScheme
  const beforeYeman=fixture.plans.has(YM),beforeActive=fixture.active;
  const beforePersonality=[...fixture.personality];
  yeman.setPowerControlDir(fixture.directory);
+ const release=power.onSharedPowerLifecycle(()=>{});
+ publishPower();
+ assert.deepEqual(power.getSharedPowerLifecycle(),fixture.power,name+' fixture published the original public snapshot');
  let error=null;
- try{await yeman[action](action==='switchScheme'?'yeman':action==='rebuildYemanScheme'?(options.mode??'yeman'):undefined)}catch(e){error=String(e.message)}
+ try{await yeman[action](action==='switchScheme'?'yeman':action==='rebuildYemanScheme'?(options.mode??'yeman'):undefined)}catch(e){error=String(e.message)}finally{
+  if(fixture.power.notificationPending)changePower({phase:'ready',notificationPending:false,hardwareWritesAllowed:true});
+  release();
+ }
  if(expectedError)assert.match(error||'',expectedError,name);else assert.equal(error,null,name);
  assert.deepEqual([...fixture.plans].filter(g=>g!==YM).sort(),beforeExternal,name+' external plans preserved');
  assert.equal(fixture.calls.some(c=>c[0]==='/restoredefaultschemes'||c[0]==='/duplicatescheme'),false,name+' no global restore/create');
@@ -220,7 +244,7 @@ f=await run('Missing recovery import denied is visible',{plans:new Set([A,B]),ac
 f=await run('Missing recovery rejects silent failed import',{plans:new Set([A,B]),active:A,importIgnored:true},/导入后仍未/,'ensureYemanScheme');assert.equal(f.active,A);
 f=await run('Selecting missing YMCC restores and activates fixed GUID',{plans:new Set([A,B]),active:A},null,'switchScheme');assert.deepEqual(f.calls.filter(c=>c[0]==='/setactive'),[['/setactive',YM]]);
 f=await run('Selecting restored YMCC reports activation denied',{plans:new Set([A,B]),active:A,activationFailure:YM},/access denied/,'switchScheme');assert.equal(f.active,A);assert.equal(f.settings.power,undefined);
-f=await run('Selecting restored YMCC checks final activation before remembering',{plans:new Set([A,B]),active:A,activationIgnored:YM},/仍未生效/,'switchScheme');assert.equal(f.settings.power,undefined);
+f=await run('Selecting restored YMCC checks final activation before remembering',{plans:new Set([A,B]),active:A,activationIgnored:YM},/切换电源方案后基方案未生效/,'switchScheme');assert.equal(f.settings.power,undefined);
 f=await run('Automatic missing recovery uses the same fixed GUID',{plans:new Set([A,B]),active:A},null,'ensureRememberedYemanSchemeActive');assert.equal(f.settings.power.scheme.mode,'auto');
 f=await run('Automatic existing YMCC does not import extra schemes',{},null,'ensureRememberedYemanSchemeActive');assert.equal(f.calls.some(c=>c[0]==='/import'||c[0]==='/setactive'),false);
 await run('A failed reset does not poison subsequent queue entries');
@@ -311,9 +335,25 @@ assert.deepEqual(f.calls,[]);assert.equal(schemeRequests(f).length,1);assert.equ
 f=await run('Native absent recovery confirms imported fixed GUID freshly',{nativeSchemeExists:true,nativeSetActiveScheme:true,plans:new Set([A,B]),active:A},null,'ensureYemanScheme');
 assert.deepEqual(f.calls,[['/import',f.directory+'\\YM.pow',YM]]);assert.deepEqual(f.schemeChecks.map(i=>i.exists),[false,true]);assert.equal(f.active,A);
 f=await run('Native rebuild freshly observes fixed GUID present absent and present',{nativeSchemeExists:true,nativeSetActiveScheme:true});
-assert.equal(f.calls.some(c=>c[0]==='/query'||c[0]==='/setactive'),false);
+assert.equal(f.calls.some(c=>c[0]==='/query'),false);
 assert.deepEqual(f.schemeChecks.filter(i=>i.scheme===YM).map(i=>i.exists),[true,false,false,true]);
-assert.deepEqual(f.ipc.filter(i=>i.cmd==='power.setActiveScheme').map(i=>i.args.scheme),[A,YM]);
+const resetVerbs=['/setactive','/delete','/import'];
+const resetWrites=f=>f.ipc.filter(i=>i.cmd==='shell.run'&&resetVerbs.includes(i.args.args[0]));
+assert.deepEqual(resetWrites(f).map(i=>i.args.args[0]),['/setactive','/delete','/import','/setactive']);
+assert.deepEqual(resetWrites(f).filter(i=>i.args.args[0]==='/setactive').map(i=>i.args.args[1]),[A,YM]);
+assert(resetWrites(f).every(i=>i.args.expectedPowerGeneration===f.power.generation&&i.args.expectedPowerNotificationSequence===f.power.observedNotificationSequence));
+const interrupted=await run('Same generation wake after delete cannot continue the old reset',{wakeAfterDelete:true},/电源状态未确认或已变化/);
+assert.deepEqual(interrupted.calls.filter(c=>resetVerbs.includes(c[0])),[['/setactive',A],['/delete',YM]]);
+assert.equal(interrupted.active,A,'A usable fallback remains active after cancellation');
+assert.equal(interrupted.settings.power,undefined,'Canceled reset is not recorded as completed');
+const imported=await run('A new power generation after import cannot activate the old reset',{wakeAfterImport:true},/电源状态未确认或已变化/);
+assert.deepEqual(resetWrites(imported).map(i=>i.args.args[0]),['/setactive','/delete','/import']);
+assert(imported.plans.has(YM));assert.equal(imported.active,A);assert.equal(imported.settings.power,undefined);
+const notReady={...readyPower(),phase:'resuming',hardwareWritesAllowed:false,notificationPending:true};
+const denied=await run('Pending public notification prevents any scheme reset write',{power:notReady},/电源状态未确认或已变化/);
+assert.equal(resetWrites(denied).length,0);assert(denied.plans.has(YM));assert.equal(denied.active,YM);
+const absent=await run('Missing scheme recovery cannot import with a pending notification',{power:notReady,plans:new Set([A,B]),active:A},/电源状态未确认或已变化/,'ensureYemanScheme');
+assert.equal(resetWrites(absent).length,0);assert(!absent.plans.has(YM));assert.equal(absent.active,A);
 await new Promise(resolve=>realSetTimeout(resolve,25));
 assert.equal(ownedTimers.size,0,'Every fixture-owned IPC timeout is cleared or expires, including no-reply cases');
 const coverage={originalCases:originalCaseCount,addedCases:tests.length-originalCaseCount,forwardedArgumentSubcases:forwarded.length,failClosedReceiptSubcases:failures.length,failClosedConsumerInvocations:failures.length*3};

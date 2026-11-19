@@ -40,10 +40,10 @@ function receive(value: GameValueState | null): void {
   if (!mounted) return;
   if (!value || (value.pid === props.target.pid && value.processCreated === props.target.processCreated)) state.value = value;
 }
-async function initialize(): Promise<void> {
+async function initialize(restart = false): Promise<void> {
   starting.value = true; error.value = '';
   try {
-    const value = await startGameValueSession(props.target);
+    const value = await startGameValueSession(props.target, { restart });
     if (mounted) {
       state.value = value;
       const draft = getGameValueDraft(props.target);
@@ -66,8 +66,7 @@ async function run(action: 'first' | 'next' | 'writeAll'): Promise<void> {
 async function restart(): Promise<void> {
   if (busy.value) return;
   const last = nextValue.value || state.value?.searchValue || firstValue.value;
-  await stopGameValueSession();
-  await initialize();
+  await initialize(true);
   if (mounted) { firstValue.value = last; saveDraft(); }
 }
 async function returnToGame(): Promise<void> {
@@ -84,7 +83,7 @@ async function inputKeyboard(selector: string): Promise<void> {
   panel.value?.querySelector<HTMLInputElement>(selector)?.focus({ preventScroll: true });
   try { await keyboard.open(); } catch (cause) { error.value = (cause as Error).message; }
 }
-function close(): void { if (operation.value === 'writeAll' || state.value?.stage === 'writing') return; saveDraft(); if (operation.value === 'first' || operation.value === 'next' || state.value?.stage === 'scanning') void stopGameValueSession(); emit('close'); }
+function close(): void { if (operation.value === 'writeAll' || state.value?.stage === 'writing') return; saveDraft(); if (starting.value || operation.value === 'first' || operation.value === 'next' || state.value?.stage === 'scanning') void stopGameValueSession().catch(() => {}); emit('close'); }
 function back(event: Event): void { event.preventDefault(); event.stopImmediatePropagation(); close(); }
 function keydown(event: KeyboardEvent): void { if (event.key === 'Escape') back(event); }
 watch([firstValue, nextValue, desiredValue], saveDraft, { flush: 'sync' });
@@ -94,7 +93,7 @@ onMounted(() => {
   window.addEventListener('ipc:gamepad-back', back, true); window.addEventListener('keydown', keydown, true);
   void initialize();
 });
-onBeforeUnmount(() => { saveDraft(); mounted = false; unsub?.(); window.removeEventListener('ipc:gamepad-back', back, true); window.removeEventListener('keydown', keydown, true); });
+onBeforeUnmount(() => { saveDraft(); mounted = false; unsub?.(); if (starting.value || operation.value === 'first' || operation.value === 'next' || state.value?.stage === 'scanning') void stopGameValueSession().catch(() => {}); window.removeEventListener('ipc:gamepad-back', back, true); window.removeEventListener('keydown', keydown, true); });
 </script>
 
 <template>

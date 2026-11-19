@@ -1,8 +1,8 @@
 ﻿candidateOnly: true
 releaseApproved: false
 installed: false
-sourceBatch: candidate-onex-fixed-speed-test-20261105
-sourceSnapshotManifestSha256: 24fed2ccf5ab7dd899e0d32e2532eb0f9094c052ba11a0fd238ef2698bc79816
+sourceBatch: candidate-fan-win5-resume-settlement-20261118
+sourceSnapshotManifestSha256: f0c35d7d5ef2efcbd5b2fb1929502007fc8b1ef0ba5fe2b4f4cf36b3b6f67122
 
 # YeManFanHost 正式授权记录
 
@@ -13,7 +13,7 @@ hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
 approvedHostExeSha256: F1163D7AAFACAA376E32D6AB14F10DD1B3C51380FF9BE7B392573F9AEBA77C0E
-approvedHostDllSha256: 654A698338F63832F46AE3C7D73B6F0994BF7374F66BB4C68252A151F9A850D9
+approvedHostDllSha256: 52ADB1550FD280E75D1359E7E11048EF0201E4A19612CD0D2565F67A7EEB1934
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline
@@ -78,3 +78,21 @@ fanColdWakePreparedCandidate: candidate-onex-op3-current-test-20261105; fan-only
 fanColdWakePreparedCandidate: candidate-onex-apex-lighting-test-20261105; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
 
 fanColdWakePreparedCandidate: candidate-onex-fixed-speed-test-20261105; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-aya-release-accounting-20261107; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-close-return-20261109; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-public-lifecycle-storm-20261109; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-aok-family-journal-20261109; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-fan-shared-sleep-20261114; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-fan-retirement-20261117; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-fan-parent-finalize-20261117; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-fan-win5-resume-20261118; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-fan-win5-resume-settlement-20261118; fan-only initialization and authenticated on-demand handshake; staged-not-promoted

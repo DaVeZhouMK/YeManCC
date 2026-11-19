@@ -1,5 +1,6 @@
 import { invoke, isNativeRuntime } from './ipc';
 import { screenTouchpadDefaults } from './screenTouchpadDefaults';
+import { captureBootPreferenceWrite, type BootPreferenceContext } from './bootModeGlobalPreferences';
 export { screenTouchpadDefaults, SCREEN_TOUCHPAD_DEFAULT, normalizeScreenTouchpadSummon } from './screenTouchpadDefaults';
 
 export type ScreenTouchpadLayout = 'off' | 'dual' | 'single';
@@ -25,7 +26,7 @@ export interface ScreenTouchpadConfig {
   touchFeedback: TouchFeedbackMode;
   summonPosition: ScreenSummonPosition;
   summonPlacementVersion?: 1;
-  standaloneSpecialMode: StandaloneSpecialMode; // Dedicated-key pair in the disabled profile only.
+  standaloneSpecialMode: StandaloneSpecialMode; // Direct Steam pair in every profile; no-output also supports PS + mute.
   specialMask: number;
   rearMask: number;
   // Legacy fields remain in the wire contract for old saved profiles.
@@ -34,6 +35,16 @@ export interface ScreenTouchpadConfig {
   rearEnabled: boolean;
 }
 export type ScreenTouchpadPersona = 'disabled' | 'steamdeck' | 'dualsense-edge' | 'elite';
+export type ScreenTouchpadActiveApplication = 'not-requested' | 'pending' | 'applied';
+export interface ScreenTouchpadProfilesResult {
+  ok: boolean; settingsSaved: boolean; reason: string; persona?: string;
+  profiles?: Partial<Record<ScreenTouchpadPersona, ScreenTouchpadConfig>>;
+  activeApplication?: ScreenTouchpadActiveApplication;
+  /** Current native profile/config acceptance; not a physical output-device ACK. */
+  applicationConfirmed?: boolean;
+  activeResult?: ScreenTouchpadState;
+}
+export interface ScreenTouchpadBootContext extends BootPreferenceContext { boot: string; mode: string; revision: number; }
 export function screenTouchpadProfile(persona: string): ScreenTouchpadPersona {
   if (persona === 'steamdeck') return 'steamdeck';
   if (persona === 'dualsense-edge') return 'dualsense-edge';
@@ -47,6 +58,7 @@ export interface ScreenTouchpadState extends ScreenTouchpadConfig {
   autoHidden?: boolean;
   windowPlacement?: 'left' | 'right';
   error?: number; reason?: string; settingsSaved?: boolean;
+  activeApplication?: ScreenTouchpadActiveApplication; applicationConfirmed?: boolean;
   standaloneSpecialStatus?: string; standaloneSpecialRequests?: number; standaloneSpecialCompleted?: number;
 }
 export const STANDALONE_SPECIAL_MODES = [
@@ -124,14 +136,48 @@ function previewState(persona: ScreenTouchpadPersona): ScreenTouchpadState {
 export function screenTouchpadsGet(persona: ScreenTouchpadPersona = 'steamdeck'): Promise<ScreenTouchpadState> {
   return isNativeRuntime ? invoke<ScreenTouchpadState>('screenTouchpads.get', { persona }) : Promise.resolve({ ...previewState(persona) });
 }
-export function screenTouchpadsSet(patch: Partial<ScreenTouchpadConfig>, persona: ScreenTouchpadPersona = 'steamdeck'): Promise<ScreenTouchpadState> {
-  if (!validateScreenTouchpadPatch(patch) || (persona !== 'steamdeck' && (patch.leftMode === 'steamdeck' || patch.rightMode === 'steamdeck')) || (persona !== 'dualsense-edge' && (patch.singleMode === 'dualsense' || patch.leftMode === 'dualsense' || patch.rightMode === 'dualsense')) ||
+function allowedProfilePatch(patch: Partial<ScreenTouchpadConfig>, persona: ScreenTouchpadPersona): boolean {
+  return !(!validateScreenTouchpadPatch(patch) || (persona !== 'steamdeck' && (patch.leftMode === 'steamdeck' || patch.rightMode === 'steamdeck')) || (persona !== 'dualsense-edge' && (patch.singleMode === 'dualsense' || patch.leftMode === 'dualsense' || patch.rightMode === 'dualsense')) ||
       (persona === 'disabled' && ((patch.specialEnabled === true) || (patch.specialMask !== undefined && Number(patch.specialMask) !== 0))) ||
-      (!['steamdeck','dualsense-edge'].includes(persona) && ((patch.rearEnabled === true) || (patch.rearMask !== undefined && Number(patch.rearMask) !== 0))))
+      (!['steamdeck','dualsense-edge'].includes(persona) && ((patch.rearEnabled === true) || (patch.rearMask !== undefined && Number(patch.rearMask) !== 0))));
+}
+export function screenTouchpadsSet(patch: Partial<ScreenTouchpadConfig>, persona: ScreenTouchpadPersona = 'steamdeck'): Promise<ScreenTouchpadState> {
+  if (!allowedProfilePatch(patch, persona))
     return Promise.reject(new Error('触摸板设置超出允许范围'));
   if (!isNativeRuntime) { const next = { ...previewState(persona), ...patch };
     if (patch.layout !== undefined) next.enabled = patch.layout !== 'off';
     else if (patch.enabled !== undefined) next.layout = patch.enabled ? 'dual' : 'off';
     preview[persona] = next; return Promise.resolve({ ...preview[persona]! }); }
   return invoke<ScreenTouchpadState>('screenTouchpads.set', { persona, config: patch.summonPosition !== undefined ? { ...patch, summonPlacementVersion: 1 } : patch });
+}
+
+/** Save the scene's changed personas in one native settings transaction. */
+export async function screenTouchpadsSaveProfiles(
+  patches: Partial<Record<ScreenTouchpadPersona, Partial<ScreenTouchpadConfig>>>,
+  expectedProfiles: Partial<Record<ScreenTouchpadPersona, Partial<ScreenTouchpadConfig>>>,
+  bootContext?: ScreenTouchpadBootContext,
+): Promise<ScreenTouchpadProfilesResult> {
+  const context = bootContext && captureBootPreferenceWrite({ origin: 'boot-mode', bootContext }).bootContext;
+  const entries = Object.entries(patches) as Array<[ScreenTouchpadPersona, Partial<ScreenTouchpadConfig>]>;
+  if (!entries.length || entries.length > 4 || entries.some(([persona, patch]) =>
+      !['disabled', 'elite', 'steamdeck', 'dualsense-edge'].includes(persona) || !patch ||
+      !allowedProfilePatch(patch, persona) || !expectedProfiles[persona]))
+    throw new Error('触摸预设批次或原配置无效，未保存任何档位');
+  if (isNativeRuntime) return invoke<ScreenTouchpadProfilesResult>('screenTouchpads.saveProfiles', {
+    profiles: structuredClone(patches), expectedProfiles: structuredClone(expectedProfiles),
+    ...(context ? { origin: 'boot-mode', bootContext: context } : {}),
+  });
+  const staged: Partial<Record<ScreenTouchpadPersona, ScreenTouchpadState>> = {};
+  for (const [persona, patch] of entries) {
+    const current = previewState(persona), expected = expectedProfiles[persona]!;
+    if (Object.keys(patch).some(key => JSON.stringify((current as any)[key]) !== JSON.stringify((expected as any)[key])))
+      return { ok: false, settingsSaved: false, reason: 'profile-settings-conflict', persona };
+    const next = { ...current, ...patch };
+    if (patch.layout !== undefined) next.enabled = patch.layout !== 'off';
+    else if (patch.enabled !== undefined) next.layout = patch.enabled ? 'dual' : 'off';
+    staged[persona] = next;
+  }
+  Object.assign(preview, staged);
+  return { ok: true, settingsSaved: true, reason: 'preview-only', profiles: staged,
+    activeApplication: 'not-requested', applicationConfirmed: false };
 }

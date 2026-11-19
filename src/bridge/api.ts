@@ -1,8 +1,11 @@
 // Semantic wrappers around the native shell IPC commands.
 // Names mirror exactly what native/main.cpp registers (fs.*, shell.*, app.*, os.*, dialog.*, window.*, registry.*).
 import { invoke } from './ipc';
+import { createSteamInstallationReader } from './steamInstallationFacts';
 import type { VirtualStartProtectionState } from './virtualOutputStatus';
 import type { TdpObservationContext } from './tdpStaticDiagnostics';
+import { captureBootPreferenceWrite, type BootPreferenceWrite, type BootPreferenceContext } from './bootModeGlobalPreferences';
+import type { MouseBootContext } from './gameproc';
 
 // Optional correlation metadata for the top game menu's one-shot handover.
 // It is diagnostic provenance, not authorization or a human-gesture receipt.
@@ -14,6 +17,7 @@ export interface WindowActionEvidence {
   diagnosticEventTrusted?: boolean;
   // Finite integer clamped to 0..3 by the activation evidence reader.
   diagnosticClickDetail?: number;
+  diagnosticInputRoute?: 'direct' | 'system-touch';
 }
 
 export interface RunResult {
@@ -44,8 +48,10 @@ export const fs = {
   writeTextFile: (path: string, content: string) =>
     invoke<boolean>('fs.writeTextFile', { path, content }),
   // 原子写：native 端先写临时文件再 MoveFileEx 替换；替换失败必须 reject，禁止 UI 将未落盘状态视为成功。
-  writeTextFileAtomic: async (path: string, content: string, timeoutMs?: number, windowsConfig?: { expectedContent: string | null }): Promise<void> => {
-    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content, ...(windowsConfig ? { textEncoding: 'windows-config', expectedContent: windowsConfig.expectedContent } : {}) }, { timeoutMs });
+  writeTextFileAtomic: async (path: string, content: string, timeoutMs?: number, windowsConfig?: { expectedContent?: string | null; fanDeploymentRecord?: boolean } & BootPreferenceWrite): Promise<void> => {
+    const submitted=captureBootPreferenceWrite(windowsConfig??{});
+    if(windowsConfig?.fanDeploymentRecord&&!submitted.bootContext)throw Error('FAN_DEPLOYMENT_BOOT_CONTEXT_REQUIRED');
+    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content, ...(windowsConfig && Object.prototype.hasOwnProperty.call(windowsConfig,'expectedContent') ? { textEncoding: 'windows-config', expectedContent: windowsConfig.expectedContent } : {}),...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}),...(windowsConfig?.fanDeploymentRecord?{fanDeploymentRecord:true}:{}) }, { timeoutMs });
     if (!ok) throw new Error(`原子写入失败: ${path}`);
   },
   exists: (path: string, timeoutMs?: number) => invoke<boolean>('fs.exists', { path }, { timeoutMs }),
@@ -54,19 +60,23 @@ export const fs = {
   sha256File: (path: string) => invoke<string>('fs.sha256File', { path }, { timeoutMs: 15000 }),
   readDir: (path: string) => invoke<any[]>('fs.readDir', { path }),
   stat: (path: string) => invoke<any>('fs.stat', { path }),
-  mkdir: (path: string, timeoutMs?: number) => invoke<boolean>('fs.mkdir', { path }, { timeoutMs }),
+  mkdir: (path: string, timeoutMs?: number, options: BootPreferenceWrite = {}) => {
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<boolean>('fs.mkdir', { path, ...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) }, { timeoutMs });
+  },
   remove: (path: string) => invoke<boolean>('fs.remove', { path }),
   rename: (from: string, to: string) => invoke<boolean>('fs.rename', { from, to }),
 };
 
 // Unified settings writes are handled by native so the backup and the main
 // document are protected by one cross-process transaction.
+export interface InputRuntimePower { generation: number; observedNotificationSequence?: number; }
 export const settingsStore = {
   // Native owns the effective PowerControl root, including the supported override.
   location: () => invoke<{ directory: string; file: string; backup: string }>('settings.location', {}, { timeoutMs: 10000 }),
   reset: (path: string, defaults: Record<string, unknown>) => invoke<{ ok: boolean; backups: string[]; protectedDataRecovered: boolean }>('settings.reset', { path, defaults, confirm: 'reset-application-settings' }, { timeoutMs: 15000 }),
   read: (path: string, stamp: string | null) => invoke<{ stamp: string; unchanged: boolean; content?: string; readFault?: string }>('settings.read', { path, stamp }),
-  write: (path: string, content: string, transaction?: { baseline: Record<string, any>; initialize?: boolean; expectedInputRevision?: number }) =>
+  write: (path: string, content: string, transaction?: { baseline: Record<string, any>; initialize?: boolean; expectedInputRevision?: number; guardBootMode?: boolean; inputRuntimePower?: InputRuntimePower }) =>
     invoke<boolean | { ok: boolean; content: string; reason?: string; startProtection?: VirtualStartProtectionState }>('settings.write', { path, content, ...transaction }),
 };
 
@@ -88,7 +98,19 @@ export interface WakePasswordState {
 
 // No scheme argument by design: native only targets YMCC's fixed power GUID.
 export const wakePassword = {
-  set: (enabled: boolean) => invoke<WakePasswordState>('power.wakePassword.set', { enabled }, { timeoutMs: 15000 }),
+  set: (enabled: boolean, options: BootPreferenceWrite & {
+    powerAdmission: Required<Pick<ShellIntentAdmission, 'expectedPowerGeneration' | 'expectedPowerNotificationSequence'>> | null | undefined;
+  }) => {
+    const submitted=captureBootPreferenceWrite(options);
+    const power = options?.powerAdmission;
+    if (!power || !Number.isSafeInteger(power.expectedPowerGeneration) || power.expectedPowerGeneration <= 0 ||
+        !Number.isSafeInteger(power.expectedPowerNotificationSequence) || power.expectedPowerNotificationSequence < 0)
+      throw new Error('电源状态未确认或已变化，请在唤醒后重试');
+    return invoke<WakePasswordState>('power.wakePassword.set', { enabled,
+      expectedPowerGeneration: power.expectedPowerGeneration,
+      expectedPowerNotificationSequence: power.expectedPowerNotificationSequence,
+      ...(submitted.origin ? { origin: submitted.origin } : {}), ...(submitted.bootContext ? { bootContext:submitted.bootContext } : {}) }, { timeoutMs: 15000 });
+  },
 };
 
 export const keyboard = {
@@ -112,32 +134,54 @@ export const losslessRuntime = {
     'lossless.ensureScaling', request, {timeoutMs:13000}),
 };
 
+// The same native low-priority catalog owner used at YMCC startup.
+export const optiClient = {
+  prepareCatalog: () => invoke<{status:'prepared'|'running'|'unavailable'|'busy'|'cancelled'|'error';exitCode?:number;focused?:boolean}>('optiClient.prepareCatalog'),
+};
+
 export interface ShellIntentAdmission {
   expectedPowerGeneration:number;
+  expectedPowerNotificationSequence?:number;
   expectedMirrorPeer?:{connection:string;runId:string;connectionRevision:number};
+  requireSleepPowerPlanEnabled?:true;
 }
 export const shell = {
-  run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext, intentAdmission?: ShellIntentAdmission) => {
+  run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext, intentAdmission?: ShellIntentAdmission, bootContext?:BootPreferenceContext) => {
     if(intentAdmission!==undefined&&(!intentAdmission||!Number.isSafeInteger(intentAdmission.expectedPowerGeneration)||intentAdmission.expectedPowerGeneration<=0))throw Error('SHELL_INTENT_INVALID_GENERATION');
+    if(intentAdmission?.expectedPowerNotificationSequence!==undefined&&(!Number.isSafeInteger(intentAdmission.expectedPowerNotificationSequence)||intentAdmission.expectedPowerNotificationSequence<0))throw Error('SHELL_INTENT_INVALID_NOTIFICATION_SEQUENCE');
     const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));
     // Native 负责终止超时进程树；前端只提供稍晚的保险超时，避免响应链异常时 Promise 永久悬挂。
     return invoke<RunResult>(
       'shell.run',
-      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}), ...(intentAdmission===undefined?{}:{expectedPowerGeneration:intentAdmission.expectedPowerGeneration,...(intentAdmission.expectedMirrorPeer===undefined?{}:{expectedMirrorPeer:intentAdmission.expectedMirrorPeer})}) },
+      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}), ...(intentAdmission===undefined?{}:{expectedPowerGeneration:intentAdmission.expectedPowerGeneration,...(intentAdmission.expectedPowerNotificationSequence===undefined?{}:{expectedPowerNotificationSequence:intentAdmission.expectedPowerNotificationSequence}),...(intentAdmission.expectedMirrorPeer===undefined?{}:{expectedMirrorPeer:intentAdmission.expectedMirrorPeer}),...(intentAdmission.requireSleepPowerPlanEnabled===true?{requireSleepPowerPlanEnabled:true}:{})}),...(bootContext===undefined?{}:{bootContext:structuredClone(bootContext)}) },
       { timeoutMs: nativeTimeout + 5000 },
     );
   },
   open: (url: string) => invoke<boolean>('shell.open', { url }),
-  execute: (program: string, args: string[] = []) =>
-    invoke<boolean>('shell.execute', { program, args }),
+  execute: (program: string, args: string[] = [], bootContext?: MouseBootContext) =>
+    invoke<boolean>('shell.execute', { program, args, ...(bootContext === undefined ? {} : { bootContext }) }),
   // 复用原生返回桌面动作，回执只表示 Win+D 输入已被接受。
   returnDesktop: () => invoke<boolean>('shell.returnDesktop', {}, { timeoutMs: 6000 }),
   // Windows 程序切换：native 在受超时监管的独立进程中调用系统 Shell API。
   taskView: () => invoke<boolean>('shell.taskView', { requestedAtUnixMs: Date.now() }, { timeoutMs: 6000 }),
   taskViewWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('shell.taskView', evidence, { timeoutMs: 6000 }),
-  hidden: (program: string, args: string[] = [], timeoutMs?: number) =>
-    invoke<{ ok: boolean; pid?: number }>('shell.hidden', { program, args }, { timeoutMs }),
+  hidden: (program: string, args: string[] = [], timeoutMs?: number, creationReceipt = false, options: BootPreferenceWrite = {}) => {
+    const submitted = captureBootPreferenceWrite(options);
+    return invoke<{ ok: boolean; pid?: number; creationReceipt?: number; processCreated?: boolean; errorCode?: string; win32Error?: number }>(
+      'shell.hidden', { program, args, ...(creationReceipt ? { creationReceipt: 1 } : {}),
+        ...(submitted.bootContext ? {origin:submitted.origin,bootContext:submitted.bootContext} : {}) }, { timeoutMs });
+  },
 };
+
+export interface RtssStopIfNoGameResult {
+  ok: boolean;
+  attempted: number;
+  stopped: number;
+  pending: number;
+  error: number;
+  reason: string;
+  targets?: unknown[];
+}
 
 export interface RtssReloadResult {
   ok: boolean;
@@ -153,15 +197,22 @@ export interface RtssReloadResult {
 // Profile SDK calls run in a disposable helper (never loaded into YMCC).
 // Layout loads run inside RTSS via its client plugin and return a completion ACK.
 export const rtss = {
+  stopIfNoGame: () => invoke<RtssStopIfNoGameResult>('rtss.stopIfNoGame', {}, { timeoutMs: 35000 }),
   setAffinityExact: (pid: number, processCreated: string, path: string) => invoke<{
     ok: boolean; matched: boolean; applied: boolean; error: number; reason: string;
   }>('rtss.setAffinityExact', { pid, processCreated, path }, { timeoutMs: 5000 }),
-  reloadProfiles: (dllPath: string) =>
-    invoke<RtssReloadResult>('rtss.reloadProfiles', { dllPath }),
-  prepareOverlay: (dir: string, powerControlDir: string) =>
-    invoke<RtssReloadResult>('rtss.prepareOverlay', { dir, powerControlDir }, { timeoutMs: 15000 }),
-  loadOverlay: (dir: string, layout: string) =>
-    invoke<RtssReloadResult>('rtss.loadOverlay', { dir, layout }, { timeoutMs: 6000 }),
+  reloadProfiles: (dllPath: string, options:BootPreferenceWrite={}) => {
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<RtssReloadResult>('rtss.reloadProfiles', { dllPath,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) });
+  },
+  prepareOverlay: (dir: string, powerControlDir: string, options:BootPreferenceWrite={}) => {
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<RtssReloadResult>('rtss.prepareOverlay', { dir, powerControlDir,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) }, { timeoutMs: 15000 });
+  },
+  loadOverlay: (dir: string, layout: string, options:BootPreferenceWrite={}) => {
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<RtssReloadResult>('rtss.loadOverlay', { dir, layout,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) }, { timeoutMs: 10000 });
+  },
 };
 
 export interface TdpDaemonResponse {
@@ -188,6 +239,14 @@ export interface PowerLifecycleState {
   /** Native F5 is durable state, so a recreated WebView can resume FanHost. */
   resumeReady: boolean;
   hibernateAvailable: boolean;
+  /** Coherent public power metadata; absent only on older native providers. */
+  known?: boolean;
+  notificationPending?: boolean;
+  publicationRevision?: number;
+  observedNotificationSequence?: number;
+  suspendSerial?: number;
+  /** Fan device-session generation can refine the shared system generation. */
+  sharedGeneration?: number;
 }
 
 export interface PowerResumeCompleteMeta {
@@ -201,6 +260,8 @@ export interface FanManualWakeResult {
   phase?: PowerLifecyclePhase;
   reason?: string;
   admitted?: boolean;
+  resumeScheduled?: boolean;
+  resumeDisposition?: 'registered' | 'not-registered' | 'awaiting-power';
 }
 
 export const powerLifecycle = {
@@ -216,8 +277,10 @@ export const powerLifecycle = {
     ),
   /** Fan-only rescue. A lost acknowledgement must release the manual owner;
    * timeout retires this observer only and never cancels/repeats native work. */
-  manualFanWake: (generation?: number) =>
-    invoke<FanManualWakeResult>('power.fanManualWake', generation === undefined ? {} : { generation }, { timeoutMs: 3000 }),
+  manualFanWake: (generation?: number, observedWakeOnly = false, continueReadyOnly = false) =>
+    invoke<FanManualWakeResult>('power.fanManualWake', {
+      generation, ...(observedWakeOnly ? { observedWakeOnly } : {}), ...(continueReadyOnly ? { continueReadyOnly } : {}),
+    }, { timeoutMs: 3000 }),
 };
 
 export interface HibernateState {
@@ -235,6 +298,10 @@ export const systemHibernate = {
 
 // ── 手柄反馈：掌机 Aura 灯光 + 物理震动（native 端口自 HC ROGAlly / XInputController）──
 export interface LedFeedbackCapabilities {
+  /** Source-bound AYA ownership operation; this is not physical charging-lamp verification. */
+  oemRestoreAvailable?: boolean;
+  oemOwnershipProtocol?: 'legacy-cec' | 'ceii-ram' | '';
+  sharedChargeIndicatorDeclared?: boolean;
   ledAvailable: boolean;
   brightnessAvailable: boolean;
   ledEffects: string[];
@@ -249,6 +316,10 @@ export interface LedFeedbackCapabilities {
   /** 预设仍消费副色（如标志灯／功能键），与普通双色能力分别判断。 */
   presetSupportsSecondColor?: boolean;
   vibrationAvailable: boolean;
+  /** Static declaration/current-source snapshot; capability queries never test motors. */
+  vibrationDetectionMode?: 'static';
+  /** Only an explicit test action can exercise the manual vibration test. */
+  vibrationTestRequiresUserAction?: boolean;
   physicalPrimarySlot: number;
   /** 不可用原因（可空），供 UI 直显与支持反馈。 */
   ledReason?: string;
@@ -278,12 +349,16 @@ export interface LedFeedbackCapabilities {
   };
 }
 export interface LedApplyResult {
+  ownershipRequestCompleted?: boolean;
+  ownershipReadbackAvailable?: boolean;
   ok: boolean;
   reason?: string;
   applied?: string;
   effectApplied?: boolean;
   brightnessApplied?: boolean;
   mode?: string;
+  /** Backend request receipt is not proof that physical LEDs were observed. */
+  physicalEffectVerified?: boolean;
 }
 export interface VibrateResult {
   ok: boolean;
@@ -295,12 +370,12 @@ export interface VibrateResult {
 
 export const gamepadFeedback = {
   capabilities: () => invoke<LedFeedbackCapabilities>('gamepad.feedbackCapabilities', {}, { timeoutMs: 2000 }),
-  setLed: (args: { enabled?: boolean; mode?: string; presetId?: string; color?: string; color2?: string; speed?: number; brightness?: number }) =>
+  setLed: (args: { ownership?: 'ymcc' | 'oem'; enabled?: boolean; mode?: string; presetId?: string; color?: string; color2?: string; speed?: number; brightness?: number }) =>
     // native 侧非 ROG 后端经 YeManLightSetter 子进程直驱 HC：dll 加载 + SHA-256
     // 校验 + IsReady 轮询（≤15s）+ HC Open（≥2.4s），native 等待上限 30s。原 3s
     // 会在成功前抢先超时，故对齐为 35s（略高于 native 上限）。
     invoke<LedApplyResult>('gamepad.setLed', args, { timeoutMs: 35000 }),
-  vibrate: (strength: number) => invoke<VibrateResult>('gamepad.vibrate', { strength }, { timeoutMs: 3000 }),
+  vibrate: (strength: number) => invoke<VibrateResult>('gamepad.vibrate', { strength, feedbackSource: 'manual-test' }, { timeoutMs: 3000 }),
 };
 
 /**
@@ -334,11 +409,11 @@ export const app = {
   // FAN-927 §5：native 侧的当前 run 责任 / Fan 活动记录只读快照。渲染器重建后本地
   // JS 状态为空，只有 native 仍知道"本次运行是否已确认活动控制意图"以及崩溃前仍有效的记录。
   fanActivity: () => invoke<FanActivitySnapshot>('app.fanActivity', {}, { timeoutMs: 5000 }),
-  exeDir: () => invoke<string>('app.exeDir'),
+  exeDir: (timeoutMs?: number) => invoke<string>('app.exeDir', {}, { timeoutMs }),
   pid: (timeoutMs?: number) => invoke<number>('app.pid', {}, { timeoutMs }),
   // Native resolves the sibling PowerControl directory once at process start.
   // Frontend modules must use that exact value for unified settings writes.
-  powerControlDir: () => invoke<string>('app.powerControlDir'),
+  powerControlDir: (timeoutMs?: number) => invoke<string>('app.powerControlDir', {}, { timeoutMs }),
   // 导出 native 输入捕获日志到桌面（2026-09-09）。
   exportInputCaptureLog: () => invoke<DomainLogResult>('logs.exportInputCapture', {}, { timeoutMs: 8000 }),
 };
@@ -404,6 +479,12 @@ export const music = {
 };
 
 export const windowApi = {
+  prepareTaskViewTouch: (evidence: WindowActionEvidence) =>
+    invoke<{ touchTicket?: number; requestedAtUnixMs?: number; reason?: string }>('window.touchTaskViewButton',
+      { ...evidence, prepareTouch: true }, { timeoutMs: 1000 }),
+  // A one-contact OS tap on this window only. Delivery is not Task View success.
+  touchTaskViewButton: (request: WindowActionEvidence & { touchTicket: number; touchBudgetMs: number; x: number; y: number; viewportWidth: number; viewportHeight: number }) =>
+    invoke<{ downAccepted: boolean; upAccepted: boolean; reason: string; win32Error?: number }>('window.touchTaskViewButton', request, { timeoutMs: 1500 }),
   losslessReturnTarget: (target: {pid:number;processCreated:string;path:string}, enabled: boolean) =>
     invoke<{ok:boolean;reason?:string}>('game.losslessReturnTarget', { ...target, enabled }, { timeoutMs: 1500 }),
   controllerEditorWidth: (owner: string, enabled: boolean, scale = 2) =>
@@ -441,10 +522,21 @@ export interface DisplayMode {
 }
 
 export type DisplayTopology = 'internal' | 'external' | 'clone' | 'extend';
+export type DisplayPreferenceField = 'resolution' | 'hz';
+export interface DisplayModeResult extends DisplayMode {
+  ok?: boolean; changed?: boolean; reason?: string;
+  preferenceSaved?: boolean; preferenceReason?: string;
+}
 
 export const display = {
-  getModes: () => invoke<{ current: string; modes: DisplayMode[] }>('display.getModes'),
-  setMode: (mode: DisplayMode) => invoke<DisplayMode>('display.setMode', mode),
+  getModes: () => invoke<{ current: string; modes: DisplayMode[]; known?: boolean }>('display.getModes'),
+  setMode: (mode: DisplayMode, options: BootPreferenceWrite & { fields?: readonly DisplayPreferenceField[] } = {}) => {
+    const submitted = captureBootPreferenceWrite(options);
+    return invoke<DisplayModeResult>('display.setMode', {
+      ...mode, ...(submitted.origin ? { origin: submitted.origin } : {}), ...(options.fields ? { preferenceFields: [...options.fields] } : {}),
+      ...(submitted.bootContext === undefined ? {} : { bootContext: submitted.bootContext }),
+    });
+  },
   setTopology: (topology: DisplayTopology) => {
     const args: Record<DisplayTopology, string> = {
       internal: '/internal',
@@ -461,6 +553,7 @@ export interface GamepadBrightnessState {
   value?: number;
   mode?: 'ac' | 'dc';
   reason?: string;
+  planValueSaved?: boolean; preferenceSaved?: boolean;
 }
 
 // 任务栏常驻（与 native/main.cpp 的 ipc_on("tray.*") 对应）
@@ -494,12 +587,14 @@ export const proc = {
     exited: boolean;
     reason?: string;
   }>('process.terminateExact', { pid, processCreated, path }, { timeoutMs }),
-  identity: (pid: number, timeoutMs?: number) => invoke<{
+  identity: (pid: number, timeoutMs?: number, exitOf?: string) => invoke<{
     valid: boolean;
     pid: number;
     processCreated?: string;
     path?: string;
-  }>('process.identity', { pid }, { timeoutMs }),
+    exitOf?: string;
+    exitConfirmed?: boolean;
+  }>('process.identity', exitOf ? { pid, exitOf } : { pid }, { timeoutMs }),
 };
 
 export interface HttpResponse {
@@ -526,6 +621,11 @@ export const http = {
       { timeoutMs: timeoutMs + 1000 },
     );
   },
+};
+
+// Installation metadata only; never a current account/process or write lease.
+export const steamInformation = {
+  installationRoots: createSteamInstallationReader((command, args, options) => invoke<unknown>(command, args, options)),
 };
 
 export const registry = {

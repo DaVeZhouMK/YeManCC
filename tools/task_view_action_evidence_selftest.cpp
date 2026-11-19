@@ -22,7 +22,8 @@
 
 // Every snapshot API is replaced before either production header is included.
 // Only memory fixtures and the two extracted IPC lambdas run in this executable.
-// nativeSendTaskView is a command-contract fake, independent of its real implementation.
+// nativeSendTaskView, taskViewRememberHandover and taskViewQueueHandover are
+// command-contract fakes. This fixture does not test receipt ownership/one-use logic.
 // Neither a real input producer nor the system API helper/supervisor is exercised.
 namespace fixture {
 using Json = nlohmann::json;
@@ -117,7 +118,11 @@ struct Action {
     int throwKind = 0;
     unsigned taskCalls = 0, postCalls = 0, sinkCalls = 0, gateReads = 0;
     ULONGLONG taskDeadline = ~ULONGLONG(0);
-    std::uint64_t taskSequence=0;
+    std::uint64_t taskSequence=0, taskFocusToken=0, invocation=0x100000003ULL;
+    ULONGLONG taskPower=0, rememberedDeadline=0, rememberedPower=0;
+    std::uint64_t rememberedFocusToken=0, rememberedInvocation=0;
+    unsigned rememberCalls=0, handoverCalls=0;
+    Json rememberedArgs, handoverArgs;
     bool postArgumentsOk = true, sinkDomainOk = true;
     const void* identity = nullptr;
     Rendezvous* blockInProducer = nullptr;
@@ -143,13 +148,15 @@ static void appendNativeLifecycleLog(const char* domain, json row) {
     if (action.sinkThrows) throw std::runtime_error("fixture log sink failed");
     std::lock_guard<std::mutex> lock(logMutex); logRows.push_back(std::move(row));
 }
-static void nativeSendTaskView(ULONGLONG deadline=0,std::uint64_t nativeRequestSequence=0) {
+static std::uint64_t nativeSendTaskView(ULONGLONG deadline=0,std::uint64_t nativeRequestSequence=0,ULONGLONG requestedPower=0,std::uint64_t focusToken=0) {
     using namespace fixture;
     ++action.taskCalls; action.taskDeadline = deadline; action.taskSequence=nativeRequestSequence;
+    action.taskPower=requestedPower; action.taskFocusToken=focusToken;
     if (action.blockInProducer) action.blockInProducer->enterAndWait();
     modifyAtAction();
     if (action.throwKind == 1) throw OriginalError(action.identity);
     if (action.throwKind == 2) throw NonStandardError{action.identity};
+    return action.invocation;
 }
 static HWND g_hwnd = reinterpret_cast<HWND>(std::uintptr_t(0x1234));
 static BOOL fakePostMessageW(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -158,6 +165,18 @@ static BOOL fakePostMessageW(HWND window, UINT message, WPARAM wparam, LPARAM lp
     action.postArgumentsOk = action.postArgumentsOk && window == g_hwnd && message == WM_SYSCOMMAND && wparam == SC_MINIMIZE && lparam == 0;
     modifyAtAction();
     return action.postAccepted ? TRUE : FALSE;
+}
+// These fakes only record calls and return the configured acceptance; no receipt
+// is created, consumed or validated, and no real minimize is queued.
+static void taskViewRememberHandover(const json& args,ULONGLONG deadline,ULONGLONG power,std::uint64_t focusToken,std::uint64_t invocation) {
+    using namespace fixture;
+    ++action.rememberCalls; action.rememberedArgs=args; action.rememberedDeadline=deadline;
+    action.rememberedPower=power; action.rememberedFocusToken=focusToken; action.rememberedInvocation=invocation;
+}
+static bool taskViewQueueHandover(const json& args) {
+    using namespace fixture;
+    ++action.handoverCalls; action.handoverArgs=args; modifyAtAction();
+    return action.postAccepted;
 }
 #define PostMessageW fakePostMessageW
 static std::map<std::string, std::function<json(const json&)>> handlers;
@@ -406,8 +425,14 @@ static void extractedHandlersBasic() {
         for (const bool gate : {false, true}) {
             resetAction(); action.gate = gate; win.async[VK_LCONTROL] = asyncBits(0x8000);
             const auto result = handlers.at(command)(caller()); const auto rows = rowsCopy();
-            check(result == true && action.taskCalls + action.postCalls == 1, "handler result/call count changed");
-            check(action.taskCalls == (std::string(command) == "shell.taskView" ? 1u : 0u), "wrong original producer called");
+            check(result == true && action.taskCalls + action.postCalls + action.handoverCalls == 1, "handler result/call count changed");
+            const bool taskView=std::string(command)=="shell.taskView";
+            check(action.taskCalls == (taskView ? 1u : 0u), "wrong original producer called");
+            check(action.postCalls == 0 && action.handoverCalls == (taskView ? 0u : 1u), "tagged minimize bypassed the handover command contract");
+            if(taskView) {
+                check(action.rememberCalls == 1 && action.rememberedArgs == caller() && action.rememberedDeadline == 0 && action.rememberedPower == 0 && action.rememberedFocusToken == 0, "successful taskView did not forward default handover arguments");
+                check(action.rememberedInvocation == action.invocation && action.rememberedInvocation > 0xffffffffULL, "successful taskView lost the uint64 invocation receipt");
+            } else check(action.rememberCalls == 0 && action.handoverArgs == caller(), "tagged minimize did not forward exact handover arguments");
             check(action.postArgumentsOk && action.sinkDomainOk && action.gateReads == 2, "original post arguments/log domain/helper gate reads changed");
             check(win.error == 4321, "handler diagnostics overwrote operation last error");
             if (gate) {
@@ -420,24 +445,29 @@ static void extractedHandlersBasic() {
     }
     for (const Json args : {Json(nullptr), Json::array({1}), Json::object(), Json{{"diagnosticAction", "unknown"}}}) {
         resetAction(); check(handlers.at("window.minimize")(args) == true, "unrelated minimize no longer returns true");
-        check(action.postCalls == 1 && rowsCopy().empty() && win.snapshotCalls == 0 && action.sinkCalls == 0, "unrelated real minimize sampled/logged or lost original post");
+        check(action.postCalls == 1 && action.handoverCalls == 0 && rowsCopy().empty() && win.snapshotCalls == 0 && action.sinkCalls == 0, "unrelated real minimize sampled/logged or lost original post");
         resetAction(); check(handlers.at("shell.taskView")(args) == true && action.taskCalls == 1 && rowsCopy().size() == 2, "taskView rejected unknown/nonobject caller");
     }
 }
 static void extractedDeadlineForwarding() {
-    struct DeadlineCase { Json args; ULONGLONG expected; };
+    struct DeadlineCase { Json args; ULONGLONG expected; ULONGLONG power=0; std::uint64_t focusToken=0; };
     auto valid = caller("deadline:valid"); valid["_nativeTaskViewDeadlineTick"] = Json::number_unsigned_t(0x100000001ULL);
+    valid["_nativeTaskViewPowerGeneration"] = Json::number_unsigned_t(0x100000002ULL);
+    valid["_nativeTaskViewFocusToken"] = Json::number_unsigned_t(0x100000004ULL);
     auto zero = caller("deadline:zero"); zero["_nativeTaskViewDeadlineTick"] = Json::number_unsigned_t(0);
     auto invalid = caller("deadline:invalid"); invalid["_nativeTaskViewDeadlineTick"] = "PRIVATE deadline text";
     auto negative = caller("deadline:negative"); negative["_nativeTaskViewDeadlineTick"] = -1;
-    const std::vector<DeadlineCase> inputs{{valid,0x100000001ULL},{zero,0},{caller("deadline:absent"),0},{invalid,0},{negative,0},{Json(nullptr),0}};
+    const std::vector<DeadlineCase> inputs{{valid,0x100000001ULL,0x100000002ULL,0x100000004ULL},{zero,0},{caller("deadline:absent"),0},{invalid,0},{negative,0},{Json(nullptr),0}};
     for (const auto& input : inputs) for (const bool enabled : {false,true}) {
         resetAction(); action.gate = enabled;
         check(handlers.at("shell.taskView")(input.args) == true && action.taskCalls == 1 && action.taskDeadline == input.expected, "handler deadline parse/forward changed command contract");
-        check(win.error == 4321 && action.postCalls == 0, "deadline forwarding changed operation/error");
+        check(action.taskPower == input.power && action.taskFocusToken == input.focusToken, "handler power/focus token parse/forward changed command contract");
+        check(action.rememberCalls == 1 && action.rememberedArgs == input.args && action.rememberedDeadline == input.expected && action.rememberedPower == input.power && action.rememberedFocusToken == input.focusToken && action.rememberedInvocation == action.invocation, "handler did not remember the exact successful invocation contract");
+        check(win.error == 4321 && action.postCalls == 0 && action.handoverCalls == 0, "deadline forwarding changed operation/error");
         const auto rows = rowsCopy();
         check(rows.size() == (enabled ? 2u : 0u), "deadline forwarding changed diagnostic gate");
-        for (const auto& row : rows) check(row.dump().find("PRIVATE") == std::string::npos && !row.contains("_nativeTaskViewDeadlineTick"), "deadline args leaked arbitrary diagnostic text");
+        check(action.taskSequence == (enabled ? rows.front()["nativeRequestSequence"].get<std::uint64_t>() : 0), "native request sequence detached from the recorder gate");
+        for (const auto& row : rows) check(row.dump().find("PRIVATE") == std::string::npos && !row.contains("_nativeTaskViewDeadlineTick") && !row.contains("_nativeTaskViewPowerGeneration") && !row.contains("_nativeTaskViewFocusToken"), "deadline args leaked arbitrary diagnostic text");
     }
 }
 static void extractedFailures() {
@@ -448,7 +478,7 @@ static void extractedFailures() {
         try { handlers.at("shell.taskView")(caller("throw:original")); }
         catch (const OriginalError& error) { caught = kind == 1 && error.identity == &identity && std::string(error.what()) == "TaskView command fixture original failure: contract-sentinel"; }
         catch (const NonStandardError& error) { caught = kind == 2 && error.identity == &identity; }
-        check(caught && action.taskCalls == 1 && action.postCalls == 0 && win.error == 4321, "original exception type/message/identity/count/error altered");
+        check(caught && action.taskCalls == 1 && action.postCalls == 0 && action.handoverCalls == 0 && action.rememberCalls == 0 && win.error == 4321, "original exception type/message/identity/count/error altered");
         check(g_taskViewActionEvidence.failures() == oldFailures + (gate && badSink ? 2u : 0u), "real handler sink failure count");
         const auto rows = rowsCopy();
         if (gate && !badSink) { paired(rows, "shell.taskView", "throw:original"); check(rows[1]["operationOutcome"] == "call-threw", "catch evidence omitted"); }
@@ -458,12 +488,18 @@ static void extractedFailures() {
         resetAction(); action.gate = gate; action.sinkThrows = badSink; action.postAccepted = accepted;
         const auto oldFailures = g_taskViewActionEvidence.failures();
         check(handlers.at("window.minimize")(caller("post:result")) == accepted, "top-menu minimize hid failed posting receipt");
-        check(action.postCalls == 1 && action.postArgumentsOk && win.error == 4321, "failed post was retried, altered, or last error lost");
+        check(action.handoverCalls == 1 && action.postCalls == 0 && action.handoverArgs == caller("post:result") && action.postArgumentsOk && win.error == 4321, "failed handover was retried, bypassed, altered, or last error lost");
         check(g_taskViewActionEvidence.failures() == oldFailures + (gate && badSink ? 2u : 0u), "post diagnostic failure accounting");
         const auto rows = rowsCopy();
-        if (gate && !badSink) check(rows.size() == 2 && rows[1]["postAccepted"] == accepted, "real post acceptance observation");
+        if (gate && !badSink) {
+            paired(rows, "window.minimize", "post:result");
+            check(rows[1]["postAccepted"] == accepted && rows[1]["operationOutcome"] == (accepted ? "post-returned" : "handover-rejected"), "real handover acceptance/outcome observation");
+        }
         else check(rows.empty(), "post disabled/throwing sink unexpectedly logged");
     }
+    resetAction(); action.postAccepted = false;
+    check(handlers.at("window.minimize")(Json::object()) == true && action.postCalls == 1 && action.handoverCalls == 0, "unrelated minimize failed-post return contract changed");
+    check(rowsCopy().empty() && win.snapshotCalls == 0 && win.error == 4321, "unrelated failed post sampled/logged or lost last error");
     resetAction(); action.sinkThrows = true;
     const auto oldFailures = g_taskViewActionEvidence.failures();
     check(handlers.at("shell.taskView")(caller()) == true && action.taskCalls == 1, "throwing sink suppressed a successful taskView");
@@ -472,7 +508,7 @@ static void extractedFailures() {
 static void extractedGateTransitions() {
     for (const char* command : {"shell.taskView", "window.minimize"}) for (const bool initial : {false, true}) {
         resetAction(); action.gate = initial; action.changeGate = true; action.gateAfterAction = !initial;
-        check(handlers.at(command)(caller("gate:change")) == true && action.taskCalls + action.postCalls == 1, "mid-operation gate change altered original action");
+        check(handlers.at(command)(caller("gate:change")) == true && action.taskCalls + action.postCalls + action.handoverCalls == 1, "mid-operation gate change altered original action");
         const auto rows = rowsCopy();
         check(rows.size() == (initial ? 1u : 0u) && action.sinkCalls == (initial ? 1u : 0u), "gate transition emitted orphan or forbidden after row");
         check(win.asyncCalls == (initial ? 8u : 0u) && win.error == 4321, "gate transition snapshot/error invariant");
@@ -493,8 +529,8 @@ static void extractedConcurrency() {
         try {
             resetWindows(); action = Action{};
             const auto result = handlers.at("window.minimize")(caller("handler:B"));
-            if (result != true || action.postCalls != 1 || !action.postArgumentsOk || win.error != 4321) failed = true;
-            issued += action.postCalls;
+            if (result != true || action.handoverCalls != 1 || action.postCalls != 0 || action.handoverArgs != caller("handler:B") || !action.postArgumentsOk || win.error != 4321) failed = true;
+            issued += action.handoverCalls;
         } catch (...) { failed = true; }
         rendezvous.finishSecond();
     });
@@ -533,6 +569,6 @@ int main() {
     runCase("extracted-gate-mid-command-transitions", extractedGateTransitions);
     runCase("extracted-concurrent-original-commands", extractedConcurrency);
     bool pass = true; for (const auto& item : cases) if (!item["pass"].get<bool>()) pass = false;
-    std::cout << Json({{"pass", pass}, {"checks", checks.load()}, {"cases", cases}, {"actualOSInput", false}, {"productExecuted", false}, {"allSnapshotApisReplaced", true}, {"realMainHandlersExtracted", true}, {"commandWrapperContractOnly", true}, {"deadlineForwardingTested", true}, {"realInputProducerTested", false}, {"systemApiHelperOrTimeoutTested", false}, {"concurrencyStressCommands", 144}}).dump(2) << '\n';
+    std::cout << Json({{"pass", pass}, {"checks", checks.load()}, {"cases", cases}, {"actualOSInput", false}, {"productExecuted", false}, {"allSnapshotApisReplaced", true}, {"realMainHandlersExtracted", true}, {"commandWrapperContractOnly", true}, {"deadlineForwardingTested", true}, {"handoverCommandForwardingTested", true}, {"handoverCommandsAreFakes", true}, {"realHandoverReceiptLogicTested", false}, {"realInputProducerTested", false}, {"systemApiHelperOrTimeoutTested", false}, {"concurrencyStressCommands", 144}}).dump(2) << '\n';
     return pass ? 0 : 1;
 }

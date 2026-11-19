@@ -17,7 +17,7 @@ def main():
  (run/'actual_activity.inc').write_bytes(('\n\n'.join(blocks.values())+'\n').encode('utf-8'))
  before=(OUT/'oemBackMouseHookProc.before.cpp').read_bytes();assert before.count(b'oemBackMouseHookProc(')==1
  (run/'before_mouse_hook.inc').write_bytes(before.replace(b'oemBackMouseHookProc(',b'beforeOemBackMouseHookProc(',1))
- sources={p:(REPO/p).read_bytes() for p in ['tools/input_signal_activity_windows_selftest.cpp','native/keyboard_modifier_event_evidence.h','native/keyboard_modifier_retention.h','native/input_signal_activity_evidence.h','native/input_signal_activity_windows.h','native/input_signal_key_state_evidence.h','deps/json/json.hpp']}
+ sources={p:(REPO/p).read_bytes() for p in ['tools/input_signal_activity_windows_selftest.cpp','native/keyboard_modifier_event_evidence.h','native/msi_shoulder_modifier_guard.h','native/keyboard_modifier_retention.h','native/keyboard_modifier_snapshot.h','native/input_signal_activity_evidence.h','native/input_signal_activity_windows.h','native/input_signal_key_state_evidence.h','native/input_signal_activity_log_scope.h','deps/json/json.hpp']}
  for p,b in sources.items(): (run/('fixture.cpp' if p.endswith('_selftest.cpp') else Path(p).name)).write_bytes(b)
  (run/'runner.snapshot.py').write_bytes(Path(__file__).read_bytes())
  save(run/'source-binding.initial.json',{'mainSha256':sha(raw),'functions':{k:sha(v.encode('utf-8')) for k,v in blocks.items()},'beforeHookSha256':sha(before),'inputs':{p:sha(b) for p,b in sources.items()},'realInputUsed':False})

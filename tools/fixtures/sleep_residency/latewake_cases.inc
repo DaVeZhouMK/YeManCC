@@ -3,7 +3,7 @@
 namespace sleep_timeout_fixture {
 static json lateScenarios=json::array();
 static void lateReset(){reset();g_sgRetrySleepTimeout=false;g_sgResleepEnabled=true;g_sgRetryEntryFailure=false;g_powerLifecycle=PowerLifecycle::Suspended;}
-static void advanceMs(ULONGLONG ms){tick+=ms;fixtureFileTime+=ms*10000;}
+static void advanceMs(ULONGLONG ms){fixtureTick+=ms;fixtureFileTime+=ms*10000;}
 static void observe507(int reason,ULONGLONG elapsed,ULONGLONG deliveryDelay=0){
     at(elapsed+deliveryDelay);g_sgLastKernel507EventFileTime=epoch+elapsed*10000;
     s0WakeMessage(reason==1?1:2,reason);
@@ -34,7 +34,7 @@ static void replayCase(const json& c){
     at(c.at("elapsedFromFormattedKernelTimesMs").get<ULONGLONG>());addCompletedFields(c);
     observe507(c.at("reason"),c.at("elapsedFromFormattedKernelTimesMs"));
     check(sgSleepRetryActive()&&g_sgTask.retryKind==SgRetryKind::UnexpectedWake,"actual nonmanual507 schedules original shared unexpected-wake transaction");
-    check(timers.count(retryTimerId)&&g_sgRetryDueTick-tick==SG_NON_USER_WAKE_CLASSIFY_MS,"late wake keeps original two-second human-classification grace");
+    check(timers.count(retryTimerId)&&g_sgRetryDueTick-fixtureTick==SG_NON_USER_WAKE_CLASSIFY_MS,"late wake keeps original two-second human-classification grace");
     check(!apiCalls&&!monitorCalls,"detection does not bypass original deferred dispatch");
     const auto due=g_sgRetryDueTick;advanceMs(1999);sgDispatchSameModeRetry();
     check(!apiCalls&&!monitorCalls&&g_sgRetryDueTick==due,"no power API before two-second grace");
@@ -82,7 +82,14 @@ static unsigned lateWakeNativeTests(const json& payload){
     lateScenario("archived-DC88min-manual-followup-cancels-real-UIbranch",[&]{const auto& c=*findLateCase(payload,"rog-dc-88min-reason55");replayCase(c);advanceMs(46991);manualCallback();s0WakeMessage(1,1);check(!sgSleepRetryActive()&&g_sgLastPowerButtonSleepIntentFileTime==0&&aborts==1,"archived later manual wake follows actual user branch and ends accepted retry");requireSend();},*findLateCase(payload,"rog-dc-88min-reason55"));
     lateScenario("manual507-UI-without-queued-retry-clears-origin",[]{at(1200000);manualCallback();s0WakeMessage(1,1);check(g_sgLastPowerButtonSleepIntentFileTime==0&&!sgSleepRetryActive()&&uiRecoveryCalls>0,"actual no-retry manual branch invokes only inert outside-scope UI recovery");});
     lateScenario("no-highfrequency-precondition-event-driven-only",[]{check(!g_sgFactMonitorEnabled.load(),"actual legacy fact-monitor preference default OFF");const auto reads=powerReads;at(1200000);check(!timerWrites&&!apiCalls&&powerReads==reads,"elapsed time alone adds no polling action");observe507(5,1200000);dispatch();requireSend();for(const auto& fact:facts)if(fact.first=="sleep-retry-request")check(fact.second.at("kind")=="unexpected-wake"&&fact.second.at("accepted")==true,"ordinary source facts retain actual sender acceptance");});
+    lateScenario("entry-success-after-dispatch-log-vetoes",[]{g_sgRetryEntryFailure=true;sgStartSleepRetry(SgRetryKind::EntryFailure,"explicit-failed-entry");afterLog=[](const char* event){if(std::string(event)=="sleep-request-dispatch")sgSleepTimeoutRecordSystemSuccess(fixtureFileTime);};dispatch();check(!apiCalls&&!monitorCalls,"callback-side Windows success vetoes after the actual final sender log");});
+    lateScenario("entry-Windows-reentry-after-dispatch-log-vetoes",[]{g_sgRetryEntryFailure=true;g_entryFailureInterruptedAt=fixtureFileTime;sgStartSleepRetry(SgRetryKind::EntryFailure,"explicit-failed-entry");afterLog=[](const char* event){if(std::string(event)=="sleep-request-dispatch")g_sgLastKernel506EventFileTime=fixtureFileTime;};dispatch();check(!apiCalls&&!monitorCalls,"Windows reentry during final source preparation wins before actual suspend");});
+    lateScenario("entry-hibernate-handoff-callback-vetoes",[]{g_sgRetryEntryFailure=true;sgStartSleepRetry(SgRetryKind::EntryFailure,"explicit-failed-entry");afterLog=[](const char* event){if(std::string(event)=="sleep-request-dispatch")systemWakeCallback(507,-1,fixtureFileTime,fixtureFileTime,20);};dispatch();check(!apiCalls&&!monitorCalls,"actual reason20 callback hands the entry to Windows before the sender");});
+
+    lateScenario("entry-screen-OFF-after-dispatch-log-vetoes",[]{g_sgRetryEntryFailure=true;g_sgLastS0WakeReason=32;g_entryFailureExpanded=true;g_entryFailureInterruptedAt=fixtureFileTime;sgStartSleepRetry(SgRetryKind::EntryFailure,"explicit-failed-entry");afterLog=[](const char* event){if(std::string(event)=="sleep-request-dispatch")g_entryFailureNewOffFileTime=fixtureFileTime;};dispatch();check(!apiCalls&&!monitorCalls,"screen returning OFF during sender preparation cancels the broadened retry");});
+
 #endif
     lateReset();g_sgResleepEnabled=false;::captured.clear();
+
     return sleepEvidenceChecks-initial;
 }

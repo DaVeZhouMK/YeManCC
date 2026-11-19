@@ -11,10 +11,10 @@ const repo=path.resolve(import.meta.dirname,'../../../..'),legacy='tools/decky_s
 assert.equal(sha(path.join(repo,legacy)),pins.find(r=>r.path===legacy)?.sha256,'ORIGINAL_ASSERTION_SOURCE_CHANGED');
 const expected=originalAssertions(fs.readFileSync(path.join(repo,legacy),'utf8'));
 const rejects=(name,mutate)=>test(name,()=>{const copy=structuredClone(raw);mutate(copy);assert.throws(()=>validateRuntimeResult(copy,expected));});
-test('hash-bound actual current typed run and ordered38 mapping',()=>{assert.equal(validateRuntimeResult(raw,expected).originalAssertions,38);assert.deepEqual(['environment','no-launch','cancellation','handoff'].map(g=>expected.filter(r=>r.group===g).length),[8,19,6,5]);});
+test('hash-bound actual current typed run and ordered41 mapping',()=>{assert.equal(validateRuntimeResult(raw,expected).originalAssertions,41);assert.deepEqual(['environment','no-launch','cancellation','handoff','deferred-cleanup'].map(g=>expected.filter(r=>r.group===g).length),[8,19,6,5,3]);});
 rejects('missing original assertion cannot pass',r=>r.assertions.pop());
 rejects('original ordering cannot change',r=>r.assertions.reverse());
-test('each of the38 original assertions is independently mandatory',()=>{for(let i=0;i<38;++i){const copy=structuredClone(raw);copy.assertions[i].passed=false;assert.throws(()=>validateRuntimeResult(copy,expected),expected[i].label);}});
+test('each of the41 original assertions is independently mandatory',()=>{for(let i=0;i<41;++i){const copy=structuredClone(raw);copy.assertions[i].passed=false;assert.throws(()=>validateRuntimeResult(copy,expected),expected[i].label);}});
 rejects('native15s remains strict',r=>r.elapsedMs=15000);
 rejects('original OFF1000ms remains strict',r=>r.scenarios[1].measurements.typedOffMs=1000);
 rejects('no pending actual owned IO is rejected',r=>r.scenarios[1].measurements.typedBeforeOff.pendingIo=0);

@@ -23,21 +23,62 @@ CPP=r'''
 #include "steam_original_recovery_policy.h"
 #include "steam_native_record_identity.h"
 using json=nlohmann::json;using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;
+// Ready-only dependency port: no issuer, friend, factory or constructible proof.
+// The public proof stays owned by its real issuer; old cases use a local null.
+namespace ymcc::steamgamefacts {
+class RunningLinkNativeRoleObservation final {
+ RunningLinkNativeRoleObservation()=delete;
+public:
+ RunningLinkNativeRoleObservation(const RunningLinkNativeRoleObservation&)=delete;
+ RunningLinkNativeRoleObservation(RunningLinkNativeRoleObservation&&)=delete;
+ RunningLinkNativeRoleObservation& operator=(const RunningLinkNativeRoleObservation&)=delete;
+ bool current()const noexcept{return false;}
+ std::uint64_t account64()const noexcept{return 0;}
+ std::uint32_t appid()const noexcept{return 0;}
+ std::uint64_t fullGameId()const noexcept{return 0;}
+};
+}
 enum class PowerLifecycle{Ready,Resuming,Suspending,Suspended};
 std::atomic<bool> g_exitRequested{false},g_sleepRecoveryAutoEnabled{true};
 std::atomic<ULONGLONG> g_sleepRecoveryAutoConfigEpoch{5},g_gameRulesEpoch{9};
 std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 unsigned eventSignals=0;bool SetEvent(void*){++eventSignals;return true;}
+ULONGLONG GetTickCount64(){return 1;} // Deterministic fixture clock; no Windows API.
 namespace SteamOriginalRecovery{
 using Trigger=ymcc::steamOriginal::Trigger;using Identity=ymcc::steamOriginal::Identity;using Scope=ymcc::steamOriginal::Scope;
+// Explicit data DTO for the Ready-only consumer. This is not production Control.
+// Loss notices/selection receipts, native scopes and continuation owners are outside
+// this fixture: the actual Ready predicate/callback/queue/caller remain extracted.
+struct StartupFreshWait;
+struct StartupCommandWait;
 @@PENDING@@
-@@CONTROL@@
+struct Control {
+ std::mutex mx;std::condition_variable cv;
+ bool stop=false;std::atomic<bool> startupPending{true};std::deque<Pending> pending;
+ std::shared_ptr<void> observationEvent;
+ unsigned long long sequence=0,observationSequence=0;std::uint64_t latestPower=0;
+ Identity observedTarget{},observedSteam{};unsigned long long observedRules=0;
+ bool targetObserved=false,steamObserved=false,bindingQualified=false;
+ unsigned long long bindingSerial=0;Identity boundGame{},boundSteam{};
+ std::string boundGameId;std::uint32_t boundAppId=0;
+ std::atomic<bool> active{false},ownsRunning{false},enabled{false};
+ ymcc::steamOriginal::Admission admission;
+ bool fixtureStartupContinuation=false; // External lifecycle port, absent in old cases.
+};
+struct CommandRetirement {};
+static bool currentStartupContinuation(const std::shared_ptr<Control>& c) noexcept {
+ return c&&c->fixtureStartupContinuation;
+}
+static void cancelStartupFreshLocked(const std::shared_ptr<Control>& c,CommandRetirement&) noexcept {
+ c->fixtureStartupContinuation=false;
+}
 std::mutex lifecycleMx;std::shared_ptr<Control> control;
 @@CURRENT@@
 @@ENQUEUE@@
 }
 @@OWNER_READY@@
 namespace SteamGameLink{using namespace ymcc::steamlink;
+@@GROUP_ROLE_READY@@
 @@READY_PREDICATE@@
 }
 using namespace ymcc::steamlink;using namespace SteamOriginalRecovery;
@@ -50,6 +91,7 @@ struct Round{
  json detail=json::object();
  Round(){state.begin(1,5,1);e.enabled=e.transportAvailable=true;e.configEpoch=5;e.game=e.steam=IdentityStatus::Same;e.account=AccountStatus::Same;e.tracker=TrackerStatus::Exact;e.primary=PrimaryStatus::Exact;e.validator=ValidatorStatus::Accepted;e.ui=UiStatus::RunningAndListed;privateRecordIdentity={76561197960265745ULL,10260559608980439040ULL,originalApp,true,"observed"};}
  void forward(){using SteamGameLink::originalRecoveryIdentityReady;
+ const std::shared_ptr<const ymcc::steamgamefacts::RunningLinkNativeRoleObservation> nativeGroupRole; // Same round, always null.
  @@READY_FORWARD@@
  }
 };
@@ -80,8 +122,8 @@ def run(output):
  spec=importlib.util.spec_from_file_location('ready_source_extractor',repo/'tools/steam_original_recovery_authority_selftest.py');ex=importlib.util.module_from_spec(spec);spec.loader.exec_module(ex)
  paths=['native/steam_original_recovery_runtime.h','native/steam_game_link_runtime.h','native/steam_original_recovery_policy.h','native/steam_game_link_state.h','native/steam_native_record_identity.h','deps/json/json.hpp']
  sources={n:(repo/n).read_bytes() for n in paths};runtime=sources[paths[0]].decode('utf-8-sig');link=sources[paths[1]].decode('utf-8-sig')
- extracted={'PENDING':ex.extract(runtime,r'\bstruct\s+Pending\s*\{',True),'CONTROL':ex.extract(runtime,r'\bstruct\s+Control\s*\{',True),'CURRENT':ex.function(runtime,'current'),'ENQUEUE':ex.function(runtime,'enqueue'),'OWNER_READY':ex.function(runtime,'steamOriginalRecoveryIdentityReady'),'READY_PREDICATE':ex.function(link,'originalRecoveryIdentityReady')}
- body=ex.function(link,'run');extracted['READY_FORWARD']=ex.extract(body,r'\bif\s*\(originalRecoveryIdentityReady\s*\([^;{}]*\)\)\s*\{')
+ extracted={'PENDING':ex.extract(runtime,r'\bstruct\s+Pending\s*\{',True),'CURRENT':ex.function(runtime,'current'),'ENQUEUE':ex.function(runtime,'enqueue'),'OWNER_READY':ex.function(runtime,'steamOriginalRecoveryIdentityReady'),'GROUP_ROLE_READY':ex.function(link,'originalGroupRoleReady'),'READY_PREDICATE':ex.function(link,'originalRecoveryIdentityReady')}
+ body=ex.function(link,'run');extracted['READY_FORWARD']=ex.extract(body,r'\bif\s*\(originalRecoveryIdentityReady\s*\([^;{}]*\)\)\s*\{\s*steamOriginalRecoveryIdentityReady\s*\(')
  location=body.index(extracted['READY_FORWARD']);bracket=body.index('const bool originalIdentityBracketMatched=')
  wiring={'afterFinalIdentityBracket':location>bracket,'afterExistingReadIdentityChecks':body.rfind('finishReadIdentity();',0,location)>0,'beforePublishingEvidence':body.index('publish(c,std::move(detail)')>location}
  cpp=CPP
@@ -101,7 +143,10 @@ set "INCLUDE=%VCTOOLS%\include;%SDK%\Include\%SDKVERSION%\um;%SDK%\Include\%SDKV
 set "LIB=%VCTOOLS%\lib\x64;%SDK%\Lib\%SDKVERSION%\um\x64;%SDK%\Lib\%SDKVERSION%\ucrt\x64"
 set "PATH=%SystemRoot%\System32;%VCTOOLS%\bin\Hostx64\x64;%PATH%"
 '''
- variants=[('positive',None),('old-missing-forward',('steamOriginalRecoveryIdentityReady(game.pid,game.created,client.pid,client.created,gameId,appid,\n                    e.configEpoch,currentRecordRulesEpoch);','(void)game;')),('ignore-account',('&&std::uint32_t(privateIdentity.account64)==account','')),('ignore-full-id',('&&gameId==std::to_string(fullId)','')),('owner-ignore-epoch',('g_sleepRecoveryAutoConfigEpoch.load()!=configEpoch','false')),('owner-ignore-owned',('||c->ownsRunning.load()','')),('refund-consumed',('SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::TargetChanged);','c->admission=ymcc::steamOriginal::Admission{};SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::TargetChanged);'))]
+ # Use the exact extracted callback statement, including its original EOL bytes.
+ ready_forward=extracted['READY_FORWARD'];ready_call_start=ready_forward.index('steamOriginalRecoveryIdentityReady(')
+ ready_call=ready_forward[ready_call_start:ready_forward.index(';',ready_call_start)+1]
+ variants=[('positive',None),('old-missing-forward',(ready_call,'(void)game;')),('ignore-account',('&&std::uint32_t(privateIdentity.account64)==account','')),('ignore-full-id',('&&gameId==std::to_string(fullId)','')),('owner-ignore-epoch',('g_sleepRecoveryAutoConfigEpoch.load()!=configEpoch','false')),('owner-ignore-owned',('||c->ownsRunning.load()','')),('refund-consumed',('SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::TargetChanged);','c->admission=ymcc::steamOriginal::Admission{};SteamOriginalRecovery::enqueue(c,ymcc::steamOriginal::Trigger::TargetChanged);'))]
  results=[]
  for name,mutation in variants:
   code=cpp
@@ -117,7 +162,7 @@ set "PATH=%SystemRoot%\System32;%VCTOOLS%\bin\Hostx64\x64;%PATH%"
   else:item['passed']=False
   results.append(item)
  drift=[n for n,b in sources.items() if (repo/n).read_bytes()!=b]
- result={'schema':'ymcc.exact-production-identity-ready-consumer.v1','passed':all(x['passed'] for x in results) and all(wiring.values()) and not drift,'variants':results,'callerWiring':wiring,'productionExtracts':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in extracted.items()},'sourceDrift':drift,'liveProcessCalls':0,'steamMutations':0,'sleepActions':0,'actualPassivePushCoverageProven':False}
+ result={'schema':'ymcc.exact-production-identity-ready-consumer.v1','passed':all(x['passed'] for x in results) and all(wiring.values()) and not drift,'variants':results,'callerWiring':wiring,'productionExtracts':{k:hashlib.sha256(v.encode()).hexdigest() for k,v in extracted.items()},'sourceDrift':drift,'liveProcessCalls':0,'steamMutations':0,'sleepActions':0,'actualPassivePushCoverageProven':False,'fixtureDtos':{'Control':'explicit-ready-only-data','continuationPorts':'explicit-inert-old-cases','productionControlExtracted':False,'runningLossCoverageProven':False,'nativeSelectionReceiptSynthesized':False,'groupRoleProof':'unconstructible-false-zero-only-port','nativeGroupRole':'const-same-round-local-null','groupRolePositiveCoverageProven':False}}
  (out/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8');return result
 if __name__=='__main__':
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);a=p.parse_args();r=run(a.output);print(json.dumps(r));raise SystemExit(0 if r['passed'] else 1)

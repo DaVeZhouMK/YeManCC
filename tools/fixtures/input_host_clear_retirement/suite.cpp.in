@@ -13,6 +13,7 @@ static void check(bool value,const char* name){++checks;if(!value)failures.push_
 static void require(bool value,const char* name){if(!value)throw std::runtime_error(name);}
 struct Ports {
  bool msi=false,historySettled=false,endpointAbsent=true,restore=true,commit=true,confirm=true,explicitOn=false;
+ bool detail=false;
  unsigned forget=0,revoke=0,rawInvalidations=0,restores=0,commits=0,confirmations=0,queued=0;
  unsigned rearmCalls=0,rearmBeforeClear=0,rearmAdmitted=0;
  unsigned durableHistoryWrites=0,createTargets=0;
@@ -62,7 +63,18 @@ static void gamepadSerialRevokeGameFeedback(){}
 namespace ymcc::screenpads {inline void observeNativeTransport(ULONGLONG,bool){}}
 static void hidHideInvalidateRawInputIdentityCache(){++ports.rawInvalidations;}
 static void inputHostClearBoundPersona(){g_inputHostBoundPersona.clear();}
-static void appendNativeLifecycleLog(const char* event,const json& data){ports.logs.push_back({{"event",event},{"data",data}});}
+static unsigned retainedSinkThrows=0;
+static std::atomic<unsigned long long> g_powerGeneration{0};
+static bool domainLogEnabled(const char*){return ports.detail;}
+static unsigned localRetireSinkThrows=0;
+static std::size_t localRetiredCount(){
+ std::size_t count=0;for(const auto& row:ports.logs)if(row["event"]=="input-host-session-local-retired")++count;return count;
+}
+static void appendNativeLifecycleLog(const char* event,const json& data){
+ if(retainedSinkThrows&&std::strcmp(event,"input-host-session-retained")==0){--retainedSinkThrows;throw std::bad_alloc();}
+ if(localRetireSinkThrows&&std::strcmp(event,"input-host-session-local-retired")==0){--localRetireSinkThrows;throw std::bad_alloc();}
+ ports.logs.push_back({{"event",event},{"data",data}});
+}
 static bool hidHideRestorePhysicalTransaction(const char*){++ports.restores;if(!ports.restore)return false;g_hidHideVisibilityJournal.active=false;return true;}
 static bool inputHostTargetReturnAfterPsQuarantineLocked(int,bool){++ports.commits;return ports.commit;}
 static bool psRetiredReturnProvenLocked(){return ports.endpointAbsent;}
@@ -162,13 +174,49 @@ static void rawSlot(){seed();const auto h=memoryApi::source();g_inputHostUnadopt
  cases.push_back({{"case","raw-slot-close-failure-then-actual-lifecycle-resume"}});
 }
 static void originalClose(tr::Runtime& owner){seed();adopt(owner,L"clear-original");memoryApi::failRoles=memoryApi::Original;
+ g_inputHostSequence=23;
  clearCall();const auto debt=pipeState();retained("failed original Close keeps old tuple");
+ check(localRetiredCount()==0,"unpaid local owner cannot emit session-local-retired");
+ const auto firstRows=ports.logs.size();
+ ymcc::testing::allocationFault::failAfter(0);
+ for(unsigned i=0;i<1000;++i)clearCall();
+ const auto allocationArmed=ymcc::testing::allocationFault::countdown.load();
+ ymcc::testing::allocationFault::failAfter(-1);
+ check(allocationArmed==0,"1000 unchanged failed Clear calls detail OFF request no heap allocation in actual bound consumer");
+ check(ports.logs.size()==firstRows,"1000 unchanged failed Clear calls detail OFF create no new log retainedRows");
+ ports.detail=true;
+ for(unsigned i=0;i<100;++i)clearCall();
+ ports.detail=false;
+ check(ports.logs.size()==firstRows+100,"detail ON preserves100 repeated retained observations");
+ bool repeats=true;for(std::size_t i=firstRows;i<ports.logs.size();++i)repeats=repeats&&ports.logs[i]["event"]=="input-host-session-retained"&&ports.logs[i]["data"]["repeatObservation"]==true;
+ check(repeats,"retained repeated retainedRows are explicitly marked for detailed lane");
+ auto retainedRows=ports.logs.size();g_inputHostHostInstanceId="other-host";clearCall();
+ check(ports.logs.size()==retainedRows+1&&ports.logs.back()["data"]["repeatObservation"]==false,"host-instance change retains a new failure witness");
+ g_inputHostHostInstanceId="old-host";clearCall();retainedRows=ports.logs.size();g_powerGeneration=1;clearCall();
+ check(ports.logs.size()==retainedRows+1,"observed power change retains failure even when bound power stays same");
+ g_powerGeneration=0;clearCall();retainedRows=ports.logs.size();
+ g_inputHostPrepared=false;retainedSinkThrows=1;clearCall();
+ check(retainedSinkThrows==0&&ports.logs.size()==retainedRows&&g_inputHostRunId=="old-run"&&g_inputHostEpoch==17,"retained sink exception cannot clear or discard old owner tuple");
+ g_inputHostPrepared=true;clearCall();
+ check(ports.logs.size()==retainedRows+1&&ports.logs.back()["data"]["repeatObservation"]==false,"retained logging exception rearms the next first witness");
  check(g_inputHostServerPipe==nullptr&&debt["pending"]==0&&debt["failedCloseDebt"]==1,"borrowed pointer null does not retire original owner");
  const auto before=ports.restores;inputHostReconcileQuarantine();check(ports.queued==1,"actual BUS queues source-only quarantine continuation");
  check(ports.restores==before,"BUS observation does not perform physical restore");
  noEarlyRestore("failed original Close prevents physical restore");retained("failed Close lifecycle keeps same tuple");
  clearCall();retained("repeated Clear does not consume unpaid tuple");
  memoryApi::failRoles=0;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ check(localRetiredCount()==1,"successful Clear emits exactly one local-retired old-tuple witness");
+ for(const auto& row:ports.logs)if(row["event"]=="input-host-session-local-retired"){
+  const auto& data=row["data"];
+  check(data["runId"]=="old-run"&&data["hostInstanceId"]=="old-host"&&data["epoch"]==17&&data["powerGeneration"]==9&&data["commandSequence"]==23,"local-retired preserves old tuple before reset");
+  check(data["pipeRetirementProven"]==true&&data["primaryThreadRetirementProven"]==true&&data["tupleClearPending"]==true&&data["scope"]=="local-handle-retirement-only","local-retired states only the proven local boundary");
+ }
+ const auto rows=ports.logs.size();for(unsigned i=0;i<1000;++i)clearCall();
+ check(localRetiredCount()==1&&ports.logs.size()==rows,"1000 empty Clear calls emit no repeated terminal log");
+ g_inputHostRunId="exception-run";g_inputHostEpoch=18;g_inputHostHostInstanceId="exception-host";
+ g_inputHostBoundPowerGeneration=10;localRetireSinkThrows=1;clearCall();
+ check(localRetireSinkThrows==0&&cleared()&&g_inputHostHostInstanceId.empty()&&g_inputHostBoundPowerGeneration==0,"local-retired sink exception cannot prevent original tuple Clear");
+ check(localRetiredCount()==1&&memoryApi::live.empty(),"failed terminal logging neither duplicates witness nor retains resources");
  cases.push_back({{"case","original-close-debt-source-only-quarantine-resumes"},{"debt",debt}});
 }
 static void terminalEventClose(tr::Runtime& owner){seed();const auto h=adopt(owner,L"clear-event");unsigned char bytes[8]{};

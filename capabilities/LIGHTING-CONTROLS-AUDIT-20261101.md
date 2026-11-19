@@ -1,5 +1,16 @@
 # 灯光总库接入与控件核查（2026-11-01）
 
+2026-11-09 补证：当前主线所选程序集的返回值限制已核实，本文原控件修复和原测试结论保持其当时范围。主线 `ymccLightSetterApply` 对 Lenovo 选择现有 HC 路线和 `ymcc-device-core-v1` profile；`LightSetter` 编译 pin 与 runtime manifest 均指向 `HandheldCompanion.dll` SHA256 `4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c`（2,774,016 bytes，MVID `80cb2df3-7340-9bd5-a675-3df4f6dc631d`）。独立 PE/RVA 字节核对绑定六个灯光方法体，没有加载或执行目标程序集。
+
+| 总库精确机型 | 所选方法实现 | 写入结果与无设备分支 |
+| --- | --- | --- |
+| `LegionGoTablet` / `LegionGoTablet2` | Tablet 的 `SetLedColor`、`SetLedBrightness`、`SetLedStatus`；Tablet2 无这三项覆盖 | `HidDevice.Write(byte[])` 的 bool 被 `pop` 丢弃；正常路径和无 HID 分支返回 true。抛出异常仍是独立失败路径。 |
+| `LegionGoSZ1` / `LegionGoSZ2` | SZ1 的同名三方法；SZ2 无这三项覆盖 | 直接返回 `Write` 的 bool，无 HID 返回 false。该软件回执仍不证明可见灯效。 |
+
+固定 f2e58468 源码的 Tablet 实现丢弃的是 `WriteReport(bool)`，不能把它当作当前所选 DLL 的同一方法体；当前结论已独立落到上述 DLL。现有 LightSetter 会把这些 HC 方法返回的 true 转成 `ok`，因此 GO/GO2 的 ok 只能证明该层调用正常返回，不能证明 HID 写入、关灯、物理效果或 OEM 归还。现有字段日志尚未证明某次 false 写入被报成成功，也未建立安装版/内存加载身份；这两项保持 UNKNOWN。
+
+总库不新增无消费者参数、不隐藏现有能力、不改固定 HC 或新增 DLL。消费端应沿既有 LightSetter 路线明确处理“写入结果不可观察”，保留实际异常与失败；若要声称写入成功，须提交现有消费者的源码与选中组件身份证据，以及无 HID、底层 false、正常返回和关灯的原最小正反验证。不能用调用前存在性检查或助手退出码代替当次写回执，也不新增第二个 writer 或借通用 HC Close 归还其它域。具体修正与六个 IL/RVA 证据见 `G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-107-LIGHTING-SELECTED-IL-REVIEW`。本次库侧未运行产品/夹具、构建、导出或硬件操作；以下为原历史。
+
 本轮入口为微星 Claw A1M 一代“氛围下右摇杆环停留在一个颜色”的照片与反馈。静态照片不证明设备写入失败；本轮在源码与真实组件回放中确认了四项具体问题，修复沿用能力总库和现有消费者。
 
 ## 已确认与修复

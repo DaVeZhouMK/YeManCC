@@ -85,7 +85,9 @@ internal static class Program
         Check(root.GetProperty("submitElapsedUs").GetProperty("max").GetInt64() == 4, "submit sample clone independent of producer mutation");
         var deferred = root.GetProperty("msiCostWindowDeferred");
         Check(deferred.GetProperty("runId").GetString() == "old-run", "historical run identity retained");
-        Check(deferred.GetProperty("epoch").GetUInt64() == 8 && deferred.GetProperty("requestedSequence").GetUInt64() == 20588, "historical request tuple retained");
+        Check(deferred.GetProperty("version").GetInt32() == 3 && !deferred.TryGetProperty("epoch", out _) &&
+            root.GetProperty("epoch").GetUInt64() == 8 && deferred.GetProperty("requestedSequence").GetUInt64() == 20588,
+            "historical request tuple retained once at its documented location");
         Check(!deferred.GetProperty("controllerWrites").GetBoolean() && !deferred.GetProperty("pipeWrites").GetBoolean(), "no invented control proof");
         Check(root.GetProperty("procCpuMsPerSec").ValueKind == JsonValueKind.Null, "initial runtime delta unknown");
         Check(root.GetProperty("allocPerFrame").ValueKind == JsonValueKind.Null, "worker allocation cannot be attributed to requested frame");

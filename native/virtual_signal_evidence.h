@@ -49,9 +49,14 @@ public:
         return result;
     }
 };
+// Version 1 of the periodic BUS record defines these two fixed fields.
+inline constexpr char busRateSampleScopeField[]="busRateSampleScope";
+inline constexpr unsigned busRateSampleScopeVersion=1;
+inline constexpr char busRateDispatch[]="direct-timer-callback";
+inline constexpr unsigned callbackRateThresholdMultiplier=2;
 inline bool excessiveCallbackRate(std::uint64_t ticks,std::uint64_t windowMs,
                                   std::uint64_t expectedHz) noexcept {
     return windowMs && expectedHz && static_cast<long double>(ticks)*1000.0L >
-        static_cast<long double>(windowMs)*static_cast<long double>(expectedHz)*2.0L;
+        static_cast<long double>(windowMs)*static_cast<long double>(expectedHz)*callbackRateThresholdMultiplier;
 }
 }

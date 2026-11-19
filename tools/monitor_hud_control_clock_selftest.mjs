@@ -2,7 +2,7 @@
 // Native calls/events and unified source are inert. No desktop/game/CPU access.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const root=process.cwd(),req=createRequire(path.join(root,'package.json')),{build}=req('esbuild');
-const out=path.resolve(root,'../../../Build/Tasks/YMCC-Steam-HUD-Probe/desktop-output-20261011/control-clock');fs.mkdirSync(out,{recursive:true});
+const out=path.resolve(process.env.YMCC_HUD_CONTROL_CLOCK_OUT||path.resolve(root,'../../../Build/Tasks/YMCC-Steam-HUD-Probe/desktop-output-20261011/control-clock'));fs.mkdirSync(out,{recursive:true});
 const b=await build({stdin:{resolveDir:root,loader:'ts',contents:"export * from './src/bridge/monitorHudClock.ts';export * from './src/bridge/steamHudRelay.ts';export * from './src/bridge/desktopHudOwner.ts';export * from './src/bridge/monitorHudCarrierRouter.ts';export * from './src/bridge/monitorHudSampleSource.ts';export * from './src/bridge/monitorHudModel.ts'"},bundle:true,format:'esm',platform:'node',write:false});
 const file=path.join(out,'control-clock-under-test.mjs');fs.writeFileSync(file,b.outputFiles[0].text);
 const m=await import('file:///'+file.replaceAll('\\','/')+'?'+Date.now());const cases=[];
@@ -48,6 +48,12 @@ function clockHarness(options={}) {
 }
 {
  const h=clockHarness({failAck:true}),release=h.clock.acquire();await flush();await h.tick();check('Negative renewal reply fails the clock without requiring a browser timer',()=>assert.equal(h.failures.length,1));release();
+}
+{
+ const h=clockHarness(),release=h.clock.acquire();await flush();const nonce=h.clock.inspect().nonce;
+ check('Native terminal lease receipt fails only its own clock without a browser callback',()=>{assert.equal(h.clock.accept({nonce,snapshot:null,expired:true}),false);assert.equal(h.failures.length,1);assert(h.clock.inspect().failed)});
+ h.clock.accept({nonce,snapshot:null,expired:true});check('Repeated terminal receipt cannot multiply failure callbacks',()=>assert.equal(h.failures.length,1));release();
+ const replacement=h.clock.acquire();await flush();check('Old expiry cannot revoke a new lease generation',()=>{assert.equal(h.clock.accept({nonce,snapshot:null,expired:true}),false);assert(h.clock.inspect().enabled);assert(!h.clock.inspect().failed)});replacement();h.clock.dispose();
 }
 const game={appId:1091500,gameId:'1091500',browserGameId:'1091500',overlayTitle:'SP Overlay: 77/88/3',overlayPid:77,overlayBrowserId:88,ownerBrowserId:99,overlayBrowserType:3,overlayNativeAppId:1091500};
 const peer={connection:'1',runId:'a'.repeat(32),connected:true};
@@ -141,5 +147,45 @@ function desktopHarness(options={}) {
 }
 const host=fs.readFileSync('src/bridge/monitorHudHost.ts','utf8');
 check('Host separates hardware demand from shared clock and retains late desktop IPC replies',()=>{assert(host.includes('acquireClock:clock.acquire'));assert(host.includes('source.users()>0'));assert(!host.includes('clockNonce'));assert(!/invoke:\(cmd,args\)=>invoke\(cmd,args as Record<string,unknown>,\{timeoutMs:5000\}\)/.test(host))});
-const report={passed:cases.length,cases,browserTimerCallbacksExecuted:0,cpuMeasured:false,hardwareTouched:false,actualNativeWindow:false,gameValidation:false,scope:'Production refcount clock + relay/desktop/router/sample functions with inert IPC and native pulses. Does not prove real minimized main-WebView, game mouse passthrough, or installation.'};
+let wakeIpc;
+{
+ const bundle=await build({stdin:{resolveDir:root,loader:'ts',contents:"export {createHudClock} from './src/bridge/monitorHudClock.ts';export {invoke,setLogSink} from './src/bridge/ipc.ts'"},bundle:true,format:'esm',platform:'node',write:false});
+ const wireFile=path.join(out,'wake-ipc-under-test.mjs');fs.writeFileSync(wireFile,bundle.outputFiles[0].text);
+ const sent=[],log=[],timers=new Map(),failures=[];let receive,t=10000,id=0;
+ const originalWindow=globalThis.window;
+ globalThis.window={chrome:{webview:{postMessage:msg=>sent.push(msg),addEventListener:(type,fn)=>{assert.equal(type,'message');receive=fn;}}}};
+ try{
+  const wire=await import('file:///'+wireFile.replaceAll('\\','/'));
+  wire.setLogSink(entry=>log.push(entry));
+  const clock=wire.createHudClock({now:()=>t,nonce:()=> 'native-ipc-clock-000001',invoke:(cmd,args,signal)=>wire.invoke(cmd,args,signal?{signal}:undefined),
+   setTimer:(fn,ms)=>{timers.set(++id,{fn,ms});return id;},clearTimer:key=>timers.delete(key),pulse:()=>{},failed:reason=>failures.push(reason)});
+  const release=clock.acquire();
+  const respond=(msg,result)=>receive({data:{id:msg.id,result}});
+  respond(sent.at(-1),true);await flush();
+  const nonce=clock.inspect().nonce;
+  const ackMessages=()=>sent.filter(x=>x.cmd==='monitor.hudPulse.ack');
+  for(let i=0;i<300;i++){
+   const count=ackMessages().length;t+=200;clock.accept({nonce,snapshot:null});
+   if(ackMessages().length>count)respond(sent.at(-1),true);
+   await flush();assert.equal(timers.size,0);
+  }
+  const healthy=ackMessages().length;
+  assert.equal(healthy,60,'normal 200 ms pulses still acknowledge only once a second');
+  for(let i=0;i<48;i++){clock.reconcileAfterWake();await flush();assert.equal(timers.size,1);}
+  assert.equal(ackMessages().length,healthy+48);
+  const obsolete=ackMessages().slice(healthy,-1);
+  const canceled=()=>log.filter(x=>x.cmd==='monitor.hudPulse.ack'&&!x.ok&&x.error==='IPC request retired').length;
+  assert.equal(canceled(),47,'production IPC must retire each replaced request before its reply');
+  const entries=log.length;
+  for(const msg of obsolete.reverse())respond(msg,false);
+  await flush();assert.equal(log.length,entries,'late old IDs have been removed from the production bridge');assert.equal(failures.length,0);
+  respond(sent.at(-1),true);await flush();assert.equal(timers.size,0);
+  clock.reconcileAfterWake();const inFlight=sent.at(-1);release();await flush();
+  assert.equal(canceled(),48);assert.equal(timers.size,0);assert.equal(clock.inspect().users,0);
+  const stoppedEntries=log.length;respond(inFlight,true);await flush();assert.equal(log.length,stoppedEntries);assert.equal(failures.length,0);
+  wakeIpc={healthyPulses:300,healthyAcks:healthy,wakeStorm:48,canceledAcks:canceled(),lateRepliesIgnored:obsolete.length+1,timersAfterStop:timers.size};
+  check('Actual IPC drops retired ACK IDs and keeps only the current deadline through a Ready storm',()=>{});
+ }finally{if(originalWindow===undefined)delete globalThis.window;else globalThis.window=originalWindow;}
+}
+const report={passed:cases.length,cases,wakeIpc,browserTimerCallbacksExecuted:0,cpuMeasured:false,hardwareTouched:false,actualNativeWindow:false,gameValidation:false,scope:'Production refcount clock, relay/desktop/router/sample and separate real IPC receiver on an inert WebView port. Does not prove real minimized main-WebView, game mouse passthrough, or installation.'};
 fs.writeFileSync(path.join(out,'CONTROL-CLOCK-SELFTEST.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

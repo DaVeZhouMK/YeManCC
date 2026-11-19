@@ -93,7 +93,8 @@ class Overlay {
   if(s&&s->owner){
    if(msg==WM_TIMER&&w==expireTimer){if(GetTickCount64()>s->deadline)s->owner->close(s->id,s->nonce,"owner-lease-expired");return 0;}
    if(msg==WM_TIMER&&w==transitionTimer){s->owner->close(s->id,s->nonce,"close-animation-timeout");return 0;}
-   if(msg==WM_POWERBROADCAST&&(w==PBT_APMSUSPEND)){s->owner->close(s->id,s->nonce,"suspend");return TRUE;}
+   // The main shared sleep dispatcher owns suspend admission and shutdown.
+   // A second window must not consume a late OS suspend independently.
    if(msg==WM_CLOSE){s->owner->dismiss(s->id,s->nonce);return 0;}
    if(msg==closeMessage||msg==WM_DISPLAYCHANGE||msg==WM_DPICHANGED){s->owner->close(s->id,s->nonce,"window-close");return 0;}
    if(msg==WM_NCHITTEST)return HTTRANSPARENT;if(msg==WM_POINTERACTIVATE)return PA_NOACTIVATE;if(msg==WM_MOUSEACTIVATE)return MA_NOACTIVATE;

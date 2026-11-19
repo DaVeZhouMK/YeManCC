@@ -139,6 +139,7 @@ internal static class LightSetterSelfTest
     public static void Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--apex-hid-v2") { ApexLightingTests.Run(); return; }
+        if (args.Length == 1 && args[0] == "--aokzoe-hid-v2-reenable") { AokzoeLightingTests.Run(); return; }
         if (args.Length != 0)
         {
             if (args.Length != 1 || args[0] != "--onex-serial-discovery")
@@ -460,9 +461,11 @@ internal static class LightSetterSelfTest
         checks += superJoyDependencyChecks;
         var superJoyWindowsTransportChecks = SuperJoyWindowsTransportTests.Run();
         checks += superJoyWindowsTransportChecks;
+        var oemOwnershipChecks = AyaneoOemLightingRestoreTests.Run();
+        checks += oemOwnershipChecks;
         var superJoyCombinedConsumerChecks = AyaneoSuperJoyConsumerTests.Run();
         checks += superJoyCombinedConsumerChecks;
-        Console.WriteLine(JsonSerializer.Serialize(new { ok = true, checks, superJoyCombinedConsumerChecks, originalChecks, superJoyDependencyChecks, superJoyWindowsTransportChecks, superJoyRuntimeRouteAdmitted = true, hardwareWrites = false, HCAssemblyLoaded = false, actualPinnedHCQueue = true, oxp3PureHid = true, directCancelResult, directCancelError, directCancelOutcomes, directIssuedIncomplete, directTokenCancelledAtIssue, directCancelledWhileIncomplete, ownerCancelCalls, ownerCancelResult, ownerCancelError, ownerCancelOutcomes, ownerIssuedIncomplete, ownerTokenCancelledAtIssue, ownerCancelledWhileIncomplete, deadlineCancelCalls, deadlineCancelResult, deadlineCancelError, deadlineCancelOutcomes, deadlineIssuedIncomplete, deadlineTokenCancelledAtIssue, deadlineCancelledWhileIncomplete }));
+        Console.WriteLine(JsonSerializer.Serialize(new { ok = true, checks, oemOwnershipChecks, superJoyCombinedConsumerChecks, originalChecks, superJoyDependencyChecks, superJoyWindowsTransportChecks, superJoyRuntimeRouteAdmitted = true, hardwareWrites = false, HCAssemblyLoaded = false, actualPinnedHCQueue = true, oxp3PureHid = true, directCancelResult, directCancelError, directCancelOutcomes, directIssuedIncomplete, directTokenCancelledAtIssue, directCancelledWhileIncomplete, ownerCancelCalls, ownerCancelResult, ownerCancelError, ownerCancelOutcomes, ownerIssuedIncomplete, ownerTokenCancelledAtIssue, ownerCancelledWhileIncomplete, deadlineCancelCalls, deadlineCancelResult, deadlineCancelError, deadlineCancelOutcomes, deadlineIssuedIncomplete, deadlineTokenCancelledAtIssue, deadlineCancelledWhileIncomplete }));
     }
 }
 public enum FakeLed { Solid = 1 }

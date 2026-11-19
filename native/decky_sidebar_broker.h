@@ -117,28 +117,48 @@ class Broker {
     std::atomic<bool> reporting_{true};
     unsigned short port_=0;
     std::string token_,runId_,connection_;
-    std::deque<std::pair<std::string,std::string>> replies_;
+    struct Reply {std::string connection,text;std::function<bool()> owner;size_t sent=0;};
+    std::deque<Reply> replies_;
+    static bool requestCurrent(const std::function<bool()>& owner){try{return !owner||owner();}catch(...){return false;}}
     Config config_;
+    Json lastPeerClose_; // Last authenticated edge only; no timer or payload logging.
     unsigned long long nextConnection_=0, revision_=0, connectionRevision_=0;
     void run() {
         SOCKET peer=INVALID_SOCKET;WSAEVENT peerEvent=WSA_INVALID_EVENT;
-        std::vector<unsigned char> input;std::string output,connection;
-        bool authenticated=false;ULONGLONG deadline=0,fragmentDeadline=0,writeDeadline=0;
+        std::vector<unsigned char> input;std::string connection;
+        std::deque<Reply> output;size_t outputBytes=0;
+        const auto append=[&](std::string text){outputBytes+=text.size();output.push_back({connection,std::move(text),{},0});};
+        bool authenticated=false;ULONGLONG deadline=0,fragmentDeadline=0,writeDeadline=0,connectedAt=0,lastReceive=0;
+        const char* exitReason="owner-stop";int exitError=0;
         auto changed=[&](bool connected){try{if(reporting_.load()&&config_.peerChanged)config_.peerChanged(connection,runId_,connected);}catch(...){}};
-        auto closePeer=[&]{
+        auto closePeer=[&](const char* reason,int error=0,unsigned closeCode=0,bool closeCodeKnown=false){
+            Json facts;
+            if(authenticated){
+                const auto now=GetTickCount64();
+                facts={{"closeReason",reason},{"socketError",error},{"websocketCloseCodeKnown",closeCodeKnown},
+                    {"connectionAgeMs",now-connectedAt},{"receiveIdleMs",now-lastReceive},
+                    {"pendingOutputBytes",outputBytes},{"bufferedInputBytes",input.size()}};
+                if(closeCodeKnown)facts["websocketCloseCode"]=closeCode;
+            }
             if(peer!=INVALID_SOCKET){closesocket(peer);peer=INVALID_SOCKET;}
             if(peerEvent!=WSA_INVALID_EVENT){WSACloseEvent(peerEvent);peerEvent=WSA_INVALID_EVENT;}
-            {std::lock_guard lock(state_);if(!connection_.empty())++connectionRevision_;connection_.clear();replies_.clear();}
-            if(authenticated)changed(false);authenticated=false;connection.clear();input.clear();output.clear();deadline=0;fragmentDeadline=0;writeDeadline=0;
+            {std::lock_guard lock(state_);if(!connection_.empty())++connectionRevision_;connection_.clear();replies_.clear();if(!facts.is_null())lastPeerClose_=std::move(facts);}
+            if(authenticated)changed(false);authenticated=false;connection.clear();input.clear();output.clear();outputBytes=0;deadline=0;fragmentDeadline=0;writeDeadline=0;
         };
         auto drain=[&]{
             // Only actual socket progress renews pending output; more replies/pings do not.
             if(authenticated&&!output.empty()&&!writeDeadline)writeDeadline=GetTickCount64()+kWriteProgressTimeoutMs;
             while(peer!=INVALID_SOCKET&&!output.empty()) {
-                const int n=send(peer,output.data(),static_cast<int>(output.size()),0);
-                if(n>0){output.erase(0,static_cast<size_t>(n));writeDeadline=output.empty()?0:GetTickCount64()+kWriteProgressTimeoutMs;}
-                else if(n==SOCKET_ERROR&&WSAGetLastError()==WSAEWOULDBLOCK)break;
-                else{closePeer();break;}
+                auto& item=output.front();
+                // A retired partial frame cannot be removed from a live stream.
+                // Close our peer instead of delivering its stale remaining bytes.
+                if(!requestCurrent(item.owner)){
+                    if(item.sent){closePeer("reply-owner-retired");break;}
+                    outputBytes-=item.text.size();output.pop_front();if(output.empty())writeDeadline=0;continue;
+                }
+                const int n=send(peer,item.text.data()+item.sent,static_cast<int>(item.text.size()-item.sent),0);
+                if(n>0){item.sent+=static_cast<size_t>(n);outputBytes-=static_cast<size_t>(n);if(!requestCurrent(item.owner)){closePeer("reply-owner-retired");break;}if(item.sent==item.text.size())output.pop_front();writeDeadline=output.empty()?0:GetTickCount64()+kWriteProgressTimeoutMs;}
+                else{const int error=n==SOCKET_ERROR?WSAGetLastError():0;if(error==WSAEWOULDBLOCK)break;closePeer("send-error",error);break;}
             }
         };
         for(;;) {
@@ -146,73 +166,76 @@ class Broker {
             DWORD timeout=WSA_INFINITE;
             ULONGLONG until=peer==INVALID_SOCKET?0:authenticated?fragmentDeadline:deadline;
             if(authenticated&&writeDeadline&&(!until||writeDeadline<until))until=writeDeadline;
+            const auto timeoutReason=[&]{return writeDeadline&&until==writeDeadline?"write-progress-timeout":authenticated?"frame-timeout":"handshake-timeout";};
             if(until){
                 const auto now=GetTickCount64();
                 // Check before waiting too: a busy event must not starve an expired deadline.
-                if(now>=until){closePeer();continue;}
+                if(now>=until){closePeer(timeoutReason());continue;}
                 timeout=static_cast<DWORD>(until-now);
             }
             const auto result=WSAWaitForMultipleEvents(count,events,FALSE,timeout,FALSE);
-            if(result==WSA_WAIT_EVENT_0||result==WSA_WAIT_FAILED)break;
-            if(result==WSA_WAIT_TIMEOUT){closePeer();continue;}
+            if(result==WSA_WAIT_EVENT_0||result==WSA_WAIT_FAILED){if(result==WSA_WAIT_FAILED){exitReason="wait-error";exitError=WSAGetLastError();}break;}
+            if(result==WSA_WAIT_TIMEOUT){closePeer(timeoutReason());continue;}
             const DWORD index=result-WSA_WAIT_EVENT_0;
             if(index==1){
-                WSANETWORKEVENTS network{};if(WSAEnumNetworkEvents(listener_,listenEvent_,&network)==SOCKET_ERROR)break;
+                WSANETWORKEVENTS network{};if(WSAEnumNetworkEvents(listener_,listenEvent_,&network)==SOCKET_ERROR){exitReason="listener-events-error";exitError=WSAGetLastError();break;}
                 if(network.lNetworkEvents&FD_ACCEPT) {
                     sockaddr_in address{};int size=sizeof(address);const SOCKET accepted=accept(listener_,reinterpret_cast<sockaddr*>(&address),&size);
                     if(accepted!=INVALID_SOCKET){
                         if(peer!=INVALID_SOCKET||address.sin_addr.s_addr!=htonl(INADDR_LOOPBACK)){closesocket(accepted);continue;}
                         peer=accepted;peerEvent=WSACreateEvent();deadline=GetTickCount64()+3000;
-                        if(peerEvent==WSA_INVALID_EVENT||WSAEventSelect(peer,peerEvent,FD_READ|FD_WRITE|FD_CLOSE)==SOCKET_ERROR){closePeer();continue;}
+                        if(peerEvent==WSA_INVALID_EVENT||WSAEventSelect(peer,peerEvent,FD_READ|FD_WRITE|FD_CLOSE)==SOCKET_ERROR){closePeer("peer-events-setup-error",WSAGetLastError());continue;}
                     }
                 }
             } else if(index==2){
-                WSAResetEvent(sendEvent_);std::deque<std::pair<std::string,std::string>> queue;
+                WSAResetEvent(sendEvent_);std::deque<Reply> queue;
                 {std::lock_guard lock(state_);queue.swap(replies_);}
-                for(const auto& item:queue)if(authenticated&&item.first==connection){if(output.size()+item.second.size()>kMaxPayload*2){closePeer();break;}output+=item.second;}
+                for(auto& item:queue)if(authenticated&&item.connection==connection){if(!requestCurrent(item.owner))continue;if(outputBytes+item.text.size()>kMaxPayload*2){closePeer("output-limit");break;}outputBytes+=item.text.size();output.push_back(std::move(item));}
                 drain();
             } else if(index==3&&peer!=INVALID_SOCKET){
-                WSANETWORKEVENTS network{};if(WSAEnumNetworkEvents(peer,peerEvent,&network)==SOCKET_ERROR){closePeer();continue;}
+                WSANETWORKEVENTS network{};if(WSAEnumNetworkEvents(peer,peerEvent,&network)==SOCKET_ERROR){closePeer("socket-events-error",WSAGetLastError());continue;}
                 if(network.lNetworkEvents&FD_READ){
-                    char buffer[8192];bool failed=false;
-                    for(;;){const int n=recv(peer,buffer,sizeof(buffer),0);if(n>0){input.insert(input.end(),buffer,buffer+n);if(input.size()>kMaxPayload+32){failed=true;break;}}
-                        else if(n==SOCKET_ERROR&&WSAGetLastError()==WSAEWOULDBLOCK)break;else{failed=true;break;}}
-                    if(failed){closePeer();continue;}
+                    char buffer[8192];bool failed=false;const char* readReason="remote-eof";int readError=0;
+                    for(;;){const int n=recv(peer,buffer,sizeof(buffer),0);if(n>0){lastReceive=GetTickCount64();input.insert(input.end(),buffer,buffer+n);if(input.size()>kMaxPayload+32){readReason="input-limit";failed=true;break;}}
+                        else{readError=n==SOCKET_ERROR?WSAGetLastError():0;if(readError==WSAEWOULDBLOCK)break;if(n==SOCKET_ERROR)readReason="receive-error";failed=true;break;}}
+                    if(failed){closePeer(readReason,readError);continue;}
+                    const char* inputFailure="handshake-error";
                     try {
                         if(!authenticated){
                             const std::string header(input.begin(),input.end());const auto end=header.find("\r\n\r\n");
                             if(end==std::string::npos){if(input.size()>kMaxHeader)throw std::runtime_error("header-too-large");}
                             else {
-                                output+=handshake(header.substr(0,end+4),token_,"127.0.0.1:"+std::to_string(port_));
+                                append(handshake(header.substr(0,end+4),token_,"127.0.0.1:"+std::to_string(port_)));
                                 input.erase(input.begin(),input.begin()+static_cast<std::ptrdiff_t>(end+4));
-                                authenticated=true;connection=std::to_string(++nextConnection_);
+                                authenticated=true;connectedAt=lastReceive=GetTickCount64();connection=std::to_string(++nextConnection_);
                                 {std::lock_guard lock(state_);connection_=connection;++connectionRevision_;}
                                 changed(true);
                             }
                         }
                         unsigned processed=0;
-                        while(authenticated&&peer!=INVALID_SOCKET){const auto frame=decode(input);if(!frame.complete)break;
+                        while(authenticated&&peer!=INVALID_SOCKET){inputFailure="frame-error";const auto frame=decode(input);if(!frame.complete)break;
                             if(++processed>32)throw std::runtime_error("message-burst-limit");
                             fragmentDeadline=0;
                             input.erase(input.begin(),input.begin()+static_cast<std::ptrdiff_t>(frame.bytes));
-                            if(frame.opcode==8){closePeer();break;}
-                            if(frame.opcode==9){output+=encode(frame.payload,10);continue;}
+                            if(frame.opcode==8){const bool known=frame.payload.size()>=2;const unsigned code=known?(static_cast<unsigned char>(frame.payload[0])<<8)|static_cast<unsigned char>(frame.payload[1]):0;
+                                closePeer("remote-close",0,code,known);break;}
+                            if(frame.opcode==9){append(encode(frame.payload,10));continue;}
                             if(frame.opcode==10)continue;
-                            const auto request=Json::parse(frame.payload);
-                            if(!request.is_object()||request.value("runId",std::string{})!=runId_)throw std::runtime_error("stale-run");
-                            const auto command=request.value("command",std::string{});
+                            inputFailure="request-json-error";const auto request=Json::parse(frame.payload);
+                            inputFailure="request-identity-error";if(!request.is_object()||request.value("runId",std::string{})!=runId_)throw std::runtime_error("stale-run");
+                            inputFailure="request-command-error";const auto command=request.value("command",std::string{});
                             if(command!="snapshot"&&command!="game.setField"&&command!="fan.setEnabled"&&command!="fan.setPreset"&&command!="fan.setChoice"&&command!="frame.setField"&&command!="touchpad.setField"&&command!="global.setField"&&command!="audioOptimization.setEnabled"&&command!="monitor.setEnabled"&&command!="performance.setControls"&&command!="hud.status"&&command!="hud.ack"&&command!="wallpaper.context"&&command!="wallpaper.status"&&command!="wallpaper.neighbors"&&command!="updater.status"&&command!="updater.request")throw std::runtime_error("command-denied");
-                            if(reporting_.load()&&config_.request)config_.request(connection,request);
+                            inputFailure="request-callback-error";if(reporting_.load()&&config_.request)config_.request(connection,request);
                         }
                         if(authenticated&&peer!=INVALID_SOCKET&&!input.empty()&&!fragmentDeadline)fragmentDeadline=GetTickCount64()+3000;
                         drain();
-                    }catch(...){closePeer();continue;}
+                    }catch(...){closePeer(inputFailure);continue;}
                 }
                 if(peer!=INVALID_SOCKET&&(network.lNetworkEvents&FD_WRITE))drain();
-                if(peer!=INVALID_SOCKET&&(network.lNetworkEvents&FD_CLOSE))closePeer();
+                if(peer!=INVALID_SOCKET&&(network.lNetworkEvents&FD_CLOSE))closePeer("socket-close",network.iErrorCode[FD_CLOSE_BIT]);
             }
         }
-        closePeer();
+        closePeer(exitReason,exitError);
         { std::lock_guard lock(state_); active_ = false; }
     }
     void stopLocked() {
@@ -239,20 +262,22 @@ public:
             stop_=WSACreateEvent();listenEvent_=WSACreateEvent();sendEvent_=WSACreateEvent();
             if(stop_==WSA_INVALID_EVENT||listenEvent_==WSA_INVALID_EVENT||sendEvent_==WSA_INVALID_EVENT||WSAEventSelect(listener_,listenEvent_,FD_ACCEPT)==SOCKET_ERROR)throw std::runtime_error("events-failed");
             config_=std::move(config);
-            {std::lock_guard lock(state_);port_=ntohs(address.sin_port);token_=randomHex(32);runId_=randomHex(16);active_=true;}
+            {std::lock_guard lock(state_);port_=ntohs(address.sin_port);token_=randomHex(32);runId_=randomHex(16);lastPeerClose_=Json();active_=true;}
             worker_=std::thread([this]{run();});return true;
         }catch(...){stopLocked();return false;}
     }
     Json bootstrap() {std::lock_guard lock(state_);if(!active_)return Json::object();return {{"endpoint","ws://127.0.0.1:"+std::to_string(port_)+"/mirror"},{"token",token_},{"runId",runId_},{"hudProtocol",1},{"wallpaperProtocol",1},{"wallpaperPrefetchProtocol",0},{"updaterProtocol",1}};}
-    Json status() {std::lock_guard lock(state_);return {{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_},{"connectionRevision",connectionRevision_}};}
+    Json status() {std::lock_guard lock(state_);Json result={{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_},{"connectionRevision",connectionRevision_}};
+        if(connection_.empty()&&lastPeerClose_.is_object())result["peerClose"]=lastPeerClose_;return result;}
     // Recheck queued private events at UI dispatch, not only socket receipt.
     // Client payload flags never participate in this native transport fact.
     bool acceptsRequest(const std::string& connection,const std::string& runId,unsigned long long connectionRevision) {
         std::lock_guard lock(state_);
         return active_&&!connection.empty()&&connection==connection_&&runId==runId_&&connectionRevision==connectionRevision_;
     }
-    bool reply(const std::string& connection,const Json& message) {
+    bool reply(const std::string& connection,const Json& message,std::function<bool()> owner={}) {
         const auto text=message.dump();if(text.size()>kMaxPayload)return false;
+        if(owner&&(message.value("type",std::string{})!="hud"||!requestCurrent(owner)))return false;
         std::lock_guard lock(state_);
         if(!active_||connection.empty()||connection!=connection_||replies_.size()>=kMaxQueue||message.value("runId",std::string{})!=runId_)return false;
         if(message.value("type",std::string{})=="snapshot") {
@@ -263,7 +288,7 @@ public:
             if(revision<=0 || revision>9007199254740991LL || static_cast<unsigned long long>(revision)<revision_ || snapshot.value("runId",std::string{})!=runId_)return false;
             revision_=static_cast<unsigned long long>(revision);
         }
-        replies_.emplace_back(connection,encode(text));WSASetEvent(sendEvent_);return true;
+        replies_.push_back({connection,encode(text),std::move(owner),0});WSASetEvent(sendEvent_);return true;
     }
     void stop(){std::lock_guard lifecycle(life_);stopLocked();}
 };

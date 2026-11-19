@@ -32,12 +32,18 @@ export function getCssAppearanceInputs(repo){
  }
  need(rows.length<=3072,'SOURCE_LIMIT');return rows;
 }
+// Path-list shaping only. Standalone callers still enter through the tool verifiers below.
+export function collectCssAppearanceArtifactInputs(paths){
+ const inputs=[...new Set(paths)];need(inputs.length<=3072,'TOOL_LIMIT');return inputs;
+}
 export function getCssAppearanceTools(repo){
  const owned=ownedToolDeclaration(repo);need(!owned.blockedReason,'OWNED_TOOL_AUTHORITY:'+owned.blockedReason);
- const inputs=[...new Set([...owned.artifactInputs,...verifyPackageFixtureTools().files.map(r=>r.path),...verifyResourceFixtureTools().files.map(r=>r.path)])];need(inputs.length<=3072,'TOOL_LIMIT');return {artifactInputs:inputs};
+ return {artifactInputs:collectCssAppearanceArtifactInputs([...owned.artifactInputs,...verifyPackageFixtureTools().files.map(r=>r.path),...verifyResourceFixtureTools().files.map(r=>r.path)])};
 }
 export function runCssAppearanceSequence({repo,work,powershell,deadlineMs}){
  const root=repo,out=work,report={realSteamActions:0,userSettingsWrites:0,hardwareWrites:0},appearancePack=read(path.join(root,'PowerControl/steam-appearance/manifest.json')),stages=[];
+ // Prepare the exact existing semantic mutation before any stage starts.
+ const controller=fs.readFileSync(path.join(root,'PowerControl/steam-appearance.ps1'),'utf8');const reapply=/\$applied=Invoke-AppearanceControl '(?:Refresh|Reconcile)'/g;const reapplyAnchors=[...controller.matchAll(reapply)];if(reapplyAnchors.length!==1)throw Error('Review unique production automatic reapply operation');const mutated=controller.replace(reapply,"$applied=Invoke-AppearanceControl 'Status'");if(mutated===controller)throw Error('Actual automatic reapply mutation anchor missing');
  const spawnSync=(program,args,options)=>{
   need(Date.now()<deadlineMs,'SHARED_DEADLINE_BEFORE_STAGE');need([key(powershell),key(process.execPath)].includes(key(program)),'UNDECLARED_EXECUTABLE');
   need(Number.isSafeInteger(options.timeout)&&options.timeout>0&&options.timeout<=90000,'ORIGINAL_STAGE_BUDGET');
@@ -51,7 +57,7 @@ export function runCssAppearanceSequence({repo,work,powershell,deadlineMs}){
  fs.mkdirSync(out,{recursive:false});
  const automaticOut=path.join(out,'appearance-refresh');
  const automatic=spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(root,'tools/steam_appearance_automatic_refresh_selftest.ps1'),'-Out',automaticOut],{encoding:'utf8',windowsHide:true,timeout:45000});fs.writeFileSync(path.join(out,'appearance-refresh.log'),(automatic.stdout||'')+(automatic.stderr||''));if(automatic.status!==0)throw Error('Production automatic appearance Refresh failed');report.automaticAppearanceCases=JSON.parse(fs.readFileSync(path.join(automaticOut,'result.json'),'utf8').replace(/^\uFEFF/,'')).passed;
- const mutatedRoot=path.join(out,'appearance-observe-only-negative');for(const relative of ['preset.ps1','idle.ps1','resident.ps1','manifest.json',...appearancePack.files.map(row=>'themes/'+row.path)]){const source=path.join(root,'PowerControl/steam-appearance',relative),target=path.join(mutatedRoot,'steam-appearance',relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target);}const controller=fs.readFileSync(path.join(root,'PowerControl/steam-appearance.ps1'),'utf8');const reapply=/\$applied=Invoke-AppearanceControl '(?:Refresh|Reconcile)'/g;const reapplyAnchors=[...controller.matchAll(reapply)];if(reapplyAnchors.length!==1)throw Error('Review unique production automatic reapply operation');const mutated=controller.replace(reapply,"$applied=Invoke-AppearanceControl 'Status'");if(mutated===controller)throw Error('Actual automatic reapply mutation anchor missing');fs.writeFileSync(path.join(mutatedRoot,'steam-appearance.ps1'),mutated);
+ const mutatedRoot=path.join(out,'appearance-observe-only-negative');for(const relative of ['preset.ps1','idle.ps1','resident.ps1','manifest.json',...appearancePack.files.map(row=>'themes/'+row.path)]){const source=path.join(root,'PowerControl/steam-appearance',relative),target=path.join(mutatedRoot,'steam-appearance',relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target);}fs.writeFileSync(path.join(mutatedRoot,'steam-appearance.ps1'),mutated);
   const negativeHarness=path.join(out,'appearance-observe-only-harness.ps1'),negativeOut=path.join(out,'appearance-observe-only-result');fs.writeFileSync(negativeHarness,observeOnlyHarness());
   const negative=spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',negativeHarness,'-taskTestSource',path.join(root,'tools/steam_appearance_automatic_refresh_selftest.ps1'),'-taskResultRoot',negativeOut,'-taskComponentRoot',mutatedRoot],{encoding:'utf8',windowsHide:true,timeout:45000});const negativeText=(negative.stdout||'')+(negative.stderr||'');fs.writeFileSync(path.join(out,'appearance-observe-only-negative.log'),negativeText);
   const negativeReceiptFile=path.join(negativeOut,'observe-only-business-failure.json');if(!fs.existsSync(negativeReceiptFile))throw Error('Observe-only negative missing actual production guard receipt');const negativeReceipt=JSON.parse(fs.readFileSync(negativeReceiptFile,'utf8').replace(/^\uFEFF/,'')),observeProof=validateObserveOnlyFailure(negative,negativeReceipt);

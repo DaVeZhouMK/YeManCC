@@ -13,6 +13,7 @@ import {
 const defaultRoot = path.resolve(import.meta.dirname, '../../../..');
 export const POWER_RESUME_TOOL_SOURCES = Object.freeze([
   ...BUNDLED_AUTHORITY_SOURCES, 'tools/ymcc_sim/global/sleep.mjs',
+  'tools/fixtures/power_resume_app_source.mjs', 'src/bridge/yeman.ts',
   'tools/ymcc_sim/global/sleep-fixtures/power-resume-tool-scope.mjs',
 ]);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -51,7 +52,7 @@ export function beginPowerResumeTools(repoRoot, output, options = {}) {
   const sourceHashes = {};
   for (const relative of [...POWER_RESUME_TOOL_SOURCES,
     'tools/ymcc_sim/global/sleep-fixtures/power-resume-entry.mjs', 'tools/power_resume_selftest.ts',
-    'src/bridge/powerResume.ts', 'src/App.vue', 'native/main.cpp']) {
+    'src/bridge/powerResume.ts', 'src/bridge/powerLifecycleState.ts', 'src/App.vue', 'native/main.cpp']) {
     sourceHashes[relative] = hashFile(sourcePath(repo, relative));
   }
   return {

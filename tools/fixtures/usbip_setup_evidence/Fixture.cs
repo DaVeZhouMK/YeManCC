@@ -68,7 +68,7 @@ internal static class Fixture
     {
         ++Cases; try { action(); } catch (Exception ex) { Failures.Add(name + ": " + ex); }
     }
-    private static UsbipSetupEvidence Begin(string sha = KnownCore) => UsbipSetupEvidence.TryBegin("steamdeck", "fixture-host", "fixture-run", 17, "PREPARE_TARGET", sha, "12345678-1234-1234-1234-123456789abc") ?? throw new Exception("scope unexpectedly absent");
+    private static UsbipSetupEvidence Begin(string sha = KnownCore, string command = "PREPARE_TARGET") => UsbipSetupEvidence.TryBegin("steamdeck", "fixture-host", "fixture-run", 17, command, sha, "12345678-1234-1234-1234-123456789abc") ?? throw new Exception("scope unexpectedly absent");
     private static JsonElement[] Rows() => File.Exists(FixtureLeaves.Log) ? File.ReadAllLines(FixtureLeaves.Log, new UTF8Encoding(false, true)).Select(line => JsonDocument.Parse(line).RootElement.Clone()).ToArray() : Array.Empty<JsonElement>();
     private static string Phase(JsonElement row) => row.GetProperty("phase").GetString()!;
     private static string Detail(JsonElement row) => row.GetProperty("data").GetProperty("detail").GetString()!;
@@ -105,7 +105,13 @@ internal static class Fixture
             Check(FixtureLeaves.CmCalls.SequenceEqual(new[] { FixtureLeaves.Id(0), FixtureLeaves.Id(0) }), "exact instance CM sampled at begin and end only");
             Check(PhaseRows("registered-driver").Select(Detail).Any(s => s.Contains("version=0.9.8.1")) && PhaseRows("registered-driver").Select(Detail).Any(s => s.Contains("version=99.100.101.102")), "end sample observes future registered version without policy");
             Check(PhaseRows("registered-driver").All(r => Detail(r).Contains("inf=oem42.inf") && Detail(r).Contains("registered-binding;not-loaded-memory-image")), "INF and version labeled registered binding");
-            Check(PhaseRows("registered-binding").All(r => Detail(r).Contains("started=true") && Detail(r).Contains("problem=0")), "CM started/problem facts retained");
+            var binding = PhaseRows("registered-binding").Select(Detail).ToArray();
+            Check(binding.Length == 2 && binding[0].Contains("started=true problem=0") && binding[1] == "snapshot=end index=0 sameAsBegin=1", "CM started/problem facts retained via same-instance begin");
+            Check(Detail(PhaseRows("service-enum")[1]) == "snapshot=end sameAsBegin=1", "matching known untruncated Enum count compacted");
+            var service = PhaseRows("registered-service");
+            Check(Detail(service[0]).StartsWith("snapshot=begin status=observed type=1 startConfig=3 errorControl=1") &&
+                Detail(service[1]) == "snapshot=end sameAsBegin=1" && service[0].GetProperty("scopeId").GetString() == service[1].GetProperty("scopeId").GetString(),
+                "identical service facts use one full detail and one matching end receipt");
             var available = Rows().Where(r => r.GetProperty("data").GetProperty("available").ValueKind != JsonValueKind.Null).ToArray();
             Check(available.Length == 1 && !available[0].GetProperty("data").GetProperty("available").GetBoolean(), "availability only from caller's explicit observation");
             Check(Detail(PhaseRows("scope-begin").Single()).Contains("bundledInstallerVersion=0.9.8.1 migrationBranchObserved=false"), "known core bundled version and migration limitation explicit");
@@ -146,6 +152,34 @@ internal static class Fixture
             }
             finally { for (int i = 0; i < 4; ++i) Environment.SetEnvironmentVariable(names[i], original[i]); }
         });
+        Case("release-endpoint-overflow", () => {
+            FixtureLeaves.Reset("release-endpoint-overflow", 0);
+            const string encoding = "release-detail-zlib-v1:";
+            const string plain = "pnp-not-observed";
+            string complete = "pnp-steamdeck-hid-ids=" + string.Join(",", Enumerable.Range(0, 8).Select(i =>
+                $"HID\\VID_28DE&PID_1205&MI_{i:00}\\4&274291E7&0&0000[HID\\VID_28DE&PID_1205&REV_0300|HID\\VID_28DE&PID_1205|HID_DEVICE_UP:0001_U:0002|HID_DEVICE]"));
+            using (var scope = Begin(command: "RELEASE_LOCAL"))
+            {
+                scope.Stage("release-begin", complete);
+                scope.Stage("release-begin", plain);
+                scope.Stage("release-begin", new string('x', 4097));
+                var noise = new byte[2400];
+                new Random(148271).NextBytes(noise);
+                scope.Stage("release-begin", Convert.ToBase64String(noise));
+            }
+            var rows = PhaseRows("release-begin");
+            string packed = Detail(rows[0]);
+            Check(packed.StartsWith(encoding, StringComparison.Ordinal) && !rows[0].GetProperty("data").GetProperty("textTruncated").GetBoolean(), "long endpoint preserved as untruncated encoded detail");
+            using var bytes = new MemoryStream(Convert.FromBase64String(packed[encoding.Length..]));
+            using var stream = new System.IO.Compression.ZLibStream(bytes, System.IO.Compression.CompressionMode.Decompress);
+            using var text = new StreamReader(stream, new UTF8Encoding(false, true));
+            Check(text.ReadToEnd() == complete, "all endpoint nodes and hardware IDs roundtrip");
+            Check(Detail(rows[1]) == plain && !rows[1].GetProperty("data").GetProperty("textTruncated").GetBoolean(), "small detail keeps original text and envelope");
+            Check(!Detail(rows[2]).StartsWith(encoding, StringComparison.Ordinal) && rows[2].GetProperty("data").GetProperty("textTruncated").GetBoolean(), "over-ceiling source stays explicitly truncated");
+            Check(!Detail(rows[3]).StartsWith(encoding, StringComparison.Ordinal) && rows[3].GetProperty("data").GetProperty("textTruncated").GetBoolean(), "encoded record that cannot fit falls back to an explicit truncated row");
+            Check(Counter("stages") == 4 && Counter("textTruncated") == 2, "release rows and truncation counts unchanged in shape");
+            VerifyRows("release-endpoint-overflow");
+        });
         Case("flood-and-reserved-terminals", () => {
             FixtureLeaves.Reset("flood", 1000); var scope = Begin();
             for (int i = 0; i < 10000; ++i) scope.Report(new string('汉', 3000) + "🙂");
@@ -167,14 +201,66 @@ internal static class Fixture
         Case("unknown-and-future-identities", () => {
             FixtureLeaves.Reset("unknown"); FixtureLeaves.Keys[FixtureLeaves.Class + FixtureLeaves.Driver]["DriverVersion"] = null; using (Begin("future-core-identity")) { }
             Check(Detail(PhaseRows("scope-begin").Single()).Contains("coreSha=future-core-identity") && Detail(PhaseRows("scope-begin").Single()).Contains("bundledInstallerVersion=unknown migrationBranchObserved=false"), "unknown core cannot borrow bundled installer identity");
-            Check(PhaseRows("registered-driver").All(r => Detail(r).Contains("version=versionunknown")), "missing registered version stays versionunknown");
-            Check(PhaseRows("disk-image").All(r => Detail(r).Contains("version=versionunknown") && Detail(r).Contains("sha256=ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")), "malformed PE keeps actual file hash and versionunknown");
+            var unknownDriver = PhaseRows("registered-driver").Select(Detail).ToArray();
+            Check(unknownDriver.Length == 2 && unknownDriver[0].Contains("version=versionunknown") && unknownDriver[1] == "snapshot=end index=0 sameAsBegin=1", "missing registered version stays versionunknown via begin");
+            var malformed = PhaseRows("disk-image").Select(Detail).ToArray();
+            Check(malformed.Length == 2 && malformed[0].Contains("version=versionunknown") && malformed[0].Contains("sha256=ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") && malformed[1] == "snapshot=end sameAsBegin=1", "unchanged malformed PE keeps actual file hash and versionunknown in the referenced begin");
             FixtureLeaves.Reset("future"); File.Copy(typeof(Fixture).Assembly.Location, FixtureLeaves.Sys, true);
             using (Begin()) { }
             string expected = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(FixtureLeaves.Sys))).ToLowerInvariant();
-            Check(PhaseRows("disk-image").All(r => Detail(r).Contains("version=99.3.4.5") && Detail(r).Contains("sha256=" + expected)), "future disk version and SHA from same bounded actual PE copy");
+            var future = PhaseRows("disk-image").Select(Detail).ToArray();
+            Check(future.Length == 2 && future[0].Contains("version=99.3.4.5") && future[0].Contains("sha256=" + expected) && future[1] == "snapshot=end sameAsBegin=1", "future disk version and SHA from the same bounded actual PE copy retained via begin");
             Check(Rows().All(r => r.GetProperty("data").GetProperty("available").ValueKind == JsonValueKind.Null), "future disk or registered versions never imply availability");
-            Check(PhaseRows("disk-image").All(r => Detail(r).Contains("disk-bytes;not-loaded-memory-image")), "disk version explicitly excludes loaded memory image");
+            Check(future[0].Contains("disk-bytes;not-loaded-memory-image"), "disk version explicitly excludes loaded memory image");
+            FixtureLeaves.Reset("changed-both", 0);
+            var changed = Begin();
+            FixtureLeaves.Keys[FixtureLeaves.Service]["Start"] = 2;
+            File.Copy(typeof(Fixture).Assembly.Location, FixtureLeaves.Sys, true);
+            changed.Dispose();
+            Check(Detail(PhaseRows("registered-service")[1]).StartsWith("snapshot=end status=observed type=1 startConfig=2 errorControl=1"), "changed service end remains self-contained");
+            Check(Detail(PhaseRows("disk-image")[1]).StartsWith("snapshot=end status=observed bytes=") && Detail(PhaseRows("disk-image")[1]).Contains("sha256=" + expected), "changed disk end independently retains SHA");
+            FixtureLeaves.Reset("clipped-begin", 0);
+            string deep = Path.Combine(FixtureLeaves.WindowsRoot, "System32", "drivers", new string('x', 120));
+            Directory.CreateDirectory(deep);
+            string longSys = Path.Combine(deep, "usbip2_ude.sys");
+            File.Copy(FixtureLeaves.Sys, longSys);
+            FixtureLeaves.Keys[FixtureLeaves.Service]["ImagePath"] = longSys;
+            string escaped = string.Concat(Enumerable.Repeat("\U0001f642", 18));
+            using (UsbipSetupEvidence.TryBegin("steamdeck", escaped, escaped, 17, escaped, KnownCore, "m")!) { }
+            var clipped = PhaseRows("disk-image");
+            Check(clipped.Length == 2 && clipped[0].GetProperty("data").GetProperty("textTruncated").GetBoolean() &&
+                Detail(clipped[1]).StartsWith("snapshot=end status=observed ") && clipped[1].GetProperty("data").GetProperty("textTruncated").GetBoolean(),
+                "clipped begin cannot become an unchanged reference even for identical fresh disk bytes");
+        });
+        Case("indexed-snapshot-identity", () => {
+            FixtureLeaves.Reset("indexed-stable", 2);
+            var scope = Begin();
+            scope.Stage("prepare-exception", "direct-fault-evidence");
+            scope.Stage("prepare-result", "direct-failed-result", false);
+            scope.Dispose();
+            foreach (string phase in new[] { "registered-binding", "registered-driver" })
+            {
+                var rows = PhaseRows(phase).Select(Detail).ToArray();
+                Check(rows.Length == 4 && rows[0].StartsWith("snapshot=begin index=0 status=observed ") &&
+                    rows[1].StartsWith("snapshot=begin index=1 status=observed ") && rows[2] == "snapshot=end index=0 sameAsBegin=1" &&
+                    rows[3] == "snapshot=end index=1 sameAsBegin=1", phase + ": both indexed begin/end pairs retained");
+            }
+            Check(Detail(PhaseRows("prepare-exception").Single()) == "direct-fault-evidence" &&
+                !PhaseRows("prepare-result").Single().GetProperty("data").GetProperty("available").GetBoolean(), "terminal evidence stays independent even with matching observations");
+            Check(FixtureLeaves.CmCalls.SequenceEqual(new[] { FixtureLeaves.Id(0), FixtureLeaves.Id(1), FixtureLeaves.Id(0), FixtureLeaves.Id(1) }), "fresh CM observations are unchanged");
+
+            FixtureLeaves.Reset("indexed-swapped", 2); scope = Begin();
+            var slots = FixtureLeaves.Keys[FixtureLeaves.Service + @"\Enum"];
+            slots["0"] = FixtureLeaves.Id(1); slots["1"] = FixtureLeaves.Id(0);
+            scope.Dispose();
+            Check(PhaseRows("registered-binding").Skip(2).All(r => Detail(r).Contains("status=observed ")), "changed slot bindings remain complete");
+            Check(PhaseRows("registered-driver").Skip(2).All(r => Detail(r).Contains("status=observed ")), "identical driver metadata cannot hide instance changes");
+
+            FixtureLeaves.Reset("indexed-registry-problem");
+            FixtureLeaves.Keys[FixtureLeaves.Enum + FixtureLeaves.Id(0)]["Problem"] = 28;
+            using (Begin()) { }
+            Check(PhaseRows("registered-binding").All(r => Detail(r).Contains("registryProblem=28")), "registry problem never compacted");
+            Check(PhaseRows("registered-driver").All(r => Detail(r).Contains("status=observed ")), "driver data stays independent on registry problem");
         });
         Case("paths", () => {
             FixtureLeaves.Reset("paths", 0); string w = FixtureLeaves.WindowsRoot;
@@ -234,6 +320,7 @@ internal static class Fixture
             var scope = Begin(); scope.Stage("during-fault"); scope.Report("during-fault"); File.Delete(FixtureLeaves.LogRoot); scope.Stage("recovered"); scope.Dispose(); scope.Dispose();
             Check(PhaseRows("scope-end").Length == 1 && Counter("logErrorsBeforeEnd") == 6, "log failure contained and exact count survives recovery");
             Check(PhaseRows("recovered").Length == 1 && FixtureLeaves.RegistryCalls.Count == 4, "logging failure never suppresses ending read-only snapshot");
+            Check(PhaseRows("registered-service").Concat(PhaseRows("disk-image")).Count(r => Detail(r).StartsWith("snapshot=end status=observed ")) == 2, "both observed ends keep full detail if the beginning writes failed");
             FixtureLeaves.Reset("locked-log", 0); Directory.CreateDirectory(FixtureLeaves.LogRoot);
             var active = Begin(); using (new FileStream(FixtureLeaves.Log, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { active.Report("cannot append"); }
             active.Dispose(); Check(Counter("logErrorsBeforeEnd") == 1, "exclusive log sharing failure cannot escape callback");

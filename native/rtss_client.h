@@ -1,20 +1,30 @@
 // Included by main.cpp after the existing process/path/file helpers.
 #include "rtss/protocol.h"
 #include "rtss_profile_text.h"
+#include <functional>
+#include <stdexcept>
 static std::mutex g_rtssBridgeMx;
+static void nativeRtssRequireCurrent(const std::function<bool()>& current) {
+    if(current&&!current())throw std::runtime_error("BOOT_RTSS_REQUEST_EXPIRED");
+}
 
-static json nativeRtssReloadProfiles(const std::wstring& dllPath) {
+static json nativeRtssReloadProfiles(const std::wstring& dllPath, const std::function<bool()>& current = {}) {
+    nativeRtssRequireCurrent(current);
     std::lock_guard<std::mutex> lock(g_rtssBridgeMx);
+    nativeRtssRequireCurrent(current);
     const auto path = fspath::path(dllPath);
     if (!path.is_absolute() || ascii_lower(W2U(path.filename().wstring())) != "rtsshooks64.dll" ||
         !file_exists(dllPath) || !file_exists((path.parent_path() / L"RTSS.exe").wstring()))
         return json{{"ok", false}, {"error", "RTSSHooks64.dll 路径或配套 RTSS.exe 无效"}};
+    nativeRtssRequireCurrent(current);
     ymcc::monitorrtss::registerDirectory(path.parent_path().wstring());
     const auto helper = exe_dir() + L"\\YMCCRtssProfileHelper.exe";
     if (!file_exists(helper))
         return json{{"ok", false}, {"error", "RTSS 安全配置助手缺失，请使用完整的新版本程序"}};
-    if (!sgRunExeSync(helper, L"\"" + dllPath + L"\"", 4000))
+    nativeRtssRequireCurrent(current);
+    if (!sgRunExeSync(helper, L"\"" + dllPath + L"\"", 4000,current))
         return json{{"ok", false}, {"error", "RTSS 配置助手失败或超时（已隔离，不会重启 YMCC/RTSS）"}};
+    nativeRtssRequireCurrent(current);
     return json{{"ok", true}};
 }
 struct RtssBridgeSearch { std::wstring dir; HWND window = nullptr; };
@@ -43,32 +53,45 @@ static bool nativeRtssBridgeMessage(HWND window, ymcc::rtss::Packet& packet, DWO
     if (!GetLastError()) SetLastError(ERROR_GEN_FAILURE);
     return false;
 }
-static bool rtssCopyAssetAtomic(const std::wstring& from, const std::wstring& to) {
+static bool rtssCopyAssetAtomic(const std::wstring& from, const std::wstring& to, const std::function<bool()>& current = {}) {
+    nativeRtssRequireCurrent(current);
     if (!file_exists(from)) { SetLastError(ERROR_FILE_NOT_FOUND); return false; }
     if (file_exists(to)) {
         const auto a = sha256File(from), b = sha256File(to);
         if (!a.empty() && a == b) return true;
     }
     const auto temp = to + L".ymcc-" + std::to_wstring(GetCurrentProcessId()) + L".tmp";
+    nativeRtssRequireCurrent(current);
     if (!CopyFileW(from.c_str(), temp.c_str(), FALSE)) return false;
+    try { nativeRtssRequireCurrent(current); } catch(...) { DeleteFileW(temp.c_str());throw; }
     if (MoveFileExW(temp.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
     const DWORD error = GetLastError();
     DeleteFileW(temp.c_str());
     SetLastError(error);
     return false;
 }
+static json nativeRtssBridgeTransportFailure(DWORD error) {
+    if (error == ERROR_ACCESS_DENIED)
+        return json{{"ok",false},{"error","RTSS 实时通信被权限隔离阻止，调节未生效。请在退出游戏后正常退出 RTSS，再使用同一权限启动 YMCC 与 RTSS；更新后的模板桥支持普通 YMCC 连接管理员 RTSS"},
+            {"errorCode","RTSS_BRIDGE_ACCESS_DENIED"},{"bridgeState","access_denied"},{"win32Error",error}};
+    return json{{"ok",false},{"error","RTSS 模板桥暂未响应，调节结果未确认；未替换插件或重启任何进程"},
+        {"errorCode","RTSS_BRIDGE_UNRESPONSIVE"},{"win32Error",error}};
+}
 // Installation/update is maintenance, not a prerequisite for a compatible
 // RTSS-owned bridge that is already running. Do not hash/replace a loaded DLL
 // or rewrite its enable flags on every layout click (locked/read-only installs
 // can still have a fully usable bridge). Always verify the host path and wire ABI.
-static json nativeRtssPrepareOverlay(const std::wstring& dir, const std::wstring& powerControlDir) {
+static json nativeRtssPrepareOverlay(const std::wstring& dir, const std::wstring& powerControlDir, const std::function<bool()>& current = {}) {
+    nativeRtssRequireCurrent(current);
     std::lock_guard<std::mutex> lock(g_rtssBridgeMx);
+    nativeRtssRequireCurrent(current);
     const auto root = fspath::path(dir);
     const auto assets = fspath::path(powerControlDir) / L"RTSS-Overlays";
     if (!root.is_absolute() || !fspath::path(powerControlDir).is_absolute() ||
         !file_exists((root / L"RTSS.exe").wstring()) ||
         !file_exists((root / L"Plugins/Client/OverlayEditor.dll").wstring()))
         return json{{"ok", false}, {"error", "RTSS OverlayEditor 安装路径无效"}};
+    nativeRtssRequireCurrent(current);
     ymcc::monitorrtss::registerDirectory(root.wstring());
     RtssBridgeSearch search{dir};
     EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
@@ -76,10 +99,10 @@ static json nativeRtssPrepareOverlay(const std::wstring& dir, const std::wstring
     if (live) {
         ymcc::rtss::Packet ping{};
         DWORD_PTR reply = 0;
+        nativeRtssRequireCurrent(current);
         if (!nativeRtssBridgeMessage(search.window, ping, reply)) {
             const DWORD error = GetLastError();
-            return json{{"ok", false}, {"error", "RTSS 模板桥暂未响应，请稍后重试；未替换插件或重启任何进程"},
-                {"errorCode", "RTSS_BRIDGE_UNRESPONSIVE"}, {"win32Error", error}};
+            return nativeRtssBridgeTransportFailure(error);
         }
         if (reply != static_cast<DWORD_PTR>(ymcc::rtss::Reply::Complete))
             return json{{"ok", false}, {"error", "已加载的 RTSS 模板桥协议不兼容，请在退出游戏后正常退出 RTSS，再由 YMCC 启动 RTSS 完成更新"},
@@ -92,35 +115,41 @@ static json nativeRtssPrepareOverlay(const std::wstring& dir, const std::wstring
         return json{{"ok", false}, {"error", "YMCC 程序目录缺少 YMCCOverlayBridge.dll，请使用完整的发布包"},
             {"errorCode", "RTSS_BRIDGE_SOURCE_MISSING"}, {"path", W2U(source)}};
     std::error_code ec;
+    nativeRtssRequireCurrent(current);
     fspath::create_directories(root / L"Plugins/Client/Overlays", ec);
     if (ec) return json{{"ok", false}, {"error", "无法创建 RTSS 模板目录"}, {"win32Error", ec.value()}};
     for (const auto* name : {L"YeManOBS-W-1.ovl", L"YeManOBS-L-1.ovl", L"YeManOBS-JJ-1.ovl", L"Empty.ovl"}) {
+        nativeRtssRequireCurrent(current);
         const auto target = (root / L"Plugins/Client/Overlays" / name).wstring();
         // Preserve existing user-edited layouts; only supply missing shipped templates.
-        if (!file_exists(target) && !rtssCopyAssetAtomic((assets / name).wstring(), target)) {
+        if (!file_exists(target) && !rtssCopyAssetAtomic((assets / name).wstring(), target,current)) {
             const DWORD error = GetLastError();
             return json{{"ok", false}, {"error", "补齐 RTSS 模板失败：" + W2U(name)},
                 {"win32Error", error}, {"path", W2U(target)}};
         }
     }
+    nativeRtssRequireCurrent(current);
     if (live)
         return json{{"ok", true}, {"bridgeState", "loaded_compatible"}, {"bridgeMaintenanceDeferred", true}};
     fspath::create_directories(root / L"Profiles", ec);
     if (ec) return json{{"ok", false}, {"error", "无法创建 RTSS 配置目录"}, {"win32Error", ec.value()}};
     const auto plugin = (root / L"Plugins/Client/YMCCOverlayBridge.dll").wstring();
-    if (!rtssCopyAssetAtomic(source, plugin)) {
+    if (!rtssCopyAssetAtomic(source, plugin,current)) {
         const DWORD error = GetLastError();
         return json{{"ok", false}, {"error", "安装或更新 RTSS 模板桥失败，请检查目录权限、文件占用及安全软件；不会强制卸载插件"},
             {"errorCode", "RTSS_BRIDGE_INSTALL_FAILED"}, {"win32Error", error}, {"path", W2U(plugin)}};
     }
     // Enable at the next normal RTSS start. Never restart a running hooked game.
     const auto config = (root / L"Profiles/Config").wstring();
-    if (!WritePrivateProfileStringW(L"Plugins", L"OverlayEditor.dll", L"1", config.c_str()) ||
-        !WritePrivateProfileStringW(L"Plugins", L"YMCCOverlayBridge.dll", L"1", config.c_str())) {
+    nativeRtssRequireCurrent(current);
+    const bool editorEnabled=WritePrivateProfileStringW(L"Plugins", L"OverlayEditor.dll", L"1", config.c_str())!=FALSE;
+    nativeRtssRequireCurrent(current);
+    if (!editorEnabled || !WritePrivateProfileStringW(L"Plugins", L"YMCCOverlayBridge.dll", L"1", config.c_str())) {
         const DWORD error = GetLastError();
         return json{{"ok", false}, {"error", "启用 RTSS 模板桥配置失败"},
             {"win32Error", error}, {"path", W2U(config)}};
     }
+    nativeRtssRequireCurrent(current);
     return json{{"ok", true}, {"bridgeState", "installed"}};
 }
 // Deployment/enabling on disk is not proof that a running RTSS has called
@@ -140,45 +169,75 @@ static json nativeRtssMissingBridge(const std::wstring& dir) {
         detail = "RTSS 模板桥已安装但未启用，请在 RTSS 设置的插件页启用 YMCCOverlayBridge.dll；YMCC 无需重启";
     } else {
         state = "enabled_not_loaded";
-        detail = "RTSS 模板桥已安装并启用，但当前 RTSS 进程尚未加载或启动它。请先退出游戏及其他被 RTSS 挂钩的程序，再正常重启 RTSS 一次；YMCC 无需重启，模板切换也不会自动重启任何进程。若重新启动 RTSS 后仍出现此提示，请检查插件加载错误";
+        detail = "RTSS 模板桥已安装并启用，但未连接，实时调节未生效。首次安装后请先退出游戏，再正常重启 RTSS 一次并重新应用监控；YMCC 无需重启。若仍失败，请导出日志检查插件加载";
     }
     return json{{"ok", false}, {"error", detail}, {"errorCode", "RTSS_BRIDGE_UNAVAILABLE"},
         {"bridgeState", state}, {"bridgeInstalled", installed}, {"bridgeEnabled", enabled}};
 }
-static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& layout) {
+static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& layout, const std::function<bool()>& current = {}) {
+    nativeRtssRequireCurrent(current);
     using namespace ymcc::rtss;
     std::lock_guard<std::mutex> lock(g_rtssBridgeMx);
+    nativeRtssRequireCurrent(current);
     if (layout.size() >= sizeof(Packet{}.layout))
         return json{{"ok", false}, {"error", "无效的 RTSS 模板名称"}};
     Packet packet{};
     std::memcpy(packet.layout, layout.c_str(), layout.size() + 1);
     if (!allowedLayout(packet.layout)) return json{{"ok", false}, {"error", "不支持的 RTSS 模板"}};
-    if (fspath::path(dir).is_absolute() && file_exists((fspath::path(dir) / L"RTSS.exe").wstring()))
+    if (fspath::path(dir).is_absolute() && file_exists((fspath::path(dir) / L"RTSS.exe").wstring())) {
+        nativeRtssRequireCurrent(current);
         ymcc::monitorrtss::registerDirectory(dir);
+    }
     RtssBridgeSearch search{dir};
     EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
-    if (!search.window) return nativeRtssMissingBridge(dir);
+    // RTSS.exe can exist while OverlayEditor's synchronous sensor startup is
+    // still running ahead of our Start callback. Wait before the first LOAD,
+    // never resend an accepted LOAD or start a permanent recovery timer.
+    if (!search.window) {
+        auto missing = nativeRtssMissingBridge(dir);
+        if (missing.value("bridgeInstalled", false) && missing.value("bridgeEnabled", false)) {
+            const ULONGLONG started = GetTickCount64(), deadline = started + 4000;
+            do {
+                nativeRtssRequireCurrent(current);
+                Sleep(100);
+                nativeRtssRequireCurrent(current);
+                EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
+            } while (!search.window && GetTickCount64() < deadline);
+            if (!search.window) {
+                missing = nativeRtssMissingBridge(dir);
+                missing["readinessWaitMs"] = GetTickCount64() - started;
+                missing["path"] = W2U((fspath::path(dir) / L"Plugins/Client/YMCCOverlayBridge.dll").wstring());
+                return missing;
+            }
+        } else return missing;
+    }
     const auto config=(fspath::path(dir)/L"Plugins/Client/OverlayEditor.cfg").wstring();
-    const auto prepared=ymcc::rtssprofiletext::normalize(config,[](const std::wstring&path,const std::string&bytes){return sgWriteFileAtomic(path,bytes);});
+    nativeRtssRequireCurrent(current);
+    const auto prepared=ymcc::rtssprofiletext::normalize(config,[&](const std::wstring&path,const std::string&bytes){nativeRtssRequireCurrent(current);return sgWriteFileAtomic(path,bytes);},current);
     if(!prepared.ok)return json{{"ok",false},{"error","RTSS 模板配置准备失败，未加载新模板"},{"errorCode",prepared.code},{"win32Error",prepared.error},{"path",W2U(config)}};
     static std::atomic<std::uint32_t> next{static_cast<std::uint32_t>(GetTickCount()) | 1u};
     packet.requestId = ++next;
     if (!packet.requestId) packet.requestId = ++next;
     packet.command = Command::Load;
     DWORD_PTR reply = 0;
+    nativeRtssRequireCurrent(current);
     if (!nativeRtssBridgeMessage(search.window, packet, reply))
-        return json{{"ok", false}, {"error", "RTSS 模板桥未响应，未确认切换结果"}, {"win32Error", GetLastError()}};
+        return nativeRtssBridgeTransportFailure(GetLastError());
     const ULONGLONG deadline = GetTickCount64() + 4000;
     while (reply == static_cast<DWORD_PTR>(Reply::Accepted) && GetTickCount64() < deadline) {
+        nativeRtssRequireCurrent(current);
         Sleep(20);
+        nativeRtssRequireCurrent(current);
         packet.command = Command::Status;
         if (!nativeRtssBridgeMessage(search.window, packet, reply)) {
+            if (GetLastError() == ERROR_ACCESS_DENIED) return nativeRtssBridgeTransportFailure(ERROR_ACCESS_DENIED);
             // Sensor polling/full hypertext rebuild may occupy RTSS's UI thread
             // longer than a single 200ms message bound. Retry STATUS, never LOAD.
             reply = static_cast<DWORD_PTR>(Reply::Accepted);
             if (!IsWindow(search.window)) break;
         }
     }
+    nativeRtssRequireCurrent(current);
     if (reply != static_cast<DWORD_PTR>(Reply::Complete)) {
         std::string detail;
         switch (static_cast<Reply>(reply)) {
@@ -196,5 +255,6 @@ static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& la
     }
     const auto persisted=ymcc::rtssprofiletext::verifyLayout(config,layout);
     if(!persisted.ok)return json{{"ok",false},{"error","RTSS 模板请求已完成，但配置读回未确认；当前显示状态未知"},{"errorCode",persisted.code},{"win32Error",persisted.error},{"path",W2U(config)}};
+    nativeRtssRequireCurrent(current);
     return json{{"ok", true}, {"layout", layout},{"configurationConfirmed",true},{"configurationEncodingNormalized",prepared.changed},{"encodingBackupCreated",prepared.backupCreated}};
 }

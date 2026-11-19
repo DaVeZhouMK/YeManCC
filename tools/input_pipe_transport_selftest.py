@@ -13,9 +13,9 @@ def main():
  run=OUT/('production-owner-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+str(os.getpid()));run.mkdir(parents=True)
  paths=['native/input_host_pipe_transport.h','tools/input_pipe_test_allocation_fault.h','tools/input_pipe_transport_control_selftest.cpp','tools/input_pipe_transport_real_selftest.cpp','tools/input_pipe_transport_extracted_selftest.cpp','deps/json/json.hpp','InputHost/Program.cs']
  inputs={p:(REPO/p).read_bytes() for p in paths};raw=(REPO/'native/main.cpp').read_bytes();src=raw.decode('utf-8-sig')
- signatures=['static void inputHostPipeCloseOwned(','static HANDLE inputHostCreateServerPipeLocked(','static bool inputHostPipeIo(','static bool inputHostWaitClientLocked(']
+ signatures=['static void inputHostPipeCloseOwned(','static bool inputHostPipeRetirementProvenLocked(','static HANDLE inputHostCreateServerPipeLocked(','static bool inputHostPipeIo(','static bool inputHostWaitClientLocked(']
  helpers={s:source_function(src,s) for s in signatures}
- request=source_function(src,'static bool inputHostRequestPreparedLocked(');start=request.index('    DWORD lastError = ERROR_SUCCESS;');end=request.index('    std::vector<char> responseBuffer',start);factory_fragment=request[start:end]
+ request=source_function(src,'static bool inputHostRequestPreparedLocked(');start=request.index('    DWORD lastError = ERROR_SUCCESS;');end=request.rfind('\n',start,request.index('responseBuffer',start))+1;factory_fragment=request[start:end]
  (run/'factory-error-fragment.inc').write_bytes(factory_fragment.encode('utf-8'))
  (run/'helpers.inc').write_bytes(('\n\n'.join(helpers.values())+'\nstatic HANDLE g_inputHostServerPipe=nullptr;\nstatic DWORD extractedFactoryFailureError(){\n'+factory_fragment+'\nreturn lastError;\n}\n').encode('utf-8'))
  for p,b in inputs.items():

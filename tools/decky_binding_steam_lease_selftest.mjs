@@ -13,7 +13,7 @@ export const STEAM_LEASE_CASES=Object.freeze([
   "stale PID cannot bypass changed Steam account",
   "registry zero alone never authorizes an anonymous account",
   "typed UI provenance permits only process observation before independent bootstrap guard",
-  "UI provenance cannot override another explicit registry account",
+  "current UI provenance ignores a stale explicit registry account",
   "offline to online same account retains the verified process lease",
   "offline account resolves only a verified same-process current UI proof",
   "missing raced malformed or foreign offline proofs never authorize",

@@ -1,3 +1,17 @@
+<!-- DECKY-CURRENT-RECOVERY-SCOPE-20261112 -->
+## 当前规则与历史回归的边界（2026-11-12）
+
+本文件后面的日期段落保留各自当时的策略和验收范围，不能用旧段落覆盖用户后续批准的分级自愈。当前实现以主线 `AGENTS.md` 的 Decky 全局恢复/新构建恢复例外、`native/decky_sidebar_recovery.h`、`native/decky_sidebar_manual_repair.h` 和 `main.cpp` 的 `connectionHealth`/`connectionStep` 为准。
+
+普通 `Origin::Automatic` 仍不能借用手动修复接口重建界面，原 `repair-auto-ui-negative` 有效且必须保留。用户后来获准的高阶恢复使用独立的 `FinalCleanup`（页面重建）与 `ReopenBigPicture`（关闭/重开大屏）入口：Decky ON、当前已验证大屏确实不可用时，原工作线程按阶段失败/回执和持久额度升阶；该例外不扩大 CSS、普通 Steam 启动或整个 Steam 进程重启权限。
+
+镜像接通不能单独结束恢复。当前健康同时核对认证镜像、官方后端、菜单挂钩与当前插件客户端；已提交的新共享健康结果唤醒原线程，三个点打开时复用有限状态检查。源调用接线、原生线程组件、完整原生构建、配套包和实机画面各有独立证据，不能相互代签。
+
+新实际构建仅在原额度不足、构建来源已验证且原主备记录一致时补页面/大屏各一次；同构建重开、睡眠、重装和已观察版本回滚不退款。当前官方 Windows Loader 的 `restart_webhelper` 返回成功占位值，不能用它的“正在重启”文本或 RPC 成功当成实际恢复。
+
+本次仅订正文档索引，不改变原测试 ID、断言、负例、预算、默认选择或产品代码。持续项目仍是 `Docs/Research/Sleep/SteamNonSteamRecovery-20261011/STEAM-SLEEP-EXECUTION-BASELINE.md` 及同名 JSON；完整配套包和真实 S3/S0、离线/换号、额外次数实际派发与可见界面仍按各自原件验收。
+<!-- /DECKY-CURRENT-RECOVERY-SCOPE-20261112 -->
+
 <!-- DECKY-HEALTH-REVERSE-20261031 -->
 
 ## 2026-10-31 Decky 反推复测：监视成本、漏检与重连接续

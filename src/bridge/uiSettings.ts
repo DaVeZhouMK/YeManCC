@@ -1,5 +1,6 @@
 import { normalizeBackgroundPosition } from './backgroundPosition';
 import { snapshotSettingsData } from './settingsSnapshot';
+import {captureBootPreferenceWrite} from './bootModeGlobalPreferences';
 import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 export interface UiSettings {
@@ -7,6 +8,8 @@ export interface UiSettings {
   dynamicBackgroundEnabled: boolean;
   steamDynamicWallpaperEnabled: boolean;
   steamWallpaperPauseOnBattery: boolean;
+  steamControllerCursorHide: boolean;
+  steamMenuGameIdRepair: boolean;
   steamWallpaperBackgroundDownload: boolean;
   steamWallpaperDownloadCpuThreshold: number;
   backgroundOpacity: number;
@@ -17,6 +20,7 @@ export interface UiSettings {
   scheduleMonitor: boolean;
   steamChartAutoRefresh: 'none' | 'steam' | 'steamdeck';
   windowPlacement: 'left' | 'right';
+  floatingSummonEnabled: boolean;
   gestureSummonEnabled: boolean;
   trainerAutoPrepare: boolean;
   radialTestingEnabled: boolean;
@@ -30,6 +34,8 @@ const DEFAULTS: UiSettings = {
   steamDynamicWallpaperEnabled: true,
   // Opt in; missing/older settings keep playback available on battery.
   steamWallpaperPauseOnBattery: false,
+  steamControllerCursorHide: true,
+  steamMenuGameIdRepair: true,
   steamWallpaperBackgroundDownload: true,
   steamWallpaperDownloadCpuThreshold: 15,
   backgroundOpacity: 0.64,
@@ -40,6 +46,7 @@ const DEFAULTS: UiSettings = {
   scheduleMonitor: true,
   steamChartAutoRefresh: 'none',
   windowPlacement: 'right',
+  floatingSummonEnabled: true,
   gestureSummonEnabled: false,
   trainerAutoPrepare: true,
   radialTestingEnabled: false,
@@ -61,6 +68,8 @@ function normalize(input: Partial<UiSettings>): UiSettings {
     dynamicBackgroundEnabled: input.dynamicBackgroundEnabled === true,
     steamDynamicWallpaperEnabled: input.steamDynamicWallpaperEnabled !== false,
     steamWallpaperPauseOnBattery: input.steamWallpaperPauseOnBattery === true,
+    steamControllerCursorHide: input.steamControllerCursorHide !== false,
+    steamMenuGameIdRepair: input.steamMenuGameIdRepair !== false,
     steamWallpaperBackgroundDownload: input.steamWallpaperBackgroundDownload !== false,
     steamWallpaperDownloadCpuThreshold: Number.isFinite(Number(input.steamWallpaperDownloadCpuThreshold)) ? Math.max(5,Math.min(90,Math.round(Number(input.steamWallpaperDownloadCpuThreshold)))) : 15,
     backgroundOpacity: Number.isFinite(opacity) ? Math.min(0.8, Math.max(0.2, Math.round(opacity * 100) / 100)) : DEFAULTS.backgroundOpacity,
@@ -72,6 +81,7 @@ function normalize(input: Partial<UiSettings>): UiSettings {
     steamChartAutoRefresh: input.steamChartAutoRefresh === 'steam' || input.steamChartAutoRefresh === 'steamdeck'
       ? input.steamChartAutoRefresh : 'none',
     windowPlacement: input.windowPlacement === 'left' ? 'left' : 'right',
+    floatingSummonEnabled: input.floatingSummonEnabled !== false,
     // Inactive because edge touch input can affect Windows functionality.
     gestureSummonEnabled: false,
     trainerAutoPrepare: input.trainerAutoPrepare !== false,
@@ -136,8 +146,9 @@ export async function loadUiSettings(): Promise<void> {
   }
 }
 
-export function setUiSettings(patch: Partial<UiSettings>): Promise<void> {
+export function setUiSettings(patch: Partial<UiSettings>, options: import('./bootModeGlobalPreferences').BootPreferenceWrite = {}): Promise<void> {
   const submitted = snapshotSettingsData(patch);
+  const submittedOrigin = captureBootPreferenceWrite(options);
   const generation = getSettingsGeneration();
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
@@ -147,7 +158,7 @@ export function setUiSettings(patch: Partial<UiSettings>): Promise<void> {
     for (const key of Object.keys(submitted) as (keyof UiSettings)[]) {
       if (key in DEFAULTS) (changed as any)[key] = next[key];
     }
-    await saveSettingsSection('ui', changed, generation);
+    await saveSettingsSection('ui', changed, generation, submittedOrigin);
     settings = normalize(await readSettingsSection<Partial<UiSettings>>('ui'));
     loaded = true;
     window.dispatchEvent(new CustomEvent('ui-settings:changed', { detail: getUiSettings() }));

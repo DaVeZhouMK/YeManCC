@@ -21,7 +21,7 @@ static bool pipeOk=true,cliOk=true,pipeApplies=true,cliApplies=true,virtualTarge
 static bool inputHostExitFenceRaised(){return fence;}
 static void inputHostExitFenceLogRefusal(const char*,const char*){}
 static void hidHideServiceHealth(const char*){++health;}
-static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& result){if(!identityOk)return false;HidHidePhysicalIdentity p{};p.resolved=true;p.deviceInstanceId="HID\\VID_1234&PID_5678\\PHYSICAL";p.baseContainerDeviceInstanceId="USB\\VID_1234&PID_5678\\PHYSICAL";result={p};return true;}
+static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>& result,const char** failure=nullptr){if(failure)*failure=identityOk?nullptr:"physical-discovery-incomplete";if(!identityOk)return false;HidHidePhysicalIdentity p{};p.resolved=true;p.deviceInstanceId="HID\\VID_1234&PID_5678\\PHYSICAL";p.baseContainerDeviceInstanceId="USB\\VID_1234&PID_5678\\PHYSICAL";result={p};return true;}
 static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot& value){++snapshots;if(!snapshotOk)return false;value.valid=true;value.cloaking=true;for(const auto& p:world)value.hidden.push_back(U2W(p));return true;}
 static bool hidHideApplyPhysicalTransaction(const std::string&,bool){++applyFallback;return false;}
 static std::vector<std::string> hidHideVirtualPhysicalTargets(const HidHidePhysicalIdentity&,const HidHideVisibilitySnapshot&,size_t,const char*){return targets;}
@@ -49,6 +49,15 @@ static bool inputHostTargetReturnBeforeHideLocked(
  if(responsibilityReserved)*responsibilityReserved=true;
  return true;
 }
+// This fixture exercises the ordinary refresh path outside a partial handoff.
+static const bool t_inputHostOneXStartWrite=false,t_rogPartialHideIdentity=false;
+static const bool g_inputHostTransportFault=false,g_inputHostPipeRetired=false;
+static bool inputHostRogPartialHideSourcesCurrent(const std::vector<HidHidePhysicalIdentity>&){return true;}
+static bool inputHostOneXRefreshSourcesCurrent(const std::vector<HidHidePhysicalIdentity>&){return true;}
+static bool inputHostRogPartialHideTargetsCurrent(const std::vector<std::string>&){return true;}
+static bool inputHostOneXRefreshTargetsCurrent(const std::vector<std::string>&){return true;}
+static bool inputHostDeferredPhysicalHideWriteCurrent(){throw std::logic_error("unexpected partial-handoff write");}
+static bool inputHostRogPartialHideConfigurationCurrent(const HidHideVisibilitySnapshot&){throw std::logic_error("unexpected partial-handoff readback");}
 #include "consumer.inc"
 static unsigned checks=0;static std::vector<std::string> failures;static std::string current;
 static void check(bool value,const char* assertion){++checks;if(!value)failures.push_back(current+" :: "+assertion);}
@@ -61,7 +70,7 @@ int main(){
  reset();current="already-owned-prehidden";world.insert(targets[0]);g_hidHideVisibilityJournal.hiddenByUs={U2W(targets[0])};check(run(),"owned prehidden refresh stays usable");check(g_hidHideVisibilityJournal.hiddenByUs.size()==1,"existing responsibility preserved exactly once");check(operations.empty(),"already hidden own path never rehidden");
  reset();current="case-equivalent-existing-obligation";g_hidHideVisibilityJournal.hiddenByUs={U2W(ascii_lower(targets[0]))};check(run(),"case-equivalent existing obligation permits original hide");check(g_hidHideVisibilityJournal.hiddenByUs.size()==1,"Windows instance casing cannot duplicate an existing obligation");
  reset();current="failed-first-batch-tail-never-attempted";targets.push_back("HID\\VID_1234&PID_5678\\B");pipeOk=cliOk=false;check(!run(),"failed first dispatch stops batch");check(g_hidHideVisibilityJournal.hiddenByUs.size()==1,"only attempted first target reserved");check(!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,targets[1]),"unattempted tail is not claimed");
- for(int gate=0;gate<5;++gate){reset();current="existing-gate/"+std::to_string(gate);if(gate==0)fence=true;else if(gate==1)identityOk=false;else if(gate==2)snapshotOk=false;else if(gate==3)reservationOk=false;else virtualTarget=true;check(!run(),"existing refusal result preserved");check(operations.empty(),"refusal never dispatches hide");check(g_hidHideVisibilityJournal.hiddenByUs.empty(),"refusal never invents an attempted path");}
+ for(int gate=0;gate<5;++gate){reset();current="existing-gate/"+std::to_string(gate);if(gate==0)fence=true;else if(gate==1)identityOk=false;else if(gate==2)snapshotOk=false;else if(gate==3)reservationOk=false;else virtualTarget=true;check(!run(),"existing refusal result preserved");const bool selectionLogged=gate!=1||(events.size()==1&&events[0]["event"]=="hidhide.p-hid-refresh-deferred"&&events[0]["facts"]["reason"]=="physical-identity-unresolved"&&events[0]["facts"]["physicalSelectionFailure"]=="physical-discovery-incomplete"&&snapshots==0);check(operations.empty()&&selectionLogged,"refusal never dispatches hide; selection failure enriches its single existing receipt");check(g_hidHideVisibilityJournal.hiddenByUs.empty(),"refusal never invents an attempted path");}
  reset();current="inactive-journal";g_hidHideVisibilityJournal.active=false;check(!run()&&applyFallback==1,"inactive journal delegates to existing initial apply");check(operations.empty(),"refresh does not add a second dispatch route");
  json result={{"status",failures.empty()?"PASS":"FAIL"},{"checks",checks},{"failures",failures},{"realDeviceIo",false},{"scope","actual production refresh local-ownership consumer and path helpers; explicit fake discovery/driver/log and BeforeHide persistence leaves"},{"physicalPersistenceAlgorithmExecuted",false},{"physicalPersistenceBoundary","inputHostTargetReturnBeforeHideLocked: return true and out responsibilityReserved=true; no true Session/CM/durable IO claim"}};std::cout<<result.dump(2)<<std::endl;return failures.empty()?0:1;
 }

@@ -48,6 +48,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {wireProjectionForManifest,wireIdentityManifest,verifyWireProjectionReference} from '../global/controller-lifecycle-pipe/cache-projection.mjs';
+import {preHostManifestAdapter,verifyPreHostCacheReference} from '../global/controller-foreground-latency/prehost-cache-contract.mjs';
+import {verifyHostLifecycleCacheReference} from '../global/controller-lifecycle-completion/host-cache-contract.mjs';
 
 const SCHEMA_VERSION = 1;
 const SELF = fileURLToPath(import.meta.url);
@@ -58,7 +60,22 @@ export const CACHE_ENGINE_DEPENDENCIES=Object.freeze([
   '../../fixtures/legion_motion_consumer/extract_main.mjs',
   '../../fixtures/hc_remaining_model_capabilities/expectations.mjs',
   '../../lib/hc_controller_motion_fixture.mjs',
-  '../../lib/hc_motion_matrix_guard.mjs'
+  '../../lib/hc_motion_matrix_guard.mjs',
+  '../global/controller-foreground-latency/prehost-cache-contract.mjs',
+  '../global/controller-foreground-latency/prehost-input-provenance.mjs',
+  '../global/controller-foreground-latency/prehost-output-provenance.mjs',
+  '../global/controller-foreground-latency/prehost-toolchain.mjs',
+  "../global/controller-lifecycle-completion/host-cache-contract.mjs",
+  "../global/controller-lifecycle-completion/host-adapter.mjs",
+  "../global/controller-lifecycle-completion/host-run.mjs",
+  "../global/inputhost-protocol/adapter.mjs",
+  "../global/controller-signal-evidence/environment.mjs",
+  "../global/runner.mjs",
+  "../global/bundled-node-tool-authority.mjs",
+  "../global/execution-completion/index.mjs",
+  "../global/snapshot-node-tools.mjs",
+  "../global/source-snapshot.mjs",
+  "../../fixtures/battery_ui_native_recovery/snapshot-node-binding.mjs"
 ].map(relative=>fileURLToPath(new URL(relative,import.meta.url))));
 const SHA = /^[a-f0-9]{64}$/i;
 const FAILURE_STATUSES = new Set(['FAIL', 'UNKNOWN', 'BLOCKED', 'TIMEOUT', 'INCOMPLETE', 'NOT_RUN']);
@@ -217,6 +234,44 @@ function identityProblems(identity, adapter) {
   return reasons;
 }
 
+// Only the wire module's read-only receipt verifier may migrate independently
+// from the producer, which imports its unchanged projection constants. Full
+// old bytes must be independently pinned; every byte outside that one body is
+// identical. Current verifier bytes remain part of the fresh cache identity.
+function wireReadOnlyVerifierRoles({manifest,raw,cacheEntry,requirePin,declared}){
+ const rows=cacheEntry.sourceRoleMigrations;
+ if(rows===undefined)return new Map();
+ const relative='tools/ymcc_sim/global/controller-lifecycle-pipe/cache-projection.mjs';
+ const marker='export function verifyWireProjectionReference({manifest,graph,caseDir,requirePin}){';
+ if(raw.status!=='PASS'||manifest.adapter.path!=='tools/ymcc_sim/global/controller-lifecycle-pipe/run.mjs'||!Array.isArray(rows)||rows.length!==1)throw Error('READONLY_VERIFIER_ROLE_SCOPE_INVALID');
+ const row=rows[0];
+ if(!row||Object.keys(row).sort().join('|')!=='file|function|kind|originalSnapshot'||row.kind!=='wire-readonly-verifier-body-v1'||row.file!==relative||row.function!=='verifyWireProjectionReference')throw Error('READONLY_VERIFIER_ROLE_INVALID');
+ const file=path.resolve(manifest.repoRoot,relative),original=raw.sourceInputs?.filter(p=>path.resolve(manifest.repoRoot,p.path)===file);
+ if(original?.length!==1||!SHA.test(original[0].sha256)||!row.originalSnapshot||row.originalSnapshot.sha256!==original[0].sha256)throw Error('READONLY_VERIFIER_ORIGINAL_BINDING_MISSING');
+ requirePin(row.originalSnapshot.path,row.originalSnapshot.sha256);
+ const before=fs.readFileSync(row.originalSnapshot.path),after=fs.readFileSync(file),current=declared.get(file);
+ if(before.length>128*1024||after.length>128*1024||digest(before)!==original[0].sha256||digest(after)!==current?.sha256)throw Error('READONLY_VERIFIER_BYTES_CHANGED');
+ function outside(bytes){
+  const text=bytes.toString('utf8'),start=text.indexOf(marker);
+  if(start<0||text.indexOf(marker,start+marker.length)>=0)throw Error('READONLY_VERIFIER_MEMBER_NONUNIQUE');
+  const open=start+marker.length-1;let depth=1,mode='code';
+  for(let i=open+1;i<text.length;i++){
+   const c=text[i],next=text[i+1];
+   if(mode==='line'){if(c==='\n')mode='code';continue;}
+   if(mode==='comment'){if(c==='*'&&next==='/'){mode='code';i++;}continue;}
+   if(mode!=='code'){if(c==='\\')i++;else if(c===mode)mode='code';continue;}
+   if(c==='/'&&next==='/'){mode='line';i++;continue;}
+   if(c==='/'&&next==='*'){mode='comment';i++;continue;}
+   if(c==='/')throw Error('READONLY_VERIFIER_UNREVIEWED_TOKEN');
+   if(c==='"'||c==="'"||c==='`'){mode=c;continue;}
+   if(c==='{')depth++;else if(c==='}'&&--depth===0)return text.slice(0,open+1)+text.slice(i);
+  }
+  throw Error('READONLY_VERIFIER_MEMBER_UNCLOSED');
+ }
+ if(outside(before)!==outside(after))throw Error('READONLY_VERIFIER_PRODUCER_BYTES_CHANGED');
+ return new Map([[file,{sha256:original[0].sha256}]]);
+}
+
 /** A cached reference is never a PASS performed by this invocation. */
 export function inspectCachedResult({ identity, cacheEntry } = {}) {
   const outcome = { hit: false, reusable: false, status: 'CACHE_MISS', previousStatus: null,
@@ -281,6 +336,8 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
       const graph=JSON.parse(fs.readFileSync(manifestFile,'utf8').replace(/^\uFEFF/,''));
       if(!Array.isArray(graph.sourceHashes)||graph.sourceHashes.length<1||graph.sourceHashes.length>10000)throw new Error('CACHE_OUTPUT_GRAPH_INVALID');
       sourceEquivalence=verifyWireProjectionReference({manifest:identity.manifest,graph,caseDir,requirePin});
+      const readOnlyRoles=wireReadOnlyVerifierRoles({manifest:identity.manifest,raw,cacheEntry,requirePin,declared});
+      for(const [file,row]of readOnlyRoles){if(!sourceEquivalence||sourceEquivalence.has(file))throw Error('READONLY_VERIFIER_ROLE_CONFLICT');sourceEquivalence.set(file,row);}
       for(const row of graph.sourceHashes){
         if(typeof row?.path!=='string'||!SHA.test(row.sha256??''))throw new Error('CACHE_OUTPUT_GRAPH_ROW_INVALID');
         const file=path.resolve(identity.manifest.repoRoot,row.path);
@@ -312,6 +369,8 @@ export function inspectCachedResult({ identity, cacheEntry } = {}) {
       const entry = path.resolve(identity.manifest.repoRoot, identity.manifest.adapter.path);
       if (!raw.sourceInputs?.some(row => path.resolve(identity.manifest.repoRoot, row.path) === entry)) throw new Error('RESULT_SOURCE_IDENTITY_MISSING');
     }
+    if(raw.status==='PASS'&&preHostManifestAdapter(identity.manifest.adapter))outcome.preHostReference=verifyPreHostCacheReference({manifest:identity.manifest,raw,caseDir,requirePin});
+    if(raw.status==='PASS')outcome.hostLifecycleReference=verifyHostLifecycleCacheReference({manifest:identity.manifest,raw,caseDir,requirePin,cacheEntry});
     outcome.previousStatus = raw.status;
     outcome.reference = raw;
     outcome.reusable = true;

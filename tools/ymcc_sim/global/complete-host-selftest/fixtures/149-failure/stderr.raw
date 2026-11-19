@@ -1,0 +1,5 @@
+Unhandled exception. System.InvalidOperationException: FAN-934: victim route HandheldCompanion.Devices.MSI.ClawA2VM must resolve to a compat-callback contract (MsiHcDefaultRelease)
+   at YeManFanHost.FanRouteEvidenceSelfTest.RunSelfTest()
+   at YeManFanHost.FanHostSelfTest.RunAsync(FanHostEngine engine)
+   at YeManFanHost.Program.Main(String[] args)
+   at YeManFanHost.Program.<Main>(String[] args)

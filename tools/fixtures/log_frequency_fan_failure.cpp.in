@@ -1,0 +1,88 @@
+#define NOMINMAX
+#include <windows.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <mutex>
+#include <sstream>
+#include <stdexcept>
+#include "json.hpp"
+#include "log_snapshot_state.h"
+#include "log_jsonl_boundary.h"
+#include "sleep_fact_log_record.h"
+#include "input_pipe_test_allocation_fault.h"
+using json=nlohmann::json;namespace fspath=std::filesystem;
+static std::wstring fixtureRoot;
+static std::mutex g_fanLogMtx;
+static bool timestampThrows=false;
+static unsigned rotations=0;
+static std::wstring yemancc_data_dir(){return fixtureRoot;}
+static std::string nativeLifecycleTimestamp(){if(timestampThrows)throw std::runtime_error("owned-timestamp");return "2000-01-01T00:00:00.000";}
+static void rotateOneLogFile(const std::wstring&){++rotations;}
+enum class OutputFault {none,openException,writeFailure,writeException,flushFailure,flushException};
+static OutputFault outputFault=OutputFault::none;
+struct FailureOutput:std::ofstream {
+ struct Buffer:std::streambuf {
+  std::streambuf* original=nullptr;
+  std::streamsize xsputn(const char* text,std::streamsize size)override{if(outputFault==OutputFault::writeFailure)return 0;if(outputFault==OutputFault::writeException)throw std::runtime_error("owned-write");return original->sputn(text,size);}
+  int_type overflow(int_type value)override{return traits_type::eq_int_type(value,traits_type::eof())?traits_type::not_eof(value):original->sputc(traits_type::to_char_type(value));}
+  int sync()override{if(outputFault==OutputFault::flushFailure)return -1;if(outputFault==OutputFault::flushException)throw std::runtime_error("owned-flush");return original->pubsync();}
+ } buffer;
+ bool attached=false;
+ FailureOutput(){buffer.original=std::ofstream::rdbuf();if(outputFault==OutputFault::openException)exceptions(std::ios::failbit|std::ios::badbit);else if(outputFault==OutputFault::writeException||outputFault==OutputFault::flushException)exceptions(std::ios::badbit);}
+ FailureOutput& operator<<(const std::string& value){if(outputFault!=OutputFault::none&&outputFault!=OutputFault::openException&&!attached){static_cast<std::ostream&>(*this).rdbuf(&buffer);attached=true;}static_cast<std::ostream&>(*this)<<value;return *this;}
+ FailureOutput& operator<<(char value){static_cast<std::ostream&>(*this)<<value;return *this;}
+ ~FailureOutput(){exceptions(std::ios::goodbit);if(attached)static_cast<std::ostream&>(*this).rdbuf(buffer.original);}
+};
+@@ACTUAL_WRITER@@
+static void exportFailureAvailability(json& availability){
+@@ACTUAL_EXPORT@@
+}
+static json exportFailureAvailability(){json value;exportFailureAvailability(value);return value;}
+static json checks=json::array();
+static void check(bool pass,const char* name){checks.push_back({{"name",name},{"pass",pass}});}
+using Evidence=ymcc::logging::FanLogFailureEvidence;
+static unsigned long long count(Evidence::Kind kind){return ymcc::logging::fanLifecycleLogFailureEvidence().snapshot()["buckets"][size_t(kind)]["observedFailures"].get<unsigned long long>();}
+static json readRows(const fspath::path& path){std::ifstream in(path);json rows=json::array();std::string line;while(std::getline(in,line))if(!line.empty())rows.push_back(json::parse(line));return rows;}
+int wmain(int argc,wchar_t** argv){try{
+ if(argc!=2)return 3;const fspath::path root(argv[1]);if(fspath::exists(root))return 3;fspath::create_directories(root);fixtureRoot=root.wstring();(void)ymcc::sleepfactlog::writerIdentity();(void)ymcc::logging::fanLifecycleLogFailureEvidence().snapshot();DWORD before=0,after=0;GetProcessHandleCount(GetCurrentProcess(),&before);
+ const json payload={{"caller","owned-fan"},{"accepted",false}};
+ const auto initial=ymcc::logging::fanLifecycleLogFailureEvidence().snapshot();
+ appendFanLifecycleLog("fan-owned-healthy",payload);auto rows=readRows(root/L"fan-lifecycle.log");
+ check(rows.size()==1&&rows[0]["event"]=="fan-owned-healthy"&&rows[0]["accepted"]==false&&rows[0]["caller"]=="owned-fan"&&rows[0]["writerProcessCreation100ns"].is_string(),"original-fan-row-envelope-and-negative-fields-preserved");
+ fixtureRoot=(root/L"missing"/L"parent").wstring();appendFanLifecycleLog("fan-owned-open",payload);fixtureRoot=root.wstring();
+ check(count(Evidence::openFailure)==1,"real-missing-parent-open-failure-retained");
+#ifndef YMCC_FAN_FAILURE_OLD_ONLY
+ bool initialZero=true;for(const auto& row:initial["buckets"])initialZero=initialZero&&row["observedFailures"]==0;check(initialZero,"healthy-original-offer-does-not-increment-failure-counters");
+ const auto originalDecky=ymcc::logging::deckyLogFailureEvidence().snapshot();const auto originalNative=ymcc::logging::nativeLogFailureEvidence().snapshot();
+ timestampThrows=true;appendFanLifecycleLog("fan-owned-preparation",payload);timestampThrows=false;
+ check(count(Evidence::preparationException)==1,"original-envelope-preparation-exception-retained");
+ const auto priorPreparation=count(Evidence::preparationException);appendFanLifecycleLog("fan-owned-serialization",{{"bad",std::string(1,static_cast<char>(0xff))}});
+ check(count(Evidence::preparationException)==priorPreparation+1,"actual-json-dump-failure-classified-before-write");
+ fixtureRoot=(root/L"missing"/L"parent").wstring();outputFault=OutputFault::openException;appendFanLifecycleLog("fan-owned-open-exception",payload);outputFault=OutputFault::none;fixtureRoot=root.wstring();
+ check(count(Evidence::openException)==1,"open-boundary-exception-is-distinct-from-false-return");
+ outputFault=OutputFault::writeFailure;appendFanLifecycleLog("fan-owned-write",payload);outputFault=OutputFault::none;
+ check(count(Evidence::writeFailure)==1&&count(Evidence::flushFailure)==0,"write-failure-does-not-become-an-unobserved-independent-flush-failure");
+ outputFault=OutputFault::writeException;appendFanLifecycleLog("fan-owned-write-exception",payload);outputFault=OutputFault::none;
+ check(count(Evidence::writeException)==1,"actual-stream-write-exception-retained");
+ outputFault=OutputFault::flushFailure;appendFanLifecycleLog("fan-owned-flush",payload);outputFault=OutputFault::none;
+ check(count(Evidence::flushFailure)==1,"original-flush-false-after-accepted-write-retained");
+ outputFault=OutputFault::flushException;appendFanLifecycleLog("fan-owned-flush-exception",payload);outputFault=OutputFault::none;
+ check(count(Evidence::flushException)==1,"original-flush-exception-after-accepted-write-retained");
+ const auto failureSnapshot=ymcc::logging::fanLifecycleLogFailureEvidence().snapshot();
+ for(unsigned i=0;i<500;++i)appendFanLifecycleLog("fan-owned-next-original-operation",payload);
+ check(ymcc::logging::fanLifecycleLogFailureEvidence().snapshot()==failureSnapshot,"500-healthy-original-operations-preserved-without-success-accounting");
+ check(ymcc::logging::deckyLogFailureEvidence().snapshot()==originalDecky&&ymcc::logging::nativeLogFailureEvidence().snapshot()==originalNative,"fan-counter-storage-is-independent-of-decky-and-native-recovery");
+ Evidence local;std::string name(110,'A');name[5]=static_cast<char>(0xff);local.record(Evidence::writeFailure,name.c_str());auto localView=local.snapshot();const auto prefix=localView["buckets"][Evidence::writeFailure];
+ check(prefix["observedFailures"]==1&&prefix["firstEventKnown"]==true&&prefix["firstEventTruncated"]==true&&prefix["firstEventAsciiSanitized"]==true&&prefix["firstEvent"].get<std::string>().size()==95,"bounded95-ascii-first-event-prefix-is-not-full-text");
+ ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)local.record(Evidence::writeFailure,"other-event");const auto arm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+ check(arm==0&&local.snapshot()["buckets"][Evidence::writeFailure]["observedFailures"]==50001,"50000-failure-accounting-calls-allocation-free-and-bounded");
+ {std::lock_guard<std::mutex> lock(local.mutex);local.buckets[Evidence::writeFailure].count=~0ULL-1;}local.record(Evidence::writeFailure,"new");local.record(Evidence::writeFailure,"new");
+ check(local.snapshot()["buckets"][Evidence::writeFailure]["observedFailures"]==~0ULL&&local.snapshot()["buckets"][Evidence::writeFailure]["counterLimitReached"]==true,"uint64-saturation-preserves-first-witness");
+ const auto available=exportFailureAvailability();check(available.contains("fanLifecycleLogFailureEvidence")&&available["fanLifecycleLogFailureEvidence"]["stats"]==failureSnapshot&&available["fanLifecycleLogFailureEvidence"]["writerProcessCreation100ns"].is_string(),"actual-existing-export-block-publishes-current-writer-and-exact-stats");
+ json unavailable={{"existing",true}};ymcc::testing::allocationFault::failAfter(0);exportFailureAvailability(unavailable);ymcc::testing::allocationFault::failAfter(-1);
+ check(unavailable["existing"]==true&&!unavailable.contains("fanLifecycleLogFailureEvidence"),"optional-snapshot-allocation-failure-does-not-change-existing-export");
+#endif
+ GetProcessHandleCount(GetCurrentProcess(),&after);check(before==after,"owned-file-handles-returned");unsigned failed=0;for(const auto& row:checks)failed+=!row["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failed},{"availability",exportFailureAvailability()},{"handlesBefore",before},{"handlesAfter",after},{"deviceCalls",0},{"rotationPortIsMemory",true},{"originalWriterBodyWithSingleStreamTypePort",true}}.dump(2)<<'\n';return failed?2:0;
+}catch(const std::exception& e){ymcc::testing::allocationFault::failAfter(-1);std::cerr<<e.what()<<'\n';return 3;}}

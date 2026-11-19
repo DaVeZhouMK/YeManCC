@@ -5,7 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { createFanLogFixture } from '../fan-log-regression.mjs';
+import { createFanLogFixture, createFanFixtureTranspilation, transpileFanFixtureSource } from '../fan-log-regression.mjs';
 
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 export const SIMULATED_HANDSHAKE = Object.freeze({
@@ -16,8 +16,8 @@ export const SIMULATED_HANDSHAKE = Object.freeze({
 });
 
 /** NoIOHost models the server only. Every client operation uses real HTTP TS. */
-export function createFanSignalFixture({ repoRoot, handshake = {}, simulation = {}, runtimeContract = {} }) {
-  const base = createFanLogFixture({ repoRoot, handshake });
+export function createFanSignalFixture({ repoRoot, handshake = {}, simulation = {}, runtimeContract = {} }, transpilation = createFanFixtureTranspilation()) {
+  const base = createFanLogFixture({ repoRoot, handshake }, transpilation);
   base.life.setConfig({ ...base.life.config,
     ...(runtimeContract.protocolVersion !== undefined ? { protocolVersion: runtimeContract.protocolVersion } : {}),
     ...(typeof runtimeContract.runtimeRoot === 'string' ? { hcRuntimeDirectory: runtimeContract.runtimeRoot } : {}),
@@ -26,9 +26,7 @@ export function createFanSignalFixture({ repoRoot, handshake = {}, simulation = 
   const root = fs.realpathSync(repoRoot), require = createRequire(path.join(root, 'package.json'));
   const sourcePath = 'src/bridge/fanApi.ts', source = fs.readFileSync(path.join(root, sourcePath), 'utf8');
   const ts = require('typescript');
-  const compiled = ts.transpileModule(source, { compilerOptions: {
-    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
-  }, fileName: path.join(root, sourcePath) }).outputText;
+  const compiled = transpileFanFixtureSource(transpilation, ts, source, path.join(root, sourcePath));
   let currentHandshake = structuredClone(handshake), stateTransportFailure = false;
   let generation = 0, powerPhase = 'ready', writesAllowed = true;
   const routes = new Map([

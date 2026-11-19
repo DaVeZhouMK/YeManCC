@@ -2,6 +2,7 @@ import { detectedGameName, isGameStatusCurrent, isCurrentGameTarget, subscribeGa
 import { getPolicyGame, subscribePolicyGameStatus } from './gamePolicyTarget';
 import { canAutoPrepareTrainer, getGameTrainerState, getReadyGameTrainer, restoreReadyGameTrainer, subscribeGameTrainerState, trainerTaskKey } from './gameTrainer';
 import { getSettingsGeneration } from './settingsRepository';
+import { subscribeTrainerLifecycle } from './trainerLifecycle';
 
 const RECOVERY_POLL_MS = 5000;
 let leases = 0;
@@ -16,7 +17,8 @@ export function refreshGameTrainerRecovery(): void { refreshShared?.(); }
 // needs local receipt polling. Read faults wait for an explicit/owned event.
 export function startGameTrainerRecovery(): () => void {
   if (leases++ === 0) {
-    let stopped = false, epoch = 0, misses = 0, recoveryKey = '', cacheFaulted = false;
+    // A new owner must wait for the same admission as an already paused owner.
+    let stopped = false, paused = true, epoch = 0, misses = 0, recoveryKey = '', cacheFaulted = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let checking: { identity: string; generation: number } | null = null;
     const recover = () => {
@@ -24,7 +26,7 @@ export function startGameTrainerRecovery(): () => void {
       timer = null;
       // Display may retain a game while discovery is unknown. Do not turn that
       // state into a local restore or discard an already confirmed receipt.
-      if (stopped || !isGameStatusCurrent()) { ++epoch; checking = null; return; }
+      if (stopped || paused || !isGameStatusCurrent()) { ++epoch; checking = null; return; }
       const target = getPolicyGame(), generation = getSettingsGeneration();
       if (stopped || !target || !Number.isSafeInteger(target.pid) || target.pid <= 0 || !/^[1-9][0-9]*$/.test(target.processCreated)
         || !isCurrentGameTarget(target) || !canAutoPrepareTrainer(detectedGameName(target), target.path) || getReadyGameTrainer(detectedGameName(target), target.path, target)) {
@@ -41,13 +43,13 @@ export function startGameTrainerRecovery(): () => void {
       if (checking?.identity === selected && checking.generation === generation) return;
       const observed = ++epoch;
       checking = { identity: selected, generation };
-      const isCurrent = () => !stopped && epoch === observed && generation === getSettingsGeneration()
+      const isCurrent = () => !stopped && !paused && epoch === observed && generation === getSettingsGeneration()
         && isGameStatusCurrent() && isCurrentGameTarget(target) && identity(getPolicyGame()) === selected;
       void restoreReadyGameTrainer(detectedGameName(target), target.path, {
         processTarget: target, isTargetCurrent: isCurrent,
         onCacheFault: () => { if (isCurrent()) cacheFaulted = true; },
       }).catch(() => { if (isCurrent()) cacheFaulted = true; }).finally(() => {
-          if (stopped || epoch !== observed || !isGameStatusCurrent() || !isCurrentGameTarget(target)) return;
+          if (!isCurrent()) return;
           checking = null;
           if (cacheFaulted) return;
           const current = getPolicyGame();
@@ -62,19 +64,24 @@ export function startGameTrainerRecovery(): () => void {
     };
     const refresh = () => { misses = 0; cacheFaulted = false; recover(); };
     refreshShared = refresh;
+    const stopLifecycle = subscribeTrainerLifecycle(event => {
+      ++epoch; checking = null;
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      paused = event !== 'ipc:power.resumed';
+      if (!paused) refresh();
+    }, () => { if (paused) { paused = false; refresh(); } });
     let receivedInitial = false;
     const stopGame = subscribePolicyGameStatus(() => { receivedInitial = true; recover(); });
     const stopTrainer = subscribeGameTrainerState(recover);
     const stopReadiness = subscribeGameTargetReadiness(recover);
     window.addEventListener('ui-settings:changed', refresh);
-    window.addEventListener('ipc:power.resumed', refresh);
     if (!receivedInitial) recover();
     stopShared = () => {
       stopped = true; ++epoch; refreshShared = null;
       if (timer !== null) clearTimeout(timer);
-      stopGame(); stopTrainer(); stopReadiness();
+      stopGame(); stopTrainer(); stopReadiness(); stopLifecycle();
       window.removeEventListener('ui-settings:changed', refresh);
-      window.removeEventListener('ipc:power.resumed', refresh);
     };
   }
   let released = false;

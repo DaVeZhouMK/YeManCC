@@ -7,13 +7,80 @@ let root,load,createMirrorHostFixture,createMirrorSpeedMemoryOwner,ReadOnlyMirro
 const src=p=>fs.readFileSync(path.join(root,p),'utf8');
 const runId='a'.repeat(32),peer={connection:'1',runId,connected:true},flush=async()=>{for(let n=0;n<180;n++)await Promise.resolve();await new Promise(resolve=>setImmediate(resolve));};
 const defer=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};};
+function updaterHostPowerFixture(install=()=>()=>{}){
+ const events=new Map(),timers=new Map();let serial=0,revision=1,reads=0;
+ let fact={phase:'ready',known:true,generation:1,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:revision,observedNotificationSequence:revision};
+ const module=load(src('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:()=>{throw Error('private native read forbidden');},on:()=>{throw Error('private native listener forbidden');}}});
+ const source=module.createSharedPowerLifecycleSource({read:async()=>{reads++;return {...fact};},listen:(name,callback)=>{assert(!events.has(name));events.set(name,callback);return()=>events.delete(name);},clock:{setTimeout:(callback,delay)=>{const id=++serial;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id)}});
+ const ports={...source,isSharedPowerLifecycleAdmitted:module.isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle:callback=>{const release=install('power',callback);let stop;try{stop=source.onSharedPowerLifecycle(callback);}catch(error){release();throw error;}return()=>{try{stop();}finally{release();}};}};
+ return {ports,source,events,timers,get reads(){return reads;},fact:()=>({...fact}),publish:(change={},notify=true)=>{fact={...fact,...change,publicationRevision:++revision,observedNotificationSequence:revision};if(notify)events.get('power.lifecycleChanged')?.({...fact});return {...fact};},deliver:value=>events.get('power.lifecycleChanged')?.({...value}),retry:async()=>{assert.equal(timers.size,1,'one shared retry owns missing Ready');const [id,timer]=timers.entries().next().value;timers.delete(id);timer.callback();await flush();},assertClosed:()=>{assert.equal(events.size,0);assert.equal(timers.size,0);assert.equal(source.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}};
+}
+async function exerciseUpdaterPowerBoundary(selectedMode=''){
+ const store=load(src('decky-plugin/src/deckyStoreClient.ts')),protocol=load(src('decky-plugin/src/deckyUpdaterProtocol.ts'));
+ const updater=load(src('src/bridge/deckyUpdaterService.ts'),{'../../decky-plugin/src/deckyStoreClient':store,'../../decky-plugin/src/deckyUpdaterProtocol':protocol});
+ const allModes=['pending-admission','game-read-same-generation','game-read-new-generation','native-read-same-generation','native-read-new-generation','native-unknown','missing-ready','stop-during-validation'];
+ const modes=selectedMode?[selectedMode]:allModes;
+ const measurements=[];
+ for(const mode of modes){
+  const power=updaterHostPowerFixture(),messages=[],observers=new Map();let extension,installs=0,checks=0,downloads=0,gameReads=0,nativeReads=0,id=0;
+  let gameBarrier=null,nativeBarrier=null;
+  const install=(kind,callback)=>{assert(!observers.has(kind));observers.set(kind,callback);return()=>observers.delete(kind);};
+  const target={version:'9.0.0',sha256:'b'.repeat(64)},state={phase:'downloaded',version:target.version,sha256:target.sha256};
+  const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
+  const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
+   vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
+   './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:()=>{throw Error('private power subscription forbidden');}},
+   './powerLifecycleState':power.ports,'./api':{powerLifecycle:{get:async()=>{nativeReads++;if(nativeBarrier)return nativeBarrier.promise;return power.fact();}}},
+   './gamedetect':{refreshGameStatusStrict:async()=>{gameReads++;if(gameBarrier)await gameBarrier.promise;return null;}},
+   './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
+   './updateManager':{ensureUpdateManager:async()=>{},updateSnapshot:state,updateInfo:{value:target},checkForUpdate:async()=>{checks++;},prepareUpdate:async()=>{downloads++;return true;},downloadAndInstall:async()=>{installs++;}},
+   './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},'./deckyUpdaterService':updater
+  });
+  const host=startDeckyUpdaterHost(()=>true),status=()=>extension.request({...peer,request:{command:'updater.status',runId,subscribe:true}}),request=()=>extension.request({...peer,request:{command:'updater.request',runId,clientId:'aabbccdd-1122-3344-5566-778899aabbcc',id:++id,action:'install',...target}}),view=()=>messages.filter(r=>r.message.type==='ymcc-updater').at(-1)?.message.view;
+  try{
+   multiplex.dispatchDeckyMirrorPeer(peer);status();await flush();assert.equal(view().canInstall,true,'initial admitted package remains installable');
+   const old=power.fact();
+   if(mode==='pending-admission'||mode==='missing-ready'){
+    power.publish({hardwareWritesAllowed:false,notificationPending:true});await flush();
+    assert.equal(view().canInstall,false,'pending shared power must deny updater installation');request();await flush();assert.equal(installs,0);assert.equal(gameReads,0);
+    power.publish({hardwareWritesAllowed:true,notificationPending:false},mode!=='missing-ready');
+    if(mode==='missing-ready'){await power.retry();assert.equal(power.source.getSharedPowerLifecycleDiagnostics().read.demand,false);}
+    await flush();
+   }else{
+    if(mode.startsWith('game-read')||mode==='stop-during-validation')gameBarrier=defer();else nativeBarrier=defer();
+    request();await flush();assert.equal(gameReads,1,'original install validation started');
+    if(nativeBarrier)assert.equal(nativeReads,1,'original native validation started');
+    if(mode==='stop-during-validation')host.stop();
+    else if(mode!=='native-unknown'){
+     power.publish({hardwareWritesAllowed:false,notificationPending:true});
+     power.publish({phase:'ready',generation:mode.endsWith('new-generation')?2:1,hardwareWritesAllowed:true,notificationPending:false});
+     power.deliver(old);await flush();
+    }
+    if(gameBarrier)gameBarrier.resolve();
+    if(nativeBarrier)nativeBarrier.resolve(mode==='native-unknown'?{...power.fact(),hardwareWritesAllowed:false,known:false}:power.fact());
+    await flush();assert.equal(installs,0,'interrupted updater validation must not install after power boundary');
+    if(mode==='stop-during-validation'){power.assertClosed();assert.equal(observers.size,0);measurements.push({mode,installs,gameReads,nativeReads,stopped:true});continue;}
+    gameBarrier=null;nativeBarrier=null;
+   }
+   assert.equal(view().canInstall,true,'interrupted validation must release the updater task');
+   assert.equal(power.source.getSharedPowerLifecycleDiagnostics().subscriberCount,1,'one original host subscription remains after validation');
+   const before=installs;request();await flush();assert.equal(installs,before+1,'fresh explicit install works after shared recovery');
+   assert.equal(checks,0);assert.equal(downloads,0);assert.equal(power.source.getSharedPowerLifecycleDiagnostics().subscriberCount,1);
+   measurements.push({mode,recoveredGeneration:power.fact().generation,installs,gameReads,nativeReads,sharedReads:power.reads,readinessReleased:true});
+  }finally{gameBarrier?.resolve();nativeBarrier?.resolve(power.fact());host.stop();await flush();power.assertClosed();assert.equal(observers.size,0);}
+ }
+ assert.equal(measurements.length,modes.length);console.log(JSON.stringify({updaterSharedPowerMeasurements:measurements}));
+}
+
 const args=process.argv.slice(2),requestedCases=[],groups=[];
-let selectionError='',speedCompletionOnly=false;
+let selectionError='',speedCompletionOnly=false,updaterPowerOnly=false,updaterPowerMode='';
 const speedCompletionCase='read recovery: a late old-game read after a power generation change cannot restore old admission';
 const speedCompletionMeasurements=[];
 for(let i=0;i<args.length;i++){
  const arg=args[i];
- if(arg==='--case'){
+ if(arg==='--updater-power-only'){if(updaterPowerOnly)selectionError='Duplicate updater power selection';updaterPowerOnly=true;}
+ else if(arg.startsWith('--updater-power-mode=')){if(updaterPowerMode)selectionError='Duplicate updater power mode';updaterPowerMode=arg.slice('--updater-power-mode='.length);}
+ else if(arg==='--case'){
   if(!args[i+1]||args[i+1].startsWith('--')){selectionError='--case requires one exact original case name';break;}
   requestedCases.push(args[++i]);
  }else if(arg==='--speed-completion'){if(speedCompletionOnly){selectionError='Duplicate speed completion selection';break;}speedCompletionOnly=true;}
@@ -23,6 +90,8 @@ for(let i=0;i<args.length;i++){
 if(groups.length>1||groups.length&&requestedCases.length)selectionError='Readiness group and exact-case selections are mutually exclusive';
 if(new Set(requestedCases).size!==requestedCases.length)selectionError='Duplicate exact readiness case selection';
 if(speedCompletionOnly&&(groups.length||requestedCases.length!==1||requestedCases[0]!==speedCompletionCase))selectionError='--speed-completion requires only its original exact generation case';
+if(updaterPowerOnly&&(groups.length||requestedCases.length!==1||requestedCases[0]!=='updater host releases every independent observation after one teardown callback fails'))selectionError='Updater power selection requires only its exact original host case';
+if(updaterPowerMode&&(!updaterPowerOnly||!['pending-admission','game-read-same-generation','game-read-new-generation','native-read-same-generation','native-read-new-generation','native-unknown','missing-ready','stop-during-validation'].includes(updaterPowerMode)))selectionError='Unknown or unsupported updater power mode';
 const selection=requestedCases.length?'cases':groups[0]??'all';
 const readRecoveryOnly=selection==='read-recovery',legacyOnly=selection==='legacy-diagnostics';
 const registry=[],cases=[],skipped=[],selectedResults=[];
@@ -31,16 +100,117 @@ const data=()=>({generation:1,ready:true,game:null,fan:{supported:false,enabled:
 function relayFixture(read=async()=>data(),diagnosticThrows=false){const logs=[],replies=[],timers=new Map();let now=0,watcher=null,reads=0,nextTimer=0;
  const relay=new ReadOnlyMirrorRelay({read:async trace=>{reads++;return read(trace,()=>now,delta=>{now+=delta;});},now:()=>now,observe:fn=>{watcher=fn;return()=>watcher=null;},reply:async(_c,m)=>{replies.push(m);return true;},diagnostic:(event,detail)=>{if(diagnosticThrows)throw Error('Memory log offline');logs.push({event,...structuredClone(detail)});},schedule:(fn,ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;},cancel:id=>timers.delete(id)});
  const f={relay,logs,replies,timers,fire:async ms=>{const entry=[...timers].find(([,timer])=>timer.ms===ms);assert(entry,'Missing read retry '+ms);timers.delete(entry[0]);now+=ms;entry[1].fn();await flush();},get reads(){return reads;},now:()=>now,advance:delta=>now+=delta,open:()=>relay.request({...peer,request:{command:'snapshot',runId}}),pause:()=>relay.request({...peer,request:{command:'snapshot',runId,subscribe:false}}),invalidate:async()=>{watcher?.();await flush();},dispose:()=>relay.dispose()};return f;}
-await check('first demand records one start/finish with correlated read ID and stage timings',async()=>{const f=relayFixture(async(trace,_now,advance)=>{await trace.measure('power',async()=>advance(25));await trace.measure('frames',async()=>advance(40));return data();});try{await f.open();const a=f.logs.find(x=>x.event==='snapshot-read-start'),b=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(a.readId,b.readId);assert.equal(a.demandEpoch,b.demandEpoch);assert.equal(b.elapsedMs,65);assert.equal(b.powerMs,25);assert.equal(b.framesMs,40);assert.equal(b.ok,true);assert.equal(b.discarded,false);assert.equal(f.timers.size,0);}finally{f.dispose();}});
+await check('first demand records one start/finish with correlated read ID and stage timings',async()=>{
+ // Same original telemetry case: actual Host and fixed startup phases, no IO.
+ const startupClock={now:0},startup=await createMirrorHostFixture({clock:startupClock});
+ try{
+  const onlyStartup=()=>startup.diagnostics.filter(row=>row.event==='startup-phase');
+  assert.equal(onlyStartup().length,1);assert.equal(onlyStartup()[0].stage,'registered');
+  const reads={...startup.counts};startupClock.now=17;startup.startupPhase('native-context');
+  startupClock.now=129;startup.startupPhase('fan-settings');
+  assert.equal(onlyStartup().at(-1).previousStage,'native-context');assert.equal(onlyStartup().at(-1).previousMs,112);
+  for(let n=0;n<1000;n++){startup.startupPhase('fan-settings');startup.startupPhase('unknown');startup.startupPhase('registered');}
+  assert.equal(onlyStartup().length,3);assert.deepEqual(startup.counts,reads,'startup observations must not read settings or apply business controls');
+  startupClock.now=229;startup.ready();const ready=onlyStartup().at(-1);assert.equal(ready.stage,'ready');assert.equal(ready.elapsedMs,229);assert.equal(ready.previousMs,100);
+  const count=onlyStartup().length;startup.startupPhase('tray');startupClock.now=NaN;startup.startupPhase('performance');assert.equal(onlyStartup().length,count);
+  startup.stop();assert.equal(onlyStartup().length,count);assert.equal(startup.controllerTimerCount(),0);assert.equal(startup.fxTimerCount(),0);
+ }finally{startup.stop();}
+ const failedLog=await createMirrorHostFixture({readHooks:{diagnostic:async()=>{throw Error('inert diagnostic transport failure');}}});
+ try{failedLog.startupPhase('native-context');failedLog.ready();await flush();assert.equal(failedLog.counts.saves,0);assert.equal(failedLog.controllerTimerCount(),0);}finally{failedLog.stop();}
+const f=relayFixture(async(trace,_now,advance)=>{await trace.measure('power',async()=>advance(25));await trace.measure('frames',async()=>advance(40));trace.performanceStage?.('performanceCore',17);return data();});try{await f.open();const a=f.logs.find(x=>x.event==='snapshot-read-start'),b=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(a.readId,b.readId);assert.equal(a.demandEpoch,b.demandEpoch);assert.equal(b.elapsedMs,65);assert.equal(b.powerMs,25);assert.equal(b.framesMs,40);assert.equal(b.performanceCoreMs,17);assert.equal(b.ok,true);assert.equal(b.discarded,false);assert.equal(f.timers.size,0);}finally{f.dispose();}});
 await check('1000 healthy fast refreshes do not create 1000 telemetry records or a polling timer',async()=>{const f=relayFixture();try{await f.open();const before=f.logs.length;for(let i=0;i<1000;i++)await f.invalidate();assert.equal(f.logs.length,before);assert.equal(f.timers.size,0);}finally{f.dispose();}});
 await check('slow reads are recorded at most once per ten seconds outside first demand',async()=>{const f=relayFixture(async(trace,_now,advance)=>{await trace.measure('monitor',async()=>advance(300));return data();});try{await f.open();for(let i=0;i<10;i++)await f.invalidate();assert.equal(f.logs.filter(x=>x.event==='snapshot-read-finished').length,1);f.advance(10000);await f.invalidate();assert.equal(f.logs.filter(x=>x.event==='snapshot-read-finished').length,2);assert.equal(f.logs.at(-1).monitorMs,300);}finally{f.dispose();}});
 await check('pause/reopen records the real demand transition and first read even inside the slow-log cooldown',async()=>{const f=relayFixture();try{await f.open();await f.pause();await f.pause();await f.open();const demands=f.logs.filter(x=>x.event==='snapshot-demand');assert.deepEqual(demands.map(x=>x.subscribe),[true,false,true]);assert.equal(f.logs.filter(x=>x.event==='snapshot-read-start').length,2);assert.equal(f.logs.filter(x=>x.event==='snapshot-read-finished').length,2);}finally{f.dispose();}});
-await check('a blocked first read has a start record until completion, while hiding discards its eventual result',async()=>{const done=defer(),f=relayFixture(async trace=>{await trace.measure('frames',()=>done.promise);return data();});try{const open=f.open();await flush();assert.equal(f.logs.filter(x=>x.event==='snapshot-read-start').length,1);assert.equal(f.logs.filter(x=>x.event==='snapshot-read-finished').length,0);await f.pause();done.resolve();await open;const end=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(end.discarded,true);assert.equal(f.replies.length,0);assert.equal(end.demandEpoch,f.logs.find(x=>x.event==='snapshot-read-start').demandEpoch);}finally{done.resolve();f.dispose();}});
-await check('partial owner errors retain unrelated controls and produce a fixed partial stage rather than raw messages',async()=>{const f=relayFixture(async trace=>{try{await trace.measure('touchpads',async()=>{throw Error('PRIVATE/file/path');});}catch{}return data();});try{await f.open();assert.equal(f.replies.at(-1).snapshot.ready,true);const log=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(log.ok,false);assert.equal(log.stage,'partial');assert(!JSON.stringify(f.logs).includes('PRIVATE'));}finally{f.dispose();}});
-await check('complete read failure records failed and preserves the original not-ready fallback',async()=>{const f=relayFixture(async()=>{throw Error('PRIVATE');});try{await f.open();assert.equal(f.replies.at(-1).snapshot.ready,false);const end=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(end.stage,'failed');assert.equal(end.ok,false);assert(!JSON.stringify(f.logs).includes('PRIVATE'));}finally{f.dispose();}});
+await check('a blocked first read has a start record until completion, while hiding discards its eventual result',async()=>{const done=defer(),f=relayFixture(async trace=>{await trace.measure('frames',()=>done.promise);return data();});try{const open=f.open();await flush();assert.equal(f.logs.filter(x=>x.event==='snapshot-read-start').length,1);assert.equal(f.logs.filter(x=>x.event==='snapshot-read-finished').length,0);await f.pause();done.resolve();await open;const end=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(end.discarded,true);assert.equal(end.discardReason,'demand-changed');assert.equal(end.failureKind,undefined);assert.equal(f.replies.length,0);assert.equal(end.demandEpoch,f.logs.find(x=>x.event==='snapshot-read-start').demandEpoch);}finally{done.resolve();f.dispose();}});
+await check('partial owner errors retain unrelated controls and produce a fixed partial stage rather than raw messages',async()=>{const f=relayFixture(async trace=>{try{await trace.measure('touchpads',async()=>{throw Error('PRIVATE/file/path');});}catch{}return data();});try{await f.open();assert.equal(f.replies.at(-1).snapshot.ready,true);const log=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(log.ok,false);assert.equal(log.stage,'partial');assert.equal(log.failureKind,'owner-read');assert.equal(log.failureStage,'touchpads');assert.equal(log.discardReason,undefined);assert(!JSON.stringify(f.logs).includes('PRIVATE'));}finally{f.dispose();}});
+await check('complete read failure records failed and preserves the original not-ready fallback',async()=>{
+ // SOURCE_CHANGE_DIAGNOSTIC_BEGIN
+ {
+  const findings=[];
+  for(const [events,expected] of [[['input'],'input'],[['game','game'],'game'],[['power','monitor'],'multiple'],[['C:/PRIVATE'],'unspecified']]){
+   const gate=defer();let calls=0;const f=relayFixture(async()=>{if(++calls===1)await gate.promise;return data();});
+   try{const opening=f.open();await flush();for(const source of events)f.relay.invalidate(source);gate.resolve();await opening;await flush();
+    const retired=f.logs.find(row=>row.event==='snapshot-read-finished'&&row.discarded);assert.equal(retired.discardReason,'source-changed');
+    assert.equal(retired.invalidatedBy,expected,'A discarded read must identify its fixed notification source');
+    const current=f.logs.find(row=>row.event==='snapshot-read-finished'&&!row.discarded);assert.equal(current.invalidatedBy,undefined,'Accepted retry cannot inherit a retired read cause');assert.equal(f.timers.size,0);assert(!JSON.stringify(f.logs).includes('PRIVATE'));
+    findings.push({events:events[0].includes('PRIVATE')?['unrecognized']:events,invalidatedBy:retired.invalidatedBy,acceptedRetryTagged:false});
+   }finally{gate.resolve();f.dispose();}
+  }
+  {
+   const gate=defer();let calls=0;const f=await createMirrorHostFixture({readHooks:{frames:async()=>{if(++calls===1)await gate.promise;}}});
+   try{f.ready();const opening=request(f);await flush();assert.equal(calls,1);f.state.monitor={...f.state.monitor,enabled:false};f.monitorChanged();await flush();gate.resolve();await opening;await flush();
+    const retired=f.diagnostics.find(row=>row.event==='snapshot-read-finished'&&row.discarded);assert.equal(retired.discardReason,'source-changed');assert.equal(retired.invalidatedBy,'monitor','Actual Host must pass the original monitor notification source');
+    const ready=f.replies.filter(row=>row.message.type==='snapshot').at(-1).message.snapshot;assert.equal(ready.ready,true);assert.equal(ready.monitor.enabled,false);assert.equal(f.counts.saves,0);assert.equal(f.counts.monitorSaves,0);assert.equal(f.controllerTimerCount(),0);
+    findings.push({actualHost:'monitor',oldReadTagged:true,currentMonitorEnabled:false,configurationWrites:0});
+   }finally{gate.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);assert(Object.values(f.observerStats()).every(value=>value===0));}
+  }
+  {
+   const oldGate=defer(),newGate=defer();let calls=0;const f=relayFixture(async()=>{const number=++calls;if(number===1)await oldGate.promise;else if(number===2)await newGate.promise;return data();});
+   try{const first=f.open();await flush();f.relay.invalidate('input');const nextPeer={...peer,connection:'2',connectionRevision:1};f.relay.connected(nextPeer);const second=f.relay.request({...nextPeer,request:{command:'snapshot',runId}});await flush();f.relay.invalidate('power');oldGate.resolve();await first;await flush();newGate.resolve();await second;await flush();
+    const old=f.logs.find(row=>row.event==='snapshot-read-finished'&&row.discardReason==='peer-changed');assert(old);assert.equal(old.invalidatedBy,undefined,'Peer retirement has its own higher-priority reason');
+    const changed=f.logs.find(row=>row.event==='snapshot-read-finished'&&row.discardReason==='source-changed');assert(changed);assert.equal(changed.invalidatedBy,'power','New peer scope cannot inherit or be cleared by late old scope');assert.equal(f.timers.size,0);
+    findings.push({lateOldPeer:'peer-changed',oldInvalidationOmitted:true,newPeerInvalidatedBy:'power'});
+   }finally{oldGate.resolve();newGate.resolve();f.dispose();}
+  }
+  {
+   const listeners=[],responses=[];let reads=0;const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;return data();},observe:callback=>{listeners.push(callback);return()=>{};},reply:async(_connection,message)=>{responses.push(message);return true;}});
+   try{await relay.request({...peer,request:{command:'snapshot',runId}});await relay.request({...peer,request:{command:'snapshot',runId,subscribe:false}});await relay.request({...peer,request:{command:'snapshot',runId}});await flush();const before=reads;
+    listeners[0]('input');await flush();assert.equal(reads,before,'Tagged late observer must retain original demand-epoch fence');listeners.at(-1)('input');await flush();assert.equal(reads,before+1);
+    findings.push({retiredObserverTagged:true,lateReads:0,currentObserverReads:1});
+   }finally{relay.dispose();}
+  }
+  console.log(JSON.stringify({sourceChangeDiagnosticMeasurements:findings,scope:'Fixed labels only; existing first/fault/slow log cadence, no new read or recovery decision'}));
+ }
+ // SOURCE_CHANGE_DIAGNOSTIC_END
+
+ const f=relayFixture(async()=>{throw Error('PRIVATE');});
+ try{await f.open();assert.equal(f.replies.at(-1).snapshot.ready,false);const end=f.logs.find(x=>x.event==='snapshot-read-finished');assert.equal(end.stage,'failed');assert.equal(end.ok,false);assert.equal(end.failureKind,'read-error');assert.equal(end.failureStage,undefined);assert(!JSON.stringify(f.logs).includes('PRIVATE'));}finally{f.dispose();}
+ // Same original error boundary, with a real source invalidation while the
+ // first read is blocked. The late result is not a successful current view.
+ const gate=defer();let reads=0;
+ const changed=relayFixture(async()=>{if(++reads===1){await gate.promise;throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');}return data();});
+ try{const open=changed.open();await flush();await changed.invalidate();gate.resolve();await open;await flush();
+  const failed=changed.logs.find(x=>x.event==='snapshot-read-finished'&&x.stage==='failed');
+  assert(failed);assert.equal(failed.failureKind,'source-changed');assert.equal(failed.discardReason,'source-changed');assert.equal(failed.discarded,true);
+  assert.equal(changed.replies.at(-1).snapshot.ready,true);assert.equal(changed.timers.size,0);assert(!JSON.stringify(changed.logs).includes('MIRROR_SNAPSHOT_SOURCE_CHANGED'));
+  const accepted=changed.logs.find(row=>row.event==='snapshot-read-finished'&&row.discarded===false&&row.ready===true);
+  assert(accepted,'A current retry after the first discarded read must have its own outcome record');
+  assert.equal(accepted.ok,true);assert.equal(accepted.demandEpoch,failed.demandEpoch);assert(accepted.readId>failed.readId);
+ }finally{gate.resolve();changed.dispose();}
+});
 await check('diagnostic transport failures cannot fail an otherwise healthy snapshot',async()=>{const f=relayFixture(undefined,true);try{await f.open();assert.equal(f.replies.at(-1).snapshot.ready,true);assert.equal(f.timers.size,0);}finally{f.dispose();}});
 const request=async f=>{f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;};
-await check('independent control reads begin concurrently before a delayed frame owner returns',async()=>{const frames=defer(),input=defer(),monitor=defer();const f=await createMirrorHostFixture({readHooks:{frames:()=>frames.promise,input:()=>input.promise,monitor:()=>monitor.promise}});try{f.ready();const pending=request(f);await flush();assert.equal(f.counts.frameReads,1);assert.equal(f.counts.inputReads,1);assert.equal(f.counts.monitorReads,1);input.resolve();await flush();assert.equal(f.counts.touchpadReads,1);assert.equal(f.replies.filter(x=>x.message.type==='snapshot').length,0);frames.resolve();monitor.resolve();await pending;await flush();const snapshot=f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;assert(snapshot?.ready);assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,0);}finally{frames.resolve();input.resolve();monitor.resolve();f.stop();}});
+await check('independent control reads begin concurrently before a delayed frame owner returns',async()=>{const frames=defer(),input=defer(),monitor=defer();const f=await createMirrorHostFixture({sharedGyroInput:true,readHooks:{frames:()=>frames.promise,input:()=>input.promise,monitor:()=>monitor.promise}});try{f.ready();const pending=request(f);await flush();assert.equal(f.counts.frameReads,1);assert.equal(f.counts.inputReads,1);assert.equal(f.counts.monitorReads,1);input.resolve();await flush();assert.equal(f.counts.touchpadReads,1);assert.equal(f.replies.filter(x=>x.message.type==='snapshot').length,0);frames.resolve();monitor.resolve();await pending;await flush();const snapshot=f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;assert(snapshot?.ready);assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,0);}finally{frames.resolve();input.resolve();monitor.resolve();f.stop();}
+ // Current shared input is display-only. Reopening reads again; action defaults
+ // always call the original settings owner, not a retained display promise.
+ const measurements=[];
+ for(const dedicated of [false,true]){
+  const initial={version:1,entries:{},rtss:{}};
+  if(dedicated)initial.entries['game.exe']={enabled:true,displayName:'Fixture Game',ac:{tdpMax:20},dc:{tdpMax:10},padPersona:'follow',gyroOverride:'follow'};
+  const h=await createMirrorHostFixture({initial,sharedGyroInput:true});
+  try{
+   h.state.input.gyroMotion={enabled:true,preset:'racing'};h.state.input.outputTarget={persona:'steamdeck',gyroEnabled:true,buttonMappingEnabled:true};h.ready();
+   let view=await request(h);await flush();assert(view?.ready);assert.equal(h.counts.inputReads,1,'A game display must share one original input read');assert.equal(view.game.fields.gyroPreset.value,'racing');assert.equal(view.game.fields.gyroEnabled.value,'on');
+   const first=structuredClone(view);
+   h.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();h.state.input.gyroMotion.preset='steam';
+   view=await request(h);await flush();assert(view?.ready);assert.equal(h.counts.inputReads,2);assert.equal(view.game.fields.gyroPreset.value,'steam');
+   for(const key of ['saves','inputSaves','monitorSaves','fxSoundWrites'])assert.equal(h.counts[key],0);
+   measurements.push({dedicated,firstInputReads:1,reopenedInputReads:h.counts.inputReads,firstPreset:first.game.fields.gyroPreset.value,currentPreset:view.game.fields.gyroPreset.value,displayWrites:0});
+  }finally{h.stop();await flush();assert.deepEqual(h.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});assert.equal(h.controllerTimerCount(),0);assert.equal(h.fxTimerCount(),0);assert.equal(h.sharedPowerTimerCount(),0);}
+ }
+
+ // A failed shared input read disables its dependent fields only. The existing
+ // read-recovery timer must fetch a new input promise after the owner returns.
+ {
+  let failed=true;const h=await createMirrorHostFixture({sharedGyroInput:true,readHooks:{input:async()=>{if(failed)throw Error('Inert input owner unavailable');}}});
+  try{h.state.input.gyroMotion={enabled:true,preset:'steam'};h.state.input.outputTarget={persona:'steamdeck',gyroEnabled:true,buttonMappingEnabled:true};h.ready();
+   let view=await request(h);await flush();assert(view?.ready);assert.equal(h.counts.inputReads,1);assert.equal(view.game.fields.gyroPreset.supported,false);assert.equal(view.actions.monitor,true);assert(view.frames);assert.equal(h.controllerTimerCount(),1);
+   failed=false;h.advanceController(250);await flush();view=h.replies.filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;assert(view?.ready);assert.equal(h.counts.inputReads,2);assert.equal(view.game.fields.gyroPreset.value,'steam');assert.equal(view.game.fields.gyroPreset.supported,true);assert.equal(h.controllerTimerCount(),0);
+   assert.equal(h.counts.inputSaves,0);assert.equal(h.counts.saves,0);measurements.push({inputFailureRecovery:true,failedReadCount:1,recoveredReadCount:2,currentPreset:view.game.fields.gyroPreset.value,dependentFieldsOnly:true});
+  }finally{h.stop();await flush();assert.deepEqual(h.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});assert.equal(h.controllerTimerCount(),0);assert.equal(h.fxTimerCount(),0);assert.equal(h.sharedPowerTimerCount(),0);}
+ }
+ console.log(JSON.stringify({sharedGyroInputMeasurements:measurements}));
+});
 let beforeCounts=null,afterCounts;
 const completionMeasurements=[];
 const transportMeasurements=[];
@@ -55,6 +225,14 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
   assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,0);assert.equal(f.counts.performanceUpdates??0,0);
  }finally{f.stop();}
 
+ // Controls completing first cannot publish an unobserved audio state.
+ {
+  const audio=defer();const h=await createMirrorHostFixture({readHooks:{fxSound:()=>audio.promise}});
+  try{h.state.game=null;h.ready();const pending=request(h);await flush();assert.equal(h.counts.fxSoundReads,1);assert.equal(h.counts.frameReads,1);assert.equal(h.replies.filter(x=>x.message.type==='snapshot').length,0);
+   audio.resolve();await pending;await flush();const view=h.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;assert(view?.ready);assert.equal(view.audioOptimization.known,true);assert.equal(h.counts.frameReads,1);assert.equal(h.counts.fxSoundReads,1);assert(h.diagnostics.some(x=>x.event==='snapshot-read-finished'&&Number.isFinite(x.audioMs)));assert.equal(h.counts.saves,0);assert.equal(h.counts.fxSoundWrites,0);
+   completionMeasurements.push({timing:'audio-after-controls',controlBatches:1,audioReads:1,noEarlyPublication:true});
+  }finally{audio.resolve();h.stop();await flush();assert.equal(h.fxTimerCount(),0);assert.equal(h.controllerTimerCount(),0);}
+ }
  // Controlled completion order, using the original read hooks/owner clock.
  const snapshots=f=>f.replies.filter(row=>row.message.type==='snapshot').map(row=>row.message.snapshot);
  const counts=f=>({input:f.counts.inputReads,frames:f.counts.frameReads,monitor:f.counts.monitorReads});
@@ -62,7 +240,7 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
   const audio=defer(),frames=defer(),program=defer();let programReads=0;
   const f=await createMirrorHostFixture({readHooks:{fxSound:()=>audio.promise,frames:()=>frames.promise,losslessProgram:()=>{programReads++;return program.promise;}}});
   try{
-   f.state.game=null;f.ready();const pending=request(f);await flush();assert.equal(f.counts.fxSoundReads,1);assert.equal(f.counts.frameReads,0);
+   f.state.game=null;f.ready();const pending=request(f);await flush();assert.equal(f.counts.fxSoundReads,1);assert.equal(f.counts.frameReads,1,'Independent controls must start while audio is pending');assert.equal(snapshots(f).length,0,'Audio is still required for the final admitted view');
    audio.resolve();await flush();assert.equal(snapshots(f).length,0);
    assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});assert.equal(programReads,1);
    f.state.losslessProgram={known:true,running:true};program.resolve();await flush();assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});
@@ -90,7 +268,7 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
   const initialAudio=defer(),frames=defer();let audioReads=0;
   const f=await createMirrorHostFixture({readHooks:{frames:()=>frames.promise,fxSound:async()=>{audioReads++;if(audioReads===1)await initialAudio.promise;}}});
   try{
-   f.state.game=null;f.ready();const pending=request(f);await flush();assert.equal(audioReads,1);assert.equal(f.counts.frameReads,0);
+   f.state.game=null;f.ready();const pending=request(f);await flush();assert.equal(audioReads,1);assert.equal(f.counts.frameReads,1,'Audio capture must not serialize the control batch');
    initialAudio.resolve();await flush();assert.equal(f.fxTimerCount(),1);assert.equal(snapshots(f).length,0);
    f.state.fxSound={...f.state.fxSound,running:true,enabled:true};f.advanceFx();await flush();assert.equal(audioReads,2,'Actual existing audio tick must complete before the blocked frames');
    assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});frames.resolve();await pending;await flush();
@@ -101,7 +279,28 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
   }finally{initialAudio.resolve();frames.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
  }
 });
-await check('a late read from the old game cannot publish stale identity after a game switch',async()=>{const gate=defer();let calls=0;const f=await createMirrorHostFixture({readHooks:{frames:()=>++calls===1?gate.promise:Promise.resolve()}});try{f.ready();const pending=request(f);await flush();f.state.game={...f.state.game,pid:202,processCreated:'birth-B',path:'C:/Other/Game.exe'};f.gameChanged();gate.resolve();await pending;await flush();const snapshots=f.replies.filter(x=>x.message.type==='snapshot').map(x=>x.message.snapshot);assert(snapshots.length);assert(snapshots.every(x=>!x.game||x.game.identity.includes('202')));assert.equal(f.counts.saves,0);}finally{gate.resolve();f.stop();}});
+await check('a late read from the old game cannot publish stale identity after a game switch',async()=>{
+ for(const change of ['target','readiness']){
+  const gate=defer();let calls=0;
+  const f=await createMirrorHostFixture({readHooks:{frames:()=>++calls===1?gate.promise:Promise.resolve()}});
+  try{
+   f.ready();const pending=request(f);await flush();assert.equal(calls,1);
+   if(change==='target'){
+    f.state.game={...f.state.game,pid:202,processCreated:'birth-B',path:'C:/Other/Game.exe'};f.gameChanged();
+   }else f.setGameReadiness(false);
+   gate.resolve();await pending;await flush();
+   const snapshots=f.replies.filter(x=>x.message.type==='snapshot').map(x=>x.message.snapshot);assert(snapshots.length);
+   if(change==='target')assert(snapshots.every(x=>!x.game||x.game.identity.includes('202')));
+   else assert(snapshots.every(x=>x.ready&&x.actions.game===false&&x.actions.monitor===true));
+   const finished=f.diagnostics.filter(row=>row.event==='snapshot-read-finished');
+   const retired=finished.find(row=>row.discarded);
+   assert.equal(retired?.discardReason,'source-changed');
+   assert.equal(retired.invalidatedBy,'game',`Missing game invalidation source: ${change}`);
+   const accepted=finished.find(row=>!row.discarded);assert(accepted?.ready);assert.equal(accepted.invalidatedBy,undefined);
+   assert.equal(calls,2);assert.equal(f.counts.saves,0);assert.equal(f.controllerTimerCount(),0);
+  }finally{gate.resolve();f.stop();await flush();assert(Object.values(f.observerStats()).every(value=>value===0));}
+ }
+});
 await check('settings invalidation during parallel reads retries against the latest schedule',async()=>{
  // Keep settings and target changes independent: a target fence must not mask a broken settings fence.
  for(const change of ['settings','target']){
@@ -169,9 +368,83 @@ await check('settings invalidation during parallel reads retries against the lat
    completionMeasurements.push({timing:externalSettings?'old-peer-with-settings':'old-peer-stable',controlBatches:frameStarts,programReads,currentPeerOnly:true});
   }finally{framesA.resolve();framesB.resolve();program.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
  }
+ // The original schedule owner may return after this demand has retired or
+ // after a newer source event. That completion cannot replace the current cache
+ // and make the next explicit, current user intent fail source validation.
+ for(const boundary of ['peer-change','pause-reopen','settings-event']){
+  const held=defer();let f,loads=0;
+  const owner={
+   getContinuousPerformanceSnapshot:async()=>null,
+   updateContinuousPerformanceControls:async()=>{throw Error('No performance write in schedule read test');},
+   loadPerformanceSchedule:async()=>{loads++;return loads===1?held.promise:structuredClone(f.state.schedule);},
+  };
+  f=await createMirrorHostFixture({performanceOwner:owner});
+  try{
+   f.state.game=null;
+   f.state.schedule.controls={version:1,ac:{mode:'auto',tdp:21,tdpCeiling:55},dc:{mode:'auto',tdp:17,tdpCeiling:30}};
+   const old=structuredClone(f.state.schedule);
+   f.ready();const first=request(f);await flush();assert.equal(loads,1);
+   f.state.schedule.controls.ac.tdp=29;
+   const currentPeer={...peer,connection:boundary==='peer-change'?'2':'1'};
+   if(boundary==='peer-change'){
+    f.emit('deckySidebar.mirrorPeer',currentPeer);
+    f.emit('deckySidebar.mirrorRequest',{...currentPeer,request:{command:'snapshot',runId}});
+    await flush();assert.equal(loads,2);
+   }else if(boundary==='pause-reopen'){
+    f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});
+    await flush();
+    f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});
+    await flush();assert.equal(loads,1,'The existing in-flight read remains single-owner');
+   }else{
+    f.scheduleChanged();await flush();assert.equal(loads,1);
+   }
+   held.resolve(old);await first;await flush();
+   // An explicit post-completion read exposes cache poisoning even when the
+   // stale response itself was correctly withheld from its retired peer.
+   f.emit('deckySidebar.mirrorRequest',{...currentPeer,request:{command:'snapshot',runId}});
+   await flush();
+   const view=f.replies.filter(row=>row.connection===currentPeer.connection&&row.message.type==='snapshot').at(-1)?.message.snapshot;
+   assert(view?.ready);assert(view.actions.global);assert.equal(view.game,null);
+   const id='schedule-intent:1';
+   f.emit('deckySidebar.mirrorRequest',{...currentPeer,request:{command:'global.setField',runId,id,clientId:'schedule-intent',sequence:1,
+    generation:view.generation,revision:view.revision,identity:'',args:{field:'gyroEnabled',value:'on'}}});
+   await flush();
+   const reply=f.replies.filter(row=>row.connection===currentPeer.connection&&row.message.type==='reply'&&row.message.id===id).at(-1)?.message;
+   const measurement={boundary,loads,currentReply:reply??null,inputSaves:f.counts.inputSaves,
+    profileSaves:f.counts.saves,performanceWrites:f.counts.performanceUpdates??0,frameWrites:f.counts.frameApplies,fxWrites:f.counts.fxSoundWrites};
+   console.log(JSON.stringify({retiredScheduleMeasurement:measurement}));
+   assert.equal(reply?.ok,true,'current global intent must remain accepted after a retired schedule read');
+   assert.equal(f.counts.inputSaves,1,'Only the explicit current user intent may save through its original input owner');
+   assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);assert.equal(f.counts.frameApplies,0);assert.equal(f.counts.fxSoundWrites,0);
+  }finally{held.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);assert.deepEqual(f.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});}
+ }
 });
 await check('a control owner error disables only the related operation and retains other fresh fields',async()=>{const f=await createMirrorHostFixture({readHooks:{monitor:async()=>{throw Error('Memory monitor offline');}}});try{f.ready();const snapshot=await request(f);assert(snapshot.ready);assert.equal(snapshot.actions.monitor,false);assert(snapshot.frames);assert(snapshot.touchpads);assert.equal(snapshot.actions.game,true);assert(f.diagnostics.some(x=>x.event==='snapshot-read-finished'&&x.stage==='partial'));}finally{f.stop();}});
-await check('after hiding, diagnostic and owner observers stay idle despite source event storms',async()=>{const f=await createMirrorHostFixture();try{f.ready();await request(f);f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();const reads=f.counts.power,logs=f.diagnostics.length;for(let i=0;i<1000;i++){f.trainerChanged();f.scheduleChanged();f.monitorChanged();}await flush();assert.equal(f.counts.power,reads);assert.equal(f.diagnostics.length,logs);assert.equal(f.observerStats().schedule,0);}finally{f.stop();}});
+await check('after hiding, diagnostic and owner observers stay idle despite source event storms',async()=>{const f=await createMirrorHostFixture();try{f.ready();await request(f);f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();const reads=f.counts.power,logs=f.diagnostics.length;for(let i=0;i<1000;i++){f.trainerChanged();f.scheduleChanged();f.monitorChanged();}await flush();assert.equal(f.counts.power,reads);assert.equal(f.diagnostics.length,logs);assert.equal(f.observerStats().schedule,0);}finally{f.stop();} const cleanupMeasurements=[];
+ for(const boundary of ['pause','disconnect','dispose'])for(const failUnsubscribe of [false,true]){
+  let releaseCalls=0;
+  const h=await createMirrorHostFixture({policyReadiness:{isGameStatusCurrent:()=>true,subscribeGameTargetReadiness:()=>()=>{releaseCalls++;if(failUnsubscribe)throw Error('inert readiness unsubscribe failure');}}});
+  try{
+   h.ready();await flush();
+   const request=subscribe=>h.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,...(subscribe===undefined?{}:{subscribe})}});
+   const cycles=boundary==='pause'?4:1;
+   for(let cycle=0;cycle<cycles;cycle++){
+    request();await flush();assert.equal(h.observerStats().watchers,1,'one current host observation after opening');
+    if(boundary==='pause')request(false);else if(boundary==='disconnect')h.emit('deckySidebar.mirrorPeer',{...peer,connected:false});else h.stop();
+    await flush();
+    const stats=h.observerStats(),row={boundary,failUnsubscribe,cycle,releaseCalls,...stats,controllerTimers:h.controllerTimerCount(),audioTimers:h.fxTimerCount(),readinessSubscribers:h.readinessSubscriberCount()};
+    cleanupMeasurements.push(row);console.log(JSON.stringify({observerCleanupMeasurement:row}));
+    assert.equal(stats.watchers,0,'a failed readiness unsubscribe must still release later host observers');
+    assert.equal(stats.game,0);assert.equal(stats.schedule,0);assert.equal(stats.fan,0);assert.equal(row.controllerTimers,0);assert.equal(row.audioTimers,0);assert.equal(row.readinessSubscribers,0);
+    assert.equal(stats.ipc,boundary==='dispose'?0:2,'only native peer/request listeners remain until complete host stop');
+    const reads=h.counts.power;for(let n=0;n<1000;n++){h.powerChanged();h.scheduleChanged();h.trainerChanged();}await flush();assert.equal(h.counts.power,reads);
+   }
+   for(const key of ['saves','fanSaves','inputSaves','monitorSaves','trainerLaunches','fxSoundWrites'])assert.equal(h.counts[key],0,'cleanup must not issue business writes: '+key);
+  }finally{h.stop();}
+  assert.deepEqual(h.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});
+ }
+ assert.equal(cleanupMeasurements.length,12);
+});
 function clientFixture(buildId){const sent=[],timers=new Map(),handlers=new Map();let next=0;const socket={send:s=>sent.push(JSON.parse(s)),close(){handlers.get('close')?.();},addEventListener:(n,fn)=>handlers.set(n,fn)};const client=new MirrorClient({bootstrap:()=>({endpoint:'ws://127.0.0.1:12345/mirror',runId,token:'TEST-ONLY'}),socket:()=>socket,clientId:'build',buildId,schedule:(fn,ms)=>{timers.set(++next,{fn,ms});return next;},cancel:id=>timers.delete(id)});return {client,sent,timers,handlers};}
 await check('compiled fingerprint accompanies read-only requests and never adds a discovery connection',()=>{const id='a'.repeat(64),f=clientFixture(id);try{f.client.setVisible(true);f.handlers.get('open')();assert.equal(f.sent.length,1);assert.equal(f.sent[0].buildId,id);assert.equal(f.sent[0].command,'snapshot');f.client.setVisible(false);assert.equal(f.timers.size,0);}finally{f.client.dispose();}});
 await check('unbuilt or malformed fingerprint is omitted for legacy clients',()=>{for(const id of [undefined,'development','C:/private/path','A'.repeat(64),'a'.repeat(65)]){const f=clientFixture(id);try{f.client.setVisible(true);f.handlers.get('open')();assert.equal('buildId' in f.sent[0],false);}finally{f.client.dispose();}}});
@@ -213,6 +486,47 @@ await check('read recovery: healthy disabled controls are not mistaken for a fai
  const f=relayFixture(async()=>({...data(),actions:{monitor:false,performance:false}}));try{
   await f.open();for(let n=0;n<1000;n++)await f.invalidate();assert.equal(f.timers.size,0);assert.equal(f.replies.at(-1).snapshot.ready,true);
  }finally{f.dispose();}
+
+ const gate=defer();let hold=false,held=false;
+ const host=await createMirrorHostFixture({reactiveInputs:true,readHooks:{performance:async()=>{if(hold&&!held){held=true;await gate.promise;}}}});
+ const snapshots=()=>host.replies.filter(row=>row.message.type==='snapshot');
+ const latest=()=>snapshots().at(-1)?.message.snapshot;
+ const counts=()=>[host.counts.power,host.counts.schedule,host.counts.inputReads,host.counts.frameReads,snapshots().length];
+ const delta=start=>counts().map((value,index)=>value-start[index]);
+ try{
+  host.state.fan.controlReady=false;
+  host.ready();await flush();const idleObservers=host.observerStats();
+  await request(host);assert.equal(latest().fan.supported,false);assert.equal(latest().powerSource,'ac');
+  assert.equal(host.observerStats().watchers,1);
+  let start=counts();
+  for(let i=0;i<20;i++){host.state.fan.featureEnabled=i%2===1;await flush();}
+  const unchanged=delta(start);assert.equal(latest().fan.supported,false);
+
+  // Work already in flight must not be retried on an equivalent fan view.
+  start=counts();hold=true;host.state.monitor.enabled=false;host.monitorChanged();await flush();assert(held);
+  host.state.fan.featureEnabled=false;await flush();gate.resolve();await flush();
+  const unchangedInFlight=delta(start);
+
+  // Real preset and power-side changes still publish, even without fan support.
+  start=counts();host.state.fan.preset='soft';await flush();assert.equal(latest().fan.preset,'soft');
+  const preset=delta(start);
+  start=counts();host.state.powerSource='dc';await flush();assert.equal(latest().powerSource,'dc');assert.equal(latest().actions.frames,true);
+  const dc=delta(start);
+  start=counts();host.state.powerSource=null;await flush();assert.equal(latest().powerSource,null);assert.equal(latest().actions.frames,false);
+  const unknown=delta(start);
+  start=counts();host.state.powerSource='ac';host.state.fan.preset='aggressive';await flush();
+  assert.equal(latest().powerSource,'ac');assert.equal(latest().fan.preset,'aggressive');assert.equal(latest().actions.frames,true);
+  const combined=delta(start);
+  start=counts();host.state.fan.preset='balanced';host.state.powerSource='dc';
+  host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();
+  const afterUnsubscribe=delta(start);assert.deepEqual(host.observerStats(),idleObservers);
+  await request(host);assert.equal(latest().powerSource,'dc');assert.equal(latest().fan.preset,'balanced');
+  assert.equal(host.controllerTimerCount(),0);assert.equal(host.counts.fanSaves,0);assert.equal(host.counts.saves,0);assert.equal(host.counts.inputSaves,0);
+  const measured={unchanged,unchangedInFlight,preset,dc,unknown,combined,afterUnsubscribe};
+  console.log(JSON.stringify({fanPowerWatchMeasurement:measured,columns:['powerReads','scheduleReads','inputReads','frameReads','snapshotPublications']}));
+  const zero=[0,0,0,0,0],one=[1,1,1,1,1];
+  assert.deepEqual(measured,{unchanged:zero,unchangedInFlight:one,preset:one,dc:one,unknown:one,combined:one,afterUnsubscribe:zero},'Equivalent fan input must not make, retire, or publish a full snapshot');
+ }finally{gate.resolve();host.stop();await flush();assert.deepEqual(host.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});}
 });
 await check('read recovery: pause and disposal release the single timer and late callbacks remain inert',async()=>{
  for(const boundary of ['pause','disconnect','dispose']){
@@ -238,7 +552,38 @@ await check('read recovery: missed Ready notification refreshes native facts wit
   assert.equal(f.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot.ready,false);assert.equal(f.controllerTimerCount(),1);
   f.state.power={...f.state.power,phase:'ready',hardwareWritesAllowed:true};f.advanceController(250);await flush();
   const snapshot=f.replies.filter(r=>r.message.type==='snapshot').at(-1).message.snapshot;assert.equal(snapshot.ready,true);assert.equal(snapshot.generation,2);assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);assert.equal(f.controllerTimerCount(),0);
- }finally{f.stop();}
+ }finally{f.stop();assert.equal(f.sharedPowerTimerCount(),0);assert.equal(f.sharedPowerDiagnostics().subscriberCount,0);}
+
+ // The real shared source receives a changed fact before an older native read
+ // returns. That old Ready must not enter any business readers. Then native
+ // Ready is observed by the existing read recovery without a Ready event.
+ const gate=defer();let held=false,h;
+ h=await createMirrorHostFixture({readHooks:{power:async()=>{if(!held){held=true;const old=structuredClone(h.state.power);await gate.promise;return old;}}}});
+ try{
+  h.ready();const pending=request(h);await flush();assert(held);
+  h.state.power={...h.state.power,generation:2,phase:'resuming',hardwareWritesAllowed:false,inputReady:false};
+  h.emit('power.lifecycleChanged',{...h.state.power,known:true,publicationRevision:2});await flush();
+  gate.resolve();await pending;await flush();
+  const waiting=h.replies.filter(r=>r.message.type==='snapshot').at(-1)?.message.snapshot;assert(waiting&&!waiting.ready);assert.equal(waiting.generation,2);
+  assert.deepEqual({input:h.counts.inputReads,frames:h.counts.frameReads,monitor:h.counts.monitorReads},{input:0,frames:0,monitor:0},'A superseded Ready read must stop before the parallel business batch');
+  h.state.power={...h.state.power,phase:'ready',hardwareWritesAllowed:true,inputReady:true};h.advanceController(250);await flush();
+  const current=h.replies.filter(r=>r.message.type==='snapshot').at(-1)?.message.snapshot;assert(current?.ready);assert.equal(current.generation,2);
+  const counts={input:h.counts.inputReads,frames:h.counts.frameReads,monitor:h.counts.monitorReads};assert.deepEqual(counts,{input:1,frames:1,monitor:1});
+  const reads=h.counts.power;h.advanceSharedPower(750);await flush();
+  assert.equal(h.sharedPowerDiagnostics().snapshot.phase,'ready');assert.equal(h.sharedPowerTimerCount(),0);
+  assert.deepEqual({input:h.counts.inputReads,frames:h.counts.frameReads,monitor:h.counts.monitorReads},counts,'Later same-state shared confirmation must not reread all controls');assert.equal(h.counts.power,reads);
+  for(let n=0;n<1000;n++)h.emit('power.lifecycleChanged',{...h.state.power,known:true,publicationRevision:3+n});await flush();
+  assert.equal(h.counts.power,reads);assert.equal(h.controllerTimerCount(),0);assert.equal(h.sharedPowerTimerCount(),0);
+  for(const name of ['saves','inputSaves','performanceUpdates','frameApplies','monitorSaves','monitorApplies','fxSoundWrites'])assert.equal(h.counts[name]??0,0,name);
+  console.log(JSON.stringify({sharedPowerHostMeasurement:{boundary:'changed-before-native-return-then-missed-Ready',counts,nativeSnapshotReads:h.counts.power,sharedPowerReads:h.counts.sharedPowerReads,sharedDiagnostics:h.sharedPowerDiagnostics(),duplicatePublications:1000,businessWrites:0}}));
+  const retired=h.diagnostics.filter(row=>row.event==='snapshot-read-finished'&&row.discarded);
+  assert.equal(retired.length,1);
+  assert.equal(retired[0].failureKind,'source-changed');assert.equal(retired[0].discardReason,'source-changed');
+  const currentReceipt=h.diagnostics.find(row=>row.event==='snapshot-read-finished'&&!row.discarded);
+  assert.ok(currentReceipt);assert.equal(currentReceipt.invalidatedBy,undefined,'The current retry must not inherit the retired read cause');
+  console.log(JSON.stringify({sharedPowerDiscardMeasurement:{discardedReads:retired.length,source:retired[0].invalidatedBy,currentRetryTagged:'invalidatedBy' in currentReceipt}}));
+  assert.equal(retired[0].invalidatedBy,'power','A newer shared power fact that supersedes the direct read must identify its source');
+ }finally{gate.resolve();h.stop();await flush();assert.equal(h.sharedPowerTimerCount(),0);assert.equal(h.sharedPowerDiagnostics().subscriberCount,0);assert.equal(h.controllerTimerCount(),0);assert.equal(h.fxTimerCount(),0);assert.equal(h.observerStats().ipc,0);}
 });
 
 await check('read recovery: unrelated monitor intent still reaches its owner during a performance outage and is not replayed',async()=>{
@@ -519,11 +864,321 @@ async function speedCompletionBoundaries(){
  }
 }
 
+await check('updater teardown failure cannot strand the next authenticated status connection',async()=>{
+ const store=load(src('decky-plugin/src/deckyStoreClient.ts'));
+ const protocol=load(src('decky-plugin/src/deckyUpdaterProtocol.ts'));
+ const {createDeckyUpdaterService}=load(src('src/bridge/deckyUpdaterService.ts'),{'../../decky-plugin/src/deckyStoreClient':store,'../../decky-plugin/src/deckyUpdaterProtocol':protocol});
+ const measurements=[];
+ for(const boundary of ['pause','disconnect','replacement','dispose'])for(const failStop of [false,true]){
+  let stopCalls=0,liveObservers=0,effects=0;const notifications=new Set(),messages=[];
+  const state={phase:'idle',message:'inert update status',percent:0};
+  const service=createDeckyUpdaterService({version:'0.0.39',read:()=>({state,target:null}),ready:()=>true,gameRunning:()=>false,powerReady:()=>true,
+   check:async()=>{effects++;},download:async()=>{effects++;return true;},install:async()=>{effects++;},validateInstall:async()=>{effects++;},
+   observe:changed=>{liveObservers++;notifications.add(changed);return()=>{stopCalls++;liveObservers--;notifications.delete(changed);if(failStop)throw Error('inert updater unsubscribe failed');};},
+   reply:async(connection,message)=>{messages.push({connection,...message});return true;}});
+  const status=(p,subscribe=true)=>service.request({...p,request:{command:'updater.status',runId:p.runId,subscribe}});
+  const current={connection:'2',runId:'b'.repeat(32)},retired={...peer};
+  let thrown='';
+  try{
+   service.connected(retired);status(retired);await flush();assert.equal(liveObservers,1);const oldNotify=[...notifications][0];
+   try{
+    if(boundary==='pause')status(retired,false);
+    else if(boundary==='disconnect')service.connected({...retired,connected:false});
+    else if(boundary==='replacement')service.connected(current);
+    else service.dispose();
+   }catch(error){thrown=String(error.message??error);}
+   const row={boundary,failStop,thrown,stopCalls,liveObservers};measurements.push(row);console.log(JSON.stringify({updaterStopMeasurement:row}));
+   assert.equal(thrown,'','failed updater unsubscribe must not interrupt connection replacement or shutdown');
+   assert.equal(stopCalls,1);assert.equal(liveObservers,0);
+   if(boundary==='dispose'){
+    assert.doesNotThrow(()=>service.dispose());service.connected(current);status(current);await flush();
+    assert.equal(stopCalls,1);assert.equal(liveObservers,0);
+   }else{
+    if(boundary==='pause')status(retired,false);
+    else {const count=messages.length;status(retired);await flush();assert.equal(messages.length,count,'retired peer cannot restore observation after disconnect/replacement');}
+    assert.equal(stopCalls,1,'a retired failing stop callback must not be invoked twice');
+    if(boundary!=='replacement')service.connected(current);
+    status(current);await flush();assert.equal(liveObservers,1);assert(protocol.validUpdaterView(messages.at(-1).view));assert.equal(messages.at(-1).connection,current.connection);
+    const after=messages.length;oldNotify();await flush();assert.equal(messages.length,after,'late old observer cannot publish a duplicate unchanged current status');
+    assert.doesNotThrow(()=>service.dispose());assert.equal(stopCalls,2);assert.equal(liveObservers,0);
+   }
+   assert.equal(effects,0,'status recovery never checks/downloads/installs or validates installation');
+  }finally{try{service.dispose();}catch{}}
+ }
+ assert.equal(measurements.length,8);
+});
+
+await check('updater host releases every independent observation after one teardown callback fails',async()=>{
+ if(updaterPowerOnly){await exerciseUpdaterPowerBoundary(updaterPowerMode);return;}
+ const store=load(src('decky-plugin/src/deckyStoreClient.ts')),protocol=load(src('decky-plugin/src/deckyUpdaterProtocol.ts'));
+ const updater=load(src('src/bridge/deckyUpdaterService.ts'),{'../../decky-plugin/src/deckyStoreClient':store,'../../decky-plugin/src/deckyUpdaterProtocol':protocol});
+ const rows=[];
+ for(const boundary of ['pause','disconnect','stop'])for(const failAt of ['none','state','game','power']){
+  const observers=new Map(),stopCalls=[],messages=[];let extension=null,effects=0,ensureCalls=0;
+  const install=(kind,callback)=>{assert(!observers.has(kind));observers.set(kind,callback);return()=>{stopCalls.push(kind);observers.delete(kind);if(failAt===kind)throw Error('inert '+kind+' unsubscribe failure');};};
+  const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
+  const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
+   vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
+   './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:(event,callback)=>install(event==='power.suspending'?'suspend':'resume',callback)},
+   './powerLifecycleState':updaterHostPowerFixture(install).ports,
+   './api':{powerLifecycle:{get:async()=>({phase:'ready'})}},
+   './gamedetect':{refreshGameStatusStrict:async()=>{effects++;return null;}},
+   './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
+   './updateManager':{ensureUpdateManager:async()=>{ensureCalls++;},updateSnapshot:{phase:'idle'},updateInfo:{value:null},checkForUpdate:async()=>{effects++;},prepareUpdate:async()=>{effects++;return true;},downloadAndInstall:async()=>{effects++;}},
+   './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},
+   './deckyUpdaterService':updater
+  });
+  const host=startDeckyUpdaterHost(()=>true),request=subscribe=>extension.request({...peer,request:{command:'updater.status',runId,subscribe}});
+  try{
+   multiplex.dispatchDeckyMirrorPeer(peer);request(true);await flush();assert.equal(observers.size,3);assert.equal(ensureCalls,1);
+   if(boundary==='pause')request(false);else if(boundary==='disconnect')multiplex.dispatchDeckyMirrorPeer({...peer,connected:false});else host.stop();
+   await flush();const row={boundary,failAt,remaining:[...observers.keys()],stopCalls:[...stopCalls],effects};rows.push(row);console.log(JSON.stringify({updaterAdapterCleanupMeasurement:row}));
+   assert.equal(observers.size,0,'one updater adapter unsubscribe must not strand later independent observations');
+   assert.deepEqual(stopCalls,['state','game','power']);
+   const count=messages.length;for(let n=0;n<1000;n++)for(const fn of observers.values())fn();await flush();assert.equal(messages.length,count);assert.equal(effects,0);
+   if(boundary!=='stop'){if(boundary==='disconnect')multiplex.dispatchDeckyMirrorPeer(peer);request(true);await flush();assert.equal(observers.size,3);host.stop();assert.equal(observers.size,0);}
+  }finally{host.stop();}
+  assert.equal(observers.size,0);
+ }
+ assert.equal(rows.length,12);
+ await exerciseUpdaterPowerBoundary();
+});
+
+await check('retired updater initialization cannot clear the current connection failure notice',async()=>{
+ const store=load(src('decky-plugin/src/deckyStoreClient.ts')),protocol=load(src('decky-plugin/src/deckyUpdaterProtocol.ts'));
+ const updater=load(src('src/bridge/deckyUpdaterService.ts'),{'../../decky-plugin/src/deckyStoreClient':store,'../../decky-plugin/src/deckyUpdaterProtocol':protocol});
+ const measurements=[];
+ for(const boundary of ['pause-reopen','disconnect-reopen','peer-replacement']){
+  const lateInitialization=defer(),observers=new Map(),messages=[],retiredCallbacks=[];
+  let extension=null,ensureCalls=0,checks=0,downloads=0,installs=0,installValidations=0,powerReads=0;
+  const state={phase:'idle',message:'inert current idle',percent:0};
+  const install=(kind,callback)=>{observers.set(kind,callback);return()=>{retiredCallbacks.push({kind,callback});if(observers.get(kind)===callback)observers.delete(kind);};};
+  const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
+  const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
+   vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
+   './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:(event,callback)=>install(event==='power.suspending'?'suspend':'resume',callback)},
+   './powerLifecycleState':updaterHostPowerFixture(install).ports,
+   './api':{powerLifecycle:{get:async()=>{powerReads++;return {phase:'ready'};}}},
+   './gamedetect':{refreshGameStatusStrict:async()=>{installValidations++;return null;}},
+   './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
+   './updateManager':{ensureUpdateManager:()=>++ensureCalls===1?lateInitialization.promise:Promise.resolve(),updateSnapshot:state,updateInfo:{value:null},checkForUpdate:async()=>{checks++;throw Error('inert current check failure');},prepareUpdate:async()=>{downloads++;return false;},downloadAndInstall:async()=>{installs++;}},
+   './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},'./deckyUpdaterService':updater
+  });
+  const host=startDeckyUpdaterHost(()=>true),status=p=>extension.request({...p,request:{command:'updater.status',runId:p.runId,subscribe:true}});
+  try{
+   multiplex.dispatchDeckyMirrorPeer(peer);status(peer);await flush();assert.equal(observers.size,3);assert.equal(ensureCalls,1);
+   const current=boundary==='peer-replacement'?{...peer,connection:'2',runId:'c'.repeat(32)}:{...peer};
+   if(boundary==='pause-reopen')extension.request({...peer,request:{command:'updater.status',runId,subscribe:false}});
+   else if(boundary==='disconnect-reopen')multiplex.dispatchDeckyMirrorPeer({...peer,connected:false});
+   if(boundary!=='pause-reopen')multiplex.dispatchDeckyMirrorPeer(current);
+   status(current);await flush();assert.equal(ensureCalls,2);assert.equal(observers.size,3);
+   extension.request({...current,request:{command:'updater.request',runId:current.runId,clientId:'aabbccdd-1122-3344-5566-778899aabbcc',id:1,action:'check'}});
+   await flush();const before=messages.filter(r=>r.message.type==='ymcc-updater').at(-1);assert(before);assert.notEqual(before.message.view.message,state.message);assert.equal(checks,1);
+   const count=messages.length,reads=powerReads;lateInitialization.resolve();await flush();
+   const after=messages.filter(r=>r.message.type==='ymcc-updater').at(-1),row={boundary,oldInitializationResolved:true,errorBefore:before.message.view.message,errorAfter:after.message.view.message,extraPackets:messages.length-count,powerReadsBefore:reads,powerReadsAfter:powerReads,checks,downloads,installs,installValidations};
+   measurements.push(row);console.log(JSON.stringify({updaterObserverEpochMeasurement:row}));
+   assert.equal(after.message.view.message,before.message.view.message,'retired updater initialization must preserve the current operation failure');
+   assert.equal(messages.length,count,'retired async completion cannot publish to the new subscriber');
+   for(let n=0;n<1000;n++)for(const old of retiredCallbacks)if(old.kind==='state'||old.kind==='game')old.callback();
+   await flush();assert.equal(messages.length,count);assert.equal(powerReads,reads);
+   state.phase='failed';state.error='fresh current update owner status';observers.get('state')();await flush();
+   const fresh=messages.filter(r=>r.message.type==='ymcc-updater').at(-1);assert.equal(fresh.message.view.message,state.error);assert(protocol.validUpdaterView(fresh.message.view));assert.equal(fresh.connection,current.connection);
+   assert.equal(checks,1);assert.equal(downloads,0);assert.equal(installs,0);assert.equal(installValidations,0);
+  }finally{lateInitialization.resolve();host.stop();await flush();}
+  assert.equal(observers.size,0);
+ }
+ assert.equal(measurements.length,3);
+});
+
+await check('updater observation setup rollback allows an explicit current status retry',async()=>{
+ const store=load(src('decky-plugin/src/deckyStoreClient.ts')),protocol=load(src('decky-plugin/src/deckyUpdaterProtocol.ts'));
+ const updater=load(src('src/bridge/deckyUpdaterService.ts'),{'../../decky-plugin/src/deckyStoreClient':store,'../../decky-plugin/src/deckyUpdaterProtocol':protocol});
+ const measurements=[];
+ for(const recovery of ['same-page','disconnect','page-reopen'])for(const failAt of ['state','game','power','manager']){
+  const observers=new Map(),messages=[],stops=[];let failing=true,effects=0,ensureCalls=0,extension=null;
+  const install=(kind,callback)=>{if(failing&&failAt===kind)throw Error('inert setup '+kind+' unavailable');assert(!observers.has(kind),'no duplicate current observation');observers.set(kind,callback);return()=>{stops.push(kind);if(observers.get(kind)===callback)observers.delete(kind);};};
+  const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
+  const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
+   vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
+   './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:(event,callback)=>install(event==='power.suspending'?'suspend':'resume',callback)},
+   './powerLifecycleState':updaterHostPowerFixture(install).ports,
+   './api':{powerLifecycle:{get:async()=>({phase:'ready'})}},'./gamedetect':{refreshGameStatusStrict:async()=>{effects++;return null;}},
+   './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
+   './updateManager':{ensureUpdateManager:()=>{ensureCalls++;if(failing&&failAt==='manager')throw Error('inert manager setup unavailable');return Promise.resolve();},updateSnapshot:{phase:'idle'},updateInfo:{value:null},checkForUpdate:async()=>{effects++;},prepareUpdate:async()=>{effects++;return false;},downloadAndInstall:async()=>{effects++;}},
+   './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},'./deckyUpdaterService':updater
+  });
+  const host=startDeckyUpdaterHost(()=>true),status=(p,subscribe=true)=>multiplex.dispatchDeckyMirrorRequest({...p,request:{command:'updater.status',runId:p.runId,subscribe}});
+  try{
+   multiplex.dispatchDeckyMirrorPeer(peer);status(peer);await flush();
+   const failure=messages.filter(r=>r.message.type==='ymcc-updater').at(-1)?.message.view;
+   const row={recovery,failAt,remainingAfterFailure:[...observers.keys()],failureReplyPresent:!!failure,failureActions:failure?[failure.canCheck,failure.canDownload,failure.canInstall]:null,ensureCalls,effects};
+   measurements.push(row);console.log(JSON.stringify({updaterSubscriptionRecoveryMeasurement:row}));
+   assert.equal(observers.size,0,'failed updater setup must roll back every earlier observation');
+   assert(failure&&protocol.validUpdaterView(failure),'failed setup must report a bounded current unavailable view');
+   assert.equal(failure.canCheck,false);assert.equal(failure.canDownload,false);assert.equal(failure.canInstall,false);
+   if(recovery==='disconnect'){multiplex.dispatchDeckyMirrorPeer({...peer,connected:false});multiplex.dispatchDeckyMirrorPeer({...peer,connection:'2'});}
+   else if(recovery==='page-reopen')status(peer,false);
+   failing=false;const current=recovery==='disconnect'?{...peer,connection:'2'}:peer;status(current);await flush();
+   assert.equal(observers.size,3,'new explicit status must establish one complete observation after failure');
+   const healthy=messages.filter(r=>r.message.type==='ymcc-updater').at(-1);assert.equal(healthy.connection,current.connection);assert.equal(healthy.message.view.canCheck,true);assert(protocol.validUpdaterView(healthy.message.view));
+   const priorEnsures=ensureCalls;for(let n=0;n<10;n++)status(current);await flush();assert.equal(ensureCalls,priorEnsures);assert.equal(observers.size,3);assert.equal(effects,0);
+   host.stop();assert.equal(observers.size,0);
+  }finally{host.stop();observers.clear();}
+ }
+ assert.equal(measurements.length,12);
+});
+
+// Actual shared reader/model, host and relay. Only native completion and source
+// notifications are inert; no alternate identity/cache/permission model.
+async function jointDisplayFixture({automatic=false,readHooks={},defaultEvents=false}={}){
+ const eventListeners=new Map(),readinessListeners=new Set();let f,invokeNative;const eventSource={on:(name,callback)=>{let set=eventListeners.get(name);if(!set)eventListeners.set(name,set=new Set());set.add(callback);return()=>{set.delete(callback);if(!set.size)eventListeners.delete(name);};},emit:(name,value)=>{for(const callback of [...eventListeners.get(name)??[]])callback(value);}};
+ const model=load(src('src/bridge/gameSteamContextModel.ts'));
+ const readerModule=load(src('src/bridge/gameSteamContext.ts'),{'./gameSteamContextModel':model,
+  './gamedetect':{getCurrentGame:()=>f?.state.game??null,isCurrentGameTarget:()=>f?.state.gameCurrent===true,subscribeGameTargetReadiness:callback=>{if(defaultEvents){readinessListeners.add(callback);callback(false);return()=>readinessListeners.delete(callback);}return()=>{};}},
+  './ipc':{invoke:(...args)=>invokeNative(...args),on:defaultEvents?eventSource.on:()=>()=>{}}},{AbortController,...(defaultEvents?{window:{}}:{})});
+ let uiSubscriptions=0;const slots=[],active=new Set(),sourceListeners=new Set();
+ const wire=slot=>{const game=slot.target,appid=400+game.pid;return {schemaVersion:1,
+  game:{...game,rulesEpoch:'1',powerGeneration:String(slot.generation),processValidated:false},
+  steam:{status:'cached-association',appid,gameId:String(appid),gamePid:game.pid,gameCreated:game.processCreated,gamePath:game.path,
+   gameIdentityGeneration:game.identityGeneration,steamPid:900,steamCreated:'987654321',processEpoch:'1',accountEpoch:'1',processValidated:false,currentSource:false}};};
+ const injectedReader=readerModule.createGameSteamContextReader({getGame:()=>f?.state.game??null,isGameCurrent:()=>f?.state.gameCurrent===true,
+  subscribeInvalidation:callback=>{sourceListeners.add(callback);return()=>sourceListeners.delete(callback);},
+  invoke:invokeNative=async(command,args,options)=>{
+   assert(['gameSteam.context.get','gameSteam.context.refresh'].includes(command));const deferred=defer(),slot={command,target:structuredClone(args.expectedGame),generation:f.state.power.generation,signal:options?.signal,resolve:value=>deferred.resolve(value),wire:()=>wire(slot)};
+   slots.push(slot);active.add(slot);const abort=()=>deferred.reject(Error('Inert native request retired'));
+   options?.signal?.addEventListener('abort',abort,{once:true});if(options?.signal?.aborted)abort();
+   if(automatic||command==='gameSteam.context.refresh')queueMicrotask(()=>slot.resolve(wire(slot)));
+   try{return await deferred.promise;}finally{active.delete(slot);options?.signal?.removeEventListener('abort',abort);}
+  }});
+ const reader=defaultEvents?readerModule.gameSteamContext:injectedReader;
+ const owner={...reader,subscribeInvalidation:callback=>{uiSubscriptions++;const stop=reader.subscribeInvalidation(callback);let retired=false;return()=>{if(!retired){retired=true;uiSubscriptions--;stop();}};}};
+ f=await createMirrorHostFixture({contextOwner:owner,readHooks,...(defaultEvents?{eventSource}:{})});f.state.game.identityGeneration=1;
+ const latest=()=>f.replies.filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;
+ const request=(subscribe=true)=>f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe}});
+ const getSlots=()=>slots.filter(slot=>slot.command==='gameSteam.context.get'),warmCount=()=>slots.filter(slot=>slot.command==='gameSteam.context.refresh').length;
+ const invalidate=()=>{for(const callback of [...sourceListeners])callback();};
+ const finish=async()=>{f.stop();reader.dispose();injectedReader.dispose();await flush();assert.equal(eventListeners.size,0);assert.equal(readinessListeners.size,0);assert.equal(active.size,0);assert.equal(uiSubscriptions,0);assert.equal(sourceListeners.size,0);assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);assert.equal(f.sharedPowerTimerCount(),0);assert(Object.values(f.observerStats()).every(value=>value===0));};
+ return {f,reader,latest,request,getSlots,warmCount,invalidate,wire,active,uiSubscriptions:()=>uiSubscriptions,eventSource,finish};
+}
+await check('optional shared Steam metadata never blocks controls or replays an explicit monitor intent',async()=>{
+ const x=await jointDisplayFixture();try{
+  x.f.ready();x.request();await flush();const snapshot=x.latest();
+  assert(snapshot?.ready,'a missing optional shared reply must not hold the core snapshot');assert.equal(snapshot.gameSteam,undefined);
+  assert(x.f.counts.inputReads>0&&x.f.counts.frameReads>0&&x.f.counts.monitorReads>0,'independent controls must start while the get is pending');
+  assert.equal(x.getSlots().length,1);assert.equal(x.getSlots()[0].signal.aborted,false);assert.equal(snapshot.actions.monitor,true);
+  const request={...peer,request:{command:'monitor.setEnabled',runId,id:'optional:1',clientId:'optional',sequence:1,generation:snapshot.generation,revision:snapshot.revision,args:{enabled:!snapshot.monitor.enabled}}};
+  x.f.emit('deckySidebar.mirrorRequest',request);await flush();assert.equal(x.f.counts.monitorSaves,1);assert.equal(x.f.counts.monitorApplies,1);assert.equal(x.getSlots().length,1);
+  const reply=x.f.replies.filter(row=>row.message.type==='reply').at(-1)?.message;assert.equal(reply?.ok,true);
+  x.f.emit('deckySidebar.mirrorRequest',request);await flush();assert.equal(x.f.counts.monitorSaves,1);assert.equal(x.f.counts.monitorApplies,1);
+ }finally{await x.finish();}
+});
+await check('optional shared metadata completes the same fast snapshot and never creates a warm loop',async()=>{
+ const x=await jointDisplayFixture({automatic:true});try{
+  x.f.ready();x.request();await flush();const snapshot=x.latest();assert(snapshot?.ready);assert.equal(snapshot.gameSteam?.game.pid,x.f.state.game.pid);assert.equal(snapshot.gameSteam?.steam.status,'cached-association');
+  assert.equal(snapshot.gameSteam.steam.processValidated,false);assert.equal(snapshot.gameSteam.steam.currentSource,false);
+  assert.equal(x.getSlots().length,1);const reads=x.f.counts.frameReads,warms=x.warmCount(),snapshots=x.f.replies.filter(row=>row.message.type==='snapshot').length;
+  await flush();await flush();assert.equal(x.getSlots().length,1);assert.equal(x.warmCount(),warms);assert.equal(x.f.counts.frameReads,reads);assert.equal(x.f.replies.filter(row=>row.message.type==='snapshot').length,snapshots);
+ }finally{await x.finish();}
+});
+await check('late optional shared metadata repaints once through the existing display without another query',async()=>{
+ const x=await jointDisplayFixture();try{
+  x.f.ready();x.request();await flush();assert(x.latest()?.ready);const slot=x.getSlots()[0],reads=x.f.counts.frameReads,warms=x.warmCount(),initial=structuredClone(x.latest()),inputReads=x.f.counts.inputReads,monitorReads=x.f.counts.monitorReads,powerReads=x.f.counts.power;
+  slot.resolve(slot.wire());await flush();const snapshot=x.latest();assert.equal(snapshot.gameSteam?.game.pid,x.f.state.game.pid);assert.equal(snapshot.gameSteam?.steam.gameId,String(400+x.f.state.game.pid));
+  assert.equal(x.getSlots().length,1);assert.equal(x.warmCount(),warms);assert.equal(x.f.counts.frameReads,reads,'Late optional metadata must not repeat business-owner reads');
+  const count=x.f.replies.length;await flush();await flush();assert.equal(x.f.replies.length,count);assert.equal(x.getSlots().length,1);
+  // Metadata completion retains the original rendered control receipt. An
+  // explicit command from it is still validated/applied by the original owner.
+  assert.equal(snapshot.revision,initial.revision);assert.equal(snapshot.generation,initial.generation);assert.deepEqual(snapshot.actions,initial.actions);
+  assert.equal(x.f.counts.inputReads,inputReads);assert.equal(x.f.counts.monitorReads,monitorReads);assert.equal(x.f.counts.power,powerReads);
+  x.f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'monitor.setEnabled',runId,id:'display:1',clientId:'display',sequence:1,generation:initial.generation,revision:initial.revision,args:{enabled:!initial.monitor.enabled}}});await flush();
+  const reply=x.f.replies.filter(row=>row.message.type==='reply').at(-1)?.message;assert.equal(reply?.ok,true);assert.equal(x.f.counts.monitorSaves,1);assert.equal(x.f.counts.monitorApplies,1);
+
+ }finally{await x.finish();}
+
+ // Existing full read wins over a late display completion and carries the
+ // metadata itself. It must not be invalidated into a third control batch.
+ {
+  const hold=defer();let blocked=false;const x=await jointDisplayFixture({readHooks:{frames:async()=>{if(blocked)await hold.promise;}}});
+  try{x.f.ready();x.request();await flush();const first=x.latest();assert(first?.ready);blocked=true;x.f.monitorChanged();await flush();const reads=x.f.counts.frameReads;assert.equal(reads,2);const slot=x.getSlots()[0];slot.resolve(slot.wire());await flush();assert.equal(x.f.counts.frameReads,reads);hold.resolve();await flush();assert(x.latest()?.ready);assert(x.latest().gameSteam);assert.equal(x.f.counts.frameReads,reads);assert.equal(x.f.counts.monitorSaves,0);}
+  finally{hold.resolve();await x.finish();}
+ }
+ // A queued display delivery may not paint over a real source/peer boundary.
+ for(const boundary of ['source','pause','peer','dispose']){
+  let release;const held=new Promise(resolve=>{release=resolve;});const messages=[];let reads=0;const identity='current-game';
+  const native={generation:1,ready:true,game:{label:'A',identity,fields:{}},fan:{supported:false,enabled:false,preset:'',choices:[]}};
+  const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;return native;},observe:()=>()=>{},reply:async(connection,message)=>{messages.push({connection,message:structuredClone(message)});if(messages.length===1)await held;return true;}});
+  try{const open=relay.request({...peer,request:{command:'snapshot',runId}});await flush();const before=reads;
+   assert.equal(relay.repaintGameSteam?.(identity,1,undefined),true);
+   const metadata={schemaVersion:1,game:null,steam:{status:'unavailable',reason:'pending'}};
+   // Exact display content is opaque to action permissions; this private test
+   // checks queue ownership only, separate from the real shared DTO above.
+   assert.equal(relay.repaintGameSteam(identity,1,metadata),true);
+   if(boundary==='source')relay.invalidate();else if(boundary==='pause')await relay.request({...peer,request:{command:'snapshot',runId,subscribe:false}});else if(boundary==='peer')relay.connected({...peer,connection:'2'});else relay.dispose();
+   release();await open;await flush();assert(messages.slice(1).every(row=>!row.message.snapshot.gameSteam),'Retired display patch must not be delivered');assert.equal(reads,boundary==='source'?before+1:before);
+  }finally{release();relay.dispose();await flush();}
+ }
+});
+await check('hiding optional metadata cancels only this sidebar subscriber and reopening restores it',async()=>{
+ const x=await jointDisplayFixture();try{
+  x.f.ready();x.request();await flush();assert(x.latest()?.ready);const slot=x.getSlots()[0],other=x.reader.read();await flush();assert.equal(x.getSlots().length,1);
+  x.request(false);await flush();assert.equal(x.uiSubscriptions(),0);assert.equal(slot.signal.aborted,false,'another actual reader subscriber still owns the same IPC');const replies=x.f.replies.length;
+  slot.resolve(slot.wire());const otherResult=await other;await flush();assert.equal(otherResult.steam.status,'cached-association');assert.equal(x.f.replies.length,replies,'hidden completion cannot repaint');
+  const warms=x.warmCount();x.invalidate();await flush();assert.equal(x.warmCount(),warms);assert.equal(x.getSlots().length,1);
+  x.request();await flush();assert(x.latest()?.ready);assert.equal(x.latest().gameSteam,undefined);assert.equal(x.getSlots().length,2);const fresh=x.getSlots()[1];fresh.resolve(fresh.wire());await flush();assert.equal(x.latest().gameSteam?.steam.status,'cached-association');
+ }finally{await x.finish();}
+});
+await check('shared client epoch and game ABA discard optional metadata from retired requests',async()=>{
+ // Default reader and real host receive the same native transport events.
+ {
+  const x=await jointDisplayFixture({defaultEvents:true});try{
+   x.f.ready();x.request();await flush();
+   const source={pid:900,processCreated:'987654321',processEpoch:'1',accountEpoch:'1',sourceAvailable:true,presence:1,windowsSessionKnown:true,windowsSession:1};
+  const emit=(name,value)=>x.eventSource.emit(name,structuredClone(value));
+   emit('gameSteam.context.sourceChanged',source);await flush();
+   const slot=x.getSlots().at(-1),reads=x.f.counts.frameReads,gets=x.getSlots().length;
+   for(let i=0;i<20;i++){emit('gameSteam.context.sourceChanged',source);await flush();}
+   console.log(JSON.stringify({defaultSourceDuplicateMeasurements:{frameReadsBefore:reads,frameReadsAfter:x.f.counts.frameReads,getsBefore:gets,getsAfter:x.getSlots().length,pendingAborted:slot.signal.aborted}}));
+   assert.equal(x.f.counts.frameReads,reads,'Duplicate complete source delivery must not repeat business reads');
+   assert.equal(x.getSlots().length,gets);assert.equal(slot.signal.aborted,false);
+   const changed=async(name,value)=>{const old=x.getSlots().at(-1);emit(name,value);await flush();assert.equal(old.signal.aborted,true,'Real or unknown source edge must retire pending metadata');};
+   for(const patch of [{processEpoch:'2'},{accountEpoch:'2'},{processCreated:'987654322'},{pid:901},{windowsSession:2}]){await changed('gameSteam.context.sourceChanged',{...source,...patch});await changed('gameSteam.context.sourceChanged',source);}
+   for(const patch of [{presence:-1},{presence:0},{sourceAvailable:false},{windowsSessionKnown:false,windowsSession:0},{processEpoch:'01'},{processEpoch:'18446744073709551616'},{extraAuthority:true}]){await changed('gameSteam.context.sourceChanged',{...source,...patch});await changed('gameSteam.context.sourceChanged',source);}
+   await changed('gameSteam.context.sourceChanged',null);await changed('gameSteam.context.sourceChanged',source);
+   const legacy={pid:900,processCreated:'987654321',processEpoch:'1',accountEpoch:'1'};await changed('gameSteam.context.sourceChanged',legacy);await changed('gameSteam.context.sourceChanged',legacy);
+   const completion={pid:x.f.state.game.pid,identityGeneration:1};await changed('gameSteam.context.changed',completion);await changed('gameSteam.context.changed',completion);
+   await changed('power.resuming',{});await changed('power.resuming',{});await changed('gameSteam.context.sourceChanged',source);
+   const final=x.getSlots().at(-1);final.resolve(final.wire());await flush();assert(x.latest().gameSteam);
+  }finally{await x.finish();}
+ }
+ const x=await jointDisplayFixture();try{
+  x.f.ready();x.request();await flush();assert(x.latest()?.ready);const old=x.getSlots()[0],original={...x.f.state.game};
+  x.invalidate();await flush();assert.equal(old.signal.aborted,true);assert.equal(x.getSlots().length,2);assert.equal(x.latest().gameSteam,undefined);
+  old.resolve(old.wire());await flush();assert.equal(x.latest().gameSteam,undefined);
+  const second=x.getSlots()[1];second.resolve(second.wire());await flush();assert.equal(x.latest().gameSteam?.game.pid,original.pid);
+  x.f.state.game={...original,pid:original.pid+1,path:'C:/Games/Other.exe',processCreated:'123456790',identityGeneration:2};x.f.gameChanged();await flush();const B=x.getSlots().at(-1);assert.equal(B.target.pid,original.pid+1);
+  x.f.state.game={...original};x.f.gameChanged();await flush();assert.equal(B.signal.aborted,true);const A=x.getSlots().at(-1);assert.notEqual(A,B);assert.equal(x.latest().gameSteam,undefined);
+  B.resolve(B.wire());await flush();assert.equal(x.latest().gameSteam,undefined);A.resolve(A.wire());await flush();assert.equal(x.latest().gameSteam?.game.pid,original.pid);
+ }finally{await x.finish();}
+});
+await check('optional metadata retires across suspended Ready and final host stop without a new timer',async()=>{
+ const x=await jointDisplayFixture();try{
+  x.f.ready();x.request();await flush();const old=x.getSlots()[0];assert(x.latest()?.ready);
+  x.f.state.power={...x.f.state.power,generation:2,phase:'suspended',hardwareWritesAllowed:false,inputReady:false};
+  x.f.emit('power.lifecycleChanged',{...x.f.state.power,known:true,publicationRevision:1,observedNotificationSequence:1});x.invalidate();await flush();assert.equal(old.signal.aborted,true);assert.equal(x.latest().ready,false);assert.equal(x.latest().gameSteam,undefined);
+  const gets=x.getSlots().length;old.resolve(old.wire());await flush();assert.equal(x.getSlots().length,gets);
+  x.f.state.power={...x.f.state.power,phase:'ready',hardwareWritesAllowed:true,inputReady:true};x.f.emit('power.lifecycleChanged',{...x.f.state.power,known:true,publicationRevision:2,observedNotificationSequence:2});x.invalidate();await flush();assert(x.latest()?.ready);
+  const fresh=x.getSlots().at(-1);assert.equal(fresh.generation,2);fresh.resolve(fresh.wire());await flush();assert.equal(x.latest().gameSteam?.game.powerGeneration,'2');
+  x.invalidate();await flush();const final=x.getSlots().at(-1);const replies=x.f.replies.length;x.f.stop();await flush();assert.equal(final.signal.aborted,true);assert.equal(x.uiSubscriptions(),0);final.resolve(final.wire());await flush();assert.equal(x.f.replies.length,replies);
+ }finally{await x.finish();}
+});
+
+
 const registeredNames=registry.map(row=>row.name);
 assert.equal(new Set(registeredNames).size,registeredNames.length,'Original readiness names must be unique');
 const unknown=requestedCases.filter(name=>!registeredNames.includes(name));
 if(unknown.length)selectionError='Unknown exact readiness case: '+unknown.join(', ');
-const selected=registry.filter(({name})=>requestedCases.length?requestedCases.includes(name):readRecoveryOnly?name.startsWith('read recovery:'):legacyOnly?!name.startsWith('read recovery:'):true);
+const isReadRecoveryCase=name=>/^(?:read recovery:|updater |retired updater )/.test(name);
+const selected=registry.filter(({name})=>requestedCases.length?requestedCases.includes(name):readRecoveryOnly?isReadRecoveryCase(name):legacyOnly?!isReadRecoveryCase(name):true);
 if(!selected.length)selectionError=selectionError||'Empty readiness case selection';
 if(selectionError){
  const report={status:'rejected',selected:'none',requestedCases,selectedNames:[],skipped:registeredNames,selectedResults:[],checks:0,preparationStarted:false,callbacksStarted:0,error:selectionError};
@@ -534,7 +1189,8 @@ if(selectionError){
  const {validation}=await import('./fixtures/decky_task_paths.mjs');
  const steam=load(src('decky-plugin/src/steamRunningContext.ts'));
  ({ReadOnlyMirrorRelay}=load(src('src/bridge/deckyMirrorRelay.ts'),{'../../decky-plugin/src/steamRunningContext':steam}));
- ({MirrorClient}=load(src('decky-plugin/src/mirrorClient.ts'),{'./steamRunningContext':steam}));
+  const gameSteamModel=load(src('src/bridge/gameSteamContextModel.ts'));
+  ({MirrorClient}=load(src('decky-plugin/src/mirrorClient.ts'),{'./steamRunningContext':steam,'../../src/bridge/gameSteamContextModel':gameSteamModel}));
  skipped.push(...registeredNames.filter(name=>!selected.some(row=>row.name===name)));
  for(const {name,fn} of selected){
   if(selection==='all'){await fn();cases.push(name);continue;}

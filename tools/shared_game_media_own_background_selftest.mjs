@@ -1,7 +1,8 @@
 import fs from'node:fs';import path from'node:path';import{createRequire}from'node:module';import{strict as assert}from'node:assert';
-const dcPower=process.argv.includes('--dc-power');
+const dcPower=process.argv.includes('--dc-power'),editorCover=process.argv.includes('--editor-cover');
+if(editorCover&&(!process.argv.includes('--app-player')||dcPower))throw Error('editor cover requires only original app-player group');
 if(dcPower&&process.argv.includes('--app-player'))throw Error('select only one directed group');
-for(let i=3;i<process.argv.length;i++){if(process.argv[i]==='--app-source'){if(!process.argv[++i])throw Error('--app-source requires a path');}else if(!['--app-player','--dc-power'].includes(process.argv[i]))throw Error('unknown selection: '+process.argv[i]);}
+for(let i=3;i<process.argv.length;i++){if(process.argv[i]==='--app-source'){if(!process.argv[++i])throw Error('--app-source requires a path');}else if(!['--app-player','--dc-power','--editor-cover'].includes(process.argv[i]))throw Error('unknown selection: '+process.argv[i]);}
 const project=path.resolve(import.meta.dirname,'..'),out=process.argv[2];if(!out)throw Error('output directory required');const require=createRequire(project+'/package.json'),{build}=require('esbuild');
 
 // Extend the original consumer with the actual App.vue playback handlers. Only
@@ -12,17 +13,19 @@ if(dcPower||process.argv.includes('--app-player')){
  const at=process.argv.indexOf('--app-source'),appPath=at>=0?path.resolve(process.argv[at+1]):project+'/src/App.vue';
  const app=fs.readFileSync(appPath,'utf8'),script=app.match(/<script setup[^>]*>([\s\S]*?)<\/script>/)?.[1];assert.ok(script,'App script missing');
  const tree=ts.createSourceFile('App.ts',script,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS),names=new Set(['reconcileBackgroundVideo','onBackgroundVideoError','onBackgroundVideoMediaError','scheduleSharedBackgroundRetry','onBackgroundVideoPlaying','clearBackgroundRetry','suspendBackgroundVideo','dynamicBackgroundAllowed']);
+ if(tree.statements.some(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='backgroundVideoShouldPlay'))names.add('backgroundVideoShouldPlay');
+ if(editorCover)for(const name of ['acquireControllerEditorBackgroundHold','onBackgroundVideoPause','onBackgroundVideoCanPlay'])names.add(name);
  if(dcPower)for(const name of ['destroyHls','invalidateBackgroundMedia','isHlsUrl','isVideoPlaybackBlockedByPower','setupBackgroundVideo','shouldSuspendBackgroundVideo','reconcileBackgroundLifecycle','resumeBackgroundVideo','onBackgroundVideoPause','onBackgroundVideoCanPlay'])names.add(name);
  for(const name of names)assert.ok(tree.statements.some(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name),'production App function missing: '+name);
  const bodies=tree.statements.filter(n=>ts.isFunctionDeclaration(n)&&names.has(n.name?.text)).map(n=>n.getText(tree)).join('\n');
  const binding=app.match(/@error="([^"]+)"/)?.[1];assert.ok(binding,'real video error binding missing');
- const make=new Function('env',ts.transpileModule('with(env){'+bodies+';return {error:(event)=>('+binding+')(event),play:reconcileBackgroundVideo,playing:onBackgroundVideoPlaying,clear:clearBackgroundRetry,suspend:suspendBackgroundVideo,allowed:dynamicBackgroundAllowed'+(dcPower?',setup:setupBackgroundVideo,lifecycle:reconcileBackgroundLifecycle,resume:resumeBackgroundVideo,pause:onBackgroundVideoPause,canPlay:onBackgroundVideoCanPlay,retry:scheduleSharedBackgroundRetry,epoch:()=>backgroundMediaEpoch,hls:()=>hlsInstance':'')+'};}',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText);
+ const make=new Function('env',ts.transpileModule('with(env){'+bodies+';return {error:(event)=>('+binding+')(event),play:reconcileBackgroundVideo,playing:onBackgroundVideoPlaying,clear:clearBackgroundRetry,suspend:suspendBackgroundVideo,allowed:dynamicBackgroundAllowed'+(editorCover?',hold:acquireControllerEditorBackgroundHold,pause:onBackgroundVideoPause,canPlay:onBackgroundVideoCanPlay':'')+(dcPower?',setup:setupBackgroundVideo,lifecycle:reconcileBackgroundLifecycle,resume:resumeBackgroundVideo,pause:onBackgroundVideoPause,canPlay:onBackgroundVideoCanPlay,retry:scheduleSharedBackgroundRetry,epoch:()=>backgroundMediaEpoch,hls:()=>hlsInstance':'')+'};}',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText);
  const captured={key:'steam-1361510',assetId:'3b507d102803210fd2601475605a7275',bindingRevision:6,kind:'video'};
  const reports=[],tests=[];const dcRuntime=dcPower?await createDcPowerRuntime(out):null;let checks=0;const same=(a,b,m)=>{checks++;assert.deepEqual(a,b,m);};
  function fixture(options={}){let id=0;const timers=new Map(),reports=[],events=[],calls=[],ticks=[],hls=[];const ref=value=>({value});
   if(dcPower)dcRuntime.reset();
-  const video={error:null,readyState:4,paused:true,ended:false,currentTime:8,src:'https://game-media.localhost/video/'+captured.assetId+'.mp4',pause(){this.paused=true;calls.push('pause');},removeAttribute(k){if(k==='src'){this.src='';calls.push('remove:src');}},load(){this.error=null;calls.push('load');},play(){this.paused=false;calls.push('play');return Promise.resolve();}};
-  const env={wallpaperPowerPaused:ref(false),backgroundVideo:ref(video),backgroundKind:ref('video'),backgroundSource:ref('dynamic'),backgroundUrl:ref(video.src),backgroundVideoSuspended:ref(false),documentVisible:ref(true),nativeWindowVisible:ref(true),lowBatteryStatic:ref(false),videoDesired:ref(false),backgroundVideoGeneration:ref(1),backgroundMediaEpoch:1,backgroundRetryTimer:null,backgroundRetryUntil:0,sharedBackgroundRetryIdentity:'',sharedBackgroundRetryAttempts:0,activeDynamicMediaAsset:{...captured},backgroundFallbackUrls:ref([]),backgroundFallbackIndex:ref(0),dynamicBackgroundActive:ref(true),enabled:true,powerBlocked:false,sharedGameMedia:{playbackFailed(e){reports.push({...e});return Promise.resolve();}},getDynamicBackgroundConfig:()=>({enabled:env.enabled}),isVideoPlaybackBlockedByPower:()=>env.powerBlocked,invalidateBackgroundMedia:()=>++env.backgroundMediaEpoch,shouldSkipVideoReconcile:(a,b,playing)=>a===b&&(b?playing:!playing),isHlsUrl:()=>false,nextTick:async fn=>fn?.(),setupBackgroundVideo:async()=>{calls.push('setup');env.backgroundVideo.value.src=env.backgroundUrl.value;env.backgroundVideo.value.readyState=4;},scheduleBackgroundRetry:()=>calls.push('fixed-retry'),window:{setTimeout(fn,ms){timers.set(++id,{fn,ms});return id;},clearTimeout(n){timers.delete(n);},dispatchEvent(e){events.push(e);}},console:{warn(){}},CustomEvent:globalThis.CustomEvent};
+  const video={error:null,readyState:4,paused:true,ended:false,currentTime:8,src:'https://game-media.localhost/video/'+captured.assetId+'.mp4',pause(){this.paused=true;calls.push('pause');},getAttribute(k){return k==='src'&&this.src?this.src:null;},removeAttribute(k){if(k==='src'){this.src='';calls.push('remove:src');}},load(){this.error=null;calls.push('load');},play(){this.paused=false;calls.push('play');return Promise.resolve();}};
+  const env={backgroundEditorPaused:ref(false),backgroundEditorHolds:new Set(),backgroundEditorPauseRevision:0,backgroundPresentationDisposed:false,wallpaperPowerPaused:ref(false),backgroundVideo:ref(video),backgroundKind:ref('video'),backgroundSource:ref('dynamic'),backgroundUrl:ref(video.src),backgroundVideoSuspended:ref(false),documentVisible:ref(true),nativeWindowVisible:ref(true),lowBatteryStatic:ref(false),videoDesired:ref(false),backgroundVideoGeneration:ref(1),backgroundMediaEpoch:1,backgroundRetryTimer:null,backgroundRetryUntil:0,sharedBackgroundRetryIdentity:'',sharedBackgroundRetryAttempts:0,activeDynamicMediaAsset:{...captured},backgroundFallbackUrls:ref([]),backgroundFallbackIndex:ref(0),dynamicBackgroundActive:ref(true),enabled:true,powerBlocked:false,sharedGameMedia:{playbackFailed(e){reports.push({...e});return Promise.resolve();}},getDynamicBackgroundConfig:()=>({enabled:env.enabled}),isVideoPlaybackBlockedByPower:()=>env.powerBlocked,invalidateBackgroundMedia:()=>++env.backgroundMediaEpoch,shouldSkipVideoReconcile:(a,b,playing)=>a===b&&(b?playing:!playing),isHlsUrl:()=>false,nextTick:async fn=>fn?.(),setupBackgroundVideo:async()=>{calls.push('setup');env.backgroundVideo.value.src=env.backgroundUrl.value;env.backgroundVideo.value.readyState=4;},scheduleBackgroundRetry:()=>calls.push('fixed-retry'),window:{setTimeout(fn,ms){timers.set(++id,{fn,ms});return id;},clearTimeout(n){timers.delete(n);},dispatchEvent(e){events.push(e);}},console:{warn(){}},CustomEvent:globalThis.CustomEvent};
   if(dcPower){
    Object.defineProperty(env.wallpaperPowerPaused,'value',{get:()=>dcRuntime.api.wallpaperPowerBlocked()});
    Object.assign(env,{backgroundVideoAutoPause:ref(false),videoPowerState:ref('desktop'),hlsInstance:null,shouldSkipVideoReconcile:dcRuntime.api.shouldSkipVideoReconcile});
@@ -39,14 +42,33 @@ if(dcPower||process.argv.includes('--app-player')){
    env.window.Hls=MediaHls;
    if(options.deferTicks)env.nextTick=fn=>new Promise(resolve=>ticks.push(resolve)).then(()=>fn?.());
   }
-  const api=make(env);return {api,env,video,timers,reports,calls,ticks,hls,source(mode){dcRuntime.api.rememberPowerSourceMode(mode);dcRuntime.api.captureWallpaperPower();},async drain(){for(let n=0;n<48;n++){for(const resolve of ticks.splice(0))resolve();await Promise.resolve();}assert.equal(ticks.length,0,'bounded nextTick drain');},async fire(){const [id,t]=[...timers][0]||[];assert.ok(t,'missing owned retry');timers.delete(id);t.fn();for(let i=0;i<8;i++)await Promise.resolve();}};
+  const api=make(env);return {api,env,video,timers,reports,calls,ticks,hls,source(mode){return dcRuntime.source(mode);},async drain(){for(let n=0;n<48;n++){for(const resolve of ticks.splice(0))resolve();await Promise.resolve();}assert.equal(ticks.length,0,'bounded nextTick drain');},async fire(){const [id,t]=[...timers][0]||[];assert.ok(t,'missing owned retry');timers.delete(id);t.fn();for(let i=0;i<8;i++)await Promise.resolve();}};
  }
  async function run(name,fn){tests.push({name,fn});}
  await run('captured TMNT stale error must not poison current shared asset',()=>{const f=fixture();f.api.error({target:{error:{code:3}}});same(f.reports,[],'detached error cannot report the current TMNT asset');same(f.env.backgroundMediaEpoch,1,'detached error cannot invalidate current decoder');});
  for(const code of [1,2])await run('TMNT media interruption code '+code+' retains valid cached video',()=>{const f=fixture();f.video.error={code};f.api.error({target:f.video});same(f.reports,[],'interruption is not shared corruption');same(f.timers.size,1,'one selected recovery timer');same([...f.timers.values()][0].ms,500,'first foreground retry is prompt and owned');same(f.video.paused,true,'interrupted decoder paused');same(f.video.src,'','interrupted decoder releases source');});
  await run('play AbortError cannot persistently exclude TMNT from either consumer',async()=>{const f=fixture();f.video.play=()=>Promise.reject(Object.assign(Error('play interrupted'),{name:'AbortError'}));await f.api.play();same(f.reports,[],'play promise rejection is not proof of bad bytes');same(f.timers.size,1,'one recovery owned by current selection');});
  await run('all plain play rejections remain local',async()=>{const f=fixture();f.video.play=()=>Promise.reject(Error('renderer lost'));await f.api.play();same(f.reports,[],'plain rejection cannot mutate shared cache');same(f.timers.size,1,'rejection waits for recovery');});
- for(const code of [3,4])await run('current confirmed media error '+code+' still reports exact CAS identity',()=>{const f=fixture();f.video.error={code};f.api.error({target:f.video});same(f.reports,[captured],'actual decode/unsupported error retains quarantine path');f.api.error({target:f.video});same(f.reports.length,1,'duplicate event never reports twice');});
+ await run('current confirmed media error 3 still reports exact CAS identity',()=>{const f=fixture();f.video.error={code:3};f.api.error({target:f.video});same(f.reports,[captured],'actual decode error retains quarantine path');f.api.error({target:f.video});same(f.reports.length,1,'duplicate event never reports twice');});
+ await run('TMNT source rejected before decode keeps the shared video eligible',async()=>{const f=fixture(),source=f.video.src;
+  for(const ms of [500,2000,60000]){
+   f.video.readyState=0;f.video.error={code:4};f.api.error({target:f.video});
+   same(f.reports,[],'source rejection cannot report shared corruption');same(f.env.activeDynamicMediaAsset,captured,'same cached binding stays selected');
+   same([...f.timers.values()].map(t=>t.ms),[ms],'one selected retry uses the original backoff');same(f.video.src,'','failed decoder releases source');
+   if(ms<60000){const generation=f.env.backgroundVideoGeneration.value;await f.fire();
+    if(dcPower){
+     same(f.env.backgroundVideoGeneration.value,generation+1,'one keyed video remount is requested');
+     same(f.env.backgroundUrl.value,source,'remount retains the same cached source');
+     const videoTemplate=app.match(/<video\b[^>]*:key="backgroundVideoGeneration"[^>]*>/)?.[0]||'';
+     same(videoTemplate.includes(':src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"'),true,'actual Vue remount binds the same cached non-HLS URL');
+    }else same(f.video.src,source,'retry opens only the same cached source');
+   }
+  }
+  const late=[...f.timers.values()][0].fn, generation=f.env.backgroundVideoGeneration.value;
+  f.env.documentVisible.value=false;f.api.suspend();late();f.video.error={code:4};f.api.error({target:f.video});await f.drain();
+  same(f.env.backgroundVideoGeneration.value,generation,'hidden retry does not remount the decoder');same(f.timers.size,0,'hidden route has no retry owner');
+  same(f.video.src,'','hidden route keeps source released');same(f.reports,[],'hidden error cannot poison the shared asset');
+ });
  await run('error storm coalesces to one recovery',()=>{const f=fixture();for(let n=0;n<100;n++){f.video.error={code:2};f.api.error({target:f.video});}same(f.timers.size,1,'no timer per error event');same(f.reports.length,0,'storm cannot quarantine healthy bytes');});
  await run('two fast retries then a single slow retry without poisoning cache',async()=>{const f=fixture();for(const ms of [500,2000,60000,60000]){f.video.error={code:2};f.api.error({target:f.video});same(f.timers.size,1,'one retry per selected decoder');same([...f.timers.values()][0].ms,ms,'fast budget is bounded then backs off');await f.fire();}same(f.reports.length,0,'persistent interruption never globally excludes the file');});
  await run('foreground recovery reopens only selected cached video',async()=>{const f=fixture();f.video.error={code:2};f.api.error({target:f.video});await f.fire();same(f.env.backgroundVideoGeneration.value,2,'one decoder remount');same(f.calls.filter(x=>x==='setup').length,1,'one selected source setup');same(f.calls.filter(x=>x==='play').length,1,'current source plays after recovery');same(f.reports.length,0,'no download or global invalidation');});
@@ -55,6 +77,18 @@ if(dcPower||process.argv.includes('--app-player')){
  await run('detached playing event cannot cancel current recovery',()=>{const f=fixture();f.video.error={code:2};f.api.error({target:f.video});f.api.playing({target:{}});same(f.timers.size,1,'old playing receipt cannot cancel current retry');f.api.playing({target:f.video});same(f.timers.size,0,'current actual playback clears retry');});
  await run('a late rejected old play cannot corrupt a new selection',async()=>{const f=fixture();let reject;f.video.play=()=>new Promise((_,r)=>reject=r);const pending=f.api.play();await Promise.resolve();f.env.backgroundMediaEpoch++;f.env.backgroundVideo.value={...f.video};f.env.activeDynamicMediaAsset={...captured,bindingRevision:7};reject(Error('late old error'));await pending;same(f.reports,[],'old promise has no write permission');same(f.timers.size,0,'old promise creates no retry');});
  if(dcPower)await registerDcPowerCases({run,fixture,same,runtime:dcRuntime,out});
+
+ if(editorCover){
+  await run('Editor: hidden decode error keeps shared bytes eligible until local reopen',async()=>{const f=fixture();const source=f.video.src,release=f.api.hold();f.video.error={code:3};f.api.error({target:f.video});same(f.reports,[],'covered decoder cannot quarantine a shared asset');same(f.timers.size,0,'covered decoder cannot schedule work');same(f.video.src,source,'covered editor retains its frame and source');release();await f.drain();same(f.timers.size,1,'reopening schedules one local recovery');same(f.reports,[],'covered decode error never becomes a shared error on release');await f.fire();same(f.video.src,source,'local recovery reopens exactly the same asset');same(f.env.backgroundVideoGeneration.value,2,'one recovery only');same(f.video.paused,false,'same video can play again');f.video.error={code:3};f.api.error({target:f.video});same(f.reports,[captured],'a new foreground decode error still publishes the exact CAS identity');});
+  await run('Editor: queued shared recovery does not remount until cover is released',async()=>{const f=fixture();const source=f.video.src;f.video.error={code:2};f.api.error({target:f.video});const late=[...f.timers.values()][0].fn;const release=f.api.hold();same(f.timers.size,0,'covered editor has no shared recovery timer');late();await f.drain();same(f.env.backgroundVideoGeneration.value,1,'old queued timer cannot mount under the cover');same(f.calls.filter(x=>x==='setup').length,0,'no decoder setup under the cover');release();await f.drain();same(f.timers.size,1,'opening the window again re-arms one local recovery');await f.fire();same(f.video.src,source,'reopens the selected cache only');same(f.env.backgroundVideoGeneration.value,2,'no duplicate remount');same(f.reports,[],'no cache write');});
+  await run('Editor: held retry does not re-arm after selection changes',async()=>{const f=fixture();f.video.error={code:2};f.api.error({target:f.video});const release=f.api.hold(),replacement='https://game-media.localhost/video/other.mp4';f.env.backgroundMediaEpoch++;f.env.activeDynamicMediaAsset={key:'steam-570',assetId:'other',bindingRevision:7,kind:'video'};f.env.backgroundUrl.value=replacement;f.video.src=replacement;release();await f.drain();same(f.timers.size,0,'new source has no inherited retry');same(f.video.src,replacement,'release preserves the replacement');same(f.video.paused,false,'replacement follows normal playback');same(f.reports,[],'no write to the current or previous cache');});
+  await run('Editor: pause keeps the current frame and source without recovery',async()=>{const f=fixture();await f.api.play();f.calls.length=0;const url=f.video.src,release=f.api.hold();same(f.video.paused,true,'covered video pauses immediately');same(f.video.currentTime,8,'last frame retained');same(f.video.src,url,'source retained');same(f.env.backgroundMediaEpoch,1,'no media invalidation');await f.api.play();f.api.canPlay();await f.drain();same(f.calls,['pause'],'metadata and canplay cannot restart covered playback');same(f.timers.size,0,'no retry/recovery timer');same(f.reports,[],'no cache mutation');release();await f.drain();same(f.video.paused,false,'last cover release resumes via original playback consumer');release();await f.drain();same(f.calls,['pause','play'],'release is idempotent');});
+  await run('Editor: overlapping local holds release only the final owner',async()=>{const f=fixture();await f.api.play();f.calls.length=0;const a=f.api.hold(),b=f.api.hold();same(f.calls,['pause'],'first owner alone pauses');a();a();await f.drain();same(f.video.paused,true,'other owner still covers video');same(f.env.backgroundEditorHolds.size,1,'duplicate release cannot revoke other owner');b();await f.drain();same(f.calls,['pause','play'],'one resume after final owner');});
+  await run('Editor: late rejected play after reopening cannot fault new playback',async()=>{const f=fixture();let reject;f.video.play=function(){f.calls.push('deferred-play');return new Promise((_,r)=>reject=r)};const old=f.api.play();await Promise.resolve();const release=f.api.hold();f.video.play=function(){this.paused=false;f.calls.push('play');return Promise.resolve()};release();await f.drain();same(f.env.videoDesired.value,true,'new visible playback started');reject(Object.assign(Error('paused by covered editor'),{name:'AbortError'}));await old;same(f.env.videoDesired.value,true,'old rejection cannot erase current desired playback');same(f.timers.size,0,'old interruption cannot create recovery');same(f.reports,[],'old interruption cannot quarantine media');});
+  await run('Editor: late successful play cannot escape an active cover',async()=>{const f=fixture();let finish;f.video.play=function(){return new Promise(resolve=>finish=()=>{this.paused=false;resolve()})};const old=f.api.play();await Promise.resolve();f.api.hold();finish();await old;same(f.video.paused,true,'promise completion rechecks current cover');same(f.timers.size,0,'no restart timer');same(f.reports,[],'no recovery');});
+  await run('Editor: releasing cover preserves every original playback gate',async()=>{for(const gate of ['document','native','battery','power','dynamic','kind','url','disposed']){const f=fixture();await f.api.play();f.calls.length=0;const release=f.api.hold();if(gate==='document')f.env.documentVisible.value=false;else if(gate==='native')f.env.nativeWindowVisible.value=false;else if(gate==='battery')f.env.lowBatteryStatic.value=true;else if(gate==='power')f.env.powerBlocked=true;else if(gate==='dynamic')f.env.enabled=false;else if(gate==='kind')f.env.backgroundKind.value='image';else if(gate==='url')f.env.backgroundUrl.value='';else f.env.backgroundPresentationDisposed=true;release();await f.drain();same(f.video.paused,true,gate+' blocks playback');same(f.calls.filter(x=>x==='play').length,0,gate+' cannot grant playback');same(f.timers.size,0,gate+' creates no recovery');}});
+  await run('Editor: queued pause repair and fixed media obey local cover',async()=>{const f=fixture();f.env.backgroundSource.value='fixed';f.env.enabled=false;await f.api.play();same(f.video.paused,false,'fixed media uses original independent selection');f.api.pause();same(f.timers.size,1,'original pause reconciliation queued');const release=f.api.hold();await f.fire();same(f.video.paused,true,'old timer cannot restart covered video');same(f.timers.size,0,'no second repair loop');release();await f.drain();same(f.video.paused,false,'fixed media resumes on last release');});
+ }
  const legacyCritical=new Set([
   'captured TMNT stale error must not poison current shared asset',
   'TMNT media interruption code 1 retains valid cached video',
@@ -62,37 +96,64 @@ if(dcPower||process.argv.includes('--app-player')){
   'play AbortError cannot persistently exclude TMNT from either consumer',
   'all plain play rejections remain local',
   'current confirmed media error 3 still reports exact CAS identity',
-  'current confirmed media error 4 still reports exact CAS identity',
+  'TMNT source rejected before decode keeps the shared video eligible',
   'a late rejected old play cannot corrupt a new selection',
  ]);
- const selected=tests.filter(test=>!dcPower||legacyCritical.has(test.name)||test.name.startsWith('DC: '));
+ const selected=tests.filter(test=>editorCover?test.name.startsWith('Editor: '):!test.name.startsWith('Editor: ')&&(!dcPower||legacyCritical.has(test.name)||test.name.startsWith('DC: ')));
  if(dcPower)assert.equal(selected.filter(test=>legacyCritical.has(test.name)).length,legacyCritical.size,'all original critical assertions selected');
  assert.ok(selected.length,'empty selection');
  const start=new Date().toISOString();
- for(const {name,fn} of selected){try{await fn();reports.push({name,group:dcPower?'dc-power':'app-player',ok:true});console.log('PASS '+name);}catch(error){reports.push({name,group:dcPower?'dc-power':'app-player',ok:false,error:String(error),stack:error.stack});console.log('FAIL '+name+': '+error.message);if(dcPower)break;}}
+ for(const {name,fn} of selected){try{await fn();reports.push({name,group:dcPower?'dc-power':'app-player',ok:true});console.log('PASS '+name);}catch(error){reports.push({name,group:dcPower?'dc-power':'app-player',ok:false,error:String(error),stack:error.stack});console.log('FAIL '+name+': '+error.message);if(dcPower||editorCover)break;}}
  const end=new Date().toISOString();
- const selection=dcPower?{group:'dc-power',expected:selected.map(test=>test.name),executed:reports.map(test=>test.name),notRun:selected.slice(reports.length).map(test=>test.name),legacyCritical:[...legacyCritical],defaultGroupExecuted:false}:undefined;
- if(dcPower&&reports.every(test=>test.ok))assert.deepEqual(selection.executed,selection.expected,'exact directed case set');
+ const selection=dcPower||editorCover?{group:editorCover?'editor-cover':'dc-power',expected:selected.map(test=>test.name),executed:reports.map(test=>test.name),notRun:selected.slice(reports.length).map(test=>test.name),legacyCritical:[...legacyCritical],defaultGroupExecuted:false}:undefined;
+ if((dcPower||editorCover)&&reports.every(test=>test.ok))assert.deepEqual(selection.executed,selection.expected,'exact directed case set');
  const summary={ok:reports.length===selected.length&&reports.every(x=>x.ok),checks,cases:reports.length,reports,selection,start,end,runtime:dcRuntime?.identity,source:{path:appPath,sha256:crypto.createHash('sha256').update(app).digest('hex')},capturedFixture:captured,scope:'production App.vue function bodies plus actual error binding; inert DOM/clock/IPC, no installed WebView or original failure causality claim'};fs.writeFileSync(out+(dcPower?'/dc-power-results.json':'/app-player-results.json'),JSON.stringify(summary,null,2));console.log(JSON.stringify({ok:summary.ok,cases:summary.cases,checks}));process.exit(summary.ok?0:1);
 }
 
 fs.mkdirSync(out,{recursive:true});
 const mocks={
- './ipc':`export const invoke=(...args)=>globalThis.__OWN_BACKGROUND_FIXTURE__.invoke(...args);`,
+ './ipc':`export const invoke=(...args)=>args[0]==='power.lifecycle'?Promise.resolve({known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:0}):globalThis.__OWN_BACKGROUND_FIXTURE__.invoke(...args);export const on=()=>()=>{};`,
+ './powerSource':`export const powerSourceMode={value:'ac'};`,
+ './uiSettings':`export const getUiSetting=()=>false;`,
  './sharedGameMedia':`export const sharedGameMedia={lookup:(...args)=>globalThis.__OWN_BACKGROUND_FIXTURE__.lookup(...args),ensure:(...args)=>globalThis.__OWN_BACKGROUND_FIXTURE__.ensure(...args)};`,
  './steamMediaSource':`export const getDynamicBackgroundConfig=()=>({enabled:globalThis.__OWN_BACKGROUND_FIXTURE__.enabled});export const resolveSteamWallpaperIdentity=(...args)=>globalThis.__OWN_BACKGROUND_FIXTURE__.identify(...args);export const cleanGameTitle=s=>s;export const normalizeGameTitle=s=>s;export const scoreSteamTitle=()=>1;export const stripLaunchModeSuffix=s=>s;export const setDynamicBackgroundEnabled=async()=>{};`
 };
-const result=await build({entryPoints:[project+'/src/bridge/dynamicBackground.ts'],bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'owner-transport-only',setup(build){build.onResolve({filter:/^\.\/(ipc|sharedGameMedia|steamMediaSource)$/},args=>({path:args.path,namespace:'fixture'}));build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'js'}));}}]});
+const result=await build({stdin:{contents:`export * from './dynamicBackground';export {onSharedPowerLifecycle} from './powerLifecycleState';`,resolveDir:project+'/src/bridge',sourcefile:'own-background-entry.ts'},bundle:true,platform:'node',format:'esm',write:false,metafile:true,plugins:[{name:'owner-transport-only',setup(build){build.onResolve({filter:/^\.\/(ipc|sharedGameMedia|steamMediaSource|powerSource|uiSettings)$/},args=>({path:args.path,namespace:'fixture'}));build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'js'}));}}]});
 const file=out+'/own-background-production-test.mjs';fs.writeFileSync(file,result.outputFiles[0].text);const api=await import('file:///'+file.replaceAll('\\','/'));let cases=0,checks=0;const reports=[];const same=(a,b,label)=>{checks++;assert.deepEqual(a,b,label);};
 const game={pid:12345,path:'G:/Games/Fixture/game.exe',title:'Fixture',name:'Fixture',processCreated:'134372974230246308'};const cached={key:'steam-570',appId:570,name:'Fixture',ready:true,bindingRevision:4,url:'http://fixture/asset.mp4',localUrl:'https://game-media.localhost/video/asset.mp4',asset:{id:'asset',kind:'video'},playback:{start:8,end:38,fit:'cover'}};
 function fixture(options={}){const calls=[],events=[];const state={enabled:true,async lookup(args){calls.push({command:'lookup',args});options.beforeLookup?.();return options.cached??cached;},async ensure(target,...args){calls.push({command:'ensure',target,args});return options.prepare?options.prepare():cached;},async identify(){calls.push({command:'identify'});if(options.identityFailure)throw Error('offline');return options.identity||{appId:570,name:'Fixture',executable:game.path,verified:true};},async invoke(command,args){calls.push({command,args});if(command==='game.detect')return typeof options.detect==='function'?options.detect(args):options.detect===undefined?game:options.detect;if(command==='gameMedia.legacy')return options.legacy||{ready:false};throw Error(command);}};globalThis.__OWN_BACKGROUND_FIXTURE__=state;globalThis.window={dispatchEvent(event){events.push(event);}};return {state,calls,events};}
 async function run(name,test){await test();cases++;reports.push(name);console.log('PASS '+name);}
+// App.vue retains a shared power subscription while wallpaper validates the target.
+globalThis.window=new EventTarget();
+let acceptPower;
+const ready=new Promise(resolve=>{acceptPower=resolve;});
+const releasePower=api.onSharedPowerLifecycle(s=>{if(s.known&&s.phase==='ready')acceptPower();});
+try {
+await ready;
+await run('WebView-only cached video does not require a loopback URL',async()=>{
+ const control=fixture();
+ same((await api.refreshDynamicBackground(game))?.state.url,cached.localUrl,'HTTP-bearing control passes the real process gate');
+ same(control.calls.filter(c=>c.command==='game.detect').length,1,'control rechecks the game through the native boundary');
+ console.log('CONTROL HTTP-bearing entry passes exact-game validation');
+ const f=fixture({cached:{...cached,url:undefined}});
+ const refreshed=await api.refreshDynamicBackground(game);
+ same(refreshed?.state.url,cached.localUrl,'refresh accepts the actual local file without HTTP');
+ same(f.calls.filter(c=>c.command==='game.detect').length,1,'local entry passes the same exact-process recheck');
+ same(f.events.length,1,'loaded event for the local source');
+ const snapshot=await api.getDynamicBackgroundState();
+ same(snapshot.url,cached.localUrl,'snapshot accepts the actual local file without HTTP');
+ const reads=f.calls.filter(c=>c.command==='lookup');
+ same(reads.length,2,'refresh and snapshot each look up the cached target');
+ same(reads.every(c=>c.args.localWallpaperDelivery===true),true,'both current-game lookups select local delivery explicitly');
+});
+await run('blank WebView URL does not mask a usable compatibility URL',async()=>{const f=fixture({cached:{...cached,localUrl:'  '}});const refreshed=await api.refreshDynamicBackground(game);same(refreshed?.state.url,cached.url,'refresh falls back to the nonempty compatibility URL');same((await api.getDynamicBackgroundState()).url,cached.url,'snapshot uses the same compatibility rule');same(f.events.length,1,'one actual render event');});
+await run('deleted or URL-less entries are never displayed by the local route',async()=>{for(const entry of [{...cached,deleted:true,url:undefined},{...cached,url:undefined,localUrl:'  '},{...cached,url:undefined,localUrl:42}]){const f=fixture({cached:entry,prepare:()=>entry});same(await api.refreshDynamicBackground(game),null,'invalid or deleted refresh stays closed');same(await api.getDynamicBackgroundState(),{enabled:false,url:''},'invalid or deleted snapshot stays closed');same(f.events.length,0,'no load event for unusable bytes');}});
 await run('cache hits do not wait for network or missing-counterpart preparation',async()=>{let finish;const pending=new Promise(resolve=>finish=resolve);const f=fixture({prepare:()=>pending});const value=await api.refreshDynamicBackground(game);same(value.state.url,cached.localUrl,'native virtual host preferred for same physical file');same(value.state.mediaAssetId,'asset','shared asset identity retained');same(f.calls.some(c=>c.command==='identify'),false,'cache hit skips identification');same(f.calls.filter(c=>c.command==='game.detect').length,1,'exact process recheck');same(f.calls.filter(c=>c.command==='game.detect').every(c=>!c.args?.pid),true,'renderer validation never re-elects an old PID');same(value.state.playback,cached.playback,'same playback preferences');finish(cached);});
 await run('a reused PID cannot reuse the old game media',async()=>{const f=fixture({detect:{...game,processCreated:'134372974230246309'}});same(await api.refreshDynamicBackground(game),null,'birth mismatch rejected');same(f.events.length,0,'no stale render event');});
 await run('missing process birth never asks for cached media',async()=>{const f=fixture();await assert.rejects(()=>api.refreshDynamicBackground({...game,processCreated:''}),/进程身份/);checks++;same(f.calls.length,0,'no owner access without process identity');});
 await run('disabled own background does no media work',async()=>{const f=fixture();f.state.enabled=false;same(await api.refreshDynamicBackground(game),null,'own switch respected');same(f.calls.length,0,'disabled has no cache/network/identity IPC');same(await api.getDynamicBackgroundState(),{enabled:false,url:''},'read state respects switch');});
 await run('missing cache joins owner and retains exact original PID',async()=>{const f=fixture({cached:{key:'exe-fixture',ready:false}});const value=await api.refreshDynamicBackground(game);same(f.calls.filter(c=>c.command==='identify').length,1,'one owner identity lookup');same(f.calls.filter(c=>c.command==='ensure').length,1,'one paired preparation');same(value.state.pid,game.pid,'original target PID');same(value.state.processCreated,game.processCreated,'original target birth');same(f.calls.find(c=>c.command==='ensure').args,['ymcc',true,true],'own background joins same paired queue');});
-await run('an exact current-game legacy hit is shown before complement work',async()=>{const f=fixture({cached:{key:'exe-fixture',ready:false},legacy:cached});const value=await api.refreshDynamicBackground(game);same(value.state.mediaKey,cached.key,'migrated asset reused');same(f.calls.filter(c=>c.command==='gameMedia.legacy').length,1,'single native guarded migration request');});
+await run('an exact current-game legacy hit is shown before complement work',async()=>{const f=fixture({cached:{key:'exe-fixture',ready:false},legacy:{...cached,url:undefined}});const value=await api.refreshDynamicBackground(game);same(value.state.mediaKey,cached.key,'migrated asset reused');same(value.state.url,cached.localUrl,'legacy local URL needs no loopback');const calls=f.calls.filter(c=>c.command==='gameMedia.legacy');same(calls.length,1,'single native guarded migration request');same(calls[0].args.localWallpaperDelivery,true,'legacy migration explicitly selects local delivery');});
 await run('manual local cache stays usable when optional identity lookup is offline',async()=>{const f=fixture({cached:{...cached,appId:0},identityFailure:true});const value=await api.refreshDynamicBackground(game);same(value.state.mediaAssetId,'asset','local manual video still displayed');same(f.events.length,1,'cache output delivered despite metadata outage');});
 await run('snapshot returns the same shared file for the exact current game',async()=>{fixture();const value=await api.getDynamicBackgroundState();same(value.mediaKey,cached.key,'canonical identity');same(value.url,cached.localUrl,'same native mapping');same(value.pid,game.pid,'original process identity retained');});
 await run('snapshot without a current admitted game releases dynamic output',async()=>{const f=fixture({detect:null});same(await api.getDynamicBackgroundState(),{enabled:false,url:''},'no game no output');same(f.calls.filter(c=>c.command==='lookup').length,0,'no cache lookup for absent game');});
@@ -100,7 +161,8 @@ await run('overlapping refreshes share one exact-process result and render event
 await run('a new process birth never shares an older in-flight refresh',async()=>{let finish;const pending=new Promise(resolve=>finish=resolve),fresh={...game,processCreated:'134372974230246309'};const f=fixture({cached:{key:'exe-fixture',ready:false},prepare:()=>pending,detect:fresh});const a=api.refreshDynamicBackground(game),b=api.refreshDynamicBackground(fresh);finish(cached);const [old,current]=await Promise.all([a,b]);same(old,null,'old original birth rejected');same(current.state.processCreated,'134372974230246309','new instance gets its own admission');same(f.calls.filter(c=>c.command==='ensure').length,2,'different births never share renderer validation');});
 await run('an unresolved file uses the prepared confirmed AppID in output',async()=>{const f=fixture({cached:{key:'exe-fixture',ready:false},identity:{appId:0,name:'Fixture',executable:game.path,verified:false}});const value=await api.refreshDynamicBackground(game);same(f.calls.some(c=>c.command==='gameMedia.legacy'),false,'unverified file never authorizes old-cache migration');same(f.calls.find(c=>c.command==='ensure').target.appId,0,'shared queue owns verification');same(value.state.appId,570,'resolved shared entry supplies AppID');});
 await run('snapshot rechecks process identity after the cache read',async()=>{let reads=0;fixture({detect:()=>++reads===1?game:{...game,processCreated:'134372974230246310'}});same(await api.getDynamicBackgroundState(),{enabled:false,url:''},'process replacement during lookup never renders old cached output');});
-const summary={ok:true,cases,checks,reports,scope:'current production dynamicBackground.ts and shared gamedetect.ts; only IPC/media/identity transports replaced; verifies admission and shared-cache flow, not installed WebView rendering'};fs.writeFileSync(out+'/own-background-results.json',JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));
+const summary={ok:true,cases,checks,reports,scope:'production dynamicBackground.ts, gamedetect.ts and power lifecycle; synthetic IPC/media/identity plus AC and settings boundaries; verifies admission and shared-cache flow, not installed WebView rendering'};fs.writeFileSync(out+'/own-background-results.json',JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));
+} finally { releasePower(); }
 
 // Bundle real source policy, process validation, revision fence and TDP store.
 // Only settings storage, IPC/identity/media and visibility are boundary ports.
@@ -111,17 +173,17 @@ async function createDcPowerRuntime(directory,{withoutPowerKey=false}={}) {
  globalThis.window=new EventTarget();
  const port='globalThis.__OWN_BACKGROUND_DC__';
  const mocks={
-  './ipc':`export const invoke=(...args)=>${port}.transport.invoke(...args);export const on=(name,listener)=>{const listeners=${port}.nativeListeners;listeners.set(name,listener);return()=>listeners.delete(name);};`,
+  './ipc':`export const invoke=async(command,...args)=>command==='power.lifecycle'?{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1}:${port}.transport.invoke(command,...args);export const on=(name,listener)=>{const listeners=${port}.nativeListeners;listeners.set(name,listener);return()=>listeners.delete(name);};`,
   './sharedGameMedia':`export const sharedGameMedia={lookup:(...args)=>${port}.transport.lookup(...args),ensure:(...args)=>${port}.transport.ensure(...args)};`,
   './steamMediaSource':`export const getDynamicBackgroundConfig=()=>({enabled:${port}.enabled});export const resolveSteamWallpaperIdentity=(...args)=>${port}.transport.identify(...args);export const cleanGameTitle=s=>s;export const normalizeGameTitle=s=>s;export const scoreSteamTitle=()=>1;export const stripLaunchModeSuffix=s=>s;export const setDynamicBackgroundEnabled=async()=>{};`,
   './uiSettings':`export const getUiSetting=key=>{if(key!=='steamWallpaperPauseOnBattery')throw Error('unexpected setting read: '+key);return ${port}.pauseOnBattery;};`,
   './yeman':`export const detectPowerModeReliable=()=>{throw Error('unexpected performance/hardware power probe');};`,
-  './uiLifecycle':`export const isUiVisible=()=>true;export const onUiVisibilityChange=()=>()=>{};`,
+  './uiLifecycle':`export const isUiVisible=()=>true;export const isUiPowerReady=state=>!!state&&state.known!==false&&state.phase==='ready'&&state.notificationPending!==true;export const onUiVisibilityChange=()=>()=>{};`,
  };
  const sourcePath=project+'/src/bridge/dynamicBackground.ts';
  const input=fs.readFileSync(sourcePath,'utf8');
  if(withoutPowerKey)assert.ok(input.includes('[captureWallpaperPower(),game.pid'),'power-key negative requires current production key');
- const result=await build({absWorkingDir:project,stdin:{contents:`export {refreshDynamicBackground,getDynamicBackgroundState} from './src/bridge/dynamicBackground';export * from './src/bridge/wallpaperPowerPolicy';export {rememberPowerSourceMode,powerSourceMode,startForegroundPowerSourceRefresh} from './src/bridge/powerSource';export {tdpRuntimeStore} from './src/bridge/tdpRuntimeState';export {shouldSkipVideoReconcile} from './src/bridge/backgroundPolicy';`,resolveDir:project,sourcefile:'own-background-dc-entry.ts'},bundle:true,platform:'node',format:'esm',write:false,metafile:true,plugins:[{name:'dc-boundary-ports',setup(builder){
+ const result=await build({absWorkingDir:project,stdin:{contents:`export {refreshDynamicBackground,getDynamicBackgroundState} from './src/bridge/dynamicBackground';export * from './src/bridge/wallpaperPowerPolicy';export {powerSourceMode,startForegroundPowerSourceRefresh} from './src/bridge/powerSource';export {onSharedPowerLifecycle} from './src/bridge/powerLifecycleState';export {tdpRuntimeStore} from './src/bridge/tdpRuntimeState';export {shouldSkipVideoReconcile} from './src/bridge/backgroundPolicy';`,resolveDir:project,sourcefile:'own-background-dc-entry.ts'},bundle:true,platform:'node',format:'esm',write:false,metafile:true,plugins:[{name:'dc-boundary-ports',setup(builder){
   builder.onResolve({filter:/^\.\/(?:bridge\/)?(ipc|sharedGameMedia|steamMediaSource|uiSettings|yeman|uiLifecycle)$/},args=>({path:'./'+args.path.split('/').at(-1),namespace:'dc-port'}));
   builder.onLoad({filter:/.*/,namespace:'dc-port'},args=>({contents:mocks[args.path],loader:'js'}));
   if(withoutPowerKey)builder.onLoad({filter:/[\\/]dynamicBackground\.ts$/},()=>({contents:input.replace('[captureWallpaperPower(),game.pid','[game.pid'),loader:'ts',resolveDir:path.dirname(sourcePath)}));
@@ -132,8 +194,18 @@ async function createDcPowerRuntime(directory,{withoutPowerKey=false}={}) {
  const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
  const sources=Object.keys(result.metafile.inputs).filter(file=>!file.startsWith('dc-port:')&&file!=='own-background-dc-entry.ts').map(file=>path.resolve(project,file));
  const identity={bundle:{path:file,sha256:sha(file)},sources:sources.map(file=>({path:file,sha256:sha(file)})),boundaryMocks:mocks,mutation:withoutPowerKey?'remove captureWallpaperPower() from production in-flight key':null};
- function reset(){state.enabled=true;state.pauseOnBattery=true;api.rememberPowerSourceMode('ac');api.captureWallpaperPower();}
- reset();return {api,state,identity,reset};
+ let revision=0;
+ function source(mode,event='power.sourceChanged'){
+  // Only native receipts can change a known physical source.
+  const stop=state.nativeListeners.has(event)?null:api.startForegroundPowerSourceRefresh(()=>{});
+  try{
+   state.nativeListeners.get(event)({known:true,ac:mode==='ac',generation:1,revision:++revision});
+   assert.equal(api.powerSourceMode.value,mode,'production source accepted the physical power receipt');
+   return api.captureWallpaperPower();
+  }finally{stop?.();}
+ }
+ function reset(){state.enabled=true;state.pauseOnBattery=true;source('ac');}
+ reset();return {api,state,identity,reset,source};
 }
 
 async function registerDcPowerCases({run,fixture,same,runtime,out}) {
@@ -156,8 +228,13 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   window.dispatchEvent=event=>{events.push({type:event.type,detail:event.detail});return true;};
   return {calls,events};
  }
- function source(mode){api.rememberPowerSourceMode(mode);return api.captureWallpaperPower();}
+ const source=runtime.source;
  async function reached(f,command){await microtasks();same(count(f,command),1,'old flow reached the selected '+command+' boundary');}
+ async function withMountedPower(current,work){
+  // App keeps the shared power owner alive across strict process validation.
+  const stop=current.api.onSharedPowerLifecycle(()=>{});
+  try{return await work();}finally{stop();}
+ }
 
  await run('DC: physical source gate ignores requested performance profile',async()=>{
   const f=fixture();const acEpoch=api.captureWallpaperPower();
@@ -182,11 +259,11 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   const stop=api.startForegroundPowerSourceRefresh(()=>foregroundReceipts++);
   const changes=[];const unsubscribe=api.subscribeWallpaperPowerChanged(blocked=>changes.push(blocked));
   try{
-   state.nativeListeners.get('power.sourceChanged')({ac:false});state.nativeListeners.get('power.sourceChanged')({ac:false});
+   source('dc');source('dc');
    same(api.wallpaperPowerBlocked(),true,'actual native source binding feeds the production policy');
-   const dcEpoch=api.captureWallpaperPower();state.nativeListeners.get('power.sourceHeartbeat')({ac:false});
+   const dcEpoch=api.captureWallpaperPower();source('dc','power.sourceHeartbeat');
    same(api.captureWallpaperPower(),dcEpoch,'repeated native DC does not create another epoch');
-   state.nativeListeners.get('power.sourceChanged')({ac:true});
+   source('ac');
    same(changes,[true,false],'production subscriber coalesces repeated source events');
    same(foregroundReceipts,0,'no foreground repair or performance read was requested');
   }finally{unsubscribe();stop();}
@@ -247,16 +324,17 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
 
  // Observe actual calls rather than outer Promise identity: async functions
  // wrap adopted promises. The old finally runs while the new lookup is pending.
- async function epochRace(currentApi=api,currentState=state) {
+ async function epochRace(current=runtime) {
+  const {api:currentApi,state:currentState,source:change}=current;
   const oldRead=deferred(),newRead=deferred();let f;
   if(currentApi===api)f=mediaFixture({lookup:n=>n===1?oldRead.promise:newRead.promise});
   else{
-   currentState.enabled=true;currentState.pauseOnBattery=true;currentApi.rememberPowerSourceMode('ac');currentApi.captureWallpaperPower();
+   current.reset();
    const calls=[],events=[];f={calls,events};
    currentState.transport={lookup(args){calls.push({command:'lookup',args});return count(f,'lookup')===1?oldRead.promise:newRead.promise;},identify(){calls.push({command:'identify'});return Promise.resolve(identity);},ensure(){calls.push({command:'ensure'});return Promise.resolve(cached);},invoke(command){calls.push({command});if(command==='game.detect')return Promise.resolve(game);if(command==='gameMedia.legacy')return Promise.resolve(missing);throw Error(command);}};
    window.dispatchEvent=event=>{events.push({type:event.type,detail:event.detail});return true;};
   }
-  const change=mode=>{currentApi.rememberPowerSourceMode(mode);return currentApi.captureWallpaperPower();};
+  return withMountedPower(current,async()=>{
   const firstEpoch=currentApi.captureWallpaperPower(),old=currentApi.refreshDynamicBackground(game);
   change('dc');const blocked=await currentApi.refreshDynamicBackground(game),blockedCalls=count(f,'lookup');
   const newEpoch=change('ac'),fresh=currentApi.refreshDynamicBackground({...game,path:'g:/games/fixture/GAME.EXE'}),newCalls=count(f,'lookup');
@@ -266,6 +344,7 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   const joined=currentApi.refreshDynamicBackground(game),joinedCalls=count(f,'lookup');
   newRead.resolve(cached);const [freshValue,joinedValue]=await Promise.all([fresh,joined]);await microtasks();
   return {f,firstEpoch,newEpoch,blocked,blockedCalls,newCalls,oldValue,afterOld,joinedCalls,freshValue,joinedValue};
+  });
  }
  function checkEpochRace(result) {
   const {f}=result;
@@ -277,25 +356,25 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
  }
  await run('DC: same-game AC DC AC isolates in-flight key and old finally owner',async()=>checkEpochRace(await epochRace()));
 
- for(const phase of ['identify','gameMedia.legacy','ensure'])await run('DC: late '+phase+' reply cannot start new legacy ensure or loaded',async()=>{
+ for(const phase of ['identify','gameMedia.legacy','ensure'])await run('DC: late '+phase+' reply cannot start new legacy ensure or loaded',()=>withMountedPower(runtime,async()=>{
   const pending=deferred();let lookup=0;
   const f=mediaFixture({lookup:()=>Promise.resolve(++lookup===1?missing:cached),identify:()=>phase==='identify'?pending.promise:Promise.resolve({...identity,verified:phase!=='ensure'}),legacy:()=>pending.promise,ensure:n=>phase==='ensure'&&n===1?pending.promise:Promise.resolve(cached)});
   const old=api.refreshDynamicBackground(game);await reached(f,phase);source('dc');const before=f.calls.map(call=>call.command);
   pending.resolve(phase==='identify'?identity:cached);same(await old,null,'reply from revoked power epoch is dropped');await microtasks();
   same(f.calls.map(call=>call.command),before,'late reply cannot initiate another transport stage');same(f.events,[],'late reply cannot dispatch loaded');
   source('ac');const fresh=await api.refreshDynamicBackground(game);same(fresh?.state.url,cached.localUrl,'fresh AC request still works');same(f.events.filter(event=>event.type==='dynamic-background:loaded').length,1,'only current AC result is delivered');
- });
+ }));
 
- await run('DC: process-validation reply arriving after unplug cannot dispatch loaded',async()=>{
+ await run('DC: process-validation reply arriving after unplug cannot dispatch loaded',()=>withMountedPower(runtime,async()=>{
   const pending=deferred();const f=mediaFixture({detect:()=>pending.promise});
   const old=api.refreshDynamicBackground(game);await reached(f,'game.detect');source('dc');
   const before=f.calls.map(call=>call.command);pending.resolve(game);same(await old,null,'late exact-game validation cannot override power gate');
   same(f.calls.map(call=>call.command),before,'no new complement work after validation');same(f.events,[],'no loaded event while DC');
- });
+ }));
 
  await run('DC: deleting production power epoch key is rejected by the same race assertion',async()=>{
   const negative=await createDcPowerRuntime(out,{withoutPowerKey:true});
-  const result=await epochRace(negative.api,negative.state);same(result.newCalls,1,'control reproduces old-epoch Promise reuse');
+  const result=await epochRace(negative);same(result.newCalls,1,'control reproduces old-epoch Promise reuse');
   assert.throws(()=>checkEpochRace(result),/new AC lookup must not reuse old unresolved Promise/);
   runtime.identity.negative=negative.identity;globalThis.__OWN_BACKGROUND_DC__=state;
  });

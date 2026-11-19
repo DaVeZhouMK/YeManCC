@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cwctype>
 #include "native_process_cost.h"
+#include "input_idle_scope.h"
 namespace ymcc::deckycost {
 using Json=nlohmann::json;
 struct Target {
@@ -41,8 +42,10 @@ public:
     }
     void peer(bool connected,ULONGLONG now) noexcept {try{std::unique_lock lock(mx_,std::try_to_lock);if(!lock)return;value_.peerKnown=true;value_.connected=connected;value_.enabledKnown=false;value_.enabled=false;value_.visibleKnown=false;value_.requestedVisible=false;value_.frameQueued=false;value_.seq=0;value_.kind="unknown";value_.changeTick=now;}catch(...){}}
     void request(const Json& request,ULONGLONG now) noexcept {
-        try{std::unique_lock lock(mx_,std::try_to_lock);if(!lock||!value_.connected)return;
-            if(request.value("command",std::string{})!="wallpaper.context")return;
+        try{
+            const auto command=request.find("command");
+            if(command==request.end()||!command->is_string()||*command->get_ptr<const Json::string_t*>()!="wallpaper.context")return;
+            std::unique_lock lock(mx_,std::try_to_lock);if(!lock||!value_.connected)return;
             const auto s=request.find("contextSeq"),v=request.find("visible");
             if(s==request.end()||!s->is_number_unsigned()||s->get<std::uint64_t>()>9007199254740991ull||v==request.end()||!v->is_boolean())return;
             const auto seq=s->get<std::uint64_t>();if(seq<=value_.seq)return;
@@ -50,8 +53,12 @@ public:
         }catch(...){}
     }
     void reply(const Json& message,ULONGLONG now) noexcept {
-        try{std::unique_lock lock(mx_,std::try_to_lock);if(!lock||!value_.connected)return;
-            const auto type=message.value("type",std::string{});if(type!="wallpaper"&&type!="wallpaper-ready")return;
+        try{
+            const auto tag=message.find("type");
+            if(tag==message.end()||!tag->is_string())return;
+            const auto& type=*tag->get_ptr<const Json::string_t*>();
+            if(type!="wallpaper"&&type!="wallpaper-ready")return;
+            std::unique_lock lock(mx_,std::try_to_lock);if(!lock||!value_.connected)return;
             const auto enabled=message.find("enabled");if(enabled!=message.end()&&enabled->is_boolean()){value_.enabledKnown=true;value_.enabled=enabled->get<bool>();if(!value_.enabled)value_.frameQueued=false;}
             const auto seq=message.find("contextSeq");
             if(type!="wallpaper"||seq==message.end()||!seq->is_number_unsigned()||seq->get<std::uint64_t>()!=value_.seq)return;
@@ -69,48 +76,80 @@ public:
     ~Sampler(){reset();}
     bool active() const noexcept {return haveGeneration_;}
     void reset() noexcept {if(!haveGeneration_)return;for(auto& s:slots_)close(s);haveGeneration_=false;}
-    Json sample(bool enabled,ULONGLONG now,ULONGLONG generation,unsigned logicalProcessors,const std::array<Target,12>& targets,std::size_t count) {
+    Json sample(bool enabled,ULONGLONG now,ULONGLONG generation,unsigned logicalProcessors,const std::array<Target,12>& targets,std::size_t count,bool includeScope=true) {
         if(!enabled){reset();return nullptr;}
         if(!haveGeneration_||generation_!=generation){reset();generation_=generation;haveGeneration_=true;}
         for(auto& s:slots_)s.used=false;
+        // The current process session is shared by this bounded sample. Keep
+        // failed reads retryable for the next target; reuse successful facts only.
+        DWORD ownSession=0;bool ownSessionKnown=false;
+        const auto readOwnSession=[&]{
+            if(!ownSessionKnown)ownSessionKnown=ProcessIdToSessionId(GetCurrentProcessId(),&ownSession)!=FALSE;
+            return ownSessionKnown;
+        };
         Json rows=Json::array();count=(std::min)(count,targets.size());
+        bool compactAttribution=false;
         for(std::size_t n=0;n<count;++n){const auto& target=targets[n];
-            Json row={{"role",target.role},{"attribution",target.attribution},{"pid",target.pid},{"cpuRateAvailable",false}};
-            if(!target.pid||target.expectedImage.empty()){row["cpuStatus"]="identity-unavailable";rows.push_back(std::move(row));continue;}
+            Json row={{"role",target.role},{"pid",target.pid},{"cpuRateAvailable",false}};
+            const auto append=[&](bool verified=false){
+                if(verified&&!includeScope&&target.role&&target.attribution&&
+                    idle::matchingDeckyRoleAttribution(target.role,target.attribution)){
+                    row.erase("attribution"); // A shared process row may carry the previous role's inline text.
+                    compactAttribution=true;
+                }else row["attribution"]=target.attribution;
+                rows.push_back(std::move(row));
+            };
+            if(!target.pid||target.expectedImage.empty()){row["cpuStatus"]="identity-unavailable";append();continue;}
             bool shared=false;
             for(std::size_t prior=0;prior<rows.size();++prior)if(rows[prior].value("pid",DWORD{0})==target.pid&&rows[prior].value("identityVerified",false)&&
                 targets[prior].cefSubtree==target.cefSubtree&&normalized(targets[prior].expectedImage)==normalized(target.expectedImage)&&
                 (!target.birth||rows[prior].value("processCreation100ns",ULONGLONG{0})==target.birth)){
-                const auto previousRole=rows[prior].value("role",std::string{});row=rows[prior];row["role"]=target.role;row["attribution"]=target.attribution;row["sameProcessAsRole"]=previousRole;rows.push_back(std::move(row));shared=true;break;
+                const auto previousRole=rows[prior].value("role",std::string{});row=rows[prior];row["role"]=target.role;row["sameProcessAsRole"]=previousRole;append(true);shared=true;break;
             }
             if(shared)continue;
             const auto expected=normalized(target.expectedImage);Slot* slot=nullptr;
-            for(auto& s:slots_)if(!s.used&&s.pid==target.pid&&s.expectedBirth==target.birth&&s.image==expected&&s.cefSubtree==target.cefSubtree){slot=&s;break;}
-            if(!slot)for(auto& s:slots_)if(!s.used){close(s);slot=&s;slot->pid=target.pid;slot->expectedBirth=target.birth;slot->image=expected;slot->cefSubtree=target.cefSubtree;break;}
-            if(!slot){row["cpuStatus"]="sample-capacity";rows.push_back(std::move(row));continue;}
+            for(auto& s:slots_)if(!s.used&&s.pid==target.pid&&(!s.expectedBirth||!target.birth||s.expectedBirth==target.birth)&&s.image==expected&&s.cefSubtree==target.cefSubtree){slot=&s;break;}
+            if(!slot)for(auto& s:slots_)if(!s.used){
+                // A new earlier target must not discard a later exact target's
+                // live handle and CPU baseline. Healthy matched samples keep
+                // the original fast path; only replacement searches ahead.
+                const bool neededLater=std::any_of(targets.begin()+n+1,targets.begin()+count,[&](const Target& later){
+                    return later.pid&&s.pid==later.pid&&(!s.expectedBirth||!later.birth||s.expectedBirth==later.birth)&&s.cefSubtree==later.cefSubtree&&s.image==normalized(later.expectedImage);
+                });
+                if(neededLater)continue;
+                close(s);slot=&s;slot->pid=target.pid;slot->expectedBirth=target.birth;slot->image=expected;slot->cefSubtree=target.cefSubtree;break;
+            }
+            if(!slot){row["cpuStatus"]="sample-capacity";append();continue;}
+            // Birth0 is an unknown expectation from the existing window role,
+            // not a new process. Reuse a compatible role's handle/baseline;
+            // liveness, image, session and actual birth are still read below.
+            // Two different nonzero expectations never share this cache slot.
+            slot->expectedBirth=target.birth;
             slot->used=true;
             if(!slot->process)slot->process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,target.pid);
-            if(!slot->process){row["cpuStatus"]="process-open-failed";row["win32Error"]=GetLastError();slot->window.reset();rows.push_back(std::move(row));continue;}
-            DWORD size=32768,observedSession=MAXDWORD,ownSession=0;wchar_t image[32768]{};
+            if(!slot->process){row["cpuStatus"]="process-open-failed";row["win32Error"]=GetLastError();slot->window.reset();append();continue;}
+            DWORD size=32768,observedSession=MAXDWORD;wchar_t image[32768]{};
             FILETIME created{},exited{},kernel{},user{};
-            if(WaitForSingleObject(slot->process,0)!=WAIT_TIMEOUT){row["cpuStatus"]="process-exited";close(*slot);rows.push_back(std::move(row));continue;}
+            if(WaitForSingleObject(slot->process,0)!=WAIT_TIMEOUT){row["cpuStatus"]="process-exited";close(*slot);append();continue;}
             const bool imageKnown=QueryFullProcessImageNameW(slot->process,0,image,&size)!=FALSE;
             const auto actual=imageKnown?normalized(std::wstring(image,size)):std::wstring{};
             const bool matching=target.cefSubtree?actual.starts_with(expected+L"\\bin\\cef\\")&&actual.ends_with(L"\\steamwebhelper.exe"):actual==expected;
-            if(!imageKnown||!matching||!ProcessIdToSessionId(target.pid,&observedSession)||!ProcessIdToSessionId(GetCurrentProcessId(),&ownSession)||observedSession!=ownSession){row["cpuStatus"]="process-identity-mismatch";close(*slot);rows.push_back(std::move(row));continue;}
-            if(!GetProcessTimes(slot->process,&created,&exited,&kernel,&user)){row["cpuStatus"]="cpu-read-failed";row["win32Error"]=GetLastError();slot->window.reset();rows.push_back(std::move(row));continue;}
-            if(target.birth&&ticks(created)!=target.birth){row["cpuStatus"]="process-birth-mismatch";close(*slot);rows.push_back(std::move(row));continue;}
+            if(!imageKnown||!matching||!ProcessIdToSessionId(target.pid,&observedSession)||!readOwnSession()||observedSession!=ownSession){row["cpuStatus"]="process-identity-mismatch";close(*slot);append();continue;}
+            if(!GetProcessTimes(slot->process,&created,&exited,&kernel,&user)){row["cpuStatus"]="cpu-read-failed";row["win32Error"]=GetLastError();slot->window.reset();append();continue;}
+            if(target.birth&&ticks(created)!=target.birth){row["cpuStatus"]="process-birth-mismatch";close(*slot);append();continue;}
             nativeCost::Counters c;c.tick=now;c.processId=target.pid;c.creation100ns=ticks(created);c.cpuKnown=true;c.kernel100ns=ticks(kernel);c.user100ns=ticks(user);c.memoryError=ERROR_NOT_SUPPORTED;
-            const auto observation=slot->window.observe(c);const auto counters=nativeCost::toJson(observation);
-            for(const auto& [key,value]:counters.items())if(key!="scope"&&key!="memorySource"&&key!="memoryAvailable"&&key!="memoryError")row[key]=value;
+            const auto observation=slot->window.observe(c);const auto counters=nativeCost::toJson(observation,false);
+            for(const auto& [key,value]:counters.items())if(key!="memorySource"&&key!="memoryAvailable"&&key!="memoryError")row[key]=value;
             row["identityVerified"]=true;row["logicalProcessors"]=logicalProcessors;
             if(observation.rateKnown){const auto rate=counters.at("cpuMsPerSec").get<double>();row["oneLogicalCpuPercent"]=rate/10.0;if(logicalProcessors)row["machineCpuPercent"]=rate/(10.0*logicalProcessors);}
-            rows.push_back(std::move(row));
+            append(true);
         }
         for(auto& s:slots_)if(!s.used)close(s);
-        return {{"schemaVersion",1},{"sampleTick",now},{"powerGeneration",generation},{"intervalPolicyMs",1000},{"logicalProcessors",logicalProcessors},
-            {"cpuScope","Whole identified OS process; Steam owner/UI candidates and other plugins may share work. Not exclusive wallpaper or Decky JS CPU. GPU engine utilization and video-decode attribution unavailable; candidate process type not guaranteed."},
+        Json result={{"schemaVersion",1},{"sampleTick",now},{"powerGeneration",generation},{"intervalPolicyMs",1000},{"logicalProcessors",logicalProcessors},
             {"processes",std::move(rows)}};
+        if(includeScope)result["cpuScope"]=ymcc::idle::SteamDeckyCpuScope;
+        if(compactAttribution)result[idle::DeckyRoleAttributionSchemaField]=idle::DeckyRoleAttributionSchema;
+        return result;
     }
 };
 }

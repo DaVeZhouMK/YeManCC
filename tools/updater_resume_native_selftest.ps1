@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
-param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly)
+param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly,
+ [ValidatePattern('^[A-Za-z0-9 -]*$')][string]$ConfigStormCase='')
 $ErrorActionPreference='Stop'
+if($ConfigStormCase -and !$ConfigStormOnly){throw 'An exact config case requires ConfigStormOnly'}
 
 # Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
 $ownModules = Join-Path $PSHOME 'Modules'
@@ -56,7 +58,7 @@ $stateFunctions=$stateFunctions.Replace('ymcc::updaterecovery::read(','fixtureRe
 $fixture=$fixture.Replace('//__PRODUCTION_CONFIG_READERS__',$stateFunctions)
 $snapshotWriter=Slice 'static void updateProgressPost(const json& data) {' 'static json updateProgressRead() {'
 $fixture=$fixture.Replace('//__PRODUCTION_CONFIG_WRITER__',$snapshotWriter.Replace('updateProgressPost','fixtureActualProgressPost'))
-$atomicWriter=Slice 'bool sgWriteFileAtomicFlags(const std::wstring& path, const std::string& content, bool durable) {' 'static bool sgWriteFileAtomic(const std::wstring& path, const std::string& content) {'
+$atomicWriter=Slice 'bool sgWriteFileAtomicFlags(const std::wstring& path, const std::string& content, bool durable,' 'static bool sgWriteFileAtomic(const std::wstring& path, const std::string& content) {'
 $fixture=$fixture.Replace('//__PRODUCTION_ATOMIC_WRITER__',$atomicWriter.Replace('sgWriteFileAtomicFlags','fixtureAtomicFlags'))
 
 
@@ -84,7 +86,7 @@ if errorlevel 1 call "$vcvars" >nul
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /utf-8 /EHsc /W4 /MT /I"$project\deps\json" /I"$project\native" "$source" /Fo"$run\updater-resume-selftest.obj" /Fe"$run\updater-resume-selftest.exe" /link advapi32.lib user32.lib
 if errorlevel 1 exit /b 1
-"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}else{''})
+"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}else{''}) $(if($ConfigStormCase){'"'+$ConfigStormCase+'"'}else{''})
 "@ | Set-Content -LiteralPath $bat -Encoding ascii
 & $bat *> (Join-Path $run 'compile-and-test.log')
 $code=$LASTEXITCODE
@@ -98,6 +100,7 @@ $sourceAfter['harness']=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA
 $sourceAfter['template']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'updater_resume_native_fixture.cpp') -Algorithm SHA256).Hash
 foreach($name in $sourceBefore.Keys){if($sourceAfter[$name] -ne $sourceBefore[$name]){$sourceDrift+=$name}}
 $record['sourceInputsBefore']=$sourceBefore;$record['sourceInputsAfter']=$sourceAfter;$record['sourceDrift']=$sourceDrift;$record['configurationOnly']=[bool]$ConfigStormOnly
+$record['selectedConfigCase']=$ConfigStormCase
 if($toolchainLine){$record['toolchainPath']=$toolchain;$record['toolchainSha256']=(Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash}
 if($sourceDrift.Count){$record['status']='SOURCE_DRIFT';if(!$code){$code=1}}
 

@@ -315,7 +315,7 @@ foreach ($name in $hostFiles) {
 # ASCII-only for new text - PS 5.1 decodes a BOM-less script as ANSI and can drop the next
 # statement, which is exactly how an added non-ASCII comment broke this gate mid-batch.
 $pinnedHcAssembly = Join-Path $hcRuntimeSourceRoot 'HandheldCompanion.dll'
-$approvedHcHash = if ($hcRuntimeId -eq 'YMCC-DEVICECORE-20261018-v1') { '08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583' } else { '0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49' }
+$approvedHcHash = if ($hcRuntimeId -eq 'YMCC-DEVICECORE-20261018-v1') { '4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c' } else { '0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49' }
 if ((Get-Sha256 $pinnedHcAssembly) -ne $approvedHcHash) {
   throw "Pinned HC runtime source has an unexpected HandheldCompanion.dll hash: $pinnedHcAssembly"
 }

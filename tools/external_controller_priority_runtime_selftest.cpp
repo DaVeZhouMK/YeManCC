@@ -86,6 +86,7 @@ struct World {
     ep::DebtLoadFailure loadFailure = ep::DebtLoadFailure::InvalidRecord;
     int resolves = 0, snapshots = 0, saves = 0, launches = 0, stops = 0, refreshes = 0, resets = 0, reprobes = 0;
     int loads = 0, pnpQueries = 0, settingsReads = 0; bool settingsThrow = false;
+    int metadataReads = 0; bool metadataKnown = true, freezeMetadata = false;
     std::string queryRoot; std::vector<std::string> events; std::vector<json> logs;
     std::vector<HubOpen> hubOpens; std::vector<HubQuery> hubQueries;
     bool hubOpen = false; DWORD hubDesiredAccess = 0; int hubCloses = 0;
@@ -211,6 +212,17 @@ json ymSettingsField(const char* section, const char* field) {
     const auto settings = ymSettingsSection(section);
     if (!settings.is_object()) return nullptr;
     const auto value = settings.find(field); return value == settings.end() ? json(nullptr) : *value;
+}
+json ymSettingsInactiveField(const char* section, const char* field,
+    const std::string& knownFalseStamp, std::string& stamp, bool& unchanged) {
+    ++offline::w.metadataReads;
+    unchanged = false;
+    stamp.clear();
+    if (offline::w.metadataKnown && !offline::w.settingsThrow) {
+        stamp = offline::w.freezeMetadata ? "unchanged-fixture-metadata" : offline::w.settings.dump();
+        if (!knownFalseStamp.empty() && knownFalseStamp == stamp) { unchanged = true; return nullptr; }
+    }
+    return ymSettingsField(section, field);
 }
 std::uint64_t currentPowerGeneration() {
     const auto overridePower = g_offlinePowerOverride.load();
@@ -411,6 +423,92 @@ void run(const char* name, const std::function<void()>& test) {
 }
 int main() {
     using namespace offline;
+    run("ROG Xbox builtin identity survives unsupported connector query", [] {
+        for (const auto& model : {std::make_pair("HandheldCompanion.Devices.XboxROGAlly", "rog-xbox:0x1B4C"), std::make_pair("HandheldCompanion.Devices.XboxROGAllyX", "rog-xbox:0x1ABE")}) {
+            reset(); w.board=false; g_machineIdentity.family=YmccFamily::Other; g_machineIdentity.deviceClass=model.first; g_machineIdentity.inputHidKey=model.second;
+            const bool x=std::string(model.first).back()=='X';
+            const std::string root=x?"USB\\VID_0B05&PID_1ABE\\BUILTIN":"USB\\VID_0B05&PID_1B4C\\BUILTIN";
+            w.devices.front()=device(root,builtinLocation,-1,1); w.devices.front().identity.vendorId=0x0B05; w.devices.front().identity.productId=x?0x1ABE:0x1B4C;
+            takeover(); CHECK(w.durable.builtinRoot==root); CHECK(g_externalPriority.externalRoot==externalRoot);
+            CHECK(std::find(w.visibility.hidden.begin(),w.visibility.hidden.end(),U2W(externalRoot))==w.visibility.hidden.end());
+            beginReturn();step(w.now+500);complete();step(w.now+3000);CHECK(!g_externalPriorityVirtualSuspended.load());CHECK(w.visibility.hidden.empty());
+        }
+    });
+    run("ROG Xbox authority never comes from Xbox label slot or partial model", [] {
+        for(unsigned scenario=0;scenario<7;++scenario){
+            reset();w.board=false;g_machineIdentity.family=YmccFamily::Other;
+            g_machineIdentity.deviceClass="HandheldCompanion.Devices.XboxROGAlly";g_machineIdentity.inputHidKey="rog-xbox:0x1B4C";
+            auto builtin=device("USB\\VID_0B05&PID_1B4C\\BUILTIN",builtinLocation,-1,1);builtin.identity.vendorId=0x0B05;builtin.identity.productId=0x1B4C;w.devices.front()=builtin;
+            if(scenario==0)g_machineIdentity.resolved=false;
+            if(scenario==1)g_machineIdentity.deviceClass="HandheldCompanion.Devices.DefaultDevice";
+            if(scenario==2)g_machineIdentity.inputHidKey="rog-xbox:0x1ABE";
+            if(scenario==3)w.devices.front().identity.vendorId=0x045E;
+            if(scenario==4)w.devices.front().identity.baseContainerDeviceInstanceId="USB\\VID_045E&PID_028E\\NOT_BUILTIN";
+            if(scenario==5)w.devices.front().identity.productId=0x1ABE;
+            if(scenario==6){auto second=builtin;second.identity.baseContainerDeviceInstanceId="USB\\VID_0B05&PID_1B4C\\SECOND";second.location="OTHER-PORT";w.devices.push_back(second);}
+            for(ULONGLONG time=1000;time<5000;time+=500)step(time);
+            CHECK(noMutations());CHECK(!g_externalPriorityVirtualSuspended.load());CHECK(w.visibility.hidden.empty());
+        }
+    });
+    run("ROG Xbox external priority does not require virtual Host enabled", [] {
+        reset();w.board=false;w.host=false;g_machineIdentity.family=YmccFamily::Other;
+        g_machineIdentity.deviceClass="HandheldCompanion.Devices.XboxROGAlly";g_machineIdentity.inputHidKey="rog-xbox:0x1B4C";
+        auto builtin=device("USB\\VID_0B05&PID_1B4C\\BUILTIN",builtinLocation,-1,1);builtin.identity.vendorId=0x0B05;builtin.identity.productId=0x1B4C;w.devices.front()=builtin;
+        takeover();CHECK(w.stops==0);CHECK(g_externalPriority.builtinHidden);CHECK(g_externalPriority.externalRoot==externalRoot);
+        w.devices.back().fresh=false;step(3000);step(5000);step(5500);CHECK(g_externalPriority.returning);step(6000);complete();step(9000);
+        CHECK(!g_externalPriorityVirtualSuspended.load());CHECK(w.visibility.hidden.empty());CHECK(g_externalPriority.enabled);
+    });
+    run("connector read does not demand device write permission", [] {
+        reset(); w.board=false;
+        for(auto& d:w.devices)d.deniedAccessMask=GENERIC_WRITE;
+        takeover();CHECK(!w.hubOpens.empty());
+        for(const auto& opened:w.hubOpens)CHECK(opened.desiredAccess==0);
+    });
+    run("quiet OFF policy bounds repeated settings reads", [] {
+        reset(false); step(1000); step(1500);
+        CHECK(w.settingsReads == 2); CHECK(g_externalPriority.disabledPolicyKnown);
+        for (ULONGLONG time = 2000; time < 31500; time += 500) step(time);
+        CHECK(w.settingsReads == 2); CHECK(!g_externalPriority.enabled); CHECK(noMutations());
+        step(31500); CHECK(w.settingsReads == 3); CHECK(w.loads == 1);
+    });
+    run("quiet OFF settings event defeats identical metadata", [] {
+        reset(false); w.freezeMetadata = true; step(1000); step(1500);
+        w.settings["ownership"]["externalControllerPriority"] = true;
+        externalPrioritySettingsChanged(); step(2000);
+        CHECK(w.settingsReads == 3); CHECK(g_externalPriority.enabled);
+        CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(w.launches == 0);
+    });
+    run("quiet OFF metadata change observes policy before fallback", [] {
+        reset(false); step(1000); step(1500);
+        w.settings["ownership"]["externalControllerPriority"] = true; step(2000);
+        CHECK(w.settingsReads == 3); CHECK(g_externalPriority.enabled);
+        CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(w.launches == 0);
+    });
+    run("quiet OFF identical external metadata delays only enabling within 30sec", [] {
+        reset(false); w.freezeMetadata = true; step(1000); step(1500);
+        w.settings["ownership"]["externalControllerPriority"] = true;
+        for (ULONGLONG time = 2000; time < 31500; time += 500) step(time);
+        CHECK(w.settingsReads == 2); CHECK(!g_externalPriority.enabled); CHECK(noMutations());
+        step(31500); CHECK(g_externalPriority.enabled); CHECK(w.settingsReads == 3);
+    });
+    run("quiet OFF metadata failure bypasses inactive memo", [] {
+        reset(false); step(1000); step(1500); w.metadataKnown = false;
+        step(2000); step(2500); CHECK(w.settingsReads == 4);
+        CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(noMutations());
+    });
+    run("strict policy read bypasses inactive memo before admission", [] {
+        reset(false); w.freezeMetadata = true; step(1000); step(1500);
+        w.settings["ownership"]["externalControllerPriority"] = true;
+        CHECK(externalPriorityDesired()); CHECK(w.settingsReads == 3);
+        CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(noMutations());
+    });
+    run("quiet OFF power changes and retained return duty bypass memo", [] {
+        reset(false); step(1000); step(1500); ++w.power; step(2000);
+        CHECK(w.settingsReads == 3); CHECK(!g_externalPriority.disabledPolicyKnown);
+        step(2500); CHECK(w.settingsReads == 4); CHECK(g_externalPriority.disabledPolicyKnown);
+        g_externalPriority.returning = true; step(3000);
+        CHECK(w.settingsReads == 5); CHECK(!g_externalPriority.disabledPolicyKnown);
+    });
     run("default false malformed settings do not mutate", [] {
         for (const auto& settings : std::vector<json>{json::object(), {{"ownership", json::object()}},
             {{"ownership", {{"externalControllerPriority", "true"}}}}, {{"ownership", {{"externalControllerPriority", nullptr}}}}}) {

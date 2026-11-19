@@ -111,6 +111,7 @@ export function getMonitorAdapters(){return [{
     "native/monitor_hwinfo_config_commit.h",
     "native/monitor_freshness.h",
     "native/monitor_hwinfo_recovery.h",
+    "native/sleep_power_state.h",
     "native/monitor_frame_time.h",
     "native/monitor_gpu_selection.h",
     "native/monitor_memory_network.h",

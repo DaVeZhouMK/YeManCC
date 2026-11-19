@@ -92,11 +92,15 @@ const prelude = String.raw`
 #include <utility>
 #include <vector>
 #include "json.hpp"
+#include "log_snapshot_state.h"
 using json = nlohmann::json;
 using ULONGLONG = unsigned long long;
 using DWORD = std::uint32_t;
 using USHORT = std::uint16_t;
 using USAGE = std::uint16_t;
+// Unused by the extracted helper; no power or output behavior is linked.
+namespace ymcc::sleeppower { struct SharedPowerV1 {}; }
+namespace ymcc::touchhaptic { struct SourceToken {}; }
 // Inert portable layout only; no XInput header, library, handle or function.
 struct XINPUT_GAMEPAD {
     std::uint16_t wButtons = 0;
@@ -254,7 +258,13 @@ int main() {
     transition("epoch-transition", [] { frame["frameProof"]["hostReceipt"]["epoch"] = 42ULL; });
     transition("topology-transition", [] { source.readTopologyGeneration = 8; g_xinputTopologyEpoch = 8; });
     transition("source-transition", [] { source.inputSource = "rog-hid"; });
-    transition("neutral-transition", [] {}, true);
+    one("neutrality-remains-sampled-with-the-current-frame", [] {
+        emit(); check(logs.size() == 1, "first row missing");
+        fakeTick += 1; emit(true); check(logs.size() == 1, "neutrality edge bypassed periodic sampling");
+        fakeTick += 999; emit(true);
+        check(logs.size() == 2 && logs.back().at("snapshotReason") == "periodic" && logs.back().at("semanticNeutral") == true,
+              "periodic row lost current neutrality");
+    });
     transition("outcome-transition", [] { frame["hostSubmission"] = "not-admitted-or-failed"; });
     transition("runId-transition", [] { frame["frameProof"]["hostReceipt"]["runId"] = "run-B"; });
     transition("hostInstanceId-transition", [] { frame["frameProof"]["hostReceipt"]["hostInstanceId"] = "host-B"; });
@@ -360,6 +370,8 @@ function main() {
   // Snapshot the header too: concurrent mainline work cannot change fixture bytes.
   const jsonPath = path.join(repo, 'deps', 'json', 'json.hpp');
   const jsonHeader = fs.readFileSync(jsonPath);
+  const nativeHeaders = ['common_frame_log_scope.h', 'log_snapshot_state.h'].map(name =>
+    [name, fs.readFileSync(path.join(repo, 'native', name))]);
   const recipePath = path.join(repo, 'native', 'build_native.bat');
   const recipe = fs.readFileSync(recipePath, 'utf8');
   const recipeVcvars = /call\s+"([^"]*vcvars64\.bat)"/i.exec(recipe);
@@ -367,15 +379,17 @@ function main() {
   if (!args.vcvars && !recipeVcvars) throw Error('No vcvars64.bat path found in build_native.bat; provide --vcvars.');
   if (!fs.existsSync(vcvars)) throw Error('Missing existing MSVC environment script: ' + vcvars);
   commandPath(vcvars);
-  const fixture = prelude + '\n' + definitions[0].body + '\n' + definitions[1].body + '\n' + fakes + '\n' + definitions[2].body + '\n' + helper.body + '\n' + tests;
+  const fixture = '#include "common_frame_log_scope.h"\n' + prelude + '\n' + definitions[0].body + '\n' + definitions[1].body + '\n' + fakes + '\n' + definitions[2].body + '\n' + helper.body + '\n' + tests;
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.mkdirSync(out); // exclusive: never reuse another task's outputs
   fs.writeFileSync(path.join(out, 'json.hpp'), jsonHeader);
+  for (const [name, content] of nativeHeaders) fs.writeFileSync(path.join(out, name), content);
   fs.writeFileSync(path.join(out, 'common-controller-evidence.cpp'), fixture);
   fs.writeFileSync(path.join(out, 'inputCaptureCommonFrameEvidence.extracted.cpp'), helper.body);
   const binding = { createdAt: new Date().toISOString(), sourcePath, sourceSha256: sha256(raw),
     functions: definitions.map(({ body, ...metadata }) => metadata), jsonHeaderPath: jsonPath,
-    jsonHeaderSha256: sha256(jsonHeader), fixtureSha256: sha256(fixture), toolSha256: sha256(fs.readFileSync(__filename)),
+    jsonHeaderSha256: sha256(jsonHeader), nativeHeaders: Object.fromEntries(nativeHeaders.map(([name, content]) => [name, sha256(content)])),
+    fixtureSha256: sha256(fixture), toolSha256: sha256(fs.readFileSync(__filename)),
     vcvars, recipePath, recipeSha256: sha256(recipe),
     extraction: 'Verbatim definitions from one read of main.cpp; no production entrypoint or SDK code compiled.',
     fakes: ['domain gate', 'clock', 'machine identity', 'synthetic physical cache with controlled real std::mutex try_lock', 'log sink'],

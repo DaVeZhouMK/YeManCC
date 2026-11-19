@@ -1,8 +1,20 @@
 // Owned, hidden Win32 fixture. No real YMCC, game, service, sleep or hardware is touched.
 // Include the production reader, probes and decision core; only kill/spawn/time are mocked.
+#if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+static ULONGLONG recoveryFixtureNow=100000;
+static ULONGLONG recoveryFixtureTick(){return recoveryFixtureNow;}
+static BOOL recoveryFixtureTerminateProcess(HANDLE,UINT);
+#define TerminateProcess recoveryFixtureTerminateProcess
+#define GetTickCount64 recoveryFixtureTick
+#endif
 #define wWinMain unusedRecoveryServiceEntry
 #include "../native/recovery_service.cpp"
 #undef wWinMain
+#if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
+#undef TerminateProcess
+#endif
 #include <thread>
 #include <cassert>
 
@@ -28,7 +40,11 @@ static LRESULT CALLBACK fixtureWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 
-int main() {
+#if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
+#include "fixtures/recovery_shared_power_cases.h"
+#endif
+
+int runOriginalRecoveryUiProgressFixture() {
     fixtureReady = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     fixtureStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     fixtureBlocked = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -116,5 +132,14 @@ int main() {
     snapshotChannelClose(channel); UnmapViewOfFile(view); CloseHandle(mapping);
     for (HANDLE h : {fixtureReady, fixtureStop, fixtureBlocked, fixturePong}) CloseHandle(h);
     puts("owned Win32 UI recovery fixture: PASS (no real app/game/sleep touched)");
+    return 0;
 }
 
+
+int main(int argc,char** argv){
+#if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
+ return runRecoverySharedPowerCases(argc,argv);
+#else
+ (void)argv;if(argc!=1)return 2;return runOriginalRecoveryUiProgressFixture();
+#endif
+}

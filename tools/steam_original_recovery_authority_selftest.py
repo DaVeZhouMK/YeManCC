@@ -46,13 +46,18 @@ def function(text, name):
 
 def wiring(text):
     """Structural caller check, separately reported from executed consumers."""
-    clean = masked_cpp(text)
-    hits = list(re.finditer(r'\bconst\s+auto\s+tracker\s*=\s*tracking\s*\(\s*client\s*,\s*game\s*\)\s*;', clean))
+    # The two revocation consumers belong to run; discovery has no callback.
+    caller = function(text, 'run')
+    caller_start = text.index(caller)
+    clean = masked_cpp(caller)
+    hits = list(re.finditer(r'\bconst\s+auto\s+tracker\s*=\s*tracking\s*\(\s*client\s*,\s*game(?:\s*,\s*TrackingScope::(?:RunningListAndProcess|ProcessLifetime)(?:\s*,\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture)?)?\s*\)\s*;', clean))
     rows = []
     for hit in hits:
         tail = clean[hit.end():]
-        connected = re.match(r'\s*steamOriginalRecoveryTrackerObserved\s*\(', tail) is not None
-        rows.append({'line': text.count('\n', 0, hit.start()) + 1, 'immediateRevocationCallback': connected})
+        # Permit only the actual read-only group-observation assignment before
+        # the original callback; arbitrary intervening statements still fail.
+        connected = re.match(r'\s*(?:if\s*\(\s*originalGroupCandidate\s*\(\s*tracker\s*,\s*client\s*,\s*game\s*\)\s*\)\s*observedGroup\s*=\s*tracker\s*\.\s*processGroup\s*;\s*)?steamOriginalRecoveryTrackerObserved\s*\(', tail) is not None
+        rows.append({'line': text.count('\n', 0, caller_start + hit.start()) + 1, 'immediateRevocationCallback': connected})
     return {'passed': len(rows) >= 2 and all(row['immediateRevocationCallback'] for row in rows), 'sites': rows}
 
 
@@ -61,6 +66,7 @@ CPP = r"""
 #include <atomic>
 #include <climits>
 #include <condition_variable>
+#include <chrono>
 #include <cstdint>
 #include <cwctype>
 #include <deque>
@@ -73,9 +79,11 @@ CPP = r"""
 #include <utility>
 #include <vector>
 #include "steam_original_recovery_policy.h"
+#include "steam_original_recovery_dual_route.h"
 #include "steam_original_recovery_wake_watch.h"
 #include "sleep_recovery_diagnostics.h"
 #include "sleep_steam_tracking.h"
+#include "recovery_startup_handoff_unsupported.h"
 using json=nlohmann::json;using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;
 constexpr DWORD MAXDWORD=UINT32_MAX;
 enum class PowerLifecycle {Ready,Resuming,Suspending,Suspended};
@@ -88,17 +96,20 @@ unsigned dispatches=0,targetReads=0,identityReads=0,preferenceWrites=0,facts=0,n
 bool targetAvailable=true,operationAllowed=true;
 ULONGLONG currentPowerGeneration(){return generation;}
 ULONGLONG sgNowFileTime(){return now;}
+ULONGLONG GetTickCount64(){return 1000;}
 bool ProcessIdToSessionId(DWORD pid,DWORD* value){++identityReads;*value=1;return pid!=0;}
 bool ymSettingsPatchSection(const char*,const json&){++preferenceWrites;return true;}
 void sgRecordFact(const char*,const json&){++facts;}
 namespace SleepRecoveryAuto {
-std::mutex mx,setMx;
-struct State {ULONGLONG generation=7,configEpoch=5;json wakeAdmission;std::string phase,reason;json steamStatus,inputStatus;} state;
+std::mutex mx;
+std::timed_mutex setMx;
+struct State {ULONGLONG armed=1000,generation=7,configEpoch=5;json wakeAdmission;std::string phase,reason;json steamStatus,inputStatus;} state;
 struct KernelWake {ULONGLONG generation=7,configEpoch=5,boundaryFileTime=0,eventFileTime=0;int eventId=507;bool uiWakeRequested=true;ULONGLONG requestGeneration=7;} kernelWake;
 struct KernelSleepEntry {ULONGLONG configEpoch=5,generation=7,eventFileTime=0;} kernelSleepEntry;
 bool wakeOperationAllows(ULONGLONG,ULONGLONG){return operationAllowed;}
+bool wakeOperationAllowedLocked(ULONGLONG,ULONGLONG){return operationAllowed;}
 json get(){return {{"enabled",g_sleepRecoveryAutoEnabled.load()}};}
-void notify(){++notifications;}
+void notify(const std::function<void(const std::function<void()>&)>& = nullptr){++notifications;}
 @@SETTING_SET@@
 }
 struct NativeDetectedGame {DWORD pid=100;ULONGLONG processCreated=1234;std::wstring path=L"D:\\games\\game.exe";} liveGame;
@@ -115,6 +126,7 @@ std::mutex lifecycleMx;std::shared_ptr<Control> control;
 @@CURRENT@@
 @@IDENTITY@@
 @@WAKE_PROOF@@
+@@LEGACY_WAKE_PROOF@@
 @@SAME_SCOPE@@
 // Forbidden action boundaries: any future callback use is counted, never run.
 void enqueue(const std::shared_ptr<Control>&,Trigger,unsigned long long=0){++dispatches;}
@@ -140,7 +152,8 @@ void reset(){
 std::function<bool()> capturedCurrent(Trigger kind=Trigger::Wake,bool recover=true){
  auto c=current();const auto scope=scopeValue();Pending pending{kind,7,1};
  const auto configEpoch=g_sleepRecoveryAutoConfigEpoch.load();const auto bindingSerial=c->bindingSerial;
- const auto proof=wakeProof(pending.generation,configEpoch);
+ const bool legacy=false; // Original kernel-witness consumer selects the semi-static route.
+ @@CAPTURED_PROOF_DECLARATIONS@@
  @@SCOPE_LAMBDA@@
  return [scopeNow,recover]{return scopeNow(recover);};
 }
@@ -151,6 +164,8 @@ void publishReadBracket(const std::function<void()>& duringRead={}){
  // This is the sole mocked tracking read boundary, including its possible callback.
  if(duringRead)duringRead();
  struct {std::string gameId;} tracked{originalId};const auto expectedApp=originalApp;
+ const std::shared_ptr<const ymcc::steamgamefacts::HistoricalStartupHandoffEvidence> historicalStartupHandoff{};
+ const ymcc::steamgamefacts::TrackerOwnerCurrent historicalStartupHandoffCurrent{};
  @@BINDING_PUBLISH@@
 }
 json fieldReplay;
@@ -287,6 +302,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--negative-controls', action='store_true')
+    parser.add_argument('--authority-only', action='store_true', help='Run original authority consumer and caller wiring only; nested suites NOT_RUN')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     out = args.output.resolve()
@@ -296,20 +312,26 @@ def main():
         raise RuntimeError('fresh output required; earlier evidence is retained')
     out.mkdir(parents=True, exist_ok=True)
     names = ['native/steam_original_recovery_runtime.h', 'native/steam_original_recovery_wake_watch.h',
-             'native/steam_original_recovery_policy.h', 'native/sleep_recovery_auto.h',
+             'native/steam_original_recovery_policy.h', 'native/steam_original_recovery_dual_route.h', 'native/sleep_recovery_auto.h',
              'native/sleep_recovery_diagnostics.h', 'native/sleep_steam_tracking.h',
              'native/steam_game_link_runtime.h', 'deps/json/json.hpp',
-             'tools/fixtures/steam_original_recovery_g3e_20261021.json']
+             'tools/fixtures/steam_original_recovery_g3e_20261021.json',
+             'tools/fixtures/recovery_startup_handoff_unsupported.h']
     sources = {name: (repo / name).read_bytes() for name in names}
     runtime = sources[names[0]].decode('utf-8-sig')
     auto = sources['native/sleep_recovery_auto.h'].decode('utf-8-sig')
     extracted = {key: function(runtime, name) for key, name in {
-        'CURRENT':'current', 'IDENTITY':'identity', 'WAKE_PROOF':'wakeProof',
+        'CURRENT':'current', 'IDENTITY':'identity', 'WAKE_PROOF':'wakeProof', 'LEGACY_WAKE_PROOF':'legacyWakeProof',
         'SAME_SCOPE':'sameScopeNow', 'TRACKER_OBSERVED':'steamOriginalRecoveryTrackerObserved'}.items()}
     extracted['SETTING_SET'] = function(auto, 'set')
     for key in ('Pending', 'Control'):
         extracted[key.upper()] = extract(runtime, r'\bstruct\s+' + key + r'\s*\{', True)
-    run_one = function(runtime, 'runOne')
+    # The original per-route consumer moved from runOne to runRoute; preserve
+    # every original assertion and consume the actual current closure unchanged.
+    run_one = function(runtime, 'runRoute')
+    proof_start = run_one.index('const auto proof=')
+    proof_end = run_one.index('const ULONGLONG powerEventFileTime=', proof_start)
+    extracted['CAPTURED_PROOF_DECLARATIONS'] = run_one[proof_start:proof_end]
     extracted['SCOPE_LAMBDA'] = extract(run_one, r'\bconst\s+auto\s+scopeNow\s*=[^;{}]*\{', True)
     prefix = run_one.index('unsigned long long bindingBefore=0;')
     end_prefix = run_one.index('const auto tracked=', prefix)
@@ -348,10 +370,12 @@ def main():
     for name, data in sources.items():
         if name.startswith('native/'):
             (frozen / Path(name).name).write_bytes(data)
+    (frozen / 'recovery_startup_handoff_unsupported.h').write_bytes(sources['tools/fixtures/recovery_startup_handoff_unsupported.h'])
     provenance = {'sources': [{'path': name, 'sha256': hashlib.sha256(data).hexdigest()} for name, data in sources.items()],
                   'exactFunctionsAndStatements': {key: {'sha256': hashlib.sha256(value.encode()).hexdigest(), 'text': value} for key, value in extracted.items()},
                   'mockedBoundaries': ['clock', 'process/session identity snapshots', 'preference persistence', 'notify/log counters', 'tracking read timing'],
-                  'modelOfAuthorityLogic': False, 'wholeRunOneOrTrackerThreadExecuted': False,
+                  'modelOfAuthorityLogic': False, 'legacyDynamicExecution': 'NOT_RUN',
+                  'routeSelection': 'semi-static-original-kernel-witness-cases', 'wholeRunOneOrTrackerThreadExecuted': False,
                   'fieldSample': {'path': sample_path, 'archiveSha256': sample['archiveSha256'],
                                   'rawKernelWitnessPresent': False, 'missingWitnessPortsMockedFromAdmission': True,
                                   'fieldAcceptance': False}}
@@ -412,6 +436,16 @@ def main():
             result['detected'] = result.get('compiled', False) and result.get('returnCode') == 1 and result.get('result', {}).get('failure') == expected
             controls.append(result)
     caller = wiring(sources['native/steam_game_link_runtime.h'].decode('utf-8-sig'))
+    if args.authority_only:
+        drift = [name for name, data in sources.items() if (repo / name).read_bytes() != data]
+        passed = positive.get('returnCode') == 0 and caller['passed'] and not drift and all(row['detected'] for row in controls)
+        result = {'status': 'PASS' if passed else 'FAIL', 'selection': 'authority-only', 'positive': positive,
+                  'negativeControls': controls, 'trackingCallerWiring': caller, 'sourceDrift': drift,
+                  'nestedSuites': 'NOT_RUN', 'liveSteamOrSleep': False, 'fieldAcceptance': False}
+        with (out / 'result.json').open('x', encoding='utf-8') as stream:
+            json.dump(result, stream, indent=2)
+        print(json.dumps(result, indent=2))
+        return 0 if passed else 1
     # Exercise the real valve reader changed by the guard optimization, with
     # its unchanged predicates and three required-read negative controls.
     valve_run = subprocess.run([sys.executable, str(repo / 'tools/steam_original_recovery_valve_selftest.py'),

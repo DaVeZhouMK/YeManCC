@@ -34,6 +34,15 @@ unwritable destination cannot guarantee a physical final row.
 
 Registered service/Enum/Class values describe registered bindings, not a loaded
 kernel image. CM started/problem facts do not derive backend availability.
+Successful service, disk-image and complete service Enum end snapshots can use
+`snapshot=end sameAsBegin=1`. Successful device binding and driver registration
+can use `snapshot=end index=N sameAsBegin=1` when the same instance occupies that
+slot and binding and CM checks permit a reference. A fresh end read still has
+its own timestamp, and the referenced detail must match the successfully
+appended, untruncated begin in that operation. Errors and changed observations
+keep full text; caller stages and terminal receipts are unchanged. The offline
+`tools/usbip_setup_log_reader.py` reports unknown if a unique matching prior
+begin cannot be found in the retained active log and its rotation.
 Only caller-supplied Stage availability is recorded. The SYS fingerprint and
 VS_FIXEDFILEINFO version come from the same at-most-2-MiB disk byte copy, never a
 loaded driver module or a second version pathname read. Missing/malformed

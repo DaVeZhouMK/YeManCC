@@ -13,34 +13,48 @@ static ULONGLONG WINAPI cpuTick(){return cpuVirtualTick;}
 #undef GetTickCount64
 #include <chrono>
 #include <string>
-struct Result {double wallUs=0,threadCpuUs=0;unsigned long long sum=0,cancels=0;unsigned pulses=0,dispatches=0;};
+struct Result {double wallUs=0,threadCpuUs=0;unsigned long long sum=0,cancels=0;unsigned pulses=0,dispatches=0;bool gestureOk=true;};
 static unsigned long long threadTime(){FILETIME a{},b{},k{},u{};if(!GetThreadTimes(GetCurrentThread(),&a,&b,&k,&u))return 0;return ((ULONGLONG)k.dwHighDateTime<<32)+k.dwLowDateTime+((ULONGLONG)u.dwHighDateTime<<32)+u.dwLowDateTime;}
 static Result measure(const std::string& kind,int count){
  reset();bool owned=true;cpuVirtualTick=1000;feedbackOnlyForegroundFixture=nullptr;
  const bool buttonPath=kind.rfind("button-",0)==0,off=kind.find("-off")!=std::string::npos;
+ const bool mapped=kind.rfind("pad-mapped-",0)==0,ps=kind.find("-ps5")!=std::string::npos;
+ psAvailable=ps;
  core.config.touchFeedback=off?TouchFeedbackMode::Off:TouchFeedbackMode::Medium;
  const HWND h=reinterpret_cast<HWND>(uintptr_t{2});
  if(buttonPath)handleButtonPointer(h,1,WM_POINTERDOWN,501,30,20);
  else {
   feedbackOnlyForegroundFixture=&owned;dryRun=true;core.config.left=core.config.right=Mode::Mouse;
-  if(kind.find("blocked")!=std::string::npos){owned=false;core.config.left=core.config.right=Mode::Deck;core.nativeOutputBlocked=true;}
+  if(mapped){owned=false;core.config.left=core.config.right=Mode::Deck;if(ps){core.config.layout=Layout::Single;core.config.single=Mode::DualSense;}}
+  else if(kind.find("blocked")!=std::string::npos){owned=false;core.config.left=core.config.right=Mode::Deck;core.nativeOutputBlocked=true;}
   sizes={SIZE{200,200},SIZE{200,200}};handlePointer(nullptr,0,WM_POINTERDOWN,501,20,20,0);
+  if(ps)handlePointer(nullptr,0,WM_POINTERDOWN,502,150,30,0);
  }
+ const bool admitted=!mapped||(core.pads[0].down&&core.pads[0].id==501&&(!ps||(core.pads[1].down&&core.pads[1].id==502)));
  unsigned long long sum=0;const auto g=standaloneGeneration.load();
  const auto cpu=threadTime();const auto start=std::chrono::steady_clock::now();
  for(int i=0;i<count;++i){cpuVirtualTick+=8;
   if(buttonPath){handleButtonPointer(h,1,WM_POINTERUPDATE,501,30+(i%3),20);sum+=buttonFeedbackContacts[1]+(unsigned)buttonFeedbackPressed[1]+screenButtonMask.load(std::memory_order_relaxed);}
-  else {const float x=(i%2)?20.f:150.f;handlePointer(nullptr,0,WM_POINTERUPDATE,501,x,20,0);const auto& c=feedbackOnlyContacts.contacts[0];sum+=(unsigned)c.x+c.id+(unsigned)c.active;}
+  else {
+   const float x=((ps?i/2:i)%2)?20.f:150.f;
+   const unsigned slot=ps?i%2:0;
+   handlePointer(nullptr,0,WM_POINTERUPDATE,501+slot,x,20,0);
+   if(mapped){const auto& p=core.pads[slot];sum+=(unsigned)p.x+p.id+(unsigned)p.down;}
+   else {const auto& c=feedbackOnlyContacts.contacts[0];sum+=(unsigned)c.x+c.id+(unsigned)c.active;}
+  }
  }
  Result r;r.wallUs=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();r.threadCpuUs=(threadTime()-cpu)/10.0;r.sum=sum;r.cancels=standaloneGeneration.load()-g;r.pulses=pulses;r.dispatches=sinkCalls;
  if(buttonPath)handleButtonPointer(h,1,WM_POINTERUP,501,30,20);else handlePointer(nullptr,0,WM_POINTERUP,501,20,20,0);
+ if(ps)handlePointer(nullptr,0,WM_POINTERUPDATE,502,150,30,POINTER_FLAG_CANCELED);
+ r.gestureOk=admitted&&(!mapped||(!core.pads[0].down&&!core.pads[1].down&&!feedbackOnlyContacts.mask()&&lastContacts==0))&&injectedCalls==0;
  feedbackOnlyForegroundFixture=nullptr;setTouchHapticPulseSink(nullptr);return r;
 }
 int wmain(int argc,wchar_t** argv){
- if(argc!=2)return 2;const char* kinds[]={"button-owned-medium","button-owned-off","pad-owned-off","pad-owned-medium","pad-blocked-off"};
+ if(argc!=2)return 2;const char* kinds[]={"button-owned-medium","button-owned-off","pad-owned-off","pad-owned-medium","pad-blocked-off",
+  "pad-mapped-deck-medium","pad-mapped-deck-off","pad-mapped-ps5-medium"};
  constexpr int count=200000,rounds=7;bool ok=true;Json rows=Json::array();
  for(const auto* kind:kinds){measure(kind,10000);Json samples=Json::array();std::array<double,rounds> wall{};Result first{};bool stable=true;
-  for(int i=0;i<rounds;++i){const auto r=measure(kind,count);wall[i]=r.wallUs;if(i==0)first=r;else stable&=r.sum==first.sum&&r.cancels==first.cancels&&r.pulses==first.pulses&&r.dispatches==first.dispatches;
+  for(int i=0;i<rounds;++i){const auto r=measure(kind,count);wall[i]=r.wallUs;stable&=r.gestureOk;if(i==0)first=r;else stable&=r.sum==first.sum&&r.cancels==first.cancels&&r.pulses==first.pulses&&r.dispatches==first.dispatches;
    samples.push_back({{"wallUs",r.wallUs},{"threadCpuUs",r.threadCpuUs}});}
   std::sort(wall.begin(),wall.end());ok&=stable;
   rows.push_back({{"workload",kind},{"iterations",count},{"rounds",rounds},{"medianWallUs",wall[rounds/2]},{"minWallUs",wall.front()},{"maxWallUs",wall.back()},{"medianUsPerEvent",wall[rounds/2]/count},{"checksum",first.sum},{"cancellations",first.cancels},{"pulses",first.pulses},{"sinkCalls",first.dispatches},{"stable",stable},{"samples",samples}});

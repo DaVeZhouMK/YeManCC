@@ -1,0 +1,2351 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXPLICIT26_SOURCE_DERIVED_TUPLE_ASSERTION_GRAMMAR_V1",
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "sourceBindings": {
+    "originalTupleSha256": "977e11bf6ea13a56e2ce2b1260a2dd915f8c403d29e03fa8ac940b5488122ccb",
+    "compiledTupleSha256": "98a0f8f817c5c48399272b308fe79c3290b7b5c9531ff8b8f948914dfab99104",
+    "compiledTupleBytes": 63272,
+    "fixtureSha256": "3b56d28d86e2e608a68953529fbb24cca6c14d7dbc0a8de332ced17e304ffb4a",
+    "inertSha256": "cb9ea99bd9652938c777f06c8ac56d1b93e25c18267aa7dc11021b67b61ab89c",
+    "inertSuccessors": [
+      {
+        "id": "ordinary-switch-ports-msi-cleanup-r2-20261115",
+        "inertSha256": "e5c42c7fe7c2aa539038e2854a89e8fe312e41bf591a162c4e905b5b34de6198",
+        "productSourceSuccessorId": "terminal-cleanup-handoff-20261115",
+        "productHeaderSuccessorId": "msi-quarantine-cleanup-r2-20261115",
+        "headerRelative": "native/msi_native_foreground_isolation_runtime.h",
+        "compiledHeaderRelative": "source/native/msi_native_foreground_isolation_runtime.reviewed.h",
+        "compiledHeaderSha256": "e6a9ef846f9629c664d2cd7a628be417281a13285d5f67a63cad263035055944",
+        "compiledHeaderBytes": 155556
+      }
+    ],
+    "pipeSha256": "0c21bcee6c9b50d127e1b773fc6b5d2712c3a9a4ce9d8a3ed2dd7868cb19f3f1",
+    "fixtureSha256Scope": "N26V8_REVIEW_PROVENANCE_ONLY_ACTUAL_GENERATION_PREFLIGHT_BINDS_RUNTIME_ROOT_DEPENDENT_FIXTURE"
+  },
+  "labels": [
+    "fixture begins without another lifecycle owner",
+    "tuple case uses the existing private settings file",
+    "one real protection request owns the fixture",
+    "real Start creates the first native owned-event Host",
+    "actual Host tuple is bound to a live unsignaled fixture-owned event",
+    "actual accepted frame candidate begins the original ten-second inspection",
+    "steady tuple starts after actual final success",
+    "injected worker token names an actual nonzero Host epoch",
+    "actual lifecycle queue accepts tuple token",
+    "exact epoch-bearing token is observed before actual dispatch",
+    "post-final test observes an actual Host accepted frame",
+    "post-final proof comes from an actual current-source accepted report",
+    "tuple work completes on the serialized owner within sixteen dispatches",
+    "fresh post-final acceptance cancels only unspent repair without stopping the healthy target",
+    "resolved post-final tuple spends no shared budget and leaves no pending repair",
+    "actual tuple consumer logs one exact unspent resolution edge",
+    "resolved tuple cannot reappear rewrite the completed final or repeat its edge log",
+    "teardown signals only the fixture-owned Host event",
+    "teardown retires the owned event before the next seed",
+    "actual post-final token is deferred without spending or Stop",
+    "fresh source read without Host acceptance does not resolve a tuple fault",
+    "read-only or neutral ACK preserves the original bounded repair and its one charge",
+    "intentional neutral ACK cannot supply current-source tuple resolution proof",
+    "healthy ordinary ACK without unresolved tuple does not start evidence tracking work or recovery",
+    "real replacement Stop completes old ownership before another Start",
+    "real replacement Start succeeds through current production gates",
+    "replacement owns a distinct actual epoch and run with a live event",
+    "stale epoch changes no current budget rolling cooldown terminal hold pending due tick or tuple heal",
+    "stale epoch cannot Stop terminate clear or replace the current live target",
+    "stale epoch creates no physical-fallback job and does not alter the player cycle",
+    "current revoked-power token creates pending work",
+    "generic deferred tuple starts after actual player final",
+    "valid current token is deferred without Stop or budget charge",
+    "pending token is now strictly older than the actual Host",
+    "maintenance never rewrites a valid old deferral into the replacement epoch",
+    "retired deferral cannot charge or hold the replacement Host on repeated maintenance",
+    "maintenance of a retired deferral never Stops or replaces the new actual target",
+    "retired deferral cannot change the current request or its deadlines",
+    "original actual target completes verification before admitting the normal player switch",
+    "real settings admission owns the normal persona switch",
+    "normal transition waits for actual old Host exit",
+    "real normal-return path already owns exactly one Stop of the retained old tuple",
+    "tuple token cannot repeat normal-return owner's Stop or start another Host",
+    "tuple duplicate preserves normal-return proof owner budget hold and pending work exactly",
+    "normal-return tuple duplicate cannot charge fallback or renew the cycle",
+    "real Submit fault supplies the existing classified cleanup producer",
+    "actual fault dispatch retains the live old tuple under exactly one established Stop owner",
+    "actual owner has the exact expected central reservation and public charge",
+    "tuple cannot repeat Stop already owned by execution cleanup or switch recovery",
+    "tuple duplicate changes no charge rolling record hold pending or exact stopped-tuple proof",
+    "duplicate tuple preserves zero or one central reservation and the original request clock",
+    "current tuple fault before ten seconds preserves the first inspection deadline with no reservation",
+    "current tuple fault at500 or9999 cannot Stop reopen or replace before inspection completes",
+    "pre-inspection tuple work cannot spend public recovery or claim a destructive heal",
+    "current observed tuple fault uses the exact captured production token",
+    "natural tuple recovery uses an actual accepted current-source report",
+    "a newer accepted report cancels old unspent tuple work before or after worker admission",
+    "natural tuple return finalizes once without destructive repair or fallback charge",
+    "actual tuple worker retains unspent classified fault through inspection",
+    "steady tuple capture follows a real successful original cycle",
+    "original tuple task is captured outside player protection",
+    "completed original cycle admits actual player OFF",
+    "actual OFF waits for its own completion before admitting a newer intent",
+    "actual newer ON is admitted only after uncompleted OFF reaches original hard cap",
+    "new player cycle deliberately retains the same still-live Host",
+    "old unprotected tuple work cannot Stop or replace the newer player cycle's Host",
+    "old steady-state task cannot charge acquire return ownership or alter newer request deadlines",
+    "actual current steady-state worker retains its own power deferral",
+    "old steady-state deferral cannot queue recovery into the newer player cycle",
+    "runtime fixture establishes its old target through the actual write-ahead hook",
+    "runtime input starts only after the original actual successful final",
+    "original player final scope is observed before the runtime error",
+    "runtime old Host has the exact controlled PID and birth identity",
+    "runtime fault begins with a real persisted nonempty exact old-target obligation",
+    "actual periodic Host query receives the controlled OS transport failure",
+    "one real request classifier consumes exactly one injected transport OS error",
+    "actual runtime offer captures the complete faulted old owner without reusing its final ticket",
+    "original serialized owner performs exactly one uncharged runtime safety Stop",
+    "unknown return retains prepared hello and the exact old persistent duty before Clear",
+    "duplicate fault and maintenance cannot repeat Stop proof IO ticket or shared charge",
+    "only the exact fixture-owned old Host event is signaled exited",
+    "actual queued lifecycle work drains without stranding ownership",
+    "present or unknown old target forbids physical restoration before complete absence proof",
+    "dead exact Host with present or unknown PnP retains the real prepared hello quarantine tuple",
+    "production exact-host death PnP parser and Session durably settle the old target before restart",
+    "proven return creates one distinct internally charged same-persona ordinary Start",
+    "spent serial and old fault token cannot Stop successor reissue a ticket or charge again",
+    "new internal ticket retains the original ten-second inspection thirty-second cap and unspent one fallback",
+    "ordinary verifier emits exactly one new-ticket successful final",
+    "runtime processing neither changes nor republishes the completed original player final",
+    "runtime teardown signals its own old Host observer",
+    "runtime exact old Host observation handle is closed",
+    "complete target absence cannot substitute for the still-live exact old Host",
+    "actual frame consumer receives the controlled OS transport failure",
+    "real atomic commit failure retains proven old duty and cannot mint a recovery ticket",
+    "retained proof cannot erase duty or restart while the original atomic write is still denied",
+    "already-proven exact return retries its denied durable commit without another PnP census",
+    "only the private commit-denial handle is released",
+    "later unknown census cannot block completion of the already-proven old return",
+    "runtime cancellation enters through the original player settings admission",
+    "OFF exit power intent or newer player request retires only the old runtime serial",
+    "original shared episode or rolling exhaustion permits safety return but no replacement charge or ticket",
+    "expected pause or original cooldown waits without fabricating another fault or charge",
+    "nonretryable error or unfinished player verification cannot offer a runtime incident",
+    "last real quiescence writer-path IO fires the armed post-commit power or intent change exactly once",
+    "late quiescence invalidation preserves the already committed exact old-origin settlement",
+    "post-commit quiescence IO invalidation cannot return success Clear the retained tuple or create a new ticket Host or charge",
+    "original runtime maintenance retires the late power or intent serial without reviving its settled old request"
+  ],
+  "cases": [
+    {
+      "name": "post-final-tuple/fresh-queued",
+      "sourceOrdinal": 1,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "fresh-queued"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        12,
+        16,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/fresh-deferred",
+      "sourceOrdinal": 2,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "fresh-deferred"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        12,
+        19,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        12,
+        16,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/read-only-queued",
+      "sourceOrdinal": 3,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "read-only-queued"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        20,
+        12,
+        21,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/read-only-deferred",
+      "sourceOrdinal": 4,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "read-only-deferred"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        12,
+        19,
+        20,
+        12,
+        21,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/neutral-queued",
+      "sourceOrdinal": 5,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "neutral-queued"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        22,
+        12,
+        21,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/neutral-deferred",
+      "sourceOrdinal": 6,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "neutral-deferred"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        12,
+        19,
+        10,
+        22,
+        12,
+        21,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "post-final-tuple/idle",
+      "sourceOrdinal": 7,
+      "nameOccurrence": 1,
+      "parameters": {
+        "variant": "idle"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        23,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-episode-exhausted",
+      "sourceOrdinal": 8,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "episode-exhausted"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-rolling-exhausted",
+      "sourceOrdinal": 9,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "rolling-exhausted"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-cooldown",
+      "sourceOrdinal": 10,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "cooldown"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-power-revoked",
+      "sourceOrdinal": 11,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "power-revoked"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-power-not-ready",
+      "sourceOrdinal": 12,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "power-not-ready"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/stale-power-revoked-existing-pending",
+      "sourceOrdinal": 13,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "power-revoked-existing-pending"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        24,
+        25,
+        26,
+        7,
+        8,
+        9,
+        12,
+        30,
+        7,
+        8,
+        9,
+        12,
+        27,
+        28,
+        29,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/deferred-current-epoch-never-adopts-replacement/cooldown",
+      "sourceOrdinal": 14,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "cooldown"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        31,
+        7,
+        8,
+        9,
+        12,
+        32,
+        24,
+        25,
+        26,
+        33,
+        34,
+        12,
+        12,
+        35,
+        36,
+        37,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/deferred-current-epoch-never-adopts-replacement/power-revoked",
+      "sourceOrdinal": 15,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "power-revoked"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        31,
+        7,
+        8,
+        9,
+        12,
+        32,
+        24,
+        25,
+        26,
+        33,
+        34,
+        12,
+        12,
+        35,
+        36,
+        37,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/deferred-current-epoch-never-adopts-replacement/power-not-ready",
+      "sourceOrdinal": 16,
+      "nameOccurrence": 1,
+      "parameters": {
+        "mode": "power-not-ready"
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        31,
+        7,
+        8,
+        9,
+        12,
+        32,
+        24,
+        25,
+        26,
+        33,
+        34,
+        12,
+        12,
+        35,
+        36,
+        37,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/normal-return-owner-refuses-duplicate-stop",
+      "sourceOrdinal": 17,
+      "nameOccurrence": 1,
+      "parameters": {},
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        38,
+        39,
+        40,
+        41,
+        7,
+        8,
+        9,
+        12,
+        42,
+        43,
+        44,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/execution-cleanup-owner-refuses-duplicate-stop",
+      "sourceOrdinal": 18,
+      "nameOccurrence": 1,
+      "parameters": {
+        "spent": false
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        45,
+        12,
+        46,
+        47,
+        7,
+        8,
+        9,
+        12,
+        48,
+        49,
+        50,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/spent-switch-recovery-owner-refuses-duplicate-stop",
+      "sourceOrdinal": 19,
+      "nameOccurrence": 1,
+      "parameters": {
+        "spent": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        45,
+        12,
+        46,
+        47,
+        7,
+        8,
+        9,
+        12,
+        48,
+        49,
+        50,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/current-fault-inspection-boundary/500",
+      "sourceOrdinal": 20,
+      "nameOccurrence": 1,
+      "parameters": {
+        "elapsed": 500
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        12,
+        51,
+        52,
+        53,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/current-fault-inspection-boundary/9999",
+      "sourceOrdinal": 21,
+      "nameOccurrence": 1,
+      "parameters": {
+        "elapsed": 9999
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        12,
+        51,
+        52,
+        53,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/fresh-report-before-queued-worker",
+      "sourceOrdinal": 22,
+      "nameOccurrence": 1,
+      "parameters": {
+        "acceptBeforeWorker": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        54,
+        55,
+        12,
+        56,
+        57,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "protected-tuple/fresh-report-during-inspection",
+      "sourceOrdinal": 23,
+      "nameOccurrence": 1,
+      "parameters": {
+        "acceptBeforeWorker": false
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        54,
+        12,
+        58,
+        55,
+        12,
+        56,
+        57,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "cross-cycle-tuple/steady-queued-before-new-player",
+      "sourceOrdinal": 24,
+      "nameOccurrence": 1,
+      "parameters": {
+        "deferred": false
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "cross-cycle-tuple/steady-deferred-before-new-player",
+      "sourceOrdinal": 25,
+      "nameOccurrence": 1,
+      "parameters": {
+        "deferred": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        59,
+        60,
+        67,
+        61,
+        62,
+        63,
+        64,
+        68,
+        65,
+        66,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18
+      ]
+    },
+    {
+      "name": "runtime-after-final/HIDHIDE_QUERY_STATE/return-order/host-first",
+      "sourceOrdinal": 26,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "HIDHIDE_QUERY_STATE",
+        "condition": "return-order",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/HIDHIDE_QUERY_STATE/return-order/target-first",
+      "sourceOrdinal": 27,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "HIDHIDE_QUERY_STATE",
+        "condition": "return-order",
+        "hostFirst": false
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        81,
+        12,
+        92,
+        80,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/return-order/host-first",
+      "sourceOrdinal": 28,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "return-order",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/return-order/target-first",
+      "sourceOrdinal": 29,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "return-order",
+        "hostFirst": false
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        81,
+        12,
+        92,
+        80,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/target-present",
+      "sourceOrdinal": 30,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "target-present",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/target-unknown",
+      "sourceOrdinal": 31,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "target-unknown",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/commit-denied",
+      "sourceOrdinal": 32,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "commit-denied",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        94,
+        81,
+        95,
+        96,
+        97,
+        81,
+        98,
+        84,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cancel-off",
+      "sourceOrdinal": 33,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cancel-off",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        99,
+        100,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cancel-exit",
+      "sourceOrdinal": 34,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cancel-exit",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        100,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cancel-power",
+      "sourceOrdinal": 35,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cancel-power",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        100,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cancel-intent",
+      "sourceOrdinal": 36,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cancel-intent",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        100,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cancel-new-request",
+      "sourceOrdinal": 37,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cancel-new-request",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        99,
+        100,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/episode-exhausted",
+      "sourceOrdinal": 38,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "episode-exhausted",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        101,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/rolling-exhausted",
+      "sourceOrdinal": 39,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "rolling-exhausted",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        101,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/cooldown",
+      "sourceOrdinal": 40,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "cooldown",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        102,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/HIDHIDE_QUERY_STATE/nonretryable",
+      "sourceOrdinal": 41,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "HIDHIDE_QUERY_STATE",
+        "condition": "nonretryable",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        103,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/HIDHIDE_QUERY_STATE/verification-period",
+      "sourceOrdinal": 42,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "HIDHIDE_QUERY_STATE",
+        "condition": "verification-period",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        71,
+        72,
+        73,
+        74,
+        75,
+        103,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/recording-pause",
+      "sourceOrdinal": 43,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "recording-pause",
+        "hostFirst": true
+      },
+      "hasProbe": true,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        84,
+        12,
+        102,
+        12,
+        {
+          "fact": "probe",
+          "then": [
+            12
+          ],
+          "else": []
+        },
+        85,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        86,
+        87,
+        12,
+        88,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/quiescence-power",
+      "sourceOrdinal": 44,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "quiescence-power",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        104,
+        105,
+        106,
+        12,
+        107,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    },
+    {
+      "name": "runtime-after-final/SUBMIT_FRAME/quiescence-intent",
+      "sourceOrdinal": 45,
+      "nameOccurrence": 1,
+      "parameters": {
+        "command": "SUBMIT_FRAME",
+        "condition": "quiescence-intent",
+        "hostFirst": true
+      },
+      "hasProbe": false,
+      "grammar": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        69,
+        5,
+        70,
+        71,
+        72,
+        73,
+        93,
+        75,
+        76,
+        12,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        81,
+        104,
+        105,
+        106,
+        12,
+        107,
+        89,
+        90,
+        {
+          "fact": "host",
+          "then": [
+            17
+          ],
+          "else": []
+        },
+        18,
+        91
+      ]
+    }
+  ]
+}

@@ -159,7 +159,16 @@ extern "C" __declspec(dllexport) BOOL Start() {
     // Top-level, invisible window so x64 YMCC can discover it without injection.
     g_window = CreateWindowExW(0, kWindowClass, L"YMCC RTSS Overlay Bridge", WS_POPUP,
                               0, 0, 0, 0, nullptr, nullptr, g_module, nullptr);
-    return g_window != nullptr;
+    if (!g_window) return FALSE;
+    // RTSS is often elevated while YMCC is not. Grant only this bounded,
+    // versioned COPYDATA protocol on our invisible window, never a process-
+    // wide filter. The decoder below retains command and layout allowlists.
+    CHANGEFILTERSTRUCT filter{sizeof(filter)};
+    if (!ChangeWindowMessageFilterEx(g_window, WM_COPYDATA, MSGFLT_ALLOW, &filter)) {
+        DestroyWindow(g_window);g_window=nullptr;
+        UnregisterClassW(kWindowClass,g_module);return FALSE;
+    }
+    return TRUE;
 }
 extern "C" __declspec(dllexport) void Stop() {
     if (IsWindow(g_window)) DestroyWindow(g_window);

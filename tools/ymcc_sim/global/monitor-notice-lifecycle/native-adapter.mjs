@@ -10,7 +10,7 @@ export const NATIVE_QUOTE_SOURCES=Object.freeze([
  'native/monitor_hud_input_policy.h','native/monitor_hud_panel_input.h',
  'native/monitor_hud_placement.h','native/monitor_hud_recovery.h',
  'native/monitor_hud_serialization.h','native/monitor_hud_visibility.h',
- 'native/screen_touchpad_input_surface.h','native/touch_haptic_dispatch.h',
+ 'native/screen_touchpad_input_surface.h','native/screen_touchpad_input_channel.h','native/touch_haptic_dispatch.h',
  MODULE+'/native-lease-selftest.cpp',
 ]);
 export const NATIVE_INPUTS=Object.freeze([...new Set([
@@ -27,7 +27,7 @@ export function getMonitorNoticeNativeLeaseAdapter(repoRoot=path.resolve(import.
   path:MODULE+'/native-global.mjs',args:['--evidence-dir','{outDir}/monitor-notice-native-lease'],
   timeoutMs:600000,profiles:['desktop','full'],scope:'behavioral-mock',
   resultFiles:['monitor-notice-native-lease/result.json'],
-  evidenceInputs:[...NATIVE_INPUTS],...toolDeclaration(repoRoot),
+  evidenceInputs:[...NATIVE_INPUTS],...toolDeclaration(repoRoot,{entry:MODULE+'/native-global.mjs'}),
   lifecycleComponent:{
   "featureId": "monitor.notice-host",
   "persistence": "persistent",

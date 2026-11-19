@@ -16,8 +16,12 @@ static void nativeShortcutFeedbackFromResult(const std::string& event,const json
     const bool ok=data["ok"].get<bool>();
     if(event=="gamepad.brightness") {
         if(ok&&data.contains("value")&&data["value"].is_number_integer()) {
-            const int value=data["value"].get<int>();nativeShortcutFeedback("display.brightnessAdjust","applied","亮度",
-                "亮度已调整为 "+std::to_string(value)+"%。",{{"text",std::to_string(value)+"%"},{"number",value},{"unit","%"}});
+            const int value=data["value"].get<int>();
+            const bool remembered=!data.contains("preferenceSaved") || data["preferenceSaved"]==true;
+            nativeShortcutFeedback("display.brightnessAdjust",remembered?"applied":"pending","亮度",
+                "亮度已调整为 "+std::to_string(value)+(remembered?"%。":"%，但开机全局偏好未保存。"),{{"text",std::to_string(value)+"%"},{"number",value},{"unit","%"}});
+        } else if(data.value("planValueSaved",json(false))==true) {
+            nativeShortcutFeedback("display.brightnessAdjust","pending","亮度","亮度已保存到电源计划，当前生效尚未确认。");
         } else nativeShortcutFeedback("display.brightnessAdjust","failed","亮度","亮度未确认调整，请检查当前电源方案和显示设备。");
     }
     // Mouse policy transitions use the automatic-only bottom-right HUD hint.

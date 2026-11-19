@@ -64,38 +64,6 @@
       "sha256": "66bbdb774bf79d538828efafb2099e2485a79c610beac775052d43f8c6bd752b"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\cmake.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1925,
-      "sha256": "0938795316a9882a684f9744fe96c82d1f60d8d9aa5e5223749b85bb4e329602"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\codecoverage.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1461,
-      "sha256": "f4bb6f3a7abcbd04c7999f7e3a8287220a7889e35905727f2c308c915ef629fe"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\ConnectionManagerExe.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1361,
-      "sha256": "62991251273db1680499e3af92cfa93b2dd1c08d97517c7731cf0cda8ac0b5d9"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\diaghub.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1123,
-      "sha256": "164a604db6e97acfdbbecd3973a0ebaf6efc2c4e36bacb9ef45d2d945d3a85ef"
-    },
-    {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\netfxsdk.bat",
       "roles": [
         "toolchain-environment-script"
@@ -110,30 +78,6 @@
       ],
       "bytes": 1263,
       "sha256": "f417aeb7f9c2387df16e397c70e90643cba4e0c40741ba669d08509c387ae534"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\team_explorer.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1607,
-      "sha256": "d4904972b2d7dd9ebcf438f81c929068b094b94b83d7200f0ba868670377f02a"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\testwindow.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 1405,
-      "sha256": "43ccf694cc0c717c84b99656ca585c8a1b0055da6c4b2065a0e896da1f4d5764"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\vcpkg.bat",
-      "roles": [
-        "toolchain-environment-script"
-      ],
-      "bytes": 914,
-      "sha256": "51441266a31db1cdffffce6b29e1dc7be72a0f9f34d4a6f26da3140b1889a3cd"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\vsdevcmd\\ext\\vcvars.bat",
@@ -216,156 +160,156 @@
       "sha256": "b7790487bc1fc458c234d0a2baee291a4816d89ef32d3da4e4b77da82beb9b4d"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\atlprovui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\atlprovui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 31072,
-      "sha256": "af14dfd7b9d644ef6fb47519da5f60d450d1f6435b95d6ce555d5944e5a76856"
+      "bytes": 35128,
+      "sha256": "20dbca01f33de479511402ea97cb72ed9cfb4d1f84494ec65204b8b7f88c7939"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\bscmakeui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\bscmakeui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 16184,
-      "sha256": "83819e2feba4ab241341cb0657e75dbc23a9d4a272f60ea95a95334dc77da2b4"
+      "bytes": 18744,
+      "sha256": "1dda9594a02f34485a07871aa18eadaa089045b657e1a2d5da589db24b5ff1e4"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\clui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\clui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 304440,
-      "sha256": "c5144bc61f61725b544693bf951a90fa41169bd69b4396b1f5b85856c0af9b58"
+      "bytes": 617272,
+      "sha256": "8877a566cf0e39504f1eebed7a37202974d2dc91e850ef24175c9433fe82b7ab"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\ConcurrencyCheckui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\ConcurrencyCheckui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 30776,
-      "sha256": "da0e2101f2b7771372a0f19271686a860931b17a1c8c81ae29f40573eb7e2e66"
+      "bytes": 33824,
+      "sha256": "85c13e039c888b950cfd787c310649da6ae77f364ee9e930b8e020d33fcb2bfa"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\CppCoreCheckui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\CppCoreCheckui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 82976,
-      "sha256": "0aa51914b82adadc302652b79e20e8e632fd2669a9da604a2524adeb6fcf8cd4"
+      "bytes": 93728,
+      "sha256": "f7f809bfbbe51b2048830f545fb0f6f40a6760dcaaff869dd857f1e963ac3690"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\cvtresui.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 15160,
-      "sha256": "8e4c178c881c28538de4f3983c5b0aebea75bc7507b1689a899e55f80d3dad93"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\EnumIndexui.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 16456,
-      "sha256": "bce21913ea4c917b006799a83fb0c4d23b1d9b976b44693acbfc5f2d8a21f479"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\EspxEngineui.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 15928,
-      "sha256": "c6bff9aee9d4648e96a73c9f56e043db9f547aa2ae0c1fb115023a3e56115f49"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\HResultCheckui.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 15928,
-      "sha256": "d8cad1b0753e600153b6a76c1a9e76ccae725d984da00665f800c9e701f073c6"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\linkui.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 64824,
-      "sha256": "a7571edda9da0c869d1a36d376c1ad66ba470f5a005e011a9846a30673f10f41"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\mspdbcmfui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\cvtresui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 15672,
-      "sha256": "cb8bf69b436dde3b1c02857c4b96c51e66b8620471defa8246a386575a36ab39"
+      "sha256": "2cb5d834bdce427ce19669bc7c0595817d9d2820a9d153f1c2d6863ab0cc2b35"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\mspft140ui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\EnumIndexui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 48480,
-      "sha256": "9e5a449a08bdb1d4245f5fc391f10732177f8a9666ed5fe03324b0c7a614da26"
+      "bytes": 17464,
+      "sha256": "bec1276abea214ccdfb780094195e701c2415c7a303b004dd5cc61c9bf60f70e"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\nmakeui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\EspxEngineui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 18784,
-      "sha256": "b9902f45f7bfb3f55ca20c48fc10ba2064e4c62f379468f13b78c10f88118169"
+      "bytes": 19008,
+      "sha256": "f988b3dbb8fe31acbc939af5895f6d7b21b2e55734103da4c2b8539dcfd824bd"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\pgort140ui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\HResultCheckui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 19488,
-      "sha256": "ed81220d45bcb6dd95ef0474999416b1fbcf7434b71de8e5c64ba75999ae07c8"
+      "bytes": 15904,
+      "sha256": "965a958ab4b36024acfca0bbe27320b352ac64085a2cdcea4ae7189bfb2a05d4"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\pgoui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\linkui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 23072,
-      "sha256": "432538de1ef6f64c98b6fddc9d91683794005474592a52e4918410c367b2c8b8"
+      "bytes": 105784,
+      "sha256": "437129ea3e4b102753d197ca79333273f69c0fa075bcf62b339e501613c9a102"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\SecurityChecksui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\mspdbcmfui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 20000,
-      "sha256": "55ef4be2a9fd7f94d8dd4158fe8e45d297e33e9c73e1629a92f673886eed5971"
+      "bytes": 17248,
+      "sha256": "cc7d2fdb32f51be4843a993a63b1d44aa6eaf007cd5f94695b581c28978c2a4b"
     },
     {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\2052\\VariantClearui.dll",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\mspft140ui.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 18976,
-      "sha256": "c5e4892afd045b2ee628ba2a2546d121ef682c5c7f15faaa95c3cdb9f8720b21"
+      "bytes": 83768,
+      "sha256": "21a82919c0e2cb46759cc6a500b19f1553ff69c6d187f209c9869679219aeb7c"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\nmakeui.dll",
+      "roles": [
+        "compiler-linker-binary-or-resource"
+      ],
+      "bytes": 24416,
+      "sha256": "0e7ae8686ffa6133f70922a2b687e0d7a7ad618c69fed711bbdbb91819204fb1"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\pgort140ui.dll",
+      "roles": [
+        "compiler-linker-binary-or-resource"
+      ],
+      "bytes": 21536,
+      "sha256": "e8f6e0e71fd09c877c8f96cd1bccad813fbf599bbc56e73d8bf012395c867426"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\pgoui.dll",
+      "roles": [
+        "compiler-linker-binary-or-resource"
+      ],
+      "bytes": 29744,
+      "sha256": "0b0a56348a70ef051a9fa858c9921e4704b7e935f1dc09d373a30e8a7bcaab91"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\SecurityChecksui.dll",
+      "roles": [
+        "compiler-linker-binary-or-resource"
+      ],
+      "bytes": 20024,
+      "sha256": "26179729be3cd12fa38792f5ada9126626a24452bf87de3e66b43eb3b5f2e6dc"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\1033\\VariantClearui.dll",
+      "roles": [
+        "compiler-linker-binary-or-resource"
+      ],
+      "bytes": 20040,
+      "sha256": "d432d864fc7d6a7a79b88dcfee79bcc3573f7eb2a55edebeb488d86de6607067"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\atlprov.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 212320,
-      "sha256": "de51e1081c30be9b5b34315ae5c8a923e2c052404deb8126897790a359ff4cd6"
+      "bytes": 212280,
+      "sha256": "fc4c78bf6d6007a89ef48a1e9d805565a516464d9ff5282eac3d8d47f6139f39"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\bscmake.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 117136,
-      "sha256": "de08279282ae87f667ccb76d9e390db4838c8036cfb39e062a79966f59cb4bae"
+      "bytes": 117128,
+      "sha256": "1f7608fed1ecfacee20300d7bac77cdf1b8c75d8d89abdd2a9a0e21ab9a06b42"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1.dll",
@@ -373,15 +317,15 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 3430200,
-      "sha256": "48bb561939cfd8fbf194bb73b111b2083912da4fb81af2c181cbe8f4b89e5ad1"
+      "sha256": "6176d88c3e682f64ef960e29ecde0ff431785da664eba854e571e280dba6604b"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1xx.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 12332384,
-      "sha256": "688fe28f3065283edf668868e76aeab28f03f80e2171c14c7d4e37f64513f623"
+      "bytes": 12332344,
+      "sha256": "b96238e05dcc5fd9aa2614ab5e29ee2f9d3fd775fe41ce0a2202875956f383ed"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2.dll",
@@ -389,7 +333,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 10462008,
-      "sha256": "98050f97d60f7e95fcaf3525a7103e4818fba498a43563922476819ce88ed162"
+      "sha256": "b057a18570f712ffb535e227825a291706620f3337e5b13d896d6586fb6b3cec"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2dd.dll",
@@ -397,7 +341,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 10462048,
-      "sha256": "66f48262db00a15cffed9bc852e9e377f90c2e42da54b38d9569c3ab615aea54"
+      "sha256": "79dc88b75996e56ff2b760358a497002b69025e254e155de0fff3eb93d2bceaf"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cfgpersist.dll",
@@ -412,24 +356,8 @@
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 677736,
-      "sha256": "88c8344236a27a6e727e0a8edc49aaa2690bdc7a9464b9d18cc7abe70a9f1c0d"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dbg_dynamic-x86_64.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 1267784,
-      "sha256": "6ebc5e4c7b5906a3fa8234937dab49aa5b31be1f329bb6cc92141cdc80472ad4"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dynamic-x86_64.dll",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 1193496,
-      "sha256": "3aa742521e8cbd23252f0545aa51d5a15624a3e4430fbe2f81567afaeb3fc59b"
+      "bytes": 677776,
+      "sha256": "fe251ef50a1545b1b0835ee17b1e785459712b38d79e45b5c1d3d28970a36619"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ConcurrencyCheck.dll",
@@ -461,7 +389,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 48544,
-      "sha256": "8e4b47f34c08c2118b1a6913ee923abc0c94881dc4e003d0daf059c1230c7687"
+      "sha256": "b5da94e7b9ff60b388ea9013d9e0e3d4a2a68bff7c668c7017583459dac4e3c5"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\d3dcompiler_47.dll",
@@ -477,23 +405,23 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 1398584,
-      "sha256": "74aabc92d318480d0f9bd3a65ecc0b15a144eb723f1f3379758913c4fbfd9b81"
+      "sha256": "84b73b9e22dd0d701ef43da2fbedc61592ccdfc0ae71f1a87fde3cf44605dbf6"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\dumpbin.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 23416,
-      "sha256": "12a1cd87238bd66dfdb788b4fcdcb91ce4b3f81236aab12a7a29e5ae1d85af50"
+      "bytes": 23376,
+      "sha256": "cfee7ed764b7b0866aae0be12f9c0ad2a7f5aecc4046ba2b7de26335827ca815"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\editbin.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 23376,
-      "sha256": "82fc1e076713c90959d2c5856fd219d88ea8112af74164769a737dff5a418928"
+      "bytes": 23416,
+      "sha256": "e0d0024920f3073410c346813220ba61d034bb22fe13212de4f84094d978ef89"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\EnumIndex.dll",
@@ -524,8 +452,8 @@
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 211808,
-      "sha256": "afceb636b7b8d4e8f0478bc32b77d96c5c69ff0f5f3681fe7751cac18e0e1967"
+      "bytes": 211768,
+      "sha256": "b9f2f8c53ff8a108d00947c84a1368b2e0159a23d4497f0def7853bc3dc05122"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\KernelTraceControl.dll",
@@ -541,23 +469,15 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 23376,
-      "sha256": "3d694c782f93e998fec5db0c2df78153565da23a028ee4618561fa0c33408489"
+      "sha256": "fde148a275981855689c45f932dda56b10dc9289a0290826a0fb93478da34929"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 3252576,
-      "sha256": "ca11e6c45debd34bf652dfe984c5360a531a005ed78bf72852330c9c2590cf0d"
-    },
-    {
-      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\llvm-symbolizer.exe",
-      "roles": [
-        "compiler-linker-binary-or-resource"
-      ],
-      "bytes": 12831776,
-      "sha256": "1a591000e57e894662427fee1f24dfbf5b5f0345260f84c5c2102207a31918ab"
+      "bytes": 3252616,
+      "sha256": "a364af801a8539e4324d9489313dbf001d959128451fc99a27b24676bbac058f"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Microsoft.Diagnostics.Tracing.EventSource.dll",
@@ -597,7 +517,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 646504,
-      "sha256": "a776cf32777d2df2e201a769bb5bd6502bb72bac98f60c6f53a4bfcecd0db8ed"
+      "sha256": "5caf9b734273a9ccb109eb0465581bd6c9fb67fa52a1cd12cc6d40ee12e40d4a"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msobj140.dll",
@@ -605,7 +525,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 149344,
-      "sha256": "0a18f9fe0a6d7afd9fbcf921c15eee51e3c982d7297429eabf4122a19e56d4bc"
+      "sha256": "6a23e3aa1f1dc964f62c5a761d4ea279f77cc7c2ae3ac43e4fb91e7830bdd88f"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdb140.dll",
@@ -613,7 +533,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 345912,
-      "sha256": "8cd754a0fe8a91d853e04c48bf56b5de502897c77c3aa89a2dc82d6b80b9351a"
+      "sha256": "eb6535aae9d1a9860c6973fdcd1c20c20045d13db77e1d1897a474b90867aff9"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcmf.exe",
@@ -621,7 +541,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 2021752,
-      "sha256": "79f50bad07e6f9bb9651cfadaf79201e627533b08fd13358494aee189d976f08"
+      "sha256": "ccbdf80b764229f5f8a6c3f64bd74ccd8db316736b0bc25a6bce3cdd579d3dfb"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcore.dll",
@@ -629,7 +549,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 1321824,
-      "sha256": "ff7482bf01d1dcad8d5e368333e4495ed3572713edeec7044623e5f5fff999b9"
+      "sha256": "589861f069bbbcc47cbf496c1d9c823a23cdaccbda671d602d88ff67b48d227e"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbsrv.exe",
@@ -637,15 +557,15 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 186248,
-      "sha256": "9221dbe740f39a1059dfe6e917984effad6f97312636f001c9191a6bccb34f93"
+      "sha256": "8ffbacfdbef90a79e8441d640bc8b4c86be02a2d9035ce87c5fa4f36dc3c70e1"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbst.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 1288544,
-      "sha256": "80de4791af04fcdd093fb9f9163122a07d9e08321c8a1512b15cdce08acf729e"
+      "bytes": 1288504,
+      "sha256": "e3b1d078aab45329fb88c99e2262dfad6974e650fb75c6e8237d4bd38be7d056"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspft140.dll",
@@ -653,7 +573,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 2525496,
-      "sha256": "f1800a2620d018886440cf1cc1a5ad22d403387409e5b9ff128eaf8eb71a906a"
+      "sha256": "33beb55552b9884e6dee3890542c646212246d5611bfdaab1da0037061150118"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcdis140.dll",
@@ -661,31 +581,31 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 1824608,
-      "sha256": "a5baa6487efccc4285b1aadd6620b94bbbcd649a77b4068170a5c575b0087e88"
+      "sha256": "e117f84ab6a78ce5e896ced882db6cde3e2fec0018a0963e8f50d6dc5bed52ff"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 557496,
-      "sha256": "20076bc0e3fcb1842cab77dfe8ef816bc099b887c25329847a83e71c98765639"
+      "bytes": 557416,
+      "sha256": "0fa7eb792d3fbcf2233e4ea47e9144b9b1309ba8ed5d4731a72fffa8f4f556d6"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_1.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 35696,
-      "sha256": "a65e4abcf1df1ee5b4c363a2dfd27c471f78f1520372e38456c4379064d75aa2"
+      "bytes": 35768,
+      "sha256": "9648d46b710235db9888732a8dbd9e247b8dcb37a9e0dd64fa7c9a9d6763d282"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_2.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 280000,
-      "sha256": "b0798ec98cb0bade3df33ab66b553282425c6a2b512ff24b2d3f9040c848fe73"
+      "bytes": 279912,
+      "sha256": "f21990f3da34972486072a15bb509773cafae7764f1d9bd14b00825a7ee601af"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_atomic_wait.dll",
@@ -693,7 +613,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 50032,
-      "sha256": "4b77104b31157c094493667f2919ef857e39f23163df632dbe302c4e6d7e8180"
+      "sha256": "b366579799aa419a9d50daefb34c1898d22044f72dbe0c38136f86f8c216cfa1"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_codecvt_ids.dll",
@@ -701,7 +621,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 31600,
-      "sha256": "21ce1d7d4685efff88bae1034215529a5a991d3a1dbb9daf5126963818a935a4"
+      "sha256": "e642ecabfd668ab738aa35438644783cedf1d6d2c0f0b0df946ba4c21f7e35ae"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Newtonsoft.Json.dll",
@@ -709,7 +629,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 709944,
-      "sha256": "a4096c8ab7c4dc5c21485b43f81b8f87699b748d39c4c24dc5dab6df61111219"
+      "sha256": "db96e2166c19dd698041f0d689e810f77bdf11c6596bfc1203d196aee0792f46"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\nmake.exe",
@@ -717,7 +637,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 134560,
-      "sha256": "b05f089f67dba8df1d7cc38798b71e62a6ce8881b234dcfc80a657264597626c"
+      "sha256": "ce6b50c2d8e6704b671ec116e52ce9d2fbc1d20dd28c5b895b5421adddf94ebb"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\onecore\\pgort140.dll",
@@ -805,7 +725,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 115000,
-      "sha256": "1e142c6c1d16f5454dbe30167e0164123c8542a85ef0db6a41ce474d93aef8ed"
+      "sha256": "3629efbb6000da9c4ce7a9332affb85c8d04873be22a7af46b10e58a45357d89"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\undname.exe",
@@ -813,7 +733,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 26472,
-      "sha256": "e805364f61cecb3f7730731a77111a258a7198e33cc89e652392651340f00984"
+      "sha256": "567c5cd29643b97c45c9eeac20521f642b2e770357f4154b9c755166f5f85126"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\VariantClear.dll",
@@ -828,8 +748,8 @@
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 113976,
-      "sha256": "2ac473af2de8d862f0b2ee5df02693b7ebbc639b9b0139ae063015aa71dbb7f7"
+      "bytes": 114016,
+      "sha256": "509ed7bbf934a56baa4a168a1ecd6660f76b2b9f178a86e8bca4342e1b9007ae"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcperf.exe",
@@ -837,15 +757,15 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 265568,
-      "sha256": "2cfba4e704e19c8eda9514b4f7eca42fd35326f8fa730a2a17dff5144ffec50a"
+      "sha256": "0528568f4ead8fc3ac7eeac119eab8de7186fdfafe67adab8f610478b9a6b54a"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140.dll",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 124272,
-      "sha256": "b23a5c9ee132fbb72d970165de052f332209992eb4568616b7802052edc4f398"
+      "bytes": 124264,
+      "sha256": "80b039ca328f53ce4f468eda0e6d25a6e565eb4842b3690db1d1cf033a1f2aca"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_1.dll",
@@ -853,7 +773,7 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 49592,
-      "sha256": "c3feb5700b1cbe6ace93e64e286b6394970e52d36b3b643d8243a1771077d210"
+      "sha256": "99ad0c5380674e28f965dc76b7cdfb8688cc2175a6641e00ab524195c3eaa900"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_threads.dll",
@@ -861,23 +781,23 @@
         "compiler-linker-binary-or-resource"
       ],
       "bytes": 38328,
-      "sha256": "077dac1a197b8fbb9bffff1109489fdfba21140a25960b7e94d20bb69687dd84"
+      "sha256": "cb6c85a96cedbf21d3bff225ff47ed5aa0ee4dac4d5f05cd80f505f43ecfbd91"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vctip.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 335328,
-      "sha256": "e175c981ca866689bf8f8d9bd5ba1e71e2eb1c9d389de555744b0cb439250996"
+      "bytes": 335288,
+      "sha256": "d591358c6aee4b673562ca3b3a15c250e612708394fe3b44a7a7eda2470570a5"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\xdcmake.exe",
       "roles": [
         "compiler-linker-binary-or-resource"
       ],
-      "bytes": 42368,
-      "sha256": "8bfe7d0842bbf727c154b0229e0e91b11b6850a8d1ae300839a91e478a917d42"
+      "bytes": 42408,
+      "sha256": "b40291d8df221cf5a3cba7ceb98332f6db9d1ee3e97b3a21fccd96c16b0d3f3f"
     },
     {
       "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\__msvc_bit_utils.hpp",
@@ -2405,7 +2325,7 @@
         "build-shell"
       ],
       "bytes": 344064,
-      "sha256": "65ec268add3973b6dca64222985da47caeaee44a340b0ec1466782914fd743d9"
+      "sha256": "97ac98b1a92c286054cce55239cfccdfc23a5517bd07fe693072c9ca96c7dabb"
     },
     {
       "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
@@ -2415,5 +2335,7 @@
       "bytes": 83344536,
       "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
     }
-  ]
+  ],
+  "installedCompilerFileVersion": "14.44.35229",
+  "currentSelectionBasis": "Existing47-case observed include/library closure plus current installed vsdevcmd and compiler resource trees; per-build evaluated inputs remain strict. Old removed files preserved in SOURCE-BEFORE and toolchain diff."
 }

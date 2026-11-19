@@ -27,10 +27,25 @@ const fixturePath = path.join(repo, 'tools/inputhost_msi_cost_producer_selftest.
 const fixture = fs.readFileSync(fixturePath, 'utf8');
 const marker = '// EXACT_PRODUCTION_METHODS';
 if (fixture.split(marker).length !== 2) throw Error('Fixture insertion marker');
-fs.writeFileSync(path.join(out, 'Fixture.cs'), fixture.replace(marker, methods.join('\n').replaceAll('Environment.TickCount64', 'FixtureClock.Tick')));
+// The former constant-true fixture silently skipped non-MSI admission. Compile
+// the actual constructor decision, so restoring its old MSI-only condition
+// sends default/non-MSI calls into the existing forbidden synchronous seams.
+const constructorStart = text.indexOf('        public HostSession(');
+const constructorEnd = text.indexOf('        // F3-B', constructorStart);
+if (constructorStart < 0 || constructorEnd <= constructorStart ||
+    text.indexOf('        public HostSession(', constructorStart + 1) >= 0) throw Error('Constructor anchor changed');
+const admission = [...text.slice(constructorStart, constructorEnd)
+  .matchAll(/^\s*_msiCostDeferredRequested\s*=\s*([^;\r\n]+);/gm)];
+if (admission.length !== 1) throw Error('Constructor deferred admission changed');
+const admissionMarker = '// EXACT_PRODUCTION_DEFERRED_ADMISSION';
+if (fixture.split(admissionMarker).length !== 2) throw Error('Fixture admission insertion marker');
+const admissionStatement = admission[0][0].trim();
+fs.writeFileSync(path.join(out, 'Fixture.cs'), fixture
+  .replace(admissionMarker, admissionStatement)
+  .replace(marker, methods.join('\n').replaceAll('Environment.TickCount64', 'FixtureClock.Tick')));
 const sources = [{ source: programPath, sha256: sha(program) },
   { source: fixturePath, sha256: sha(fs.readFileSync(fixturePath)) }];
-for (const name of ['MsiCostWindowDiagnostics.cs', 'MsiCostWindowDispatcher.cs', 'HostCpuCostWindow.cs', 'SteamDeckPadSubmissionEvidence.cs']) {
+for (const name of ['MsiCostWindowDiagnostics.cs', 'MsiCostWindowDispatcher.cs', 'HostCpuCostWindow.cs', 'SteamDeckPadSubmissionEvidence.cs', 'HostCostLog.cs', 'HostCostArchive.cs']) {
   const source = path.join(repo, 'InputHost', name), bytes = fs.readFileSync(source);
   fs.writeFileSync(path.join(out, name), bytes); sources.push({ source, sha256: sha(bytes) });
 }
@@ -54,6 +69,8 @@ for (const profile of ['Release', 'Debug']) {
 }
 for (const r of sources) if (sha(fs.readFileSync(r.source)) !== r.sha256) throw Error('Source changed: ' + r.source);
 fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ pass: true, sources, profiles,
+  actualConstructorAdmission: admissionStatement, nonMsiAdmissionCovered: true,
+  virtualSignalResetBoundary: 'explicit inert recorder; virtual-signal reset semantics are outside this producer fixture',
   queueAndResetBytesTransformed: false, cadenceClockSeam: 'Environment.TickCount64 -> FixtureClock.Tick', actualMethodSha256: sha(methods.join('\n')), sourceStableDuringRun: true,
   limit: 'Diagnostic producer protocol with injected runtime, flag, SDK and sink; no real virtual submit, ACK, jitter or hardware acceptance.' }, null, 2) + '\n');
 console.log(out);

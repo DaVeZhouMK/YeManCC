@@ -17,6 +17,10 @@
 //
 // 验证：`Patches/Tests/monitor_text_fold_verify.cpp`（同一头，对语料逐一与
 // "先小写再比较"的 oracle 对拍）。
+#if defined(_M_X64)
+#include <emmintrin.h>
+#include <intrin.h>
+#endif
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -80,7 +84,31 @@ public:
         const char first = needle[0];
         if (first >= 'A' && first <= 'Z') return kNotFound;
         const char upper = first >= 'a' && first <= 'z' ? static_cast<char>(first - ('a' - 'A')) : first;
-        for (size_t start = 0; start + n <= raw.size(); ++start) {
+        size_t start = 0;
+#if defined(_M_X64)
+        // Only starts whose complete needle is inside the borrowed view.
+        // The original tail comparison still decides every candidate match.
+        const size_t last = raw.size() - n;
+        if (last >= 15) {
+            const __m128i lowerFirst = _mm_set1_epi8(first);
+            const __m128i upperFirst = _mm_set1_epi8(upper);
+            for (; start <= last && last - start >= 15; start += 16) {
+                const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(raw.data() + start));
+                unsigned long mask = static_cast<unsigned long>(_mm_movemask_epi8(_mm_or_si128(
+                    _mm_cmpeq_epi8(bytes, lowerFirst), _mm_cmpeq_epi8(bytes, upperFirst))));
+                while (mask) {
+                    unsigned long offset = 0;
+                    _BitScanForward(&offset, mask);
+                    const size_t candidate = start + offset;
+                    size_t k = 1;
+                    while (k < n && monitorAsciiFold(raw[candidate + k]) == needle[k]) ++k;
+                    if (k == n) return candidate;
+                    mask &= mask - 1;
+                }
+            }
+        }
+#endif
+        for (; start + n <= raw.size(); ++start) {
             const char current = raw[start];
             if (current != first && current != upper) continue;
             size_t k = 1;

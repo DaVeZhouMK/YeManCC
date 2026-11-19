@@ -1,0 +1,59 @@
+#include "shared-original.hpp"
+#include "current-extracted.hpp"
+#include <cstring>
+using Builder=json(*)(const Scalars&,const json&);
+static std::uint64_t cases=0;
+static json opaqueRecord(){return {{"t",UINT64(0x20000000000001ULL)},{"kind","sample"},{"event",{{"gyro",{{"sequence",UINT64(0xffffffffffffffffULL)}}},{"accel",{{"sequence",UINT64(0)}}}}},{"testLane",{{"pairProven",false},{"status","无传感器 / unchanged"}}},{"controllerMotion",{{"sampleObserved",false}}}};}
+static void equivalent(const Scalars& value){
+    ++cases;std::array<unsigned char,sizeof(Scalars)> before{};std::memcpy(before.data(),&value,sizeof(value));
+    const auto opaque=opaqueRecord();const auto a=beforeRecord(value,opaque),b=afterRecord(value,opaque);
+    check(exact(a,b),"final IMU record types/values/bits");check(a.dump()==b.dump(),"final IMU record dump bytes");
+    auto expected=opaque;expected["imu"]=(value.gyroSequence||value.accelSequence)?oracle(value).imu:json{{"imuActive",false}};
+    exactAndDump(a,expected,"independent existing IMU field oracle");
+    check(std::memcmp(before.data(),&value,sizeof(value))==0,"immutable scalar inputs");
+    check(exact(opaque,opaqueRecord()),"immutable unrelated record fields");
+}
+static json verify(){
+    Scalars v{};v.orientationW=1;
+    for(unsigned flags=0;flags<16;++flags)for(unsigned seq=0;seq<4;++seq){
+        v.gyro=flags&1;v.accel=flags&2;v.sameBindingGeneration=flags&4;v.currentBindingGeneration=flags&8;
+        v.gyroSequence=(seq&1)?UINT64(0x20000000000001ULL):0;v.accelSequence=(seq&2)?UINT64(0xffffffffffffffffULL):0;equivalent(v);
+    }
+    for(auto x:{UINT64(0),UINT64(1),UINT64(0xffffffffULL),UINT64(0x20000000000001ULL),UINT64(0xffffffffffffffffULL)}){fillUnsigned(v,x);equivalent(v);}
+    const std::array<double,12> doubles={0.,-0.,0.125,-23.75,std::numeric_limits<double>::max(),std::numeric_limits<double>::lowest(),std::numeric_limits<double>::denorm_min(),-std::numeric_limits<double>::denorm_min(),std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity(),std::bit_cast<double>(UINT64(0x7ff8000000000042ULL)),std::bit_cast<double>(UINT64(0xfff800000000007fULL))};
+    for(auto x:doubles)for(unsigned active=0;active<2;++active){fillDouble(v,x);v.gyroSequence=active;v.accelSequence=0;equivalent(v);}
+    const std::array<float,10> floats={0.f,-0.f,.125f,-23.75f,std::numeric_limits<float>::max(),std::numeric_limits<float>::denorm_min(),std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity(),std::bit_cast<float>(uint32_t(0x7fc00042)),std::bit_cast<float>(uint32_t(0xffc0007f))};
+    for(auto x:floats)for(unsigned active=0;active<2;++active){fillFloat(v,x);v.gyroSequence=0;v.accelSequence=active;equivalent(v);}
+    const std::array<std::pair<UINT64,UINT64>,7> transitions={{{0,0},{1,0},{0,1},{1,1},{0,0},{0,UINT64(-1)},{0,0}}};
+    for(unsigned repeat=0;repeat<40;++repeat)for(auto [g,a]:transitions){v={};v.gyro=true;v.accel=true;v.gyroSequence=g;v.accelSequence=a;equivalent(v);}
+    std::mt19937_64 random(0x20261108a6ULL);
+    for(unsigned i=0;i<1200;++i){v={};fillDouble(v,(double(random()%2000000)-1000000.)/1000.);fillFloat(v,float((double(random()%2000000)-1000000.)/1000.));fillUnsigned(v,random());v.gyroSequence=(i&1)?random():0;v.accelSequence=(i&2)?random():0;v.gyro=random()&1;v.accel=random()&1;v.cgy+=.031;v.gravityY-=.062f;equivalent(v);}
+    return {{"pass",true},{"cases",cases},{"assertions",assertions},{"allSequenceCombinations",true},{"flagIndependentAdmission",true},{"activeInactiveTransitions",true},{"specialFloatingBitsAndDump",true},{"scope","actual changed IMU builders plus unchanged final transfer/override; opaque other fields are fixture inputs"}};
+}
+static double median(std::vector<double> values){std::sort(values.begin(),values.end());return values[values.size()/2];}
+static NOINLINE std::uint64_t execute(Builder builder,const Scalars& v,const json& opaque,bool dump){auto record=builder(v,opaque);return dump?record.dump().size():record.at("imu").size();}
+static std::uint64_t cycles(){ULONG64 value=0;if(!QueryThreadCycleTime(GetCurrentThread(),&value))throw std::runtime_error("QueryThreadCycleTime");return value;}
+static std::pair<double,double> measure(Builder builder,const Scalars& v,const json& opaque,bool dump,unsigned iterations){
+    const auto c=cycles();const auto at=std::chrono::steady_clock::now();std::uint64_t total=0;
+    for(unsigned i=0;i<iterations;++i)total+=execute(builder,v,opaque,dump);
+    const auto ns=std::chrono::duration<double,std::nano>(std::chrono::steady_clock::now()-at).count();const auto elapsed=cycles()-c;sink+=total;return {double(elapsed)/iterations,ns/iterations};
+}
+static Count allocations(Builder builder,const Scalars& v,const json& opaque,bool dump){counter={};counting=true;for(unsigned i=0;i<8;++i)sink+=execute(builder,v,opaque,dump);counting=false;return counter;}
+static json benchmark(){
+    std::ifstream f("acceptance-plan.json");json plan;f>>plan;check(plan.at("campaigns")==2&&plan.at("pairsPerCampaign")==11&&plan.at("iterationsPerArm")==1024,"fixed measurement plan");
+    json reports=json::array();bool accepted=true;const auto opaque=opaqueRecord();
+    for(unsigned campaign=0;campaign<2;++campaign)for(unsigned state=0;state<4;++state)for(unsigned scope=0;scope<2;++scope){
+        Scalars v{};v.orientationW=1;v.gyroSequence=state&1?UINT64(0x20000000000001ULL):0;v.accelSequence=state&2?UINT64(-1):0;const bool dump=scope!=0;
+        const auto ba=allocations(beforeRecord,v,opaque,dump),ca=allocations(afterRecord,v,opaque,dump);
+        for(unsigned i=0;i<128;++i){sink+=execute(beforeRecord,v,opaque,dump);sink+=execute(afterRecord,v,opaque,dump);}
+        std::vector<double> beforeCycles,afterCycles,reductions,beforeNs,afterNs;unsigned faster=0;json pairs=json::array();
+        for(unsigned pair=0;pair<11;++pair){std::pair<double,double> b,c;if((campaign+state+scope+pair)&1){c=measure(afterRecord,v,opaque,dump,1024);b=measure(beforeRecord,v,opaque,dump,1024);}else{b=measure(beforeRecord,v,opaque,dump,1024);c=measure(afterRecord,v,opaque,dump,1024);}beforeCycles.push_back(b.first);afterCycles.push_back(c.first);beforeNs.push_back(b.second);afterNs.push_back(c.second);const double reduction=100*(b.first-c.first)/b.first;reductions.push_back(reduction);if(c.first<b.first)++faster;pairs.push_back({{"beforeCyclesPerOperation",b.first},{"afterCyclesPerOperation",c.first},{"cycleReductionPercent",reduction},{"beforeNsPerOperation",b.second},{"afterNsPerOperation",c.second}});}
+        const double paired=median(reductions),ratio=100*(median(beforeCycles)-median(afterCycles))/median(beforeCycles),wallRatio=100*(median(beforeNs)-median(afterNs))/median(beforeNs);
+        const bool allocation=state==0?(ca.requests()<ba.requests()&&ca.bytes()<ba.bytes()):(ca.requests()<=ba.requests()&&ca.bytes()<=ba.bytes());
+        const bool timing=state==0?(paired>=5&&ratio>=5&&faster>=9):(paired>=-5&&ratio>=-5);
+        const bool wall=wallRatio>=-5;const bool pass=allocation&&timing&&wall;accepted=accepted&&pass;
+        reports.push_back({{"campaign",campaign+1},{"sequenceState",state},{"scope",dump?"final-record-and-dump":"final-record"},{"beforeRequestsPerOperation",double(ba.requests())/8},{"afterRequestsPerOperation",double(ca.requests())/8},{"beforeRequestedBytesPerOperation",double(ba.bytes())/8},{"afterRequestedBytesPerOperation",double(ca.bytes())/8},{"pairedMedianCycleReductionPercent",paired},{"ratioOfMedianCycleReductionPercent",ratio},{"medianWallReductionPercent",wallRatio},{"fasterPairs",faster},{"accepted",pass},{"pairs",pairs}});
+    }
+    return {{"accepted",accepted},{"campaigns",reports},{"scope","source-extracted IMU build, final record transfer/override and optional dump; opaque other record inputs, not complete production sample cost"},{"sink",sink}};
+}
+int main(int argc,char** argv){try{if(argc!=2)throw std::runtime_error("verify|benchmark");const std::string mode=argv[1];if(mode=="verify"){std::cout<<verify().dump();return 0;}if(mode=="benchmark"){const auto result=benchmark();std::cout<<result.dump();return result.at("accepted").get<bool>()?0:2;}throw std::runtime_error("unknown mode");}catch(const std::exception& e){std::cout<<json{{"pass",false},{"failure",e.what()},{"cases",cases},{"assertions",assertions}}.dump();return 1;}}

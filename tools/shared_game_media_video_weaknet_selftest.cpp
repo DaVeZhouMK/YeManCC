@@ -63,6 +63,7 @@ using namespace ymcc::media;
 using namespace ymcc::media::downloads;
 int wmain(int argc, wchar_t** argv) {
   try {
+    ymcc::powerSource::setExternalReader(+[]() noexcept {ymcc::powerSource::Snapshot v;v.readable=v.known=true;v.ac=1;v.status.ACLineStatus=1;v.revision=1;return v;});
     if (argc == 5 && std::wstring_view(argv[1]) == L"--media-background") {
       supervisedFixture = true;
       wchar_t value[16]{};
@@ -120,7 +121,7 @@ int wmain(int argc, wchar_t** argv) {
     auto state = q.snapshot(); auto doc = q.document(); auto entry = store.resolve(target);
     size_t partials = 0;
     std::error_code ec;
-    for (fs::directory_iterator it(root/L"cache"/L"jobs"/L"game-media",ec),end;
+    for (fs::directory_iterator it(custom_steam_library::ioPath(root/L"cache"/L"jobs"/L"game-media"),ec),end;
          !ec && it!=end; it.increment(ec)) if (it->path().extension() == L".part") ++partials;
     Json report = {{"case",mode},{"workerCode",code},{"state",state},{"entry",entry},
                    {"jobs",doc["jobs"]},{"partialFiles",partials},{"recovery",recovery},

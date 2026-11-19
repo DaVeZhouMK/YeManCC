@@ -54,6 +54,132 @@ static unsigned cases=0;
 static void need(bool v,const char* reason){if(!v)throw std::runtime_error(reason);++cases;}
 static bool until(const std::function<bool()>& f){const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(4);while(std::chrono::steady_clock::now()<end){if(f())return true;std::this_thread::sleep_for(std::chrono::milliseconds(5));}return false;}
 
+static std::vector<std::string> releaseRetryScenarios;
+struct ReleaseRetryFixture {
+ std::mutex mx;Context foreground{1,10,100,true,false,false};
+ std::atomic<bool> active{false},fails{false},known{true},closeDespiteFailure{false},failEnable{false},throwsClose{false};
+ std::atomic<unsigned> enables{0},closes{0},releases{0},published{0},changeOnObservation{0};
+ std::atomic<int> provider{0};std::atomic<std::uint64_t> nowMs{0},injectedSequence{0},publishedSequence{0};
+ std::atomic<bool> injectReadback{false},stalePublished{false},changeDuringClose{false},modeDuringClose{false};
+ Runtime runtime;
+ static Context desktop(){return Context{1,10,100,true,false,false};}
+ static Context game(){auto c=Context{2,20,200,false,false,false};c.game=true;c.identityKnown=true;c.foregroundImage="c:/games/title.exe";return c;}
+ Json receipt(bool ok){return {{"ok",ok},{"on",known.load()&&active.load()},{"stateKnown",known.load()},{"controlAllowed",true},{"provider","ymcc"},{"backend",provider.load()?"gamebar":"joyxoff"},{"error",ok?"":"close unavailable"}};}
+ ReleaseRetryFixture(){
+  runtime.start({[&]{std::lock_guard lock(mx);if(changeOnObservation.load()&&changeOnObservation.fetch_sub(1)==1)foreground=desktop();return foreground;},
+   [&](bool on,const std::function<bool()>& valid){
+    if(on){++enables;if(!failEnable.load()&&valid&&valid())active=true;return receipt(!failEnable.load());}
+    ++closes;if(throwsClose.load())throw std::runtime_error("provider unavailable");if(!fails.load()||closeDespiteFailure.load())active=false;
+    auto result=receipt(!fails.load());
+    if(injectReadback.exchange(false)){
+     // An external provider read wins while the old OFF result is in flight.
+     provider=1;active=true;injectedSequence=runtime.acceptBackendReadback(receipt(true)).at("sequence").get<std::uint64_t>();
+    }
+    if(changeDuringClose.exchange(false)){std::lock_guard lock(mx);foreground=desktop();}
+    if(modeDuringClose.exchange(false))runtime.request(Mode::On);
+    return result;
+   },[&]{++releases;if(!fails.load())active=false;return Json{{"ok",!fails.load()},{"on",false},{"stateKnown",false},{"provider","steam"},{"controlAllowed",false}};},
+   [&](const Json& result){++published;if(injectedSequence.load()&&result.value("backend",std::string{})=="joyxoff")stalePublished=true;publishedSequence=result.at("sequence").get<std::uint64_t>();},
+   [&](const Json& result){return result.value("backend",std::string{})==(provider.load()?"gamebar":"joyxoff");},
+   [&]{return std::chrono::steady_clock::time_point{std::chrono::milliseconds(nowMs.load())};}},Mode::Off);
+  need(runtime.set(Mode::Auto).value("on",false),"release-retry-desktop-auto-starts");
+  settle();
+ }
+ void settle(){need(until([&]{if(runtime.state().value("pending",true))return false;const auto records=runtime.records();return records.empty()||publishedSequence.load()>=records.back().at("sequence").get<std::uint64_t>();}),"release-retry-worker-settles");}
+ void move(Context c){{std::lock_guard lock(mx);foreground=std::move(c);}runtime.wake();settle();}
+ void tick(std::uint64_t at){nowMs=at;runtime.wake();settle();}
+ // Stop before any dependency captured by the worker is destroyed.
+ ~ReleaseRetryFixture(){runtime.stop();}
+};
+static void releaseRetryCases(const std::string& scenario={}){
+ const auto selected=[&](const char* name){return scenario.empty()||scenario==name;};
+ if(selected("stable-game-provider-recovers")){
+  ReleaseRetryFixture f;f.fails=true;const auto before=f.closes.load();f.move(ReleaseRetryFixture::game());
+  need(f.closes.load()==before+1&&f.active.load()&&!f.runtime.state().value("ok",true),"release-retry-first-game-close-fails-and-stays-on");
+  f.tick(999);need(f.closes.load()==before+1,"release-retry-never-runs-before-backoff");
+  // No wake/request/context change: the original cv 1s fallback must recover.
+  f.fails=false;f.nowMs=1000;
+  need(until([&]{return !f.active.load()&&f.runtime.state().value("ok",false);}),"release-retry-stable-game-recovers-without-context-change");
+  f.settle();
+  const auto calls=f.closes.load(),events=f.published.load();f.tick(1000000);f.tick(2000000);
+  need(f.closes.load()==calls&&f.published.load()==events,"release-retry-success-is-silent");
+  const auto observedAt=f.runtime.state().at("backendObservedAt");auto other=ReleaseRetryFixture::game();other.window=3;f.move(other);
+  need(f.closes.load()==calls&&!f.runtime.state().value("backendReadbackFresh",true)&&f.runtime.state().at("backendObservedAt")==observedAt,"release-retry-confirmed-off-still-reuses-provider");
+  releaseRetryScenarios.push_back("stable-game-provider-recovers");
+ }
+ if(selected("permanent-failure-backoff")){
+  ReleaseRetryFixture f;f.fails=true;f.move(ReleaseRetryFixture::game());auto calls=f.closes.load();std::uint64_t at=0;
+  for(unsigned i=0;i<8;++i)f.tick(0);
+  need(f.closes.load()==calls,"release-retry-event-storm-does-not-refund-backoff");
+  for(const unsigned delay:{1000u,2000u,4000u,8000u,16000u,30000u,30000u}){
+   for(unsigned step=1000;step<delay;step+=1000){f.tick(at+step);need(f.closes.load()==calls,"release-retry-permanent-failure-does-not-scan-every-second");}
+   f.tick(at+delay-1);need(f.closes.load()==calls,"release-retry-capped-deadline-not-early");
+   at+=delay;f.tick(at);++calls;
+   need(f.closes.load()==calls&&f.active.load()&&!f.runtime.state().value("ok",true),"release-retry-permanent-failure-remains-visible-at-bounded-rate");
+  }
+  f.tick(at+1000000);need(f.closes.load()==calls+1,"release-retry-long-starvation-has-no-catchup-storm");
+  releaseRetryScenarios.push_back("permanent-failure-backoff");
+ }
+ if(selected("current-context-and-mode")){
+  ReleaseRetryFixture f;f.fails=true;f.move(ReleaseRetryFixture::game());const auto closes=f.closes.load();
+  f.move(ReleaseRetryFixture::desktop());const auto enables=f.enables.load();f.tick(1000000);
+  need(f.active.load()&&f.enables.load()==enables&&f.closes.load()==closes,"release-retry-old-off-cannot-close-new-allowed-context");
+  f.move(ReleaseRetryFixture::game());
+  need(f.runtime.set(Mode::On).value("on",false),"release-retry-new-manual-on-wins");const auto manualCloses=f.closes.load();f.tick(2000000);
+  need(f.active.load()&&f.closes.load()==manualCloses,"release-retry-old-auto-off-cannot-overwrite-new-mode");
+  f.runtime.set(Mode::Auto);f.tick(3000000); // New game OFF fails; change focus during its next dispatch admission.
+  const auto guardedCloses=f.closes.load();f.changeOnObservation=2;f.tick(4000000);
+  need(f.active.load()&&f.closes.load()==guardedCloses&&f.runtime.state().value("scene",std::string{})=="desktop","release-retry-reobserves-before-off-dispatch");
+  // Same HWND/PID with a new rule epoch is a new policy context.
+  auto rule=ReleaseRetryFixture::game();f.move(rule);rule.customRule=1;++rule.customRulesEpoch;f.move(rule);const auto ruleCloses=f.closes.load();f.tick(5000000);
+  need(f.active.load()&&f.closes.load()==ruleCloses,"release-retry-new-rule-context-retires-old-off");
+  f.move(ReleaseRetryFixture::game());f.fails=false;f.changeDuringClose=true;f.tick(6000000);
+  need(f.active.load()&&f.runtime.state().value("scene",std::string{})=="desktop","release-retry-reobserves-after-off-io");
+  f.fails=true;f.move(ReleaseRetryFixture::game());f.fails=false;f.modeDuringClose=true;f.tick(7000000);
+  need(f.active.load()&&f.runtime.current()==Mode::On&&f.runtime.state().value("mode",std::string{})=="on","release-retry-inflight-old-off-cannot-publish-over-new-mode");
+  releaseRetryScenarios.push_back("current-context-and-mode");
+ }
+ if(selected("explicit-off-and-steam")){
+  ReleaseRetryFixture f;f.fails=true;f.move(ReleaseRetryFixture::game());const auto before=f.closes.load();
+  const auto explicitOff=f.runtime.set(Mode::Off);
+  need(f.closes.load()==before+1&&!explicitOff.value("ok",true)&&f.active.load(),"release-retry-explicit-off-is-immediate");
+  f.fails=false;f.tick(1000);need(!f.active.load()&&f.runtime.state().value("ok",false),"release-retry-explicit-off-recovers");
+  f.runtime.set(Mode::On);f.fails=true;auto steam=ReleaseRetryFixture::desktop();steam.steam=true;f.move(steam);const auto releases=f.releases.load();
+  need(releases>0&&!f.runtime.state().value("ok",true)&&f.active.load(),"release-retry-steam-failure-keeps-local-release-obligation");
+  f.tick(1999);need(f.releases.load()==releases,"release-retry-steam-failure-obeys-backoff");
+  f.fails=false;f.tick(2000);need(f.releases.load()==releases+1&&!f.active.load()&&!f.runtime.state().value("stateKnown",true),"release-retry-steam-recovers-without-claiming-steam-state");
+  const auto enables=f.enables.load();f.tick(1000000);
+  need(f.releases.load()==releases+1&&f.enables.load()==enables,"release-retry-successful-steam-release-is-silent");
+  releaseRetryScenarios.push_back("explicit-off-and-steam");
+ }
+ if(selected("unknown-and-confirmed-off")){
+  ReleaseRetryFixture f;f.fails=true;f.known=false;f.move(ReleaseRetryFixture::game());const auto calls=f.closes.load();
+  need(!f.runtime.state().value("stateKnown",true),"release-retry-unknown-close-is-not-confirmed-off");
+  f.fails=false;f.known=true;f.tick(1000);need(f.closes.load()==calls+1&&!f.active.load(),"release-retry-unknown-close-recovers");
+  f.move(ReleaseRetryFixture::desktop());f.fails=true;f.closeDespiteFailure=true;f.move(ReleaseRetryFixture::game());const auto offCalls=f.closes.load();f.tick(1000000);
+  need(f.closes.load()==offCalls&&!f.active.load()&&!f.runtime.state().value("ok",true),"release-retry-failed-command-with-known-off-has-no-pending-io");
+  f.runtime.set(Mode::Off);f.fails=false;f.closeDespiteFailure=false;f.failEnable=true;f.move(ReleaseRetryFixture::desktop());f.runtime.set(Mode::Auto);const auto enables=f.enables.load();f.tick(2000000);
+  need(f.enables.load()==enables&&!f.active.load()&&!f.runtime.state().value("ok",true),"release-retry-never-replays-failed-enable");
+  f.failEnable=false;f.runtime.set(Mode::On);f.throwsClose=true;f.runtime.set(Mode::Off);const auto thrownCalls=f.closes.load();f.tick(2000999);
+  need(f.closes.load()==thrownCalls&&!f.runtime.state().value("stateKnown",true),"release-retry-exception-without-provider-identity-keeps-backoff");
+  f.throwsClose=false;f.tick(2001000);need(f.closes.load()==thrownCalls+1&&!f.active.load(),"release-retry-provider-exception-recovers");
+  releaseRetryScenarios.push_back("unknown-and-confirmed-off");
+ }
+ if(selected("readback-epoch-fence")){
+  ReleaseRetryFixture f;f.fails=true;f.move(ReleaseRetryFixture::game());const auto calls=f.closes.load();
+  f.provider=1;f.fails=false;f.tick(0);
+  need(f.closes.load()==calls+1&&f.runtime.state().value("backend",std::string{})=="gamebar","release-retry-provider-change-decides-afresh-before-old-deadline");
+  f.provider=0;f.move(ReleaseRetryFixture::desktop());f.fails=true;f.move(ReleaseRetryFixture::game());
+  f.fails=false;f.injectReadback=true;f.tick(1000);
+  need(f.injectedSequence.load()>0&&!f.stalePublished.load()&&!f.active.load()&&f.runtime.state().value("backend",std::string{})=="gamebar","release-retry-old-result-cannot-overwrite-new-readback-epoch");
+  need(f.runtime.state().at("sequence").get<std::uint64_t>()>f.injectedSequence.load(),"release-retry-new-provider-result-follows-readback-sequence");
+  f.move(ReleaseRetryFixture::desktop());f.fails=true;f.move(ReleaseRetryFixture::game());const auto beforeRead=f.closes.load();f.active=false;f.runtime.acceptBackendReadback(f.receipt(true));f.tick(2000000);
+  need(f.closes.load()==beforeRead&&!f.active.load(),"release-retry-new-physical-off-readback-clears-pending");
+  releaseRetryScenarios.push_back("readback-epoch-fence");
+ }
+ if(releaseRetryScenarios.empty())throw std::runtime_error("unknown-mouse-policy-selection");
+}
+
 static void semiStaticOffCases(){
  std::mutex guard;Context foreground{90,90,900,false,false,false};
  std::atomic<unsigned> applies{0},releases{0};std::atomic<bool> known{true},succeeds{true};std::atomic<int> selectedProvider{0};std::atomic<bool> backendLive{false},injectReadback{false};std::atomic<std::uint64_t> injectedSequence{0};
@@ -210,6 +336,7 @@ static void applicationScopeCases(){
 }
 
 namespace requestRegression {
+ static Json mouseModeSaveBootIntent(const Json&,const Json&){throw std::runtime_error("boot storage is outside ordinary policy-order regression");}
  static std::atomic<int> g_mousePolicyMode{2};static std::mutex g_gamepadSettingsMx,gateMx;static std::condition_variable gateCv;
  static Runtime g_mousePolicy;static bool savePaused=false,saveEntered=false,releaseSave=false;static std::string persisted="on";
  static bool mouseModeSteamDeckBlocked(){return false;}static json mouseModeSteamDeckState(bool){return {{"ok",false}};}
@@ -238,7 +365,14 @@ namespace requestRegression {
  }
 }
 
-int main(){try{
+int main(int argc,char** argv){try{
+ if(argc!=1){
+  if(argc!=3||std::string(argv[1])!="--selected")throw std::runtime_error("unknown-mouse-policy-selection");
+  const std::string selection=argv[2],prefix="release-retry:";
+  if(selection!="release-retry"&&(selection.rfind(prefix,0)!=0||selection.size()==prefix.size()))throw std::runtime_error("unknown-mouse-policy-selection");
+  releaseRetryCases(selection=="release-retry"?std::string{}:selection.substr(prefix.size()));
+  std::cout<<Json{{"status","PASS"},{"cases",cases},{"selection",selection},{"scenarios",releaseRetryScenarios},{"consumer","production mouse_mode_policy::Runtime"},{"hardware","NOT_TOUCHED"}}.dump();return 0;
+ }
  const std::wstring win=L"c:\\windows",explorer=win+L"\\explorer.exe";
  need(desktopSurface(explorer,win,L"DV2ControlHost"),"logged-explorer-popup-remains-desktop");
  for(const auto cls:{L"TopLevelWindowForOverflowXamlIsland",L"NotifyIconOverflowWindow",L"Shell_TrayWnd",L"Windows.UI.Composition.DesktopWindowContentBridge",L"#32768",L"CabinetWClass",L"WorkerW",L"Progman"})need(desktopSurface(explorer,win,cls),"verified-explorer-surface-does-not-depend-on-class-list");
@@ -338,5 +472,6 @@ int main(){try{
  need(newer.value("mode",std::string{})=="off"&&!on(),"newer-explicit-off-wins-over-auto");
  need(late.value("mode",std::string{})=="off"&&late.value("superseded",false),"old-response-cannot-relabel-newer-mode");need(runtime.records().size()>8,"native-transition-history-recorded");runtime.stop();need(!events.empty(),"native-consumer-publishes-receipts");
  semiStaticOffCases();requestRegression::run();
- std::cout<<Json{{"status","PASS"},{"cases",cases},{"consumer","production mouse_mode_policy::Runtime"},{"hardware","NOT_TOUCHED"}}.dump();return 0;
+ releaseRetryCases();
+ std::cout<<Json{{"status","PASS"},{"cases",cases},{"scenarios",releaseRetryScenarios},{"consumer","production mouse_mode_policy::Runtime"},{"hardware","NOT_TOUCHED"}}.dump();return 0;
 }catch(const std::exception& e){std::cout<<Json{{"status","FAIL"},{"error",e.what()},{"cases",cases}}.dump();return 1;}}

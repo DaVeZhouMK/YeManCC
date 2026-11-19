@@ -8,7 +8,7 @@ param(
  [ValidateRange(10,600)][int]$MaximumSeconds=360,
  [ValidateRange(1,10)][int]$TailSeconds=1,
  [switch]$FileMode,
- [ValidateSet('Samples','Scheduling','Rog')][string]$ProfileMode='Samples',
+ [ValidateSet('Samples','Scheduling','Rog','FileIO')][string]$ProfileMode='Samples',
  [ValidateRange(0,600)][int]$WarmupSeconds=0,
  [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$ExpectedIdentityPath,
  [string]$ExpectedBirthFileTime='',
@@ -17,6 +17,7 @@ param(
  [string]$OutputRoot=''
 )
 $ErrorActionPreference='Stop'
+if($ProfileMode -eq 'FileIO' -and -not $FileMode){throw 'FileIO diagnosis requires explicit -FileMode; memory history is not used for this high-volume profile.'}
 $taskEvidenceRoot=[IO.Path]::GetFullPath($EvidenceRoot)
 if(-not [IO.Directory]::Exists($taskEvidenceRoot)){throw 'EvidenceRoot must be an existing development evidence directory.'}
 $taskOutputRoot=if($OutputRoot){[IO.Path]::GetFullPath($OutputRoot)}else{Join-Path $taskEvidenceRoot 'StackCapture'}
@@ -31,7 +32,7 @@ if($TargetProcessId -eq 0){
 }
 $taskIsAdmin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $taskWpr=(Get-Command wpr.exe -ErrorAction Stop).Source
-$taskProfileName=if($ProfileMode -eq 'Rog'){'RogCpu'}elseif($ProfileMode -eq 'Scheduling'){'YmccCpuScheduling'}else{'YmccCpu'}
+$taskProfileName=if($ProfileMode -eq 'Rog'){'RogCpu'}elseif($ProfileMode -eq 'Scheduling'){'YmccCpuScheduling'}elseif($ProfileMode -eq 'FileIO'){'YmccCpuFileIo'}else{'YmccCpu'}
 $taskProfilePath=if($ProfileMode -eq 'Rog'){Join-Path $PSScriptRoot 'rog-field/RogCpu.wprp'}else{Join-Path $PSScriptRoot ($taskProfileName+'.wprp')}
 $taskProfileSelector=$taskProfilePath+'!'+$taskProfileName+'.Verbose'
 if(!(Test-Path -LiteralPath $taskProfilePath)){throw 'Missing bounded WPR profile'}
@@ -57,7 +58,7 @@ function Read-TargetTimes {
  $taskWait=[YmccStackCaptureReadOnly]::WaitForSingleObject($taskProcessHandle,0)
  if($taskWait -ne 0 -and $taskWait -ne 258){throw "Process wait-state query failed: status=$taskWait; Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"}
  if($taskWait -eq 0 -and -not [YmccStackCaptureReadOnly]::GetProcessTimes($taskProcessHandle,[ref]$taskBirth,[ref]$taskExit,[ref]$taskKernel,[ref]$taskUser)){throw 'Exited process diagnostic re-read failed'}
- [ordered]@{birthFileTime=$taskBirth.ToString();exitFileTime=$taskExit.ToString();cpu100ns=$taskKernel+$taskUser;alive=($taskWait -eq 258);waitStatus=$taskWait;exitFileTimeDefined=($taskWait -eq 0);livenessSource='HELD_SYNCHRONIZABLE_HANDLE_WAIT';cpuCyclesKnown=$taskCyclesKnown;cpuCycles=$(if($taskCyclesKnown){$taskCycles.ToString()}else{$null});cpuCyclesError=$taskCycleError;counterReadBeginQpc=$taskCounterBeginQpc;counterReadEndQpc=[Diagnostics.Stopwatch]::GetTimestamp().ToString()}
+ [ordered]@{birthFileTime=$taskBirth.ToString();exitFileTime=$taskExit.ToString();cpu100ns=$taskKernel+$taskUser;kernelCpu100ns=$taskKernel.ToString();userCpu100ns=$taskUser.ToString();alive=($taskWait -eq 258);waitStatus=$taskWait;exitFileTimeDefined=($taskWait -eq 0);livenessSource='HELD_SYNCHRONIZABLE_HANDLE_WAIT';cpuCyclesKnown=$taskCyclesKnown;cpuCycles=$(if($taskCyclesKnown){$taskCycles.ToString()}else{$null});cpuCyclesError=$taskCycleError;counterReadBeginQpc=$taskCounterBeginQpc;counterReadEndQpc=[Diagnostics.Stopwatch]::GetTimestamp().ToString()}
 }
 function Write-Json($taskValue,[string]$taskPath){$taskValue|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $taskPath -Encoding utf8}
 $taskOwnStarted=$false;$taskRunPath=$null;$taskWriter=$null;$taskFailure=$null;$taskTraceSaved=$false;$taskStopExitCode=$null
@@ -81,7 +82,9 @@ try{
  $taskRunPath=Join-Path $taskOutputRoot $taskRunId
  [IO.Directory]::CreateDirectory($taskOutputRoot)|Out-Null
  $null=New-Item -ItemType Directory -Path $taskRunPath
- $taskProbe=[ordered]@{atUtc=[DateTime]::UtcNow.ToString('o');mode=$Mode;elevatedAdministrator=$taskIsAdmin;wpr=$taskWpr;pid=$TargetProcessId;startUtc=[DateTime]::FromFileTimeUtc([long]$taskInitial.birthFileTime).ToString('o');birthFileTime=$taskInitial.birthFileTime;imagePath=$taskImage;diskImageSha256=(Get-FileHash -LiteralPath $taskImage -Algorithm SHA256).Hash.ToLowerInvariant();logicalProcessors=[Environment]::ProcessorCount;profile=($taskProfileName+'.Verbose.'+$(if($FileMode){'File'}else{'Memory'}));profileMode=$ProfileMode;schedulingEvents=($ProfileMode -in @('Scheduling','Rog'));interruptEvents=($ProfileMode -in @('Scheduling','Rog'));contextSwitchStackWalk=$false;profilePath=$taskProfilePath;profileSha256=(Get-FileHash -LiteralPath $taskProfilePath -Algorithm SHA256).Hash.ToLowerInvariant();requestedRingBufferBytes=$(if($ProfileMode -eq 'Rog'){83886080}else{67108864});clrJitGcEvents=($ProfileMode -eq 'Rog');wprStatus=@(& $taskWpr -status 2>&1|ForEach-Object{[string]$_});profileDetails=@(& $taskWpr -profiledetails $taskProfileSelector 2>&1|ForEach-Object{[string]$_});privileges=@(& whoami.exe /priv 2>&1|ForEach-Object{[string]$_});requiresSourceMatchedPrivateSymbols=$true;appOrDeviceControlled=$false;traceStarted=$false}
+ $taskProfileDetailArgs=@('-profiledetails',$taskProfileSelector)
+ if($FileMode){$taskProfileDetailArgs+='-filemode'}
+ $taskProbe=[ordered]@{atUtc=[DateTime]::UtcNow.ToString('o');mode=$Mode;elevatedAdministrator=$taskIsAdmin;wpr=$taskWpr;pid=$TargetProcessId;startUtc=[DateTime]::FromFileTimeUtc([long]$taskInitial.birthFileTime).ToString('o');birthFileTime=$taskInitial.birthFileTime;imagePath=$taskImage;diskImageSha256=(Get-FileHash -LiteralPath $taskImage -Algorithm SHA256).Hash.ToLowerInvariant();logicalProcessors=[Environment]::ProcessorCount;profile=($taskProfileName+'.Verbose.'+$(if($FileMode){'File'}else{'Memory'}));profileMode=$ProfileMode;schedulingEvents=($ProfileMode -in @('Scheduling','Rog','FileIO'));fileIoEvents=($ProfileMode -eq 'FileIO');interruptEvents=($ProfileMode -in @('Scheduling','Rog','FileIO'));contextSwitchStackWalk=$false;profilePath=$taskProfilePath;profileSha256=(Get-FileHash -LiteralPath $taskProfilePath -Algorithm SHA256).Hash.ToLowerInvariant();requestedRingBufferBytes=$(if($ProfileMode -eq 'Rog'){83886080}elseif($ProfileMode -eq 'FileIO'){134217728}elseif($ProfileMode -eq 'Scheduling'){268435456}else{67108864});clrJitGcEvents=($ProfileMode -eq 'Rog');wprStatus=@(& $taskWpr -status 2>&1|ForEach-Object{[string]$_});profileDetails=@(& $taskWpr @taskProfileDetailArgs 2>&1|ForEach-Object{[string]$_});privileges=@(& whoami.exe /priv 2>&1|ForEach-Object{[string]$_});requiresSourceMatchedPrivateSymbols=$true;appOrDeviceControlled=$false;traceStarted=$false}
  if($Mode -eq 'Preflight'){
   Write-Json $taskProbe (Join-Path $taskRunPath 'WPR-PREFLIGHT.json')
   [ordered]@{status='READ_ONLY_PREFLIGHT';elevatedAdministrator=$taskIsAdmin;pid=$TargetProcessId;profile=$taskProbe.profile;captureReady=$taskIsAdmin;output=(Join-Path $taskRunPath 'WPR-PREFLIGHT.json')}|ConvertTo-Json
@@ -111,7 +114,7 @@ try{
   $taskTimes=Read-TargetTimes;$taskNow=$taskClock.Elapsed.TotalMilliseconds
   if($taskTimes.birthFileTime -ne $taskInitial.birthFileTime){throw 'Target birth changed'}
   if(-not $taskTimes.alive){$taskReason='TARGET_EXITED';break}
-  $taskRow=[ordered]@{sample=$taskSequence;atUtc=[DateTime]::UtcNow.ToString('o');qpc=[Diagnostics.Stopwatch]::GetTimestamp().ToString();qpcFrequency=[Diagnostics.Stopwatch]::Frequency;wallMs=$taskNow;pid=$TargetProcessId;birthFileTime=$taskTimes.birthFileTime;cpu100ns=$taskTimes.cpu100ns;cpuCyclesKnown=$taskTimes.cpuCyclesKnown;cpuCycles=$taskTimes.cpuCycles;cpuCyclesError=$taskTimes.cpuCyclesError;counterReadBeginQpc=$taskTimes.counterReadBeginQpc;counterReadEndQpc=$taskTimes.counterReadEndQpc;cpuPercentMachine1s=$null;windowMs=$null}
+  $taskRow=[ordered]@{sample=$taskSequence;atUtc=[DateTime]::UtcNow.ToString('o');qpc=[Diagnostics.Stopwatch]::GetTimestamp().ToString();qpcFrequency=[Diagnostics.Stopwatch]::Frequency;wallMs=$taskNow;pid=$TargetProcessId;birthFileTime=$taskTimes.birthFileTime;cpu100ns=$taskTimes.cpu100ns;kernelCpu100ns=$taskTimes.kernelCpu100ns;userCpu100ns=$taskTimes.userCpu100ns;cpuCyclesKnown=$taskTimes.cpuCyclesKnown;cpuCycles=$taskTimes.cpuCycles;cpuCyclesError=$taskTimes.cpuCyclesError;counterReadBeginQpc=$taskTimes.counterReadBeginQpc;counterReadEndQpc=$taskTimes.counterReadEndQpc;cpuPercentMachine1s=$null;windowMs=$null}
   $taskSamples.Enqueue($taskRow)
   while($taskSamples.Count -gt 5){$null=$taskSamples.Dequeue()}
   if($taskSamples.Count -eq 5){$taskOld=$taskSamples.Peek();$taskWall=$taskNow-$taskOld.wallMs;$taskDelta=[long]$taskTimes.cpu100ns-[long]$taskOld.cpu100ns;if($taskWall -gt 0 -and $taskDelta -ge 0){$taskRow.cpuPercentMachine1s=$taskDelta/10000.0/$taskWall/[Environment]::ProcessorCount*100;$taskRow.windowMs=$taskWall}}

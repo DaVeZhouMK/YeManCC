@@ -127,10 +127,11 @@ static std::unique_ptr<Resource> dsuResource,gmResource,dllResource,gyroToken,ac
 struct MemoryLog { bool open=false;bool is_open()const{return open;}void flush(){mark("logFlush");}void close(){mark("logClose");open=false;} };
 struct InputCaptureSensorSink { Resource resource{"sink"};~InputCaptureSensorSink(){mark("sinkDestroyed");} };
 static bool g_inputCaptureReady=false,g_realStickTestAdmissionLogged=false;
+static std::atomic<bool> g_oemInputCaptureOnly{false},g_oemInputCaptureInitRequested{false};
 static std::atomic<bool> g_inputCaptureStop{false},g_exitRequested{false},g_inputHostExitFence{false};
 static std::atomic<unsigned long long> g_inputHostExitFenceRefusals{0},g_inputHostExitFenceRefusalRows{0};
 static std::atomic<bool> g_inputCaptureSensorsSuspended{false};
-static std::mutex g_inputCaptureBusTickMx,g_inputCaptureMx;
+static std::mutex g_inputCaptureBusTickMx,g_inputCaptureMx,g_inputHostPersonaMx;
 static MemoryLog g_inputCaptureLog;
 static std::uint32_t g_inputCaptureSampleWrites=0;
 static std::shared_ptr<InputCaptureSensorSink> g_inputCaptureSink;

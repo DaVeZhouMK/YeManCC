@@ -1,4 +1,14 @@
+// Match the production IPC timeout contract at this memory-only boundary.
+export class IpcTimeoutError extends Error {
+  readonly code = 'IPC_TIMEOUT';
+  constructor(readonly command:string) { super(`IPC command timed out: ${command}`); }
+}
 import {screenTouchpadDefaults,validateScreenTouchpadPatch,screenTouchpadProfile} from '@/bridge/screenTouchpads';
+import {customTouchDefaults,validCustomTouch} from '@/bridge/customTouch';
+const customTouchMemory={config:customTouchDefaults(),editing:false,writes:[] as any[],failNext:false,
+ finish(positions:Record<string,Record<string,{x:number;y:number}>>={},save=true){if(save){this.config.positions=structuredClone(positions);this.writes.push(structuredClone(this.config));}this.editing=false;emitNativeEvent('customTouch.updated',customTouchRead());}};
+function customTouchRead(){return {ok:true,scope:'global',config:structuredClone(customTouchMemory.config),editing:customTouchMemory.editing,outputReady:true,settingsSaved:false};}
+(window as any).__customTouchMemory=customTouchMemory;
 // Opt-in single-owner window-width boundary; all other scenes retain browser mode.
 const nativeWidthSeed=new URLSearchParams(location.search).get('nativeWidth')==='1';
 export const isNativeRuntime=nativeWidthSeed;
@@ -42,7 +52,7 @@ if(shortcutSeed){
 
 // Explicit memory-boundary leaf facts, never execution of the native class.
 // Browser time, authoritative state injection, event delivery and reply delivery
-// are independent. Only the opt-in global/locked seeds use these controls.
+// are independent. Only the opt-in virtual-start seeds use these controls.
 const virtualStartSeed=new URLSearchParams(location.search).get('virtualStartSeed');
 const holdInitialVirtualFeed=new URLSearchParams(location.search).get('virtualStartInitialFeed')==='hold';
 const baseGamepadState={connected:true,virtualConnected:true,deviceName:'Xbox Controller',physicalName:'Handheld Controller',deviceSource:'xinput',battery:82,capabilities:{vibration:true,lighting:true,gyro:true}};
@@ -51,7 +61,8 @@ type VirtualReplyTrace={id:number;cmd:string;request:any;requestId:number;atMs:n
 const heldVirtualReplies=new Map<number,()=>void>();
 let virtualStartShortcutRuntime:any={active:false};
 const virtualStartFixture=virtualStartSeed?{
- armed:false, rejectNextWrite:false, holdNextStart:false, holdNextClear:false, holdNextFeed:false, sameTargetClearSucceeds:false, heldFeeds:[] as any[], accepted:0, rejected:0,
+ armed:false, rejectNextWrite:false, failNextTargetCommit:false, holdNextStart:false, holdNextClear:false, holdNextFeed:false, sameTargetClearSucceeds:false, heldFeeds:[] as any[], accepted:0, rejected:0,
+ nativeFailedCommit: null as null | {response:{ok:false;content:string};state:{requestId:number;persona:string;[key:string]:unknown}},
  backendNowMs:0, nextReplyId:1, feeds:[] as {atMs:number;state:any}[], replies:[] as VirtualReplyTrace[],
  facts:[] as {kind:string;atMs:number;state?:any}[],
  state:{locked:virtualStartSeed==='locked',requestId:1,phase:virtualStartSeed==='locked'?'pending':'idle',persona:'steamdeck',remainingMs:virtualStartSeed==='locked'?30000:0,elapsedMs:0,maxMs:30000,settleMs:10000,expiresAtUnixMs:virtualStartSeed==='locked'?Date.now()+30000:0},
@@ -111,8 +122,10 @@ const virtualStartFixture=virtualStartSeed?{
  releaseClear(){const row=this.replies.find(row=>row.cmd==='input.shortcutRuntime.clear'&&row.status==='held');if(row)this.releaseReply(row.id);},
 }:null;
 if(virtualStartFixture){
- if(!['global','locked'].includes(virtualStartSeed!))throw Error('Unknown virtual start seed');
- files.set(shortcutSettingsPath,JSON.stringify({input:{revision:10,outputTarget:{persona:'steamdeck',buttonMappingEnabled:true,gyroEnabled:true},gyroMotion:{enabled:true}},rtss:{monitorOutput:{enabled:true,output:'ymcc'}}}));
+ if(!['global','locked','off'].includes(virtualStartSeed!))throw Error('Unknown virtual start seed');
+ const enabled=virtualStartSeed!=='off';
+ if(!enabled)virtualStartFixture.state.persona='disabled';
+ files.set(shortcutSettingsPath,JSON.stringify({input:{revision:10,outputTarget:{persona:enabled?'steamdeck':'disabled',buttonMappingEnabled:enabled,gyroEnabled:enabled},gyroMotion:{enabled}},rtss:{monitorOutput:{enabled:true,output:'ymcc'}}}));
  (window as any).__virtualStartFixture=virtualStartFixture;
  const initialPayload=virtualStartFixture.capturePayload();
  if(holdInitialVirtualFeed){virtualStartFixture.heldFeeds.push(initialPayload);lastGamepadState={...baseGamepadState};}
@@ -151,6 +164,13 @@ if(losslessSeed){
  (window as any).__losslessMemory=losslessMemory;
 }
 export async function invoke(cmd:string,args:any={}){
+ if(cmd==='customTouch.get')return customTouchRead();
+ if(cmd==='customTouch.set'){
+  if(customTouchMemory.failNext){customTouchMemory.failNext=false;return {...customTouchRead(),ok:false,settingsSaved:false,reason:'settings-write-failed'};}
+  if(customTouchMemory.editing||!validCustomTouch(args.config)||JSON.stringify(args.expected)!==JSON.stringify(customTouchMemory.config))return {...customTouchRead(),ok:false,reason:'custom-touch-settings-conflict'};
+  customTouchMemory.config=structuredClone(args.config);customTouchMemory.writes.push(structuredClone(args.config));const value={...customTouchRead(),settingsSaved:true};emitNativeEvent('customTouch.updated',value);return value;
+ }
+ if(cmd==='customTouch.edit'){customTouchMemory.editing=args.action==='begin';const value=customTouchRead();emitNativeEvent('customTouch.updated',value);return value;}
  if(cmd==='lossless.watch')return true;
  if(cmd==='lossless.detect')return {known:true,running:losslessSeed&&losslessMemory.running,readable:false,pid:losslessMemory.running?731:0,processCreated:losslessMemory.stamp,path:losslessExe,button:'',status:'',reason:'UIA unavailable',configRevision:0};
  if(losslessSeed){
@@ -244,7 +264,7 @@ export async function invoke(cmd:string,args:any={}){
   const before=!!fixture().loggingEnabled;fixture().logTrace=['capture','pause','ack'];fixture().loggingEnabled=false;
   await new Promise(resolve=>setTimeout(resolve,160));
   fixture().logTrace.push('clear','restore');fixture().loggingEnabled=before;
-  return {protocol:'ymcc.current-diagnostic-logs.v1',ok:true,busy:false,captured:true,pauseAcknowledged:true,deleteAttempted:true,restored:true,originalGates:{gyro:before,virtual:before},restoredGates:{gyro:before,virtual:before},files:fixture().currentLogFiles.map(name=>({name,state:'deleted',error:''})),pauseError:'',deleteError:'',restoreError:''};
+  return {protocol:'ymcc.current-diagnostic-logs.v2',ok:true,busy:false,captured:true,pauseAcknowledged:true,deleteAttempted:true,restored:true,originalGates:{gyro:before,virtual:before},restoredGates:{gyro:before,virtual:before},files:fixture().currentLogFiles.map(name=>({name,state:'deleted',error:''})),pauseError:'',deleteError:'',restoreError:''};
  }
  if(cmd==='logs.exportAll')return {ok:true,path:'G:/YMCC-H5-Memory/Logs.zip',count:16};
  if(cmd==='background.get')return fixture().backgroundState||{enabled:false,url:''};
@@ -273,6 +293,19 @@ export async function invoke(cmd:string,args:any={}){
     virtualStartFixture.produceState({locked:true,phase:'pending',remainingMs:30000,elapsedMs:0});
     reply.requestId=virtualStartFixture.state.requestId;
     return virtualStartFixture.finishReply(reply,{ok:false,reason:'virtual-start-protection-active',content:JSON.stringify(current),startProtection:{...virtualStartFixture.state}});
+   }
+   if(changed&&virtualStartFixture.failNextTargetCommit){
+    virtualStartFixture.failNextTargetCommit=false;
+    virtualStartFixture.accepted++;
+    const replay=virtualStartFixture.nativeFailedCommit;
+    virtualStartFixture.nativeFailedCommit=null;
+    if(replay&&(replay.state.persona!==target.persona||replay.state.requestId!==virtualStartFixture.state.requestId+1))throw Error('Native failed commit does not match this click');
+    // Native has an admission, but the settings guard did not commit. The
+    // failure candidate is visible in a later feed, not in the write ACK.
+    virtualStartFixture.produceState(replay?.state??{locked:true,phase:'verifying',requestId:virtualStartFixture.state.requestId+1,persona:target.persona,
+     remainingMs:30000,elapsedMs:0,verificationPending:true,verificationRemainingMs:10000,candidateOutcome:'failure'});
+    reply.requestId=virtualStartFixture.state.requestId;
+    return virtualStartFixture.finishReply(reply,replay?.response??{ok:false,content:''});
    }
    files.set(args.path,args.content);stamp++;
    if(changed){
@@ -304,20 +337,75 @@ export async function invoke(cmd:string,args:any={}){
   return virtualStartFixture.finishReply(reply,response);
  }
  if(cmd==='settings.reset'){files.clear();stamp++;return {ok:true,backups:[],protectedDataRecovered:false};}
- if(cmd==='app.dataDir'||cmd==='app.exeDir')return 'memory://YMCC';
+ if(cmd==='app.dataDir'||cmd==='app.exeDir')return new URLSearchParams(location.search).get('trainerMenu')?'Q:\\TrainerUi':'memory://YMCC';
  if(cmd==='app.pid')return 123;
  if(cmd==='app.version')return '2026.10';
  if(cmd.startsWith('dialog.'))return null;
- if(cmd==='fs.readTextFile')return files.get(args.path)||'{}';
- if(cmd==='fs.writeTextFile'||cmd==='fs.writeTextFileAtomic'){files.set(args.path,args.content);return true;}
+ if(cmd==='fs.readTextFile'){
+  if(new URLSearchParams(location.search).get('trainerMenu')?.startsWith('launch-')&&String(args.path).endsWith('\\trainer-cache\\trainers.json')){
+   const g=fixture().game;
+   return JSON.stringify({cyberpunk2077:{storageVersion:2,state:'ready',gameName:g.title,trainerGameName:g.title,trainerPath:'Q:\\GCM\\Cyberpunk\\Trainer.exe',trainerFolder:'Q:\\GCM\\Cyberpunk',origin:'fling_main',sha256:'b'.repeat(64),identity:{method:'ymcc-game-target',steamAppId:'1091500',gameName:g.title,executablePath:g.path,processId:g.pid,processCreated:g.processCreated,executableSha256:'a'.repeat(64),snapshotPath:'Q:\\TrainerUi\\PowerControl\\game-target.json'}}});
+  }
+  return files.get(args.path)||'{}';
+ }
+ if(cmd==='fs.readTextRange'&&new URLSearchParams(location.search).get('trainerMenu')){
+  const content=await invoke('fs.readTextFile',args);
+  return {content,offset:0,size:new TextEncoder().encode(content).byteLength};
+ }
+
+ // Scoped inert CE transport for the original scanner-close UI case.
+ // No process or game-memory API is invoked by these fixture receipts.
+ const scannerRestart=new URLSearchParams(location.search).get('trainerMenu')==='scanner-restart';
+ const scannerPort=scannerRestart?((window as any).__trainerScanUi??={probes:0,launches:[],pending:[],completions:0,stops:0,releases:0,holdStop:false,releaseRequired:false}):null;
+ if(scannerRestart&&cmd==='fs.exists'&&String(args.path).includes('\\memory-scan\\'))return files.has(args.path);
+ if(cmd==='fs.writeTextFile'||cmd==='fs.writeTextFileAtomic'){
+  if(scannerPort&&String(args.path).endsWith('\\stop')){
+   scannerPort.stops++;
+   if(scannerPort.holdStop){scannerPort.holdStop=false;await new Promise<void>(resolve=>scannerPort.pending.push(()=>{scannerPort.completions++;resolve()}));}
+   const root=String(args.path).slice(0,-5),config=JSON.parse(files.get(root+'\\config.json')||'{}');
+   files.set(root+'\\closed.json',JSON.stringify({...config,engine:'cheat-engine',stage:'closed',ceExited:!scannerPort.releaseRequired,at:Date.now()}));
+  }
+  files.set(args.path,args.content);return true;
+ }
+
  // Optional read-only CE capability probe for trainer-popup layout cases.
  const trainerMenuSeed=new URLSearchParams(location.search).get('trainerMenu');
- if(trainerMenuSeed && cmd==='app.powerControlDir')return 'memory://YMCC/PowerControl';
+ if(trainerMenuSeed?.startsWith('launch-')){
+  if(cmd==='app.powerControlDir')return 'Q:\\TrainerUi\\PowerControl';
+  if(cmd==='fs.sha256File')return String(args.path).endsWith('Trainer.exe')?'b'.repeat(64):'a'.repeat(64);
+  if(cmd==='shell.hidden'&&args.args?.includes('Q:\\TrainerUi\\PowerControl\\YeManTrainerLaunch.ps1')){
+   const sent=args.args as string[],at=(key:string)=>sent[sent.indexOf(key)+1],resultPath=at('-ResultPath');
+   const pending=JSON.parse(files.get(resultPath)||'{}');if(!pending.requestToken)throw Error('Trainer UI requires durable pending binding');
+   ((window as any).__trainerLaunchUi??={dispatches:[]}).dispatches.push([...sent]);
+   files.set(resultPath,JSON.stringify({...pending,pending:false,requestClaimed:true,ok:trainerMenuSeed!=='launch-denied',...(trainerMenuSeed==='launch-denied'?{error:'系统拒绝启动，请确认权限窗口',code:'launch-denied'}:{notice:'启动请求已发送，请确认修改器窗口'})}));
+   return {ok:true,pid:9876};
+  }
+ }
+ if(trainerMenuSeed && cmd==='app.powerControlDir')return 'Q:\\TrainerUi\\PowerControl';
  if(trainerMenuSeed && cmd==='fs.exists' && /[\\/]MemoryScan[\\/]MemoryScanHost\.exe$/i.test(String(args.path)))return trainerMenuSeed!=='no-scan';
  if(trainerMenuSeed && cmd==='shell.hidden' && /[\\/]MemoryScan[\\/]MemoryScanHost\.exe$/i.test(String(args.program)) && args.args?.[0]==='--probe'){
+  if(trainerMenuSeed==='scanner-close'){
+   const port=((window as any).__trainerScanUi??={probes:0,launches:[],pending:[],completions:0});
+   if(++port.probes>1)await new Promise<void>(resolve=>port.pending.push(()=>{port.completions++;resolve();}));
+  }
   if(trainerMenuSeed==='delayed-scan')await new Promise(resolve=>setTimeout(resolve,180));
   files.set(String(args.args[1]),JSON.stringify({engine:'cheat-engine',available:true}));
   return {ok:true,pid:9876};
+ }
+
+ if(scannerPort&&cmd==='shell.hidden'&&/[\\/]MemoryScan[\\/]MemoryScanHost\.exe$/i.test(String(args.program))){
+  const sent=args.args as string[];
+  if(sent[0]==='--release'){
+   scannerPort.releases++;scannerPort.releaseRequired=false;const config=JSON.parse(files.get(sent[1]+'\\config.json')||'{}');
+   files.set(sent[1]+'\\closed.json',JSON.stringify({...config,engine:'cheat-engine',stage:'closed',ceExited:true,at:Date.now()}));
+   files.set(sent[2],JSON.stringify({...config,engine:'cheat-engine',released:true,message:'',at:Date.now()}));return {ok:true,pid:9876};
+  }
+  const root=sent[0],config=JSON.parse(files.get(root+'\\config.json')||'{}');scannerPort.launches.push(root);
+  const state={...config,engine:'cheat-engine',stage:scannerPort.launches.length===1?'failed':'idle',message:'输入当前数字',at:Date.now(),revision:0,dataType:'int32',count:0,offset:0,pageSize:40,rows:[],selected:'',selectedValue:null,frozen:false,frozenValue:null,scannedBytes:0,skippedBlocks:0,bulkLimit:32,scanRound:0,searchValue:'',lastWriteCount:0,lastWriteValue:'',temporarilyPaused:false,pauseRestored:true};
+  files.set(root+'\\status.json',JSON.stringify(state));return {ok:true,pid:9876};
+ }
+ if(trainerMenuSeed==='scanner-close' && cmd==='shell.hidden' && /[\\/]MemoryScan[\\/]MemoryScanHost\.exe$/i.test(String(args.program))){
+  (window as any).__trainerScanUi.launches.push([...args.args]);throw Error('UI fixture forbids a scanner process launch');
  }
  if(cmd==='fs.exists')return true;
  if(cmd==='fs.readDir')return [];

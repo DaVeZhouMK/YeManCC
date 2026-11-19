@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include "../steam_startup_window_facts.h"
+#include <functional>
 #include <string_view>
 namespace ymcc::gaminghome {
 inline constexpr wchar_t Bat[] = L"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat";
@@ -22,10 +24,22 @@ inline bool activation(std::wstring_view arg) {
 }
 inline bool windowCandidate(bool visible, bool sameSession, bool ownedImage,
                             bool sdlClass, bool appWindow, bool resizable, int width, int height) {
-    return visible && sameSession && ownedImage && sdlClass && appWindow && !resizable && width >= 480 && height >= 270;
+    return ymcc::steaminfo::startupWindowCandidate(visible,sameSession,ownedImage,sdlClass,appWindow,resizable,width,height);
 }
-struct Snapshot { bool active = false, ymcc = false, steamWindow = false, cancelled = false; };
-enum class Result { Success, Unsupported, OutsideFse, MissingFiles, Busy, TaskFailed, InternalError, YmccTimeout, BatFailed, UriFailed, Timeout, Cancelled };
+enum class SteamPresence { Unknown, Absent, Running };
+inline SteamPresence steamPresence(bool available,bool completed,int presence,std::uint32_t pid,std::uint64_t birth) noexcept {
+    if (!available || !completed) return SteamPresence::Unknown;
+    if (presence == 0 && !pid && !birth) return SteamPresence::Absent;
+    if (presence == 1 && pid && birth) return SteamPresence::Running;
+    return SteamPresence::Unknown;
+}
+struct Snapshot {
+    bool active = false, ymcc = false, steamWindow = false, cancelled = false;
+    SteamPresence presence = SteamPresence::Unknown;
+};
+enum class Action { EnsureYmcc, StartSteam, ShowHome, FocusWindow };
+using Current = std::function<bool()>;
+enum class Result { Success, Unsupported, OutsideFse, MissingFiles, Busy, TaskFailed, InternalError, YmccTimeout, BatFailed, UriFailed, Timeout, Cancelled, ActionUnknown };
 // All effects go through these ports. Tests use the same production controller
 // with memory ports; they never launch the product, Steam or Windows tasks.
 struct Ports {
@@ -35,10 +49,13 @@ struct Ports {
     virtual bool lock() = 0;
     virtual bool files() = 0;
     virtual Snapshot snapshot() = 0;
-    virtual bool startYmccTask() = 0;
-    virtual bool startBat() = 0;
-    virtual bool showSteam() = 0;
-    virtual bool focusSteam() = 0;
+    // Same activation's final owner check; no Steam/account/UI authority.
+    virtual bool current(Action) = 0;
+    // Synchronous fixed outlet. Do not retain Current beyond this call.
+    virtual bool dispatch(Action, const Current&) = 0;
+    virtual void begin(std::uint64_t) {}
+    virtual bool uncertain() const { return false; }
+    virtual bool commandBusy() const { return false; }
     virtual std::uint64_t now() = 0;
     virtual void wait() = 0;
     virtual void event(const char*) = 0;
@@ -52,9 +69,29 @@ inline Result run(Ports& p) {
     if (!s.active) return Result::OutsideFse;
     if (s.cancelled) return Result::Cancelled;
     const auto begin = p.now();
+    p.begin(begin);
+    const auto admission = [&](Action action) {
+        if (!p.current(action)) return Result::Cancelled;
+        const auto now = p.now();
+        const auto budget = action == Action::EnsureYmcc ? YmccDeadlineMs : DeadlineMs;
+        if (now < begin || now - begin >= budget)
+            return action == Action::EnsureYmcc ? Result::YmccTimeout : Result::Timeout;
+        return Result::Success;
+    };
+    const auto dispatch = [&](Action action, Result failure) {
+        auto gate = admission(action);
+        if (gate != Result::Success) return gate;
+        const bool submitted = p.dispatch(action, [&] { return admission(action) == Result::Success; });
+        if (submitted) return Result::Success;
+        if (p.commandBusy()) return Result::Busy; // Terminal for this activation; no focus retry/fallback.
+        gate = admission(action);
+        if (gate != Result::Success) return gate;
+        return p.uncertain() ? Result::ActionUnknown : failure;
+    };
     if (!s.ymcc) {
         p.event("ymcc-task-request");
-        if (!p.startYmccTask()) return Result::TaskFailed;
+        const auto submitted = dispatch(Action::EnsureYmcc, Result::TaskFailed);
+        if (submitted != Result::Success) return submitted;
         while (!s.ymcc) {
             p.wait(); s = p.snapshot();
             if (s.cancelled || !s.active) return Result::Cancelled;
@@ -62,21 +99,32 @@ inline Result run(Ports& p) {
         }
         p.event("ymcc-process-observed"); // Not an input-readiness assertion.
     }
-    if (s.steamWindow) {
+    // Wait for a completed public observation. No window is not process absence.
+    while (s.presence == SteamPresence::Unknown) {
+        const auto gate = admission(Action::StartSteam);
+        if (gate != Result::Success) return gate;
+        p.wait(); s = p.snapshot();
+        if (s.cancelled || !s.active) return Result::Cancelled;
+        if (p.now() < begin || p.now() - begin >= DeadlineMs) return Result::Timeout;
+    }
+    if (s.presence == SteamPresence::Running) {
         p.event("existing-steam-home-request");
-        if (!p.showSteam()) return Result::UriFailed;
+        const auto submitted = dispatch(Action::ShowHome, Result::UriFailed);
+        if (submitted != Result::Success) return submitted;
     } else {
         p.event("bat-request");
-        if (!p.startBat()) return Result::BatFailed;
+        const auto submitted = dispatch(Action::StartSteam, Result::BatFailed);
+        if (submitted != Result::Success) return submitted;
     }
     while (true) {
         s = p.snapshot();
         if (s.cancelled || !s.active) return Result::Cancelled;
         if (p.now() - begin >= DeadlineMs) return Result::Timeout;
-        // A verified visible Steam window is only an HWND handoff receipt.
-        // Geometry/foreground are never reported as Valve UI-mode evidence.
-        if (s.ymcc && s.steamWindow && p.focusSteam()) {
-            p.event("steam-window-handoff"); return Result::Success;
+        // HWND handoff is not Valve UI-mode, account or input evidence.
+        if (s.ymcc && s.steamWindow) {
+            const auto focused = dispatch(Action::FocusWindow, Result::InternalError);
+            if (focused == Result::Success) { p.event("steam-window-handoff"); return Result::Success; }
+            if (focused != Result::InternalError) return focused;
         }
         p.wait();
     }
@@ -92,6 +140,7 @@ inline const wchar_t* message(Result r) {
     case Result::BatFailed: return L"无法调用原 YeManSteam.bat。";
     case Result::UriFailed: return L"无法提交 Steam 大屏主页请求。";
     case Result::Timeout: return L"60 秒内未完成 Steam 窗口交接。请检查 YMCC 导出中的 steam-launch.log。";
+    case Result::ActionUnknown: return L"Steam 请求结果尚未确认，已停止本次自动操作，请查看 steam-launch.log。";
     default: return L"";
     }
 }

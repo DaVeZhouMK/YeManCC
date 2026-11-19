@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "kind": "CURRENT26_FIXED_CPP_ARTIFACT_SOFTWARE_V1",
+  "status": "BOUND",
+  "scope": "FIXED_CPP_ARTIFACT_SOFTWARE_ONLY",
+  "workspaceRoot": "G:/YeManCC-Work/Testing/YMCC/Workspace/R105CP-20261117A",
+  "authorizedBuildRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22",
+  "sourceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Mainline\\YeManCC-source\\YeManCC",
+  "descriptor": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\formal-owned-runtime-r9\\generated-r13\\FIXED-SOURCE-DESCRIPTOR-owned-r13.json",
+    "bytes": 17330112,
+    "sha256": "f8e5b407c9e1e93fb21af6e7b4011779d7a69224e1ffb931c960a3da6f1bc793"
+  },
+  "expectations": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\formal-owned-runtime-r9\\generated-r13\\SOURCE-EXPECTATIONS-current26-owned-r13.json",
+    "bytes": 4509852,
+    "sha256": "a1f2b703005d321230672a86d6039ae0eccb8771bd33ebec0ce96179ed230b1f"
+  },
+  "qualification": {
+    "positive": {
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\OWNED-CURRENT-FOUR-PIPE-RESULT-r10.json",
+        "bytes": 2413213,
+        "sha256": "17864dd733e87e6d553222b3668a4a5fcae581332722553ab6e040921849586e"
+      },
+      "raw": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22\\np2\\p\\r\\0000000000000030\\fixture-result.json",
+        "bytes": 67703054,
+        "sha256": "a8fb02c4a884368bf19eef99e5bce567545b7af7541baf1e99fade1c3a52ff23"
+      }
+    },
+    "cancellation": {
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\OWNED-CURRENT-THREE-PIPE-CONTINUATION-RESULT-r11.json",
+        "bytes": 7177251,
+        "sha256": "8818944b4f7f817662e3ec6a86855d54ae5e689380f23d7c03b3e00dba53f99f"
+      },
+      "raw": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22\\nb3\\cancel\\r\\0000000000000040\\fixture-result.json",
+        "bytes": 67870010,
+        "sha256": "631c3eb5a617213dd2e4a07631bf6401347ded3e3e67891d794eaa798f87fa16"
+      }
+    },
+    "psOwnership": {
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\OWNED-CURRENT-THREE-PIPE-CONTINUATION-RESULT-r11.json",
+        "bytes": 7177251,
+        "sha256": "8818944b4f7f817662e3ec6a86855d54ae5e689380f23d7c03b3e00dba53f99f"
+      },
+      "raw": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22\\nb3\\psown\\r\\0000000000000041\\fixture-result.json",
+        "bytes": 67714605,
+        "sha256": "05c9c0dafd6d2d41cae2c980c293435cc0333858b34fec65d6ad084e49e9163a"
+      }
+    },
+    "psBinding": {
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\OWNED-CURRENT-THREE-PIPE-CONTINUATION-RESULT-r11.json",
+        "bytes": 7177251,
+        "sha256": "8818944b4f7f817662e3ec6a86855d54ae5e689380f23d7c03b3e00dba53f99f"
+      },
+      "raw": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22\\nb3\\psbind\\r\\0000000000000042\\fixture-result.json",
+        "bytes": 67701212,
+        "sha256": "fe42877538dee26a4a0a05e463e252dba1358ac7646c8e29407c9c80240942f2"
+      }
+    }
+  },
+  "currentPipeOracle": {
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-current-oracle.mjs",
+    "bytes": 7432,
+    "sha256": "166e04af7085cb627c3af2a0eec837b5a0f67d222ac895c8be764bc51c052704"
+  },
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "sourceCaptureManifestSha256": "03bc36a4c6546e3a1d0ba505aa12aa8cd2c22da0249291ef4b7b66f58897eee9",
+  "toolClosureComplete": false,
+  "cacheAcceptance": false,
+  "currentPrimaryAccepted": false,
+  "nativeBudgetMs": 135000,
+  "leafBudgetMs": 360000,
+  "cleanupReserveMs": 30000,
+  "powershell": {
+    "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\PowerShell\\7.4.6\\pwsh.exe",
+    "bytes": 278048,
+    "sha256": "ea5596296a0b6f1261c84c7edee40f27879aefc63f005ed541c440b73e382503"
+  },
+  "node": {
+    "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+    "bytes": 83344536,
+    "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+  }
+}

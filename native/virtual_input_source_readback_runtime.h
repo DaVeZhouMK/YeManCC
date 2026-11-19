@@ -1,6 +1,7 @@
 #pragma once
 #include "virtual_input_token_evidence.h"
 #include "rog_fse_experiment_policy.h"
+#include "input_source_readback_log_scope.h"
 
 // VC-FSE-SOURCE-20261026-R1. Read-only evidence within the existing BUS 1 Hz
 // System32 observer. Never selects a source, changes XInputEnable, writes a
@@ -98,11 +99,12 @@ static void inputSourceReadbackEvidenceTick(ULONGLONG systemReadBeginTick,
     static HWND priorForeground=nullptr;
     static std::uint64_t priorPower=0;
     static ULONGLONG until=0;
+    static ymcc::inputSourceReadbackLog::WindowOrdinal logWindow;
     static unsigned long long dropped=0;
     // Re-enable begins a fresh diagnostic observation window even when the
     // previous 30-second window expired. OFF performs no source/FSE/token reads.
     if(!tickCostEnabled() || !g_realStickTest.virtualTargetEnabled) {
-        observed=false;until=0;return;
+        observed=false;until=0;logWindow.close();return;
     }
     try {
         const auto powerBefore=currentPowerGeneration();
@@ -120,7 +122,10 @@ static void inputSourceReadbackEvidenceTick(ULONGLONG systemReadBeginTick,
         const char* why=!observed?"first":powerChanged?"power-generation-change":
             fseChanged?"fse-state-change":foregroundChanged?"foreground-change":"armed-sample";
         const bool contextChanged=!observed || powerChanged || fseChanged || foregroundChanged;
-        if(contextChanged)until=now+30000; // Fixed bounded evidence window, not a recovery budget.
+        if(contextChanged){
+            until=now+30000; // Fixed bounded evidence window, not a recovery budget.
+            logWindow.open();
+        }
         if(!contextChanged && (until==0 || now>until))return;
 
         DWORD selectedSlot=0,connectedMask=0,physicalMask=0,virtualMask=0,unknownMask=0;
@@ -161,7 +166,8 @@ static void inputSourceReadbackEvidenceTick(ULONGLONG systemReadBeginTick,
         const auto systemApi=nativeXInputFunctionModuleEvidence(systemGetter,systemOwner);
         json evidence={
             {"formatVersion",1},{"reason",why},{"diagnosticOnly",true},
-            {"scope","sequential-extra-canonical-read-vs-existing-System32-reads;never-used-for-source-or-output"},
+            {ymcc::inputSourceReadbackLog::marker,ymcc::inputSourceReadbackLog::schema},
+            {"readbackWindowOrdinal",logWindow.active?json(logWindow.active):json(nullptr)},
             {"systemReadBeginTick",systemReadBeginTick},{"systemReadEndTick",systemReadEndTick},
             {"fseObservedTick",platformTick},{"fseObservedAfterSystemRead",true},
             {"fse",ymcc::bootmode::platformJson(platform)},
@@ -181,7 +187,6 @@ static void inputSourceReadbackEvidenceTick(ULONGLONG systemReadBeginTick,
                 {"physicalSourceMask",physicalMask},{"virtualEndpointMask",virtualMask},{"unknownSlotMask",unknownMask}}},
             {"nativeProducerCache",sourceContextKnown && selectedSlot<4?
                 inputSourceReadbackPadJson(cachedPad):json(nullptr)},
-            {"nativeProducerCacheScope","copied-under-source-lock;not-an-extra-hardware-read-or-atomic-with-system-state"},
             {"nativeProbe",{{"attempted",nativeReadAttempted},
                 {"result",nativeReadAttempted?json(nativeResult):json(nullptr)},
                 {"packet",nativeReadAttempted && nativeResult==ERROR_SUCCESS?json(nativeState.dwPacketNumber):json(nullptr)},
@@ -192,6 +197,8 @@ static void inputSourceReadbackEvidenceTick(ULONGLONG systemReadBeginTick,
             {"driverDeliveryProven",false},{"gameConsumptionProven",false},
             {"controlsChanged",false},{"droppedDiagnosticAttempts",dropped}};
         if(contextChanged) {
+            evidence["scope"]=ymcc::inputSourceReadbackLog::scope;
+            evidence["nativeProducerCacheScope"]=ymcc::inputSourceReadbackLog::cacheScope;
             // ROG only, on already-existing context observations. No per-frame
             // path scan and no source/output decision consumes this result.
             if(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Rog)

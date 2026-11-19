@@ -1,3 +1,5 @@
+#include "input_host_frame_request_id.h"
+#include "input_host_compact_frame_reply.h"
 #include "production.inc"
 #include "typed_submit_candidate.inc"
 struct AllocationCount{std::uint64_t calls=0,bytes=0;};
@@ -14,6 +16,20 @@ static void check(bool b,const char* why){++checks;if(!b)throw std::runtime_erro
 static const std::string id="0123456789abcdef0123456789abcdef",hashValue(64,'a');
 static std::string before(const FocusFrameContent& c,std::uint64_t n){const auto frame=focusIsolationAssembleFrame(c);return inputHostBuildSubmitFrameText(frame,id,n,n,n+100,hashValue,c.imuAdmitted?"proof-live":"safe-zero");}
 static std::string after(const FocusFrameContent& c,std::uint64_t n){return focusIsolationBuildTypedSubmitText(c,id,n,n,n+100,hashValue,c.imuAdmitted?"proof-live":"safe-zero");}
+static void compactEquivalent(const FocusFrameContent& c,std::uint64_t n){
+ const auto fullText=after(c,n);
+ const auto getters=fixtureTupleGetterCalls;
+ const auto text=focusIsolationBuildTypedSubmitText(c,id,n,n,n+100,hashValue,c.imuAdmitted?"proof-live":"safe-zero",true);
+ check(fixtureTupleGetterCalls==getters,"compact directly skips constant identity getters");
+ auto compact=json::parse(text);const auto full=json::parse(fullText);
+ check(compact.at("compactFrameRequestVersion")==1,"compact request marker");
+ check(!compact.contains("frameReplyBinding"),"writer leaves sole token attachment to request owner");
+ check(compact.at("startupNonce")==g_inputHostStartupNonce&&compact.at("sequence")==n&&compact.at("requestId")==id,"nonce and request correlation retained");
+ check(compact.size()+8==full.size(),"only nine tuple fields omitted and one version added");
+ for(const char* field:ymcc::inputHost::compactReply::kRequestTupleFields)check(!compact.contains(field),"constant tuple field omitted");
+ check(ymcc::inputHost::compactReply::expandRequestForParity(compact,full),"compact expansion");
+ check(compact==full&&compact.dump()==fullText,"full dynamic/hash/proof/time/raw/IMU/pads semantics and bytes");
+}
 static FocusFrameContent sample(std::uint64_t i,bool idle,bool gyro,int persona){
  FocusFrameContent c;
  if(!idle){c.buttons=static_cast<int>(i%65536);c.lxShort=static_cast<short>(i*37);c.lyShort=static_cast<short>(i*71);c.rxShort=static_cast<short>(i*97);c.ryShort=static_cast<short>(i*137);c.rawLtByte=static_cast<unsigned char>(i%256);c.rawRtByte=static_cast<unsigned char>(i*3);c.lt=c.rawLtByte/255.f;c.rt=c.rawRtByte/255.f;c.ltRaw=c.rawLtByte;c.rtRaw=c.rawRtByte;c.backButtons=i%4;c.screenButtons=i%17==0?1:0;}
@@ -34,17 +50,47 @@ static json leg(bool candidate,const std::vector<FocusFrameContent>& data,int co
  return json{{"candidate",candidate},{"frames",count},{"cycles",c1-c0},{"cpu100ns",cpu1-cpu0},{"wallNs",std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()},{"checksum",sum}};
 }
 static int correctness(){
+ ymcc::inputHost::FrameRequestIds ids;std::string firstId,nextId;
+ check(ids.tryNext(firstId)&&firstId=="frame-1","first frame correlation ID");
+ check(ids.tryNext(nextId)&&nextId=="frame-2"&&firstId!=nextId,"rejected/rebuilt attempts do not reuse IDs");
+ // Resetting wire/sample counters and switching persona must not touch IDs.
+ for(int persona=0;persona<3;++persona){setPersona(persona);std::string id;check(ids.tryNext(id)&&id=="frame-"+std::to_string(persona+3),"target/persona changes retain the process correlation namespace");}
+ ymcc::inputHost::FrameRequestIds last((std::numeric_limits<std::uint64_t>::max)()-1);
+ std::string finalId;check(last.tryNext(finalId)&&finalId=="frame-18446744073709551615","maximum ID formats without truncation");
+ check(!last.tryNext(finalId)&&!last.tryNext(finalId),"exhaustion never wraps and leaves GUID fallback available");
+ auto idEffective=sample(7,true,false,0);
+
+ const auto idWire=focusIsolationBuildTypedSubmitText(idEffective,firstId,11,17,19,"hash-proof","pair-proof");
+ const auto parsedId=json::parse(idWire);
+ check(parsedId.at("requestId")==firstId&&parsedId.at("sequence")==11&&parsedId.at("sampleSequence")==17,"correlation ID does not replace either protocol sequence");
+ check(parsedId.at("startupNonce")==g_inputHostStartupNonce&&parsedId.at("runId")==g_inputHostRunId,"full session identity remains on the actual frame wire");
+
  std::mt19937_64 rng(0x892408a7);
- for(int p=0;p<3;p++){setPersona(p);for(bool idle:{false,true})for(bool gyro:{false,true})for(std::uint64_t i=0;i<2048;i++){const auto c=sample(i,idle,gyro,p);const auto a=before(c,i+1),b=after(c,i+1);check(a==b,"sample exact bytes");check(json::parse(a)==json::parse(b),"sample parsed content");}}
+ for(int p=0;p<3;p++){setPersona(p);for(bool idle:{false,true})for(bool gyro:{false,true})for(std::uint64_t i=0;i<2048;i++){const auto c=sample(i,idle,gyro,p);const auto a=before(c,i+1),b=after(c,i+1);check(a==b,"sample exact bytes");check(json::parse(a)==json::parse(b),"sample parsed content");if(i<128)compactEquivalent(c,i+1);}}
  for(int p=0;p<3;p++){setPersona(p);for(int i=0;i<2048;i++){auto c=sample(rng(),false,true,p);c.imuAdmitted=(i&1)!=0;
   const auto axis=[&]{return std::bit_cast<double>(rng());};c.gyroX=axis();c.gyroY=axis();c.gyroZ=axis();c.accelX=axis();c.accelY=axis();c.accelZ=axis();c.qw=axis();c.qx=axis();c.qy=axis();c.qz=axis();
   c.lt=std::bit_cast<float>(static_cast<std::uint32_t>(rng()));c.rt=std::bit_cast<float>(static_cast<std::uint32_t>(rng()));c.ltRaw=std::bit_cast<float>(static_cast<std::uint32_t>(rng()));c.rtRaw=std::bit_cast<float>(static_cast<std::uint32_t>(rng()));
   c.touchpads.present=i%3!=0;c.touchpads.left.down=i%2;c.touchpads.right.down=i%5==0;c.touchpads.left.click=i%7==0;c.touchpads.right.click=i%13==0;c.screenButtons=static_cast<unsigned>(rng());
-  const auto n=rng();check(before(c,n)==after(c,n),"random exact scalar/optional bytes");}}
- for(const auto& weird:{std::string("quote\"slash\\tab\tline\n"),std::string("\xE5\xBE\xAE\xE6\x98\x9F"),std::string(8192,'x')}){g_inputHostRunId=weird;g_inputHostStartupNonce=weird;fixturePersona=weird;fixtureProfile=weird;check(before(sample(37,false,true,0),~0ULL)==after(sample(37,false,true,0),~0ULL),"escaped identity/max sequence");}
+  const auto n=rng();check(before(c,n)==after(c,n),"random exact scalar/optional bytes");if(i<256)compactEquivalent(c,n);}}
+ for(const auto& weird:{std::string("quote\"slash\\tab\tline\n"),std::string("\xE5\xBE\xAE\xE6\x98\x9F"),std::string(8192,'x')}){g_inputHostRunId=weird;g_inputHostStartupNonce=weird;fixturePersona=weird;fixtureProfile=weird;check(before(sample(37,false,true,0),~0ULL)==after(sample(37,false,true,0),~0ULL),"escaped identity/max sequence");compactEquivalent(sample(37,false,true,0),~0ULL);}
  // Independent field oracle, including signed zero and inactive sensors/contacts.
  setPersona(1);g_inputHostRunId="run-fixed";g_inputHostStartupNonce="nonce-fixed";auto c=sample(50,false,true,1);c.imuAdmitted=false;c.gyroX=999;c.qw=17;c.lt=-0.0f;c.touchpads.present=true;c.touchpads.left.down=false;c.touchpads.left.x=333;c.touchpads.left.pressure=77;
  const auto doc=json::parse(after(c,19));check(doc.at("imu").at("admitted")==false,"imu gate");check(doc.at("imu").at("gyroDps").at("x")==0.0,"safe gyro");check(doc.at("imu").at("quaternion").at("w")==1.0,"safe quaternion");check(std::signbit(doc.at("lt").get<double>()),"signed zero preserved");check(doc.at("touchpads").at("left").at("x")==0,"inactive contact coordinate");check(doc.at("touchpads").at("left").at("pressure")==0,"inactive pressure");check(doc.at("profileIdentity")=="dualsense-edge","profile oracle");check(doc.at("sequence")==19,"sequence oracle");
+ compactEquivalent(c,19);
+ const auto compactText=focusIsolationBuildTypedSubmitText(c,id,19,19,119,hashValue,"safe-zero",true);
+ const auto compactDoc=json::parse(compactText),fullDoc=json::parse(after(c,19));
+ for(const char* field:ymcc::inputHost::compactReply::kRequestTupleFields){auto mixed=compactDoc;mixed[field]=fullDoc.at(field);const auto original=mixed;check(!ymcc::inputHost::compactReply::expandRequestForParity(mixed,fullDoc)&&mixed==original,"mixed fields fail parity expansion without mutation");}
+ for(const auto& version:{json(nullptr),json(true),json("1"),json(0),json(2),json(1.0),json::array(),json::object()}){auto bad=compactDoc;bad["compactFrameRequestVersion"]=version;check(!ymcc::inputHost::compactReply::expandRequestForParity(bad,fullDoc),"bad diagnostic marker rejected");}
+ auto missing=compactDoc;missing.erase("compactFrameRequestVersion");check(!ymcc::inputHost::compactReply::expandRequestForParity(missing,fullDoc),"missing diagnostic marker rejected");
+ for(bool compact:{false,true}){
+  const auto text=focusIsolationBuildTypedSubmitText(c,id,19,19,119,hashValue,"safe-zero",compact),saved=text;
+  g_c6aParityChecked=false;g_c6aParityFailed=false;fixtureParityLogs=json::array();
+  inputHostVerifySubmitFrameParity(focusIsolationAssembleFrame(c),id,19,19,119,hashValue,"safe-zero",text,compact);
+  check(g_c6aParityChecked&&!g_c6aParityFailed&&fixtureParityLogs.at(0).at("event")=="c6a-wire-parity-ok","actual cost diagnostic compares full semantics");check(text==saved,"cost diagnostic never mutates output");
+ }
+ auto changed=compactDoc;changed["buttons"]=999;g_c6aParityChecked=false;g_c6aParityFailed=false;
+ inputHostVerifySubmitFrameParity(focusIsolationAssembleFrame(c),id,19,19,119,hashValue,"safe-zero",changed.dump(),true);
+ check(g_c6aParityFailed,"cost diagnostic detects changed dynamic payload");
  std::cout<<json{{"pass",true},{"assertions",checks},{"productOrDeviceCalls",0},{"scope","Exact current pure constructor+wire vs typed candidate, random IEEE bits, signed-zero, inactive sensors, pads, escaped identities"}}.dump()<<'\n';return 0;
 }
 int main(int argc,char**argv){try{

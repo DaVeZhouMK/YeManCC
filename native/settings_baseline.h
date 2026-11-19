@@ -77,12 +77,22 @@ inline Json& recoveryObject(Json& parent,const char* key) {
     if(!parent.is_object())parent=Json::object();
     auto& value=parent[key];if(!value.is_object())value=Json::object();return value;
 }
+// Backup reads and full recovery share only this native monitor receipt downgrade.
+inline void deactivateRecoveredSteamMonitor(Json& next) {
+    const auto monitor=next.find("steamMonitor");
+    if(monitor!=next.end()&&monitor->is_object()){
+        (*monitor)["pending"]=false;(*monitor)["restartRequired"]=false;
+        (*monitor)["via"]="unknown";(*monitor)["reason"]="recovered-state-unconfirmed";
+        monitor->erase("livePid");monitor->erase("liveValues");
+    }
+}
 inline void deactivateRecoveredState(Json& next) {
+    deactivateRecoveredSteamMonitor(next);
     next["deckyContextCleanup"] = cleanupHistoryUnconfirmed();
     next["deckyBigPictureRecovery"] = cleanupHistoryUnconfirmed();
     auto& startup=recoveryObject(next,"startupDesired");
     startup["virtualGamepadPersona"]="disabled";startup["gyroPreset"]="off";
-    for(const auto* key:{"fanControl","rtss","energyStar","memoryCleanup","steamCommunity"})startup[key]=false;
+    for(const auto* key:{"steamOverlayOnBoot","fanControl","rtss","energyStar","memoryCleanup","steamCommunity"})startup[key]=false;
     recoveryObject(next,"performanceSchedule")["enabled"]=false;
     auto& tdp=recoveryObject(next,"tdp");recoveryObject(tdp,"autoApply")={{"boot",false},{"wake",false}};
     auto& cpu=recoveryObject(next,"cpu");recoveryObject(cpu,"autoEnable")["mode"]="off";

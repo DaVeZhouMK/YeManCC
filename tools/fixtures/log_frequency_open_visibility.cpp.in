@@ -1,0 +1,40 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;
+static bool g_inputHostTransportFault=false,kVirtualTestKeepPhysicalVisible=false;
+static std::string g_inputHostHostInstanceId="owned-fixture-host",g_inputHostRunId="owned-fixture-run";
+static unsigned long long g_inputHostEpoch=3;
+static std::vector<json> rows,checks;
+static void appendNativeLifecycleLog(const char* event,const json& detail){auto value=detail;value["event"]=event;rows.push_back(std::move(value));}
+static void render(bool physicalSourceOnlineAtStart,bool nativeHandoffRequired,bool physicalSourcePending,
+                   bool physicalSourceAdmittedAtStart,bool physicalHidAdmitted,bool prepared){
+    static_cast<void>(nativeHandoffRequired); // Old-source log has no use for this explicit port.
+    const bool hello=true,neutralized=prepared,visibilityAdmitted=physicalHidAdmitted;
+    const char* xinputPlane=physicalSourcePending?"UNENCLOSED-source-pending":"UNENCLOSED";
+@@PRODUCER@@
+}
+static void check(const char* name,bool ok){checks.push_back({{"name",name},{"pass",ok}});}
+int main(int argc,char** argv){
+    if(argc!=2)return 2;const std::string mode=argv[1];if(mode!="all"&&mode!="pending")return 2;
+    for(unsigned variant=0;variant<(mode=="pending"?1U:10U);++variant){
+        const unsigned shape=variant%5;const bool online=shape==1||shape==4,handoff=shape==2;
+        const bool pending=!online,admitted=online,hid=shape!=3,prepared=shape!=4;
+        kVirtualTestKeepPhysicalVisible=variant>=5;const auto before=rows.size();render(online,handoff,pending,admitted,hid,prepared);
+        check("one original append event per original call",rows.size()==before+1);
+        const auto& row=rows.back();auto legacy=row;
+        for(const char* key:{"physicalVisibilitySchemaVersion","physicalVisibilityScope","physicalSourceOnlineAtHideGate","nativeHandoffRequiredAtHideGate","physicalVisibilityReadbackProven","externalControllerCountProven"})legacy.erase(key);
+        const json expected={{"hello",true},{"prepared",prepared},{"neutralized",prepared},{"visibilityAdmitted",hid},
+            {"pXinput",pending?"UNENCLOSED-source-pending":"UNENCLOSED"},{"physicalSourceAdmittedAtStart",admitted},
+            {"physicalSourcePending",pending},{"physicalHidAdmitted",hid},{"physicalHideGate",online?(hid?"admitted":"refused"):"not-required"},
+            {"physicalVisibility",kVirtualTestKeepPhysicalVisible?"kept-visible-test":"hidhide-admitted"},
+            {"transportFault",false},{"hostInstanceId",g_inputHostHostInstanceId},{"runId",g_inputHostRunId},{"epoch",3},{"event","input-host-open-result"}};
+        check("all preexisting event fields and enums remain exact",legacy==expected);
+        check("explicit local-admission diagnostic schema and scope",row.value("physicalVisibilitySchemaVersion",0)==1&&row.value("physicalVisibilityScope","")=="start-local-test-policy-and-hide-admission;not-physical-or-external-consumer-readback");
+        check("existing hide-gate source and native-handoff flags remain distinct",row.contains("physicalSourceOnlineAtHideGate")&&row["physicalSourceOnlineAtHideGate"]==online&&row.contains("nativeHandoffRequiredAtHideGate")&&row["nativeHandoffRequiredAtHideGate"]==handoff);
+        check("visibility and external controller count remain explicitly unproven",row.contains("physicalVisibilityReadbackProven")&&row["physicalVisibilityReadbackProven"]==false&&row.contains("externalControllerCountProven")&&row["externalControllerCountProven"]==false);
+    }
+    unsigned failures=0;for(const auto& value:checks)failures+=!value["pass"].get<bool>();
+    std::cout<<json({{"case",mode},{"checks",checks},{"failures",failures},{"rows",rows},{"actualOriginalAppendInitializerExecuted",true},{"completeStartExecuted",false},{"productOrDeviceUsed",false}}).dump()<<'\n';return failures?3:0;
+}

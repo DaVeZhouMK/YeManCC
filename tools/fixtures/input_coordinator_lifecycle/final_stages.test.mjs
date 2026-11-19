@@ -5,7 +5,8 @@ import {observeCurrent105Fixture} from '../../input_coordinator_current105_sourc
 import {observeCurrent105Progress} from './check_progress.mjs';
 import {buildCurrentCompileOnly} from '../../input_coordinator_current_compile_only.mjs';
 const sha=s=>createHash('sha256').update(s).digest('hex');
-const actual=observeCurrent105Fixture(fs.readFileSync(new URL('./fixture.cpp',import.meta.url),'utf8')).text;
+const profile=JSON.parse(fs.readFileSync(new URL('../../ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile.json',import.meta.url),'utf8'));
+const actual=observeCurrent105Fixture(fs.readFileSync(profile.sourceCapture.root+'/'+profile.fixture.relative,'utf8'),{sourceRoot:profile.sourceCapture.root,managedInputContract:profile.managedInputContract}).text;
 function verified(source){const o=observeFinalStages(source);assert.equal(o.originalSha256,sha(source));assert.equal(o.observedSha256,sha(o.text));assert.equal(o.wholeOriginalRestored,true);assert.equal(o.originalAssertionsUnchanged,true);assert.equal(o.originalReportExpressionUnchanged,true);assert.equal(o.nativeBudgetMs,60000);assert.equal(o.observerTimingTransparent,false);assert.equal(o.acceptanceChanged,false);assert.equal(o.budgetChanged,false);assert(o.text.includes('return report.dump(2);'));return o;}
 test('actual original ordered105 fixture receives reversible stage observations',()=>verified(actual));
 test('stage observations compose with exact completed-assertion progress',()=>verified(observeCurrent105Progress(actual).text));

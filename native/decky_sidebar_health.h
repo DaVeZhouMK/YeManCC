@@ -3,9 +3,42 @@
 // Keep source URLs and messages private; only the reviewed reason code crosses into settings/logs.
 #include "json.hpp"
 #include <string>
+#include <string_view>
 #include <algorithm>
 namespace ymcc::deckyhealth {
 using Json=nlohmann::json;
+// Passive official-socket facts have no connection, fatal or action authority.
+// Validate again at the log sink; never preserve arbitrary source text/identity.
+inline Json officialSocketFacts(const Json& value){
+    try{
+        if(!value.is_object()||!value.contains("schema")||!value["schema"].is_number_integer()||value["schema"]!=1||
+            !value.contains("ordinal")||!value["ordinal"].is_number_integer()||value["ordinal"]<1||value["ordinal"]>16||
+            !value.contains("closeCode")||!value["closeCode"].is_number_integer()||value["closeCode"]<0||value["closeCode"]>65535)return nullptr;
+        for(const auto* key:{"codeKnown","cleanKnown","wasClean","opened"})if(!value.contains(key)||!value[key].is_boolean())return nullptr;
+        if((!value["codeKnown"].get<bool>()&&value["closeCode"]!=0)||(!value["cleanKnown"].get<bool>()&&value["wasClean"]!=false))return nullptr;
+        const bool known=value.contains("pendingCallsKnown"),count=value.contains("pendingCalls");
+        if(!known){if(count||value.size()!=7)return nullptr;}
+        else{
+            if(!value["pendingCallsKnown"].is_boolean())return nullptr;
+            if(value["pendingCallsKnown"].get<bool>()){
+                if(!count||value.size()!=9||!value["pendingCalls"].is_number_integer()||value["pendingCalls"]<0||value["pendingCalls"]>0xffffffffull)return nullptr;
+            }else if(count||value.size()!=8)return nullptr;
+        }
+        return value;
+    }catch(...){return nullptr;}
+}
+inline Json officialSocketSignal(const Json& packet,int context,const std::string& run){
+    try{
+        if(context<=0||packet.value("method",std::string{})!="Runtime.bindingCalled")return nullptr;
+        const auto& params=packet.at("params");
+        if(params.value("name",std::string{})!="__YMCC_DECKY_HEALTH_V1"||params.value("executionContextId",0)!=context)return nullptr;
+        const auto raw=params.value("payload",std::string{});if(raw.size()>256)return nullptr;
+        auto value=Json::parse(raw,nullptr,false);
+        if(!value.is_object()||value.size()<8||value.size()>10||value.value("runId",std::string{})!=run||value.value("code",std::string{})!="decky-socket-close")return nullptr;
+        value.erase("runId");value.erase("code");value["schema"]=1;
+        return officialSocketFacts(value);
+    }catch(...){return nullptr;}
+}
 inline bool terminal(const std::string& code){return code=="decky-frontend-incompatible"||code=="decky-render-failed"||code=="loader-crash-loop";}
 inline bool coreUrl(const std::string& url){
     if(url.size()>1024)return false;
@@ -33,13 +66,21 @@ inline std::string exception(const Json& packet,int context){
         return "decky-frontend-incompatible";
     }catch(...){return {};}
 }
-inline bool boundarySignal(const Json& packet,int context,const std::string& run){
+inline constexpr size_t scopedSignalPayloadLimit=160;
+inline const char* scopedSignal(const Json& packet,int context,const std::string& run,const char* code,const char* alternate=nullptr){
     try{
-        if(context<=0||packet.value("method",std::string{})!="Runtime.bindingCalled")return false;
-        const auto& p=packet.at("params");if(p.value("executionContextId",0)!=context||p.value("name",std::string{})!="__YMCC_DECKY_HEALTH_V1")return false;
-        const auto raw=p.value("payload",std::string{});if(raw.size()>160)return false;
-        const auto value=Json::parse(raw);return value.size()==2&&value.value("runId",std::string{})==run&&value.value("code",std::string{})=="decky-render-failed";
-    }catch(...){return false;}
+        if(context<=0||packet.value("method",std::string{})!="Runtime.bindingCalled")return nullptr;
+        const auto& p=packet.at("params");if(p.value("executionContextId",0)!=context||p.value("name",std::string{})!="__YMCC_DECKY_HEALTH_V1")return nullptr;
+        const auto raw=p.value("payload",std::string{});if(raw.size()>scopedSignalPayloadLimit)return nullptr;
+        const auto value=Json::parse(raw);if(value.size()!=2||value.value("runId",std::string{})!=run)return nullptr;
+        const auto match=value.value("code",std::string{});
+        return match==code?code:alternate&&match==alternate?alternate:nullptr;
+    }catch(...){return nullptr;}
+}
+inline bool boundarySignal(const Json& packet,int context,const std::string& run){return scopedSignal(packet,context,run,"decky-render-failed");}
+inline const char* connectionSignal(const Json& packet,int context,const std::string& run){
+    const auto code=scopedSignal(packet,context,run,"decky-connection-check","decky-connection-result");
+    return !code?nullptr:std::string_view(code)=="decky-connection-result"?"probe-result":"qam-open";
 }
 // A terminal watch packet is already scoped to the authenticated binding.
 // Keep its admission until the UI owner consumes it; automatic retries must not

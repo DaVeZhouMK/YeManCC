@@ -125,7 +125,7 @@ static void setup(){
  mem::foreground=mem::handle(9);mem::window(mem::foreground).pid=2;mem::window(mem::foreground).style=WS_EX_TOPMOST;
  owner=mem::handle(1);windows={mem::handle(2),mem::handle(3)};outlines={mem::handle(4),mem::handle(5)};
  for(HWND h:{windows[0],windows[1],outlines[0],outlines[1]})mem::window(h).previous=mem::foreground;
- core=Core{};core.config=profileDefault(1);core.config.autoHideSeconds=15;initialized=true;enabled=true;available=true;nativeMode=true;nativeInputCandidateRequested=true;sentKeys=0;sentClick=false;dryRun=false;
+ core=Core{};core.config=profileDefault(1);core.config.autoHideSeconds=15;initialized=true;inputTeardown=false;exitInputWindows={};exitInputWindowCount=0;exitInputChecks={};exitInputCheckCount=0;screenButtonMask.store(0);enabled=true;available=true;nativeMode=true;nativeInputCandidateRequested=true;sentKeys=0;sentClick=false;dryRun=false;
  buttonWindows={};buttonOutlines={};buttonContacts={};contactVisuals={};cursorWindow=nullptr;cursorVisible=false;nativeTransport={};autoHide={};ownerRebindQueued=false;++ownerLifecycleEpoch;ownerVisibilityHooks={};ownerVisibilityQueued=false;++ownerVisibilityEpoch;
  touchHapticPulseSink=feedback;touchHapticEventGate.reset();feedbackOnlyContacts.cancel();
 }
@@ -194,7 +194,8 @@ int main(int argc,char** argv){try{
  check("feedback-restores-after-input-and-outline-cursor-last",consumed&&raised==std::vector<uintptr_t>{2,4,3,5,6,8}&&!IsWindowVisible(mem::handle(7)),{{"reorder",true}},"consumeOwnerVisibility/restoreScreenLayerPair/restoreScreenFeedbackOrder");
  const auto stale=ownerVisibilityEpoch;stopOwnerVisibility();check("stopped-visibility-rejects-stale-message",!consumeOwnerVisibility(stale),{{"epoch",stale}},"stopOwnerVisibility/consumeOwnerVisibility");
  setup();output(core.event(0,8,0,20,20,200,200,1000));queueOwnerResumeRebind();const auto pending=ownerLifecycleEpoch;shutdownForOwner();
- check("close-destroys-memory-surfaces-clears-output-and-old-rebind",!initialized&&!owner.load()&&!windows[0]&&!outlines[0]&&sentKeys==0&&!sentClick&&!consumeOwnerRebind(pending),{{"event","close"}},"shutdownForOwner/shutdown/release");
+ const auto terminal=exitInputReleaseState();const auto sendsAfterClose=mem::sends;Action late;late.keys=1;late.dx=4;late.heldClick=true;output(late);
+ check("close-destroys-memory-surfaces-clears-output-and-old-rebind",!initialized&&!owner.load()&&!windows[0]&&!outlines[0]&&sentKeys==0&&!sentClick&&!consumeOwnerRebind(pending)&&inputTeardown&&terminal.value("verified",false)&&exitInputCheckCount>=kExitInputRequiredCleanRounds&&mem::sends==sendsAfterClose,{{"event","close"},{"exitInputRelease",terminal},{"lateOutputSent",mem::sends!=sendsAfterClose}},"shutdownForOwner/quiesceForOwner/quiesce/shutdown/confirmExitInputs/release/output");
  setup();mem::postOkay=false;check("post-failure-does-not-stick-queued-owner",!queueOwnerResumeRebind()&&!ownerRebindQueued,{{"PostMessage",false}},"queueOwnerResumeRebind");
  setup();using namespace ymcc::touchhaptic;SourceToken token{Backend::Msi,1,3,7,4};FeedbackLease<LeaseOps> lease;
  auto receipt=lease.write(token,{32},20,20,[]{return true;});lease.write(token,{32},20,20,[]{return true;});

@@ -3,15 +3,20 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {MODULE,FILES,HERE,spec,sha,shaFile,need,json,save,inside,checkedFile,fingerprint,unchanged,extractVm,mutate,semanticVerdict,assertPlainDestination} from './contract.mjs';
+const observeInputs=rows=>rows.map(row=>fingerprint(row.path));
+const sameInputs=(before,after)=>before.length===after.length&&before.every((row,i)=>{
+  const observed=after[i];
+  return row.path===observed.path&&row.size===observed.size&&row.sha256===observed.sha256;
+});
 export function prepareCase({repoRoot,caseDir,faultId=null}) {
   repoRoot=fs.realpathSync(repoRoot);caseDir=path.resolve(caseDir);
   need(!inside(repoRoot,caseDir),'OUTPUT_MUST_BE_OUTSIDE_SOURCE');assertPlainDestination(caseDir);
   fs.mkdirSync(caseDir,{recursive:false});
-  const tool=json(path.join(HERE,'toolchain-inputs.json'));
-  need(tool.node.sha256===shaFile(process.execPath)&&tool.node.version===process.version,'NODE_IDENTITY_MISMATCH');
+  const tool=json(path.join(HERE,'toolchain-inputs.json')), node=fingerprint(process.execPath);
+  need(tool.node.sha256===node.sha256&&tool.node.version===process.version,'NODE_IDENTITY_MISMATCH');
   const sourceInputs=spec.sourceInputs.map(relative=>({relative,...fingerprint(checkedFile(repoRoot,relative))}));
   need(sourceInputs[0].sha256===spec.producerSha256,'PRODUCER_IDENTITY_MISMATCH');
-  const tools=[fingerprint(process.execPath),...FILES.map(f=>fingerprint(path.join(HERE,f)))];
+  const tools=[node,...FILES.map(f=>fingerprint(path.join(HERE,f)))];
   // Exactly two levels above sourceview/repo is this owned case directory.
   const view=path.join(caseDir,'sourceview','repo');fs.mkdirSync(view,{recursive:true});
   for(const row of sourceInputs){const dest=path.join(view,row.relative);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(row.path,dest);}
@@ -48,14 +53,12 @@ export function executeCase(plan) {
 export function evaluateCase(plan,child) {
   const reasons=[];
   const check=(value,reason)=>{if(!value)reasons.push(reason);return value;};
-  check(unchanged(plan.sourceInputs),'SOURCE_CHANGED');check(unchanged(plan.viewInputs),'VM_SOURCE_CHANGED');check(unchanged(plan.tools),'TOOL_CHANGED');
-  check(unchanged([plan.configIdentity,plan.vmIdentity]),'VM_CONFIG_CHANGED');
   check(!plan.outputBefore.reportExists&&!plan.outputBefore.traceExists,'OUTPUT_NOT_FRESH');
   check(!child.error&&!child.signal&&Number.isInteger(child.exitCode),'CHILD_EXECUTION_INCOMPLETE');
   let report=null,trace=null;
   try{report=json(plan.report);trace=json(plan.trace);}catch{reasons.push('FRESH_REPORT_OR_TRACE_MISSING');}
   if(trace){
-    check(trace.finished===true&&!trace.forbidden.length,'OBSERVER_CONTROL_FAILURE');
+    check(trace.finished===true&&Array.isArray(trace.forbidden)&&trace.forbidden.length===0,'OBSERVER_CONTROL_FAILURE');
     check(trace.node.path===process.execPath&&trace.node.version===process.version,'ACTUAL_NODE_MISMATCH');
     check(JSON.stringify(trace.vm.map(v=>({sha256:v.sha256,code:v.code,completed:v.completed})))===JSON.stringify(plan.vm.map(v=>({sha256:v.sha256,code:v.code,completed:true}))),'ACTUAL_VM_INPUT_MISMATCH');
     check(plan.viewInputs.every(row=>trace.reads.some(r=>path.resolve(r.path)===row.path&&r.sha256===row.sha256)),'SOURCE_READ_NOT_OBSERVED');
@@ -66,24 +69,37 @@ export function evaluateCase(plan,child) {
   if(report){
     try{check(fs.readFileSync(path.join(plan.caseDir,'stdout.txt'),'utf8')===fs.readFileSync(plan.report,'utf8')+'\n','RAW_REPORT_STDOUT_DIFFER');}catch{reasons.push('RAW_STDOUT_MISSING');}
   }
+  const files=['stdout.txt','stderr.txt','child.json','plan.json','observer-config.json','vm-inputs.json',...(fs.existsSync(plan.report)?['Build/CustomSteamLibrary/ui-datachain-summary.json']:[]),...(fs.existsSync(plan.trace)?['trace.json']:[])];
+  const outputAfter=files.map(f=>fingerprint(path.join(plan.caseDir,f)));
+  const sourceAfter=observeInputs(plan.sourceInputs),vmInputAfter=observeInputs(plan.viewInputs),toolAfter=observeInputs(plan.tools);
+  // The verdict must compare the same closing fingerprints that the receipt records.
+  const identityFailures=[];
+  if(!sameInputs(plan.sourceInputs,sourceAfter))identityFailures.push('SOURCE_CHANGED');
+  if(!sameInputs(plan.viewInputs,vmInputAfter))identityFailures.push('VM_SOURCE_CHANGED');
+  if(!sameInputs(plan.tools,toolAfter))identityFailures.push('TOOL_CHANGED');
+  if(!unchanged([plan.configIdentity,plan.vmIdentity]))identityFailures.push('VM_CONFIG_CHANGED');
+  reasons.unshift(...identityFailures);
   const accepted=semanticVerdict({report,trace,exitCode:child.exitCode,faultId:plan.faultId,controlsOk:reasons.length===0});
   if(!accepted&&reasons.length===0)reasons.push('ORIGINAL_CASE_OR_EXPECTED_ASSERTION_CONTRACT_FAILED');
-  const files=['stdout.txt','stderr.txt','child.json','plan.json','observer-config.json','vm-inputs.json',...(fs.existsSync(plan.report)?['Build/CustomSteamLibrary/ui-datachain-summary.json']:[]),...(fs.existsSync(plan.trace)?['trace.json']:[])];
-  return {schemaVersion:1,kind:plan.faultId?'semantic-negative':'original-positive',faultId:plan.faultId,accepted,semanticDetected:!!plan.faultId&&accepted,controlStatus:reasons.length?'FAIL':'PASS',controlFailures:reasons,caseDir:plan.caseDir,originalResult:report?{allPassed:report.allPassed,caseCount:report.caseCount,failed:report.cases.filter(c=>!c.passed)}:null,child,outputBefore:plan.outputBefore,outputAfter:files.map(f=>fingerprint(path.join(plan.caseDir,f))),sourceBefore:plan.sourceInputs,sourceAfter:plan.sourceInputs.map(r=>fingerprint(r.path)),vmInputBefore:plan.viewInputs,vmInputAfter:plan.viewInputs.map(r=>fingerprint(r.path)),toolBefore:plan.tools,toolAfter:plan.tools.map(r=>fingerprint(r.path)),fault:plan.fault};
+  return {schemaVersion:1,kind:plan.faultId?'semantic-negative':'original-positive',faultId:plan.faultId,accepted,semanticDetected:!!plan.faultId&&accepted,controlStatus:reasons.length?'FAIL':'PASS',controlFailures:reasons,caseDir:plan.caseDir,originalResult:Array.isArray(report?.cases)?{allPassed:report.allPassed,caseCount:report.caseCount,failed:report.cases.filter(c=>c?.passed===false)}:null,child,outputBefore:plan.outputBefore,outputAfter,sourceBefore:plan.sourceInputs,sourceAfter,vmInputBefore:plan.viewInputs,vmInputAfter,toolBefore:plan.tools,toolAfter,fault:plan.fault};
 }
 export function runSuite({repoRoot,outDir,currentRoot=null}) {
   repoRoot=fs.realpathSync(repoRoot);outDir=path.resolve(outDir);
   need(!inside(repoRoot,outDir),'OUTPUT_MUST_BE_OUTSIDE_SOURCE');assertPlainDestination(outDir);
   fs.mkdirSync(path.dirname(outDir),{recursive:true});fs.mkdirSync(outDir);
-  const start=Date.now(),topInputs=[...spec.sourceInputs.map(f=>fingerprint(checkedFile(repoRoot,f))),...FILES.map(f=>fingerprint(path.join(HERE,f))),fingerprint(process.execPath)];
-  const manifestFile=path.join(repoRoot,'.ymcc-source-snapshot','manifest.json');let snapshot=null;
+  const start=Date.now(),topInputs=spec.sourceInputs.map(f=>fingerprint(checkedFile(repoRoot,f)));
+  const manifestFile=path.join(repoRoot,'.ymcc-source-snapshot','manifest.json');let snapshot=null,manifestIdentity=null;
   if(fs.existsSync(manifestFile)){
     const manifest=json(manifestFile);
     const sameRoot=typeof manifest.snapshotRoot==='string'&&path.resolve(manifest.snapshotRoot).toLowerCase()===repoRoot.toLowerCase();
     need(['PASS','FAIL'].includes(manifest.status)&&manifest.kind==='ymcc-fixed-source-snapshot'&&sameRoot&&Array.isArray(manifest.files)&&manifest.files.length>0,'COMPLETED_SNAPSHOT_REQUIRED');
     const rows=spec.sourceInputs.map(relative=>{const matches=manifest.files.filter(r=>r.path===relative),row=matches[0];need(matches.length===1&&row&&shaFile(checkedFile(repoRoot,relative))===row.sha256,'SNAPSHOT_SOURCE_IDENTITY_MISMATCH');return row;});
-    snapshot={...fingerprint(manifestFile),status:manifest.status,sourceRoot:manifest.sourceRoot,snapshotRoot:manifest.snapshotRoot,completeFileCount:manifest.files.length,consumedRows:rows,wholeSnapshotReverifiedByThisModule:false};topInputs.push(fingerprint(manifestFile));
+    snapshot={...fingerprint(manifestFile),status:manifest.status,sourceRoot:manifest.sourceRoot,snapshotRoot:manifest.snapshotRoot,completeFileCount:manifest.files.length,consumedRows:rows,wholeSnapshotReverifiedByThisModule:false};manifestIdentity=fingerprint(manifestFile);
   }
+  topInputs.push(...FILES.map(f=>fingerprint(path.join(HERE,f))));
+  const nodeIndex=topInputs.length;
+  topInputs.push(fingerprint(process.execPath));
+  if(manifestIdentity)topInputs.push(manifestIdentity);
   const currentBefore=currentRoot?spec.sourceInputs.map(f=>({relative:f,...fingerprint(checkedFile(currentRoot,f))})):null;
   const receipts=[];
   for(const faultId of [null,...spec.faults.map(f=>f.id)]){
@@ -91,8 +107,10 @@ export function runSuite({repoRoot,outDir,currentRoot=null}) {
     const receipt=executeCase(plan);save(path.join(plan.caseDir,'receipt.json'),receipt);receipts.push(receipt);
   }
   const currentAfter=currentRoot?spec.sourceInputs.map(f=>({relative:f,...fingerprint(checkedFile(currentRoot,f))})):null;
-  const ok=receipts.every(r=>r.accepted)&&unchanged(topInputs)&&(currentBefore===null||unchanged(currentBefore));
-  const result={schemaVersion:1,status:ok?'PASS':'FAIL',ok,scope:'library.workspace-ui normalization and artwork original Node VM plus original HTML checks',repoRoot,outDir,snapshot,currentIdentity:currentBefore?{root:currentRoot,before:currentBefore,after:currentAfter,unchanged:unchanged(currentBefore),matchesConsumedSource:currentBefore.every((r,i)=>r.sha256===topInputs[i].sha256)}:null,sourceHashes:spec.sourceInputs.map(f=>({path:f,sha256:shaFile(checkedFile(repoRoot,f))})),artifactInputs:[fingerprint(process.execPath)],sourceInputs:spec.sourceInputs,ownedOutputs:receipts.map(r=>r.caseDir),inputBefore:topInputs,inputAfter:topInputs.map(r=>fingerprint(r.path)),inputUnchanged:unchanged(topInputs),receipts,timeoutMs:spec.timeoutMs,durationMs:Date.now()-start,boundary:{hcFixed24Reopened:false,nativeWorkspace80OperationsCovered:false,browserUsed:false,esbuildUsed:false,vueUsed:false,deviceOrSteamStarted:false,realLibraryFilesRead:false,wholeGlobalAccepted:false,currentSourceApprovalGranted:false}};
+  const inputAfter=topInputs.map((row,i)=>fingerprint(i<spec.sourceInputs.length?checkedFile(repoRoot,spec.sourceInputs[i]):row.path));
+  const inputUnchanged=sameInputs(topInputs,inputAfter),currentUnchanged=currentBefore===null||sameInputs(currentBefore,currentAfter);
+  const ok=receipts.every(r=>r.accepted)&&inputUnchanged&&currentUnchanged;
+  const result={schemaVersion:1,status:ok?'PASS':'FAIL',ok,scope:'library.workspace-ui normalization and artwork original Node VM plus original HTML checks',repoRoot,outDir,snapshot,currentIdentity:currentBefore?{root:currentRoot,before:currentBefore,after:currentAfter,unchanged:currentUnchanged,matchesConsumedSource:currentBefore.every((r,i)=>r.sha256===topInputs[i].sha256)}:null,sourceHashes:spec.sourceInputs.map((f,i)=>({path:f,sha256:inputAfter[i].sha256})),artifactInputs:[inputAfter[nodeIndex]],sourceInputs:spec.sourceInputs,ownedOutputs:receipts.map(r=>r.caseDir),inputBefore:topInputs,inputAfter,inputUnchanged,receipts,timeoutMs:spec.timeoutMs,durationMs:Date.now()-start,boundary:{hcFixed24Reopened:false,nativeWorkspace80OperationsCovered:false,browserUsed:false,esbuildUsed:false,vueUsed:false,deviceOrSteamStarted:false,realLibraryFilesRead:false,wholeGlobalAccepted:false,currentSourceApprovalGranted:false}};
   save(path.join(outDir,'result.json'),result);return result;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

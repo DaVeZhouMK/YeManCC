@@ -245,4 +245,8 @@ def main():
         return 0 if current_safe else 2
     except Exception as error:
         receipt['status']='FAIL';receipt['error']=str(error);publish();print(str(error),file=sys.stderr);return 1
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':
+    if '--oem-consumer-worker' in sys.argv:
+        parser=argparse.ArgumentParser();parser.add_argument('--oem-consumer-worker',action='store_true');parser.add_argument('--output-root',required=True,type=Path);parser.add_argument('--source',required=True,type=Path)        parser.add_argument('--oem-consumer-worker-case',choices=('all','optional-failures'),default='all')        args=parser.parse_args()
+        spec=importlib.util.spec_from_file_location('native_oem_worker',ROOT/'tools/fixtures/input_capture_timer_retirement/native_oem_worker.py');consumer=importlib.util.module_from_spec(spec);spec.loader.exec_module(consumer)
+        raise SystemExit(consumer.run(sys.modules[__name__],args.output_root,args.source,args.oem_consumer_worker_case))    raise SystemExit(main())

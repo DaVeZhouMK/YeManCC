@@ -2,11 +2,16 @@
 #include "virtual_target_return_session.h"
 #include "virtual_target_return_process.h"
 #include "virtual_target_return_physical_path.h"
+#include "virtual_target_return_pnp_absence.h"
+
+static ymcc::targetReturn::pnpAbsence::Result inputHostTargetReturnPsProfileAbsence(){
+    return ymcc::targetReturn::pnpAbsence::verifyPsProfile();
+}
 
 // Historical target duties only, on the existing g_inputHostMx owner. This is
 // not a second execution cycle. Disk pins never enter State.accept/admission.
 namespace ymcc::inputHost::targetReturnRuntime {
-struct Target { ymcc::targetReturn::Origin origin; std::uint64_t sequence=0; };
+struct Target { ymcc::targetReturn::Origin origin; std::uint64_t sequence=0; bool psQuarantineProven=false; };
 struct Physical { ymcc::targetReturn::Origin origin; std::string journalId; };
 struct State {
     std::unique_ptr<ymcc::targetReturn::Session> session;
@@ -50,6 +55,7 @@ static void note(const char* phase,const char* reason,const duty::Origin* origin
         appendNativeLifecycleLog("input-host-target-return-record",{
             {"phase",phase},{"reason",reason},{"recordPath",W2U(state.path)},
             {"ready",record!=nullptr},{"revision",record?json(record->revision):json(nullptr)},
+            {"historyBindingMatched",record?json(state.session->historyBindingMatched()):json(nullptr)},
             {"origins",record?record->obligations.size():0},
             {"originKey",origin?origin->transactionId:std::string{}},
             {"physicalRoot",origin?origin->physicalRoot:std::string{}},{"pathInstanceId",path},
@@ -95,16 +101,20 @@ static bool open() {
         state.lastError=state.session->error().reason;note("load-deferred",state.lastError.c_str());return false;
     }
     state.coldHistoryPending=!state.session->record()->obligations.empty();
-    state.lastError.clear();note("loaded",state.session->openedFrom()==duty::LoadState::Missing?"record-missing":"historical-duties-loaded");
+    state.lastError.clear();note("loaded",!state.session->historyBindingMatched()?"empty-history-hint-reused":
+        state.session->openedFrom()==duty::LoadState::Missing?"record-missing":"historical-duties-loaded");
     return true;
 }
 static bool contains(const duty::Origin& origin) {
     const auto* record=state.session?state.session->record():nullptr;if(!record)return false;
     return std::any_of(record->obligations.begin(),record->obligations.end(),[&](const auto& item){return duty::sameOrigin(item.origin,origin);});
 }
-static bool flushProven(const char* basis="previously-proven-target-lifetime-complete") {
-    if(!state.session||!state.session->ready())return false;
+static bool flushProven(const char* basis="previously-proven-target-lifetime-complete",
+        const std::string& runId={},std::uint64_t epoch=0,const duty::Origin* flow=nullptr) {
+    if(!state.session||!state.session->ready() || runId.empty()!=(epoch==0))return false;
     for(auto it=state.proven.begin();it!=state.proven.end();) {
+        if(!runId.empty() && (it->runId!=runId || it->epoch!=epoch)){++it;continue;}
+        if(flow&&!sameFlow(*it,*flow)){++it;continue;}
         if(contains(*it)) {
             const auto* record=state.session->record();
             const auto group=std::find_if(record->obligations.begin(),record->obligations.end(),[&](const auto& item){return duty::sameOrigin(item.origin,*it);});
@@ -161,6 +171,32 @@ static bool inputHostTargetReturnBeforeCreateLocked(const char* command,std::uin
         const auto after=currentOwner();
         return contextCurrent()&&after&&sameFlow(*after,*current);
     }catch(...){state.lastError="target-record-exception";note("reservation-rejected",state.lastError.c_str());return false;}
+}
+
+// Exact current proof is independent of loaded cold history.
+// No ticket creation, Session open, Native-death requirement or device operation.
+static bool inputHostTargetReturnCurrentProofPendingLocked() {
+    return !ymcc::inputHost::targetReturnRuntime::state.proven.empty();
+}
+static bool inputHostTargetReturnFlushCurrentLocked(std::uint64_t ticket,
+        std::uint64_t power,const std::string& persona,std::uint64_t deadline) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    const auto current=[&]() {
+        return g_inputHostMx.ownedByCurrentThread() && ticket && deadline &&
+            inputHostStartProtectionNow()<deadline && currentPowerGeneration()==power &&
+            inputHostConfiguredPersona()==persona && !inputHostExitFenceRaised() &&
+            !g_exitRequested.load(std::memory_order_acquire) &&
+            !g_inputCaptureStop.load(std::memory_order_acquire) &&
+            g_virtualStartProtection.canContinueExecution(ticket,persona,inputHostStartProtectionNow());
+    };
+    if(!current())return false;
+    if(!inputHostTargetReturnCurrentProofPendingLocked())return true;
+    try {
+        const bool saved=flushProven("same-R3-current-proof-continuation");
+        // Successful IO remains durable history if the request expires in IO.
+        return current() && saved && !inputHostTargetReturnCurrentProofPendingLocked();
+    }catch(...){state.lastError="current-proof-settlement-exception";
+        note("settlement-deferred",state.lastError.c_str());return false;}
 }
 
 // Call only AFTER the existing in-memory State.accept. An optional absent pin
@@ -236,6 +272,46 @@ static void inputHostTargetReturnTargetExitedLocked(const std::string& runId,std
     }catch(...){note("settlement-deferred","target-settlement-exception");}
 }
 
+// A completed old lifetime is irreversible after the exact Host has exited.
+// Preserve that proof while its private record commit is retried. This is only
+// an in-memory proof of the same retired origin, never new target authority.
+// Generic RELEASE/RECREATE proven entries do not carry psQuarantineProven.
+static bool inputHostTargetReturnPsLifetimeProvenLocked(
+        const ymcc::psEndpointOwnership::Retirement& retired) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    try {
+        if(!g_inputHostMx.ownedByCurrentThread() || !retired.required || g_inputHostProcess ||
+            g_hidHideVisibilityJournal.active || retired.owner.persona!="dualsense-edge" ||
+            !retired.owner.epoch || retired.owner.epoch!=g_inputHostEpoch ||
+            retired.owner.runId.empty() || retired.owner.runId!=g_inputHostRunId ||
+            retired.owner.hostInstanceId!=g_inputHostHostInstanceId ||
+            retired.owner.targetId!=kInputHostTargetId || !state.session || !state.session->ready())return false;
+        const auto parent=inputHostTargetReturnCaptureOwner(GetCurrentProcess());
+        if(!parent)return false;
+        bool matched=false;
+        for(const auto& entry:state.targets) {
+            const auto& origin=entry.origin;
+            if(origin.runId!=retired.owner.runId || origin.epoch!=retired.owner.epoch)continue;
+            if(!entry.psQuarantineProven || origin.persona!=retired.owner.persona || origin.hostInstanceId!=retired.owner.hostInstanceId ||
+                origin.targetId!=retired.owner.targetId || !origin.physicalRoot.empty() ||
+                !duty::detail::sameProcess(origin.parent,*parent) ||
+                std::none_of(state.proven.begin(),state.proven.end(),
+                    [&](const auto& proof){return duty::sameOrigin(proof,origin);}))return false;
+            const auto* record=state.session->record();if(!record)return false;
+            const auto group=std::find_if(record->obligations.begin(),record->obligations.end(),
+                [&](const auto& item){return duty::sameOrigin(item.origin,origin);});
+            if(group!=record->obligations.end()) {
+                if(!group->paths.empty())return false;
+                if(group->acceptedPsPin && retired.target.valid &&
+                    !duty::detail::samePin(*group->acceptedPsPin,duty::AcceptedPsPin{
+                        retired.target.rootInstanceId,retired.target.hidInstanceIds,retired.target.generation}))return false;
+            }
+            matched=true;
+        }
+        return matched; // Empty/disk-only history cannot invent an old proof.
+    }catch(...){return false;}
+}
+
 // Called only after the existing owner proved this exact retired PS target
 // absent and physical return complete. Commit its current target-only duty
 // before clearing that proof; no PnP/driver/mode or admission work is added.
@@ -244,13 +320,23 @@ static bool inputHostTargetReturnAfterPsQuarantineLocked(
     using namespace ymcc::inputHost::targetReturnRuntime;
     try {
         if(!g_inputHostMx.ownedByCurrentThread() || !qualifiedAbsence || !retired.required ||
-            g_inputHostProcess || retired.owner.persona!="dualsense-edge" ||
+            g_inputHostProcess || g_hidHideVisibilityJournal.active || retired.owner.persona!="dualsense-edge" ||
             !retired.owner.epoch || retired.owner.epoch!=g_inputHostEpoch ||
             retired.owner.runId.empty() || retired.owner.runId!=g_inputHostRunId)return false;
         // A previously accepted RECREATE may have proved its predecessor gone
         // while the file commit failed. Finish that existing exact proof before
         // comparing the new target's retirement pin; never relabel pin-A as B.
-        if(!state.proven.empty() && !flushProven("previously-proven-recreate-before-PS-return"))return false;
+        const auto flowParent=inputHostTargetReturnCaptureOwner(GetCurrentProcess());
+        if(!flowParent)return false;
+        std::optional<duty::Origin> flow;
+        for(const auto& entry:state.targets)if(entry.origin.runId==retired.owner.runId &&
+            entry.origin.epoch==retired.owner.epoch && entry.origin.persona==retired.owner.persona &&
+            entry.origin.hostInstanceId==retired.owner.hostInstanceId && entry.origin.targetId==retired.owner.targetId &&
+            entry.origin.physicalRoot.empty() && duty::detail::sameProcess(entry.origin.parent,*flowParent)) {
+            flow=entry.origin;break;
+        }
+        if(flow && !state.proven.empty() && !flushProven("previously-proven-PS-before-commit-retry",
+                retired.owner.runId,retired.owner.epoch,&*flow))return false;
         const auto entries=state.targets;
         for(const auto& entry:entries) {
             const auto& origin=entry.origin;
@@ -272,6 +358,12 @@ static bool inputHostTargetReturnAfterPsQuarantineLocked(
                         note("settlement-deferred","retired-PS-pin-does-not-match-origin",&origin);return false;
                     }
                 }
+                const auto qualified=std::find_if(state.targets.begin(),state.targets.end(),
+                    [&](const auto& item){return duty::sameOrigin(item.origin,origin);});
+                if(qualified==state.targets.end())return false;
+                qualified->psQuarantineProven=true; // Only this qualified PS+physical-return stage may stamp it.
+                if(std::none_of(state.proven.begin(),state.proven.end(),
+                    [&](const auto& proof){return duty::sameOrigin(proof,origin);}))state.proven.push_back(origin);
                 if(!state.session->consumeOrigin(record->revision,origin)) {
                     state.lastError=state.session->error().reason;
                     note("settlement-deferred",state.lastError.c_str(),&origin);return false;
@@ -335,6 +427,25 @@ static void pruneEmptyPhysicals() {
     state.physicals.erase(std::remove_if(state.physicals.begin(),state.physicals.end(),
         [&](const auto& item){return !contains(item.origin);}),state.physicals.end());
 }
+}
+
+// Verify actual current Hosted durable ownership, never just a memory copy.
+static bool inputHostTargetReturnNativeHandoffDurableLocked(const std::string& root,const std::vector<std::wstring>& paths){
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(!g_inputHostMx.ownedByCurrentThread() || !state.session || !state.session->ready() || paths.empty())return false;
+    auto owner=currentOwner();if(!owner)return false;owner->physicalRoot=root;
+    const auto* record=state.session->record();
+    for(const auto& path:paths){
+        bool found=false;
+        for(const auto& group:record->obligations){
+            if(duty::detail::fold(group.origin.physicalRoot)!=duty::detail::fold(root))continue;
+            auto expected=*owner;expected.physicalRoot=group.origin.physicalRoot;
+            if(!sameFlow(group.origin,expected))continue;
+            for(const auto& entry:group.paths)if(duty::detail::fold(entry.instanceId)==duty::detail::fold(W2U(path)))found=true;
+        }
+        if(!found)return false;
+    }
+    return true;
 }
 
 // One reached hide path, before either pipe or CLI dispatch. Its durable origin
@@ -549,11 +660,16 @@ static bool inputHostTargetReturnBeforeNativeHandoffLocked(
 // settlement keeps the caller's journal; known focus borrow never calls this.
 static bool inputHostTargetReturnAfterPhysicalRestoreLocked(
         const HidHideVisibilitySnapshot& after,bool readback,
-        const std::vector<std::wstring>& ownedTargets) {
+        const std::vector<std::wstring>& ownedTargets,const std::function<bool()>& returnCurrent) {
     using namespace ymcc::inputHost::targetReturnRuntime;
     try {
-        if(!g_inputHostMx.ownedByCurrentThread())return false;
-        if(!state.session||!state.session->ready()||state.physicals.empty())return true;
+        if(!g_inputHostMx.ownedByCurrentThread() || (returnCurrent && !returnCurrent()))return false;
+        // The optional consumer is the original journal owner only. Its real
+        // committed paths can be retired locally even when its scope revokes
+        // during IO; imported/history-only records gain no such authority.
+        if(returnCurrent && &ownedTargets!=&g_hidHideVisibilityJournal.hiddenByUs)return false;
+        if(!state.session||!state.session->ready()||state.physicals.empty())
+            return !returnCurrent || returnCurrent();
         if(!physicalWritersQuiescent()) {
             note("physical-settlement-deferred","old-physical-writer-not-yet-quiescent");return false;
         }
@@ -572,15 +688,255 @@ static bool inputHostTargetReturnAfterPhysicalRestoreLocked(
                 if(!readback||!after.valid||hidHideContainsPath(after.hidden,path.instanceId)) {
                     note("physical-settlement-deferred","owned-path-still-hidden-or-readback-unknown",&item.origin,path.instanceId);return false;
                 }
+                // Prepare a nonallocating local retirement BEFORE the real CAS.
+                // An interrupted successor never consumes this path twice.
+                const auto committedPath=returnCurrent?U2W(path.instanceId):std::wstring{};
+                if(returnCurrent && !returnCurrent())return false;
                 if(!state.session->consumePath(state.session->record()->revision,item.origin,path.instanceId)) {
                     state.lastError=state.session->error().reason;
                     note("physical-settlement-deferred",state.lastError.c_str(),&item.origin,path.instanceId);return false;
                 }
+                if(returnCurrent) {
+                    auto& remaining=g_hidHideVisibilityJournal.hiddenByUs;
+                    remaining.erase(std::remove_if(remaining.begin(),remaining.end(),[&](const auto& known){
+                        // Match the original ASCII fold without allocation
+                        // after a successfully committed file transaction.
+                        return known.size()==committedPath.size() && std::equal(known.begin(),known.end(),committedPath.begin(),
+                            [](wchar_t left,wchar_t right){
+                                if(left>=L'A' && left<=L'Z')left+=L'a'-L'A';
+                                if(right>=L'A' && right<=L'Z')right+=L'a'-L'A';
+                                return left==right;
+                            });
+                    }),remaining.end());
+                }
                 note("physical-path-settled","exact-owned-path-readback-not-hidden",&item.origin,path.instanceId);
+                if(returnCurrent && !returnCurrent())return false;
             }
         }
+        // Guarded returns retain the existing origin through the caller's
+        // last current check and journal clear. All other consumers keep their
+        // original pruning. This metadata is not a new debt or retry budget.
+        if(returnCurrent)return returnCurrent();
         pruneEmptyPhysicals();return true;
     }catch(...){note("physical-settlement-deferred","physical-settlement-exception");return false;}
 }
+static void inputHostTargetReturnPruneCompletedPhysicalsLocked() {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(g_inputHostMx.ownedByCurrentThread() && state.session && state.session->ready())pruneEmptyPhysicals();
+}
 
 #include "virtual_target_return_cold_runtime.h"
+
+// Runtime return is independent of an already-final player switch. It consumes
+// only this Native's published target duties, never imported cold history.
+// The recovery owner separately decides whether a new bounded Start is allowed.
+// Only a published in-memory target owned by this exact retained run/epoch
+// requires the runtime two-stage proof. Imported cold history and legacy pads
+// do not acquire new authority from this read-only predicate.
+static bool inputHostTargetReturnRuntimeKnownTargetLocked(const std::string& runId,std::uint64_t epoch) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(!g_inputHostMx.ownedByCurrentThread() || runId.empty() || !epoch)return false;
+    return std::any_of(state.targets.begin(),state.targets.end(),[&](const auto& item){
+        const auto& origin=item.origin;
+        return origin.runId==runId && origin.epoch==epoch && origin.physicalRoot.empty() &&
+            (origin.persona=="steamdeck" || origin.persona=="elite");
+    });
+}
+static bool inputHostTargetReturnRuntimeSettledLocked(const std::string& runId,std::uint64_t epoch) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(!g_inputHostMx.ownedByCurrentThread() || runId.empty() || !epoch ||
+        !state.session || !state.session->ready())return false;
+    const auto sameRetirement=[&](const duty::Origin& origin){return origin.runId==runId&&origin.epoch==epoch;};
+    const auto* record=state.session->record();if(!record)return false;
+    return std::none_of(record->obligations.begin(),record->obligations.end(),
+            [&](const auto& item){return sameRetirement(item.origin);}) &&
+        std::none_of(state.targets.begin(),state.targets.end(),
+            [&](const auto& item){return sameRetirement(item.origin);}) &&
+        std::none_of(state.proven.begin(),state.proven.end(),sameRetirement);
+}
+
+// Existing quarantine worker only, AFTER physical return and BEFORE tuple Clear.
+// A dead pipe or an empty XInput plane is not SD/HID target-absence proof.
+// One return proof, two ordered stages. BeforePhysicalRestore is read-only:
+// it cannot commit/erase a duty or require already-returned visibility.
+// AfterPhysicalRestore retains the original journal/path-free durable settlement.
+enum class InputHostRuntimeReturnStage { BeforePhysicalRestore, AfterPhysicalRestore };
+static bool inputHostTargetReturnRuntimeQuarantineProofLocked(const std::string& runId,std::uint64_t epoch,InputHostRuntimeReturnStage stage) {
+    const bool physicalReturned=stage==InputHostRuntimeReturnStage::AfterPhysicalRestore;
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    try {
+        if(!g_inputHostMx.ownedByCurrentThread() || runId.empty() || !epoch ||
+            !state.session || !state.session->ready())return false;
+        if(physicalReturned && inputHostTargetReturnRuntimeSettledLocked(runId,epoch))return true;
+        const auto power=currentPowerGeneration();
+        const auto intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+        const auto hostInstance=g_inputHostHostInstanceId;
+        const auto parent=inputHostTargetReturnCaptureOwner(GetCurrentProcess());
+        if(!parent || hostInstance.empty())return false;
+        const auto current=[&](){
+            return g_inputHostMx.ownedByCurrentThread() && g_inputHostRunId==runId && g_inputHostEpoch==epoch &&
+                g_inputHostHostInstanceId==hostInstance && !g_inputHostProcess && !g_inputHostPrimaryThread &&
+                // prepared/hello remain historical until the quarantined tuple
+                // clears; the dead exact Host and PnP census prove retirement.
+                !g_inputHostActive && (!physicalReturned || !g_hidHideVisibilityJournal.active) &&
+                inputHostPipeRetirementProvenLocked() && physicalWritersQuiescent() &&
+                // Writer retirement can synchronously read its durable journal.
+                // The last power/intent observations must follow that IO too.
+                currentPowerGeneration()==power && g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+                !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
+                g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)==intent;
+        };
+        if(!current())return false;
+        // A completed exact lifetime proof survives a failed atomic record
+        // commit. Replay only its durable settlement, before any new OS scan.
+        // The exact old run/epoch remains isolated from unrelated proven duties;
+        // this does not grant a replacement Start or bypass current admission.
+        if(physicalReturned) {
+            if(!flushProven("previously-proven-runtime-before-commit-retry",runId,epoch))return false;
+            if(!current())return false;
+            if(inputHostTargetReturnRuntimeSettledLocked(runId,epoch))return true;
+        }
+        std::vector<duty::Origin> targets;
+        for(const auto& entry:state.targets) {
+            const auto& origin=entry.origin;
+            if(origin.runId!=runId || origin.epoch!=epoch)continue;
+            if(!duty::detail::sameProcess(origin.parent,*parent) || origin.hostInstanceId!=hostInstance ||
+                origin.targetId!=kInputHostTargetId || !origin.physicalRoot.empty() ||
+                (origin.persona!="steamdeck" && origin.persona!="elite"))return false;
+            const auto* record=state.session->record();if(!record)return false;
+            const auto group=std::find_if(record->obligations.begin(),record->obligations.end(),
+                [&](const auto& item){return duty::sameOrigin(item.origin,origin);});
+            if(group!=record->obligations.end() && ((physicalReturned && !group->paths.empty()) || group->acceptedPsPin))return false;
+            if(inputHostTargetReturnProbePhysicalWriter(origin.host).state!=duty::process::State::Dead)return false;
+            targets.push_back(origin);
+        }
+        if(targets.empty()) {
+            if(physicalReturned)return false;
+            // Target return and owned physical return are distinct duties. A
+            // completed/never-created target needs no new whole-device census.
+            const auto* record=state.session->record();if(!record)return false;
+            const auto pending=[&](const auto& origin){return origin.runId==runId && origin.epoch==epoch && origin.physicalRoot.empty();};
+            if(std::any_of(record->obligations.begin(),record->obligations.end(),[&](const auto& item){return pending(item.origin);}) ||
+               std::any_of(state.proven.begin(),state.proven.end(),pending))return false;
+            return current(); // Disk-only target debt never grants authority.
+        }
+        if(!physicalReturned && std::all_of(targets.begin(),targets.end(),[&](const auto& origin){
+                return std::any_of(state.proven.begin(),state.proven.end(),[&](const auto& known){return duty::sameOrigin(known,origin);});
+            }))return current(); // Retained exact proof survives a denied commit; do not rescan it.
+        // Include every supported virtual family even though these SD/Xbox
+        // origins have no PS pin. Unknown, partial or present is never absent.
+        const auto absence=inputHostTargetReturnColdAbsence({});
+        if(!absence.absent() || !current()) {
+            note(physicalReturned?"runtime-target-return-deferred":"runtime-target-pre-restore-deferred",ymcc::targetReturn::pnpAbsence::reasonName(absence.reason));
+            return false;
+        }
+        if(!physicalReturned)return current(); // The preflight never mutates or settles a responsibility.
+        for(const auto& origin:targets) {
+            if(!current())return false;
+            const auto* record=state.session->record();if(!record)return false;
+            const auto group=std::find_if(record->obligations.begin(),record->obligations.end(),
+                [&](const auto& item){return duty::sameOrigin(item.origin,origin);});
+            if(group!=record->obligations.end()) {
+                if(!group->paths.empty() || group->acceptedPsPin)return false;
+                // The old Host is dead and its target absence has been proved.
+                // Retain this exact proof if file IO fails; no new Start follows.
+                if(std::none_of(state.proven.begin(),state.proven.end(),
+                    [&](const auto& old){return duty::sameOrigin(old,origin);}))state.proven.push_back(origin);
+                if(!state.session->consumeOrigin(record->revision,origin)) {
+                    state.lastError=state.session->error().reason;
+                    note("runtime-target-return-deferred",state.lastError.c_str(),&origin);return false;
+                }
+                note("target-settled","exact-runtime-Host-exit-and-complete-target-absence",&origin);
+            }
+            state.targets.erase(std::remove_if(state.targets.begin(),state.targets.end(),
+                [&](const auto& item){return duty::sameOrigin(item.origin,origin);}),state.targets.end());
+            state.proven.erase(std::remove_if(state.proven.begin(),state.proven.end(),
+                [&](const auto& item){return duty::sameOrigin(item,origin);}),state.proven.end());
+            // A committed old return remains durable if OFF/power changes in IO,
+            // but that late completion cannot authorize clearing a newer owner.
+            if(!current())return false;
+        }
+        return inputHostTargetReturnRuntimeSettledLocked(runId,epoch);
+    }catch(...){note("runtime-target-return-deferred","runtime-target-return-exception");return false;}
+}
+
+static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string& runId,std::uint64_t epoch) {
+    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::BeforePhysicalRestore);
+}
+static bool inputHostTargetReturnAfterRuntimeQuarantineLocked(const std::string& runId,std::uint64_t epoch) {
+    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::AfterPhysicalRestore);
+}
+
+// OFF return continuation only. This is a queue eligibility check, NOT endpoint
+// absence and NOT authority to clear quarantine. It reads the existing owner
+// journal/session only; the BUS must not enumerate PnP or query a process here.
+static bool inputHostTargetReturnSdRestorePendingLocked() {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(!g_inputHostMx.ownedByCurrentThread() || !g_inputHostReleaseQuarantined ||
+       g_inputHostProcess || g_inputHostPrimaryThread || g_inputHostActive ||
+       inputHostBoundPersonaValue()!="steamdeck" || g_inputHostRunId.empty() || !g_inputHostEpoch ||
+       g_inputHostHostInstanceId.empty() || !g_hidHideVisibilityJournal.active ||
+       g_psEndpointOwnership.retirementRequired() || g_msiSteamDeckReleaseFence.required() ||
+       g_msiSteamDeckReleaseDebt.required() ||
+       g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) ||
+       !state.session || !state.session->ready())return false;
+    const auto* record=state.session->record();if(!record)return false;
+    const auto& journal=g_hidHideVisibilityJournal;
+    return std::any_of(state.physicals.begin(),state.physicals.end(),[&](const auto& item){
+        const auto& origin=item.origin;
+        if(item.journalId!=journal.transactionId || origin.runId!=g_inputHostRunId ||
+           origin.epoch!=g_inputHostEpoch || origin.hostInstanceId!=g_inputHostHostInstanceId ||
+           origin.parent.pid!=GetCurrentProcessId() || origin.targetId!=kInputHostTargetId ||
+           origin.persona!="steamdeck" || origin.physicalRoot.empty())return false;
+        const auto group=std::find_if(record->obligations.begin(),record->obligations.end(),[&](const auto& item){
+            return duty::sameOrigin(item.origin,origin);
+        });
+        // All paths may have committed before a notification revoked final
+        // cleanup. Only this retained LOCAL origin plus its original active
+        // journal can continue; no imported record or empty tuple is adopted.
+        return group==record->obligations.end() ||
+            std::any_of(group->paths.begin(),group->paths.end(),[&](const auto& path){
+                return hidHideContainsPath(journal.hiddenByUs,path.instanceId);
+            });
+    });
+}
+
+// Existing lifecycle owner only. Source-mask loss is not a PnP proof. Reuse the
+// real complete supported-target census, the exact retained local writer, pipe
+// retirement and Native shared power; UNKNOWN/present always retain the duty.
+static bool inputHostTargetReturnSdRestoreAbsenceLocked(
+        const ymcc::sleeppower::SharedPowerV1& power) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    try {
+        if(!inputHostTargetReturnSdRestorePendingLocked() ||
+           !sharedPowerLifecycleCurrent(power) || g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire))return false;
+        const auto run=g_inputHostRunId,instance=g_inputHostHostInstanceId;
+        const auto epoch=g_inputHostEpoch,intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+        const auto journalId=g_hidHideVisibilityJournal.transactionId;
+        const auto parent=inputHostTargetReturnCaptureOwner(GetCurrentProcess());if(!parent)return false;
+        bool exactPhysicalWriter=false;
+        for(const auto& item:state.physicals) {
+            const auto& origin=item.origin;
+            if(item.journalId!=journalId || origin.runId!=run || origin.epoch!=epoch ||
+               origin.hostInstanceId!=instance || origin.persona!="steamdeck")continue;
+            if(!duty::detail::sameProcess(origin.parent,*parent) ||
+               !physicalOriginWriterSettled(origin))return false;
+            exactPhysicalWriter=true;
+        }
+        const auto current=[&](){
+            return inputHostTargetReturnSdRestorePendingLocked() && g_inputHostRunId==run &&
+                g_inputHostEpoch==epoch && g_inputHostHostInstanceId==instance &&
+                g_hidHideVisibilityJournal.transactionId==journalId &&
+                g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)==intent &&
+                !g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) &&
+                inputHostPipeRetirementProvenLocked() && physicalWritersQuiescent() &&
+                sharedPowerLifecycleCurrent(power);
+        };
+        if(!exactPhysicalWriter || !current() ||
+           !inputHostTargetReturnBeforeRuntimeRestoreLocked(run,epoch) || !current())return false;
+        // BeforeRuntimeRestore may succeed after an already-settled target. That
+        // shortcut alone is not an absence observation, so keep this real census.
+        const auto absence=inputHostTargetReturnColdAbsence({});
+        return absence.absent() && current();
+    }catch(...){return false;}
+}

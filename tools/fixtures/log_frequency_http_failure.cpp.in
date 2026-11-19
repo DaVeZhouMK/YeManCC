@@ -1,0 +1,45 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <stdexcept>
+#include "json.hpp"
+#include "log_snapshot_state.h"
+using json=nlohmann::json;
+using ULONGLONG=unsigned long long;
+static json recorded;static unsigned appended=0,clockReads=0;static ULONGLONG now=300;
+static ULONGLONG GetTickCount64(){++clockReads;return now;}
+static void appendNativeLifecycleLog(const char* event,const json& detail){if(std::string(event)!="http-request-failed")throw std::runtime_error("foreign log");++appended;recorded=detail;}
+static void produce(const json& error,bool expired=false){json resp={{"error",error}},args={{"timeoutMs",5000},{"_nativeHttpDeadlineTick",expired?100ULL:1000ULL}};const ULONGLONG tq=100,ts=150;@@PRODUCER@@}
+int main(){unsigned checks=0;std::vector<std::string> names;std::string failure;
+ const auto check=[&](const char* name,bool ok){++checks;names.push_back(name);if(!ok)throw std::runtime_error(name);};
+ const auto detail=[](const json& text){return ymcc::logging::httpFailureLogDetail(text);};
+ try{
+  produce("POWER_RESUMING: Fan request power context retired before send");
+  check("actual HTTP failure row carries its original error category",recorded.contains("httpFailure")&&recorded["httpFailure"]["kind"]=="power-admission-refused"&&recorded["httpFailure"]["phase"]=="before-send");
+  check("original timing fields and clock count are preserved",recorded["queueWaitMs"]==50&&recorded["executionMs"]==150&&recorded["timeoutMs"]==5000&&recorded["deadlineExpired"]==false&&clockReads==2&&appended==1);
+  check("stage text does not invent an error code",recorded["httpFailure"]["codeKnown"]==false&&recorded["httpFailure"]["code"].is_null()&&recorded["httpFailure"]["codeDomain"].is_null());
+  for(const auto phase:{"queue","send","headers","body"}){
+   auto v=detail(std::string("HTTP request deadline exceeded (phase=")+phase+")");
+   check("exact deadline phase remains separate from numeric code",v["kind"]=="deadline-exceeded"&&v["phase"]==phase&&!v["codeKnown"].get<bool>());
+  }
+  for(const auto phase:{"send","headers","body"})for(const auto code:{0UL,5UL,12029UL,0xffffffffUL}){
+   auto v=detail(std::string("HTTP request failed (WinHTTP ")+std::to_string(code)+", phase="+phase+")");
+   check("canonical reported WinHTTP code and phase are retained",v["kind"]=="winhttp-failed"&&v["phase"]==phase&&v["codeKnown"]==true&&v["code"]==code&&v["codeDomain"]=="winhttp-error-from-reported-text");
+  }
+  for(const auto text:{"HTTP request failed (WinHTTP -1, phase=send)","HTTP request failed (WinHTTP 4294967296, phase=send)","HTTP request failed (WinHTTP 05, phase=send)","HTTP request failed (WinHTTP true, phase=send)","HTTP request failed (WinHTTP 5, phase=queue)","HTTP request failed (WinHTTP 5, phase=unknown)","HTTP request failed (WinHTTP 5, phase=send)secret","HTTP request deadline exceeded (phase=unknown)","HTTP request deadline exceeded (phase=send)secret","WinHttpOpen failed https://secret.invalid","HTTP request failed (WinHTTP , phase=send)"}){
+   auto v=detail(text);check("unknown or malformed text cannot acquire known code",v["kind"]=="unknown"&&v["codeKnown"]==false&&v["code"].is_null()&&v["phase"].is_null());
+  }
+  for(const auto input:{json(nullptr),json(false),json(5),json::object(),json::array()}){
+   auto v=detail(input);check("nonstring error remains unknown",v["kind"]=="unknown"&&v["code"].is_null());
+  }
+  const auto huge=std::string(100000,'s')+"https://credential.invalid/token";auto v=detail(huge);
+  check("oversize and private text are never copied into metadata",v["kind"]=="unknown"&&v.dump().size()<300&&v.dump().find("credential")==std::string::npos);
+  const std::vector<std::string> fixed={"url is required","Invalid URL","Only http and https URLs are supported","Invalid HTTP method","Invalid HTTP header","WinHttpOpen failed","WinHttpConnect failed","WinHttpOpenRequest failed","WinHTTP callback registration failed","WinHTTP request context failed","Fan request headers rejected","HTTP response exceeded 8 MiB limit","HTTP request cancelled during shutdown","POWER_RESUMING: Fan request power context retired before transport","FAN_PUBLIC_POWER_UNAVAILABLE: original Fan operation has no current write grant","AI_FAN_OWNED_MOCK_REQUIRED","native error: http.request"};
+  for(const auto& text:fixed){auto r=detail(text);check("original fixed messages retain finite classification",r["kind"]!="unknown"&&r["code"].is_null());}
+  const auto prior=appended;produce("HTTP request cancelled during shutdown",true);produce("HTTP request cancelled during shutdown",true);
+  check("separate failed requests keep every original receipt",appended==prior+2&&recorded["deadlineExpired"]==true&&recorded["httpFailure"]["kind"]=="cancelled");
+  check("classification never copies raw error or endpoint",recorded.dump().find("shutdown")==std::string::npos&&recorded["httpFailure"]["scope"]=="exact-existing-error-string;not-independent-api-observation");
+ }catch(const std::exception& e){failure=e.what();}
+ std::cout<<json{{"passed",failure.empty()},{"checks",checks},{"caseNames",names},{"failure",failure},{"networkIo",false},{"defaultSuiteExecuted",false},{"boundary","source-exact original HTTP log initializer and pure classifier;clock and log sink are memory ports;not transport/IPC/resource proof"}}.dump()<<"\n";
+ return failure.empty()?0:1;
+}

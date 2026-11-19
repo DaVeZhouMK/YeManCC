@@ -26,6 +26,16 @@ inline const WriterIdentity& writerIdentity() noexcept {
     }();
     return identity;
 }
+// Serialized once from the same cached process identity. Suppressed Native
+// records do not enter this accessor. Unknown birth stays null, with no retry
+// of the original GetProcessTimes observation.
+inline const Json& writerCreation100nsJson() {
+    static const Json value=[] {
+        const auto birth=writerIdentity().creation100ns;
+        return birth?Json(std::to_string(birth)):Json(nullptr);
+    }();
+    return value;
+}
 inline std::string isoTime(const SYSTEMTIME& time,const std::string& suffix) {
     char text[40]{};
     std::snprintf(text,sizeof(text),"%04u-%02u-%02uT%02u:%02u:%02u.%03u",

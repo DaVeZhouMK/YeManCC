@@ -1,4 +1,4 @@
-import {originalReadyConsumer} from './owned-run.mjs';
+import {originalReadyConsumer,originalCommittedReadyConsumer} from './owned-run.mjs';
 import {simulationCorePath,selectedNativeTools} from '../release-host-environment.mjs';
 // Independent sidecar; no parent registration or source changes are performed.
 import fs from 'node:fs';
@@ -23,8 +23,8 @@ export function originalAssertions(text) {
  const main=text.indexOf('int main()');assert(main>=0,'LEGACY_MAIN_CHANGED');
  const rows=[...text.slice(main).matchAll(/check\(([\s\S]*?),\s*"([^"\r\n]+)"\s*\);/g)].map((m,i)=>({
   ordinal:i+1,label:m[2],legacyCall:m[0],legacyLine:text.slice(0,main+m.index).split('\n').length,
-  group:i<8?'environment':i<27?'no-launch':i<33?'cancellation':'handoff'}));
- assert.equal(rows.length,38,'ORIGINAL_ASSERTION_MEMBERSHIP_CHANGED');return rows;
+  group:i<8?'environment':i<27?'no-launch':i<33?'cancellation':i<38?'handoff':'deferred-cleanup'}));
+ assert.equal(rows.length,41,'ORIGINAL_ASSERTION_MEMBERSHIP_CHANGED');return rows;
 }
 function zero(s) {
  return s?.fullyDestroyed===true&&s.handles===0&&s.pendingIo===0&&s.activeCalls===0&&s.jobActiveProcesses===0&&s.childExited===true&&
@@ -50,7 +50,7 @@ export function validateRuntimeResult(raw,expected) {
  assert.deepEqual(raw.ownedContextExits.map(r=>r.scenario),['typed-cancellation','typed-handoff'],'CONTEXT_WITNESSES_REQUIRED');
  assert(raw.ownedContextExits.every(r=>r.exitedAfterOriginalContextDestructor===true),'OWNED_CONTEXT_STILL_ALIVE');
  assert(raw.scenarios.every(r=>r.passed!==false&&!r.error),'UNEXPECTED_SCENARIO_ERROR');
- const ids=['current.no-launch-environment-and-state','current.resource-and-real-owned-binding-cancellation','current.real-owned-generation-token-handoff'];
+ const ids=['current.no-launch-environment-and-state','current.resource-and-real-owned-binding-cancellation','current.real-owned-generation-token-handoff','current.original-deferred-cleanup-wait-and-off'];
  assert.deepEqual(raw.scenarios.map(r=>r.id),ids,'SCENARIO_ERRORS_OR_MISSING');
  const cancellation=raw.scenarios[1].measurements,handoff=raw.scenarios[2].measurements;
  assert(cancellation.resourcePreparation.offMs<1000&&cancellation.typedOffMs<1000,'ORIGINAL_OFF_DEADLINE');
@@ -69,7 +69,7 @@ export function validateRuntimeResult(raw,expected) {
  }
  assert.deepEqual(raw.negativeControls.map(r=>r.id),['negative.original-enable-cancel-epoch-fences','negative.original-refresh-stop-off-epoch-sequence','negative.original-reject-wrong-id','negative.original-reject-wrong-generation']);
  for(const n of raw.negativeControls){assert.equal(n.passed,true,'NEGATIVE_FAILED:'+n.id);assert(zero(n.atExit??n),'NEGATIVE_RESOURCE_RESIDUE');if(n.id.includes('-reject-'))assert(n.reason&& !n.reason.includes('b'.repeat(64)),'NEGATIVE_REASON_REQUIRED');}
- return {originalAssertions:38,passedAssertions:38,negativeControls:4,orderedMapping:true,currentTypedRuntimeSemantics:true,legacyCallbackAbiExecuted:false,fullPersistentAcceptance:false};
+ return {originalAssertions:41,passedAssertions:41,negativeControls:4,orderedMapping:true,currentTypedRuntimeSemantics:true,legacyCallbackAbiExecuted:false,fullPersistentAcceptance:false};
 }
 export async function execute(argv) {
  const get=name=>{const i=argv.indexOf(name);return i<0?null:argv[i+1];};
@@ -120,7 +120,13 @@ export async function execute(argv) {
    const file=path.join(work,'s/tools/typed-legacy-runtime-'+name+'.inc');fs.writeFileSync(file,text);frozen.set(key(file),pin(file));report.generated.push({...pin(file),origin,originSha256:sources.get(origin).sha256,bytePreserved:true});
   }
   const readyConsumer=originalReadyConsumer(path.join(work,'s'),{write:true});frozen.set(key(readyConsumer.path),readyConsumer);report.generated.push(readyConsumer);
-  write(path.join(out,'GENERATED.json'),report.generated);
+  const committedConsumer=originalCommittedReadyConsumer(path.join(work,'s'),{write:true});frozen.set(key(committedConsumer.path),committedConsumer);report.generated.push(committedConsumer);
+  const deferredBegin=legacy.indexOf('    // The final-cleanup policy borrows'),deferredEnd=legacy.indexOf('    std::cout << "YMCC Decky sidebar native no-launch tests passed:',deferredBegin);
+  assert(deferredBegin>=0&&deferredEnd>deferredBegin,'ORIGINAL_DEFERRED_CLEANUP_BOUNDARY');
+  const deferredText=legacy.slice(deferredBegin,deferredEnd);assert.equal((deferredText.match(/\bcheck\(/g)??[]).length,3,'ORIGINAL_DEFERRED_CLEANUP_THREE_ASSERTIONS');
+  const deferredFile=path.join(work,'s/tools/typed-legacy-runtime-deferred-cleanup.inc');fs.writeFileSync(deferredFile,deferredText);
+  const deferred={...pin(deferredFile),origin:legacyRel,originSha256:sources.get(legacyRel).sha256,slice:{begin:deferredBegin,end:deferredEnd},bytePreserved:true};
+  frozen.set(key(deferredFile),deferred);report.generated.push(deferred);write(path.join(out,'GENERATED.json'),report.generated);
   const compiler=selectedNativeTools().native;
   env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));env.PATH=path.dirname(compiler.compiler)+';'+process.env.SystemRoot+'/System32';env.INCLUDE=compiler.include.join(';');env.LIB=compiler.lib.join(';');
   for(const k of ['CL','_CL_','LINK','_LINK_'])env[k]='';

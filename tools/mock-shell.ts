@@ -10,6 +10,10 @@ import * as fs from 'fs';
 type Msg = { id: number; cmd: string; args: any };
 
 const listeners: ((e: { data: any }) => void)[] = [];
+/** Native event envelope for source/lifecycle integration fixtures. */
+export function emitMockIpcEvent(event: string, data: unknown): void {
+  listeners.forEach(listener => listener({ data: { event, data } }));
+}
 const shellCalls: Array<{ program: string; args: string[]; timeoutMs?: number }> = [];
 (globalThis as any).__mockShellCalls = shellCalls;
 const registryWrites: Array<{ root: string; path: string; name: string; value: any }> = [];
@@ -165,11 +169,15 @@ const webview = {
   },
 };
 
+const windowEvents = new Map<string, Set<(event: any) => void>>();
 (globalThis as any).window = {
   chrome: { webview },
-  addEventListener() {},
-  removeEventListener() {},
-  dispatchEvent() { return true; },
+  addEventListener(type: string, listener: (event: any) => void) {
+    if (!windowEvents.has(type)) windowEvents.set(type, new Set());
+    windowEvents.get(type)!.add(listener);
+  },
+  removeEventListener(type: string, listener: (event: any) => void) { windowEvents.get(type)?.delete(listener); },
+  dispatchEvent(event: any) { for (const listener of [...windowEvents.get(event.type) ?? []]) listener(event); return true; },
   setTimeout,
   clearTimeout,
 };

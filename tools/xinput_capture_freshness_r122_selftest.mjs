@@ -11,7 +11,7 @@ const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const workspace=path.resolve(repo,'../../..');
 const opts={out:path.join(workspace,'Build/Validation/VirtualInput-CaptureProof-R122-20261016/xinput-sidecar')};
 for(let i=2;i<process.argv.length;++i){
- if(process.argv[i]==='--help'){console.log('node tools/xinput_capture_freshness_r122_selftest.mjs [--out NEW_EVIDENCE_DIR]');process.exit(0);}
+ if(process.argv[i]==='--prepare-only'){opts.prepareOnly=true;continue;}if(process.argv[i]==='--help'){console.log('node tools/xinput_capture_freshness_r122_selftest.mjs [--out NEW_EVIDENCE_DIR] [--prepare-only]');process.exit(0);}
  assert.equal(process.argv[i],'--out');assert(process.argv[i+1]);opts.out=path.resolve(process.argv[++i]);
 }
 assert(!fs.existsSync(path.join(opts.out,'summary.json')),'Preserve completed evidence; use a new --out.');
@@ -25,6 +25,17 @@ const scriptFile=fileURLToPath(import.meta.url);
 const load=file=>{const bytes=fs.readFileSync(file);return {file,bytes,text:bytes.toString('utf8'),sha256:sha(bytes)};};
 const json=(name,value)=>fs.writeFileSync(path.join(out,name),JSON.stringify(value,null,2)+'\n');
 const source=load(sourceFile),fixture=load(fixtureFile),extractor=load(extractorFile),script=load(scriptFile);
+
+const sharedPowerHeader=load(path.join(repo,'native/input_host_shared_power.h'));
+function pureSharedInputFunction(name,bindings){
+ // Extraction-only keyword projection has equal width. Restore exact inline
+ // bytes and hash before compiling; no product body or ABI is substituted.
+ const projected=sharedPowerHeader.text.replace(/^inline /gm,'static ');
+ const code=extract(projected,'function',name,sharedPowerHeader.file,bindings).replace(/^static /,'inline ');
+ const row=bindings.at(-1);row.kind='exact-inline-function';row.sha256=sha(code);
+ return code;
+}
+
 function bind(s){
  const text=s.text,bindings=[];
  const readStart=text.indexOf('static void gamepadReadStateUnlocked(bool publishUi) {');assert(readStart>=0);
@@ -49,10 +60,20 @@ function bind(s){
   const m=matches[0],a=m.index,b=a+m[0].length;
   bindings.push({file:s.file,kind:'constant',symbol:name,startLine:text.slice(0,a).split('\n').length,endLine:text.slice(0,b).split('\n').length,sha256:sha(m[0]),startUtf8Byte:Buffer.byteLength(text.slice(0,a)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,b))});return m[0];
  };
+ const globalDefinition=name=>{
+  const matches=[...text.matchAll(new RegExp('^static[^\\r\\n;]*\\b'+name+'\\s*;','gm'))];assert.equal(matches.length,1,name);
+  const m=matches[0],a=m.index,b=a+m[0].length;bindings.push({file:s.file,kind:'global-declaration',symbol:name,startLine:text.slice(0,a).split('\n').length,endLine:text.slice(0,b).split('\n').length,sha256:sha(m[0]),startUtf8Byte:Buffer.byteLength(text.slice(0,a)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,b))});return m[0];
+ };
+ const physicalReaderFile=path.join(repo,'native/physical_source_reader_bridge.h');
+ const physicalReader=load(physicalReaderFile);
+ const physicalSample='namespace ymcc::physicalreader {\n'+extract(physicalReader.text,'struct','Sample',physicalReaderFile,bindings)+'\n}';
+ const sharedInputPure='#pragma once\n#include \"sleep_power_observation.h\"\nnamespace ymcc::inputHost::sharedPower {\n'+['inputAdmitted','capture'].map(name=>pureSharedInputFunction(name,bindings)).join('\n')+'\n}\n';
  const parts={
+  READ_OWNERS:globalDefinition('g_axisCalibrationXinputKeys'),
+  PHYSICAL_READER_SAMPLE:physicalSample,
   TYPES:[definition('enum','PowerLifecycle'),definition('enum','XInputSlotIdentity'),definition('struct','InputCaptureGamepadSnapshot'),...(/^struct MsiCanonicalReadProof\s*\{/m.test(text)?[definition('struct','MsiCanonicalReadProof')]:[])].join('\n'),
   CONSTANTS:['kXInputSlotReprobeBackoffMs','kXInputSlotDiscoveryIntervalMs','kXInputPermissiveAnyConnectedInput','kInputStickCenterDeadzone'].map(constant).join('\n'),
-  METHODS:['currentPowerGeneration','sgVirtualWriterAllowedNow','xinputNonVirtualConnectedMask','xinputPhysicalConnectedMask','xinputSlotIdentityVerdict','xinputSlotsMarkDiscoveryDirty','hidHideUpper','hidHideIsVirtualIdentity','xinputFeedbackIdentityProbe','inputCanonicalizeStickAxis','inputCanonicalizeGamepad','msiControllerNeutralCleanupAllowed','inputHostPhysicalPublicationSourceAdmitted','inputHostFrameSubmissionSample','inputHostFrameSubmissionCurrent',...(/^static void msiDinputApplyCanonicalReadProof/m.test(text)?['msiDinputApplyCanonicalReadProof']:[])].map(name=>definition('function',name)).join('\n\n'),
+  METHODS:['ascii_lower','inputCaptureBindStandardInput','currentPowerGeneration','sgVirtualWriterAllowedNow','xinputNonVirtualConnectedMask','xinputPhysicalConnectedMask','xinputSlotIdentityVerdict','xinputSlotsMarkDiscoveryDirty','hidHideUpper','hidHideIsVirtualIdentity','xinputFeedbackIdentityProbe','inputCanonicalizeStickAxis','inputCanonicalizeGamepad','msiControllerNeutralCleanupAllowed','inputHostPhysicalPublicationSourceAdmitted','inputHostFrameSubmissionSample','inputHostFrameSubmissionCurrent',...(/^static void msiDinputApplyCanonicalReadProof/m.test(text)?['msiDinputApplyCanonicalReadProof']:[])].map(name=>definition('function',name)).join('\n\n'),
   READ_PREFIX:fragment('XInput read-start + clear + four-slot GetState loop + discovery bookkeeping','    GpReadScope gpReadCost;','    // L3（需求单）'),
   ADMISSION:fragment('XInput physical source admission','    const DWORD physicalMask = xinputPhysicalConnectedMask();','    // R10-R2 M3'),
   SELECTION:fragment('XInput single-source canonical selection','    bool multipleActive = false;','    // GP-MSIG3E-3（Layer B）'),
@@ -61,13 +82,14 @@ function bind(s){
  assert(parts.READ_PREFIX.includes('g_xinputPads.fill(XINPUT_GAMEPAD{});'));
  assert(!parts.READ_PREFIX.includes('msiDinputCanonicalSnapshot'));
  assert(!parts.SELECTION.includes('msiDinputCanonicalSnapshot'));
- return {parts,bindings};
+ return {parts,bindings,sharedInputPure};
 }
 const extracted=bind(source);
-const dependencyNames=[...controllerInputFixtureInputs,'native/gamepad_backend_cost.h','native/xinput_identity_refresh_policy.h','native/input_frame_submission.h','native/touch_haptic_dispatch.h','native/virtual_output_status.h','deps/json/json.hpp'];
+const dependencyNames=[...controllerInputFixtureInputs,'native/sleep_power_state.h','native/sleep_power_observation.h','native/input_host_shared_power.h','native/gamepad_backend_cost.h','native/xinput_identity_refresh_policy.h','native/input_frame_submission.h','native/physical_source_reader_bridge.h','native/touch_haptic_dispatch.h','native/virtual_output_status.h','deps/json/json.hpp'];
 const dependencies=dependencyNames.map(name=>load(path.join(repo,name)));
 const inc=path.join(out,'include');fs.mkdirSync(inc);
 for(const d of dependencies)fs.writeFileSync(path.join(inc,path.basename(d.file)),d.bytes);
+fs.writeFileSync(path.join(inc,'input_host_shared_power_pure.h'),extracted.sharedInputPure);
 const controllerFixture=snapshotControllerInputFixture(repo,path.join(out,'controller-input'));
 let code=controllerFixture.preamble+fixture.text;
 for(const [name,part]of Object.entries(extracted.parts)){
@@ -82,7 +104,7 @@ const sourceBinding={
  dependencies:dependencies.map(({file,sha256})=>({file,sha256})),sourceSubstitutions:[],fullReadStateExtracted:false,
  exactness:'Complete named helper definitions use the existing R120 extractor. Four contiguous ReadState blocks use unique exact anchors; original bytes and statements are inserted unchanged. No handwritten replacement sampling, freshness, lifecycle or ticket algorithm.',
  exclusions:['MSI canonical/fallback/permit/cache','ReadState physical-drop/reconfirmation and other OEM fallbacks','snapshot mutex/continuity/diagnostic/UI/consumer paths','real Win32 XInput and device-internal freshness','Host transport/device/Steam/services/system sleep and field logs'],
- standins:['Fake GetState returns include deliberately unchanged packet and failure with stale output bytes. No Windows/XInput import is linked.','Fake clock and external lifecycle/power/topology/identity/Host-ready facts. Actual sgVirtualWriterAllowedNow, frame Current/Sample and production header decide/source execute.','Standby policy decision input is stubbed, not the actual machine-family/platform detector.','Log sink inert. Actual identity observe/disconnect runs; feedback scheduler is a throwing guard.','Feedback source-stamping callback is inert; actual SourceToken layout is included, no physical feedback writer is admitted.','Capture/virtual requested and persona-match facts are explicit shim inputs.','Single thread, no production lock. Static read-sequence storage in shim; actual assignment and stable predicate unchanged.','tickCostEnabled=false throughout; backend spans cannot record elapsed time. No benchmark.'],
+ standins:['Fake GetState returns include deliberately unchanged packet and failure with stale output bytes. No Windows/XInput import is linked.','Fake clock and external lifecycle/power/topology/identity/Host-ready facts. Actual sgVirtualWriterAllowedNow, frame Current/Sample and production header decide/source execute.','Standby policy decision input is stubbed, not the actual machine-family/platform detector.','Log sink inert. Actual identity observe/disconnect runs; feedback scheduler is a throwing guard.','Feedback source-stamping callback is inert; actual SourceToken layout is included, no physical feedback writer is admitted.','Capture/virtual requested and persona-match facts are explicit shim inputs. Physical-reader/ROG-raw ports are explicitly inactive; the actual Sample layout and unchanged stamp assignments execute. No physical-reader runtime is tested.','Public reader has controlled Native phase/generation/flags; exact pure input-use capture/admission executes, not Scope/events/registry or the real publisher.','Single thread, no production lock. Static read-sequence storage in shim; actual assignment and stable predicate unchanged.','tickCostEnabled=false throughout; backend spans cannot record elapsed time. No benchmark.'],
  driftPolicy:'Compare named slices and dependencies at end; unrelated main.cpp full-file drift is recorded without claiming whole-file acceptance.'
 };
 json('source-binding.json',sourceBinding);
@@ -90,14 +112,16 @@ const vcvars=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual
 assert(fs.existsSync(vcvars),'Set YMCC_VCVARS64 to vcvars64.bat');
 const quote=s=>{assert(!/["\r\n]/.test(s));return '"'+s+'"';};
 const batch=path.join(out,'compile.cmd');
-fs.writeFileSync(batch,calibrationToolchainPreamble(vcvars)+'set VSLANG=1033\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 /WX /O2 '+quote(path.join(out,'fixture.generated.cpp'))+' /I'+quote(inc)+' /Fo'+quote(path.join(out,'fixture.obj'))+' /Fe'+quote(path.join(out,'fixture.exe'))+'\r\nexit /b %errorlevel%\r\n');
+fs.writeFileSync(batch,calibrationToolchainPreamble(vcvars)+'set VSLANG=1033\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 /WX /O2 /sourceDependencies '+quote(path.join(out,'compile-dependencies.json'))+' '+quote(path.join(out,'fixture.generated.cpp'))+' /I'+quote(inc)+' /Fo'+quote(path.join(out,'fixture.obj'))+' /Fe'+quote(path.join(out,'fixture.exe'))+'\r\nexit /b %errorlevel%\r\n');
 function command(label,exe,args,expected){
  const r=spawnSync(exe,args,{cwd:out,encoding:'utf8',timeout:60000});
  fs.writeFileSync(path.join(out,label+'.stdout.log'),r.stdout??'');fs.writeFileSync(path.join(out,label+'.stderr.log'),r.stderr??'');
  json(label+'.command.json',{exe,args,cwd:out,expected,status:r.status,error:r.error?String(r.error):null});
  assert(!r.error&&r.status===expected,label+' failed; see '+out);return r.stdout;
 }
+if(opts.prepareOnly){json('prepared-only.json',{passed:false,status:'PREPARED_ONLY',sourceBinding,generated:path.join(out,'fixture.generated.cpp')});console.log(JSON.stringify({passed:false,status:'PREPARED_ONLY',out}));process.exit(0);}
 command('build','cmd.exe',['/d','/c',batch],0);
+const dependencyGraph=JSON.parse(fs.readFileSync(path.join(out,'compile-dependencies.json'),'utf8').replace(/^\uFEFF/,''));json('actual-compile-inputs.json',[dependencyGraph.Data.Source,...dependencyGraph.Data.Includes].map(file=>{const bytes=fs.readFileSync(file);return {file,bytes:bytes.length,sha256:sha(bytes)};}));
 const results=JSON.parse(command('execute',path.join(out,'fixture.exe'),[],0));
 assert.equal(results.caseCount,24);assert.equal(results.failedCases,0);assert(results.checks>=85);
 json('results.json',results);

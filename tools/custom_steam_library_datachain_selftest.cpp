@@ -1,3 +1,9 @@
+#if defined(YMCC_LIBRARY_TYPED_SHUTDOWN) && !defined(YMCC_LIBRARY_HOST_CHAIN)
+#define YMCC_LIBRARY_HOST_CHAIN 1
+#endif
+#if defined(YMCC_LIBRARY_HOST_CHAIN) && !defined(YMCC_LIBRARY_FACTS_IPC)
+#define YMCC_LIBRARY_FACTS_IPC 1
+#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -51,10 +57,18 @@ inline std::vector<fs::path> dataRootFixtureLegacyRoots(const fs::path& lab) {
 }
 #define legacyDataRoots dataRootFixtureLegacyRoots
 
+#ifdef YMCC_LIBRARY_FACTS_IPC
+#include "steam_client_action_channel_fixtures/native_resource_observation.inc"
+#endif
 // These ports are active only for this original consumer's exact identity mode.
 #include <winhttp.h>
 #include <mutex>
 #include <vector>
+#ifdef YMCC_LIBRARY_FACTS_IPC
+static bool factsIpcRealClient=false;
+static DWORD factsIpcOwnedProviderPid=0;
+static unsigned factsIpcAllowedProcessReads=0;
+#endif
 static bool identityCallerActive=false;
 static unsigned identityCallerNetwork=0,identityCallerProcesses=0;
 static std::function<void(const std::wstring&)> identityCallerReadHook;
@@ -64,9 +78,28 @@ static std::wstring identityCallerPath(std::wstring path){if(path.starts_with(L"
 static BOOL WINAPI identityCallerRead(HANDLE handle,LPVOID data,DWORD count,LPDWORD read,LPOVERLAPPED over){
  const auto ok=ReadFile(handle,data,count,read,over);if(ok&&identityCallerActive){wchar_t path[32768]{};const auto n=GetFinalPathNameByHandleW(handle,path,32768,FILE_NAME_NORMALIZED);if(n&&n<32768){const auto file=identityCallerPath(path);{std::lock_guard<std::mutex> guard(identityCallerReadMx);identityCallerReads.push_back(file);}if(identityCallerReadHook)identityCallerReadHook(file);}}return ok;
 }
-static HANDLE WINAPI identityCallerOpenProcess(DWORD access,BOOL inherit,DWORD pid){if(identityCallerActive){++identityCallerProcesses;SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return OpenProcess(access,inherit,pid);}
+static HANDLE WINAPI identityCallerOpenProcess(DWORD access,BOOL inherit,DWORD pid){
+#ifdef YMCC_LIBRARY_FACTS_IPC
+    if(identityCallerActive&&factsIpcRealClient&&(pid==GetCurrentProcessId()||pid==factsIpcOwnedProviderPid)){++factsIpcAllowedProcessReads;return nativeObserveOpenProcess(access,inherit,pid);}
+#endif
+    if(identityCallerActive){++identityCallerProcesses;SetLastError(ERROR_ACCESS_DENIED);return nullptr;}
+#ifdef YMCC_LIBRARY_FACTS_IPC
+    return nativeObserveOpenProcess(access,inherit,pid);
+#else
+    return OpenProcess(access,inherit,pid);
+#endif
+}
 static BOOL WINAPI identityCallerCreateProcess(LPCWSTR a,LPWSTR b,LPSECURITY_ATTRIBUTES c,LPSECURITY_ATTRIBUTES d,BOOL e,DWORD f,LPVOID g,LPCWSTR h,LPSTARTUPINFOW i,LPPROCESS_INFORMATION j){if(identityCallerActive){++identityCallerProcesses;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}return CreateProcessW(a,b,c,d,e,f,g,h,i,j);}
 static HINTERNET WINAPI identityCallerHttp(LPCWSTR agent,DWORD type,LPCWSTR proxy,LPCWSTR bypass,DWORD flags){if(identityCallerActive){++identityCallerNetwork;SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return WinHttpOpen(agent,type,proxy,bypass,flags);}
+static std::function<void(const std::wstring&)> identityCallerCloseHook;
+static BOOL WINAPI identityCallerClose(HANDLE handle){std::wstring file;if(identityCallerActive&&identityCallerCloseHook){wchar_t path[32768]{};const auto n=GetFinalPathNameByHandleW(handle,path,32768,FILE_NAME_NORMALIZED);if(n&&n<32768)file=identityCallerPath(path);}const auto ok=
+#ifdef YMCC_LIBRARY_FACTS_IPC
+        nativeObserveClose(handle);
+#else
+        CloseHandle(handle);
+#endif
+    if(ok&&!file.empty()&&identityCallerCloseHook)identityCallerCloseHook(file);return ok;}
+#define CloseHandle identityCallerClose
 #define ReadFile identityCallerRead
 #define OpenProcess identityCallerOpenProcess
 #define CreateProcessW identityCallerCreateProcess
@@ -310,11 +343,11 @@ struct DiscoveryProducerFixture {
     explicit DiscoveryProducerFixture(const fs::path& p):root(p),data(p/L"data"),lab(p/L"lab"),games(p/L"Games"),trainers(p/L"Trainers"),job(p/L"job"),scan(data/L"state"/L"library-scan.json"),accounts(data/L"state"/L"steam-accounts.json"),steam(p/L"Steam"),exe(p/L"Outside"/L"Game"/L"bin"/L"Game.exe"),previousRoot(custom_steam_library::configuredDataRoot()),previousWorker(g_workerDataRoot),previousSteam(transactionFixtureSteamRoot){
         check(discoveryProducerPorts,"Producer fixture requires inert CLI ports");
         fs::create_directories(games);fs::create_directories(trainers);fs::create_directories(job);fs::create_directories(lab/L"bin");textFile(exe,"owned fake exe, never launched");textFile(steam/L"steam.exe","owned fake Steam marker, never launched");
-        SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());g_workerDataRoot=data;transactionFixtureSteamRoot=steam.wstring();writeJsonAtomic(data/L"data-root.json",dataRootManifest(data));
+        SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());g_workerDataRoot=data;transactionFixtureSteamRoot=steam.wstring();selftestSteamInstallationRoot=transactionFixtureSteamRoot;writeJsonAtomic(data/L"data-root.json",dataRootManifest(data));
         auto config=defaultLibraryConfig();config["roots"]=json::array({toUtf8(games.wstring())});config["trainerRoots"]=json::array({toUtf8(trainers.wstring())});config["manualGameDirectories"]=json::array();config["firstRunDefaultScan"]["status"]="completed";config["userProducerNote"]="keep";writeJsonAtomic(data/L"config"/L"library-config.json",config);
         writeAtomic(steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",BinaryVdfDocument::emptySteamShortcuts().serialize());
     }
-    ~DiscoveryProducerFixture(){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previousRoot.empty()?nullptr:previousRoot.c_str());g_workerDataRoot=previousWorker;transactionFixtureSteamRoot=previousSteam;}
+    ~DiscoveryProducerFixture(){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previousRoot.empty()?nullptr:previousRoot.c_str());g_workerDataRoot=previousWorker;transactionFixtureSteamRoot=previousSteam;selftestSteamInstallationRoot=transactionFixtureSteamRoot;}
     json catalog(int schema=1)const{return {{"schemaVersion",schema},{"games",json::array({{{"gameDirectory",toUtf8(exe.parent_path().parent_path().wstring())},{"primaryExecutable",toUtf8(exe.wstring())},{"status","ready"},{"primaryRole","main-game"},{"selectionSource","manual"},{"scanComplete",true}}})},{"missingGames",json::array()},{"unscannedGames",json::array()},{"roots",json::array()},{"futureUnknown",{{"keep",true}}}};}
     int call(std::vector<std::wstring> tail){std::vector<std::wstring> args{(lab/L"bin"/L"SteamArtworkLab.exe").wstring()};args.insert(args.end(),tail.begin(),tail.end());std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());std::ostringstream out,err;auto oldOut=std::cout.rdbuf(out.rdbuf()),oldErr=std::cerr.rdbuf(err.rdbuf());int code;try{code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());}catch(...){std::cout.rdbuf(oldOut);std::cerr.rdbuf(oldErr);throw;}std::cout.rdbuf(oldOut);std::cerr.rdbuf(oldErr);output=out.str();error=err.str();json wireArgs=json::array();for(const auto& arg:args)wireArgs.push_back(toUtf8(arg));writeJsonAtomic(root/L"calls"/toWide(std::to_string(++callCount)+".json"),{{"scope","in-process renamed original workerMainNotUsedBySelftest; no product launch"},{"consumerPid",GetCurrentProcessId()},{"args",wireArgs},{"exitCode",code},{"stdout",output},{"stderr",error},{"networkCalls",identityCallerNetwork},{"externalProcessCalls",identityCallerProcesses},{"priorityWriteAttempts",discoveryProducerPriorityWrites},{"automaticDriveDiscovery",discoveryProducerDriveDiscovery}});check(identityCallerNetwork==0&&identityCallerProcesses==0&&discoveryProducerPriorityWrites==0&&discoveryProducerDriveDiscovery==0,"Producer escaped explicit inert ports");return code;}
     int fresh(){return call({L"--scan-library",job.wstring(),L"--root",games.wstring(),L"--trainer-root",trainers.wstring(),L"--max-depth",L"1"});}
@@ -324,25 +357,57 @@ struct DiscoveryProducerFixture {
 };
 static bool producerArchivedBytes(const fs::path& root,const std::string& expected){std::error_code error;if(!fs::is_directory(root,error))return false;for(const auto& entry:fs::recursive_directory_iterator(root,fs::directory_options::skip_permission_denied,error)){if(error)break;if(entry.is_regular_file(error)&&fileText(entry.path())==expected)return true;}return false;}
 
+#ifdef YMCC_LIBRARY_FACTS_IPC
+#include "custom_steam_library_facts_ipc_cases.inc"
+#endif
+
+static void bootstrapPeIdentityBoundary(const fs::path& p) {
+    const auto input=json::parse(R"BOOTSTRAP([{"name":"actual-paw-studio-product","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"3DClouds"},"expected":"launcher","pathRole":"main-game","directory":"PAW Patrol Grand Prix Pup Treat Arena"},{"name":"bootstrap-game-title-agrees","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"Owned Game","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"Owned Game"},"expected":"launcher","pathRole":"main-game","directory":"Owned Game"},{"name":"bootstrap-case-insensitive-original","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BOOTSTRAPPACKAGEDGAME-WIN64-SHIPPING.EXE","ProductName":"3DClouds"},"expected":"launcher","pathRole":"main-game","directory":"Owned Game"},{"name":"missing-original-studio-is-not-new-authority","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","ProductName":"3DClouds"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"prefixed-filename-is-not-exact","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"MyBootstrapPackagedGame-Win64-Shipping.exe","ProductName":"3DClouds"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"backup-suffix-is-not-exact","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe.bak","ProductName":"3DClouds"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"truncated-extension-is-not-exact","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.ex","ProductName":"3DClouds"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"normal-shipping-game","version":{"CompanyName":"Outright Games Ltd","FileDescription":"Paw Patrol Grand Prix","InternalName":"PAW","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"PAW-Win64-Shipping.exe","ProductName":"Paw Patrol Grand Prix"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"unreal-internal-name-alone","version":{"ProductName":"Owned Game","FileDescription":"Owned Game","InternalName":"UnrealEngine"},"expected":"main-game","pathRole":"main-game","directory":"Owned Game"},{"name":"legitimate-game-launcher","version":{"ProductName":"Total War: SHOGUN 2","FileDescription":"Total War: SHOGUN 2"},"expected":"main-game","pathRole":"launcher","directory":"Total War - SHOGUN 2"},{"name":"bootstrap-cannot-replace-installer-path","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"3DClouds"},"expected":"launcher","pathRole":"installer","directory":"Owned Game"},{"name":"bootstrap-cannot-replace-crash-path","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"3DClouds","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"3DClouds"},"expected":"launcher","pathRole":"crash-handler","directory":"Owned Game"},{"name":"explicit-tool-description-keeps-role","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"Creation Kit","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"Owned Game"},"expected":"tool","pathRole":"main-game","directory":"Owned Game"},{"name":"explicit-installer-product-keeps-role","version":{"CompanyName":"Epic Games, Inc.","FileDescription":"Owned Game","InternalName":"UnrealEngine","LegalCopyright":"Fill out your copyright notice in the Description page of Project Settings.","OriginalFilename":"BootstrapPackagedGame-Win64-Shipping.exe","ProductName":"Setup Installer"},"expected":"installer","pathRole":"main-game","directory":"Owned Game"}])BOOTSTRAP");
+    json observed=json::array();bool passed=true;
+    for(const auto& row:input){
+        const auto value=assessPeIdentity(row["version"].get<std::map<std::string,std::string>>(),row["pathRole"],row["directory"]);
+        const auto expected=row["expected"].get<std::string>();
+        const bool role=value.role==expected;
+        const bool source=expected=="main-game"?value.primaryEvidenceSource=="pe-product-name":value.primaryEvidenceSource=="pe-tool-classification";
+        const bool confidence=expected=="main-game"?value.identityConfidence==0.98:value.identityConfidence==0;
+        observed.push_back({{"name",row["name"]},{"role",value.role},{"source",value.primaryEvidenceSource},{"confidence",value.identityConfidence},{"expected",expected},{"passed",role&&source&&confidence}});
+        passed=passed&&role&&source&&confidence;
+    }
+    writeJsonAtomic(p/L"bootstrap-pe-observations.json",observed);
+    check(passed,"EXACT_UNREAL_BOOTSTRAP_CLASSIFIED_AS_MAIN_GAME");
+}
+
 int wmain(int argc,wchar_t** argv) {
     try {
-        check(argc==2 || (argc==3 && (std::wstring(argv[2])==L"--config-storm" || std::wstring(argv[2])==L"--transaction-storm" || std::wstring(argv[2])==L"--data-root-storm" || std::wstring(argv[2])==L"--identity-storm" || std::wstring(argv[2])==L"--membership-storm" || std::wstring(argv[2])==L"--rule-text-storm" || std::wstring(argv[2])==L"--publisher-text-storm" || std::wstring(argv[2])==L"--discovery-storm")),"Pass new isolated fixture root"); const auto root=fs::absolute(argv[1]);
+#ifdef YMCC_LIBRARY_HOST_CHAIN
+        if(argc>1 && (std::wstring(argv[1])==L"--plan-add-library-to-steam" || std::wstring(argv[1])==L"--commit-add-library-to-steam"))return LibraryFactsIpc::chainCli(argc,argv);
+#endif
+#ifdef YMCC_LIBRARY_FACTS_IPC
+        return LibraryFactsIpc::entry(argc,argv);
+#endif
+        const bool factsOnly=argc==4&&std::wstring(argv[2])==L"--steam-facts";
+        const std::vector<std::string> factsNames={"steamfacts-owned-installation-nesting","steamfacts-legacy-bool-and-owned-installation","steamfacts-absent-commits-real-files","steamfacts-unknown-first-preserves-original","steamfacts-final-unknown-preserves-original","steamfacts-final-running-preserves-original","steamfacts-hook-exception-is-unavailable","steamfacts-missing-whitelist-recovery","delete-success-keeps-backup-receipt","rollback-first-shortcut-restores-absence","rollback-existing-shortcuts-restores-bytes","real-target-guard-does-not-trust-plan-flag"};
+        std::string factsSelected;
+        if(factsOnly){factsSelected=toUtf8(argv[3]);if(factsSelected.empty()||std::find(factsNames.begin(),factsNames.end(),factsSelected)==factsNames.end())return 2;}
+        check(factsOnly || argc==2 || (argc==3 && (std::wstring(argv[2])==L"--config-storm" || std::wstring(argv[2])==L"--transaction-storm" || std::wstring(argv[2])==L"--data-root-storm" || std::wstring(argv[2])==L"--identity-storm" || std::wstring(argv[2])==L"--membership-storm" || std::wstring(argv[2])==L"--rule-text-storm" || std::wstring(argv[2])==L"--publisher-text-storm" || std::wstring(argv[2])==L"--discovery-storm")),"Pass new isolated fixture root"); const auto root=fs::absolute(argv[1]);
         const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
         const auto evidence=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L".."/L"Testing"/L"YMCC"/L"Evidence").lexically_normal();
         check((pathWithin(root,build)||pathWithin(root,evidence))&&!fs::exists(root),"Unsafe or reused fixture root"); fs::create_directories(root);g_workerDataRoot=root;SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",root.c_str());
         transactionFixtureSteamRoot=(root/L"isolated-steam-discovery").wstring();textFile(fs::path(transactionFixtureSteamRoot)/L"steam.exe","isolated marker, never executed");
+        selftestSteamInstallationRoot=transactionFixtureSteamRoot;
         SetEnvironmentVariableW(L"YEMAN_GAME_WHITELIST_PATH",(root/L"isolated-whitelist.txt").c_str());SetEnvironmentVariableW(L"YEMAN_PLAYER_BLACKLIST_PATH",(root/L"isolated-blacklist.txt").c_str());
         const bool discoveries=argc==3 && std::wstring(argv[2])==L"--discovery-storm";
         wchar_t producerOnlyValue[8]{};const bool producerOnly=GetEnvironmentVariableW(L"YMCC_DISCOVERY_PRODUCER_ONLY",producerOnlyValue,8)==1&&producerOnlyValue[0]==L'1';discoveryProducerPorts=discoveries&&producerOnly;
         const bool publisherTexts=argc==3 && std::wstring(argv[2])==L"--publisher-text-storm";
         const bool ruleTexts=argc==3 && std::wstring(argv[2])==L"--rule-text-storm";
         const bool memberships=argc==3 && std::wstring(argv[2])==L"--membership-storm";
-        const bool identities=argc==3 && std::wstring(argv[2])==L"--identity-storm";identityCallerActive=identities||memberships||ruleTexts||publisherTexts||discoveries;
+        const bool identities=argc==3 && std::wstring(argv[2])==L"--identity-storm";identityCallerActive=factsOnly||identities||memberships||ruleTexts||publisherTexts||discoveries;
         const bool dataRoots=argc==3 && std::wstring(argv[2])==L"--data-root-storm";
         const bool transactions=argc==3 && std::wstring(argv[2])==L"--transaction-storm";
         json reports=json::array(); size_t failures=0;
         auto run=[&](const char* name,const std::function<void(const fs::path&)>& fn) {
             const std::string label=name;
+            if(factsOnly&&label!=factsSelected)return;
             if(discoveries&&!label.starts_with("discovery-"))return;
             if(discoveries&&producerOnly&&!label.starts_with("discovery-producer-"))return;
             if(discoveries){wchar_t prefix[256]{};const auto n=GetEnvironmentVariableW(L"YMCC_DISCOVERY_SELFTEST_PREFIX",prefix,256);if(n&&n<256&&!label.starts_with(toUtf8(prefix)))return;}
@@ -361,12 +426,131 @@ int wmain(int argc,wchar_t** argv) {
             if(argc==3 && !transactions && !dataRoots && !identities && !memberships && !ruleTexts && !publisherTexts && !discoveries && !std::string(name).starts_with("storm-") && !std::string(name).starts_with("config-") &&
                 std::string(name)!="manual-overrides-invalid-items-recovers-backup" && std::string(name)!="initialization-restores-missing-config-before-defaults" &&
                 std::string(name)!="empty-root-first-run-scan-is-retryable") return;
+            if(factsOnly){selftestSteamFactsAvailable=true;selftestSteamPresenceOverride=-2;selftestSteamFactsReads=selftestSteamPresenceReads=0;selftestSteamFactsBeforeRead={};}
             const auto caseRoot=root/(L"c"+std::to_wstring(reports.size())); fs::create_directories(caseRoot); selftestMoveFault={}; selftestSteamRunning=false; configIoMode=0;configIoTarget.clear();configIoPartial=false;
             identityCallerReadHook={};ruleTextAfterMove={};{std::lock_guard<std::mutex> guard(identityCallerReadMx);identityCallerReads.clear();}
-            try {fn(caseRoot);if(memberships||ruleTexts||publisherTexts||discoveries)check(identityCallerNetwork==0&&identityCallerProcesses==0,"Selected file consumer invoked an external port");reports.push_back({{"name",name},{"passed",true}});}
+            try {fn(caseRoot);if(factsOnly||memberships||ruleTexts||publisherTexts||discoveries)check(identityCallerNetwork==0&&identityCallerProcesses==0,"Selected file consumer invoked an external port");reports.push_back({{"name",name},{"passed",true}});}
             catch(const std::exception& e){++failures;reports.push_back({{"name",name},{"passed",false},{"error",e.what()}});}
             selftestMoveFault={};ruleTextAfterMove={}; selftestSteamRunning=false;configIoMode=0;configIoTarget.clear();configIoPartial=false;
         };
+        if(factsOnly){
+            run("steamfacts-owned-installation-nesting",[](const fs::path& p){
+                const auto previous=selftestSteamInstallationRoot;const bool previousPorts=discoveryProducerPorts;discoveryProducerPorts=true;
+                try{
+                    const auto matches=[](const fs::path& expected){const auto actual=steamInstallPath(true);return actual&&canonicalPathKey(*actual)==canonicalPathKey(expected);};
+                    {DiscoveryProducerFixture outer(p/L"outer");
+                     check(matches(outer.steam),"Outer producer did not project owned installation");
+                     {DiscoveryProducerFixture inner(p/L"inner");check(matches(inner.steam),"Nested producer retained stale installation");}
+                     check(matches(outer.steam),"Nested destruction did not restore outer owned installation");}
+                    const auto restored=steamInstallPath(true);check(restored&&canonicalPathKey(*restored)==canonicalPathKey(fs::path(previous)),"Producer destruction did not restore previous owned installation");
+                }catch(...){discoveryProducerPorts=previousPorts;throw;}discoveryProducerPorts=previousPorts;
+                check(identityCallerProcesses==0&&identityCallerNetwork==0,"Owned installation nesting invoked live provider");
+                writeJsonAtomic(p/L"facts-observed.json",{{"factsReads",selftestSteamFactsReads},{"restoredOwnedRoot",toUtf8(previous)},{"realProducerInvoked",false}});
+            });
+            run("steamfacts-legacy-bool-and-owned-installation",[](const fs::path& p){
+                const auto install=steamInstallPath(true);check(install&&canonicalPathKey(*install)==canonicalPathKey(fs::path(transactionFixtureSteamRoot)),"Test consumer did not read the explicitly owned installation");
+                selftestSteamRunning=false;check(!steamRunning(),"Old false bool no longer controls shared presence");
+                selftestSteamRunning=true;check(steamRunning(),"Old true bool no longer controls shared presence");
+                const auto facts=ymcc::steaminfo_selftest::read(ymcc::steaminfo::Presence);
+                check(facts.available&&facts.processPid==0&&facts.processBirth==0&&facts.actionPowerGeneration==0,"Test presence minted action identity");
+                check(selftestSteamPresenceReads>=3&&selftestSteamFactsReads>selftestSteamPresenceReads,"Actual worker bypassed test facts port");
+                writeJsonAtomic(p/L"facts-observed.json",{{"factsReads",selftestSteamFactsReads},{"presenceReads",selftestSteamPresenceReads},{"ownedRoot",toUtf8(transactionFixtureSteamRoot)},{"liveProviderUsed",false}});
+            });
+            run("steamfacts-absent-commits-real-files",[](const fs::path& p){
+                Fixture f(p,true);const auto before=readBinaryFile(f.target.path);textFile(f.local,validLocal);const auto localBefore=readBinaryFile(f.local);
+                const auto result=f.commit();check(result.value("committed",false)&&readShortcuts(f.target.path,f.target.accountId).size()==1,"Absent test facts did not allow original real-file transaction");
+                const auto localAfter=readBinaryFile(f.local);
+                const bool keptUnrelated=fileText(f.local).find("\"KeepThisSetting\" \"original\"")!=std::string::npos;
+                writeJsonAtomic(p/L"facts-observed.json",{{"presenceReads",selftestSteamPresenceReads},{"targetChanged",readBinaryFile(f.target.path)!=before},{"localChanged",localAfter!=localBefore},{"keptUnrelated",keptUnrelated},{"stagesCleaned",!hasStages(p)},{"result",result}});
+                check(readBinaryFile(f.target.path)!=before&&selftestSteamPresenceReads>=2&&!hasStages(p),"Transaction skipped final facts or left staging files");
+                check(keptUnrelated&&localAfter!=localBefore&&result.value("recentSignalStatus",std::string{})=="updated", "Expected recent-game update damaged unrelated local config or was not applied");
+                check(result.value("localConfigBeforeSha256",std::string{})==sha256(localBefore)&&result.value("localConfigAfterSha256",std::string{})==sha256(localAfter),"Committed local config does not match original transaction hashes");
+                check(readBinaryFile(fs::path(toWide(result.at("localConfigBackup").get<std::string>())))==localBefore,"Recent update lost original localconfig backup");
+                check(fs::is_regular_file(fs::path(toWide(result.at("transactionReceipt").get<std::string>()))),"Actual complete transaction receipt missing");
+            });
+            const auto refusal=[&](const fs::path& p,const std::string& mode){
+                Fixture f(p,true);textFile(f.local,validLocal);const auto before=readBinaryFile(f.target.path),localBefore=readBinaryFile(f.local);bool staged=false;
+                if(mode=="first")selftestSteamFactsAvailable=false;
+                if(mode=="exception")selftestSteamFactsBeforeRead=[](std::uint32_t){throw std::runtime_error("controlled facts callback exception");};
+                selftestMoveFault=[&](const std::wstring&,const std::wstring& to)->DWORD{
+                    if(to.ends_with(L"transaction.pending.json")){
+                        staged=true;if(mode=="unknown")selftestSteamPresenceOverride=-1;if(mode=="running")selftestSteamRunning=true;
+                    }return ERROR_SUCCESS;
+                };
+                bool refused=false;std::string error;json result;
+                try{result=f.commit();}catch(const std::exception& e){refused=true;error=e.what();}
+                selftestMoveFault={};selftestSteamFactsBeforeRead={};
+                const bool targetPreserved=readBinaryFile(f.target.path)==before,localPreserved=readBinaryFile(f.local)==localBefore;
+                writeJsonAtomic(p/L"facts-observed.json",{{"mode",mode},{"refused",refused},{"error",error},{"staged",staged},
+                    {"targetPreserved",targetPreserved},{"localPreserved",localPreserved},{"stagesCleaned",!hasStages(p)},
+                    {"presenceReads",selftestSteamPresenceReads},{"factsReads",selftestSteamFactsReads},{"transactionResult",result},{"liveProviderUsed",false}});
+                check(refused&&targetPreserved&&localPreserved&&!hasStages(p),"Unknown/running shared facts allowed final Steam activation or damaged original bytes");
+                if(mode=="unknown"||mode=="running")check(staged&&selftestSteamPresenceReads>=2,"Late facts case did not reach staged final guard");
+                if(mode!="running")check(error.find("[steam-process-unknown]")!=std::string::npos,"Unknown observation became absent or lost original error");
+            };
+            run("steamfacts-unknown-first-preserves-original",[&](const fs::path& p){refusal(p,"first");});
+            run("steamfacts-final-unknown-preserves-original",[&](const fs::path& p){refusal(p,"unknown");});
+            run("steamfacts-final-running-preserves-original",[&](const fs::path& p){refusal(p,"running");});
+            run("steamfacts-hook-exception-is-unavailable",[&](const fs::path& p){refusal(p,"exception");});
+            run("steamfacts-missing-whitelist-recovery",[](const fs::path& p){
+                namespace m = custom_steam_library::ymcc_whitelist;
+                const auto destination = gameWhitelistPath();
+                const auto expected = std::string(m::beginMarker);
+                for (const std::string mode : {"missing", "wrong-binding", "no-live-rows", "vdf-changed", "existing-empty", "concurrent-manual"}) {
+                    Fixture f(p/toWide(mode), true);
+                    const auto scan = fixtureScanState(f);
+                    const auto ledger = f.data/L"state"/L"ymcc-game-whitelist-membership.json";
+                    const auto observed = f.root/L"Games"/L"OwnedGame.exe";
+                    const auto other = f.root/L"Games"/L"SecondOwned.exe";
+                    const auto stale = f.root/L"Games"/L"StaleGame.exe";
+                    const auto unowned = f.root/L"Games"/L"Unowned.exe";
+                    for (const auto& path : {observed, other, stale, unowned}) textFile(path,"not executable");
+                    auto vdf = BinaryVdfDocument::emptySteamShortcuts();
+                    auto* rows = vdfFindObject(vdf.root(),"shortcuts");
+                    if (mode!="no-live-rows") for (const auto& path : {observed, other, unowned})
+                        rows->objectValue.push_back({std::to_string(rows->objectValue.size()),steamShortcutNode(-1073741823,toUtf8(path.stem().wstring()),quotedSteamPath(path),quotedSteamPath(path.parent_path()),0)});
+                    const auto vdfBytes = vdf.serialize();
+                    const auto clearedVdf = BinaryVdfDocument::emptySteamShortcuts().serialize();
+                    writeAtomic(f.target.path, vdfBytes);
+                    const auto bound = mode=="wrong-binding" ?
+                        f.root/L"Foreign"/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf" : f.target.path;
+                    json entries = json::object();
+                    for (const auto& path : {observed, other, stale}) entries[m::executableKey(toUtf8(path.wstring()))] = normalizeGameRule(toUtf8(path.wstring()));
+                    writeJsonAtomic(ledger,{{"schemaVersion",1},{"owner","custom-steam-library"},
+                        {"accounts",{{"19627",{{"entries",entries},{"revision",17}}}}},
+                        {"bindings",{{"19627",{{"shortcutsVdf",toUtf8(bound.wstring())}}}}}});
+                    const auto originalLedger = fileText(ledger);
+                    if (mode=="existing-empty") textFile(destination, "");
+                    selftestSteamFactsAvailable = false;
+                    selftestSteamFactsBeforeRead = [&](std::uint32_t mask){ if(mode=="vdf-changed" && (mask & ymcc::steaminfo::Presence)) writeAtomic(f.target.path, clearedVdf); };
+                    bool concurrentWriter = false;
+                    selftestMoveFault = [&](const std::wstring&, const std::wstring& to){
+                        if(mode=="concurrent-manual" && identityCallerPath(to)==identityCallerPath(destination.wstring()) && !concurrentWriter){
+                            concurrentWriter=true;
+                            textFile(destination,"manual-race\n");
+                        }
+                        return DWORD{ERROR_SUCCESS};
+                    };
+                    std::string error;
+                    try { (void)buildSteamLibraryAddPlan(f.data,scan,f.target,f.planFile); }
+                    catch(const std::exception& e){ error=e.what(); }
+                    selftestMoveFault = {};
+                    selftestSteamFactsBeforeRead = {};
+                    check(error.find("[steam-process-unknown]")!=std::string::npos && !fs::exists(f.planFile),"Missing whitelist repair loosened the unavailable Steam guard");
+                    check(fileText(ledger)==originalLedger && readBinaryFile(f.target.path)==(mode=="vdf-changed" ? clearedVdf : vdfBytes),"Recovery changed Steam bytes or library ownership");
+                    if(mode=="missing") {
+                        const auto text=fileText(destination);
+                        check(text.find(expected)!=std::string::npos && text.find("ownedgame")!=std::string::npos && text.find("secondowned")!=std::string::npos,"Lost derived file did not restore both exact shortcut members");
+                        check(text.find("stalegame")==std::string::npos && text.find("unowned")==std::string::npos,"Restore created a rule for an unconfirmed or unowned member");
+                    } else if (mode=="existing-empty") check(fileText(destination).empty(),"Present empty rules was overwritten");
+                    else if (mode=="concurrent-manual") check(concurrentWriter && fileText(destination)=="manual-race\n","Concurrent manual write not preserved");
+                    else check(!fs::exists(destination),"A wrong or changed binding created whitelist rules");
+                    std::error_code cleanup;
+                    if (fs::exists(destination)) fs::remove(destination,cleanup); // Owned fixture output, reused for the next arm.
+                    check(!cleanup && !fs::exists(destination), "Fixture whitelist did not reset");
+                }
+            });
+        }
         run("rollback-first-shortcut-restores-absence",[](const fs::path& p){Fixture f(p);textFile(f.local,validLocal);
             selftestMoveFault=[](const auto& from,const auto& to){return to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{f.commit();}); check(!fs::exists(f.target.path),"Failed first import left an empty shortcuts.vdf");check(fileText(f.local)==validLocal,"Existing config changed");check(!hasStages(p),"Staged files leaked");});
@@ -740,7 +924,169 @@ int wmain(int argc,wchar_t** argv) {
         run("txstorm-bad-recovery-state-does-not-claim-consumed",[](const fs::path& p){const auto data=p/L"data",game=p/L"Games"/L"Game";textFile(data/L"games"/toWide(gameDataId(game))/L"meta.json","owned metadata");const auto package=createDeletedGameRecoveryPackage(data,game,defaultLibraryConfig(),{{"items",json::object()}});textFile(package/L"recovery-state.json","");check(latestDeletedGameRecoveryPackage(data,game)==package,"Bad consumed marker permanently suppressed explicit undo");check(fileText(package/L"recovery-state.json").empty(),"Selection overwrote corrupt marker");});
 
         auto membershipEvent=[](const fs::path& p,const std::string& account,const std::string& game){const auto steam=p/L"Steam",target=steam/L"userdata"/toWide(account)/L"config"/L"shortcuts.vdf",exe=p/L"Games"/toWide(game)/(toWide(game)+L".exe");textFile(steam/L"steam.exe","fixture marker");textFile(exe,"never executed");auto doc=BinaryVdfDocument::emptySteamShortcuts();vdfFindObject(doc.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,game,quotedSteamPath(exe),quotedSteamPath(exe.parent_path()),0)});writeAtomic(target,doc.serialize());return json{{"schemaVersion",1},{"mode","steam-library-add-plan"},{"realSteamTarget",true},{"accountId",account},{"shortcutsVdf",toUtf8(target.wstring())},{"shortcutsBeforeSha256",sha256(readBinaryFile(target))},{"items",json::array({{{"primaryExecutable",toUtf8(exe.wstring())},{"primarySelectionStatus","ready"},{"primaryRole","main-game"},{"status","already-in-steam"}}})}};};
-        run("txstorm-membership-two-accounts-and-one-account-removal",[=](const fs::path& p){const auto data=p/L"data",rules=p/L"rules.txt";textFile(rules,"manual-user-rule\n");auto a=membershipEvent(p,"1001","Alpha"),b=membershipEvent(p,"1002","Beta");publishYmccGameWhitelist(a,data,true,rules);publishYmccGameWhitelist(b,data,true,rules);check(fileText(rules).find("alpha")!=std::string::npos&&fileText(rules).find("beta")!=std::string::npos,"Two-account union lost an actual peer");const auto target=fs::path(toWide(a["shortcutsVdf"].get<std::string>()));writeAtomic(target,BinaryVdfDocument::emptySteamShortcuts().serialize());a.erase("ymccMembershipAuthority");a["shortcutsBeforeSha256"]=sha256(readBinaryFile(target));a["items"]=json::array();publishYmccGameWhitelist(a,data,true,rules);check(fileText(rules).find("alpha")==std::string::npos&&fileText(rules).find("beta")!=std::string::npos&&fileText(rules).find("manual-user-rule")!=std::string::npos,"Account refresh removed another account/manual rule");});
+        run("txstorm-membership-two-accounts-and-one-account-removal",[=](const fs::path& p){const auto data=p/L"data",rules=p/L"rules.txt";textFile(rules,"manual-user-rule\n");auto a=membershipEvent(p,"1001","Alpha"),b=membershipEvent(p,"1002","Beta");publishYmccGameWhitelist(a,data,true,rules);publishYmccGameWhitelist(b,data,true,rules);check(fileText(rules).find("alpha")!=std::string::npos&&fileText(rules).find("beta")!=std::string::npos,"Two-account union lost an actual peer");const auto target=fs::path(toWide(a["shortcutsVdf"].get<std::string>()));writeAtomic(target,BinaryVdfDocument::emptySteamShortcuts().serialize());a.erase("ymccMembershipAuthority");a["shortcutsBeforeSha256"]=sha256(readBinaryFile(target));a["items"]=json::array();publishYmccGameWhitelist(a,data,true,rules);check(fileText(rules).find("alpha")==std::string::npos&&fileText(rules).find("beta")!=std::string::npos&&fileText(rules).find("manual-user-rule")!=std::string::npos,"Account refresh removed another account/manual rule");
+            // Repeated real extensions use the shared exact literal codec.
+            json literalObservations=json::array();
+            for(const auto& label:std::vector<std::string>{
+                    "Stray-Win64-Shipping.exe","Stray-Win64-Shipping.exe.exe","测试.exe","Été.ExE"}) {
+                const auto literalRoot=p/L"Lit"/toWide(std::to_string(literalObservations.size()));
+                const auto literalData=literalRoot/L"d",literalRules=literalRoot/L"r.txt";
+                auto event=membershipEvent(literalRoot,"1001",label);
+                const auto executable=fs::path(toWide(event["items"][0]["primaryExecutable"].get<std::string>()));
+                const auto expected=std::string("@exe:")+toUtf8(unicodeLower(executable.filename().wstring()));
+                const auto rule=normalizeGameRule(toUtf8(executable.wstring()));
+                check(rule==expected&&normalizeGameRule(rule)==rule&&normalizeGameRule(normalizeGameRule(rule))==rule,
+                    "Literal producer changed a real suffix or was not idempotent");
+                textFile(literalRules,"manual-user-rule\n");
+                const auto target=fs::path(toWide(event["shortcutsVdf"].get<std::string>()));
+                const auto targetBefore=readBinaryFile(target);
+                publishYmccGameWhitelist(event,literalData,true,literalRules);
+                const auto statePath=literalData/L"state"/L"ymcc-game-whitelist-membership.json";
+                const auto owned=loadJsonDocument(statePath);
+                const auto key=custom_steam_library::ymcc_whitelist::executableKey(toUtf8(executable.wstring()));
+                check(owned["accounts"]["1001"]["entries"].at(key)==expected &&
+                    event["ymccWhitelistPublication"]["status"]!="warning" &&
+                    readBinaryFile(target)==targetBefore,"Literal membership disappeared or changed the VDF");
+                const auto bytes=readBinaryFile(literalRules);
+                const auto parsed=gameRuleTextRules(bytes);
+                check(std::find(parsed.begin(),parsed.end(),expected)!=parsed.end() &&
+                    gameRuleFileBytes(parsed,&bytes)==bytes,"Literal managed/manual text roundtrip changed identity");
+                const std::vector<LibraryExecutableExclusion> exact{{expected,"owned-literal"}};
+                const auto nearby=executable.parent_path()/L"Stray-Win64-Shipping.exe";
+                check(libraryExecutableExclusion(executable,exact).has_value() &&
+                    (executable==nearby || !libraryExecutableExclusion(nearby,exact)),
+                    "Literal blacklist matched a different actual basename");
+                const std::vector<LibraryExecutableExclusion> glob{{"*","old-glob"}};
+                check(libraryExecutableExclusion(executable,glob).has_value(),"Literal producer broke old glob semantics");
+                literalObservations.push_back({{"path",toUtf8(executable.wstring())},{"rule",rule},
+                    {"publication",event["ymccWhitelistPublication"]},{"membership",owned},{"roundtrip",true}});
+            }
+            namespace literalMember=custom_steam_library::ymcc_whitelist;
+            check(!literalMember::validRule("bad.exe")&&!literalMember::validRule("bad*")&&
+                literalMember::validRule("normal-game"),"Literal support weakened old managed rule guards");
+            for(const auto* bad:{"@exe2:game.exe.exe","@exe:game.exe","@exe:../game.exe.exe",
+                                "@exe:game*.exe.exe","@exe:game?.exe.exe","@exe:game.exe.exe:evil"}) {
+                check(!literalMember::validRule(bad),"Malformed literal passed stored-state validation");
+                mustThrow([&]{normalizeGameRule(bad);});
+                mustThrow([&]{const std::string text=std::string(bad)+"\n";gameRuleTextRules(std::vector<unsigned char>(text.begin(),text.end()));});
+            }
+            check(normalizeGameRule("D:\\Games\\NORMAL.EXE")=="normal"&&normalizeGameRule("normal")=="normal"&&
+                normalizeGameRule("qemu-system-*")=="qemu-system-*","Legacy ordinary/glob normalization changed");
+            writeJsonAtomic(p/L"literal-rule-observations.json",literalObservations);
+            // A native game has a real appmanifest but no shortcuts.vdf row.
+            // Its main EXE can be nested several directories under the install.
+            const auto nativeDir=p/L"Steam"/L"steamapps"/L"common"/L"NativeGame";
+            const auto nativeExe=nativeDir/L"bin"/L"NativeGame.exe";
+            const auto nativeManifest=p/L"Steam"/L"steamapps"/L"appmanifest_778899.acf";
+            textFile(nativeExe,"owned inert marker, never executed");fs::resize_file(nativeExe,6u*1024u*1024u);
+            const std::string manifest="\"AppState\" { \"appid\" \"778899\" \"name\" \"NativeGame\" \"installdir\" \"NativeGame\" }";
+            textFile(nativeManifest,manifest);
+            auto nativeRow=json{{"status","already-in-steam"},{"steamNative",true},{"contentType","steam-native"},{"nativeSteamAppId",778899},
+                {"gameDirectory",toUtf8(nativeDir.wstring())},{"primaryExecutable",toUtf8(nativeExe.wstring())},{"primaryRole","main-game"},{"primarySelectionStatus","ready"}};
+            auto mixed=b;mixed.erase("ymccMembershipAuthority");mixed["items"].push_back(nativeRow);
+            // A built-in excluded prerequisite cannot own a rule or block
+            // unrelated games merely because it has no launchable main EXE.
+            mixed["items"].push_back({{"status","already-in-steam"},{"steamNative",true},{"nativeSteamAppId",228980},{"directoryName","Steamworks Common Redistributables"},{"primaryExecutable",nullptr}});
+            publishYmccGameWhitelist(mixed,data,true,rules);
+            writeJsonAtomic(p/L"native-publication-observation.json",{{"publication",mixed["ymccWhitelistPublication"]},{"rules",fileText(rules)}});
+            check(mixed["ymccWhitelistPublication"]["status"]!="warning"&&fileText(rules).find("nativegame")!=std::string::npos&&fileText(rules).find("beta")!=std::string::npos,"Native Steam row blocked valid shortcut whitelist publication");
+            a.erase("ymccMembershipAuthority");publishYmccGameWhitelist(a,data,true,rules);
+            check(a["ymccWhitelistPublication"]["status"]!="warning"&&fileText(rules).find("nativegame")!=std::string::npos,"Nested native executable lost retained peer ownership");
+            const auto state=data/L"state"/L"ymcc-game-whitelist-membership.json";
+            const auto beforeState=fileText(state),beforeRules=fileText(rules);
+            for(const auto* reason:{"wrong-appid","wrong-directory","helper-exe","missing-manifest"}) {
+                auto forged=mixed;forged.erase("ymccMembershipAuthority");auto& row=forged["items"][1];const std::string kind=reason;
+                if(kind=="wrong-appid")row["nativeSteamAppId"]=778900;
+                if(kind=="wrong-directory")row["gameDirectory"]=toUtf8((p/L"OtherGame").wstring());
+                if(kind=="helper-exe"){const auto helper=nativeDir/L"bin"/L"CrashLogsGenerator.exe";textFile(helper,"owned helper marker");row["primaryExecutable"]=toUtf8(helper.wstring());}
+                if(kind=="missing-manifest")fs::remove(nativeManifest);
+                publishYmccGameWhitelist(forged,data,true,rules);
+                check(forged["ymccWhitelistPublication"]["status"]=="warning"&&fileText(state)==beforeState&&fileText(rules)==beforeRules,"Unverified native row changed account/manual ownership");
+                if(kind=="missing-manifest")textFile(nativeManifest,manifest);
+            }
+            mixed.erase("ymccMembershipAuthority");publishYmccGameWhitelist(mixed,data,true,rules);
+            check(mixed["ymccWhitelistPublication"]["status"]!="warning"&&fileText(rules)==beforeRules,"Explicit native proof recovery did not preserve rules");
+            // An independently observed live addition must proceed even when
+            // a retained peer no longer has one of its historical shortcuts.
+            const auto partialRoot=p/L"Partial",partialData=partialRoot/L"data",partialRules=partialRoot/L"rules.txt";
+            textFile(partialRules,"manual-user-rule\r\n");
+            auto partialA=membershipEvent(partialRoot,"1001","Alpha"),partialB=membershipEvent(partialRoot,"1002","Beta");
+            publishYmccGameWhitelist(partialA,partialData,true,partialRules);publishYmccGameWhitelist(partialB,partialData,true,partialRules);
+            const auto partialState=partialData/L"state"/L"ymcc-game-whitelist-membership.json";
+            auto retained=loadJsonDocument(partialState);const auto ghost=partialRoot/L"Games"/L"Ghost"/L"Ghost.exe";
+            retained["accounts"]["1002"]["entries"][custom_steam_library::ymcc_whitelist::executableKey(toUtf8(ghost.wstring()))]="ghost";
+            retained["vendorExtension"]={{"retained",7}};writeJsonAtomic(partialState,retained);
+            const auto peer=fs::path(toWide(partialB["shortcutsVdf"].get<std::string>()));writeAtomic(peer,BinaryVdfDocument::emptySteamShortcuts().serialize());
+            const auto current=fs::path(toWide(partialA["shortcutsVdf"].get<std::string>()));
+            const auto alpha=fs::path(toWide(partialA["items"][0]["primaryExecutable"].get<std::string>()));
+            const auto gamma=partialRoot/L"Games"/L"Gamma"/L"Gamma.exe";textFile(gamma,"owned inert marker, never executed");
+            auto actual=BinaryVdfDocument::emptySteamShortcuts();auto* actualRows=vdfFindObject(actual.root(),"shortcuts");
+            actualRows->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Alpha",quotedSteamPath(alpha),quotedSteamPath(alpha.parent_path()),0)});
+            actualRows->objectValue.push_back({"1",steamShortcutNode(-1073741822,"Gamma",quotedSteamPath(gamma),quotedSteamPath(gamma.parent_path()),0)});writeAtomic(current,actual.serialize());
+            partialA.erase("ymccMembershipAuthority");partialA["shortcutsBeforeSha256"]=sha256(readBinaryFile(current));auto gammaRow=partialA["items"][0];gammaRow["primaryExecutable"]=toUtf8(gamma.wstring());partialA["items"].push_back(gammaRow);
+            const auto retainedRules=fileText(partialRules);publishYmccGameWhitelist(partialA,partialData,false,partialRules);
+            const auto published=fileText(partialRules);const bool newRule=published.find("gamma\r\n")!=std::string::npos;
+            const bool oldRule=published.find("beta\r\n")!=std::string::npos,unknownWithheld=published.find("ghost")==std::string::npos;
+            writeJsonAtomic(p/L"partial-publication-observations.json",{{"newRule",newRule},{"oldRule",oldRule},{"unknownWithheld",unknownWithheld},{"publication",partialA["ymccWhitelistPublication"]},{"rules",published}});
+            check(newRule,"Unconfirmed peer debt blocked confirmed new game rules");
+            check(oldRule&&unknownWithheld&&published.starts_with("manual-user-rule\r\n"),"Partial publication deleted prior/manual rules or manufactured unknown ownership");
+            check(partialA["ymccWhitelistPublication"].value("partialPublication",false)&&partialA["ymccWhitelistPublication"]["unconfirmedEntryCount"]==2,"Partial publication hid unresolved membership");
+            const auto detail = partialA["ymccWhitelistPublication"].find("unconfirmedMembership");
+            check(detail != partialA["ymccWhitelistPublication"].end() && detail->is_object(),
+                "MEMBERSHIP_WARNING_DETAILS_MISSING");
+            const auto keyFor = [](const fs::path& exe) { return custom_steam_library::ymcc_whitelist::executableKey(toUtf8(exe.wstring())); };
+            std::set<std::string> actualDetails;
+            for (const auto& row : (*detail)["entries"]) {
+                check(row["accountId"] == "1002" && row["reason"] == "current-membership-unconfirmed",
+                    "Unconfirmed diagnostic changed account or asserted absence");
+                actualDetails.insert(row["executable"].get<std::string>());
+            }
+            check((*detail)["complete"] == true && (*detail)["entryLimit"] == 32 &&
+                actualDetails == std::set<std::string>{keyFor(ghost), keyFor(partialRoot/L"Games"/L"Beta"/L"Beta.exe")},
+                "Unconfirmed diagnostic did not retain exact owned paths");
+            const auto savedState = readBinaryFile(partialState);
+            auto duplicate = loadJsonDocument(partialState);
+            duplicate["accounts"]["1001"]["entries"][keyFor(ghost)] = "ghost";
+            writeJsonAtomic(partialState, duplicate);
+            partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);
+            const auto crossAccount = partialA["ymccWhitelistPublication"];
+            check(crossAccount["unconfirmedEntryCount"] == 3 &&
+                crossAccount["unconfirmedMembership"]["entries"].size() == 3 &&
+                crossAccount["unconfirmedMembership"]["complete"] == true,
+                "Same EXE in different accounts was collapsed");
+            writeJsonAtomic(p/L"cross-account-warning-observations.json", crossAccount);
+            auto capped = loadJsonDocument(partialState);
+            for (int i = 0; i < 35; ++i) {
+                const auto name = L"Missing" + std::to_wstring(i);
+                const auto exe = partialRoot/L"Games"/name/(name+L".exe");
+                capped["accounts"]["1002"]["entries"][keyFor(exe)] = normalizeGameRule(toUtf8(exe.wstring()));
+            }
+            writeJsonAtomic(partialState, capped);
+            const auto cappedBefore = readBinaryFile(partialState);
+            partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);
+            const auto cappedNotice = partialA["ymccWhitelistPublication"];
+            check(cappedNotice["unconfirmedEntryCount"] == 38 &&
+                cappedNotice["unconfirmedMembership"]["entries"].size() == 32 &&
+                cappedNotice["unconfirmedMembership"]["complete"] == false &&
+                fileText(partialRules) == published && readBinaryFile(partialState) == cappedBefore,
+                "Bounded diagnostic lost count or changed rules/ownership");
+            writeJsonAtomic(p/L"capped-warning-observations.json", cappedNotice);
+            writeAtomic(partialState, savedState);
+            partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);
+            check(partialA["ymccWhitelistPublication"]["unconfirmedEntryCount"] == 2 &&
+                partialA["ymccWhitelistPublication"]["unconfirmedMembership"]["entries"].size() == 2 &&
+                partialA["ymccWhitelistPublication"]["unconfirmedMembership"]["complete"] == true &&
+                fileText(partialRules) == published,
+                "A prior truncated diagnostic survived a smaller observation");
+            check(loadJsonDocument(partialState)["vendorExtension"]["retained"]==7,"Partial publication lost unknown membership fields");
+            partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);check(fileText(partialRules)==published,"Repeated partial publication duplicated confirmed rules");
+            withConfigReadDenied(peer,[&]{partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);check(fileText(partialRules)==published&&partialA["ymccWhitelistPublication"]["status"]=="warning","Unreadable peer bypassed original read protection");});
+            textFile(partialRules,"manual\n# BEGIN YMCC custom-steam-library managed rules\n");const auto broken=fileText(partialRules);partialA.erase("ymccMembershipAuthority");publishYmccGameWhitelist(partialA,partialData,false,partialRules);check(fileText(partialRules)==broken&&partialA["ymccWhitelistPublication"]["status"]=="warning","Partial publication bypassed ambiguous marker refusal");textFile(partialRules,published);
+            partialB.erase("ymccMembershipAuthority");partialB["shortcutsBeforeSha256"]=sha256(readBinaryFile(peer));partialB["items"]=json::array();publishYmccGameWhitelist(partialB,partialData,true,partialRules);
+            check(partialB["ymccWhitelistPublication"]["status"]!="warning"&&fileText(partialRules).find("beta")==std::string::npos&&fileText(partialRules).find("gamma")!=std::string::npos&&fileText(partialRules).starts_with("manual-user-rule\r\n"),"Explicit complete peer recovery did not converge without losing current/manual rules");
+            writeJsonAtomic(p/L"partial-publication-recovery.json",{{"publication",partialB["ymccWhitelistPublication"]},{"rules",fileText(partialRules)}});
+
+        });
         for(const auto* change:{"wrong-account","wrong-executable","old-hash","future-schema"})run((std::string("txstorm-membership-reject-")+change).c_str(),[=](const fs::path& p){const auto data=p/L"data",rules=p/L"rules.txt";textFile(rules,"manual-user-rule\n");auto event=membershipEvent(p,"19627","Alpha");const std::string kind=change;if(kind=="wrong-account")event["accountId"]="99999";if(kind=="wrong-executable")event["items"][0]["primaryExecutable"]=toUtf8((p/L"NotInSteam.exe").wstring());if(kind=="old-hash")event["shortcutsBeforeSha256"]=std::string(64,'0');if(kind=="future-schema")event["schemaVersion"]=999;publishYmccGameWhitelist(event,data,true,rules);check(event["ymccWhitelistPublication"]["status"]=="warning"&&fileText(rules)=="manual-user-rule\n","Unverified membership event published rules");check(!fs::exists(data/L"state"/L"ymcc-game-whitelist-membership.json"),"Unverified event fabricated persisted ownership");});
         run("txstorm-membership-corrupt-state-retained-and-valid-repair-retries",[=](const fs::path& p){const auto data=p/L"data",rules=p/L"rules.txt",state=data/L"state"/L"ymcc-game-whitelist-membership.json";textFile(rules,"manual-user-rule\n");auto seed=membershipEvent(p,"19627","Alpha");publishYmccGameWhitelist(seed,data,true,rules);const auto trusted=fileText(state),priorRules=fileText(rules);const std::string bad="{";textFile(state,bad);auto event=membershipEvent(p,"19627","Alpha");publishYmccGameWhitelist(event,data,true,rules);check(fileText(state)==bad&&fileText(rules)==priorRules&&event["ymccWhitelistPublication"]["status"]=="warning","Corrupt membership became confirmed ownership");writeJsonAtomic(p/L"saved-bad-membership.json",{{"originalBytes",bad}});textFile(state,trusted);event.erase("ymccMembershipAuthority");publishYmccGameWhitelist(event,data,true,rules);check(fileText(rules).find("alpha")!=std::string::npos,"Explicit verified state repair could not retry");});
         run("txstorm-membership-rules-io-failure-is-warning-and-retry",[=](const fs::path& p){const auto data=p/L"data",rules=p/L"rules.txt";textFile(rules,"manual-user-rule\n");auto event=membershipEvent(p,"19627","Alpha");selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return to==rules.wstring()?ERROR_WRITE_FAULT:ERROR_SUCCESS;};publishYmccGameWhitelist(event,data,true,rules);check(event["ymccWhitelistPublication"]["status"]=="warning"&&fileText(rules)=="manual-user-rule\n","Failed rules write claimed publication success");selftestMoveFault={};event.erase("ymccMembershipAuthority");publishYmccGameWhitelist(event,data,true,rules);check(fileText(rules).find("alpha")!=std::string::npos,"Durable membership did not retry the failed rules publication");});
@@ -753,6 +1099,27 @@ int wmain(int argc,wchar_t** argv) {
         run("txstorm-oversize-and-deep-pending-stay-unresolved",[=](const fs::path& p){Fixture f(p,true);const auto journal=createDebt(f);const auto original=readBinaryFile(f.target.path);for(const auto& bad:std::vector<std::string>{std::string((8u<<20)+1,'x'),std::string(512,'[')+"0"+std::string(512,']')}){textFile(journal,bad);cleanupInterruptedSteamTransactions(f.data);mustThrow([&]{requireResolvedSteamTransactions(f.data,f.target.path);});check(fileText(journal)==bad&&readBinaryFile(f.target.path)==original,"Oversize/deep debt was erased or applied");}});
 
         // Same original suite, selected only by --data-root-storm; no new registered ID.
+        for (const bool buildLayout : {false, true}) run(buildLayout ? "dataroot-startup-cli-build-layout" : "dataroot-startup-cli-packaged-layout", [&](const fs::path& p){
+            const auto lab=p/L"CustomSteamLibrary",data=lab/L"data";
+            auto debt=dataRootMigration(data,lab);debt["sources"]=json::array({toUtf8((lab/L"Steam大屏").wstring())});
+            writeJsonAtomic(data/L"state"/L"data-migration.json",debt);
+            auto config=defaultLibraryConfig();config["roots"]=json::array({toUtf8((p/L"MyGames").wstring())});writeJsonAtomic(data/L"config"/L"library-config.json",config);
+            const auto before=fileText(data/L"config"/L"library-config.json"),debtBefore=fileText(data/L"state"/L"data-migration.json");
+            const bool oldPorts=discoveryProducerPorts;discoveryProducerPorts=true;
+            SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());
+            std::vector<std::wstring> args{(buildLayout?lab/L"build"/L"SteamArtworkLab.exe":lab/L"SteamArtworkLab.exe").wstring(),L"--cleanup-interrupted-transactions",L"--expected-data-root",data.wstring()};
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+            const auto code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());discoveryProducerPorts=oldPorts;
+            check(code==0&&validDataRootManifest(readDataRootJournal(data/L"data-root.json",1u<<20),data),"Original startup CLI did not initialize selected root");
+            check(fileText(data/L"config"/L"library-config.json")==before&&fileText(data/L"state"/L"data-migration.json")==debtBefore,"Startup CLI changed existing settings/debt");
+        });
+        run("dataroot-startup-cli-selection-change-no-publication",[&](const fs::path& p){
+            const auto data=p/L"selected",foreign=p/L"changed";SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());
+            const bool oldPorts=discoveryProducerPorts;discoveryProducerPorts=true;
+            std::vector<std::wstring> args{(p/L"SteamArtworkLab.exe").wstring(),L"--cleanup-interrupted-transactions",L"--expected-data-root",foreign.wstring()};
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());const auto code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());discoveryProducerPorts=oldPorts;
+            check(code!=0&&!fs::exists(data)&&!fs::exists(foreign),"Changed root was initialized before expected-root validation");
+        });
         auto rootInit=[](const fs::path& data,const fs::path& lab){
             SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());
             return dataRootReady([&]{return initializeSteamBigPictureDataRoot(data,lab);});
@@ -836,7 +1203,170 @@ int wmain(int argc,wchar_t** argv) {
         run("txstorm-membership-revision-overflow-retains-debt",[&](const fs::path& p){namespace m=custom_steam_library::ymcc_whitelist;auto event=membershipSeed(p);auto state=loadJsonDocument(p/L"data"/L"state"/L"ymcc-game-whitelist-membership.json");state["accounts"]["19627"]["revision"]=(std::numeric_limits<uint64_t>::max)();const auto original=state;event.erase("ymccMembershipAuthority");event["mode"]="steam-library-delete-commit";event["committed"]=true;event["items"][0]["status"]="ready-to-delete";m::prepareLiveEvent(event,state,false);mustThrow([&]{m::applyPrepared(state,event,normalizeGameRule);});check(state==original,"Overflow rewrote ownership/debt");});
         run("txstorm-membership-large-legal-unknown-fields-roundtrip",[&](const fs::path& p){auto event=membershipSeed(p);const auto data=p/L"data",state=data/L"state"/L"ymcc-game-whitelist-membership.json",rules=p/L"rules.txt",target=fs::path(toWide(event["shortcutsVdf"].get<std::string>()));auto value=loadJsonDocument(state);auto doc=BinaryVdfDocument::parse(readBinaryFile(target));auto* shortcuts=vdfFindObject(doc.root(),"shortcuts");for(int i=0;i<1800;++i){const auto name="Game"+std::to_string(i);const auto exe=p/L"Games"/toWide(name)/(toWide(name)+L".exe");shortcuts->objectValue.push_back({std::to_string(i+1),steamShortcutNode(-1073000000+i,name,quotedSteamPath(exe),quotedSteamPath(exe.parent_path()),0)});value["accounts"]["19627"]["entries"][custom_steam_library::ymcc_whitelist::executableKey(toUtf8(exe.wstring()))]=normalizeGameRule(toUtf8(exe.wstring()));}writeAtomic(target,doc.serialize());event["shortcutsBeforeSha256"]=sha256(readBinaryFile(target));value["userNote"]=std::string(150000,'n');value["accounts"]["19627"]["unknownDebt"]={{"keep",true}};value["bindings"]["19627"]["extra"]={{"keep",true}};writeJsonAtomic(state,value);check(fileText(state).size()>300000&&fileText(state).size()<(1u<<20),"Large legal fixture size outside intended reader budget");event.erase("ymccMembershipAuthority");publishYmccGameWhitelist(event,data,false,rules);check(event["ymccWhitelistPublication"]["status"]!="warning","Large legal membership rejected");auto saved=loadJsonDocument(state);check(saved["userNote"]==value["userNote"]&&saved["accounts"]["19627"]["unknownDebt"]["keep"]==true&&saved["bindings"]["19627"]["extra"]["keep"]==true&&saved["accounts"]["19627"]["entries"].size()==1801,"Large membership lost entries or unknown fields");});
         check(!memberships||(!reports.empty()&&identityCallerNetwork==0&&identityCallerProcesses==0),"Membership selection empty or external port invoked");
-        run("identitycaller-valid-cache-through-header",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());const auto result=f.read();check(result&&(*result)["match"]["appId"]==555,"Valid cache did not reach actual caller");});
+        run("identitycaller-valid-cache-through-header",[](const fs::path& p){
+            IdentityCallerFixture f(p);f.save(f.record());const auto result=f.read();check(result&&(*result)["match"]["appId"]==555,"Valid cache did not reach actual caller");
+            textFile(f.executable,"owned existing game marker, never launched");
+            const auto directory=f.executable.parent_path(),statePath=f.data/L"state"/L"library-scan.json",planPath=f.data/L"state"/L"existing-plan.json";
+            writeJsonAtomic(statePath,{{"schemaVersion",1},{"games",json::array({{{"gameDirectory",toUtf8(directory.wstring())},{"directoryName","Resident Evil 2"},{"primaryExecutable",f.exe},{"primaryRole","main-game"},{"status","ready"}}})},{"missingGames",json::array()},{"unscannedGames",json::array()}});
+            const auto steam=p/L"Steam",vdf=steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";textFile(steam/L"steam.exe","owned fake Steam marker, never launched");
+            auto shortcut=BinaryVdfDocument::emptySteamShortcuts();vdfFindObject(shortcut.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Homeworld: Deserts of Kharak",quotedSteamPath(f.executable),quotedSteamPath(directory),0)});writeAtomic(vdf,shortcut.serialize());
+            const auto originalVdf=readBinaryFile(vdf);const SteamShortcutTarget target{vdf,"19627"};
+            auto match=IdentityCallerFixture::match(883710);match["formalName"]="Resident Evil 2";match["storefrontAppId"]=883710;match["score"]=0.99;
+            auto record=f.record(match);record["metadata"]={{"releaseDate","January 25, 2019"}};f.observation(match);f.save(record);
+            auto plan=[&](){return buildSteamLibraryAddPlan(f.data,statePath,target,planPath);};
+            auto assertMembership=[&](const json& value){check(value["items"].size()==1&&value["items"][0]["status"]=="already-in-steam"&&value["summary"]["alreadyInSteam"]==1&&value["summary"]["readyToAdd"]==0,"Identity enrichment changed existing shortcut membership");const auto& item=value["items"][0];check(item["storedAppId"]==-1073741823&&item["shortAppId"]=="3221225473"&&readBinaryFile(vdf)==originalVdf,"Identity enrichment changed existing shortcut ID/name/bytes");};
+            const auto cachedPlan=plan();writeJsonAtomic(p/L"existing-identity-cache-observed.json",cachedPlan);assertMembership(cachedPlan);
+            check(cachedPlan["items"][0].value("steamStoreAppId",0)==883710&&cachedPlan["items"][0].value("formalName",std::string{})=="Resident Evil 2"&&cachedPlan["items"][0].value("steamVerificationStatus",std::string{})=="steam-verified","Already-in-Steam plan dropped verified cache identity");
+            check(cachedPlan["items"][0]["steamShortcutName"]=="Homeworld: Deserts of Kharak"&&cachedPlan["items"][0]["releaseYear"]==2019,"Existing shortcut provenance or verified release metadata lost");
+            const auto direct=f.data/L"artwork"/toWide(gameDataId(directory))/L"manifest.json";auto directMatch=match;directMatch["formalName"]="Verified manifest title";writeJsonAtomic(direct,{{"exe",f.exe},{"match",directMatch},{"artwork",json::array()}});
+            const auto directPlan=plan();assertMembership(directPlan);check(directPlan["items"][0]["formalName"]=="Verified manifest title"&&directPlan["items"][0]["identitySource"]=="portable-artwork-manifest","Valid current manifest did not retain precedence over cache");
+            const auto overrides=f.data/L"config"/L"manual-overrides.json";writeJsonAtomic(overrides,{{"items",{{canonicalPathKey(f.executable),{{"idCleared",true},{"name","User custom label"}}}}}});
+            const auto cleared=plan();assertMembership(cleared);check(!cleared["items"][0].contains("steamStoreAppId")&&cleared["items"][0]["formalName"]=="Homeworld: Deserts of Kharak","Existing shortcut repopulated explicitly cleared Steam ID");
+            writeJsonAtomic(overrides,{{"items",json::object()}});fs::remove(direct);
+            for(const auto* kind:{"candidate","future","different-exe","missing"}){
+                auto invalid=record;const std::string k=kind;if(k=="candidate"){invalid["match"]["identityStatus"]="candidate";invalid["match"]["steamVerificationStatus"]="candidate";}if(k=="future")invalid["schemaVersion"]=99;if(k=="different-exe")invalid["executable"]=toUtf8((p/L"Different.exe").wstring());
+                if(k=="missing")fs::remove(custom_steam_library::ioPath(f.cache));else f.save(invalid);const auto beforeCache=custom_steam_library::identity_cache::readSnapshot(f.cache);
+                const auto fallback=plan();assertMembership(fallback);check(!fallback["items"][0].contains("steamStoreAppId")&&fallback["items"][0]["formalName"]=="Homeworld: Deserts of Kharak","Unverified/mismatched cache minted existing game's store ID");
+                const auto afterCache=custom_steam_library::identity_cache::readSnapshot(f.cache);
+                writeJsonAtomic(p/toWide("identity-cache-preservation-"+k+".json"),{{"case",k},{"pathChars",f.cache.wstring().size()},{"plainExists",fs::exists(f.cache)},{"beforeExists",beforeCache.exists},{"afterExists",afterCache.exists},{"beforeBytes",beforeCache.bytes.size()},{"afterBytes",afterCache.bytes.size()},{"sameSnapshot",custom_steam_library::identity_cache::sameSnapshot(beforeCache,afterCache)}});
+                check(custom_steam_library::identity_cache::sameSnapshot(beforeCache,afterCache),"Read-only enrichment rewrote a protected identity cache");
+            }
+            f.save(record);const auto recovered=plan();assertMembership(recovered);check(recovered["items"][0].value("steamStoreAppId",0)==883710,"Valid later identity could not recover an existing shortcut");
+            writeJsonAtomic(p/L"existing-identity-recovered.json",recovered);
+            // An explicit new ID supersedes conflicting manifests and caches.
+            const auto emptyVdf=steam/L"userdata"/L"26347"/L"config"/L"shortcuts.vdf";writeAtomic(emptyVdf,BinaryVdfDocument::emptySteamShortcuts().serialize());
+            const SteamShortcutTarget emptyTarget{emptyVdf,"26347"};json manualObserved=json::array();bool manualSafe=true;
+            for(const auto* variant:{"both-conflict","cache-current","manifest-current","numeric-string","explicit-content","name-only"}){
+                const std::string kind=variant;auto oldMatch=match;oldMatch["appId"]=883710;oldMatch["storefrontAppId"]=883710;
+                auto newMatch=match;newMatch["appId"]=620;newMatch["storefrontAppId"]=620;newMatch["formalName"]="New selected identity";
+                auto manifestMatch=(kind=="manifest-current"||kind=="numeric-string"||kind=="explicit-content")?newMatch:oldMatch;
+                auto cacheMatch=kind=="cache-current"?newMatch:oldMatch;
+                json manual={{"steamId",620},{"name","Custom user label"}};
+                if(kind=="numeric-string")manual["steamId"]="620";
+                if(kind=="explicit-content"){manual["steamId"]=700;manifestMatch["matchedContentAppId"]=700;manifestMatch["baseGameAppId"]=620;manifestMatch["contentRelation"]="explicit-dlc";manifestMatch["identityKind"]="steam-base-game-with-explicit-content";}
+                if(kind=="name-only")manual.erase("steamId");
+                const int expected=kind=="both-conflict"?0:kind=="name-only"?883710:620;
+                writeJsonAtomic(overrides,{{"items",{{canonicalPathKey(f.executable),manual}}}});
+                writeJsonAtomic(direct,{{"exe",f.exe},{"match",manifestMatch},{"metadata",{{"releaseDate","January 1, 1999"}}},{"artwork",json::array()}});
+                f.observation(cacheMatch);f.save(f.record(cacheMatch));const auto overrideBefore=readBinaryFile(overrides),manifestBefore=readBinaryFile(direct);
+                for(bool owned:{true,false}){
+                    const auto value=buildSteamLibraryAddPlan(f.data,statePath,owned?target:emptyTarget,planPath);const auto& item=value["items"][0];
+                    const bool correct=positiveJsonInt(item,"steamStoreAppId")==expected;
+                    const bool preserved=readBinaryFile(vdf)==originalVdf&&readBinaryFile(overrides)==overrideBefore&&readBinaryFile(direct)==manifestBefore;
+                    const bool membership=owned?(item["status"]=="already-in-steam"&&value["summary"]["readyToAdd"]==0):item["status"]!="already-in-steam";
+                    manualObserved.push_back({{"variant",kind},{"owned",owned},{"expectedAppId",expected},{"item",item},{"identityCorrect",correct},{"inputsPreserved",preserved},{"membershipPreserved",membership}});manualSafe=manualSafe&&correct&&preserved&&membership;
+                }
+            }
+            writeJsonAtomic(p/L"manual-selection-worker-observed.json",manualObserved);
+            check(manualObserved.size()==12&&manualSafe,"Plan reused identity conflicting with selected Steam ID");
+
+            json igdbObserved=json::array();bool igdbSafe=true;
+            for(const auto* variant:{"conflicting-steam","matching-igdb-manifest","matching-steam-igdb","mismatching-igdb"}){
+                const std::string kind=variant;auto old=match;old["appId"]=883710;old["storefrontAppId"]=883710;old.erase("igdbId");
+                auto chosen=old;chosen["igdbId"]=kind=="mismatching-igdb"?73:72;chosen["formalName"]="Selected metadata title";
+                if(kind!="matching-steam-igdb"){chosen["appId"]=0;chosen["storefrontAppId"]=nullptr;chosen["primaryProvider"]="playnite-igdb";chosen["identityStatus"]="metadata-verified";chosen["metadataVerificationStatus"]="metadata-verified";chosen["steamVerificationStatus"]="not-available";}
+                const auto observed=kind=="conflicting-steam"?old:chosen;json manual={{"igdbId",72},{"name","Selected metadata title"}};
+                writeJsonAtomic(overrides,{{"items",{{canonicalPathKey(f.executable),manual}}}});
+                writeJsonAtomic(direct,{{"exe",f.exe},{"match",observed},{"artwork",json::array()}});f.observation(old);f.save(f.record(old));
+                const auto sourceBefore=readBinaryFile(direct),manualBefore=readBinaryFile(overrides),cacheBefore=readBinaryFile(f.cache);
+                for(bool owned:{true,false}){
+                    const auto value=buildSteamLibraryAddPlan(f.data,statePath,owned?target:emptyTarget,planPath);const auto& item=value["items"][0];
+                    const int expected=kind=="matching-steam-igdb"?883710:0;
+                    const bool identity=positiveJsonInt(item,"steamStoreAppId")==expected;
+                    const bool metadata=owned||kind!="matching-igdb-manifest"||(positiveJsonInt(item,"igdbId")==72&&jsonStringOr(item,"formalName")=="Selected metadata title");
+                    const bool preserved=readBinaryFile(vdf)==originalVdf&&readBinaryFile(direct)==sourceBefore&&readBinaryFile(overrides)==manualBefore&&readBinaryFile(f.cache)==cacheBefore;
+                    const bool membership=owned?item["status"]=="already-in-steam":item["status"]!="already-in-steam";
+                    igdbObserved.push_back({{"variant",kind},{"owned",owned},{"item",item},{"identityCorrect",identity},{"metadataCorrect",metadata},{"inputsPreserved",preserved},{"membershipPreserved",membership},{"passed",identity&&metadata&&preserved&&membership}});igdbSafe=igdbSafe&&identity&&metadata&&preserved&&membership;
+                }
+            }
+            json bindings=json::array();auto bind=[&](const char* name,json m,json selected,bool expected){const bool actual=custom_steam_library::steamIdentityMatchesManualSelection(m,selected);bindings.push_back({{"name",name},{"expected",expected},{"actual",actual},{"passed",actual==expected}});igdbSafe=igdbSafe&&(actual==expected);};
+            bind("numeric-string",{{"igdbId",72}},{{"igdbId","72"}},true);
+            bind("negative",{{"igdbId",72}},{{"igdbId",-1}},false);
+            bind("boolean",{{"igdbId",72}},{{"igdbId",true}},false);
+            bind("signed-string",{{"igdbId",72}},{{"igdbId","+72"}},false);
+            bind("overflow-string",{{"igdbId",72}},{{"igdbId","18446744073709551688"}},false);
+            bind("int64-max",{{"igdbId",uint64_t{9223372036854775807ULL}}},{{"igdbId","9223372036854775807"}},true);
+            bind("bad-match-type",{{"igdbId",true}},{{"igdbId",72}},false);
+            bind("steam-choice-precedence",{{"appId",620},{"igdbId",73}},{{"steamId",620},{"igdbId",72}},true);
+            writeJsonAtomic(p/L"igdb-selection-worker-observed.json",{{"rows",igdbObserved},{"bindings",bindings}});
+            check(igdbSafe,"Worker plan reused identity conflicting with selected IGDB ID");
+            // Exercise the actual CLI writer, then its persisted reader after
+            // a failed offline recognition. These are owned, never-run EXEs.
+            struct ClearCliPorts { bool previous=discoveryProducerPorts; ClearCliPorts(){discoveryProducerPorts=true;} ~ClearCliPorts(){discoveryProducerPorts=previous;} } clearCliPorts;
+            DiscoveryProducerFixture clear(p/L"clear-cli");
+            const auto overridesPath=clear.data/L"config"/L"manual-overrides.json";
+            const auto clearKey=canonicalPathKey(clear.exe);
+            textFile(clear.exe.parent_path()/L"steam_appid.txt","4285170");
+            json observations=json::array();bool durable=true;
+            for(const auto* variant:{"absent","empty","ids-no-name","named","artwork-no-name"}){
+                const std::string kind=variant;
+                json item=json::object();
+                if(kind=="ids-no-name"||kind=="named")item={{"steamId",4285170},{"storefrontSteamId",4285170},{"igdbId",72},{"formalName","Wrong historical identity"},{"identityStatus","verified"},{"retryable",true},{"lastError","old failure"},{"attempts",3}};
+                if(kind=="named")item["name"]="User custom title";
+                if(kind=="artwork-no-name")item={{"cover",{{"file","owned-cover.png"},{"provider","user"}}},{"wallpaper",{{"file","owned-video.mp4"},{"provider","user"}}},{"userExtension",{{"keep",true}}}};
+                json items={{"unrelated.exe",{{"name","Other game"},{"steamId",620},{"userExtension","keep"}}}};
+                if(kind!="absent")items[clearKey]=item;
+                writeJsonAtomic(overridesPath,{{"schemaVersion",1},{"items",items},{"userRootExtension","keep"}});
+                auto expected=item;
+                for(const auto* field:{"steamId","storefrontSteamId","igdbId","formalName","identityStatus","retryable","lastError","attempts"})expected.erase(field);
+                expected["idCleared"]=true;
+                for(int step=0;step<3;++step){
+                    const auto output=p/L"clear-cli"/toWide(kind+"-"+std::to_string(step));
+                    std::vector<std::wstring> args{clear.exe.wstring(),L"--steam-identity-only",L"--fault-provider",L"steam",output.wstring()};
+                    if(step<2)args.push_back(L"--clear-id");
+                    const auto code=clear.call(args);const auto stored=loadManualOverrides(overridesPath);
+                    auto actual=stored["items"].value(clearKey,json::object());actual.erase("updatedAt");
+                    const auto failure=loadJsonDocument(output/L"rounds-failed.json");
+                    const bool saved=actual==expected;
+                    const bool suppressed=failure.contains("localSteamIdentity")&&failure["localSteamIdentity"]["selectedAppId"].is_null()&&clear.output.find("LOCAL_STEAM_APPID_CANDIDATE:")==std::string::npos;
+                    const bool preserved=stored["items"]["unrelated.exe"]==items["unrelated.exe"]&&stored["userRootExtension"]=="keep";
+                    const bool failedOffline=code!=0&&failure.contains("steam")&&!failure["steam"].empty()&&failure["steam"][0]["status"]=="injected-failure";
+                    observations.push_back({{"variant",kind},{"step",step},{"operation",step<2?"clear-id":"subsequent-offline-read"},{"exitCode",code},{"actual",actual},{"expected",expected},{"durableClear",saved},{"localCandidateSuppressed",suppressed},{"unrelatedPreserved",preserved},{"offlineFailureObserved",failedOffline}});
+                    durable=durable&&saved&&suppressed&&preserved&&failedOffline;
+                }
+            }
+            writeJsonAtomic(p/L"clear-id-cli-observations.json",observations);
+            check(observations.size()==15&&clear.callCount==15,"Actual clear-id CLI selection did not execute the exact fifteen operations");
+            check(durable,"Worker clear-id lost durable opt-out or unrelated saved fields");
+            {
+                DiscoveryProducerFixture stored(p/L"persisted-choice-cli");
+                const auto config=stored.data/L"config"/L"manual-overrides.json";const auto key=canonicalPathKey(stored.exe);
+                json savedRows=json::array();bool savedSafe=true;
+                for(const auto* variant:{"saved-igdb","saved-igdb-reopen","saved-igdb-string","saved-steam-priority","saved-steam-string","explicit-igdb","explicit-steam","ignore-saved","cleared-saved","igdb-int64-max","igdb-overflow-string","name-only"}){
+                    const std::string kind=variant;json choice={{"igdbId",72},{"name","Saved metadata choice"},{"userNote","keep"}};
+                    std::string expectedSteam,expectedIgdb="72",source="manual-id-persisted",injected="Playnite IGDB provider failure was injected";
+                    if(kind=="saved-igdb-string")choice["igdbId"]="00072";
+                    if(kind=="saved-steam-priority"||kind=="saved-steam-string"){choice["steamId"]=kind=="saved-steam-string"?json("00620"):json(620);expectedSteam="620";expectedIgdb.clear();injected="Steam provider failure was injected";}
+                    if(kind=="explicit-igdb"){expectedIgdb="73";source="manual-id-one-shot";}
+                    if(kind=="explicit-steam"){expectedSteam="620";expectedIgdb.clear();source="manual-id-one-shot";injected="Steam provider failure was injected";}
+                    if(kind=="ignore-saved"||kind=="cleared-saved"||kind=="name-only"||kind=="igdb-overflow-string"){expectedIgdb.clear();source.clear();injected.clear();}
+                    if(kind=="cleared-saved")choice["idCleared"]=true;
+                    if(kind=="name-only")choice.erase("igdbId");
+                    if(kind=="igdb-int64-max"){choice["igdbId"]=uint64_t{9223372036854775807ULL};expectedIgdb="9223372036854775807";}
+                    if(kind=="igdb-overflow-string")choice["igdbId"]="18446744073709551688";
+                    if(kind!="saved-igdb-reopen")writeJsonAtomic(config,{{"schemaVersion",1},{"items",{{key,choice},{"unrelated.exe",{{"steamId",620},{"note","preserve"}}}}},{"rootNote","preserve"}});
+                    const auto configBefore=readBinaryFile(config),exeBefore=readBinaryFile(stored.exe),steamBefore=readBinaryFile(stored.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");
+                    const auto output=stored.root/toWide("output-"+kind);
+                    std::vector<std::wstring> args{stored.exe.wstring(),L"--metadata-only",L"--fault-provider",L"steam",L"--fault-provider",L"playnite-igdb"};
+                    if(kind=="explicit-igdb")args.insert(args.end(),{L"--igdb-id",L"73"});
+                    if(kind=="explicit-steam")args.insert(args.end(),{L"--steam-id",L"620"});
+                    if(kind=="ignore-saved")args.push_back(L"--ignore-saved-id");
+                    args.push_back(output.wstring());const auto code=stored.call(args);
+                    const auto expectedLine=[&](const char* prefix,const std::string& id){return std::string(prefix)+id+" ("+source+")";};
+                    const bool steamCorrect=expectedSteam.empty()?stored.output.find("MANUAL_STEAM_ID:")==std::string::npos:stored.output.find(expectedLine("MANUAL_STEAM_ID: ",expectedSteam))!=std::string::npos;
+                    const bool igdbCorrect=expectedIgdb.empty()?stored.output.find("MANUAL_IGDB_ID:")==std::string::npos:stored.output.find(expectedLine("MANUAL_IGDB_ID: ",expectedIgdb))!=std::string::npos;
+                    const bool route=injected.empty()||stored.error.find(injected)!=std::string::npos||stored.output.find(injected)!=std::string::npos;
+                    const bool preserved=readBinaryFile(config)==configBefore&&readBinaryFile(stored.exe)==exeBefore&&readBinaryFile(stored.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf")==steamBefore;
+                    const bool isolated=identityCallerNetwork==0&&identityCallerProcesses==0&&discoveryProducerPriorityWrites==0&&discoveryProducerDriveDiscovery==0;
+                    savedRows.push_back({{"variant",kind},{"expectedSteam",expectedSteam},{"expectedIgdb",expectedIgdb},{"source",source},{"exitCode",code},{"stdout",stored.output},{"stderr",stored.error},{"steamCorrect",steamCorrect},{"igdbCorrect",igdbCorrect},{"directProviderRoute",route},{"savedInputsPreserved",preserved},{"isolated",isolated},{"passed",steamCorrect&&igdbCorrect&&route&&preserved&&isolated}});
+                    savedSafe=savedSafe&&steamCorrect&&igdbCorrect&&route&&preserved&&isolated;
+                }
+                writeJsonAtomic(p/L"persisted-choice-observed.json",{{"rows",savedRows},{"calls",stored.callCount}});
+                check(savedRows.size()==12&&stored.callCount==12,"Saved identity selection did not execute exactly twelve original CLI operations");
+                check(savedSafe,"Ordinary Worker recognition ignored saved explicit identity choice");
+            }
+
+        });
         run("identitycaller-legacy-complete-without-pointer",[](const fs::path& p){IdentityCallerFixture f(p);auto value=f.record();value.erase("manifestPath");value.erase("schemaVersion");f.save(value);check(f.read().has_value(),"Legacy complete verified cache lost");});
         run("identitycaller-future-cache-no-manifest-follow",[](const fs::path& p){IdentityCallerFixture f(p);auto value=f.record();value["schemaVersion"]=99;value["match"]=json::object();f.save(value);const auto raw=fileText(f.cache);check(!f.read()&&!f.observed(f.manifest),"Future cache followed authority pointer");check(fileText(f.cache)==raw,"Caller changed future original");});
         run("identitycaller-decoded-duplicate-cache-rejected",[](const fs::path& p){IdentityCallerFixture f(p);const auto record=f.record();auto raw=record.dump();raw.pop_back();raw+=",\"\\u006datc\\u0068\":"+IdentityCallerFixture::match().dump()+"}";textFile(f.cache,raw);check(!f.read()&&!f.observed(f.manifest),"Decoded duplicate authority promoted");check(fileText(f.cache)==raw,"Duplicate original changed");});
@@ -851,7 +1381,35 @@ int wmain(int argc,wchar_t** argv) {
         run("identitycaller-manifest-match-binding",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());f.observation(IdentityCallerFixture::match(777));check(!f.read(),"Changed manifest identity borrowed");});
         run("identitycaller-future-manifest-not-consumed",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());auto value=loadJsonDocument(f.manifest);value["schemaVersion"]=99;writeJsonAtomic(f.manifest,value);const auto raw=fileText(f.manifest);check(!f.read()&&fileText(f.manifest)==raw,"Future manifest accepted or changed");});
         run("identitycaller-decoded-duplicate-manifest",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());auto raw=loadJsonDocument(f.manifest).dump();raw.pop_back();raw+=",\"\\u0065xe\":"+json(f.exe).dump()+"}";textFile(f.manifest,raw);check(!f.read(),"Decoded duplicate manifest binding accepted");});
-        run("identitycaller-complete-cache-survives-cleaned-job",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());fs::remove(f.manifest);check(f.read().has_value(),"Historical optional job pointer invalidated complete cache");});
+        run("identitycaller-complete-cache-survives-cleaned-job",[](const fs::path& p){
+            json rows=json::array();bool passed=true;
+            const auto record=[&](const char* variant,bool expected,bool actual,bool unchanged){const bool ok=expected==actual&&unchanged;rows.push_back({{"variant",variant},{"expected",expected},{"actual",actual},{"unchanged",unchanged},{"passed",ok}});passed=passed&&ok;};
+            for(const auto* variant:{"legacy","schema1","schema2","missing","future","negative","float","string","boolean","null","foreign-schema","cache-tagged-worker","cache-version2","wrong-target","wrong-match","wrong-metadata","unverified-match","unknown-cache"}){
+                IdentityCallerFixture f(p/toWide(variant));auto cache=f.record();auto manifest=loadJsonDocument(f.manifest);const std::string mode=variant;bool expected=mode=="legacy"||mode=="schema1"||mode=="schema2"||mode=="missing";
+                if(mode!="legacy"&&mode!="missing")manifest["schemaVersion"]=2;
+                if(mode=="schema1")manifest["schemaVersion"]=1;
+                if(mode=="future")manifest["schemaVersion"]=3;
+                if(mode=="negative")manifest["schemaVersion"]=-1;
+                if(mode=="float")manifest["schemaVersion"]=2.0;
+                if(mode=="string")manifest["schemaVersion"]="2";
+                if(mode=="boolean")manifest["schemaVersion"]=true;
+                if(mode=="null")manifest["schemaVersion"]=nullptr;
+                if(mode=="foreign-schema")manifest["schema"]="external.schema";
+                if(mode=="cache-tagged-worker")manifest["schema"]="ymcc.library-identity-cache.v1";
+                if(mode=="cache-version2")cache["schemaVersion"]=2;
+                if(mode=="wrong-target")manifest["exe"]=f.exe+".other";
+                if(mode=="wrong-match")manifest["match"]=IdentityCallerFixture::match(777);
+                if(mode=="wrong-metadata")manifest["metadata"]=json::array();
+                if(mode=="unverified-match"){manifest["match"]["steamVerificationStatus"]="not-available";cache["match"]=manifest["match"];}
+                if(mode=="unknown-cache")cache["match"]=json::object();
+                f.save(cache);writeJsonAtomic(f.manifest,manifest);if(mode=="missing")fs::remove(f.manifest);
+                const auto beforeCache=fileText(f.cache);const auto beforeManifest=fs::exists(f.manifest)?fileText(f.manifest):std::string{};const bool actual=f.read().has_value();
+                record(variant,expected,actual,fileText(f.cache)==beforeCache&&(!fs::exists(f.manifest)||fileText(f.manifest)==beforeManifest));
+            }
+            /* PRIVATE_REAL_CAPTURE */
+            writeJsonAtomic(p/L"manifest-schema-observed.json",{{"variants",rows},{"networkCalls",identityCallerNetwork},{"processCalls",identityCallerProcesses}});
+            check(passed,"Worker manifest schema2 is not reusable through the real cached identity caller");
+        });
         run("identitycaller-read-denied-then-valid-observation",[](const fs::path& p){IdentityCallerFixture f(p);f.save(f.record());const auto raw=fileText(f.cache);withConfigReadDenied(f.cache,[&]{check(!f.read(),"Denied cache reached identity");});check(fileText(f.cache)==raw,"Denied cache original changed");f.fresh();check(f.read().has_value(),"Valid observation after denial did not recover");});
         run("identitycaller-corrupt-to-real-store-commit-to-caller",[](const fs::path& p){IdentityCallerFixture f(p);const std::string raw="{owned bad";textFile(f.cache,raw);check(!f.read(),"Corrupt cache reached caller");f.fresh();check(f.read().has_value(),"Header commit not consumed by actual caller");bool preserved=false;for(const auto& entry:fs::directory_iterator(f.cache.parent_path()))if(entry.is_regular_file()&&entry.path()!=f.cache&&fileText(entry.path())==raw)preserved=true;check(preserved,"Legal observation lost bad original");});
         run("identitycaller-future-explicit-quarantine-then-observation",[](const fs::path& p){IdentityCallerFixture f(p);auto value=f.record();value["schemaVersion"]=99;f.save(value);const auto raw=fileText(f.cache);check(!f.read(),"Future root consumed");const auto retained=p/L"future-original.json";fs::rename(custom_steam_library::ioPath(f.cache),custom_steam_library::ioPath(retained));f.fresh();check(f.read().has_value()&&fileText(retained)==raw,"Explicit valid repair did not preserve original");});
@@ -980,18 +1538,400 @@ int wmain(int argc,wchar_t** argv) {
         run("discovery-restored-backup-not-complete-authority",[&](const fs::path& p){Fixture f(p,true);const auto path=f.data/L"state"/L"library-scan.json",rules=p/L"rules.txt";auto event=membershipEvent(p,"19627","Alpha");publishYmccGameWhitelist(event,f.data,true,rules);const auto member=f.data/L"state"/L"ymcc-game-whitelist-membership.json";const auto beforeEntries=loadJsonDocument(member)["accounts"]["19627"]["entries"];check(beforeEntries.size()==1,"Live ownership fixture not created");textFile(path,"damaged scan JSON");const json emptyComplete={{"schemaVersion",1},{"games",json::array()},{"roots",json::array()},{"missingGames",json::array()},{"unscannedGames",json::array()},{"futureUnknown",{{"keep",true}}}};writeJsonAtomic(fs::path(path.wstring()+L".bak"),emptyComplete);for(int attempt=0;attempt<2;++attempt){const auto plan=buildSteamLibraryAddPlan(f.data,path,f.target,f.planFile);check(plan.value("planWriteConfirmed",false),"Verified repaired discovery plan did not remain available");check(loadJsonDocument(member)["accounts"]["19627"]["entries"]==beforeEntries,"Recovered old empty inventory cleared current membership");}check(loadLibraryScanState(path)["futureUnknown"]["keep"]==true,"Backup unknown fields lost");writeJsonAtomic(path,emptyComplete);const auto fresh=buildSteamLibraryAddPlan(f.data,path,f.target,f.planFile);check(fresh.value("planWriteConfirmed",false)&&loadJsonDocument(member)["accounts"]["19627"]["entries"].empty(),"Fresh explicit complete inventory could not release owned membership");});
         for(const auto* kind:{"future","duplicate","bad-type","candidate-container","escaped-nul"})run((std::string("discovery-producer-mapping-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);auto doc=f.catalog();const std::string k=kind;std::string raw;if(k=="future")doc["schemaVersion"]=99;if(k=="bad-type")doc["games"][0]["nativeSteamAppId"]="wrong";if(k=="candidate-container")doc["games"][0]["candidates"]={{"alias",{{"path",toUtf8(f.exe.wstring())}}}};if(k=="escaped-nul")doc["games"][0]["gameDirectory"]=toUtf8(f.exe.parent_path().parent_path().wstring())+std::string(1,'\0')+"tail";raw=doc.dump();if(k=="duplicate")raw.insert(1,"\"schemaVersion\":99,");textFile(f.scan,raw);bool source=true;const auto mapped=persistentGameDirectoryForExecutable(f.data,f.exe,&source);check(!source&&canonicalPathKey(mapped)==canonicalPathKey(f.exe.parent_path()),"Unknown raw scan invented a verified game directory");check(fileText(f.scan)==raw,"Mapping rewrote unknown original");writeJsonAtomic(f.scan,f.catalog());source=false;check(canonicalPathKey(persistentGameDirectoryForExecutable(f.data,f.exe,&source))==canonicalPathKey(f.exe.parent_path().parent_path())&&source,"Valid explicit mapping repair failed");});
         run("discovery-producer-mapping-lock-release",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());writeJsonAtomic(fs::path(f.scan.wstring()+L".bak"),f.catalog());HANDLE h=CreateFileW(f.scan.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);check(h!=INVALID_HANDLE_VALUE,"Owned mapping lock failed");bool source=true;const auto mapped=persistentGameDirectoryForExecutable(f.data,f.exe,&source);CloseHandle(h);check(!source&&canonicalPathKey(mapped)==canonicalPathKey(f.exe.parent_path()),"IO fault became known cached mapping");check(!persistentGameDirectoryForExecutable(f.data,f.exe,&source).empty()&&source,"Mapping lock release not retried");});
-        for(const auto* kind:{"future","schema-type","recovery-future"})run((std::string("discovery-producer-scan-protect-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);auto doc=f.catalog();const std::string k=kind;if(k=="future")doc["schemaVersion"]=99;if(k=="schema-type")doc["schemaVersion"]="1";if(k=="recovery-future")doc["libraryScanRecovery"]={{"schemaVersion",99},{"requiresFreshScan",true}};writeJsonAtomic(f.scan,doc);const auto raw=fileText(f.scan);const auto code=f.fresh();check(code==0&&!f.scanAck()&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos&&fileText(f.scan)==raw,"Fresh scan overwrote protected previous state or ACKed it");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Protected scan did not retry after valid repair");});
-        for(const auto* kind:{"lock","acl","directory"})run((std::string("discovery-producer-scan-io-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);const std::string k=kind;if(k=="directory")fs::create_directories(f.scan);else writeJsonAtomic(f.scan,f.catalog());std::string raw=k=="directory"?"":fileText(f.scan);int code=-1;if(k=="lock"){HANDLE h=CreateFileW(f.scan.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(h!=INVALID_HANDLE_VALUE,"Owned scan lock failed");code=f.fresh();CloseHandle(h);}else if(k=="acl")withConfigReadDenied(f.scan,[&]{code=f.fresh();});else code=f.fresh();check(code==0&&!f.scanAck()&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos,"Previous read fault crashed/ACKed fresh producer");if(k=="directory"){check(fs::is_directory(f.scan),"Nonfile original deleted");fs::remove(f.scan);}else check(fileText(f.scan)==raw,"Unreadable original changed");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Released scan IO did not recover");});
+        for(const auto* kind:{"future","schema-type","recovery-future"})run((std::string("discovery-producer-scan-protect-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);auto doc=f.catalog();const std::string k=kind;if(k=="future")doc["schemaVersion"]=99;if(k=="schema-type")doc["schemaVersion"]="1";if(k=="recovery-future")doc["libraryScanRecovery"]={{"schemaVersion",99},{"requiresFreshScan",true}};writeJsonAtomic(f.scan,doc);const auto raw=fileText(f.scan);const auto code=f.fresh();check(code==2&&!f.scanAck()&&f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos&&fileText(f.scan)==raw,"Unconfirmed scan CLI returned success or lost protected original");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Protected scan did not retry after valid repair");});
+        for(const auto* kind:{"lock","acl","directory"})run((std::string("discovery-producer-scan-io-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);const std::string k=kind;if(k=="directory")fs::create_directories(f.scan);else writeJsonAtomic(f.scan,f.catalog());std::string raw=k=="directory"?"":fileText(f.scan);int code=-1;if(k=="lock"){HANDLE h=CreateFileW(f.scan.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(h!=INVALID_HANDLE_VALUE,"Owned scan lock failed");code=f.fresh();CloseHandle(h);}else if(k=="acl")withConfigReadDenied(f.scan,[&]{code=f.fresh();});else code=f.fresh();check(code==2&&!f.scanAck()&&f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos,"Unconfirmed scan CLI returned success or ACKed unreadable previous state");if(k=="directory"){check(fs::is_directory(f.scan),"Nonfile original deleted");fs::remove(f.scan);}else check(fileText(f.scan)==raw,"Unreadable original changed");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Released scan IO did not recover");});
         for(const auto* kind:{"truncated","duplicate"})run((std::string("discovery-producer-scan-damaged-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);const std::string raw=std::string(kind)=="truncated"?"{broken scan":"{\"games\":[],\"games\":[]}";textFile(f.scan,raw);check(f.fresh()==0&&f.scanAck(),"Explicit scan could not conservatively rebuild readable damage");const auto doc=loadJsonDocument(f.scan);check(doc["libraryScanRecovery"]["requiresFreshScan"]==true&&doc["libraryScanRecovery"]["unknownPreviousInventory"]==true,"Damaged previous inventory became complete empty permission");check(producerArchivedBytes(f.data/L"backups",raw),"Damaged scan original not preserved");check(f.fresh()==0&&f.scanAck()&&loadJsonDocument(f.scan)["libraryScanRecovery"]["unknownPreviousInventory"]==true,"Explicit retry erased unknown previous inventory debt");});
-        for(const auto* kind:{"persistent-failure","persistent-readback","job-future","job-readback"})run((std::string("discovery-producer-scan-write-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());const auto before=fileText(f.scan);const auto output=f.job/L"library-scan.json";const std::string k=kind;if(k=="job-future")writeJsonAtomic(output,{{"schemaVersion",99},{"keep","future job"}});bool fired=false;if(k=="persistent-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(f.scan.wstring())?ERROR_WRITE_FAULT:ERROR_SUCCESS;};if(k=="persistent-readback"||k=="job-readback")ruleTextAfterMove=[&](const auto&,const auto& to){const auto selected=k=="persistent-readback"?f.scan:output;if(!fired&&identityCallerPath(to)==identityCallerPath(selected.wstring())){fired=true;writeJsonAtomic(selected,{{"schemaVersion",99},{"keep","external"}});}};const int code=f.fresh();selftestMoveFault={};ruleTextAfterMove={};check(code==0&&!f.scanAck(),"Unconfirmed scan writer crashed/ACKed producer");if(k=="persistent-failure"||k=="job-future")check(fileText(f.scan)==before,"Failed/protected output changed persistent state");if(k=="persistent-readback")check(fired&&loadJsonDocument(f.scan)["keep"]=="external","Canonical scan readback conflict overwritten");if(k=="job-readback")check(fired&&loadJsonDocument(output)["keep"]=="external","Job readback conflict overwritten");writeJsonAtomic(f.scan,f.catalog());writeJsonAtomic(output,{{"schemaVersion",1},{"games",json::array()}});check(f.fresh()==0&&f.scanAck(),"Scan publication release did not recover");});
+        for(const auto* kind:{"persistent-failure","persistent-readback","job-future","job-readback"})run((std::string("discovery-producer-scan-write-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());const auto before=fileText(f.scan);const auto output=f.job/L"library-scan.json";const std::string k=kind;if(k=="job-future")writeJsonAtomic(output,{{"schemaVersion",99},{"keep","future job"}});bool fired=false;if(k=="persistent-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(f.scan.wstring())?ERROR_WRITE_FAULT:ERROR_SUCCESS;};if(k=="persistent-readback"||k=="job-readback")ruleTextAfterMove=[&](const auto&,const auto& to){const auto selected=k=="persistent-readback"?f.scan:output;if(!fired&&identityCallerPath(to)==identityCallerPath(selected.wstring())){fired=true;writeJsonAtomic(selected,{{"schemaVersion",99},{"keep","external"}});}};const int code=f.fresh();selftestMoveFault={};ruleTextAfterMove={};check(code==2&&!f.scanAck()&&f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos,"Unconfirmed scan CLI returned success or ACKed failed publication");check(f.output.find(k=="job-readback"?"LIBRARY_STATE_COMMITTED: true":"LIBRARY_STATE_COMMITTED: false")!=std::string::npos,"Scan refusal lost actual partial-state publication receipt");if(k=="persistent-failure"||k=="job-future")check(fileText(f.scan)==before,"Failed/protected output changed persistent state");if(k=="persistent-readback")check(fired&&loadJsonDocument(f.scan)["keep"]=="external","Canonical scan readback conflict overwritten");if(k=="job-readback")check(fired&&loadJsonDocument(output)["keep"]=="external","Job readback conflict overwritten");writeJsonAtomic(f.scan,f.catalog());writeJsonAtomic(output,{{"schemaVersion",1},{"games",json::array()}});check(f.fresh()==0&&f.scanAck(),"Scan publication release did not recover");});
         run("discovery-producer-scan-healthy-lifecycle",[&](const fs::path& p){DiscoveryProducerFixture f(p);auto previous=f.catalog();previous["games"][0]["userMetadata"]={{"keep",true}};previous["missingGames"]=json::array({{{"gameDirectory",toUtf8((p/L"MissingOld").wstring())},{"primaryExecutable",toUtf8((p/L"MissingOld"/L"Old.exe").wstring())},{"status","ready"},{"dataRetained",true},{"opaqueDebt","keep"}}});previous["libraryScanRecovery"]={{"schemaVersion",1},{"requiresFreshScan",true}};writeJsonAtomic(f.scan,previous);check(f.fresh()==0&&f.scanAck(),"Healthy original producer did not commit");const auto stored=loadJsonDocument(f.scan),job=loadJsonDocument(f.job/L"library-scan.json");check(stored==job&&stored["unscannedGames"].size()==1&&stored["unscannedGames"][0]["userMetadata"]["keep"]==true&&stored["missingGames"][0]["opaqueDebt"]=="keep","Actual previous-state merge lost retained lifecycle entries");check(!stored.contains("libraryScanRecovery"),"Fresh healthy known inventory could not release backup-only provenance");});
-        run("discovery-producer-accounts-healthy-readback",[&](const fs::path& p){DiscoveryProducerFixture f(p);check(f.list()==0&&f.accountAck(),"Healthy accounts producer unconfirmed");const auto report=loadJsonDocument(f.accounts);check(report["accounts"].size()==1&&report["accounts"][0]["accountId"]=="19627"&&report["accounts"][0]["readError"].is_null(),"Actual account observation not preserved");});
+        if(GetEnvironmentVariableW(L"YMCC_DISCOVERY_NATIVE_ROOT_CONTROL",nullptr,0))
+        run("discovery-producer-scan-nested-steam",[&](const fs::path& p){
+            DiscoveryProducerFixture f(p);
+            const auto steam=f.games/L"Steam", apps=steam/L"steamapps", common=apps/L"common";
+            auto seed=[&](const fs::path& appRoot,const wchar_t* name,int id) {
+                const auto dir=appRoot/L"common"/name, exe=dir/(std::wstring(name)+L".exe");
+                textFile(exe,"owned marker; never executed");
+                if(id)textFile(appRoot/(L"appmanifest_"+std::to_wstring(id)+L".acf"),
+                    "\"AppState\" { \"appid\" \""+std::to_string(id)+"\" \"name\" \""+toUtf8(name)+"\" \"installdir\" \""+toUtf8(name)+"\" }");
+                return json{{"gameDirectory",toUtf8(dir.wstring())},{"primaryExecutable",toUtf8(exe.wstring())},
+                    {"status","ready"},{"steamNative",true},{"discoverySource","steam-native"},{"nativeSteamAppId",id}};
+            };
+            const auto installed=seed(apps,L"Owned Game",778801), oldMissing=seed(apps,L"Restored Game",778802);
+            seed(apps,L"Copied Game",0);
+            seed(apps,L"Steamworks Shared",228980);
+            seed(p/L"Unrelated"/L"steamapps",L"Unrelated Game",778803);
+            auto outside=toUtf8((p/L"Unrelated").wstring());
+            for(size_t i=0;(i=outside.find('\\',i))!=std::string::npos;i+=2)outside.insert(i,1,'\\');
+            textFile(apps/L"libraryfolders.vdf","\"libraryfolders\" { \"1\" { \"path\" \""+outside+"\" } }");
+            const auto deletedDir=common/L"Deleted Game";
+            auto deleted=installed;deleted["gameDirectory"]=toUtf8(deletedDir.wstring());
+            deleted["primaryExecutable"]=toUtf8((deletedDir/L"Deleted Game.exe").wstring());
+            auto previous=f.catalog();previous["games"]=json::array({installed,deleted});
+            previous["missingGames"]=json::array({oldMissing});writeJsonAtomic(f.scan,previous);
+            struct RestoreFacts{bool available=selftestSteamFactsAvailable;~RestoreFacts(){selftestSteamFactsAvailable=available;}} restoreFacts;
+            selftestSteamFactsAvailable=false;
+            check(f.fresh()==0&&f.scanAck(),"Nested Steam scan failed before publishing");
+            const auto actual=loadJsonDocument(f.scan);
+            writeJsonAtomic(p/L"nested-native-observed.json",actual);
+            check(actual==loadJsonDocument(f.job/L"library-scan.json"),"Nested Steam scan reply does not match inventory");
+            const auto has=[](const json& doc,int id){return std::any_of(doc["games"].begin(),doc["games"].end(),[&](const json& item){
+                return jsonIntCaseInsensitive(item,"nativeSteamAppId").value_or(0)==id&&jsonBoolSafe(item,"steamNative",false);
+            });};
+            check(has(actual,778801)&&has(actual,778802),"Steam platform directory observed but both installed native games were not retained");
+            check(actual["games"].size()==2,"Unrelated, unmanifested or built-in excluded directory entered active inventory");
+            check(actual["missingGames"].size()==1&&actual["missingGames"][0]["gameDirectory"]==deleted["gameDirectory"]&&
+                actual["missingGames"][0]["lifecycleStatus"]=="game-directory-missing","Real deletion was not distinguished from native discovery loss");
+            check(actual["lifecycleTransitions"].size()==2&&std::any_of(actual["lifecycleTransitions"].begin(),actual["lifecycleTransitions"].end(),[&](const json& row){
+                return row["type"]=="restored-or-reinstalled"&&row["gameDirectory"]==oldMissing["gameDirectory"];
+            }),"Known native game did not recover from the old missing state");
+            mustThrow([&]{(void)steamInstallPath(true);});
+            check(f.call({L"--scan-library",f.job.wstring(),L"--root",common.wstring(),L"--trainer-root",f.trainers.wstring(),L"--max-depth",L"1"})==0&&f.scanAck(),"Explicit Steam root scan failed");
+            const auto explicitScan=loadJsonDocument(f.scan);writeJsonAtomic(p/L"explicit-native-observed.json",explicitScan);
+            check(has(explicitScan,778801)&&has(explicitScan,778803),"Explicit root no longer follows its existing Steam libraryfolders");
+            const auto manifest=apps/L"appmanifest_778801.acf";
+            const auto validManifest=fileText(manifest);
+            const auto observe=[&] {
+                check(f.call({L"--scan-library",f.job.wstring(),L"--root",common.wstring(),L"--trainer-root",f.trainers.wstring(),L"--max-depth",L"1"})==0&&f.scanAck(),
+                    "Healthy neighboring appmanifest did not allow partial scan");
+                const auto report=loadJsonDocument(f.scan);
+                check(report==loadJsonDocument(f.job/L"library-scan.json"),"Manifest check scan reply did not match inventory");
+                return report;
+            };
+            const std::pair<const wchar_t*,std::string> invalidManifests[]={
+                {L"wrong-appid",R"("AppState" { "appid" "778899" "installdir" "Owned Game" })"},
+                {L"duplicate-appid",R"("AppState" { "appid" "778801" "appid" "778899" "installdir" "Owned Game" })"},
+                {L"truncated",R"("AppState" { "appid" "778801" "installdir" "Owned Game")"},
+                {L"missing-appid",R"("AppState" { "installdir" "Owned Game" })"}
+            };
+            for(const auto& [label,text]:invalidManifests) {
+                textFile(manifest,text);
+                const auto partial=observe();
+                writeJsonAtomic(p/(std::wstring(label)+L"-observed.json"),partial);
+                check(!has(partial,778801)&&!has(partial,778899)&&has(partial,778802)&&has(partial,778803),
+                    "Invalid appmanifest claimed a native game or removed a healthy neighbor");
+                check(partial["nativeSteamInstallationUnavailable"]==true&&
+                    std::any_of(partial["unscannedGames"].begin(),partial["unscannedGames"].end(),[](const json& row){
+                        return row.value("nativeSteamAppId",0)==778801&&jsonBoolSafe(row,"nativeSteamScanUnconfirmed",false);
+                    }),"Invalid appmanifest settled a previously visible card instead of retaining it unconfirmed");
+            }
+            textFile(manifest,validManifest);
+            check(has(observe(),778801),"Corrected appmanifest did not restore native identity");
+
+            const auto duplicate=apps/L"appmanifest_778899.acf";
+            textFile(duplicate,R"("AppState" { "appid" "778899" "installdir" "OWNED GAME" })");
+            const auto ambiguous=observe();
+            const auto direct=steamNativeGameInfoForDirectory(common/L"Owned Game");
+            writeJsonAtomic(p/L"shared-install-observed.json",{{"inventory",ambiguous},{"directAppId",direct?direct->appId:0}});
+            check(!has(ambiguous,778801)&&!has(ambiguous,778899)&&!direct,
+                "Two valid Steam AppIDs sharing a directory picked an arbitrary native identity");
+            check(has(ambiguous,778802)&&has(ambiguous,778803)&&std::any_of(ambiguous["unscannedGames"].begin(),ambiguous["unscannedGames"].end(),[](const json& row){
+                return row.value("nativeSteamAppId",0)==778801&&jsonBoolSafe(row,"nativeSteamScanUnconfirmed",false);
+            }),
+                "Conflicting manifests did not preserve healthy neighbors and the previous card as unconfirmed");
+            fs::remove(duplicate);
+            const auto repaired=steamNativeGameInfoForDirectory(common/L"Owned Game");
+            check(has(observe(),778801)&&repaired&&repaired->appId==778801,"Removing the conflicting manifest did not restore identity");
+        });
+        if(GetEnvironmentVariableW(L"YMCC_DISCOVERY_NATIVE_ROOT_CONTROL",nullptr,0))
+        run("discovery-producer-scan-native-installation-coverage",[&](const fs::path& p){
+            DiscoveryProducerFixture f(p);
+            const auto config=f.data/L"config"/L"library-config.json", lifecycle=f.data/L"state"/L"lifecycle-events.json";
+            const auto result=f.job/L"library-scan.json", apps=f.steam/L"steamapps";
+            const auto dir=apps/L"common"/L"Native Title", exe=dir/L"Native Title.exe";
+            textFile(exe,"owned marker; never executed");
+            textFile(apps/L"appmanifest_778811.acf","\"AppState\" { \"appid\" \"778811\" \"name\" \"Native Title\" \"installdir\" \"Native Title\" }");
+            struct RestoreFacts {bool available=selftestSteamFactsAvailable;~RestoreFacts(){selftestSteamFactsAvailable=available;}} restore;
+            const auto scan=[&](bool clear=false){
+                std::vector<std::wstring> args{L"--scan-library",f.job.wstring(),L"--trainer-root",f.trainers.wstring(),L"--max-depth",L"1"};
+                if(clear)args.push_back(L"--clear-roots");
+                const auto reads=selftestSteamFactsReads;
+                const int code=f.call(std::move(args));
+                check(selftestSteamFactsReads-reads==1,"Scan did not use exactly one installation observation");
+                return code;
+            };
+            const auto refused=[&](int code){
+                check(code==2&&!f.scanAck()&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos&&
+                    f.output.find("LIBRARY_STATE_COMMITTED: false")!=std::string::npos&&
+                    f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED: [steam-information-unavailable]")!=std::string::npos,
+                    "Unknown installation did not return a retryable uncommitted scan");
+            };
+            selftestSteamFactsAvailable=false;
+            refused(scan(true));
+            const auto cleared=loadJsonDocument(config);
+            check(cleared["roots"].empty()&&cleared["scanRootsExplicitlyCleared"]==true&&cleared["userProducerNote"]=="keep",
+                "Refused scan lost explicit clear-roots choice or unrelated config");
+            check(!fs::exists(f.scan)&&!fs::exists(result)&&!fs::exists(lifecycle),"Unconfirmed first scan created inventory or lifecycle state");
+
+            auto prior=f.catalog();
+            prior["games"][0].update({{"gameDirectory",toUtf8(dir.wstring())},{"primaryExecutable",toUtf8(exe.wstring())},
+                {"steamNative",true},{"nativeSteamAppId",778811},{"discoverySource","steam-native"}});
+            writeJsonAtomic(f.scan,prior);writeJsonAtomic(result,prior);
+            const auto stateBytes=fileText(f.scan), replyBytes=fileText(result);
+            refused(scan());
+            check(fileText(f.scan)==stateBytes&&fileText(result)==replyBytes&&!fs::exists(lifecycle),
+                "Unconfirmed rescan replaced inventory, job output or lifecycle log");
+
+            auto older = prior["games"][0];
+            older["gameDirectory"] = toUtf8((apps/L"common"/L"Historical").wstring());
+            older["primaryExecutable"] = toUtf8((apps/L"common"/L"Historical"/L"Historical.exe").wstring());
+            older["nativeSteamAppId"] = 778812;
+            prior["unscannedGames"].push_back(older);
+            writeJsonAtomic(f.scan,prior);
+            for(int repeat=0; repeat<2; ++repeat) {
+                check(f.fresh()==0&&f.scanAck(),"Independent configured-root scan could not publish");
+                const auto partial=loadJsonDocument(f.scan);
+                const auto pending=std::count_if(partial["unscannedGames"].begin(),partial["unscannedGames"].end(),[](const json& row){
+                    return jsonBoolSafe(row,"nativeSteamScanUnconfirmed",false)&&row.value("nativeSteamAppId",0)==778811;
+                });
+                const auto marked=std::count_if(partial["unscannedGames"].begin(),partial["unscannedGames"].end(),[](const json& row){
+                    return jsonBoolSafe(row,"nativeSteamScanUnconfirmed",false);
+                });
+                check(partial["nativeSteamInstallationUnavailable"]==true&&partial["games"].empty()&&partial["missingGames"].empty()&&
+                    partial["unscannedGames"].size()==2&&pending==1&&marked==1,"Partial scan elevated history, lost previous visible native row, or invented a deletion");
+            }
+
+            selftestSteamFactsAvailable=true;
+            check(scan(true)==0&&f.scanAck(),"Verified installed Steam with zero custom roots did not publish");
+            const auto active=loadJsonDocument(f.scan);
+            check(!active.contains("nativeSteamInstallationUnavailable"),"Recovered scan retained the unavailable signal");
+            check(active["games"].size()==1&&active["games"][0]["nativeSteamAppId"]==778811&&
+                active["unscannedGames"].size()==1&&!active["unscannedGames"][0].contains("nativeSteamScanUnconfirmed")&&
+                active==loadJsonDocument(result),"Verified scan did not replace the pending row, or elevated history");
+
+            selftestSteamInstallationRoot.clear();
+            check(scan()==0&&f.scanAck()&&loadJsonDocument(f.scan)["games"].empty(),"Confirmed absence of a Steam installation was not publishable");
+            selftestSteamFactsAvailable=false;
+            check(f.fresh()==0&&f.scanAck()&&loadJsonDocument(f.scan)["roots"].size()==1,
+                "Independent configured root could not publish under unknown Steam coverage");
+        });
+        run("discovery-producer-accounts-healthy-readback",[&](const fs::path& p){DiscoveryProducerFixture f(p);check(f.list()==0&&f.accountAck(),"Healthy accounts producer unconfirmed");const auto report=loadJsonDocument(f.accounts);check(report["accounts"].size()==1&&report["accounts"][0]["accountId"]=="19627"&&report["accounts"][0]["readError"].is_null(),"Actual account observation not preserved");
+            json rows=json::array();bool safe=true;
+            for(const auto* label:{"before-healthy","after-healthy","locked","first-add","two-historical"}){
+                const std::string mode=label;DiscoveryProducerFixture owned(p/toWide(mode));check(owned.list()==0&&owned.accountAck(),"Partial account seed failed");
+                const auto valid=BinaryVdfDocument::emptySteamShortcuts().serialize();
+                const auto bad=owned.steam/L"userdata"/toWide(mode=="before-healthy"?"00012":"19628")/L"config"/L"shortcuts.vdf";
+                if(mode=="first-add")fs::remove(owned.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");
+                HANDLE held=INVALID_HANDLE_VALUE;if(mode=="locked"){writeAtomic(bad,valid);held=CreateFileW(bad.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"Partial owned lock failed");}else textFile(bad,"malformed owned VDF");
+                const auto second=owned.steam/L"userdata"/L"19629"/L"config"/L"shortcuts.vdf";if(mode=="two-historical")textFile(second,"malformed second owned VDF");
+                const auto code=owned.list();const bool ack=owned.accountAck();const auto current=loadJsonDocument(owned.accounts);const size_t expected=mode=="two-historical"?2:1;
+                const bool isolated=code==0&&ack&&current.value("partialAccounts",false)&&current["accounts"].size()==1&&current["accounts"][0]["accountId"]=="19627"&&current.value("unavailableAccounts",json::array()).size()==expected;
+                if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);
+                const bool preserved=mode=="locked"?fileText(bad)==std::string(valid.begin(),valid.end()):fileText(bad)=="malformed owned VDF";
+                writeAtomic(bad,valid);if(mode=="two-historical")writeAtomic(second,valid);
+                const bool recovered=owned.list()==0&&owned.accountAck()&&!loadJsonDocument(owned.accounts).value("partialAccounts",false)&&loadJsonDocument(owned.accounts)["accounts"].size()==expected+1;
+                rows.push_back({{"variant",mode},{"isolated",isolated},{"preserved",preserved},{"recovered",recovered}});safe=safe&&isolated&&preserved&&recovered;
+            }
+            writeJsonAtomic(p/L"partial-accounts-observed.json",{{"rows",rows}});check(safe,"Unreadable historical account blocked healthy discovery");});
         for(const auto* kind:{"future","schema-type","lock","write-failure","readback-change"})run((std::string("discovery-producer-accounts-")+kind).c_str(),[&,kind](const fs::path& p){DiscoveryProducerFixture f(p);const std::string k=kind;const auto prior=json{{"schemaVersion",k=="future"?json(99):k=="schema-type"?json("1"):json(1)},{"accounts",json::array()},{"keep","original"}}.dump();textFile(f.accounts,prior);bool fired=false;HANDLE held=INVALID_HANDLE_VALUE;if(k=="lock"){held=CreateFileW(f.accounts.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"Owned account-output lock failed");}if(k=="write-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(f.accounts.wstring())?ERROR_WRITE_FAULT:ERROR_SUCCESS;};if(k=="readback-change")ruleTextAfterMove=[&](const auto&,const auto& to){if(!fired&&identityCallerPath(to)==identityCallerPath(f.accounts.wstring())){fired=true;writeJsonAtomic(f.accounts,{{"schemaVersion",99},{"accounts",json::array()},{"keep","external"}});}};const auto code=f.list();selftestMoveFault={};ruleTextAfterMove={};if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);check(code==0&&!f.accountAck()&&f.output.find("STEAM_ACCOUNTS_STATUS: unknown")!=std::string::npos,"Unknown account writer crashed/ACKed output");if(k=="readback-change")check(fired&&loadJsonDocument(f.accounts)["keep"]=="external","Account readback conflict overwritten");else check(fileText(f.accounts)==prior,"Unknown account cache replaced");writeJsonAtomic(f.accounts,{{"schemaVersion",1},{"accounts",json::array()}});check(f.list()==0&&f.accountAck(),"Account explicit repair/retry failed");});
+        run("discovery-producer-accounts-reply-payload",[&](const fs::path& p){
+            DiscoveryProducerFixture f(p);
+            const auto reply=[&](){std::istringstream lines(f.output);std::string line,payload;unsigned count=0;while(std::getline(lines,line))if(line.starts_with("STEAM_ACCOUNTS_JSON: ")){++count;payload=line.substr(20);}check(count==1,"Actual Worker did not return exactly one account JSON payload");return json::parse(payload);};
+            const auto beforeLocal=selftestSteamFactsReads;
+            check(f.list()==0&&f.accountAck(),"Actual Worker account observation failed");const auto report=reply();check(report==loadJsonDocument(f.accounts)&&report["accounts"].size()==1,"Worker reply differs from its confirmed account observation");
+            check(report["accounts"][0].value("realSteamTarget",false)&&selftestSteamFactsReads==beforeLocal,"Explicit local account did not use its own Steam marker");
+            textFile(f.accounts,"{changed after worker reply");check(reply()==report,"Later shared cache changed immutable Worker reply");
+            textFile(f.accounts,R"({"schemaVersion":1,"accounts":[]})");fs::remove(f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");fs::remove(f.steam/L"userdata"/L"19627"/L"config");fs::remove(f.steam/L"userdata"/L"19627");
+            check(f.list()==0&&f.accountAck()&&reply()["steamStatus"]=="installed-no-account"&&reply()["accounts"].empty(),"Actual healthy-empty Worker payload lost");
+            textFile(f.accounts,R"({"schemaVersion":99,"accounts":[]})");const auto before=fileText(f.accounts);check(f.list()==0&&!f.accountAck()&&f.output.find("STEAM_ACCOUNTS_JSON:")==std::string::npos&&fileText(f.accounts)==before,"Unknown Worker publication emitted fresh payload");
+
+            DiscoveryProducerFixture observed(p/L"inst");
+            auto list=[&](const fs::path& explicitRoot={}) {
+                std::vector<std::wstring> args{L"--list-steam-accounts",L"--output",observed.accounts.wstring()};
+                if(!explicitRoot.empty())args.insert(args.end(),{L"--steam-root",explicitRoot.wstring()});
+                return observed.call(std::move(args));
+            };
+            auto reads=selftestSteamFactsReads;
+            check(list()==0&&observed.accountAck()&&selftestSteamFactsReads-reads==1,"Automatic installed account report did not read once");
+            const auto installed=fileText(observed.accounts);
+            selftestSteamFactsAvailable=false;
+            reads=selftestSteamFactsReads;
+            const auto unknownCode=list();
+            selftestSteamFactsAvailable=true;
+            check(unknownCode==0&&!observed.accountAck()&&fileText(observed.accounts)==installed&&selftestSteamFactsReads-reads==1&&
+                observed.error.find("[steam-information-unavailable]")!=std::string::npos,"Unavailable installation replaced the account report");
+            selftestSteamInstallationRoot.clear();
+            reads=selftestSteamFactsReads;
+            check(list()==0&&observed.accountAck()&&selftestSteamFactsReads-reads==1,"Known absent account report did not read once");
+            const auto absent=loadJsonDocument(observed.accounts);
+            check(absent.value("steamStatus",std::string{})=="not-installed"&&absent["accounts"].empty(),"Known absence changed account report shape");
+
+            const auto alternate=observed.root/L"alternate";
+            const auto emptyVdf=BinaryVdfDocument::emptySteamShortcuts().serialize();
+            for(const auto* id:{L"42",L"43"})writeAtomic(alternate/L"userdata"/id/L"config"/L"shortcuts.vdf",emptyVdf);
+            selftestSteamInstallationRoot=observed.steam.wstring();
+            reads=selftestSteamFactsReads;
+            check(list(alternate)==0&&observed.accountAck()&&selftestSteamFactsReads-reads==1,"Explicit fallback requested installation per account");
+            const auto alternateReport=loadJsonDocument(observed.accounts);
+            check(alternateReport["accounts"].size()==2&&std::none_of(alternateReport["accounts"].begin(),alternateReport["accounts"].end(),[](const auto& row){
+                return row.value("realSteamTarget",true);
+            }),"Other Steam root incorrectly classified as real");
+            reads=selftestSteamFactsReads;
+            check(list()==0&&observed.accountAck()&&selftestSteamFactsReads-reads==1&&fileText(observed.accounts)==installed,"Later account transaction did not observe a fresh installation");
+        });
+        run("discovery-producer-add-cli-refuses-unconfirmed-plan",[&](const fs::path& p){
+            // A collision for a different card remains visible, but it must
+            // not reject an explicitly selected independent game transaction.
+            {
+                Fixture selected(p/L"sel",true);const auto scan=fixtureScanState(selected);
+                const auto ordinary=selected.root/L"Game"/L"Game.exe",collisionDir=selected.root/L"C",collisionExe=collisionDir/L"bin"/L"cod.exe",retainedExe=collisionDir/L"sp26"/L"sp26-cod.exe";
+                textFile(collisionExe,"owned inert primary, never executed");textFile(retainedExe,"owned inert prior shortcut executable, never executed");
+                auto inventory=loadJsonDocument(scan);auto& healthy=inventory["games"][0];healthy["status"]="ready";healthy["directoryName"]="Independent Game";healthy["primaryRole"]="main-game";
+                inventory["games"].push_back({{"gameDirectory",toUtf8(collisionDir.wstring())},{"directoryName","Conflict"},{"primaryExecutable",toUtf8(collisionExe.wstring())},{"primaryRole","main-game"},{"status","ready"},{"alternateGameDirectories",json::array({toUtf8((collisionDir/L"bin").wstring())})}});writeJsonAtomic(scan,inventory);
+                const auto image=selected.root/L"slot.png";textFile(image,"owned isolated artwork bytes");
+                const auto manifest=selected.data/L"artwork"/toWide(gameDataId(collisionDir))/L"manifest.json";
+                writeJsonAtomic(manifest,{{"exe",toUtf8(collisionExe.wstring())},{"match",{{"primaryProvider","steam"},{"identityStatus","verified"},{"steamVerificationStatus","steam-verified"},{"resolverVersion",STEAM_RESOLVER_VERSION},{"appId",620},{"formalName","Conflict"},{"score",1.0}}},
+                    {"artwork",json::array({{{"type","tall"},{"steamSuffix","p"},{"file",toUtf8(image.wstring())},{"ok",true}},{{"type","hero"},{"steamSuffix","_hero"},{"file",toUtf8(image.wstring())},{"ok",true}}})}});
+                auto vdf=BinaryVdfDocument::emptySteamShortcuts();auto* rows=vdfFindObject(vdf.root(),"shortcuts");const auto retainedId=steamShortcutAppId(quotedSteamPath(collisionExe),"Conflict");
+                rows->objectValue.push_back({"0",steamShortcutNode(retainedId,"Conflict",quotedSteamPath(retainedExe),quotedSteamPath(retainedExe.parent_path()),0)});writeAtomic(selected.target.path,vdf.serialize());
+                const auto original=readBinaryFile(selected.target.path);const auto originalNode=BinaryVdfReader(original).parse()["shortcuts"]["0"];
+                const auto plan=buildSteamLibraryAddPlan(selected.data,scan,selected.target,selected.planFile,{canonicalPathKey(ordinary.parent_path())},true);
+                bool collisionVisible=false,collisionSelected=false;for(const auto& item:plan["items"])if(jsonStringOr(item,"status")=="shortcut-id-collision"){collisionVisible=true;collisionSelected=jsonBoolSafe(item,"selectedForAdd",true);}
+                json result;std::string failure;try{result=commitSteamLibraryAddPlan(selected.data,scan,selected.target,selected.planFile,true,{canonicalPathKey(ordinary.parent_path())},true);}catch(const std::exception& e){failure=e.what();}
+                writeJsonAtomic(p/L"selected-collision-observations.json",{{"visible",collisionVisible},{"selected",collisionSelected},{"planConflicts",plan["summary"]["shortcutIdConflicts"]},{"committed",jsonBoolSafe(result,"committed",false)},{"failure",failure},{"summary",plan["summary"]}});
+                check(failure.empty()&&jsonBoolSafe(result,"committed",false),"Unselected shortcut collision blocked an independent selected game");
+                check(collisionVisible&&!collisionSelected&&plan["summary"]["shortcutIdConflicts"]==0&&plan["summary"]["readyToAdd"]==1,"Selected plan hid another card conflict or miscounted the requested write");
+                const auto after=BinaryVdfReader(readBinaryFile(selected.target.path)).parse();check(after["shortcuts"].size()==2&&after["shortcuts"]["0"]==originalNode,"Independent add rewrote prior conflicting shortcut fields");
+                const auto shortcuts=readShortcuts(selected.target.path,selected.target.accountId);check(std::count_if(shortcuts.begin(),shortcuts.end(),[&](const auto& item){return canonicalPathKey(expandEnvironmentPath(unquote(item.exe)))==canonicalPathKey(ordinary);})==1,"Independent add wrote the wrong executable or duplicated it");
+                const auto committedBytes=readBinaryFile(selected.target.path);
+                for(const auto& selection:std::vector<std::set<std::string>>{{canonicalPathKey(collisionDir)},{canonicalPathKey(collisionDir/L"bin")},{}}){
+                    bool refused=false;try{commitSteamLibraryAddPlan(selected.data,scan,selected.target,selected.planFile,true,selection,!selection.empty());}catch(const std::exception& e){refused=std::string(e.what()).find("AppID")!=std::string::npos;}
+                    check(refused&&readBinaryFile(selected.target.path)==committedBytes&&!hasStages(selected.root),"Selected, alias or all-ready collision escaped original refusal");
+                }
+                fs::remove(manifest);mustThrow([&]{commitSteamLibraryAddPlan(selected.data,scan,selected.target,selected.planFile,true,{canonicalPathKey(collisionDir)},true);});check(readBinaryFile(selected.target.path)==committedBytes&&!hasStages(selected.root),"Explicit no-identity collision fallback changed old shortcuts");
+                writeJsonAtomic(p/L"selected-collision-controls.json",{{"retainedNodeUnchanged",true},{"selectedAliasAndBulkRefused",true},{"noIdentityCollisionRefused",true},{"shortcutCount",shortcuts.size()},{"pendingJournals",pendingJournals(selected.data).size()}});
+            }
+
+            json observations=json::array();
+            for(const bool commit:{false,true})for(const auto* fault:{"future-scan","future-output","write-failure"}){
+                const auto root=p/(commit?L"commit":L"plan")/toWide(fault);DiscoveryProducerFixture f(root);auto state=f.catalog();state["games"]=json::array();
+                const std::string kind=fault;if(kind=="future-scan")state["schemaVersion"]=99;writeJsonAtomic(f.scan,state);
+                const auto output=f.data/L"state"/L"plan.json",receipt=f.data/L"state"/L"last-steam-add.json",vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";
+                const json old={{"schemaVersion",kind=="future-output"?99:1},{"mode","steam-library-add-commit"},{"committed",true},{"items",json::array()},{"keep","old successful observation"}};
+                textFile(output,old.dump());textFile(receipt,"retained previous receipt");const auto originalVdf=fileText(vdf);
+                if(kind=="write-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(output.wstring())?ERROR_WRITE_FAULT:0;};
+                const auto invoke=[&](){std::vector<std::wstring> args={commit?L"--commit-add-library-to-steam":L"--plan-add-library-to-steam",L"--state",f.scan.wstring(),L"--steam-root",f.steam.wstring(),L"--account",L"19627",L"--output",output.wstring()};if(commit)args.push_back(L"--confirm-steam-closed");return f.call(args);};
+                const auto code=invoke();selftestMoveFault={};
+                check(code!=0,"Unconfirmed Steam add plan returned success");
+                check(f.error.find("ERROR_STEAM_ADD_PLAN_UNCONFIRMED:")!=std::string::npos,"CLI omitted the actual unconfirmed-plan diagnostic");
+                check(fileText(output)==old.dump()&&fileText(receipt)=="retained previous receipt"&&fileText(vdf)==originalVdf,"Unconfirmed CLI changed old result, receipt or shortcut data");
+                check(f.output.find("STEAM_PLAN_RECEIPT:")==std::string::npos,"Unconfirmed plan emitted a content receipt");
+                const auto rejectedOutput=f.output,rejectedError=f.error;
+                state["schemaVersion"]=1;writeJsonAtomic(f.scan,state);textFile(output,R"({"schemaVersion":1,"items":[]})");
+                check(invoke()==0,"Released plan publication did not recover");
+                if(!commit){
+                    const auto saved=readLibraryTransactionDocument(output,64u<<20);
+                    const auto expected="STEAM_PLAN_RECEIPT: sha256-v1:"+custom_steam_library::plan_receipt::digest(saved)+"\n";
+                    const auto first=f.output.find(expected);
+                    check(first!=std::string::npos&&f.output.find("STEAM_PLAN_RECEIPT:",first+expected.size())==std::string::npos,"Actual plan-only Worker reply did not match its confirmed saved document");
+                    auto later=saved;later["laterWriter"]=true;textFile(output,later.dump());
+                    check(f.output.find(expected)!=std::string::npos&&custom_steam_library::plan_receipt::digest(later)!=custom_steam_library::plan_receipt::digest(saved),"Original plan receipt borrowed later cache bytes");
+                }
+                check(fileText(vdf)==originalVdf,"Healthy empty plan unexpectedly changed shortcut data");
+                if(commit){const auto current=loadJsonDocument(receipt);check(current.value("reason",std::string{})=="nothing-ready-to-add"&&!current.value("committed",true),"Confirmed zero-item commit lost normal no-op semantics");const auto published=loadJsonDocument(output);check(jsonStringOr(published,"mode")=="steam-library-add-commit","No-op left requested output as a read-only plan");auto content=current;content.erase("resultPublicationWarnings");const auto expected="STEAM_ADD_RESULT_RECEIPT: sha256-v1:"+custom_steam_library::plan_receipt::digest(content)+"\n";check(f.output.find(expected)!=std::string::npos,"Commit CLI omitted its actual completion content receipt");}
+                else check(fileText(receipt)=="retained previous receipt","Read-only plan changed the commit receipt");
+                observations.push_back({{"commit",commit},{"fault",kind},{"rejectedExit",code},{"stderr",rejectedError},{"stdout",rejectedOutput},{"recoveredExit",0},{"scope","actual Worker CLI in-process; fake explicit Steam target; no actual client/network"}});
+            }
+            {
+                Fixture f(p/L"completed-publication");
+                selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return to.ends_with(L"last-steam-add.json")||identityCallerPath(to)==identityCallerPath(f.planFile.wstring())?ERROR_WRITE_FAULT:0;};
+                const auto result=f.commit();selftestMoveFault={};
+                const auto saved=loadJsonDocument(f.data/L"state"/L"last-steam-add-19627.json");
+                check(result.value("committed",false)&&readShortcuts(f.target.path,f.target.accountId).size()==1,"Completed write was lost on result publication failure");
+                check(result["resultPublicationWarnings"].size()==2&&saved["resultPublicationWarnings"].size()==1,"Publication warnings did not evolve across original destinations");
+                const auto digest=custom_steam_library::plan_receipt::addCompletionDigest(result);
+                check(!digest.empty()&&digest==custom_steam_library::plan_receipt::addCompletionDigest(saved),"Diagnostic growth invalidated an original completed receipt");
+                auto changed=saved;changed["items"][0]["status"]="ready-to-add";
+                check(digest!=custom_steam_library::plan_receipt::addCompletionDigest(changed),"Completion digest omitted actual item state");
+                observations.push_back({{"commit",true},{"fault","completed-result-publication"},{"committed",true},{"publicationWarnings",2},{"originalAccountReceiptWarnings",1},{"shortcuts",1}});
+            }
+            writeJsonAtomic(p/L"add-cli-observations.json",{{"observations",observations}});
+        });
+        run("discovery-producer-delete-cli-refuses-unconfirmed-plan",[&](const fs::path& p){
+            wchar_t mode[32]{};const auto modeSize=GetEnvironmentVariableW(L"YMCC_DELETE_RESUME_VARIANT",mode,32);const bool raceOnly=modeSize&&modeSize<32&&std::wstring(mode)==L"source-race";
+            if(!raceOnly){
+            json observations=json::array();
+            for(const bool commit:{false,true})for(const auto* fault:{"future-scan","future-output","write-failure"}){
+                const auto root=p/(commit?L"commit":L"plan")/toWide(fault);DiscoveryProducerFixture f(root);auto state=f.catalog();const auto directory=state["games"][0]["gameDirectory"].get<std::string>();
+                const std::string kind=fault;if(kind=="future-scan")state["schemaVersion"]=99;writeJsonAtomic(f.scan,state);
+                const auto output=f.data/L"state"/L"delete-plan.json",receipt=f.data/L"state"/L"last-steam-delete.json",vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",other=f.root/L"Other"/L"Other.exe";
+                auto doc=BinaryVdfDocument::emptySteamShortcuts();auto* shortcuts=vdfFindObject(doc.root(),"shortcuts");
+                shortcuts->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Selected",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});
+                shortcuts->objectValue.push_back({"1",steamShortcutNode(-1073741822,"Other",quotedSteamPath(other),quotedSteamPath(other.parent_path()),0)});writeAtomic(vdf,doc.serialize());
+                const json old={{"schemaVersion",kind=="future-output"?99:1},{"mode","steam-library-delete-commit"},{"committed",true},{"items",json::array()},{"keep","old successful observation"}};
+                textFile(output,old.dump());textFile(receipt,"retained previous receipt");const auto originalVdf=fileText(vdf);
+                if(kind=="write-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(output.wstring())?ERROR_WRITE_FAULT:0;};
+                const auto invoke=[&](){std::vector<std::wstring> args={commit?L"--commit-delete-library-from-steam":L"--plan-delete-library-from-steam",L"--state",f.scan.wstring(),L"--steam-root",f.steam.wstring(),L"--account",L"19627",L"--select-game",toWide(directory),L"--output",output.wstring()};if(commit)args.push_back(L"--confirm-steam-closed");return f.call(args);};
+                const auto code=invoke();selftestMoveFault={};
+                check(code!=0,"Unconfirmed Steam delete plan returned success");
+                check(f.error.find("ERROR_STEAM_DELETE_PLAN_UNCONFIRMED:")!=std::string::npos,"Delete CLI omitted unconfirmed-plan diagnostic");
+                check(fileText(output)==old.dump()&&fileText(receipt)=="retained previous receipt"&&fileText(vdf)==originalVdf,"Unconfirmed delete changed original results or shortcuts");
+                const auto rejectedOutput=f.output,rejectedError=f.error;
+                state["schemaVersion"]=1;writeJsonAtomic(f.scan,state);textFile(output,R"({"schemaVersion":1,"items":[]})");
+                check(invoke()==0,"Released delete publication did not recover");
+                if(commit){
+                    const auto remaining=readShortcuts(vdf,"19627");check(remaining.size()==1&&canonicalPathKey(expandEnvironmentPath(unquote(remaining[0].exe)))==canonicalPathKey(other),"Confirmed delete changed an unrelated shortcut or failed to delete selected game");
+                    const auto saved=loadJsonDocument(receipt);check(saved.value("committed",false),"Confirmed delete lost its success receipt");const auto retained=fileText(receipt),afterVdf=fileText(vdf);
+                    check(invoke()!=0&&f.error.find("ERROR_STEAM_DELETE_PLAN_UNCONFIRMED:")==std::string::npos,"Confirmed not-found delete was accepted or mislabeled as an unconfirmed plan");
+                    check(fileText(receipt)==retained&&fileText(vdf)==afterVdf,"Rejected not-found delete changed prior successful data");
+                }else check(fileText(vdf)==originalVdf&&fileText(receipt)=="retained previous receipt","Read-only delete plan changed original data");
+                observations.push_back({{"commit",commit},{"fault",kind},{"rejectedExit",code},{"stderr",rejectedError},{"stdout",rejectedOutput},{"recoveredExit",0},{"notFoundControl",commit},{"scope","actual Worker CLI in-process; explicit fake Steam directory only"}});
+            }
+            writeJsonAtomic(p/L"delete-cli-observations.json",{{"observations",observations}});
+            json actions=json::array();bool safe=true;unsigned serial=0;
+            for(const auto* operation:{"refresh","delete"})for(const auto* fault:{"healthy","output-fails","global-fails","both-fail"}){
+                DiscoveryProducerFixture f(p/std::to_wstring(serial++));const std::string action=operation,kind=fault;auto state=f.catalog();writeJsonAtomic(f.scan,state);const auto directory=state["games"][0]["gameDirectory"].get<std::string>();
+                const auto vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",output=f.data/L"state"/L"action.json",global=f.data/L"state"/(action=="refresh"?L"last-steam-artwork-refresh.json":L"last-steam-delete.json");
+                auto doc=BinaryVdfDocument::emptySteamShortcuts();vdfFindObject(doc.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Selected",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});writeAtomic(vdf,doc.serialize());
+                const auto image=f.root/L"manual.png";textFile(image,"owned manual horizontal artwork");writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(f.exe),{{"long",{{"file",toUtf8(image.wstring())}}}}}}}});
+                const std::string oldOutput=json{{"schemaVersion",1},{"mode","steam-library-delete-plan"},{"items",json::array()},{"summary",json::object()},{"keep","retained requested output"}}.dump();textFile(output,oldOutput);textFile(global,"retained global result");json captured;unsigned captures=0;
+                selftestMoveFault=[&](const std::wstring& from,const std::wstring& to)->DWORD{
+                    const bool chosen=identityCallerPath(to)==identityCallerPath(output.wstring())||identityCallerPath(to)==identityCallerPath(global.wstring());if(!chosen)return 0;
+                    auto value=loadJsonDocument(fs::path(from));if(jsonStringOr(value,"mode")!=(action=="refresh"?"steam-artwork-refresh":"steam-library-delete-commit"))return 0;
+                    captured=value;++captures;const bool blocked=(identityCallerPath(to)==identityCallerPath(output.wstring())&&(kind=="output-fails"||kind=="both-fail"))||(identityCallerPath(to)==identityCallerPath(global.wstring())&&(kind=="global-fails"||kind=="both-fail"));return blocked?ERROR_WRITE_FAULT:ERROR_SUCCESS;
+                };
+                const int code=f.call({action=="refresh"?L"--commit-refresh-steam-artwork":L"--commit-delete-library-from-steam",L"--state",f.scan.wstring(),L"--steam-root",f.steam.wstring(),L"--account",L"19627",L"--select-game",toWide(directory),L"--confirm-steam-closed",L"--output",output.wstring()});selftestMoveFault={};
+                const auto prefix=action=="refresh"?"STEAM_REFRESH_RESULT_RECEIPT: sha256-v1:":"STEAM_DELETE_RESULT_RECEIPT: sha256-v1:";const auto digest=captured.is_object()?custom_steam_library::plan_receipt::addCompletionDigest(captured):std::string{};
+                const bool receipt=!digest.empty()&&f.output.find(std::string(prefix)+digest+"\n")!=std::string::npos&&f.output.find(prefix,f.output.find(prefix)+1)==std::string::npos;
+                const bool completed=code==0&&captures==2&&(action=="delete"?readShortcuts(vdf,"19627").empty():captured.value("artworkFilesActivated",0)>0);
+                const bool retained=kind!="both-fail"||(fileText(global)=="retained global result"&&(action=="refresh"?fileText(output)==oldOutput:jsonStringOr(loadJsonDocument(output),"mode")=="steam-library-delete-plan"));
+                const bool passed=completed&&receipt&&retained;actions.push_back({{"operation",action},{"fault",kind},{"passed",passed},{"completed",completed},{"receipt",receipt},{"retainedOnBothFailures",retained},{"exitCode",code},{"captures",captures},{"stderr",f.error}});safe=safe&&passed;
+            }
+            writeJsonAtomic(p/L"action-cli-observed.json",{{"rows",actions}});check(safe,"Steam refresh/delete completion CLI did not bind actual result");
+
+            }
+            json resume=json::array();bool resumeSafe=true;
+            for(const auto* label:{"empty","missing-vdf","missing-config","mixed","duplicate","unknown-primary","malformed-row","locked","future-scan","race"}){
+                const std::string kind=label;if(raceOnly&&kind!="race")continue;DiscoveryProducerFixture f(p/toWide("resume-"+kind));auto state=f.catalog();
+                const auto vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",output=f.data/L"state"/L"resume.json",other=f.root/L"Other"/L"Other.exe";
+                const auto directory=state["games"][0]["gameDirectory"].get<std::string>();auto doc=BinaryVdfDocument::emptySteamShortcuts();auto* shortcuts=vdfFindObject(doc.root(),"shortcuts");
+                if(kind=="mixed"||kind=="duplicate"||kind=="race")shortcuts->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Selected",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});
+                if(kind=="duplicate")shortcuts->objectValue.push_back({"1",steamShortcutNode(-1073741822,"Duplicate",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});
+                if(kind=="malformed-row")shortcuts->objectValue.push_back({"0",steamShortcutNode(-1073741823,"",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});
+                if(kind=="mixed"){textFile(other,"unrelated");shortcuts->objectValue.push_back({"1",steamShortcutNode(-1073741822,"Other",quotedSteamPath(other),quotedSteamPath(other.parent_path()),0)});const auto second=f.root/L"Absent"/L"Absent.exe";textFile(second,"absent selected exe");auto row=state["games"][0];row["gameDirectory"]=toUtf8(second.parent_path().wstring());row["primaryExecutable"]=toUtf8(second.wstring());state["games"].push_back(row);}
+                if(kind=="unknown-primary")state["games"][0]["primaryExecutable"]="";if(kind=="future-scan")state["schemaVersion"]=99;
+                writeJsonAtomic(f.scan,state);writeAtomic(vdf,doc.serialize());
+                if(kind=="missing-vdf"||kind=="missing-config")fs::remove(vdf);if(kind=="missing-config")fs::remove(vdf.parent_path());
+                const auto snapshot=[&](){json value=json::object();for(const auto& e:fs::recursive_directory_iterator(custom_steam_library::ioPath(f.steam,true)))value[toUtf8(e.path().lexically_relative(custom_steam_library::ioPath(f.steam,true)).wstring())]=e.is_directory()?"directory":sha256(readBinaryFile(e.path(),16u<<20));return value;};
+                const auto before=snapshot();HANDLE held=INVALID_HANDLE_VALUE;if(kind=="locked"){held=CreateFileW(vdf.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"Owned delete lock failed");}
+                bool fired=false;std::vector<unsigned char> replacement;
+                if(kind=="race"){auto next=BinaryVdfDocument::emptySteamShortcuts();vdfFindObject(next.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Unrelated replacement",quotedSteamPath(other),quotedSteamPath(other.parent_path()),0)});replacement=next.serialize();identityCallerCloseHook=[&](const std::wstring& file){if(!fired&&file==identityCallerPath(vdf.wstring())){fired=true;writeAtomic(vdf,replacement);}};}
+                std::vector<std::wstring> args={L"--commit-delete-library-from-steam",L"--state",f.scan.wstring(),L"--steam-root",f.steam.wstring(),L"--account",L"19627",L"--select-game",toWide(directory),L"--confirm-steam-closed",L"--output",output.wstring()};
+                if(kind!="race")args.push_back(L"--allow-already-absent");if(kind=="mixed"){args.push_back(L"--select-game");args.push_back(toWide(state["games"][1]["gameDirectory"].get<std::string>()));}
+                const int code=f.call(args);identityCallerCloseHook={};if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);
+                const bool reject=kind=="duplicate"||kind=="unknown-primary"||kind=="malformed-row"||kind=="locked"||kind=="future-scan"||kind=="race";
+                bool passed=reject?code!=0:code==0;
+                if(kind=="race")passed=passed&&fired&&readBinaryFile(vdf,16u<<20)==replacement;
+                else if(reject||kind!="mixed")passed=passed&&snapshot()==before;
+                if(!reject&&code==0){const auto result=loadJsonDocument(output);passed=passed&&result.value("committed",false)&&result.value("alreadyAbsentCount",0)==1&&f.output.find("STEAM_DELETE_RESULT_RECEIPT: sha256-v1:")!=std::string::npos;if(kind=="mixed"){const auto rows=readShortcuts(vdf,"19627");passed=passed&&rows.size()==1&&canonicalPathKey(expandEnvironmentPath(unquote(rows[0].exe)))==canonicalPathKey(other);}else passed=passed&&result.value("deletedCount",-1)==0&&!result.value("shortcutsVdfModified",true);}
+                resume.push_back({{"variant",kind},{"passed",passed},{"exitCode",code},{"stderr",f.error},{"raceFired",fired}});resumeSafe=resumeSafe&&passed;
+            }
+            writeJsonAtomic(p/L"delete-resume-observed.json",{{"rows",resume}});check(resumeSafe,"Batch deletion resume accepted unknown absence or lost a confirmed no-op");
+
+        });
         run("discovery-producer-accounts-corrupt-nonempty-repair",[&](const fs::path& p){DiscoveryProducerFixture f(p);const std::string raw="{broken accounts";textFile(f.accounts,raw);check(f.list()==0&&f.accountAck()&&loadJsonDocument(f.accounts)["accounts"].size()==1,"Live nonempty accounts could not repair generated cache");check(producerArchivedBytes(f.data/L"backups",raw),"Corrupt account original lost");});
         run("discovery-producer-accounts-corrupt-empty-not-authority",[&](const fs::path& p){DiscoveryProducerFixture f(p);const std::string raw="{unknown previous accounts";textFile(f.accounts,raw);fs::remove(f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");fs::remove(f.steam/L"userdata"/L"19627"/L"config");fs::remove(f.steam/L"userdata"/L"19627");check(f.list()==0&&!f.accountAck()&&fileText(f.accounts)==raw&&f.output.find("STEAM_ACCOUNTS_STATUS: unknown")!=std::string::npos,"Bad account cache became writable default empty account list");});
         run("discovery-producer-accounts-live-vdf-locked",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.accounts,{{"schemaVersion",1},{"accounts",json::array()},{"keep","old"}});const auto raw=fileText(f.accounts);const auto target=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";HANDLE h=CreateFileW(target.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(h!=INVALID_HANDLE_VALUE,"Owned live VDF lock failed");const int code=f.list();CloseHandle(h);check(code==0&&!f.accountAck()&&fileText(f.accounts)==raw,"Unreadable live account became confirmed empty/default cache");check(f.list()==0&&f.accountAck(),"Live account lock release not retried");});
-        run("discovery-producer-scan-observed-source-change",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());bool fired=false;ruleTextAfterMove=[&](const std::wstring&,const std::wstring& to){if(!fired&&(identityCallerPath(to)==identityCallerPath((f.job/L"library-scan.json").wstring())||fs::path(to).filename()==L"original.json")){fired=true;writeJsonAtomic(f.scan,{{"schemaVersion",99},{"games",json::array()},{"keep","external observed scan"}});}};const auto code=f.fresh();ruleTextAfterMove={};check(fired&&code==0&&!f.scanAck()&&loadJsonDocument(f.scan)["keep"]=="external observed scan","Observed catalog source was overwritten or ACKed");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Observed scan repair did not retry");});
-        run("discovery-producer-job-observed-source-change",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());const auto job=f.job/L"library-scan.json";writeJsonAtomic(job,{{"schemaVersion",1},{"games",json::array()}});bool fired=false;ruleTextAfterMove=[&](const std::wstring&,const std::wstring& to){if(!fired&&identityCallerPath(to)==identityCallerPath(f.scan.wstring())){fired=true;writeJsonAtomic(job,{{"schemaVersion",99},{"keep","external job"}});}};const auto code=f.fresh();ruleTextAfterMove={};check(fired&&code==0&&!f.scanAck()&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos&&loadJsonDocument(job)["keep"]=="external job","Changed observed job output was ACKed/overwritten");writeJsonAtomic(job,{{"schemaVersion",1},{"games",json::array()}});check(f.fresh()==0&&f.scanAck(),"Job observation repair did not retry");});
+        run("discovery-producer-scan-observed-source-change",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());bool fired=false;ruleTextAfterMove=[&](const std::wstring&,const std::wstring& to){if(!fired&&(identityCallerPath(to)==identityCallerPath((f.job/L"library-scan.json").wstring())||fs::path(to).filename()==L"original.json")){fired=true;writeJsonAtomic(f.scan,{{"schemaVersion",99},{"games",json::array()},{"keep","external observed scan"}});}};const auto code=f.fresh();ruleTextAfterMove={};check(fired&&code==2&&!f.scanAck()&&f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos&&loadJsonDocument(f.scan)["keep"]=="external observed scan","Unconfirmed scan CLI returned success or replaced changed source");writeJsonAtomic(f.scan,f.catalog());check(f.fresh()==0&&f.scanAck(),"Observed scan repair did not retry");});
+        run("discovery-producer-job-observed-source-change",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.scan,f.catalog());const auto job=f.job/L"library-scan.json";writeJsonAtomic(job,{{"schemaVersion",1},{"games",json::array()}});bool fired=false;ruleTextAfterMove=[&](const std::wstring&,const std::wstring& to){if(!fired&&identityCallerPath(to)==identityCallerPath(f.scan.wstring())){fired=true;writeJsonAtomic(job,{{"schemaVersion",99},{"keep","external job"}});}};const auto code=f.fresh();ruleTextAfterMove={};check(fired&&code==2&&!f.scanAck()&&f.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos&&f.output.find("LIBRARY_SCAN_STATE: unknown")!=std::string::npos&&loadJsonDocument(job)["keep"]=="external job","Unconfirmed scan CLI returned success or replaced changed job");check(f.output.find("LIBRARY_STATE_COMMITTED: true")!=std::string::npos,"Changed job refusal lost confirmed persistent-state publication receipt");writeJsonAtomic(job,{{"schemaVersion",1},{"games",json::array()}});check(f.fresh()==0&&f.scanAck(),"Job observation repair did not retry");});
         run("discovery-producer-accounts-observed-output-change",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.accounts,{{"schemaVersion",1},{"accounts",json::array()}});const auto target=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";bool fired=false;identityCallerReadHook=[&](const std::wstring& file){if(!fired&&file==identityCallerPath(target.wstring())){fired=true;writeJsonAtomic(f.accounts,{{"schemaVersion",99},{"accounts",json::array()},{"keep","external accounts"}});}};const auto code=f.list();identityCallerReadHook={};check(fired&&code==0&&!f.accountAck()&&f.output.find("STEAM_ACCOUNTS_STATUS: unknown")!=std::string::npos&&loadJsonDocument(f.accounts)["keep"]=="external accounts","Changed account output source was overwritten/ACKed");writeJsonAtomic(f.accounts,{{"schemaVersion",1},{"accounts",json::array()}});check(f.list()==0&&f.accountAck(),"Account observation repair failed");});
         run("discovery-producer-accounts-userdata-denied",[&](const fs::path& p){DiscoveryProducerFixture f(p);writeJsonAtomic(f.accounts,listSteamAccountTargets({f.steam}));const auto raw=fileText(f.accounts);int code=-1;withConfigReadDenied(f.steam/L"userdata",[&]{code=f.list();});check(code==0&&!f.accountAck()&&fileText(f.accounts)==raw&&f.output.find("STEAM_ACCOUNTS_STATUS: unknown")!=std::string::npos,"Unreadable userdata became confirmed empty accounts");check(f.list()==0&&f.accountAck(),"Userdata ACL release failed");});
         run("discovery-producer-accounts-healthy-empty-first-observation",[&](const fs::path& p){DiscoveryProducerFixture f(p);fs::remove(f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");fs::remove(f.steam/L"userdata"/L"19627"/L"config");fs::remove(f.steam/L"userdata"/L"19627");check(!fs::exists(f.accounts)&&f.list()==0&&f.accountAck(),"Legitimate first empty account observation was blocked");const auto report=loadJsonDocument(f.accounts);check(report["accounts"].empty()&&report["steamStatus"]=="installed-no-account","Known empty discovery fabricated account identity");});
@@ -1001,8 +1941,37 @@ int wmain(int argc,wchar_t** argv) {
             auto prior=f.catalog();prior["games"][0]["gameDirectory"]=toUtf8(collection.wstring());prior["games"][0]["primaryExecutable"]=toUtf8(ae.wstring());const std::string k=kind;if(k=="future")prior["schemaVersion"]=99;if(k=="bad-type")prior["games"][0]["nativeSteamAppId"]="invalid";std::string bytes=prior.dump();if(k=="duplicate")bytes.insert(1,"\"schemaVersion\":99,");textFile(f.scan,bytes);
             auto report=scanLibraryRoots({f.games},{f.trainers},4,config);writeJsonAtomic(p/L"consumed.json",report);check(report["games"].size()==2&&!report["collectionContainers"].empty(),"Owned collection fixture did not reach actual split consumer");bool alias=false;for(const auto& game:report["games"])for(const auto& a:game.value("alternateGameDirectories",json::array()))if(a==toUtf8(collection.wstring()))alias=true;check(alias==(k=="current"),"Raw invalid scan granted legacy container ownership alias");check(fileText(f.scan)==bytes,"Collection reader changed scan original");
         });
-        for(const auto* kind:{"future","schema-type","truncated","duplicate","container","utf8","missing"})run((std::string("discovery-producer-audit-remove-protect-")+kind).c_str(),[&,kind](const fs::path& p){
-            DiscoveryProducerFixture f(p);auto doc=f.catalog();const std::string k=kind;if(k=="future")doc["schemaVersion"]=99;if(k=="schema-type")doc["schemaVersion"]="1";if(k=="container")doc["missingGames"]=json::object();std::string bytes=doc.dump();if(k=="truncated")bytes="{truncated scan";if(k=="duplicate")bytes.insert(1,"\"schemaVersion\":99,");if(k=="utf8")bytes=std::string("{\"unknown\":\"")+char(0xc0)+char(0xaf)+"\"}";if(k!="missing")textFile(f.scan,bytes);const auto config=f.data/L"config"/L"library-config.json";const auto saved=fileText(config);const int code=f.call({L"--remove-library-game",L"--game-dir",f.exe.parent_path().parent_path().wstring()});check(code==0&&f.output.find("LIBRARY_GAME_REMOVED:")==std::string::npos,"Unknown inventory removal was ACKed/threw");check((k=="missing"?!fs::exists(f.scan):fs::is_regular_file(f.scan)&&fileText(f.scan)==bytes)&&fileText(config)==saved,"Unknown scan/remove changed original or configuration");writeJsonAtomic(f.scan,f.catalog());check(f.call({L"--remove-library-game",L"--game-dir",f.exe.parent_path().parent_path().wstring()})==0&&f.output.find("LIBRARY_GAME_REMOVED:")!=std::string::npos,"Trusted scan repair did not unlock explicit removal");
+        for(const auto* kind:{"future","schema-type","truncated","duplicate","container","utf8","missing","locked","write-failure","readback-change"})run((std::string("discovery-producer-audit-remove-protect-")+kind).c_str(),[&,kind](const fs::path& p){
+            DiscoveryProducerFixture f(p);const std::string k=kind;const auto directory=f.exe.parent_path().parent_path();
+            auto doc=f.catalog();const auto other=f.root/L"Other"/L"Other.exe";textFile(other,"unrelated install");
+            auto unrelated=doc["games"][0];unrelated["gameDirectory"]=toUtf8(other.parent_path().wstring());unrelated["primaryExecutable"]=toUtf8(other.wstring());doc["games"].push_back(unrelated);
+            if(k=="future")doc["schemaVersion"]=99;if(k=="schema-type")doc["schemaVersion"]="1";if(k=="container")doc["missingGames"]=json::object();
+            std::string bytes=doc.dump();if(k=="truncated")bytes="{truncated scan";if(k=="duplicate")bytes.insert(1,"\"schemaVersion\":99,");if(k=="utf8")bytes=std::string("{\"unknown\":\"")+char(0xc0)+char(0xaf)+"\"}";
+            if(k!="missing")textFile(f.scan,bytes);
+            const auto config=f.data/L"config"/L"library-config.json",overrides=f.data/L"config"/L"manual-overrides.json";
+            textFile(overrides,json{{"schemaVersion",1},{"items",{{canonicalPathKey(f.exe),{{"removeProbe","keep"}}},{canonicalPathKey(other),{{"removeProbe","unrelated"}}}}}}.dump());
+            const auto saved=fileText(config),savedOverrides=fileText(overrides),install=fileText(f.exe);std::vector<fs::path> retained;
+            for(const auto* section:{L"games",L"artwork",L"cache"}){const auto path=f.data/section/toWide(gameDataId(directory))/L"owned.txt";textFile(path,"retained owned metadata");retained.push_back(path);}
+            HANDLE held=INVALID_HANDLE_VALUE;struct Close {HANDLE& h;~Close(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}} close{held};
+            if(k=="locked"){held=CreateFileW(f.scan.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"Owned removal scan lock failed");}
+            if(k=="write-failure")selftestMoveFault=[&](const auto&,const auto& to)->DWORD{return identityCallerPath(to)==identityCallerPath(f.scan.wstring())?ERROR_WRITE_FAULT:0;};
+            bool changed=false;std::string externalBytes;
+            if(k=="readback-change")ruleTextAfterMove=[&](const auto&,const auto& to){if(!changed&&identityCallerPath(to)==identityCallerPath(f.scan.wstring())){changed=true;writeJsonAtomic(f.scan,{{"schemaVersion",99},{"keep","new external inventory"}});externalBytes=fileText(f.scan);}};
+            const auto code=f.call({L"--remove-library-game",L"--game-dir",directory.wstring()});selftestMoveFault={};ruleTextAfterMove={};if(held!=INVALID_HANDLE_VALUE){CloseHandle(held);held=INVALID_HANDLE_VALUE;}
+            check(code!=0,"Unconfirmed library removal returned success");
+            check(f.output.find("LIBRARY_GAME_REMOVED:")==std::string::npos&&f.output.find("LIBRARY_SCAN_REMOVE_CONFIRMED: false")!=std::string::npos&&f.error.find("ERROR_LIBRARY_REMOVE_UNCONFIRMED:")!=std::string::npos,"Unconfirmed removal omitted its current failure receipt");
+            if(k=="readback-change")check(changed&&fileText(f.scan)==externalBytes,"Changed inventory was overwritten");
+            else check(k=="missing"?!fs::exists(f.scan):fileText(f.scan)==bytes,"Unconfirmed removal changed inventory original");
+            check(fileText(config)==saved&&fileText(overrides)==savedOverrides&&fileText(f.exe)==install&&fileText(other)=="unrelated install","Unconfirmed removal changed configuration, overrides or installed games");
+            for(const auto& file:retained)check(fileText(file)=="retained owned metadata","Unconfirmed removal deleted persistent metadata");
+            check(!fs::exists(f.data/L"backups"/L"deleted-games"),"Unconfirmed removal entered deleted-game recovery workflow");
+            doc=f.catalog();doc["games"].push_back(unrelated);writeJsonAtomic(f.scan,doc);
+            check(f.call({L"--remove-library-game",L"--game-dir",directory.wstring()})==0&&f.output.find("LIBRARY_GAME_REMOVED:")!=std::string::npos,"Trusted scan repair did not unlock explicit removal");
+            const auto after=loadJsonDocument(f.scan);check(after["games"].size()==1&&after["games"][0]==unrelated,"Confirmed removal changed an unrelated inventory row");
+            check(fileText(f.exe)==install&&fileText(other)=="unrelated install","Confirmed library removal deleted installed game files");
+            for(const auto& file:retained)check(!fs::exists(file)&&producerArchivedBytes(f.data/L"backups"/L"deleted-games","retained owned metadata"),"Confirmed removal lost original recovery data");
+            check(loadManualOverrides(overrides)["items"].contains(canonicalPathKey(other)),"Confirmed removal deleted unrelated manual override");
+            if(k=="missing")check(f.call({L"--restore-library-game",L"--game-dir",directory.wstring()})==0&&f.output.find("LIBRARY_GAME_RESTORED_FOR_DISCOVERY:")!=std::string::npos,"Explicit restore no longer clears original removal tombstone");
         });
         for(const auto* kind:{"lock","directory"})run((std::string("discovery-producer-audit-remove-io-")+kind).c_str(),[&,kind](const fs::path& p){
             DiscoveryProducerFixture f(p);const std::string k=kind;HANDLE held=INVALID_HANDLE_VALUE;if(k=="directory")fs::create_directories(f.scan);else{writeJsonAtomic(f.scan,f.catalog());held=CreateFileW(f.scan.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);check(held!=INVALID_HANDLE_VALUE,"Owned scan lock failed");}const auto config=f.data/L"config"/L"library-config.json";const auto saved=fileText(config);const int code=f.call({L"--remove-library-game",L"--game-dir",f.exe.parent_path().parent_path().wstring()});if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);check(code==0&&f.output.find("LIBRARY_GAME_REMOVED:")==std::string::npos&&fileText(config)==saved,"Scan IO fault became successful removal");if(k=="directory")fs::remove(f.scan);writeJsonAtomic(f.scan,f.catalog());check(f.call({L"--remove-library-game",L"--game-dir",f.exe.parent_path().parent_path().wstring()})==0&&f.output.find("LIBRARY_GAME_REMOVED:")!=std::string::npos,"Released scan IO did not retry");
@@ -1013,6 +1982,104 @@ int wmain(int argc,wchar_t** argv) {
         });
         run("discovery-producer-audit-remove-valid-unknown-preservation",[&](const fs::path& p){
             DiscoveryProducerFixture f(p);auto doc=f.catalog();const json opaque={{"gameDirectory",7},{"opaqueDebt",{{"owner","unknown"}}}};const auto other=f.root/L"Other";doc["games"].push_back(opaque);doc["unscannedGames"]=json::array({{{"gameDirectory",toUtf8(other.wstring())},{"opaque","manual remains"}}});doc["libraryScanRecovery"]={{"schemaVersion",1},{"requiresFreshScan",true},{"unknownPreviousInventory",true}};writeJsonAtomic(f.scan,doc);check(f.call({L"--remove-library-game",L"--game-dir",f.exe.parent_path().parent_path().wstring()})==0&&f.output.find("LIBRARY_GAME_REMOVED:")!=std::string::npos,"Valid explicit removal failed");const auto actual=loadJsonDocument(f.scan);check(actual["games"]==json::array({opaque})&&actual["unscannedGames"]==doc["unscannedGames"]&&actual["futureUnknown"]==doc["futureUnknown"]&&actual["libraryScanRecovery"]==doc["libraryScanRecovery"],"Removal persisted sanitized projection or lost unknown debt");
+            json legacyRows=json::array(),metadataRows=json::array(),primaryRows=json::array();bool allCorrect=true,metadataSafe=true;
+            for(const auto* mode:{"string","string-slashes","object","mixed-duplicates","object-extension"}){
+                const std::string kind=mode;DiscoveryProducerFixture scenario(p/L"legacy-manual"/toWide(kind));const auto directory=scenario.root/L"StandaloneGame",exe=directory/L"StandaloneGame.exe";
+                textFile(exe,"owned legacy manual game, never executed");fs::resize_file(exe,20u<<20);const auto installBefore=fs::file_size(exe);
+                auto path=toUtf8(directory.wstring());if(kind=="string-slashes")std::replace(path.begin(),path.end(),'\\','/');
+                const json currentObject={{"path",toUtf8(directory.wstring())},{"source","user"},{"locked",true},{"tags",{"manual-game-directory","custom-directory-tag"}},{"futureAnnotation",{{"keep",true}}}};
+                const auto other=scenario.root/L"OtherManual";const json otherEntry={{"path",toUtf8(other.wstring())},{"futureOwner",{{"keep",true}}}};
+                auto config=loadLibraryConfig(scenario.data/L"config"/L"library-config.json");config["manualGameDirectories"]=json::array({otherEntry});
+                if(kind=="object"||kind=="object-extension")config["manualGameDirectories"].push_back(currentObject);
+                else{config["manualGameDirectories"].push_back(path);if(kind=="mixed-duplicates")config["manualGameDirectories"].push_back(currentObject);}
+                config["manualPrimary"][canonicalPathKey(directory)]={{"exe",toUtf8(exe.wstring())},{"locked",true},{"tags",{"custom-primary-tag"}},{"futurePrimary",{{"keep",true}}}};config["futureRoot"]={{"keep",true}};const auto configPath=scenario.data/L"config"/L"library-config.json";writeJsonAtomic(configPath,config);
+                const auto metadata=scenario.data/L"games"/toWide(gameDataId(directory))/L"meta.json";textFile(metadata,"owned legacy metadata");const auto overridesPath=scenario.data/L"config"/L"manual-overrides.json";
+                const json chosen={{"name","Retained manual title"},{"steamId",620},{"wallpaper",{{"path","keep-wallpaper"}}},{"futureChoice",{{"keep",true}}}};writeJsonAtomic(overridesPath,{{"schemaVersion",1},{"items",{{canonicalPathKey(exe),chosen}}}});
+                const auto countGame=[&](){const auto state=loadJsonDocument(scenario.scan);return std::count_if(state["games"].begin(),state["games"].end(),[&](const auto& game){return canonicalPathKey(fs::path(toWide(jsonStringOr(game,"gameDirectory"))))==canonicalPathKey(directory)&&jsonBoolSafe(game,"manualGameDirectoryLocked",false)&&canonicalPathKey(fs::path(toWide(jsonStringOr(game,"primaryExecutable"))))==canonicalPathKey(exe);});};
+                const auto initial=scenario.fresh();const bool discovered=initial==0&&scenario.scanAck()&&countGame()==1;
+                const auto removed=scenario.call({L"--remove-library-game",L"--game-dir",directory.wstring()});const auto package=latestDeletedGameRecoveryPackage(scenario.data,directory);const auto manifest=loadJsonDocument(package/L"recovery-manifest.json");const auto savedDirectory=manifest.value("manualGameDirectory",json());
+                const bool originSaved=savedDirectory.is_object()&&canonicalPathKey(fs::path(toWide(jsonStringOr(savedDirectory,"path"))))==canonicalPathKey(directory)&&((kind=="object"||kind=="object-extension"||kind=="mixed-duplicates")?savedDirectory==currentObject:true);
+                bool foreignRejected=false;try{auto foreign=manifest;foreign["manualGameDirectory"]={{"path",toUtf8(other.wstring())}};verifyRecoveryFiles(package,foreign,directory);}catch(...){foreignRejected=true;}
+                const bool removedWithoutInstall=removed==0&&scenario.output.find("LIBRARY_GAME_REMOVED:")!=std::string::npos&&fs::is_regular_file(exe)&&fs::file_size(exe)==installBefore&&configuredDirectory(loadLibraryConfig(configPath)["excludedGameDirectories"],directory);
+                const auto undone=scenario.call({L"--undo-remove-library-game",L"--game-dir",directory.wstring()});const auto restored=loadLibraryConfig(configPath);
+                const bool originRestored=undone==0&&configuredDirectory(restored["manualGameDirectories"],directory)&&!configuredDirectory(restored["excludedGameDirectories"],directory)&&loadManualOverrides(overridesPath)["items"][canonicalPathKey(exe)]==chosen&&fileText(metadata)=="owned legacy metadata";
+                // Reintroduce the exact legacy shape to test the add writer's de-duplication.
+                auto readdConfig=restored;readdConfig["manualGameDirectories"]=config["manualGameDirectories"];writeJsonAtomic(configPath,readdConfig);
+                const auto readded=scenario.call({L"--add-library-game",L"--game-dir",directory.wstring()});const auto finalConfig=loadLibraryConfig(configPath);
+                const auto matching=std::count_if(finalConfig["manualGameDirectories"].begin(),finalConfig["manualGameDirectories"].end(),[&](const auto& row){return configuredDirectory(json::array({row}),directory);});
+                const auto rescanned=scenario.fresh();const bool stable=readded==0&&matching==1&&rescanned==0&&scenario.scanAck()&&countGame()==1;
+                const bool retained=finalConfig["futureRoot"]==config["futureRoot"]&&std::find(finalConfig["manualGameDirectories"].begin(),finalConfig["manualGameDirectories"].end(),otherEntry)!=finalConfig["manualGameDirectories"].end()&&fs::file_size(exe)==installBefore;
+                json retainedDirectory;for(const auto& row:finalConfig["manualGameDirectories"])if(configuredDirectory(json::array({row}),directory))retainedDirectory=row;
+                const bool hadObject=kind=="object"||kind=="object-extension"||kind=="mixed-duplicates";
+                const bool directoryMetadata=!hadObject||(retainedDirectory.value("futureAnnotation",json())==currentObject["futureAnnotation"]&&retainedDirectory.contains("tags")&&std::find(retainedDirectory["tags"].begin(),retainedDirectory["tags"].end(),json("custom-directory-tag"))!=retainedDirectory["tags"].end());
+                metadataSafe=metadataSafe&&directoryMetadata;metadataRows.push_back({{"variant",kind},{"passed",directoryMetadata},{"directory",retainedDirectory}});
+                if(kind=="object-extension"){
+                    const auto alternate=directory/L"StandaloneAlternate.exe",outside=scenario.root/L"Outside"/L"Foreign.exe";textFile(alternate,"owned alternate, never executed");fs::resize_file(alternate,20u<<20);textFile(outside,"owned invalid selection, never executed");
+                    const auto savedInventory=loadJsonDocument(scenario.scan);const auto wanted=canonicalPathKey(directory);const auto originalPrimary=restored["manualPrimary"][wanted];
+                    for(const auto* route:{"add-executable","legacy-primary","editor-primary"}){
+                        auto before=loadLibraryConfig(configPath);before["manualPrimary"][wanted]=originalPrimary;writeJsonAtomic(configPath,before);writeJsonAtomic(scenario.scan,savedInventory);
+                        std::vector<std::wstring> args={std::string(route)=="add-executable"?L"--add-library-game":L"--set-library-primary",L"--game-dir",directory.wstring(),L"--exe",alternate.wstring()};
+                        if(std::string(route)=="editor-primary")args.insert(args.end(),{L"--publish-primary-state",L"--expected-primary",exe.wstring()});
+                        const auto code=scenario.call(args);const auto after=loadLibraryConfig(configPath),primary=after["manualPrimary"][wanted];
+                        const bool owned=code==0&&canonicalPathKey(fs::path(toWide(jsonStringOr(primary,"exe"))))==canonicalPathKey(alternate)&&jsonStringOr(primary,"source")=="user"&&jsonBoolSafe(primary,"locked",false)&&jsonBoolSafe(primary,"protectedFromAutomaticOverwrite",false);
+                        const bool preserved=primary.value("futurePrimary",json())==originalPrimary["futurePrimary"]&&primary.contains("tags")&&std::find(primary["tags"].begin(),primary["tags"].end(),json("custom-primary-tag"))!=primary["tags"].end()&&std::find(primary["tags"].begin(),primary["tags"].end(),json("manual-primary"))!=primary["tags"].end()&&std::find(primary["tags"].begin(),primary["tags"].end(),json("locked"))!=primary["tags"].end();
+                        const auto acceptedBytes=fileText(configPath);auto invalid=args;for(size_t i=0;i+1<invalid.size();++i)if(invalid[i]==L"--exe")invalid[i+1]=outside.wstring();
+                        const auto bad=scenario.call(invalid);const bool rejected=bad!=0&&fileText(configPath)==acceptedBytes;
+                        const bool published=std::string(route)!="editor-primary"||canonicalPathKey(fs::path(toWide(jsonStringOr(loadJsonDocument(scenario.scan)["games"][0],"primaryExecutable"))))==canonicalPathKey(alternate);
+                        const bool safe=owned&&preserved&&rejected&&published;metadataSafe=metadataSafe&&safe;primaryRows.push_back({{"route",route},{"exitCode",code},{"ownedFieldsUpdated",owned},{"metadataPreserved",preserved},{"invalidOutsideDirectoryRejected",rejected},{"targetedInventoryPublished",published},{"primary",primary},{"passed",safe}});
+                    }
+                }
+                const bool passed=discovered&&originSaved&&foreignRejected&&removedWithoutInstall&&originRestored&&stable&&retained;allCorrect=allCorrect&&passed;
+                legacyRows.push_back({{"variant",kind},{"initialExitCode",initial},{"discoveredExactlyOnce",discovered},{"recoveryOriginSaved",originSaved},{"savedDirectory",savedDirectory},{"foreignRecoveryRejected",foreignRejected},{"removedWithoutInstallChange",removedWithoutInstall},{"undoExitCode",undone},{"originAndDataRestored",originRestored},{"matchingAfterReadd",matching},{"stableAfterReaddAndScan",stable},{"unrelatedAndInstallRetained",retained},{"passed",passed}});
+            }
+            writeJsonAtomic(p/L"legacy-manual-observed.json",legacyRows);
+            check(legacyRows.size()==5&&allCorrect,"Legacy manual directory lost scan, recovery origin or add uniqueness");
+            writeJsonAtomic(p/L"manual-record-metadata-observed.json",{{"directories",metadataRows},{"primaryRoutes",primaryRows}});
+            check(metadataRows.size()==5&&primaryRows.size()==3&&metadataSafe,"Manual selection discarded retained directory or primary metadata");
+            json nestedRows=json::array();bool nestedSafe=true;
+            for(const auto* mode:{"manual-object","manual-string","primary-only","active-inventory","missing-inventory","unscanned-inventory","unregistered-subdirectory","similar-prefix"}){
+                const std::string kind=mode;const bool independent=kind!="unregistered-subdirectory"&&kind!="similar-prefix";
+                DiscoveryProducerFixture scenario(p/L"nested-removal"/toWide(kind));const auto directory=scenario.exe.parent_path().parent_path();
+                const auto child=directory/L"ChildGame",childExe=(kind=="similar-prefix"?directory/L"ChildGameCopy":child)/L"ChildGame.exe",ownAlternate=directory/L"bin"/L"Alternate.exe",unrelated=scenario.root/L"OtherGame"/L"Other.exe";
+                textFile(childExe,"owned independent install, never executed");textFile(ownAlternate,"owned selected alternate, never executed");textFile(unrelated,"owned unrelated install, never executed");
+                auto state=scenario.catalog();const json childRow={{"gameDirectory",toUtf8(child.wstring())},{"primaryExecutable",toUtf8((child/L"ChildGame.exe").wstring())},{"status","ready"},{"ownerNote","independent child"}};
+                if(kind=="active-inventory")state["games"].push_back(childRow);
+                if(kind=="missing-inventory")state["missingGames"].push_back(childRow);
+                if(kind=="unscanned-inventory")state["unscannedGames"]=json::array({childRow});
+                writeJsonAtomic(scenario.scan,state);auto config=loadLibraryConfig(scenario.data/L"config"/L"library-config.json");
+                config["manualGameDirectories"].push_back({{"path",toUtf8(directory.wstring())},{"source","user"}});
+                if(kind=="manual-object"||kind=="similar-prefix")config["manualGameDirectories"].push_back({{"path",toUtf8(child.wstring())},{"source","user"}});
+                if(kind=="manual-string")config["manualGameDirectories"].push_back(toUtf8(child.wstring()));
+                config["manualPrimary"][canonicalPathKey(directory)]={{"exe",toUtf8(scenario.exe.wstring())}};
+                if(kind=="primary-only")config["manualPrimary"][canonicalPathKey(child)]={{"exe",toUtf8(childExe.wstring())}};
+                const auto configPath=scenario.data/L"config"/L"library-config.json",overridesPath=scenario.data/L"config"/L"manual-overrides.json";writeJsonAtomic(configPath,config);
+                const json parentChoice={{"name","Parent chosen name"},{"wallpaper",{{"path","keep-parent"}}}},childChoice={{"name","Child chosen name"},{"cover",{{"path","keep-child-cover"}}},{"future",{{"keep",true}}}},alternateChoice={{"name","Parent alternate"}},unrelatedChoice={{"name","Unrelated chosen name"}};
+                const auto parentKey=canonicalPathKey(scenario.exe),childKey=canonicalPathKey(childExe),alternateKey=canonicalPathKey(ownAlternate),otherKey=canonicalPathKey(unrelated);
+                writeJsonAtomic(overridesPath,{{"schemaVersion",1},{"items",{{parentKey,parentChoice},{childKey,childChoice},{alternateKey,alternateChoice},{otherKey,unrelatedChoice}}}});
+                const auto parentMeta=scenario.data/L"games"/toWide(gameDataId(directory))/L"meta.json",childMeta=scenario.data/L"games"/toWide(gameDataId(child))/L"meta.json";
+                textFile(parentMeta,"selected parent metadata");textFile(childMeta,"retained child metadata");
+                const auto removed=scenario.call({L"--remove-library-game",L"--game-dir",directory.wstring()});const auto current=loadManualOverrides(overridesPath);const auto afterState=loadJsonDocument(scenario.scan);
+                const bool removedOnlyOwn=removed==0&&!current["items"].contains(parentKey)&&!current["items"].contains(alternateKey)&&current["items"][otherKey]==unrelatedChoice&&
+                    (independent?(current["items"].contains(childKey)&&current["items"][childKey]==childChoice):!current["items"].contains(childKey));
+                const bool childInventoryRetained=(kind=="active-inventory"?afterState["games"].size()==1&&afterState["games"][0]==childRow:
+                    kind=="missing-inventory"?afterState["missingGames"]==state["missingGames"]:kind=="unscanned-inventory"?afterState["unscannedGames"]==state["unscannedGames"]:true);
+                const auto package=latestDeletedGameRecoveryPackage(scenario.data,directory);const auto manifestPath=package/L"recovery-manifest.json";auto manifest=loadJsonDocument(manifestPath);
+                const bool archiveOwnsCorrectly=manifest["manualOverrides"].contains(parentKey)&&manifest["manualOverrides"].contains(alternateKey)&&
+                    manifest["manualOverrides"].contains(childKey)==!independent&&!manifest["manualOverrides"].contains(otherKey);
+                // Legacy packages could already contain descendant overrides.
+                // Their valid same-parent data must not resurrect a now independent child.
+                manifest["manualOverrides"][childKey]=childChoice;writeJsonAtomic(manifestPath,manifest);auto beforeUndo=current;beforeUndo["items"].erase(childKey);writeJsonAtomic(overridesPath,beforeUndo);
+                const auto undone=scenario.call({L"--undo-remove-library-game",L"--game-dir",directory.wstring()});const auto restored=loadManualOverrides(overridesPath);
+                const bool undoOwnsCorrectly=undone==0&&restored["items"][parentKey]==parentChoice&&restored["items"][alternateKey]==alternateChoice&&restored["items"][otherKey]==unrelatedChoice&&
+                    (independent?!restored["items"].contains(childKey):restored["items"][childKey]==childChoice);
+                const bool filesRetained=fileText(scenario.exe)=="owned fake exe, never launched"&&fileText(childExe)=="owned independent install, never executed"&&fileText(unrelated)=="owned unrelated install, never executed"&&fileText(childMeta)=="retained child metadata"&&fileText(parentMeta)=="selected parent metadata";
+                const bool passed=removedOnlyOwn&&childInventoryRetained&&archiveOwnsCorrectly&&undoOwnsCorrectly&&filesRetained;nestedSafe=nestedSafe&&passed;
+                nestedRows.push_back({{"variant",kind},{"independent",independent},{"removeExitCode",removed},{"removedOnlyOwnOverrides",removedOnlyOwn},{"childInventoryRetained",childInventoryRetained},{"archiveOwnsCorrectly",archiveOwnsCorrectly},{"undoExitCode",undone},{"legacyUndoOwnsCorrectly",undoOwnsCorrectly},{"installationAndMetadataRetained",filesRetained},{"passed",passed}});
+            }
+            writeJsonAtomic(p/L"nested-removal-observed.json",nestedRows);
+            check(nestedRows.size()==8&&nestedSafe,"Parent removal or undo changed an independent nested game's overrides");
+
+
         });
 
         for(const auto* kind:{"add-inactive","delete-inactive","add-plan-write-failure","healthy-noop"})run((std::string("discovery-producer-audit-commit-")+kind).c_str(),[&,kind](const fs::path& p){
@@ -1024,9 +2091,320 @@ int wmain(int argc,wchar_t** argv) {
         };
         auto primaryCall=[&](DiscoveryProducerFixture& f,const fs::path& dir,const fs::path& next,const fs::path& expected){return f.call({L"--set-library-primary",L"--game-dir",dir.wstring(),L"--exe",next.wstring(),L"--publish-primary-state",L"--expected-primary",expected.wstring()});};
         run("discovery-producer-primary-publishes-exact-game-before-dependent-write",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
+            bootstrapPeIdentityBoundary(p);
+            {
+            // Reproduce the actual Win5 crash helpers without executing them.
+            const auto crashField=json::parse(R"FIELD([{"file":"CrashLogsGenerator.exe","version":{"FileDescription":"Crash Logs Generator","InternalName":"CrashLogsGenerator.dll","LegalCopyright":"Copyright (C) 2021 Activision Publishing. Inc.","OriginalFilename":"CrashLogsGenerator.dll","ProductName":"Call of Duty®"},"directory":"Call of Duty HQ","oldRole":"main-game","oldSource":"pe-product-name"},{"file":"codCrashHandler.exe","version":{"CompanyName":"Activision","FileDescription":"Call of Duty� External Crash Handler","InternalName":"codCrashHandler.exe","LegalCopyright":"� 2026 Activision Publishing, Inc.","OriginalFilename":"codCrashHandler.exe","ProductName":"External Crash Handler"},"directory":"Call of Duty HQ","oldRole":"main-game","oldSource":"pe-product-name"},{"file":"codCrashHandler.exe","version":{"CompanyName":"Activision","FileDescription":"Call of Duty� External Crash Handler","InternalName":"codCrashHandler.exe","LegalCopyright":"� 2026 Activision Publishing, Inc.","OriginalFilename":"codCrashHandler.exe","ProductName":"External Crash Handler"},"directory":"Call of Duty HQ","oldRole":"main-game","oldSource":"pe-product-name"}])FIELD");
+            json crashRows=json::array();bool crashSafe=true;
+            for(const auto& row:crashField){
+                const auto exe=p/L"crash-field"/toWide(jsonStringOr(row,"file"));
+                const auto version=row["version"].get<std::map<std::string,std::string>>();
+                const auto value=assessPeIdentity(version,classifyLibraryExecutable(exe),jsonStringOr(row,"directory"));
+                const bool passed=value.role=="crash-handler"&&value.primaryEvidenceSource=="pe-tool-classification";
+                crashRows.push_back({{"field",row},{"role",value.role},{"source",value.primaryEvidenceSource},{"confidence",value.identityConfidence},{"passed",passed}});crashSafe=crashSafe&&passed;
+            }
+            const auto describedCrash=assessPeIdentity({{"ProductName","Owned Game"},{"FileDescription","Owned Game"}},"crash-handler","Owned Game");
+            const bool descriptionSafe=describedCrash.role=="crash-handler"&&describedCrash.primaryEvidenceSource=="pe-tool-classification";
+            json crashScans=json::array();bool scanSafe=true,manualSafe=true;
+            for(const auto* filename:{L"CrashLogsGenerator.exe",L"codCrashHandler.exe"}){
+                const auto directory=p/L"crash-only"/fs::path(filename).stem(),exe=directory/filename;
+                textFile(exe,"owned inert crash utility, never executed");fs::resize_file(exe,20u*1024u*1024u);
+                const auto automatic=scanOneGameDirectory(directory,1,defaultLibraryConfig(),{});
+                const bool automaticSafe=jsonStringOr(automatic,"primaryExecutable").empty()&&jsonStringOr(automatic,"status")=="unrecognized-tool"&&!automatic["pidCoordination"].value("eligibleForGameTarget",true)&&automatic["pidCoordination"]["suggestedWhitelist"].empty()&&jsonStringOr(automatic["candidates"][0],"role")=="crash-handler";
+                auto manualConfig=defaultLibraryConfig();manualConfig["manualPrimary"][canonicalPathKey(directory)]={{"exe",toUtf8(exe.wstring())}};
+                const auto manual=scanOneGameDirectory(directory,1,manualConfig,{});
+                const bool manualRetained=manual.value("selectionLocked",false)&&jsonStringOr(manual,"primaryExecutable")==toUtf8(exe.wstring())&&jsonStringOr(manual,"selectionSource")=="manual";
+                crashScans.push_back({{"file",toUtf8(std::wstring(filename))},{"automatic",automatic},{"automaticSafe",automaticSafe},{"manual",manual},{"manualRetained",manualRetained}});scanSafe=scanSafe&&automaticSafe;manualSafe=manualSafe&&manualRetained;
+            }
+            json crashControls=json::array();bool normalSafe=true;
+            for(const auto* title:{"Crash Bandicoot 4","Crashlands","Crash Handler Adventure","CrashLogsGenerator Game"}){
+                const auto exe=p/L"normal-crash-titles"/toWide(title)/(toWide(title)+L".exe");
+                const auto value=assessPeIdentity({{"ProductName",title},{"FileDescription",title}},classifyLibraryExecutable(exe),title);
+                const bool passed=value.role=="main-game"&&value.primaryEvidenceSource=="pe-product-name";
+                crashControls.push_back({{"title",title},{"role",value.role},{"source",value.primaryEvidenceSource},{"passed",passed}});normalSafe=normalSafe&&passed;
+            }
+            const auto helperDescription=assessPeIdentity({{"ProductName","Application"},{"FileDescription","Hearts of Iron IV"}},"helper");
+            normalSafe=normalSafe&&helperDescription.role=="main-game"&&helperDescription.primaryEvidenceSource=="pe-file-description";
+            writeJsonAtomic(p/L"crash-helper-observations.json",{{"field",crashRows},{"describedCrashRole",describedCrash.role},{"descriptionSafe",descriptionSafe},{"scans",crashScans},{"controls",crashControls},{"manualSafe",manualSafe},{"normalSafe",normalSafe},{"crashSafe",crashSafe},{"scanSafe",scanSafe}});
+            check(manualSafe&&normalSafe,"Crash helper exclusion changed ordinary titles or explicit manual selection");
+            check(crashSafe&&descriptionSafe&&scanSafe,"Crash helper executables became automatic game identities");
+            }
+            // A capped candidate set cannot prove an automatic primary.
+            const auto cappedDirectory=p/L"cap-check"/L"CapAdventure";
+            for(unsigned i=0;i<251;++i){const auto exe=cappedDirectory/toWide("part-"+std::to_string(i))/L"CapAdventure.exe";textFile(exe,"owned inert marker, never executed");fs::resize_file(exe,6u*1024u*1024u);}
+            const auto capped=scanOneGameDirectory(cappedDirectory,2,defaultLibraryConfig(),{});
+            const auto selectedPath=jsonStringOr(capped,"primaryExecutable");check(!selectedPath.empty(),"Cap scenario did not retain a primary candidate");
+            auto cappedConfig=defaultLibraryConfig();cappedConfig["manualPrimary"][canonicalPathKey(cappedDirectory)]={{"exe",selectedPath}};
+            const auto manualCap=scanOneGameDirectory(cappedDirectory,2,cappedConfig,{});
+            auto legacyCap=capped;legacyCap["scanComplete"]=true;legacyCap["status"]="ready";legacyCap["pidCoordination"]["eligibleForGameTarget"]=true;legacyCap["pidCoordination"]["whitelistSuggested"]=true;legacyCap["pidCoordination"]["suggestedWhitelist"]=json::array({"capadventure"});
+            const auto cachedCap=validateLibraryScanState({{"games",json::array({legacyCap})}})["games"][0];
+            const bool automaticCapSafe=capped.value("candidateLimitReached",false)&&capped.value("executableCount",0)==251&&!capped.value("scanComplete",true)&&jsonStringOr(capped,"status")=="scan-incomplete-needs-review"&&!capped["pidCoordination"].value("eligibleForGameTarget",true)&&capped["pidCoordination"]["suggestedWhitelist"].empty();
+            const bool manualCapSafe=manualCap.value("candidateLimitReached",false)&&jsonStringOr(manualCap,"status")=="ready"&&manualCap.value("selectionLocked",false)&&jsonStringOr(manualCap,"primaryExecutable")==selectedPath&&manualCap["pidCoordination"].value("eligibleForGameTarget",false);
+            const bool cachedCapSafe=!cachedCap.value("scanComplete",true)&&jsonStringOr(cachedCap,"status")=="scan-incomplete-needs-review"&&!cachedCap["pidCoordination"].value("eligibleForGameTarget",true)&&cachedCap["pidCoordination"]["suggestedWhitelist"].empty();
+            writeJsonAtomic(p/L"candidate-cap-observations.json",{{"automatic",capped},{"manual",manualCap},{"cached",cachedCap},{"automaticSafe",automaticCapSafe},{"manualSafe",manualCapSafe},{"cachedSafe",cachedCapSafe}});
+            check(manualCapSafe,"Candidate cap changed explicit manual primary choice");
+            check(automaticCapSafe&&cachedCapSafe,"Candidate cap advertised a complete automatic scan");
+            // The actual iterator must finalize scan status before PID metadata.
+            const auto incompleteDirectory=p/L"scan-completeness"/L"OwnedAdventure",incompleteExe=incompleteDirectory/L"OwnedAdventure.exe",deniedDirectory=incompleteDirectory/L"zzClosed";
+            textFile(incompleteExe,"owned inert executable, never launched");fs::resize_file(incompleteExe,6u*1024u*1024u);
+            textFile(deniedDirectory/L"marker.txt","owned directory read-denial marker");
+            const auto completeBefore=scanOneGameDirectory(incompleteDirectory,3,defaultLibraryConfig(),{});
+            auto incompleteManualConfig=defaultLibraryConfig();incompleteManualConfig["manualPrimary"][canonicalPathKey(incompleteDirectory)]={{"exe",toUtf8(incompleteExe.wstring())}};
+            json incompleteAutomatic,incompleteManual;bool actualDirectoryDenied=false;
+            withConfigReadDenied(deniedDirectory,[&]{
+                WIN32_FIND_DATAW found{};const auto h=FindFirstFileW((deniedDirectory/L"*").c_str(),&found);const auto error=GetLastError();
+                if(h!=INVALID_HANDLE_VALUE)FindClose(h);actualDirectoryDenied=h==INVALID_HANDLE_VALUE&&error==ERROR_ACCESS_DENIED;
+                check(actualDirectoryDenied,"Owned directory ACL did not deny actual enumeration");
+                incompleteAutomatic=scanOneGameDirectory(incompleteDirectory,3,defaultLibraryConfig(),{});
+                incompleteManual=scanOneGameDirectory(incompleteDirectory,3,incompleteManualConfig,{});
+            });
+            const auto completeAfter=scanOneGameDirectory(incompleteDirectory,3,defaultLibraryConfig(),{});
+            const auto completeSafe=[&](const json& value){return value.value("scanComplete",false)&&jsonStringOr(value,"status")=="ready"&&jsonStringOr(value,"primaryExecutable")==toUtf8(incompleteExe.wstring())&&value["pidCoordination"].value("eligibleForGameTarget",false)&&value["pidCoordination"].value("whitelistSuggested",false)&&value["pidCoordination"]["suggestedWhitelist"].size()==1;};
+            bool candidateSafe=false;unsigned selectedCandidates=0;
+            for(const auto& candidate:incompleteAutomatic["candidates"])if(candidate.value("selected",false)){
+                ++selectedCandidates;const auto& pid=candidate["pidCoordination"];const auto tags=pid["tags"].get<std::vector<std::string>>();
+                candidateSafe=!pid.value("eligibleForGameTarget",true)&&!pid.value("whitelistSuggested",true)&&std::find(tags.begin(),tags.end(),"game")==tags.end()&&std::find(tags.begin(),tags.end(),"pid-whitelist-candidate")==tags.end();
+            }
+            const auto& incompletePid=incompleteAutomatic["pidCoordination"];const auto incompleteTags=incompletePid["tags"].get<std::vector<std::string>>();
+            const bool automaticSafe=!incompleteAutomatic.value("scanComplete",true)&&jsonStringOr(incompleteAutomatic,"status")=="scan-incomplete-needs-review"&&jsonStringOr(incompleteAutomatic,"primaryExecutable")==toUtf8(incompleteExe.wstring())&&!incompletePid.value("eligibleForGameTarget",true)&&!incompletePid.value("whitelistSuggested",true)&&incompletePid["suggestedWhitelist"].empty()&&std::find(incompleteTags.begin(),incompleteTags.end(),"pid-target-ineligible")!=incompleteTags.end()&&std::find(incompleteTags.begin(),incompleteTags.end(),"game")==incompleteTags.end()&&std::find(incompleteTags.begin(),incompleteTags.end(),"pid-whitelist-candidate")==incompleteTags.end()&&selectedCandidates==1&&candidateSafe;
+            const bool manualSafe=!incompleteManual.value("scanComplete",true)&&jsonStringOr(incompleteManual,"status")=="ready"&&incompleteManual.value("selectionLocked",false)&&jsonStringOr(incompleteManual,"selectionSource")=="manual"&&jsonStringOr(incompleteManual,"primaryExecutable")==toUtf8(incompleteExe.wstring())&&incompleteManual["pidCoordination"].value("eligibleForGameTarget",false)&&incompleteManual["pidCoordination"]["suggestedWhitelist"].size()==1;
+            writeJsonAtomic(p/L"scan-completeness-observations.json",{{"actualDirectoryDenied",actualDirectoryDenied},{"automatic",incompleteAutomatic},{"manual",incompleteManual},{"completeBefore",completeBefore},{"completeAfter",completeAfter},{"automaticSafe",automaticSafe},{"manualSafe",manualSafe},{"completeBeforeSafe",completeSafe(completeBefore)},{"completeAfterSafe",completeSafe(completeAfter)},{"selectedCandidates",selectedCandidates},{"candidateSafe",candidateSafe}});
+            check(completeSafe(completeBefore)&&completeSafe(completeAfter)&&manualSafe,"Scan completeness repair changed complete/manual choices or ACL recovery");
+            check(automaticSafe,"Incomplete automatic scan advertised a PID whitelist target");
+            // Old cache views must not retain authority after status validation.
+            json cacheRows=json::array();bool cacheSafe=true;
+            for(const auto* variant:{"incomplete-ready","incomplete-review","outside-primary","manual-incomplete","complete"}){
+                const std::string mode=variant;auto legacy=completeBefore;
+                legacy["futureGame"]={{"keep",true}};legacy["pidCoordination"]["futurePid"]={{"keep",true}};legacy["pidCoordination"]["tags"].push_back("custom-pid-tag");
+                for(auto& candidate:legacy["candidates"]){candidate["futureCandidate"]=42;candidate["pidCoordination"]["tags"].push_back("custom-candidate-tag");}
+                if(mode!="complete")legacy["scanComplete"]=false;
+                if(mode=="incomplete-review")legacy["status"]="scan-incomplete-needs-review";
+                if(mode=="outside-primary")legacy["primaryExecutable"]=toUtf8((p/L"Unrelated"/L"Other.exe").wstring());
+                if(mode=="manual-incomplete"){legacy["selectionSource"]="manual";legacy["selectionLocked"]=true;}
+                const auto stateFile=p/L"cache-views"/toWide(mode)/L"library-scan.json",outputFile=stateFile.parent_path()/L"add-plan.json";
+                const json original={{"schemaVersion",1},{"games",json::array({legacy})},{"futureTop",{{"keep",true}}}};writeJsonAtomic(stateFile,original);const auto originalBytes=readBinaryFile(stateFile);
+                LibraryScanObservation observation;const auto state=loadLibraryScanState(stateFile,&observation);const auto& row=state["games"][0];
+                const SteamShortcutTarget target{f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf","19627"};const auto shortcutBytes=readBinaryFile(target.path);
+                const bool quarantined=mode!="manual-incomplete"&&mode!="complete";
+                json addPlan=json::object();bool addGate=true;
+                if(quarantined){addPlan=buildSteamLibraryAddPlan(f.data,stateFile,target,outputFile);addGate=addPlan["summary"].value("readyToAdd",size_t{1})==0&&addPlan["items"].size()==1&&jsonStringOr(addPlan["items"][0],"primarySelectionStatus")!= "ready";}
+                bool suggestionsSafe=true;
+                if(quarantined){
+                    const auto& pid=row["pidCoordination"];suggestionsSafe=!pid.value("eligibleForGameTarget",true)&&!pid.value("whitelistSuggested",true)&&pid["suggestedWhitelist"].empty();
+                    for(const auto& tag:pid["tags"])if(tag=="game"||tag=="pid-whitelist-candidate")suggestionsSafe=false;
+                    for(const auto& candidate:row["candidates"]){const auto& cp=candidate["pidCoordination"];suggestionsSafe=suggestionsSafe&&!cp.value("eligibleForGameTarget",true)&&!cp.value("whitelistSuggested",true);for(const auto& tag:cp["tags"])if(tag=="game"||tag=="pid-whitelist-candidate")suggestionsSafe=false;}
+                }else suggestionsSafe=jsonStringOr(row,"status")=="ready"&&row["pidCoordination"].value("eligibleForGameTarget",false)&&row["pidCoordination"]["suggestedWhitelist"].size()==1;
+                bool preserved=state["futureTop"]==original["futureTop"]&&row["futureGame"]==legacy["futureGame"]&&row["pidCoordination"]["futurePid"]==legacy["pidCoordination"]["futurePid"];
+                preserved=preserved&&std::find(row["pidCoordination"]["tags"].begin(),row["pidCoordination"]["tags"].end(),json("custom-pid-tag"))!=row["pidCoordination"]["tags"].end();
+                for(const auto& candidate:row["candidates"])preserved=preserved&&candidate["futureCandidate"]==42&&std::find(candidate["pidCoordination"]["tags"].begin(),candidate["pidCoordination"]["tags"].end(),json("custom-candidate-tag"))!=candidate["pidCoordination"]["tags"].end();
+                const bool diskPreserved=readBinaryFile(stateFile)==originalBytes&&readBinaryFile(target.path)==shortcutBytes,passed=observation.active&&suggestionsSafe&&preserved&&diskPreserved&&addGate;
+                cacheRows.push_back({{"variant",mode},{"readState",state},{"addPlan",addPlan},{"active",observation.active},{"suggestionsSafe",suggestionsSafe},{"unknownFieldsPreserved",preserved},{"diskPreserved",diskPreserved},{"addGate",addGate},{"passed",passed}});cacheSafe=cacheSafe&&passed;
+            }
+            writeJsonAtomic(p/L"cached-scan-observations.json",cacheRows);
+            check(cacheSafe,"Validated cached scan retained stale PID authority");
+            // Exact system-utility labels must not supply a game identity.
+            const json utilityEvidence={{{"variant","leomoon-pe"},{"file","LeoMoon CPU-V.exe"},{"product","LeoMoon CPU-V"},{"description","LeoMoon CPU-V"}},{{"variant","inspectre-publisher-pe"},{"file","InSpectre.exe"},{"product","\"InSpectre\", by Steve Gibson"},{"description","InSpectre: Meltdown and Spectre?"}},{{"variant","inspectre-description-pe"},{"file","InSpectre.exe"},{"product","Application"},{"description","InSpectre: Meltdown and Spectre?"}},{{"variant","leomoon-uppercase-pe"},{"file","LEOMOON CPU-V.EXE"},{"product","LEOMOON CPU-V"},{"description","LEOMOON CPU-V"}},{{"variant","inspectre-publisher-only"},{"file","InSpectre.exe"},{"product","\"InSpectre\", by Steve Gibson"},{"description","Application"}}};
+            json utilityRows=json::array();bool utilitiesSafe=true;
+            for(const auto& evidence:utilityEvidence){
+                const auto path=p/L"local-cases"/toWide(jsonStringOr(evidence,"variant"))/toWide(jsonStringOr(evidence,"file"));
+                const auto value=assessPeIdentity({{"ProductName",jsonStringOr(evidence,"product")},{"FileDescription",jsonStringOr(evidence,"description")}},classifyLibraryExecutable(path),"Owned Game");
+                const bool passed=value.role=="tool"&&value.primaryEvidenceSource=="pe-tool-classification";
+                utilityRows.push_back({{"evidence",evidence},{"role",value.role},{"source",value.primaryEvidenceSource},{"confidence",value.identityConfidence},{"passed",passed}});utilitiesSafe=utilitiesSafe&&passed;
+            }
+            const auto utilityDirectory=p/L"local-only",utilityExe=utilityDirectory/L"LeoMoon CPU-V.exe";textFile(utilityExe,"owned inert utility, never executed");fs::resize_file(utilityExe,6u*1024u*1024u);
+            const auto utilityScan=scanOneGameDirectory(utilityDirectory,1,defaultLibraryConfig(),{});
+            const bool scanSafe=jsonStringOr(utilityScan,"status")=="needs-primary-exe-confirmation"&&jsonStringOr(utilityScan,"primaryExecutable").empty()&&!utilityScan["pidCoordination"].value("eligibleForGameTarget",true)&&utilityScan["pidCoordination"]["suggestedWhitelist"].empty()&&jsonStringOr(utilityScan["candidates"][0],"role")=="tool"&&!utilityScan["candidates"][0]["pidCoordination"].value("canBecomeGameTargetIfSelected",true);
+            auto utilityManualConfig=defaultLibraryConfig();utilityManualConfig["manualPrimary"][canonicalPathKey(utilityDirectory)]={{"exe",toUtf8(utilityExe.wstring())}};
+            const auto utilityManual=scanOneGameDirectory(utilityDirectory,1,utilityManualConfig,{});const bool manualRetained=utilityManual.value("selectionLocked",false)&&jsonStringOr(utilityManual,"selectionSource")=="manual"&&jsonStringOr(utilityManual,"primaryExecutable")==toUtf8(utilityExe.wstring());
+            json utilityControls=json::array();
+            for(const auto* title:{"InSpectre","Spectre","Leo Moon"}){
+                const auto value=assessPeIdentity({{"ProductName",title},{"FileDescription",title}},"main-game",title);utilityControls.push_back({{"title",title},{"role",value.role},{"source",value.primaryEvidenceSource},{"passed",value.role=="main-game"&&value.primaryEvidenceSource=="pe-product-name"}});
+            }
+            for(const auto* file:{"InSpectre.exe","LeoMoonGame.exe"}){
+                const auto folder=p/L"ordinary-labels"/fs::path(toWide(file)).stem(),exe=folder/toWide(file);textFile(exe,"owned inert game, never executed");fs::resize_file(exe,6u*1024u*1024u);const auto value=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});
+                utilityControls.push_back({{"file",file},{"scan",value},{"passed",jsonStringOr(value,"primaryExecutable")==toUtf8(exe.wstring())&&jsonStringOr(value,"primaryRole")=="main-game"}});
+            }
+            writeJsonAtomic(p/L"utility-label-observations.json",{{"rows",utilityRows},{"scanner",utilityScan},{"scanSafe",scanSafe},{"manual",utilityManual},{"manualRetained",manualRetained},{"controls",utilityControls}});
+            check(manualRetained&&utilityControls.size()==5&&std::all_of(utilityControls.begin(),utilityControls.end(),[](const json& x){return x["passed"].get<bool>();}),"Exact utility labels changed ordinary game or manual selection");
+            check(utilitiesSafe&&scanSafe,"System utility labels became automatic game identities");
+            // A real Win5 prerequisite installer was promoted by FileDescription.
+            const json installerEvidence={{{"variant","logged-ue-prerequisites"},{"file","UEPrereqSetup_x64.exe"},{"product","UE Prerequisites (x64)"},{"description","UE Prerequisites (x64)"},{"directory","Install"}},{{"variant","generic-product-setup"},{"file","setup.exe"},{"product","Application"},{"description","Owned Game"},{"directory","Owned Game"}},{{"variant","game-product-setup"},{"file","GameSetup.exe"},{"product","Owned Game"},{"description","Owned Game"},{"directory","Owned Game"}}};
+            json installerRows=json::array();bool installersSafe=true;
+            for(const auto& evidence:installerEvidence){
+                const auto path=p/L"installer-cases"/toWide(jsonStringOr(evidence,"directory"))/toWide(jsonStringOr(evidence,"file"));
+                const auto pathRole=classifyLibraryExecutable(path);
+                const auto value=assessPeIdentity({{"ProductName",jsonStringOr(evidence,"product")},{"FileDescription",jsonStringOr(evidence,"description")}},pathRole,jsonStringOr(evidence,"directory"));
+                const bool passed=pathRole=="installer"&&value.role=="installer"&&value.primaryEvidenceSource=="pe-tool-classification"&&value.identityConfidence==0;
+                installerRows.push_back({{"evidence",evidence},{"pathRole",pathRole},{"role",value.role},{"source",value.primaryEvidenceSource},{"confidence",value.identityConfidence},{"passed",passed}});installersSafe=installersSafe&&passed;
+            }
+            json descriptionControls=json::array();
+            for(const auto* pathRole:{"main-game","helper"}){
+                const auto value=assessPeIdentity({{"ProductName","Application"},{"FileDescription","Hearts of Iron IV"}},pathRole);
+                descriptionControls.push_back({{"pathRole",pathRole},{"role",value.role},{"source",value.primaryEvidenceSource},{"passed",value.role=="main-game"&&value.primaryEvidenceSource=="pe-file-description"&&value.identityConfidence==0.94}});
+            }
+            writeJsonAtomic(p/L"installer-description-observations.json",{{"rows",installerRows},{"controls",descriptionControls}});
+            check(descriptionControls.size()==2&&std::all_of(descriptionControls.begin(),descriptionControls.end(),[](const json& x){return x["passed"].get<bool>();}),"Installer fence changed legitimate description fallback");
+            check(installersSafe,"Installer path role was overridden by file description");
+            // Valid path components must not concatenate into a tool marker.
+            const json pathBoundaryCases={{{"variant","exe-proxy-boundary"},{"relative","ProxyAdventure.exe"},{"file","ProxyAdventure.exe"}},{{"variant","mod-manager-boundary"},{"relative","mod/manager/OrdinaryGame"},{"file","OrdinaryGame.exe"}},{{"variant","train-er-boundary"},{"relative","train/er/OrdinaryGame"},{"file","OrdinaryGame.exe"}}};
+            json boundaryRows=json::array();bool boundarySafe=true;
+            for(const auto& evidence:pathBoundaryCases){
+                const auto folder=p/L"boundary"/toWide(jsonStringOr(evidence,"relative")),exe=folder/toWide(jsonStringOr(evidence,"file"));
+                textFile(exe,"owned inert game binary, never executed");fs::resize_file(exe,6u*1024u*1024u);
+                const auto value=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});
+                const auto winRole=classifyLibraryIdentityText(toUtf8(exe.wstring())),slashRole=classifyLibraryIdentityText(toUtf8(exe.generic_wstring()));
+                const bool passed=jsonStringOr(value,"status")=="ready"&&jsonStringOr(value,"primaryExecutable")==toUtf8(exe.wstring())&&jsonStringOr(value,"primaryRole")=="main-game"&&winRole=="main-game"&&slashRole=="main-game";
+                boundaryRows.push_back({{"variant",evidence["variant"]},{"scan",value},{"winRole",winRole},{"slashRole",slashRole},{"passed",passed}});boundarySafe=boundarySafe&&passed;
+            }
+            json boundaryControls=json::array();
+            for(const auto& item:std::vector<std::pair<std::string,std::string>>{{"exeproxy.exe","mod-manager"},{"Mod_Manager","mod-manager"},{"trainer.exe","modifier"},{"Ｍｏｄ　Ｍａｎａｇｅｒ","mod-manager"},{"Tcl/Tk","helper"},{"Tcl\\Tk","helper"}}){
+                const auto role=classifyLibraryIdentityText(item.first);boundaryControls.push_back({{"identity",item.first},{"expected",item.second},{"role",role},{"passed",role==item.second}});
+            }
+            writeJsonAtomic(p/L"path-boundary-observations.json",{{"rows",boundaryRows},{"controls",boundaryControls}});
+            check(boundaryControls.size()==6&&std::all_of(boundaryControls.begin(),boundaryControls.end(),[](const json& x){return x["passed"].get<bool>();}),"Path boundary repair lost actual tool or Unicode labels");
+            check(boundarySafe,"Path label matching joined separate components into a tool");
+            // Exact filename-only runtime evidence from Win5's MO directory.
+            const json runtimeExecutables={{{"file","usvfs_proxy_x64.exe"},{"size",885760}},{{"file","usvfs_proxy_x86.exe"},{"size",697856}},{{"file","nxmhandler.exe"},{"size",126464}}};
+            json runtimeRows=json::array();bool runtimeSafe=true;unsigned runtimeIndex=0;
+            fs::path manualRuntimeDirectory,manualRuntimeExe;
+            for(const auto& evidence:runtimeExecutables){
+                const auto folder=p/L"bundle"/toWide("case-"+std::to_string(runtimeIndex++)),exe=folder/toWide(jsonStringOr(evidence,"file"));
+                textFile(exe,"owned inert mod runtime, never executed");fs::resize_file(exe,evidence["size"].get<uintmax_t>());
+                const auto value=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});const auto& candidate=value["candidates"][0];
+                const bool passed=jsonStringOr(value,"status")=="unrecognized-tool"&&jsonStringOr(value,"primaryExecutable").empty()&&jsonStringOr(candidate,"role")=="helper"&&!value["pidCoordination"].value("eligibleForGameTarget",true)&&!candidate["pidCoordination"].value("canBecomeGameTargetIfSelected",true);
+                runtimeRows.push_back({{"file",evidence["file"]},{"size",evidence["size"]},{"scan",value},{"passed",passed}});runtimeSafe=runtimeSafe&&passed;
+                if(manualRuntimeExe.empty()){manualRuntimeDirectory=folder;manualRuntimeExe=exe;}
+            }
+            json runtimeGameControls=json::array();
+            for(const auto* name:{"ProxyAdventure.exe","nxmhandler_game.exe"}){
+                const auto folder=p/L"ordinary"/fs::path(toWide(name)).stem(),exe=folder/toWide(name);textFile(exe,"owned inert game file, never executed");fs::resize_file(exe,6u*1024u*1024u);
+                const auto value=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});const bool passed=jsonStringOr(value,"status")=="ready"&&jsonStringOr(value,"primaryExecutable")==toUtf8(exe.wstring())&&jsonStringOr(value,"primaryRole")=="main-game";
+                runtimeGameControls.push_back({{"name",name},{"scan",value},{"passed",passed}});
+            }
+            auto runtimeManualConfig=defaultLibraryConfig();runtimeManualConfig["manualPrimary"][canonicalPathKey(manualRuntimeDirectory)]={{"exe",toUtf8(manualRuntimeExe.wstring())}};
+            const auto runtimeManual=scanOneGameDirectory(manualRuntimeDirectory,1,runtimeManualConfig,{});
+            const bool runtimeManualRetained=runtimeManual.value("selectionLocked",false)&&jsonStringOr(runtimeManual,"selectionSource")=="manual"&&jsonStringOr(runtimeManual,"primaryExecutable")==toUtf8(manualRuntimeExe.wstring())&&jsonStringOr(runtimeManual,"status")=="ready";
+            writeJsonAtomic(p/L"runtime-executable-observations.json",{{"rows",runtimeRows},{"gameControls",runtimeGameControls},{"manual",runtimeManual},{"manualRetained",runtimeManualRetained}});
+            check(runtimeGameControls.size()==2&&runtimeGameControls[0]["passed"].get<bool>()&&runtimeGameControls[1]["passed"].get<bool>()&&runtimeManualRetained,"Exact runtime exclusion changed ordinary game or explicit manual selection");
+            check(runtimeSafe,"Runtime executables were promoted into the game lane");
+            // Replay the actual PE evidence from Win5, not a title-only model.
+            const std::vector<json> auxiliaryEvidence={
+                {{"file","CreationKit.exe"},{"product","Bethesda Softworks: Creation Kit 2.0"},{"description","Creation Kit 2.0"},{"directory","F4.CE.v1.10.984"},{"role","tool"}},
+                {{"file","QtWebEngineProcess.exe"},{"product","Qt6"},{"description","Qt QtWebEngineProcess"},{"directory","MO"},{"role","helper"}},
+                {{"file","resources/app.asar.unpacked/node_modules/grpc-tools/bin/protoc.exe"},{"product","Protocol Buffers - Google's Data Interchange Format"},{"description","Compiled with MSVC 19.42.34436.0"},{"directory","RSI Launcher"},{"role","helper"}},
+                {{"file","FrostyModManager/ThirdParty/fifaconfig.exe"},{"product","fifaconfig"},{"description","fifaconfig"},{"directory","SW2MOD"},{"role","helper"}},
+                {{"file","MO2/explorer++/Explorer++.exe"},{"product","Explorer++"},{"description","Explorer++"},{"directory","SkyrimAE"},{"role","tool"}},
+                {{"file","MO2/loot/lootcli.exe"},{"product","lootcli"},{"description","LOOT Command line interface"},{"directory","SkyrimAE"},{"role","tool"}}
+            };
+            json auxiliaryObservations=json::array();
+            for(const auto& row:auxiliaryEvidence){
+                const auto path=p/toWide(jsonStringOr(row,"directory"))/toWide(jsonStringOr(row,"file"));
+                const auto pe=assessPeIdentity({{"ProductName",jsonStringOr(row,"product")},{"FileDescription",jsonStringOr(row,"description")}},classifyLibraryExecutable(path),jsonStringOr(row,"directory"));
+                auxiliaryObservations.push_back({{"evidence",row},{"role",pe.role},{"source",pe.primaryEvidenceSource},{"confidence",pe.identityConfidence}});
+            }
+            writeJsonAtomic(p/L"auxiliary-identity-observations.json",auxiliaryObservations);
+            json modUtilityControls=json::array();
+            for(const auto* title:{"Explorer","Loot Hero","LOOT"}){
+                const auto pe=assessPeIdentity({{"ProductName",title},{"FileDescription",title}},"main-game",title);
+                modUtilityControls.push_back({{"title",title},{"role",pe.role},{"source",pe.primaryEvidenceSource},{"passed",pe.role=="main-game"&&pe.primaryEvidenceSource=="pe-product-name"}});
+            }
+            writeJsonAtomic(p/L"mod-utility-title-controls.json",modUtilityControls);
+            for(const auto& row:modUtilityControls)check(row["passed"].get<bool>(),"Utility exclusion swallowed an ordinary Explorer/Loot title");
+            for(const auto& row:auxiliaryObservations)check(row["role"]==row["evidence"]["role"]&&row["source"]=="pe-tool-classification",("Auxiliary PE evidence became a game: "+jsonStringOr(row["evidence"],"file")).c_str());
+            // Replay the four supplemental executable records from Win5.
+            const auto supplementalEvidence=json::parse(R"FIELD([{"relative":"ARMORED.CORE.VI.FIRES.OF.RUBICON/ArtbookOST/ACVI_FOR Digital Artbook and Soundtrack.exe","directory":"ArtbookOST","size":653824,"versionEvidence":{"LegalCopyright":"(c) 2005-2025 Unity Technologies. All rights reserved."},"oldRole":"main-game","oldSelected":true},{"relative":"ELDEN RING/AdvGuide/ELDEN RING Adventure Guide.exe","directory":"AdvGuide","size":653824,"versionEvidence":{"LegalCopyright":"(c) 2005-2025 Unity Technologies. All rights reserved."},"oldRole":"main-game","oldSelected":true},{"relative":"ELDEN RING/ArtbookOST/ELDEN RING Digital Artbook & Soundtrack.exe","directory":"ArtbookOST","size":653824,"versionEvidence":{"LegalCopyright":"(c) 2005-2025 Unity Technologies. All rights reserved."},"oldRole":"main-game","oldSelected":true},{"relative":"Sekiro/Artwork_MiniSoundtrack/DigitalArtwork_MiniSoundtrack.exe","directory":"Artwork_MiniSoundtrack","size":24645512,"versionEvidence":{"CompanyName":"DIGITAL ARTWORK & MINI SOUNDTRACK","FileDescription":"DIGITAL ARTWORK & MINI SOUNDTRACK","InternalName":"DIGITAL ARTWORK & MINI SOUNDTRACK","LegalCopyright":"©2019 FromSoftware, Inc. / ©2019 Activision Publishing, Inc.","ProductName":"DIGITAL ARTWORK & MINI SOUNDTRACK"},"oldRole":"main-game","oldSelected":false}])FIELD");
+            json supplementalObserved=json::array();bool supplementalSafe=true;
+            auto retainedScan=loadJsonDocument(f.scan);
+            for(const auto& row:supplementalEvidence){
+                const auto exe=f.games/fs::path(toWide(jsonStringOr(row,"relative"))),folder=exe.parent_path();
+                textFile(exe,"owned supplemental executable marker, never launched");fs::resize_file(exe,row["size"].get<uintmax_t>());
+                const auto pe=assessPeIdentity(row["versionEvidence"].get<std::map<std::string,std::string>>(),classifyLibraryExecutable(exe),jsonStringOr(row,"directory"));
+                const auto candidate=scoreLibraryExecutable(folder,exe,0);
+                const auto automatic=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});
+                auto manualConfig=defaultLibraryConfig();manualConfig["manualPrimary"][canonicalPathKey(folder)]={{"exe",toUtf8(exe.wstring())}};
+                const auto manual=scanOneGameDirectory(folder,1,manualConfig,{});
+                const bool classified=pe.role=="tool"&&candidate.role=="tool";
+                const bool rejected=jsonStringOr(automatic,"status")=="unrecognized-tool"&&jsonStringOr(automatic,"primaryExecutable").empty()&&automatic["pidCoordination"]["suggestedWhitelist"].empty();
+                const bool retained=manual["selectionLocked"]==true&&jsonStringOr(manual,"selectionSource")=="manual"&&canonicalPathKey(fs::path(toWide(jsonStringOr(manual,"primaryExecutable"))))==canonicalPathKey(exe);
+                supplementalObserved.push_back({{"evidence",row},{"peRole",pe.role},{"scoredRole",candidate.role},{"automatic",automatic},{"manual",manual},{"classifiedAsTool",classified},{"notAutomaticGame",rejected},{"manualChoiceRetained",retained}});
+                supplementalSafe=supplementalSafe&&classified&&rejected&&retained;
+                retainedScan["games"].push_back({{"gameDirectory",toUtf8(folder.wstring())},{"directoryName",toUtf8(folder.filename().wstring())},{"primaryExecutable",toUtf8(exe.wstring())},{"primaryRole","main-game"},{"status","ready"},{"selectionSource","automatic-high-confidence"},{"scanComplete",true}});
+            }
+            writeJsonAtomic(p/L"supplemental-content-observed.json",supplementalObserved);
+            check(supplementalObserved.size()==4&&supplementalSafe,"Supplemental content became an automatic game or lost manual choice");
+            check(classifyLibraryExecutable(L"C:/Games/Adventure Guide/Adventure Guide.exe")=="main-game","A standalone Adventure Guide title was excluded");
+            check(classifyLibraryExecutable(L"C:/Games/Soundtrack/Soundtrack.exe")=="main-game","A bare soundtrack game title was excluded");
+            check(classifyLibraryExecutable(L"C:/Games/Digital Artbook and Soundtrack/Game.exe")=="main-game","Parent folder companion words excluded a normal main executable");
+            check(assessPeIdentity({{"ProductName","Adventure Guide"},{"FileDescription","Adventure Guide"}}).role=="main-game","An ordinary guide game PE title was excluded");
+            // Retain stale automatic rows through the original fresh CLI scan.
+            writeJsonAtomic(f.scan,retainedScan);
+            for(const auto* name:{L"ELDEN RING",L"ARMORED.CORE.VI.FIRES.OF.RUBICON"}){
+                const auto folder=f.games/name/L"Game";const auto exe=folder/(std::wstring(name)==L"ELDEN RING"?L"eldenring.exe":L"armoredcore6.exe");textFile(exe,"owned actual main marker, never launched");fs::resize_file(exe,std::wstring(name)==L"ELDEN RING"?(20u<<20):111413272u);
+            }
+            textFile(f.games/L"Sekiro"/L"sekiro.exe","owned actual main marker, never launched");fs::resize_file(f.games/L"Sekiro"/L"sekiro.exe",20u<<20);
+            const auto fallout=p/L"F4.CE.v1.10.984",gameExe=fallout/L"Fallout4.exe",editorExe=fallout/L"CreationKit.exe";
+            textFile(gameExe,"owned fake game, never launched");fs::resize_file(gameExe,20u<<20);
+            textFile(editorExe,"owned fake editor, never launched");fs::resize_file(editorExe,20u<<20);
+            const auto classified=scanOneGameDirectory(fallout,1,defaultLibraryConfig(),{});
+            check(jsonStringOr(classified,"primaryExecutable")==toUtf8(gameExe.wstring()),"Creation Kit displaced Fallout4 automatic primary");
+            for(const auto* name:{L"QtWebEngineProcess.exe",L"protoc.exe",L"fifaconfig.exe"}){
+                const auto folder=p/L"OnlyAuxiliary"/fs::path(name).stem(),aux=folder/name;textFile(aux,"owned fake auxiliary, never launched");fs::resize_file(aux,20u<<20);
+                const auto scannedAux=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});
+                check(jsonStringOr(scannedAux,"primaryExecutable").empty()&&jsonStringOr(scannedAux,"status")=="unrecognized-tool","Auxiliary-only directory became a ready game");
+            }
+
+            bool localAutomaticSafe=true,localManualSafe=true,localNormalSafe=true;json localObserved=json::array();
+            for(const auto* name:{L"PPSSPPWindows64.exe",L"snes9x.exe",L"Mesen-S.exe",L"NsEmuTools.exe",L"Ryujinx.exe"}) {
+                const auto folder=p/L"LocalPrograms"/fs::path(name).stem(),exe=folder/name;textFile(exe,"owned inert application marker, never executed");fs::resize_file(exe,20u<<20);
+                const auto observed=scanOneGameDirectory(folder,1,defaultLibraryConfig(),{});
+                const bool noAutomatic=jsonStringOr(observed,"primaryExecutable").empty()&&jsonStringOr(observed,"status")=="unrecognized-tool"&&observed["pidCoordination"]["suggestedWhitelist"].empty();
+                auto chosen=defaultLibraryConfig();chosen["manualPrimary"][canonicalPathKey(folder)]={{"exe",toUtf8(exe.wstring())}};
+                const auto manual=scanOneGameDirectory(folder,1,chosen,{});const bool selected=jsonStringOr(manual,"primaryExecutable")==toUtf8(exe.wstring())&&manual["selectionLocked"]==true;
+                localAutomaticSafe=localAutomaticSafe&&noAutomatic;localManualSafe=localManualSafe&&selected;
+                localObserved.push_back({{"name",toUtf8(fs::path(name).wstring())},{"role",scoreLibraryExecutable(folder,exe,0).role},{"automaticSafe",noAutomatic},{"manualSafe",selected}});
+            }
+            for(const auto* name:{L"Emulator Adventure.exe",L"PSP Quest.exe",L"Switch.exe",L"Ryujinx Adventure.exe"})localNormalSafe=localNormalSafe&&classifyLibraryExecutable(fs::path(L"C:/Games/Ordinary")/name)=="main-game";
+            writeJsonAtomic(p/L"local-program-observations.json",{{"automaticSafe",localAutomaticSafe},{"manualSafe",localManualSafe},{"normalSafe",localNormalSafe},{"rows",localObserved}});
+            check(localAutomaticSafe,"Emulator applications became automatic game identities");check(localManualSafe&&localNormalSafe,"Local-program classification lost explicit choice or ordinary game titles");
+            check(assessPeIdentity({{"ProductName","Fallout 4"},{"FileDescription","Fallout 4"}}).role=="main-game","Normal Fallout identity was excluded");
+            check(assessPeIdentity({{"ProductName","Application"},{"FileDescription","Hearts of Iron IV"}},"helper").primaryEvidenceSource=="pe-file-description","Legitimate description fallback was lost");
+            check(assessPeIdentity({{"ProductName","Total War: SHOGUN 2"},{"FileDescription","Total War: SHOGUN 2"}},"launcher","Total War - SHOGUN 2").role=="main-game","Legitimate game launcher identity was lost");
+            auto manualTool=defaultLibraryConfig();manualTool["manualPrimary"][canonicalPathKey(fallout)]={{"exe",toUtf8(editorExe.wstring())}};
+            const auto explicitTool=scanOneGameDirectory(fallout,1,manualTool,{});
+            check(jsonStringOr(explicitTool,"primaryExecutable")==toUtf8(editorExe.wstring())&&explicitTool["selectionLocked"]==true,"Explicit user primary selection was overwritten");
             const auto old=loadJsonDocument(f.scan);check(primaryCall(f,dir,next,f.exe)==0,"Primary CLI failed to publish selected EXE");const auto config=loadLibraryConfig(f.data/L"config"/L"library-config.json"),state=loadJsonDocument(f.scan);
             check(config["manualPrimary"][canonicalPathKey(dir)]["exe"]==toUtf8(next.wstring())&&state["games"][0]["primaryExecutable"]==toUtf8(next.wstring()),"Config and current scan disagree about selected primary");
             check(state["games"][0]["selectionLocked"]==true&&state["games"][0]["selectionSource"]=="manual"&&state["games"][0]["ownerNote"]=="keep","Selected primary did not retain manual lock/unknown fields");check(state["games"][1]==old["games"][1]&&state["futureUnknown"]==old["futureUnknown"],"Targeted primary save rewrote other games or unknown fields");
+            const auto zelda=f.games/L"Zelda",main=zelda/L"totk.exe",sidecar=zelda/L"totk_xlate.exe";
+            textFile(main,"owned main, never executed");fs::resize_file(main,20u<<20);textFile(sidecar,"owned translation companion, never executed");
+            check(translationSidecarForExecutable(sidecar,"totk_xlate","totk_xlate"),"Repeated translation metadata hid a sibling helper");
+            check(!translationSidecarForExecutable(sidecar,"Actual Game Title","Actual Game Title"),"A distinct formal PE identity was demoted by filename alone");
+            check(scoreLibraryExecutable(zelda,sidecar,0).role=="helper","Translation companion remained the automatic main game");
+            const auto automatic=scanOneGameDirectory(zelda,1,defaultLibraryConfig(),{});
+            check(jsonStringOr(automatic,"primaryExecutable")==toUtf8(main.wstring()),"Automatic scan chose translation companion instead of main EXE");
+            check(f.call({L"--add-library-game",L"--game-dir",zelda.wstring(),L"--exe",main.wstring()})==0,"Manual add rejected the selected EXE");
+            const auto manual=loadLibraryConfig(f.data/L"config"/L"library-config.json");
+            check(manual["manualPrimary"][canonicalPathKey(zelda)]["exe"]==toUtf8(main.wstring()),"Manual add dropped the user's selected EXE");
+            const auto common=f.steam/L"steamapps"/L"common"/L"NativeFixture";
+            textFile(common/L"NativeFixture.exe","owned native marker, never executed");
+            textFile(f.steam/L"steamapps"/L"appmanifest_620.acf",R"VDF("AppState" { "appid" "620" "name" "Native Fixture" "installdir" "NativeFixture" })VDF");
+            check(f.fresh()==0&&f.scanAck(),"Explicit scan did not publish manual/native inventory");
+            const auto scanned=loadLibraryScanState(f.scan);size_t manualCount=0,nativeCount=0;
+            for(const auto& row:scanned["games"]){
+                if(jsonStringOr(row,"gameDirectory")==toUtf8(zelda.wstring())){++manualCount;check(row["selectionLocked"]==true&&row["discoverySource"]=="manual"&&jsonStringOr(row,"primaryExecutable")==toUtf8(main.wstring()),"Overlapping automatic root lost manual choice/source");}
+                if(jsonStringOr(row,"gameDirectory")==toUtf8(common.wstring())){++nativeCount;check(row["steamNative"]==true&&row["nativeSteamAppId"]==620,"Registered native game lost native identity");}
+            }
+            check(manualCount==1&&nativeCount==1,"Manual/native games were absent or duplicated outside custom root");
+            const auto supplementalFinal=loadLibraryScanState(f.scan);size_t normalMainCount=0;
+            for(const auto& row:supplementalFinal["games"]){
+                const auto exe=fs::path(toWide(jsonStringOr(row,"primaryExecutable")));
+                check(!std::any_of(supplementalEvidence.begin(),supplementalEvidence.end(),[&](const json& evidence){return canonicalPathKey(exe)==canonicalPathKey(f.games/fs::path(toWide(jsonStringOr(evidence,"relative"))));}),"Fresh scan retained an automatic supplemental game target");
+                const auto stem=asciiLower(toUtf8(exe.stem().wstring()));if(stem=="eldenring"||stem=="armoredcore6"||stem=="sekiro")++normalMainCount;
+            }
+            check(normalMainCount==3,"Fresh scan lost or duplicated a real main game next to supplemental content");
+            writeJsonAtomic(p/L"supplemental-content-fresh-scan.json",supplementalFinal);
+
+
         });});
         run("discovery-producer-primary-stale-editor-keeps-newer-choice",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
             auto state=loadJsonDocument(f.scan);state["games"][0]["primaryExecutable"]=toUtf8(next.wstring());writeJsonAtomic(f.scan,state);const auto cfg=f.data/L"config"/L"library-config.json";const auto before=readBinaryFile(cfg),prior=readBinaryFile(f.scan);check(primaryCall(f,dir,f.exe,f.exe)!=0,"Stale editor overwrote a changed primary");check(readBinaryFile(cfg)==before&&readBinaryFile(f.scan)==prior,"Stale primary attempt changed user bytes");
@@ -1038,6 +2416,31 @@ int wmain(int argc,wchar_t** argv) {
         run("discovery-producer-primary-rejects-blacklisted-and-protected-inventory",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
             const auto config=f.data/L"config"/L"library-config.json",blocked=dir/L"Steam.exe";textFile(blocked,"owned blocked exe");const auto before=readBinaryFile(config),prior=readBinaryFile(f.scan);check(primaryCall(f,dir,blocked,f.exe)!=0&&readBinaryFile(config)==before&&readBinaryFile(f.scan)==prior,"Explicit primary bypassed executable exclusion");
             auto future=f.catalog(99);writeJsonAtomic(f.scan,future);const auto raw=readBinaryFile(f.scan);check(primaryCall(f,dir,next,f.exe)!=0&&readBinaryFile(config)==before&&readBinaryFile(f.scan)==raw,"Future scan was overwritten by primary save");
+            const auto add=[&](const fs::path& folder,const fs::path& executable){return f.call({L"--add-library-game",L"--game-dir",folder.wstring(),L"--exe",executable.wstring()});};
+            check(add(dir,blocked)!=0&&readBinaryFile(config)==before&&readBinaryFile(f.scan)==raw,"Manual add accepted an excluded selected EXE");
+            const auto native=f.steam/L"steamapps"/L"common"/L"NativeChoice",nativeExe=native/L"NativeChoice.exe";textFile(nativeExe,"owned native executable, never run");
+            textFile(f.steam/L"steamapps"/L"appmanifest_620.acf",R"VDF("AppState" { "appid" "620" "name" "Native Choice" "installdir" "NativeChoice" })VDF");
+            check(add(native,nativeExe)!=0&&readBinaryFile(config)==before&&readBinaryFile(f.scan)==raw,"Manual add overwrote manifest-managed native primary selection");
+            writeJsonAtomic(f.scan,f.catalog());
+            check(add(dir,next)==0,"Healthy manual EXE selection failed after rejected choices");
+            const auto accepted=loadLibraryConfig(config);check(accepted["manualPrimary"][canonicalPathKey(dir)]["exe"]==toUtf8(next.wstring()),"Healthy manual EXE choice was not retained");
+            auto retained=accepted;retained["futureAdmission"]={{"keep",true}};retained["manualPrimary"][canonicalPathKey(dir)]["futurePrimary"]={{"keep",true}};
+            const auto wildcard=dir/L"UnityCrashHandler64.exe";textFile(wildcard,"owned excluded wildcard marker, never run");
+            json rows=json::array();bool safe=true;
+            for(const auto* kind:{"excluded-steam","excluded-wildcard","native-manifest"}){
+                const std::string mode=kind;writeJsonAtomic(config,retained);writeJsonAtomic(f.scan,f.catalog());const auto originalConfig=readBinaryFile(config),originalScan=readBinaryFile(f.scan);
+                const auto folder=mode=="native-manifest"?native:dir,selected=mode=="native-manifest"?nativeExe:mode=="excluded-wildcard"?wildcard:blocked;
+                const auto code=f.call({L"--set-library-primary",L"--game-dir",folder.wstring(),L"--exe",selected.wstring()});
+                const bool rejected=code!=0&&f.output.find("LIBRARY_PRIMARY_SAVED:")==std::string::npos,configPreserved=readBinaryFile(config)==originalConfig,inventoryPreserved=readBinaryFile(f.scan)==originalScan;
+                const bool passed=rejected&&configPreserved&&inventoryPreserved;safe=safe&&passed;rows.push_back({{"variant",mode},{"exitCode",code},{"rejectedWithoutSuccessAck",rejected},{"configPreserved",configPreserved},{"inventoryPreserved",inventoryPreserved},{"passed",passed}});
+            }
+            writeJsonAtomic(config,retained);writeJsonAtomic(f.scan,f.catalog());const auto originalInventory=readBinaryFile(f.scan);
+            const auto valid=f.call({L"--set-library-primary",L"--game-dir",dir.wstring(),L"--exe",next.wstring()});const auto final=loadLibraryConfig(config);
+            const bool validPreserved=valid==0&&f.output.find("LIBRARY_PRIMARY_SAVED:")!=std::string::npos&&final["manualPrimary"][canonicalPathKey(dir)]["exe"]==toUtf8(next.wstring())&&final["manualPrimary"][canonicalPathKey(dir)]["futurePrimary"]==retained["manualPrimary"][canonicalPathKey(dir)]["futurePrimary"]&&final["futureAdmission"]==retained["futureAdmission"]&&readBinaryFile(f.scan)==originalInventory;
+            writeJsonAtomic(p/L"legacy-primary-admission-observed.json",{{"negativeCases",rows},{"validLegacySelectionPreserved",validPreserved},{"cliCalls",f.callCount}});
+            check(rows.size()==3&&safe&&validPreserved,"Legacy primary selection bypassed exclusion or native ownership");
+
+
         });});
 
         run("discovery-producer-primary-state-write-failure-reports-and-retains-choice-for-retry",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
@@ -1049,6 +2452,46 @@ int wmain(int argc,wchar_t** argv) {
             LibraryScanObservation observed;const auto report=loadLibraryScanState(f.scan,&observed);const auto configPath=f.data/L"config"/L"library-config.json";auto config=loadLibraryConfig(configPath);const auto captured=config["manualPrimary"];
             config["manualPrimary"][canonicalPathKey(dir)]={{"exe",toUtf8(next.wstring())}};writeJsonAtomic(configPath,config);const auto prior=readBinaryFile(f.scan);bool committed=false;std::string reason;
             check(!publishFreshLibraryScan(f.data,f.scan,f.scan,observed,report,committed,reason,&captured)&&!committed&&readBinaryFile(f.scan)==prior,"Full scan using old primary configuration overwrote the user's new choice");
+            json configurationRows=json::array();bool safe=true;
+            for(const auto* mode:{"roots","trainer-roots","manual-add","exclude","cleared-roots","manual-primary","timestamp","bucket","extension","first-run-diagnostic","explicit-unsaved-roots"}) {
+                const std::string kind=mode;const bool relevant=kind=="roots"||kind=="trainer-roots"||kind=="manual-add"||kind=="exclude"||kind=="cleared-roots"||kind=="manual-primary";
+                DiscoveryProducerFixture scenario(p/L"configuration-races"/toWide(kind));const auto configFile=scenario.data/L"config"/L"library-config.json";
+                const auto currentGame=scenario.games/L"CurrentGame",currentExe=currentGame/L"CurrentGame.exe",newRoot=scenario.root/L"NewRoot",manualGame=scenario.root/L"ManualAdded",manualExe=manualGame/L"ManualAdded.exe";
+                textFile(currentExe,"owned current game marker, never executed");fs::resize_file(currentExe,20u<<20);textFile(manualExe,"owned manual game marker, never executed");fs::resize_file(manualExe,20u<<20);fs::create_directories(newRoot);
+                auto initial=loadLibraryConfig(configFile);if(kind=="explicit-unsaved-roots"){initial["roots"]=json::array();initial["scanRootsExplicitlyCleared"]=true;writeJsonAtomic(configFile,initial);}
+                writeJsonAtomic(scenario.scan,scenario.catalog());const auto jobFile=scenario.job/L"library-scan.json";writeJsonAtomic(jobFile,{{"schemaVersion",1},{"games",json::array()},{"ownerNote","keep-job"}});
+                const auto previousState=readBinaryFile(scenario.scan),previousJob=readBinaryFile(jobFile);bool changed=false;std::vector<uint8_t> latestConfiguration;
+                struct ResetHook{~ResetHook(){identityCallerReadHook={};}} resetHook;
+                identityCallerReadHook=[&](const std::wstring& file){
+                    if(changed||file!=identityCallerPath(scenario.scan.wstring()))return;changed=true;auto concurrent=loadLibraryConfig(configFile);
+                    if(kind=="roots")concurrent["roots"]=json::array({toUtf8(newRoot.wstring())});
+                    else if(kind=="trainer-roots")concurrent["trainerRoots"]=json::array({toUtf8((scenario.root/L"NewTrainers").wstring())});
+                    else if(kind=="manual-add")concurrent["manualGameDirectories"].push_back({{"path",toUtf8(manualGame.wstring())},{"source","user"},{"locked",true}});
+                    else if(kind=="exclude")concurrent["excludedGameDirectories"].push_back(toUtf8(currentGame.wstring()));
+                    else if(kind=="cleared-roots"){concurrent["roots"]=json::array();concurrent["scanRootsExplicitlyCleared"]=true;}
+                    else if(kind=="manual-primary")concurrent["manualPrimary"][canonicalPathKey(currentGame)]={{"exe",toUtf8(currentExe.wstring())}};
+                    else if(kind=="timestamp")concurrent["updatedAt"]=unixTimeMs()+1;
+                    else if(kind=="bucket")concurrent["manualBuckets"][canonicalPathKey(currentGame)]={{"bucket","non-game"}};
+                    else if(kind=="extension")concurrent["futureOwner"]={{"keep",true}};
+                    else if(kind=="first-run-diagnostic")concurrent["firstRunDefaultScan"]["finishedAt"]=unixTimeMs();
+                    writeJsonAtomic(configFile,concurrent);latestConfiguration=readBinaryFile(configFile);
+                };
+                const auto code=scenario.fresh();identityCallerReadHook={};const bool stateRetained=readBinaryFile(scenario.scan)==previousState,jobRetained=readBinaryFile(jobFile)==previousJob,configRetained=readBinaryFile(configFile)==latestConfiguration;
+                const bool refused=code==2&&!scenario.scanAck()&&scenario.error.find("ERROR_LIBRARY_SCAN_UNCONFIRMED:")!=std::string::npos;
+                const bool initialCorrect=changed&&(relevant?(configRetained&&refused&&stateRetained&&jobRetained):(code==0&&scenario.scanAck()&&(kind=="explicit-unsaved-roots"||configRetained)));
+                json row={{"variant",kind},{"relevant",relevant},{"changeObserved",changed},{"exitCode",code},{"acknowledged",scenario.scanAck()},{"error",scenario.error},{"stateRetained",stateRetained},{"jobRetained",jobRetained},{"configurationRetained",configRetained},{"initialCorrect",initialCorrect}};
+                if(relevant){
+                    const auto retry=scenario.call({L"--scan-library",(scenario.root/L"retry-job").wstring(),L"--max-depth",L"1"});const auto fresh=loadJsonDocument(scenario.scan);bool latestVisible=true;
+                    if(kind=="manual-add")latestVisible=std::any_of(fresh["games"].begin(),fresh["games"].end(),[&](const auto& game){return canonicalPathKey(fs::path(toWide(jsonStringOr(game,"gameDirectory"))))==canonicalPathKey(manualGame);});
+                    if(kind=="exclude"||kind=="cleared-roots"||kind=="roots")latestVisible=std::none_of(fresh["games"].begin(),fresh["games"].end(),[&](const auto& game){return canonicalPathKey(fs::path(toWide(jsonStringOr(game,"gameDirectory"))))==canonicalPathKey(currentGame);});
+                    row["retryExitCode"]=retry;row["retryAcknowledged"]=scenario.scanAck();row["latestChoicesVisible"]=latestVisible;row["retryCorrect"]=retry==0&&scenario.scanAck()&&latestVisible;
+                    safe=safe&&initialCorrect&&row["retryCorrect"].get<bool>();
+                }else safe=safe&&initialCorrect;
+                configurationRows.push_back(std::move(row));
+            }
+            writeJsonAtomic(p/L"configuration-race-observed.json",configurationRows);
+            check(configurationRows.size()==11&&safe,"Full scan published stale discovery configuration or rejected unrelated metadata");
+
         });});
         run("discovery-producer-primary-partial-inventory-does-not-drop-original-rows",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
             auto state=loadJsonDocument(f.scan);state["games"].push_back({{"gameDirectory",false},{"primaryExecutable",42}});writeJsonAtomic(f.scan,state);const auto prior=readBinaryFile(f.scan),config=readBinaryFile(f.data/L"config"/L"library-config.json");
@@ -1058,6 +2501,30 @@ int wmain(int argc,wchar_t** argv) {
         run("discovery-producer-primary-resolves-pending-row-and-refreshes-counts",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
             auto state=loadJsonDocument(f.scan);state["games"][0]["status"]="needs-primary-exe-confirmation";state["games"][0]["primaryExecutable"]=nullptr;state["summary"]={{"games",2},{"ready",1},{"needsPrimaryExeConfirmation",1},{"manualPrimaryMissing",0},{"nonGames",0}};writeJsonAtomic(f.scan,state);
             check(primaryCall(f,dir,next,fs::path{})==0,"A pending primary could not be selected");const auto saved=loadJsonDocument(f.scan);check(saved["summary"]["ready"]==2&&saved["summary"]["needsPrimaryExeConfirmation"]==0&&saved["games"][0]["primaryExecutable"]==toUtf8(next.wstring()),"Primary save left pending counts or selected row stale");
+        });});
+
+        run("discovery-producer-primary-keeps-scan-exclusions-in-summary",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
+            auto state=loadJsonDocument(f.scan);
+            state["games"][0]["status"]="needs-primary-exe-confirmation";
+            state["games"][0]["primaryExecutable"]=nullptr;
+            state["roots"]=json::array({{{"path",toUtf8((p/L"Libraries").wstring())},{"status","scanned"}},
+                {{"path",toUtf8((p/L"Tools").wstring())},{"status","non-game-root-excluded"}},
+                {{"path",toUtf8((p/L"Steam").wstring())},{"status","platform-library-root-excluded"}}});
+            state["skippedDirectories"]=json::array({
+                {{"path",toUtf8((p/L"Pending").wstring())},{"reason","no-confident-game-executable"},{"status","needs-primary-exe-confirmation"}},
+                {{"path",toUtf8((p/L"Utility").wstring())},{"reason","non-game-directory-excluded"},{"status","unrecognized-tool"}},
+                {{"path",toUtf8((p/L"Redistributable").wstring())},{"reason","builtin-steam-tool-excluded"},{"steamAppId",228980}},
+                {{"path",toUtf8((p/L"NoExe").wstring())},{"reason","no-executable"}}});
+            state["summary"]={{"games",2},{"ready",1},{"needsPrimaryExeConfirmation",2},{"manualPrimaryMissing",0},
+                {"nonGames",3},{"noExecutableSkipped",1}};
+            writeJsonAtomic(f.scan,state);
+            check(primaryCall(f,dir,next,fs::path{})==0,"Targeted primary save failed");
+            const auto saved=loadJsonDocument(f.scan);
+            writeJsonAtomic(p/L"primary-summary-observed.json",saved.at("summary"));
+            check(saved["summary"]["games"]==2&&saved["summary"]["ready"]==2&&saved["games"][0]["primaryExecutable"]==toUtf8(next.wstring()),"Updated primary row not counted");
+            check(saved["summary"]["needsPrimaryExeConfirmation"]==1&&saved["summary"]["nonGames"]==3,"Targeted primary save dropped unrelated scan counts");
+            check(saved["roots"]==state["roots"]&&saved["skippedDirectories"]==state["skippedDirectories"]&&
+                saved["summary"]["noExecutableSkipped"]==1,"Targeted primary save changed scan evidence");
         });});
 
         run("discovery-producer-primary-pending-newer-config-cannot-be-overwritten",[&](const fs::path& p){primaryFixture(p,[&](auto& f,const auto& dir,const auto& next){
@@ -1070,6 +2537,7 @@ int wmain(int argc,wchar_t** argv) {
         check(!publisherTexts||(!reports.empty()&&identityCallerNetwork==0&&identityCallerProcesses==0),"Publisher TXT selection empty or external port invoked");
         check(!ruleTexts||(!reports.empty()&&identityCallerNetwork==0&&identityCallerProcesses==0),"TXT selection empty or external port invoked");
         check(!dataRoots || !reports.empty(),"No data-root consumer cases selected");
+        check(!factsOnly||(reports.size()==1&&reports[0]["name"]==factsSelected),"Exact Steam facts selection did not run one case");
         const json summary{{"allPassed",failures==0},{"caseCount",reports.size()},{"failedCount",failures},{"cases",reports},{"fixtures",toUtf8(root.wstring())},{"realSteamFilesModified",false},{"producerSelection",producerOnly},{"producerPriorityWriteAttempts",discoveryProducerPriorityWrites},{"producerAutomaticDriveDiscovery",discoveryProducerDriveDiscovery},{"discoverySelection",discoveries},{"publisherTextSelection",publisherTexts},{"ruleTextSelection",ruleTexts},{"membershipSelection",memberships},{"identitySelection",identities},{"identityNetworkCalls",identityCallerNetwork},{"identityProcessCalls",identityCallerProcesses}};
         writeJsonAtomic(root/L"summary.json",summary);std::cout<<summary.dump(2)<<"\n";return failures?1:0;
     }catch(const std::exception& e){std::cerr<<"DATA_CHAIN_TEST_FAILED: "<<e.what()<<"\n";return 1;}

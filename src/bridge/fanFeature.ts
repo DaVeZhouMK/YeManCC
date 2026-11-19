@@ -38,12 +38,12 @@ export const DEFAULT_FAN_PRESET_CURVES: Record<FanPreset, FanNode[]> = {
     { tempC: 69, dutyPercent: 30 }, { tempC: 100, dutyPercent: 70 },
   ],
   balanced: [
-    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 },
-    { tempC: 70, dutyPercent: 45 }, { tempC: 100, dutyPercent: 90 },
+    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 30 },
+    { tempC: 70, dutyPercent: 65 }, { tempC: 90, dutyPercent: 100 },
   ],
   aggressive: [
     { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 30 },
-    { tempC: 70, dutyPercent: 75 }, { tempC: 100, dutyPercent: 100 },
+    { tempC: 65, dutyPercent: 67 }, { tempC: 80, dutyPercent: 100 },
   ],
 };
 
@@ -331,7 +331,7 @@ export function createConfiguredFanAdapter(): FanApiAdapter {
 }
 
 /** Select an existing curve without replacing other saved curves or creating an ON intent. */
-export async function saveFanPresetSelection(preset: FanPreset, expected: Record<string, unknown>): Promise<void> {
+export async function saveFanPresetSelection(preset: FanPreset, expected: Record<string, unknown>, options: import('./bootModeGlobalPreferences').BootPreferenceWrite = {}): Promise<void> {
   const fingerprint = (value: Record<string, unknown>) => JSON.stringify([value.preset, value.nodes, value.presetCurves]);
   let committed: Partial<FanFeatureSettings> | null = null;
   await updateSettings(document => {
@@ -346,7 +346,7 @@ export async function saveFanPresetSelection(preset: FanPreset, expected: Record
     if (!(preset in table)) table[preset] = structuredClone(curves[preset]);
     document.fan = { ...raw, preset, nodes: structuredClone(curves[preset]), presetCurves: table };
     committed = structuredClone(document.fan) as Partial<FanFeatureSettings>;
-  });
+  }, options);
   const selected = committed as Partial<FanFeatureSettings> | null;
   if (selected) settings.value = { ...settings.value, ...selected, preset,
     nodes: structuredClone(selected.nodes || []),

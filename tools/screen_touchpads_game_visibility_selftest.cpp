@@ -1,3 +1,6 @@
+#ifdef YMCC_SCREEN_VISIBILITY_POLICY_FIXTURE
+#include "fixtures/screen_touchpads_visibility_cases.inc"
+#else
 // Isolated cross-process borderless/topmost-game reproduction. Synthetic
 // pointer/mouse controls only; not an actual game or hardware acceptance.
 #include "screen_touchpad_owner.h"
@@ -88,3 +91,4 @@ int wmain(int argc,wchar_t** argv){
     report["syntheticForegroundBootstrapUsed"]=target.bootstrapUsed;report["ownedTargetTerminal"]=target.stop();valid=valid&&report["ownedTargetTerminal"].get<bool>();report["diagnosticValid"]=valid;report["ok"]=valid&&ok;report["raises"]=ownerVisibilityRaises;report["events"]=ownerVisibilityEvents;report["checks"]=ownerVisibilityChecks;
     std::ofstream file(std::filesystem::path(argv[1]),std::ios::binary);file<<report.dump(2);std::cout<<"GAME_VISIBILITY_OK="<<(valid&&ok)<<" checks="<<report["cases"].size()<<" actualGame=false\n";return valid&&ok&&file.good()?0:2;
 }
+#endif

@@ -1,4 +1,16 @@
+#if defined(YMCC_LAUNCH_ACTUAL_MANUAL_ONLY) && (defined(YMCC_LAUNCH_BOOT_SELECTED_ONLY) || defined(YMCC_LAUNCH_INVENTORY_ONLY) || defined(YMCC_LAUNCH_SELECTED_ONLY))
+#error Actual-manual selection cannot be combined with another directed mode
+#endif
+#if defined(YMCC_LAUNCH_BOOT_SELECTED_ONLY) && (defined(YMCC_LAUNCH_INVENTORY_ONLY) || defined(YMCC_LAUNCH_SELECTED_ONLY))
+#error Boot-selected selection cannot be combined with an existing directed mode
+#endif
+#ifdef YMCC_LAUNCH_INVENTORY_ONLY
+#include "steam_launch_inventory_cases.inc"
+#else
 #include "steam_native_launch_windows.h"
+#ifdef YMCC_NOIO_CASE_DIR
+#include "steam_launch_noio_facts.h"
+#endif
 #include <iostream>
 #include <functional>
 using namespace ymcc::steamlaunch;
@@ -15,14 +27,79 @@ struct Memory {
     bool spawn(const std::wstring&,const std::wstring& args,bool steam){++spawns;order.push_back(steam?"steam":"addon");if(steam){++steamStarts;arguments=args;}return spawnOk;}
     SteamSpawnOutcome spawnSteamPrimary(const std::wstring& file,const std::wstring& args){++primaryCalls;const bool okay=spawn(file,args,true);return okay?primaryOutcome:SteamSpawnOutcome::NotCreated;}
     bool manualSteamFallbackAllowed(const std::wstring& file){return fallbackAbsent&&file==executable;}
-    bool spawnSteamShell(const std::wstring& file,const std::wstring& args){++fallbackCalls;arguments=args;return file==executable&&args==startupArguments&&shellOk;}
+    bool spawnSteamShell(const std::wstring& file,const std::wstring& args){++fallbackCalls;arguments=args;return file==executable&&manualSteamArgumentsAllowed(args)&&shellOk;}
     std::string steamLaunchFailure(){return "memory-primary/5;fallback/5";}
     bool spawnManualSteam(const std::wstring& file,const std::wstring& args){return dispatchManualSteam(*this,file,args);}
 };
+
+#if defined(YMCC_LAUNCH_ACTUAL_MANUAL_ONLY)
+#include "steam_launch_actual_manual_cases.inc"
+#elif defined(YMCC_LAUNCH_BOOT_SELECTED_ONLY)
+#include "steam_boot_selected_cases.inc"
+#elif defined(YMCC_LAUNCH_SELECTED_ONLY)
 int main(int argc,char** argv){
+ if(argc!=2||std::string(argv[1])!="--selected-executable")return 2;
+ nlohmann::json cases=nlohmann::json::array();unsigned assertions=0;
+ const auto need=[&](bool value,const char* why){++assertions;if(!value)throw std::runtime_error(why);};
+ const auto check=[&](const char* name,const auto& fn){try{fn();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"error",e.what()}});}};
+ check("selected exact path is plain and has no addon cascade",[&]{Memory f;const auto r=run(f,Origin::Manual,{},f.executable);need(r.dispatched,"not dispatched");need(f.arguments.empty(),"plain launch gained flags");need(f.steamStarts==1&&f.primaryCalls==1&&!f.fallbackCalls,"one primary");need(!f.addonReads&&f.spawns==1,"linked cascade");need(!f.locked,"lock not returned");});
+ check("selected slash and case use existing installation",[&]{Memory f;need(run(f,Origin::Manual,{},L"X:/StEaM.ExE").dispatched,"equivalent spelling refused");need(f.arguments.empty()&&f.spawns==1,"plain terminal changed");});
+ check("changed selected installation refuses rather than substituting",[&]{Memory f;const auto r=run(f,Origin::Manual,{},L"y:\\steam.exe");need(!r.ok&&r.reason=="steam-selected-executable-changed","wrong path accepted");need(!f.spawns&&!f.saves&&!f.addonReads,"mismatch caused effects");});
+ check("selected path cannot become a logon grant",[&]{Memory f;need(!run(f,Origin::Logon,{},f.executable).ok,"logon accepted selection");need(!f.lockCalls&&!f.spawns&&!f.saves,"logon effect");});
+ check("selected running Steam has no dispatch or mode change",[&]{Memory f;f.presence=1;need(run(f,Origin::Manual,{},f.executable).alreadyRunning,"running lost");need(!f.spawns&&!f.saves&&!f.addonReads,"running reopened");});
+ check("selected unknown cannot authorize start",[&]{Memory f;f.presence=-1;need(!run(f,Origin::Manual,{},f.executable).ok,"unknown accepted");need(!f.spawns&&!f.saves,"unknown effects");});
+ check("selected final presence and unknown stop dispatch",[&]{for(int final:{1,-1}){Memory f;f.finalPresence=final;auto r=run(f,Origin::Manual,{},f.executable);need(!r.dispatched,"final observation ignored");need(!f.spawns&&!f.addonReads,"late dispatch");}});
+ check("selected primary definite failure has one plain fallback",[&]{Memory f;f.spawnOk=false;need(run(f,Origin::Manual,{},f.executable).dispatched,"fallback absent");need(f.primaryCalls==1&&f.fallbackCalls==1&&f.arguments.empty(),"fallback changed semantics");need(!f.addonReads,"fallback cascade");});
+ check("selected uncertain primary never replays",[&]{Memory f;f.primaryOutcome=SteamSpawnOutcome::Uncertain;need(!run(f,Origin::Manual,{},f.executable).ok,"uncertain accepted");need(!f.fallbackCalls&&!f.addonReads,"uncertain replay");});
+ check("selected fallback keeps final absence guard",[&]{Memory f;f.spawnOk=false;f.fallbackAbsent=false;need(!run(f,Origin::Manual,{},f.executable).ok,"fallback absence ignored");need(!f.fallbackCalls,"fallback issued");});
+ check("ordinary manual default keeps flags and addons",[&]{Memory f;need(run(f,Origin::Manual).dispatched,"default rejected");need(f.arguments==startupArguments&&f.spawns==3&&f.addonReads==1,"default semantics changed");});
+ check("manual terminal still rejects arbitrary arguments",[&]{Memory f;need(!dispatchManualSteam(f,f.executable,L" -silent"),"arbitrary arguments accepted");need(!f.primaryCalls&&!f.fallbackCalls,"arbitrary terminal");});
+ check("typed selected request validates before any environment IO",[&]{
+  need(selectedManualExecutable({{"userInitiated",true}}).empty(),"old request invalid");
+  need(selectedManualExecutable({{"userInitiated",true},{"selectedExecutable","X:/Steam/steam.exe"}})==L"X:/Steam/steam.exe","selected path changed");
+  for(const auto& j:{nlohmann::json::object(),nlohmann::json{{"userInitiated",false}},nlohmann::json{{"userInitiated",1}},nlohmann::json{{"userInitiated",true},{"selectedExecutable",nullptr}},nlohmann::json{{"userInitiated",true},{"selectedExecutable",1}},nlohmann::json{{"userInitiated",true},{"selectedExecutable",""}},nlohmann::json{{"userInitiated",true},{"selectedExecutable","steam.exe"}},nlohmann::json{{"userInitiated",true},{"selectedExecutable","X:/helper.exe"}},nlohmann::json{{"userInitiated",true},{"selectedExecutable","X:/steam.exe\n"}},nlohmann::json{{"userInitiated",true},{"selectedExecutable",std::string("X:/steam.exe\0",13)}},nlohmann::json{{"userInitiated",true},{"selectedExecutable","X:/steam.exe"},{"args","-silent"}}}){bool rejected=false;try{(void)selectedManualExecutable(j);}catch(const std::runtime_error&){rejected=true;}need(rejected,"invalid request accepted");}
+ });
+ unsigned failed=0;for(const auto& row:cases)if(!row["passed"].get<bool>())++failed;
+ std::cout<<nlohmann::json{{"selection","selected-executable"},{"cases",cases},{"assertions",assertions},{"failed",failed},{"actualSteamActions",0},{"defaultGroupExecuted",false}}.dump()<<'\n';return failed?1:0;
+}
+#else
+
+static bool refusesLegacyLogon(){
+    int exitCode=0;
+    return refuseLegacyLogonCommand(L"\"x:\\ymcc.exe\" --steam-logon-start",exitCode)&&exitCode==3&&
+        refuseLegacyLogonCommand(L"\"x:\\ymcc.exe\" --steam-logon-start --dev ignored",exitCode)&&exitCode==2;
+}
+static bool keepsOrdinaryStartup(){
+    int exitCode=53;
+    return !refuseLegacyLogonCommand(L"\"x:\\ymcc.exe\" --minimized",exitCode)&&exitCode==53;
+}
+static bool migratesLegacyLogon(const Startup& cfg,const std::wstring& image){
+    std::wstring text;
+    return writeText(cfg.file,L"\""+image+L"\" --steam-logon-start\r\n")&&cfg.recognized(L"\""+image+L"\" --steam-logon-start")&&
+        !cfg.authorized()&&cfg.migrate()&&cfg.read(text)&&trim(text)==cfg.command&&cfg.authorized();
+}
+int main(int argc,char** argv){
+if(argc>1&&std::string_view(argv[1])=="--legacy-logon-guard"){
+    if(argc!=3||!*argv[2])return 2;
+    const auto directory=pathfs::absolute(argv[2]);
+    if(!pathfs::create_directory(directory))return 2;
+    const auto image=(directory/L"YeManCC.exe").wstring();
+    const Startup cfg((directory/L"PowerControl").wstring(),image,directory.wstring());
+    const nlohmann::json cases={{"retired-command-refuses-exact-and-malformed",refusesLegacyLogon()},
+        {"ordinary-minimized-untouched",keepsOrdinaryStartup()},
+        {"legacy-config-migrates-without-dispatch",migratesLegacyLogon(cfg,image)}};
+    std::cout<<nlohmann::json{{"selection","legacy-logon-guard"},{"cases",cases},{"defaultGroupExecuted",false},{"realSteamActions",0}}.dump()<<'\n';
+    return std::all_of(cases.begin(),cases.end(),[](const auto& value){return value==true;})?0:23;
+}
 const auto self=pathfs::path(executablePath());
 if(self.filename()==L"inert-addon.exe"){std::ofstream marker(self.wstring()+L".started");marker<<(IsWindowVisible(GetConsoleWindow())?"visible":"hidden");marker.close();Sleep(400);return 0;}
 unsigned passed=0;auto check=[&](const char* name,std::function<bool()> test){if(!test()){std::cerr<<"FAIL "<<name<<"\n";exit(23);}++passed;};
+check("authorized logon prepares overlay before Steam and before linked apps",[]{Memory f;unsigned calls=0;const auto result=run(f,Origin::Logon,[&]{++calls;f.order.push_back("overlay");});return result.dispatched&&calls==1&&f.order==std::vector<std::string>{"overlay","steam","read-addons","addon","addon"};});
+check("manual launch does not consume automatic overlay preference",[]{Memory f;unsigned calls=0;return run(f,Origin::Manual,[&]{++calls;}).dispatched&&calls==0;});
+check("consumed logon never repeats overlay preparation",[]{Memory f;f.ledger.bootConsumed=true;unsigned calls=0;return run(f,Origin::Logon,[&]{++calls;}).ok&&calls==0&&!f.spawns;});
+check("unauthorized logon never applies overlay preparation",[]{Memory f;f.authorized=false;unsigned calls=0;return !run(f,Origin::Logon,[&]{++calls;}).ok&&calls==0&&!f.spawns;});
+check("overlay preparation failure cannot block Steam launch",[]{Memory f;return run(f,Origin::Logon,[]{throw std::runtime_error("controlled overlay failure");}).dispatched;});
+check("Steam appearing during overlay preparation is observed before dispatch",[]{Memory f;const auto result=run(f,Origin::Logon,[&]{f.finalPresence=1;});return result.alreadyRunning&&!f.steamStarts;});
 check("cold manual once fixed offline flags",[]{Memory f;auto r=run(f,Origin::Manual);return r.ok&&r.dispatched&&f.steamStarts==1&&f.spawns==3&&f.arguments==startupArguments&&!f.locked;});
 check("running Steam has no startup args/addons/mode URI",[]{Memory f;f.presence=1;auto r=run(f,Origin::Manual);return r.ok&&r.alreadyRunning&&!f.spawns;});
 check("unknown state fails closed",[]{Memory f;f.presence=-1;return !run(f,Origin::Manual).ok&&!f.spawns;});
@@ -56,9 +133,9 @@ check("one boot start is consumed across helper and YMCC restart",[]{Memory f;ru
 check("boot with existing desktop consumes grant without switching",[]{Memory f;f.presence=1;run(f,Origin::Logon);Memory next;next.ledger=f.ledger;return run(next,Origin::Logon).ok&&!next.spawns&&f.ledger.bootConsumed;});
 check("boot unknown cannot be replayed later",[]{Memory f;f.presence=-1;run(f,Origin::Logon);Memory next;next.ledger=f.ledger;return run(next,Origin::Logon).ok&&!next.spawns;});
 check("manual action remains available after boot consumed",[]{Memory f;f.ledger.bootConsumed=true;return run(f,Origin::Manual).dispatched;});
-check("JSON launch refuses implicit intent before system IO",[]{for(const auto& input:{nlohmann::json::object(),nlohmann::json{{"userInitiated",false}},nlohmann::json{{"userInitiated",1}},nlohmann::json{{"userInitiated",true},{"path","unsafe"}}}){try{launch(L"unused",input);return false;}catch(const std::runtime_error&){}}return true;});
-check("malformed logon command cannot fall into normal app",[]{int code=0;return tryLogonCommand(L"unused",L"\"x:\\ymcc.exe\" --steam-logon-start --dev ignored",code)&&code==2;});
-check("ordinary startup never invokes logon transaction",[]{int code=0;return !tryLogonCommand(L"unused",L"\"x:\\ymcc.exe\" --minimized",code);});
+check("JSON launch refuses implicit intent before system IO",[]{for(const auto& input:{nlohmann::json::object(),nlohmann::json{{"userInitiated",false}},nlohmann::json{{"userInitiated",1}},nlohmann::json{{"userInitiated",true},{"path","unsafe"}}}){try{(void)selectedManualExecutable(input);return false;}catch(const std::runtime_error&){}}return true;});
+check("exact and malformed retired logon command cannot dispatch or fall into normal app",refusesLegacyLogon);
+check("ordinary startup never invokes logon transaction",keepsOrdinaryStartup);
 if(argc<2)return 2;const pathfs::path scratch=pathfs::temp_directory_path()/(L"ymcc-steam-native-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));pathfs::create_directories(scratch);std::ofstream(pathfs::path(argv[1])/L"owned-scratch-path.txt")<<scratch.string();
 const auto image=(scratch/L"YeManCC.exe").wstring(),pc=(scratch/L"PowerControl").wstring();Startup cfg(pc,image,scratch.wstring());
 check("disabled boot entry remains disabled",[&]{return cfg.migrate()&&!cfg.authorized()&&!pathfs::exists(cfg.file);});
@@ -71,7 +148,7 @@ check("custom earlystart requires explicit repair and is backed up before deleti
 check("delete failure preserves entry and retry can recover",[&]{if(!cfg.set(true))return false;HANDLE held=CreateFileW(cfg.file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(held==INVALID_HANDLE_VALUE)return false;const bool refused=!cfg.set(false,true)&&pathfs::exists(cfg.file);CloseHandle(held);return refused&&cfg.set(false,true)&&!pathfs::exists(cfg.file);});
 check("directory at earlystart is rejected without removing it",[&]{if(!pathfs::create_directory(cfg.file))return false;const bool refused=!cfg.set(false,true)&&pathfs::is_directory(cfg.file);pathfs::remove(cfg.file);return refused;});
 for(const auto* name:{L"YeManSteam.bat",L"YeManSteam.vbs"})check("recognized legacy boot command migrates without launching",[&]{return writeText(cfg.file,L"\""+(pathfs::path(pc)/name).wstring()+L"\"\r\n")&&cfg.migrate()&&cfg.authorized();});
-check("previous native logon helper migrates back to BAT without execution",[&]{std::wstring text;return writeText(cfg.file,L"\""+image+L"\" --steam-logon-start\r\n")&&cfg.migrate()&&cfg.read(text)&&trim(text)==cfg.command&&cfg.authorized();});
+check("previous native logon helper migrates back to BAT without execution",[&]{return migratesLegacyLogon(cfg,image);});
 check("standard installed command matches the user advanced-start contract",[&]{Startup installed(LR"(C:\SOFT\YeMan\PowerControl)",image,scratch.wstring());return installed.command==LR"("C:\SOFT\YeMan\PowerControl\YeManSteam.bat")";});
 check("unrelated custom command is never overwritten",[&]{std::wstring text;const std::wstring custom=L"\"x:\\User App.exe\" --custom";return writeText(cfg.file,custom)&&cfg.migrate()&&!cfg.set(true)&&cfg.read(text)&&text==custom;});
 check("malformed UTF8 is rejected without replacing",[&]{std::ofstream out(cfg.file,std::ios::binary);out<<"\xff\xff";out.close();std::wstring text;return !cfg.read(text)&&!cfg.migrate()&&!cfg.set(false);});
@@ -87,11 +164,15 @@ check("actual addon parser only accepts enabled paths and excludes CSS aliases",
 // The reviewed adapter consumes this exact owned non-executable marker in
 // memory; neither the creator failure nor Shell path starts any real Steam.
 const auto manualSteam=(scratch/L"steam.exe").wstring();std::ofstream(manualSteam).put('x');
-check("actual manual creator refusal uses one fixed memory Shell dispatch",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=false;ports.manualShellOkay=true;const auto primary=ports.manualPrimaryCalls,shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring());const bool ok=io.spawnManualSteam(manualSteam,startupArguments);const auto diagnostic=io.steamLaunchDiagnostics();ports.manualSteamMode=false;return ok&&ports.manualPrimaryCalls==primary+1&&ports.manualShellCalls==shell+1&&diagnostic["primaryStage"]=="create-process"&&diagnostic["primaryError"]==ERROR_ACCESS_DENIED&&diagnostic["fallbackStage"]=="shell-dispatched";});
-check("actual manual Shell failure retains precise Win32 refusal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=false;ports.manualShellOkay=false;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring());const bool ok=io.spawnManualSteam(manualSteam,startupArguments);const auto detail=io.steamLaunchFailure();ports.manualSteamMode=false;ports.manualShellOkay=true;return !ok&&ports.manualShellCalls==shell+1&&detail.find("primary=create-process/5")!=detail.npos&&detail.find("fallback=shell-execute/5")!=detail.npos;});
-check("actual manual fallback absence guard rejects a new Steam instance",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=true;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring());const bool ok=io.spawnManualSteam(manualSteam,startupArguments);ports.manualSteamMode=false;ports.manualSteamPresent=false;return !ok&&ports.manualShellCalls==shell&&io.steamLaunchDiagnostics()["fallbackStage"]=="steam-absence-unverified";});
-check("actual logon spawn port cannot enter the manual Shell terminal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring());const bool ok=io.spawn(manualSteam,startupArguments,true);ports.manualSteamMode=false;return !ok&&ports.manualShellCalls==shell;});
-check("actual manual entry rejects changed startup parameters without a terminal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;const auto primary=ports.manualPrimaryCalls,shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring());const bool ok=io.spawnManualSteam(manualSteam,L" -silent");ports.manualSteamMode=false;return !ok&&ports.manualPrimaryCalls==primary&&ports.manualShellCalls==shell;});
+const auto ownerFacts=memorySteamLaunchFacts();
+check("actual manual creator refusal uses one fixed memory Shell dispatch",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=false;ports.manualShellOkay=true;const auto primary=ports.manualPrimaryCalls,shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring(),{},{},ownerFacts);const bool ok=io.spawnManualSteam(manualSteam,startupArguments);const auto diagnostic=io.steamLaunchDiagnostics();ports.manualSteamMode=false;return ok&&ports.manualPrimaryCalls==primary+1&&ports.manualShellCalls==shell+1&&diagnostic["primaryStage"]=="create-process"&&diagnostic["primaryError"]==ERROR_ACCESS_DENIED&&diagnostic["fallbackStage"]=="shell-dispatched";});
+check("actual manual Shell failure retains precise Win32 refusal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=false;ports.manualShellOkay=false;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring(),{},{},ownerFacts);const bool ok=io.spawnManualSteam(manualSteam,startupArguments);const auto detail=io.steamLaunchFailure();ports.manualSteamMode=false;ports.manualShellOkay=true;return !ok&&ports.manualShellCalls==shell+1&&detail.find("primary=create-process/5")!=detail.npos&&detail.find("fallback=shell-execute/5")!=detail.npos;});
+check("actual manual fallback absence guard rejects a new Steam instance",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;ports.manualSteamPresent=true;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring(),{},{},ownerFacts);const bool ok=io.spawnManualSteam(manualSteam,startupArguments);ports.manualSteamMode=false;ports.manualSteamPresent=false;return !ok&&ports.manualShellCalls==shell&&io.steamLaunchDiagnostics()["fallbackStage"]=="steam-absence-unverified";});
+check("actual logon spawn port cannot enter the manual Shell terminal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;const auto shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring(),{},{},ownerFacts);const bool ok=io.spawn(manualSteam,startupArguments,true);ports.manualSteamMode=false;return !ok&&ports.manualShellCalls==shell;});
+check("actual manual entry rejects changed startup parameters without a terminal",[&]{auto& ports=ymcc_noio::state();ports.manualSteamMode=true;const auto primary=ports.manualPrimaryCalls,shell=ports.manualShellCalls;WindowsPorts io(pc,scratch.wstring(),{},{},ownerFacts);const bool ok=io.spawnManualSteam(manualSteam,L" -silent");ports.manualSteamMode=false;return !ok&&ports.manualPrimaryCalls==primary&&ports.manualShellCalls==shell;});
 #endif
 check("actual native creator starts detached hidden inert addon without shell",[&]{const auto child=scratch/L"inert-addon.exe",marker=pathfs::path(child.wstring()+L".started");std::error_code ec;pathfs::remove(marker,ec);pathfs::copy_file(self,child,pathfs::copy_options::overwrite_existing);WindowsPorts io(pc,scratch.wstring());if(!io.spawn(child.wstring(),L"",false))return false;const auto until=GetTickCount64()+3000;while(!pathfs::exists(marker)&&GetTickCount64()<until)Sleep(10);std::ifstream input(marker);std::string value;input>>value;return value=="hidden";});
 std::cout<<"{\"ok\":true,\"passed\":"<<passed<<",\"realSteamActions\":0,\"installedSettingsWrites\":0}"<<std::endl;return 0;}
+
+#endif // YMCC_LAUNCH_SELECTED_ONLY
+#endif

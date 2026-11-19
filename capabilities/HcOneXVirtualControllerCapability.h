@@ -15,12 +15,20 @@ struct Binding {
 };
 
 namespace detail {
+// Exact existing factory identities; the shared abstract base is not a model.
+inline bool aokzoeClass(std::string_view cls) noexcept {
+    return cls == "HandheldCompanion.Devices.AOKZOEA1" ||
+        cls == "HandheldCompanion.Devices.AOKZOEA1Pro" ||
+        cls == "HandheldCompanion.Devices.AOKZOEA1X" ||
+        cls == "HandheldCompanion.Devices.AOKZOEA2";
+}
 inline bool catalogOneXModel(const Device* model) noexcept {
     for (const auto& row : devices) {
         if (model != &row) continue; // Establish membership before dereferencing.
         constexpr std::string_view prefix = "HandheldCompanion.Devices.OneXPlayer";
-        return row.factoryInstantiable && row.consumerClass.size() > prefix.size() &&
-            row.consumerClass.substr(0, prefix.size()) == prefix;
+        return row.factoryInstantiable && (aokzoeClass(row.consumerClass) ||
+            (row.consumerClass.size() > prefix.size() &&
+             row.consumerClass.substr(0, prefix.size()) == prefix));
     }
     return false;
 }
@@ -51,6 +59,9 @@ inline Binding bind(std::string_view deviceClass) noexcept {
         if (source.canonicalClass == deviceClass) return {nullptr, &source};
     return {}; // No nicknames, short-name aliases, or inferred factory entries.
 }
+inline bool isAokzoe(Binding binding) noexcept {
+    return binding.known() && binding.model && detail::aokzoeClass(binding.canonicalClass());
+}
 inline bool recognized(Binding binding, std::string_view deviceClass) noexcept {
     if (!binding.known()) return false;
     const auto current = bind(deviceClass);
@@ -58,7 +69,7 @@ inline bool recognized(Binding binding, std::string_view deviceClass) noexcept {
         binding.canonicalClass() == current.canonicalClass();
 }
 // Immutable collection classification only, with no hardware-ID or topology
-// claim. A known OneX binding and standard GAME usage are metadata, not proof
+// claim. A known OneX/AOKZOE binding and standard GAME usage are metadata, not proof
 // of the selected physical source, internal wiring, root/slot binding, or any
 // hide/Cycle permission. Those live checks remain with the existing consumer.
 inline bool standardGameCollection(Binding binding, unsigned usagePage,

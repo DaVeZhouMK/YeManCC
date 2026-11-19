@@ -9,7 +9,12 @@ using namespace ymcc::screenpads;
 static unsigned sinkCalls=0,sinkContacts=0,sinkPulses=0;
 static int sinkStrength=0;
 static void fixtureSink(unsigned contacts,bool pulse,int strength){++sinkCalls;sinkContacts=contacts;sinkPulses+=pulse?1:0;sinkStrength=strength;}
+#include "fixtures/touch_haptic_summary.inc"
 int wmain(int argc,wchar_t** argv){
+    if(argc==3 && std::wstring(argv[2])==L"summary"){
+        const auto result=touchHapticSummarySelfTest();std::ofstream output(std::filesystem::path(argv[1]),std::ios::binary);
+        output<<result.dump(2);return result["ok"].get<bool>()&&output.good()?0:3;
+    }
     if(argc!=2)return 2;
     Json cases=Json::array();bool ok=true;
     auto check=[&](const std::string& name,bool passed){ok=ok&&passed;cases.push_back({{"name",name},{"ok",passed}});};

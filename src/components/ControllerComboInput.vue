@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { controllerOemDisplayCatalog } from '@/bridge/controllerOemPresentation';
+import { controllerOemDisplayCatalog, controllerShortcutInputLabel, controllerShortcutInputDefinition } from '@/bridge/controllerOemPresentation';
 import { CONTROLLER_BUTTONS, CONTROLLER_SHORTCUT_MAX_INPUTS, formatControllerShortcutInputs, isHandheldExtendedKey, type ControllerShortcutInput, type ControllerShortcutRecordMode, type OemKeysSnapshot } from '@/bridge/controllerShortcutRules';
 import { CONTROLLER_DIAGRAMS, controllerDiagramPersona } from '@/bridge/controllerDeviceDiagram';
 const props = defineProps<{ method?: 'record' | 'oem'; variant?: 'quick' | 'confirm' | 'picker'; mode?: ControllerShortcutRecordMode; persona: string; inputs: readonly ControllerShortcutInput[]; captured: readonly ControllerShortcutInput[]; candidate?: readonly ControllerShortcutInput[] | null; catalog: OemKeysSnapshot; recording: boolean; busy: boolean; recordingBusy: boolean; status: string }>();
@@ -15,7 +15,7 @@ const manual = computed(() => props.method === 'oem');
 function label(input: ControllerShortcutInput): string {
  if (input.source === 'controller') { const b=CONTROLLER_BUTTONS.find(b=>b.value===input.code),c=CONTROLLER_DIAGRAMS[controllerDiagramPersona(props.persona)].controls.find(c=>c.buttonIndex===b?.gamepadIndex);return input.code==='leftThumb'?'L3':input.code==='rightThumb'?'R3':c?.label.split(' / ')[0]||b?.label||input.code; }
  if (input.source === 'oem') return displayCatalog.value.keys.find(k=>k.keyId===input.code)?.label || input.code;
- return isHandheldExtendedKey(input)?`掌机 ${input.code}`:formatControllerShortcutInputs([input]);
+ return controllerShortcutInputLabel(input, props.catalog);
 }
 const traditionalKeys=computed(()=>visibleInputs.value.filter(i=>(i.source==='keyboard'||i.source==='mouse')&&!isHandheldExtendedKey(i)));
 const mixed=computed(()=>traditionalKeys.value.length>0&&visibleInputs.value.some(i=>i.source==='controller'||i.source==='oem'||isHandheldExtendedKey(i)));
@@ -23,7 +23,7 @@ const mixed=computed(()=>traditionalKeys.value.length>0&&visibleInputs.value.som
 <template>
  <section class="combo-input-editor" data-input-flow="record" :data-input-method="manual?'oem':'record'" :data-recording="recording" data-record-control>
   <div class="combo-section-head"><div class="input-methods" role="group" aria-label="输入方式"><button type="button" :aria-pressed="!manual" :disabled="busy||recordingBusy" @click="emit('method','record')">录制输入</button><button type="button" :aria-pressed="manual" :disabled="busy||recordingBusy" @click="emit('method','oem')">专用键 / 背键</button></div><span>最多 {{ CONTROLLER_SHORTCUT_MAX_INPUTS }} 键</span></div>
-  <div class="combo-current" :class="{capturing:recording}" aria-live="polite"><span class="combo-current-caption">{{recording?'正在识别':'当前组合'}}</span><div class="combo-chips"><template v-for="(input,index) in visibleInputs" :key="input.source+':'+input.code"><span v-if="index" class="combo-plus" aria-hidden="true">＋</span><span class="combo-chip" :data-input-source="input.source" :data-handheld-extended="isHandheldExtendedKey(input)">{{label(input)}}</span></template><span v-if="!visibleInputs.length" class="combo-empty">{{recording?'按住所需按键，再全部松开':'还没有录制组合'}}</span></div></div>
+  <div class="combo-current" :class="{capturing:recording}" aria-live="polite"><span class="combo-current-caption">{{recording?'正在识别':'当前组合'}}</span><div class="combo-chips"><template v-for="(input,index) in visibleInputs" :key="input.source+':'+input.code"><span v-if="index" class="combo-plus" aria-hidden="true">＋</span><span class="combo-chip" :data-input-source="input.source" :title="controllerShortcutInputDefinition(input,catalog)" :data-handheld-extended="isHandheldExtendedKey(input)">{{label(input)}}</span></template><span v-if="!visibleInputs.length" class="combo-empty">{{recording?'按住所需按键，再全部松开':'还没有录制组合'}}</span></div></div>
   <div v-if="manual" class="oem-input-picker" data-oem-picker>
    <template v-if="catalog.supported && displayCatalog.keys.length">
     <section v-for="group in [{label:'专用按键',keys:dedicatedKeys},{label:'背部按键',keys:rearKeys}].filter(group=>group.keys.length)" :key="group.label" class="oem-input-group"><strong>{{group.label}}</strong><div class="oem-input-keys"><button v-for="key in group.keys" :key="key.keyId" type="button" :data-oem-key="key.keyId" :aria-pressed="selected(key.keyId)" :disabled="busy||recordingBusy||key.captureImplemented===false" @click="emit('oem-key',key.keyId)">{{key.label}}<small v-if="key.captureImplemented===false">暂不可用</small></button></div></section>

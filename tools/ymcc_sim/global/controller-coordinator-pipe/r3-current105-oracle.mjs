@@ -1,23 +1,35 @@
 // Portable exact semantic oracle. It grants no runtime/source/public approval by itself.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';
-import {observeCurrentOrderedReport} from './r3-current105-ordered-observation.mjs';
+import {observeCurrentOrderedReport,terminal26RuntimeExpected} from './r3-current105-ordered-observation.mjs';
 import {verifyReviewedDisposeBranches} from './r3-reviewed-contract.mjs';
 import {verifyOwnershipReturn} from './r3-current-ownership.mjs';
 const root=import.meta.dirname,hash=bytes=>createHash('sha256').update(bytes).digest('hex'),fileHash=file=>hash(fs.readFileSync(file)),read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const need=(value,code)=>{if(!value)throw Error('CURRENT_EXACT_'+code);};const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b),key=p=>path.resolve(p).toLowerCase();
 const contractFile=root+'/r3-current105-expectations.json';const CONTRACT_SHA256='43f5de340a6ab0abc5fe1362fecbb27745daab7e0d32ef329d89e9107f858b78';need(fileHash(contractFile)===CONTRACT_SHA256,'CONTRACT_CHANGED');const contract=read(contractFile);
 export function currentRoles(){return Object.keys(contract.expectations);}
-export function currentExpected(role){const e=contract.expectations[role];need(e,'UNKNOWN_ROLE');return structuredClone(e);}
+export function currentExpected(role,options={}){const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1'].includes(id),'UNKNOWN_MANAGED_CONTRACT');const e=id==='current105-terminal26-sdk-lifetime-compact-v1'?terminal26RuntimeExpected(role):contract.expectations[role];need(e,'UNKNOWN_ROLE');return structuredClone(e);}
 export function normalizedCurrentTrace(report){const counts=new Map();return report.assertionTrace.map((row,index)=>{need(row.checkIndex===index+1,'CHECK_INDEX_CHANGED');const k=JSON.stringify([row.case,row.nameOccurrence,row.assertion]),assertionOccurrence=(counts.get(k)??0)+1;counts.set(k,assertionOccurrence);return {...row,assertionOccurrence,id:JSON.stringify([row.case,row.nameOccurrence,row.assertion,assertionOccurrence])};});}
-export function verifyCurrentSemantics(role,report){
- const expected=currentExpected(role);need(report&&report.forbiddenIo===0&&report.fullTranslationUnit===true&&report.normalProductMainExecuted===false&&report.realDeviceIo===false&&!report.exception,'OFFLINE_COMPLETED_REPORT_REQUIRED');
- const observation=observeCurrentOrderedReport(report);need(new Set(report.cases.map(row=>row.name)).size===expected.uniqueNames,'SOURCE_UNIQUE_CASE_NAMES_REQUIRED');need(report.status===expected.expectedStatus,'EXPECTED_ORIGINAL_STATUS_REQUIRED');need(report.checks===expected.checks&&report.cases.length===expected.cases,'COMPLETE_CURRENT_CHECK_AND_CASE_COUNTS_REQUIRED');
+export function verifyCurrentSemantics(role,report,options={}){
+ const expected=currentExpected(role,options);need(report&&report.forbiddenIo===0&&report.fullTranslationUnit===true&&report.normalProductMainExecuted===false&&report.realDeviceIo===false&&!report.exception,'OFFLINE_COMPLETED_REPORT_REQUIRED');
+ const observation=observeCurrentOrderedReport(report,options);need(new Set(report.cases.map(row=>row.name)).size===expected.uniqueNames,'SOURCE_UNIQUE_CASE_NAMES_REQUIRED');need(report.status===expected.expectedStatus,'EXPECTED_ORIGINAL_STATUS_REQUIRED');need(report.checks===expected.checks&&report.cases.length===expected.cases,'COMPLETE_CURRENT_CHECK_AND_CASE_COUNTS_REQUIRED');
  const trace=normalizedCurrentTrace(report),shape=trace.map(row=>[row.sourceOrdinal,row.nameOccurrence,row.case,row.assertion,row.assertionOccurrence]);need(hash(JSON.stringify(shape))===expected.traceIdentitySha256,'EXACT_COMPLETE_ASSERTION_OCCURRENCES_REQUIRED');
  const expectedFailed=new Set(expected.exactFailures.map(row=>row.id));need(expectedFailed.size===expected.exactFailures.length,'DUPLICATE_EXPECTATION');
  need(equal(trace.filter(row=>!row.passed).map(row=>row.id).sort(),[...expectedFailed].sort()),'EXACT_CURRENT_FAILURE_INSTANCES_REQUIRED');for(const row of trace)need(row.passed===!expectedFailed.has(row.id),'EVERY_CURRENT_PASS_AND_FAIL_STATE_REQUIRED');
  for(const wanted of expected.requiredOriginalPassingInstances)need(trace.some(row=>row.id===wanted.id&&row.passed),'ORIGINAL_EXECUTED_PASS_INSTANCE_REQUIRED');
+ if(expected.boundaries){
+  const before=report.orderedReturn.preTargetReturnBody,after=report.orderedReturn.postTargetReturnTail;
+  for(const [actual,wanted]of [[before,expected.boundaries.pre],[after,expected.boundaries.post]]){
+   need(actual.afterSourceOrdinal===wanted.ordinal&&actual.checks===wanted.checks&&actual.lastCaseName===wanted.lastCaseName&&actual.resources.msiModeDebt===wanted.msiModeDebt,'TERMINAL26_EXACT_RESOURCE_BOUNDARY_REQUIRED');
+   for(const field of ['hostHandle','pipeHandle','pipeConnected','prepared','quarantined','visibility','psRetirement','msiSdDebt','workRequested','workInFlight'])need(actual.resources[field]===false,'TERMINAL26_LOCAL_RESOURCE_STILL_OWNED');
+   need(actual.resources.childObservers===0&&actual.resources.workQueue===0,'TERMINAL26_CHILD_OR_WORK_NOT_RETURNED');
+  }
+  need(Number.isSafeInteger(before.resources.msiModeDebtEpisode)&&before.resources.msiModeDebtEpisode>0&&after.resources.msiModeDebtEpisode===before.resources.msiModeDebtEpisode+1,'TERMINAL26_MSI_DEBT_EPISODE_REQUIRED');
+  const debt=report.cases.at(-1).retainedDebtProof;need(debt?.returnDebtEpisodeId===after.resources.msiModeDebtEpisode&&debt.retained.length>0&&debt.retained.every(row=>row.returnDebtRetained===true)&&debt.discharged.length===0,'TERMINAL26_UNRETURNED_MSI_DEBT_WITNESS_REQUIRED');
+ }else{
  need(report.orderedReturn.preTargetReturnBody.afterSourceOrdinal===100&&report.orderedReturn.preTargetReturnBody.lastCaseName==='OFF-LIFECYCLE/MSI-return-unproven'&&report.orderedReturn.preTargetReturnBody.resources.msiModeDebt===true&&report.orderedReturn.preTargetReturnBody.resources.msiModeDebtEpisode>0,'ORIGINAL_BODY_MSI_DEBT_WITNESS_REQUIRED');
  need(report.orderedReturn.postTargetReturnTail.afterSourceOrdinal===105,'SEPARATE_TAIL_OBSERVATION_REQUIRED');need(report.orderedReturn.postTargetReturnTail.resources.spawnCount===expected.expectedOwnedChildren,'ACTUAL_CURRENT_CHILD_COUNT_REQUIRED');
+ }
+ need(report.orderedReturn.postTargetReturnTail.resources.spawnCount===expected.expectedOwnedChildren,'ACTUAL_CURRENT_CHILD_COUNT_REQUIRED');
  verifyReviewedDisposeBranches(report);verifyOwnershipReturn(report,role==='psOwnership');
  if(role==='cancellation'){
   need(expected.exactFailures.length===15&&expected.requiredOriginalPassingInstances.length===14&&expected.exactFailures.length+expected.requiredOriginalPassingInstances.length===29,'ALL_ORIGINAL29_ACCOUNTED');
@@ -26,10 +38,10 @@ export function verifyCurrentSemantics(role,report){
  return {status:'CURRENT_EXACT_SEMANTIC_INSTANCES_MATCHED',role,observed:observation.observed,exactFailedInstances:expected.exactFailures.length,requiredOriginalPassingInstances:expected.requiredOriginalPassingInstances.length,originalCancellation29Accounted:role==='cancellation'?29:null,allTracePassAndFailStatesChecked:true,nativeExecutionProvenanceVerified:false,fullPublicConsumerAccepted:false,publicSingle60Accepted:false};
 }
 function verifyBindingGroup(rows,expected,hashFile){need(Array.isArray(rows)&&rows.length===expected.length,'CHILD_BINDING_MEMBERSHIP_REQUIRED');for(let index=0;index<rows.length;index++){const row=rows[index],wanted=expected[index];need(row.matched===true&&key(row.path)===key(wanted.path)&&row.sha256===wanted.sha256,'CHILD_EXACT_BINDING_ROW_REQUIRED');need(hashFile(row.path)===row.sha256,'CHILD_BOUND_FILE_CHANGED');}}
-export function verifyCurrentChildren(role,report,managed,nativePid,{hashFile=fileHash}={}){
- const expected=currentExpected(role),collected=[];function visit(value){if(!value||typeof value!=='object')return;if(value.buildReceiptSha256&&value.inputManifestSha256&&value.processId){collected.push(value);return;}for(const child of Object.values(value))if(child&&typeof child==='object')visit(child);}visit(report.cases);
+export function verifyCurrentChildren(role,report,managed,nativePid,{hashFile=fileHash,managedInputContract}={}){
+ const expected=currentExpected(role,{managedInputContract}),collected=[];function visit(value){if(!value||typeof value!=='object')return;if(value.buildReceiptSha256&&value.inputManifestSha256&&value.processId){collected.push(value);return;}for(const child of Object.values(value))if(child&&typeof child==='object')visit(child);}visit(report.cases);
  const children=new Map();for(const row of collected){const token=JSON.stringify([row.processId,row.startupNonce]),old=children.get(token);need(!old||equal(old,row),'DUPLICATE_CHILD_RECEIPT_CONTRADICTS');children.set(token,row);}
- need(children.size===expected.expectedOwnedChildren,'ALL110_ACTUAL_OWNED_CHILDREN_REQUIRED');need(Number.isInteger(nativePid)&&nativePid>0,'EXACT_NATIVE_PARENT_REQUIRED');
+ need(children.size===expected.expectedOwnedChildren,'ALL'+expected.expectedOwnedChildren+'_ACTUAL_OWNED_CHILDREN_REQUIRED');need(Number.isInteger(nativePid)&&nativePid>0,'EXACT_NATIVE_PARENT_REQUIRED');
  const m=managed.inputBindings,bindingGroups={sourceOriginals:m.sources.map(row=>({path:row.path,sha256:row.sha256})),sourceSnapshots:m.sources.map(row=>({path:row.snapshot,sha256:row.sha256})),generated:m.generatedInputs,runtimeArtifacts:managed.runtimeArtifacts},allowedTools=new Map(m.toolchainAllowlist.map(row=>[key(row.path),row.sha256]));const manifestHash=hashFile(managed.manifestPath),dllHash=hashFile(managed.fixtureDll);let bindingHashReads=0,loadedHashReads=0;
  const ledger=[];for(const c of children.values()){
   need(c.nativeObservedProcessExit===true&&Number.isInteger(c.nativeObservedExitCode)&&c.finalCleanupAttempted===true&&typeof c.finalCleanupOk==='boolean','ACTUAL_OWNED_EXIT_AND_CLEANUP_OBSERVATION_REQUIRED');need(c.parentPid===nativePid&&Number.isInteger(c.processId)&&c.processId>0&&typeof c.startupNonce==='string'&&c.startupNonce.length>0,'ACTUAL_PARENT_AND_NONCE_REQUIRED');

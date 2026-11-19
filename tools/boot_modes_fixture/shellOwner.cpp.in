@@ -1,0 +1,266 @@
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <string>
+#include <thread>
+#include <unordered_set>
+#include <vector>
+#include "json.hpp"
+#include "settings_baseline.h"
+#include "steam_native_launch.h"
+// ORIGINAL_STEAM_PATH_LOWER
+#include "sleep_power_dispatch.h"
+#include "sleep_cancel_ready.h"
+static std::mutex powerHandlesMx;
+static std::set<HANDLE> powerHandles;
+static unsigned powerOpens=0,powerCloses=0;
+static HANDLE WINAPI trackedPowerEvent(LPSECURITY_ATTRIBUTES a,BOOL manual,BOOL initial,LPCWSTR name){auto h=::CreateEventW(a,manual,initial,name);if(h){std::lock_guard lock(powerHandlesMx);powerHandles.insert(h);++powerOpens;}return h;}
+static BOOL WINAPI trackedPowerClose(HANDLE h){const auto ok=::CloseHandle(h);if(ok){std::lock_guard lock(powerHandlesMx);if(powerHandles.erase(h))++powerCloses;}return ok;}
+#define CreateEventW trackedPowerEvent
+#define CloseHandle trackedPowerClose
+#include "sleep_power_revocation.h"
+#undef CloseHandle
+#undef CreateEventW
+using json=nlohmann::json;
+namespace fspath=std::filesystem;
+static json fixtureDocument;
+static std::mutex settingsMx;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/settings.json",kTdpDaemonExe=L"not-a-real-helper.exe";
+struct SettingsFileGuard{std::lock_guard<std::mutex> lock{settingsMx};};
+static unsigned settingsReads=0;
+static std::string ymSettingsReadRaw(const std::wstring&){++settingsReads;return fixtureDocument.dump();}
+[[maybe_unused]] static json ymSettingsSectionReadCachedUnlocked(const char* section,const char*,const std::initializer_list<const char*>* fields,bool* primaryRead){
+ ++settingsReads;*primaryRead=!fixtureDocument.is_null();json selected=json::object();
+ if(fixtureDocument.contains(section)&&fixtureDocument.at(section).is_object())for(const auto* field:*fields)
+  if(fixtureDocument.at(section).contains(field))selected[field]=fixtureDocument.at(section).at(field);
+ return selected;
+}
+static std::atomic<bool> g_exitRequested{false},g_tdpDaemonStopSent{false},g_poolCancel{false};
+static std::atomic<unsigned long long> g_powerGeneration{4};
+static std::atomic<unsigned> g_tdpObservationFailures{0};
+enum class PowerLifecycle:uint8_t{Ready,Suspending,Suspended,Resuming};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<bool> g_hardwareWriteGate{true};
+static std::atomic<unsigned> g_hardwareWriteInFlight{0};
+static std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{0};
+static std::atomic<uint64_t> g_sharedPowerPublicationRevision{0},g_sharedPowerSuspendSerial{0};
+static struct{bool isolated=false;}g_aiFanMockSession;
+static ymcc::sleeppower::CancellationReady g_sgCancellationReady;
+static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch{[](void*)noexcept{g_sharedPowerRevocations.revoke();},nullptr};
+static void traceLog(const char*,...){}
+// ORIGINAL_SHARED_POWER_FUNCTIONS
+// ORIGINAL_HARDWARE_WRITE_LEASE
+struct MirrorBroker{bool acceptsRequest(const std::string&,const std::string&,unsigned long long){return false;}};
+static MirrorBroker g_deckyMirrorBroker;
+static json tdpParentContext(const json&,const char*){return json::object();}
+static void observeTdpRuntimeIdentity(bool=false){}
+static void appendTdpObservation(const char*,const json&){}
+static json tdpCapturedObservation(const std::string&){return json::object();}
+namespace ymcc::tdpdiag{static const char* bootstrapKind(const std::string&,bool){return "owned-test";}}
+static std::wstring U2W(const std::string& text){return {text.begin(),text.end()};}
+static std::string W2U(const std::wstring& text){return {text.begin(),text.end()};}
+static std::string ascii_lower(std::string value){for(auto& c:value)c=static_cast<char>(::tolower(static_cast<unsigned char>(c)));return value;}
+static bool sameFinalPath(const std::wstring& a,const std::wstring& b){return a==b;}
+static std::string oemToUtf8(const std::string& text){return text;}
+static std::wstring quote_windows_arg(const std::wstring& text){return L"\""+text+L"\"";}
+static std::wstring fixtureImage;
+static std::string stage,change;
+static unsigned created=0,resumed=0;
+static bool changed=false,jobZeroBeforeClose=true,imageMatched=true;
+static bool powerSelection=false,powerDeniedObserved=false,powerRestoredObserved=false;
+static void powerMutate(){
+ if(changed)return;changed=true;
+ if(change=="plan-off"||change=="plan-invalid"||change=="plan-unknown"){
+  SettingsFileGuard guard;
+  if(change=="plan-unknown")fixtureDocument=nullptr;
+  else fixtureDocument["sleep"]["sleepPowerPlanOptimizationEnabled"]=change=="plan-off"?json(false):json("invalid");
+  return;
+ }
+ if(change=="publication"){g_sharedPowerPublicationRevision.fetch_add(1);return;}
+ if(change=="same-fact"){g_sharedPowerRevocations.revoke();return;}
+ const auto receipt=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,GetTickCount64());
+ powerDeniedObserved=!hardwareWriteAllowed();
+ g_sleepPowerDispatch.complete(receipt,GetTickCount64());
+ powerRestoredObserved=hardwareWriteAllowed();
+}
+static HANDLE trackedJob=nullptr,heldProcess=nullptr;
+static std::mutex handlesMx;
+static std::set<HANDLE> explicitHandles;
+static unsigned handlesCreated=0,handlesClosed=0;
+static void rememberHandle(HANDLE handle){std::lock_guard lock(handlesMx);if(handle&&handle!=INVALID_HANDLE_VALUE){explicitHandles.insert(handle);++handlesCreated;}}
+static void mutate(){
+ if(powerSelection){powerMutate();return;}
+ if(changed)return;changed=true;std::lock_guard lock(settingsMx);
+ if(change=="revision")fixtureDocument["input"]["revision"]=8;
+ if(change=="hash")fixtureDocument["input"]["diagnostics"]["inputLoggingEnabled"]=true;
+ if(change=="mode")fixtureDocument["extensions"]["bootModes"]["revision"]=4;
+ if(change=="result")fixtureDocument["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")fixtureDocument["input"]["startupObservedBoot"]="new-boot";
+ if(change=="ack")fixtureDocument["input"]["hostAcknowledgedRevision"]=7;
+ if(change=="unrelated")fixtureDocument["extensions"]["peer"]=true;
+}
+namespace ymcc::processEfficiency {
+static BOOL createProcess(LPCWSTR,LPWSTR,LPSECURITY_ATTRIBUTES pa,LPSECURITY_ATTRIBUTES ta,BOOL inherit,DWORD flags,LPVOID env,LPCWSTR cwd,LPSTARTUPINFOW startup,LPPROCESS_INFORMATION info){
+ if(!(flags&CREATE_SUSPENDED)||!inherit||env||cwd)throw std::runtime_error("owned child launch contract changed");
+ auto command=L"\""+fixtureImage+(powerSelection&&stage=="resume"?L"\" --owned-power-child":L"\" --owned-child");std::vector<wchar_t> mutableCommand(command.begin(),command.end());mutableCommand.push_back(0);
+ const auto ok=::CreateProcessW(fixtureImage.c_str(),mutableCommand.data(),pa,ta,inherit,flags,nullptr,nullptr,startup,info);
+ if(ok){++created;rememberHandle(info->hProcess);rememberHandle(info->hThread);if(!::DuplicateHandle(GetCurrentProcess(),info->hProcess,GetCurrentProcess(),&heldProcess,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("owned child identity handle failed");rememberHandle(heldProcess);
+  wchar_t image[32768]{};DWORD count=32768;imageMatched=::QueryFullProcessImageNameW(heldProcess,0,image,&count)&&fspath::path(image)==fspath::path(fixtureImage);
+  if(stage=="create")mutate();
+ }
+ return ok;
+}
+}
+static HANDLE WINAPI ownedJob(LPSECURITY_ATTRIBUTES security,LPCWSTR name){if(name)throw std::runtime_error("expected private unnamed Job");trackedJob=::CreateJobObjectW(security,name);rememberHandle(trackedJob);return trackedJob;}
+static BOOL WINAPI ownedPipe(PHANDLE read,PHANDLE write,LPSECURITY_ATTRIBUTES security,DWORD size){const auto ok=::CreatePipe(read,write,security,size);if(ok){rememberHandle(*read);rememberHandle(*write);}return ok;}
+static BOOL WINAPI ownedClose(HANDLE handle){
+ std::lock_guard lock(handlesMx);
+ if(handle==trackedJob&&trackedJob){JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+  const bool observed=::QueryInformationJobObject(handle,JobObjectBasicAccountingInformation,&accounting,sizeof(accounting),nullptr)!=FALSE;
+  jobZeroBeforeClose=observed&&accounting.ActiveProcesses==0;trackedJob=nullptr;
+ }
+ const auto ok=::CloseHandle(handle);if(ok&&explicitHandles.erase(handle))++handlesClosed;return ok;
+}
+static DWORD WINAPI ownedResume(HANDLE thread){++resumed;const auto result=::ResumeThread(thread);if(stage=="resume")mutate();return result;}
+static BOOL WINAPI ownedExitCode(HANDLE process,LPDWORD exit){const auto result=::GetExitCodeProcess(process,exit);if(stage=="exit")mutate();return result;}
+// ORIGINAL_OWNER
+static std::map<std::string,std::function<json(const json&)>> handlers;
+template<class F>static void ipc_on(const std::string& name,F action){handlers[name]=action;}
+static void registerShell(){
+#define CreateJobObjectW ownedJob
+#define CreatePipe ownedPipe
+#define CloseHandle ownedClose
+#define ResumeThread ownedResume
+#define GetExitCodeProcess ownedExitCode
+// ORIGINAL_SHELL_HANDLER
+#undef GetExitCodeProcess
+#undef ResumeThread
+#undef CloseHandle
+#undef CreateJobObjectW
+#undef CreatePipe
+}
+static void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
+
+static int runPower(const std::string& selected,const char* defaultsFile,const char* rawFile){
+ std::ofstream raw(rawFile,std::ios::app|std::ios::binary);json rows=json::array();std::string error;powerSelection=true;
+ try{
+  json defaults;std::ifstream(defaultsFile)>>defaults;fixtureDocument=defaults;registerShell();
+  const std::vector<std::string> names={"current","stale-dispatch","create","resume","exit","unguarded-create","read-only-create","ordinary-create","publication-create","same-fact-create","deny-start","plan-disabled-create","plan-current","manual-plan-disabled-create","plan-legacy-current","plan-invalid-setting-create","plan-unknown-create","plan-stale-create"};
+  need(selected=="all"||selected=="invalid"||std::find(names.begin(),names.end(),selected)!=names.end(),"unknown public power selector");
+  if(selected=="invalid"){
+   json checks=json::array();const std::vector<json> bad={nullptr,true,"1",-1,0.5,9007199254740992ull};
+   for(const auto& value:bad){created=0;resumed=0;bool rejected=false;try{handlers.at("shell.run")({{"program","powercfg"},{"args",{"/setacvalueindex","owned","owned","owned","0"}},{"expectedPowerGeneration",4},{"expectedPowerNotificationSequence",value}});}catch(...){rejected=true;}
+    checks.push_back({{"value",value},{"rejected",rejected},{"created",created}});need(rejected&&created==0&&explicitHandles.empty()&&powerHandles.empty(),"malformed Native notification ticket dispatched a child");}
+   created=0;bool rejected=false;try{handlers.at("shell.run")({{"program","powercfg"},{"expectedPowerNotificationSequence",0}});}catch(...){rejected=true;}need(rejected&&created==0,"sequence without generation was accepted");checks.push_back({{"missingGenerationRejected",true}});
+   stage="none";created=0;resumed=0;heldProcess=nullptr;const auto valid=handlers.at("shell.run")({{"program","powercfg"},{"args",{"/setacvalueindex","owned","owned","owned","0"}},{"expectedPowerGeneration",4},{"expectedPowerNotificationSequence",0}});
+   if(heldProcess){need(::WaitForSingleObject(heldProcess,0)==WAIT_OBJECT_0,"zero ticket child retained");ownedClose(heldProcess);heldProcess=nullptr;}
+   need(valid.value("exitCode",-1)==0&&created==1&&resumed==1&&jobZeroBeforeClose&&explicitHandles.empty()&&powerHandles.empty()&&powerOpens==powerCloses&&g_hardwareWriteInFlight.load()==0,"valid zero notification ticket or cleanup rejected");
+   rows.push_back({{"name","invalid"},{"checks",checks},{"invalidChecks",checks.size()},{"zeroTicketAccepted",true},{"explicitHandlesAtReturn",explicitHandles.size()},{"publicEventAtReturn",powerHandles.size()},{"publicEventCreated",powerOpens},{"publicEventClosed",powerCloses},{"jobZeroBeforeClose",jobZeroBeforeClose}});
+   raw<<rows[0].dump()<<"\n"<<std::flush;std::cout<<json{{"status","PASS"},{"selection",selected},{"rows",rows},{"error",""},{"realPowercfgOrHardwareActions",0}}.dump()<<std::endl;return 0;
+  }
+  for(const auto& name:names){if(selected!="all"&&name!=selected)continue;
+   need(explicitHandles.empty()&&powerHandles.empty(),"previous power request retained handles");
+   fixtureDocument=defaults;
+   if(name=="plan-legacy-current")fixtureDocument["sleep"].erase("sleepPowerPlanOptimizationEnabled");
+   const auto initial=g_sleepPowerDispatch.window(PBT_APMRESUMEAUTOMATIC,GetTickCount64());g_sleepPowerDispatch.complete(initial,GetTickCount64());
+   g_hardwareWriteGate.store(true);const auto sequence=g_sleepPowerDispatch.observedSequence();
+   const bool plain=name=="ordinary-create",read=name=="read-only-create",unscoped=name=="unguarded-create"||read||plain;
+   const bool planCurrent=name=="plan-current"||name=="plan-legacy-current";
+   const bool planOperation=name.rfind("plan-",0)==0;
+   const bool allowed=name=="current"||plain||read||name=="publication-create"||planCurrent||name=="manual-plan-disabled-create";
+   stage=name=="resume"?"resume":name=="exit"?"exit":name=="current"||name=="stale-dispatch"||name=="deny-start"||planCurrent?"none":"create";
+   change=name=="publication-create"?"publication":name=="same-fact-create"?"same-fact":"ingress";
+   if(name=="plan-disabled-create"||name=="manual-plan-disabled-create")change="plan-off";
+   if(name=="plan-invalid-setting-create")change="plan-invalid";
+   if(name=="plan-unknown-create")change="plan-unknown";
+   created=0;resumed=0;settingsReads=0;changed=false;powerDeniedObserved=false;powerRestoredObserved=false;jobZeroBeforeClose=true;imageMatched=true;heldProcess=nullptr;trackedJob=nullptr;handlesCreated=0;handlesClosed=0;powerOpens=0;powerCloses=0;
+   json request={{"program",plain?"owned-worker.exe":"powercfg"},{"args",plain?json::array():read?json({"/list"}):json({"/setacvalueindex","01234567-89ab-cdef-0123-456789abcdef","238c9fa8-0aad-41ed-83f4-97be242c8f20","94ac6d29-73ce-41a6-809f-6363ba21b47e","0"})},{"timeoutMs",1000}};
+   if(!unscoped){request["expectedPowerGeneration"]=4;request["expectedPowerNotificationSequence"]=sequence;}
+   if(planOperation)request["requireSleepPowerPlanEnabled"]=true;
+   if(name=="stale-dispatch")powerMutate();if(name=="deny-start")g_hardwareWriteGate.store(false);
+   json reply;std::string failure;const auto begin=GetTickCount64();
+   try{reply=handlers.at("shell.run")(request);}catch(const std::exception& e){failure=e.what();}
+   const auto elapsed=GetTickCount64()-begin;bool childExited=true;
+   if(heldProcess){childExited=::WaitForSingleObject(heldProcess,0)==WAIT_OBJECT_0;ownedClose(heldProcess);heldProcess=nullptr;}
+   const json row={{"name",name},{"allowed",allowed},{"created",created},{"resumed",resumed},{"changed",changed},{"deniedObserved",powerDeniedObserved},{"restoredObserved",powerRestoredObserved},
+    {"generation",g_powerGeneration.load()},{"capturedSequence",sequence},{"currentSequence",g_sleepPowerDispatch.observedSequence()},{"error",failure},{"reply",reply},{"elapsedMs",elapsed},
+    {"jobZeroBeforeClose",jobZeroBeforeClose},{"childExited",childExited},{"actualOwnedImageMatched",imageMatched},{"explicitHandlesCreated",handlesCreated},{"explicitHandlesClosed",handlesClosed},{"explicitHandlesAtReturn",explicitHandles.size()},
+    {"publicEventCreated",powerOpens},{"publicEventClosed",powerCloses},{"publicEventAtReturn",powerHandles.size()},{"hardwareWritesInFlightAtReturn",g_hardwareWriteInFlight.load()},{"settingsReads",settingsReads}};
+   raw<<row.dump()<<"\n"<<std::flush;rows.push_back(row);
+   need(childExited&&jobZeroBeforeClose&&imageMatched&&explicitHandles.empty()&&handlesCreated==handlesClosed,"actual owned child/Job/handle cleanup failed");
+   need(powerHandles.empty()&&powerOpens==powerCloses&&g_hardwareWriteInFlight.load()==0,"public power event or original hardware lease retained");
+   if(name!="current"&&name!="deny-start"&&!planCurrent)need(changed,"selected original shell boundary not reached");
+   if(planOperation&&!allowed)need(created==1&&resumed==0&&!failure.empty(),"revoked public shell child resumed after plan preference or public authorization changed");
+   if(name=="manual-plan-disabled-create")need(settingsReads==0,"manual powercfg acquired an optimizer settings constraint");
+   if(allowed)need(failure.empty()&&reply.value("exitCode",-1)==0&&resumed==1,"current or unrelated read-only/ordinary shell was rejected");
+   else{need(!failure.empty(),"revoked public shell request accepted after same-generation Ready");if(name=="create"||name=="unguarded-create"||name=="same-fact-create"||name=="stale-dispatch"||name=="deny-start")need(resumed==0,"revoked public shell child resumed");if(name=="resume")need(elapsed<200,"in-flight cancellation exceeded original observation allowance");}
+   g_hardwareWriteGate.store(true);
+  }
+ }catch(const std::exception& e){error=e.what();}
+ if(heldProcess){::TerminateProcess(heldProcess,ERROR_CANCELLED);::WaitForSingleObject(heldProcess,1000);ownedClose(heldProcess);heldProcess=nullptr;}
+ std::cout<<json{{"status",error.empty()?"PASS":"FAIL"},{"selection",selected},{"rows",rows},{"error",error},{"scope","actual shell handler/shared reader/Dispatch/RevocationMirrors and real owned Win32 child; no requested program execution"},{"realPowercfgOrHardwareActions",0}}.dump()<<std::endl;return error.empty()?0:1;
+}
+
+int main(int argc,char** argv){
+ if(argc==2&&std::string(argv[1])=="--owned-power-child"){::Sleep(500);return 0;}
+ if(argc==2&&std::string(argv[1])=="--owned-child"){std::cout<<"owned-child\n"<<std::flush;::Sleep(10);return 0;}
+ if(argc!=4)return 2;
+ wchar_t image[32768]{};need(GetModuleFileNameW(nullptr,image,32768)>0,"own image unavailable");fixtureImage=image;
+ const std::string selection=argv[2];if(selection.rfind("power:",0)==0)return runPower(selection.substr(6),argv[1],argv[3]);if(selection!="all"&&selection!="before")return 2;
+ std::ofstream raw(argv[3],std::ios::app|std::ios::binary);json rows=json::array();std::string error;unsigned controls=0;
+ try{
+  json defaults;std::ifstream(argv[1])>>defaults;registerShell();
+  for(const auto* mode:{"global","xbox","steam","xbox-steam"})for(const auto* boundary:{"dispatch","create","resume","exit"})
+   for(const auto* kind:{"revision","hash","mode","result","observed","ack","unrelated","current"}){
+    if(selection=="before"&&(std::string(mode)!="global"||std::string(boundary)!="dispatch"||std::string(kind)!="revision"))continue;
+    fixtureDocument=defaults;fixtureDocument["input"]["revision"]=7;fixtureDocument["input"]["diagnostics"]["inputLoggingEnabled"]=false;fixtureDocument["input"]["startupObservedBoot"]="owned-shell-boot";
+    fixtureDocument["extensions"]={{"bootModes",{{"schema",1},{"revision",3},{"current",mode},{"boot",mode}}},{"bootModesAppliedBoot","owned-shell-boot"}};
+    const json expected={{"input",fixtureDocument["input"]},{"extensions",fixtureDocument["extensions"]}};
+    need(explicitHandles.empty(),"previous native shell invocation retained an explicit handle");
+    stage=boundary;change=kind;created=0;resumed=0;settingsReads=0;changed=false;jobZeroBeforeClose=true;imageMatched=true;heldProcess=nullptr;trackedJob=nullptr;handlesCreated=0;handlesClosed=0;
+    DWORD beforeHandles=0,afterHandles=0;need(GetProcessHandleCount(GetCurrentProcess(),&beforeHandles)!=FALSE,"initial owned handle count failed");
+    if(stage=="dispatch")mutate();json reply;std::string failure;
+    try{reply=handlers.at("shell.run")({{"program","owned-worker.exe"},{"args",{"owned"}},{"timeoutMs",1000},{"bootContext",expected}});}catch(const std::exception& e){failure=e.what();}
+    bool childExited=true;
+    if(heldProcess){childExited=::WaitForSingleObject(heldProcess,0)==WAIT_OBJECT_0;ownedClose(heldProcess);heldProcess=nullptr;}
+    need(GetProcessHandleCount(GetCurrentProcess(),&afterHandles)!=FALSE,"final owned handle count failed");
+    const bool allowed=change=="ack"||change=="unrelated"||change=="current";
+    const json row={{"mode",mode},{"stage",stage},{"change",change},{"allowed",allowed},{"created",created},{"resumed",resumed},
+     {"error",failure},{"reply",reply},{"jobZeroBeforeClose",jobZeroBeforeClose},{"childExited",childExited},{"actualOwnedImageMatched",imageMatched},
+     {"beforeHandles",beforeHandles},{"afterHandles",afterHandles},{"explicitHandlesCreated",handlesCreated},{"explicitHandlesClosed",handlesClosed},{"explicitHandlesAtReturn",explicitHandles.size()},{"settingsReads",settingsReads}};
+    raw<<row.dump()<<"\n"<<std::flush;rows.push_back(row);
+    need(changed,"selected original native shell boundary was not reached");
+    need(childExited&&jobZeroBeforeClose&&imageMatched,"actual owned child/Job cleanup or identity was not confirmed");
+    need(explicitHandles.empty()&&handlesCreated==handlesClosed,"original shell invocation retained an explicit owned handle");
+    if(allowed)need(failure.empty()&&reply.value("exitCode",-1)==0&&resumed==1,"current native shell command was rejected");
+    else {need(!failure.empty(),"expired native shell request was accepted");if(stage=="dispatch"||stage=="create")need(resumed==0,"expired native shell child was resumed");}
+   }
+  if(selection=="all"){
+   stage="ordinary";change="current";settingsReads=0;created=0;resumed=0;
+   const auto normal=handlers.at("shell.run")({{"program","owned-worker.exe"},{"args",json::array()},{"timeoutMs",1000}});
+   need(normal.value("exitCode",-1)==0&&resumed==1&&settingsReads==0,"ordinary shell acquired a boot constraint");
+   if(heldProcess){need(::WaitForSingleObject(heldProcess,0)==WAIT_OBJECT_0,"ordinary worker retained");ownedClose(heldProcess);heldProcess=nullptr;}
+   need(explicitHandles.empty()&&jobZeroBeforeClose,"ordinary shell retained owned resources");++controls;
+   for(const auto value:{0,5}){
+    created=0;bool rejected=false;try{handlers.at("shell.run")({{"program","owned-worker.exe"},{"expectedPowerGeneration",value},{"timeoutMs",1000}});}catch(...){rejected=true;}
+    need(rejected&&created==0,"existing power-generation admission was weakened");
+    ++controls;
+   }
+  }
+ }catch(const std::exception& e){error=e.what();}
+ if(heldProcess){::TerminateProcess(heldProcess,ERROR_CANCELLED);::WaitForSingleObject(heldProcess,1000);ownedClose(heldProcess);}
+ std::cout<<json{{"status",error.empty()?"PASS":"FAIL"},{"selection",selection},{"rows",rows},{"error",error},{"ordinaryAndPowerControls",controls},{"globalHandleCountDiagnostic","unattributed runtime changes retained; explicit call handles and Job are tracked independently"},{"realPowercfgOrHardwareActions",0}}.dump()<<std::endl;
+ return error.empty()?0:1;
+}

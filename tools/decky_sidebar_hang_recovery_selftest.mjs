@@ -6,10 +6,18 @@ import {root,validation} from './fixtures/decky_task_paths.mjs';
 const {transformSync}=createRequire(path.join(root,'package.json'))('esbuild');
 const contextModule={exports:{}};
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'decky-plugin/src/steamRunningContext.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module:contextModule,exports:contextModule.exports});
+const gameContextModule={exports:{}};
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/gameSteamContextModel.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module:gameContextModule,exports:gameContextModule.exports});
+function loadClientImport(name){
+ if(name==='./performanceModel')return performanceModelModule;
+ if(name==='../../src/bridge/gameSteamContextModel')return gameContextModule.exports;
+ assert.equal(name,'./steamRunningContext');return contextModule.exports;
+}
+const clientCode=transformSync(fs.readFileSync(process.env.YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE||path.join(root,'decky-plugin/src/mirrorClient.ts'),'utf8'),{loader:'ts',format:'cjs'}).code;
 const module={exports:{}};
-vm.runInNewContext(transformSync(fs.readFileSync(process.env.YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE||path.join(root,'decky-plugin/src/mirrorClient.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,require:name=>{if(name==='./performanceModel')return performanceModelModule;assert.equal(name,'./steamRunningContext');return contextModule.exports;}});
+vm.runInNewContext(clientCode,{module,exports:module.exports,structuredClone,require:loadClientImport});
 const {MirrorClient}=module.exports;const cases=[];
-function fixture(){
+function fixture(options={}){
  const timers=new Map(),sockets=[];let now=0,next=0;
  let bootstrap={endpoint:'ws://127.0.0.1:23456/mirror',token:'inert-token',runId:'session1',hudProtocol:1};
  class Socket{
@@ -20,7 +28,7 @@ function fixture(){
   send(value){if(this.throwSend)throw Error('inert send failure');if(this.closed)throw Error('closed inert socket');this.sent.push(JSON.parse(value));}
   close(){if(this.throwClose)throw Error('inert close failure');this.closed=true;this.emit('close');}
  }
- const client=new MirrorClient({bootstrap:()=>bootstrap,socket:()=>new Socket(),schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay,due:now+delay});return id;},cancel:id=>timers.delete(id),clientId:'fault-fixture',now:()=>now});
+ const client=new (options.Client??MirrorClient)({bootstrap:()=>bootstrap,socket:()=>new Socket(),schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay,due:now+delay});return id;},cancel:id=>timers.delete(id),clientId:'fault-fixture',...(options.platformClock?{}:{now:()=>now})});
  const snap=(revision=1)=>({runId:bootstrap.runId,generation:1,revision,ready:true,provenance:{kind:'ymcc-native',pid:123},game:{label:'inert-game',identity:'inert:pid1',fields:{acMode:{value:'balanced',supported:true,choices:[{data:'balanced',label:'Balanced'}]}}},fan:{supported:true,enabled:true,preset:'soft',choices:[{data:'soft',label:'Soft'}]}});
  const publish=(socket=sockets.at(-1),revision=1)=>socket.emit('message',{type:'snapshot',runId:bootstrap.runId,snapshot:snap(revision)});
  const connect=()=>{client.setVisible(true);sockets.at(-1).emit('open');publish();assert.equal(client.snapshot().connected,true);};
@@ -200,24 +208,32 @@ await check('a passive connection below thirty seconds cannot reset earlier outa
  const f=fixture();try{f.setBootstrap({...f.bootstrap(),wallpaperProtocol:1});f.client.setPassiveDemand('wallpaper',true);for(const delay of [250,1000,3000,10000]){f.sockets.at(-1).close();f.advance(delay);}f.sockets.at(-1).emit('open');f.advance(29999);f.sockets.at(-1).throwSend=true;assert.equal(f.client.sendWallpaper('wallpaper.status',{}),false);assert.equal(f.timers.size,1);assert.equal([...f.timers.values()][0].delay,30000);}finally{f.client.dispose();}
 });
 
-await check('the base Decky connection survives hidden QAM with zero business polling and reconnects offline',()=>{
+async function completeHiddenOpen(f,socket){
+   socket.emit('open');assert.equal(f.client.snapshot().connected,true);
+   assert.equal(f.client.snapshot().snapshot,null);assert.equal(socket.sent.length,1);
+   const probe=socket.sent[0];assert.equal(probe.command,'snapshot');assert.notEqual(probe.subscribe,false);assert.match(probe.probeId,/^probe:fault-fixture:/);
+   socket.emit('message',{type:'snapshot',runId:f.bootstrap().runId,probeId:probe.probeId,snapshot:f.snap()});
+   await Promise.resolve();await Promise.resolve();
+   assert.equal(f.client.snapshot().connected,true);assert.equal(f.client.snapshot().snapshot,null);
+   assert.equal(socket.sent.length,2);assert.equal(socket.sent[1].command,'snapshot');assert.equal(socket.sent[1].subscribe,false);assert.equal(f.timers.size,0);
+}
+await check('the base Decky connection survives hidden QAM with zero business polling and reconnects offline',async()=>{
  const f=fixture();try{
-  f.client.setPassiveDemand('connection',true);let socket=f.sockets.at(-1);socket.emit('open');
-  assert.equal(f.client.snapshot().connected,true);assert.equal(f.client.snapshot().snapshot,null);assert.equal(socket.sent.length,0);assert.equal(f.timers.size,0);
-  f.advance(7200000);assert.equal(socket.sent.length,0);assert.equal(f.sockets.length,1);
+  f.client.setPassiveDemand('connection',true);let socket=f.sockets.at(-1);await completeHiddenOpen(f,socket);
+  f.advance(7200000);assert.equal(socket.sent.length,2);assert.equal(f.sockets.length,1);
   f.client.setVisible(true);f.publish();f.client.setVisible(false);assert.equal(f.client.snapshot().connected,true);assert.equal(f.client.snapshot().snapshot,null);
   const reads=socket.sent.filter(m=>m.command==='snapshot'&&m.subscribe!==false).length;
-  socket.close();f.advance(250);socket=f.sockets.at(-1);socket.emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(socket.sent.length,0);
-  f.advance(7200000);assert.equal(f.sockets.length,2);assert.equal(f.sockets[0].sent.filter(m=>m.command==='snapshot'&&m.subscribe!==false).length,reads);assert.equal(f.timers.size,0);
+  socket.close();f.advance(250);socket=f.sockets.at(-1);await completeHiddenOpen(f,socket);
+  f.advance(7200000);assert.equal(socket.sent.length,2);assert.equal(f.sockets.length,2);assert.equal(f.sockets[0].sent.filter(m=>m.command==='snapshot'&&m.subscribe!==false).length,reads);assert.equal(f.timers.size,0);
  }finally{f.client.dispose();}assert.equal(f.timers.size,0);
 });
-await check('malformed bootstrap is safely retried until a corrected local binding arrives even if its event was missed',()=>{
+await check('malformed bootstrap is safely retried until a corrected local binding arrives even if its event was missed',async()=>{
  const f=fixture();try{const boot=f.bootstrap();f.setBootstrap({...boot,endpoint:'ws://remote.invalid/mirror'});f.client.setPassiveDemand('connection',true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);
-  f.setBootstrap(boot);f.advance(250);assert.equal(f.sockets.length,1);f.sockets[0].emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+  f.setBootstrap(boot);f.advance(250);assert.equal(f.sockets.length,1);await completeHiddenOpen(f,f.sockets[0]);assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
  }finally{f.client.dispose();}
 });
-await check('an error without a close callback still rejoins the single recovery path',()=>{
- const f=fixture();try{f.client.setPassiveDemand('connection',true);const old=f.sockets[0];old.emit('open');old.close=()=>{old.closed=true;};old.emit('error');assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);f.advance(250);f.sockets[1].emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+await check('an error without a close callback still rejoins the single recovery path',async()=>{
+ const f=fixture();try{f.client.setPassiveDemand('connection',true);const old=f.sockets[0];await completeHiddenOpen(f,old);old.close=()=>{old.closed=true;};old.emit('error');assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);f.advance(250);await completeHiddenOpen(f,f.sockets[1]);assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
 });
 await check('unknown protocol failure recovers transport without replaying an unconfirmed operation',async()=>{
  const f=fixture();try{f.client.setPassiveDemand('connection',true);f.connect();const pending=f.client.mutate('fan.setPreset',{preset:'soft'});const rejected=assert.rejects(pending);
@@ -229,4 +245,39 @@ await check('native OFF revocation stops the base connection and every queued re
  const f=fixture();try{f.client.setPassiveDemand('connection',true);f.sockets[0].emit('open');f.sockets[0].close();assert.equal(f.timers.size,1);f.setBootstrap({revoked:true});f.client.bootstrapChanged();f.advance(86400000);assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);assert.equal(f.client.snapshot().connected,false);}finally{f.client.dispose();}
 });
 
-fs.writeFileSync(path.join(validation,'MIRROR-HANG-RECOVERY.json'),JSON.stringify({status:'passed',cases:cases.length,results:cases,healthyRecoveryMeasurements,compoundOrderingMeasurements,realProcesses:false,realSettings:false,clock:'virtual'},null,2)+'\n');console.log(JSON.stringify({status:'passed',mirrorHangCases:cases.length}));
+
+const platformClockMeasurements=[];
+function platformClient(clock){
+ const isolated={exports:{}};
+ vm.runInNewContext(clientCode,{module:isolated,exports:isolated.exports,structuredClone,
+  Date:{now:()=>clock.wall},performance:{now:()=>clock.elapsed},
+  require:loadClientImport});
+ return isolated.exports.MirrorClient;
+}
+for(const stableMs of [1000,30000])for(const wallJumpMs of [3600000,-3600000])await check('platform monotonic connection health survives '+wallJumpMs+'ms wall jump after '+stableMs+'ms',()=>{
+ const clock={elapsed:0,wall:1700000000000},f=fixture({Client:platformClient(clock),platformClock:true});
+ try{
+  f.client.setVisible(true);
+  for(const delay of [250,1000,3000,10000]){f.sockets.at(-1).close();f.advance(delay);}
+  const socket=f.sockets.at(-1);socket.emit('open');f.publish();assert.equal(f.timers.size,0);
+  const sent=socket.sent.length;f.advance(stableMs);clock.elapsed=stableMs;clock.wall+=stableMs+wallJumpMs;
+  assert.equal(socket.sent.length,sent);assert.equal(f.timers.size,0);
+  socket.close();const retry=[...f.timers.values()];assert.equal(retry.length,1);
+  const expected=stableMs>=30000?250:30000;
+  const measured={stableMs,wallJumpMs,actualRetryMs:retry[0].delay,expectedRetryMs:expected,extraHealthyTraffic:socket.sent.length-sent};
+  platformClockMeasurements.push(measured);console.log(JSON.stringify({platformClockMeasurement:measured}));
+  assert.equal(retry[0].delay,expected,'wall-clock changes cannot refund or retain the monotonic stable-health backoff');
+ }finally{f.client.dispose();assert.equal(f.timers.size,0);}
+});
+await check('platform monotonic connection probe measures elapsed work through a wall-clock jump',async()=>{
+ const clock={elapsed:0,wall:1700000000000},f=fixture({Client:platformClient(clock),platformClock:true});
+ try{
+  f.connect();const socket=f.sockets.at(-1),pending=f.client.testConnection();
+  const request=socket.sent.at(-1);clock.elapsed=1000;clock.wall+=3601000;f.advance(1000);
+  socket.emit('message',{type:'snapshot',runId:f.bootstrap().runId,probeId:request.probeId,snapshot:f.snap(2)});
+  const result=await pending;assert.equal(result.elapsedMs,1000,'probe elapsed time must use the same monotonic clock');
+  assert.equal(f.timers.size,0);assert(socket.sent.every(message=>message.command==='snapshot'));
+ }finally{f.client.dispose();assert.equal(f.timers.size,0);}
+});
+
+fs.writeFileSync(path.join(validation,'MIRROR-HANG-RECOVERY.json'),JSON.stringify({status:'passed',cases:cases.length,results:cases,platformClockMeasurements,healthyRecoveryMeasurements,compoundOrderingMeasurements,realProcesses:false,realSettings:false,clock:'virtual'},null,2)+'\n');console.log(JSON.stringify({status:'passed',mirrorHangCases:cases.length}));

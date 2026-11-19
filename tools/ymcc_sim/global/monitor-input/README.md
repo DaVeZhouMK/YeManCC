@@ -1,5 +1,51 @@
 # Monitor input regression
 
+## Unexpected activation and lease admission failure (2026-11-11)
+
+The panel input HWND must never retain active-window/keyboard ownership, even
+when selected by a shell or programmatic activation rather than an ordinary
+mouse/touch activation request. WM_ACTIVATE/WM_SETFOCUS withdraw and destroy only
+the panel input HWND and cancel its contact synchronously. Hiding/clearing focus
+alone can occur before Windows commits its focus assignment. The next normal refresh restores only the
+bounded no-activate input area. No foreground forwarding, input synthesis,
+new polling, timer, thread or hook is added.
+
+The original native consumer has an explicit `--input-activation` selection:
+eight checks, on a private desktop that is never switched into view, using real
+SetActiveWindow/SetFocus calls addressed only to owned windows. It checks contact
+withdrawal, active/focus release, normal refresh and close. This is a private
+thread input-queue test, not proof of a physical handheld/remote-session cause.
+It remains opt-in; the default input regression does not gain another branch.
+
+Initial display creation, parent frames and notice frames now reject a failed
+native lease timer instead of accepting an output without its expiry safeguard.
+They hide/release their own surfaces through the existing close path. The
+original `--lease-timer` selection retains its 23 checks and adds four admission
+failure checks (27 total). The old source fails exactly those four assertions;
+an infrastructure/compile error is not a behavior negative.
+
+## Resident display descendant isolation (2026-11-08)
+
+The display-only Composition WebView can still create native helper children.
+The Carrier protects the whole display HWND tree, including children created
+between data frames. Same-thread children retain disabled/transparent/non-activating
+styles at their native mutation boundary; their subclasses die with the HWND.
+Foreign-thread helpers must already satisfy the invariant, otherwise the display
+is withdrawn without a synchronous cross-thread style/enable request. The separate
+panel input HWND is not a descendant and keeps its existing drag/tap behavior.
+No timer, thread, input forwarding or system-input hook is added.
+
+The original private consumer covers late child/grandchild creation, attempts to
+restore input styles, separation from drag input and destruction with the owner.
+For actual OS delivery, the existing real-routing runner accepts
+`--legacy-receiver --resident-only` alongside its explicit desktop/runtime flags.
+This selects no-contact resident display and notice visibility/close checks;
+the owned receiver counts touch promoted to mouse messages, as legacy desktop
+surfaces do. The original full mutation/drag sequence remains the default.
+This scope does not identify the community machine's actual touch target or prove
+physical touch hardware behavior. Saved crosshair settings do not prove that a
+crosshair was displayed when a screenshot was taken.
+
 ## Current native bounded input (2026-10-23)
 
 The normal global adapter compiles the production Carrier, PanelInput and Gesture into owned HWNDs on a private desktop which is never shown. It does not inject system input. The current monitor path creates no Composition input site, independent input source, dispatcher or child, and never explicitly acquires mouse capture. Touch/pen use WM_POINTER on the bounded HWND; mouse uses Windows' legacy compatibility path and a leave notification. The touchpad/radial shared Surface implementation is unchanged.

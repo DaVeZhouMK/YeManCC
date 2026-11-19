@@ -146,9 +146,12 @@ def compile_and_run(run,name,flags):
 
 
 def main():
+    global OUT
     options = argparse.ArgumentParser(description=__doc__)
     options.add_argument('--header-snapshot',type=Path,help='test explicit header bytes from the authorized evidence directory; never production acceptance')
+    options.add_argument('--out',type=Path,help='fresh module evidence directory')
     args = options.parse_args()
+    if args.out:OUT=args.out.resolve()
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
     run = OUT/('run-'+stamp+'-'+str(os.getpid()));run.mkdir(parents=True)
     result = {'pass':False,'productionAcceptance':False,'run':str(run),'startedUtc':stamp,'profiles':[],

@@ -1,0 +1,17 @@
+# 显式重选恢复已正常退休的触摸板输入通道
+
+已写入主线，未导出部署。两个产品头和原生消费者CPP/PS1共4源12处上下文，未改UI、监控、Steam、main或公共睡眠。新增的是原用例可选manual-channel-recovery选择，不增加默认父门、ID、minimum或导出测试。
+
+本轮真实旧对照：已发布独立worker由原kStop正常退出，State清理完成、queue/action/completion为空，但显式相同设置仍不能恢复；10项中仅恢复项必要FAIL，隐藏桌面与UI队列退出归还。它是自有可控终态，不据此认定Win5原0x8000FFFF内部原因。
+
+现closedForSettings只观察stopping、clean closed、原thread signaled，并要求曾发布或启动失败。仅原revealFromSettings+master+native路径才触发，先release、关闭两板和7个自有按钮旧Surface，再以原buttonsOpenInputSources==0、两板terminalReleased和samechannel限定调用原shutdown。随后原refresh一次建立新State。活跃、尚未结束、清理失败的worker不退休；旧绑定未解除也不开始新State。start/shutdown函数体逐字不变。
+
+实际原生新选择17项通过：通过三次原实际repair到独立通道，按住两板、真实worker停止、直接同设置恢复、旧mailbox迟到隔离；自动刷新不重启、OFF不重启、显式ON恢复；presentation lease下不开始新worker、归还后恢复；原3repair/3episode/5秒与共享compositor保持，退出三轮信号确认及隐藏桌面/UI queue关闭。原startup真实一次delegate new16B失败支路11项、完整复位20项、显示交错13项亦在同最终产品通过，四epoch独立，不拼默认完整父门。
+
+失败全保：首候选C2065因直接引用后定义按钮数组，未运行Native；改用原按钮资源计数查询。r2、r3 Native均0xc0000005，r3即时观察显示14个专用检查结束后才异常；发现新选择未排除旧默认terminal尾部，误用独立Surface的普通source。只补原选择排除，r4明确14专用+3公共清理且17通过；旧默认断言正文不删。未抓异常指令/栈，不把该夹具异常当现场根因。首生成auto混类型在编译前修正，读路径准备失败及费用保留。
+
+8个实际Job均在关闭前观察为0，原root/business/自然或准确工具收尾分列在VALIDATION-INTAKE。没有将崩溃进程退出当COM释放成功。r2静态独审范围内无阻塞，最终产品与r2逐字同；r4仅夹具选择修正由父侧反查。未独立记录审查完整起止，不声称120/180秒内完成。
+
+4target+19dep全部share0同持139.5939ms/23HANDLE归还，整源正逆及导后23源核同最终实际消费者，Surface/分配私有端口严格逆除；git差异空白检查通过。无新增闲置poll/timer/常驻线程、输入刷新率或等待/自动修复额度。设置入口仅只读核当前三调用，原active-profile set传true，普通刷新仍默认false。
+
+已向UI任务交接本侧与显示lease边界；game_overlay_surface的ended/restore异常归还由UI任务处理，本侧未并行修改。下一自然匹配Native/runtime/source-PDB验证，当前仍旧194456包与220653日志。本轮不追编、导出、部署或控制实际应用/设备/睡眠。Win5新链loaded/全屏实体触摸与捕获稳定、原Windows错误、永久清理拒绝和长期CPU仍OPEN，持续修复ACTIVE。

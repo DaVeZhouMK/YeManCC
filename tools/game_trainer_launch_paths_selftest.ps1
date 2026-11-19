@@ -35,7 +35,7 @@ Check 'duplicate matching resources are reported as ambiguous' {$duplicate=Join-
 Check 'CE accepts explicit executable selection with a nonstandard filename' {$plan=Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings;Assert ($plan.program -eq $ce);Assert (-not $plan.arguments)}
 Check 'CE still accepts GCM directory configuration' {$ceDir=Split-Path $ce;$standard=Join-Path $ceDir 'Cheat Engine.exe';[IO.File]::Copy($ce,$standard);$config.cePath=$ceDir;Json $settingsFile $config;Assert ((Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings).program -eq $standard);[IO.File]::Delete($standard);$config.cePath=$ce;Json $settingsFile $config}
 Check 'versioned CE installation resolves native architecture entry without a loader' {$ceDir=Split-Path $ce;$native=Join-Path $ceDir $(if([Environment]::Is64BitOperatingSystem){'cheatengine-x86_64.exe'}else{'cheatengine-i386.exe'});[IO.File]::Copy($ce,$native);$config.cePath=$ceDir;Json $settingsFile $config;Assert ((Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings).program -eq $native);$config.cePath=$ce;Json $settingsFile $config}
-Check 'missing configured CE gives a configuration error' {$config.cePath=Join-Path $root 'missing.exe';Json $settingsFile $config;try{Reject {Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings}}finally{$config.cePath=$ce;Json $settingsFile $config}}
+Check 'stale CE path repairs only to an existing default or reports missing CE' {$config.cePath=Join-Path $root 'missing.exe';Json $settingsFile $config;try{if([IO.File]::Exists('C:\SOFT\Cheat Engine\cheatengine-x86_64.exe')){Assert ((Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings).program -eq 'C:\SOFT\Cheat Engine\cheatengine-x86_64.exe')}else{Reject {Resolve-TrainerLaunchPlan -Mode CheatEngine -GcmSettingsRoot $settings}}}finally{$config.cePath=$ce;Json $settingsFile $config}}
 Check 'manager honors explicit portable path without a fixed drive' {$manager=File 'portable-tools/My Manager.exe';$plan=Resolve-TrainerLaunchPlan -Mode Manager -ManagerPath $manager -GcmSettingsRoot $settings;Assert ($plan.program -eq $manager)}
 Check 'adjacent manager resolves or refuses ambiguous installed copies' {$manager=File 'portable-suite/Game Cheats Manager/Game Cheats Manager.exe';$appDir=Join-Path $root 'portable-suite/YMCC';[IO.Directory]::CreateDirectory($appDir)|Out-Null;try{$plan=Resolve-TrainerLaunchPlan -Mode Manager -AppDirectory $appDir -GcmSettingsRoot $settings;Assert ($plan.program -eq $manager)}catch{if($_.Exception.Message -notlike '*找到多个 Game Cheats Manager*'){throw};$plan=Resolve-TrainerLaunchPlan -Mode Manager -ManagerPath $manager -AppDirectory $appDir -GcmSettingsRoot $settings;Assert ($plan.program -eq $manager)}}
 Check 'invalid explicit manager path never falls back to another install' {Reject {Resolve-TrainerLaunchPlan -Mode Manager -ManagerPath (Join-Path $root 'missing-manager.exe') -GcmSettingsRoot $settings}}
@@ -85,6 +85,28 @@ Check 'a missing CE field is repaired but malformed GCM JSON is never overwritte
  Assert ([IO.File]::ReadAllText($repairFile) -ceq '{broken-json')
 }
 
+Check 'missing GCM settings is created with only the verified default CE address' {
+ $missingRoot=Join-Path $root 'new-gcm-settings'
+ $repaired=& $module {param($r,$d)Repair-TrainerGcmCePath -SettingsRoot $r -DefaultDirectory $d} $missingRoot $repairDirectory
+ Assert ($repaired.cePath -eq $repairDirectory);$saved=Get-Content -LiteralPath (Join-Path $missingRoot 'settings.json') -Raw -Encoding UTF8|ConvertFrom-Json
+ Assert ($saved.cePath -eq $repairDirectory);Assert (@($saved.PSObject.Properties).Count -eq 1)
+}
+Check 'stale CE address repairs while valid custom address and unrelated GCM values survive' {
+ Json $repairFile @{cePath=(Join-Path $root 'removed-CE.exe');safePath=$false;language='keep';downloadPath=$library}
+ $null=& $module {param($r,$d)Repair-TrainerGcmCePath -SettingsRoot $r -DefaultDirectory $d} $repairRoot $repairDirectory
+ $saved=Get-Content -LiteralPath $repairFile -Raw -Encoding UTF8|ConvertFrom-Json;Assert ($saved.cePath -eq $repairDirectory);Assert ($saved.language -eq 'keep');Assert ($saved.downloadPath -eq $library)
+}
+Check 'first-run setup changes only its DWORD and unknown flags are preserved' {
+ $keyName='Software\YMCC-CeLaunchFixture-'+[guid]::NewGuid().ToString('N');$key=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($keyName)
+ try{
+  $key.SetValue('Pause when scanning on by default',1);$key.SetValue('ScanThreadpriority',2);$key.SetValue('Language','keep')
+  & $module {param($k)Initialize-TrainerCheatEngineFirstRun -SettingsKey $k} $key
+  Assert ($key.GetValue('First Time User') -eq 0);Assert ($key.GetValueNames().Count -eq 4)
+  $key.SetValue('First Time User',1);& $module {param($k)Initialize-TrainerCheatEngineFirstRun -SettingsKey $k} $key
+  Assert ($key.GetValue('First Time User') -eq 0);Assert ($key.GetValue('Pause when scanning on by default') -eq 1);Assert ($key.GetValue('ScanThreadpriority') -eq 2);Assert ($key.GetValue('Language') -eq 'keep')
+  $key.SetValue('First Time User','unknown');Reject {& $module {param($k)Initialize-TrainerCheatEngineFirstRun -SettingsKey $k} $key};Assert ($key.GetValue('First Time User') -eq 'unknown')
+ }finally{$key.Dispose();[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($keyName)}
+}
 Json (Join-Path $root 'result.json') @($checks.ToArray())
 $failed=@($checks|Where-Object{-not $_.ok});Write-Output ('Trainer launch paths: '+($checks.Count-$failed.Count)+'/'+$checks.Count+'; '+$root)
 if($failed.Count){exit 1}

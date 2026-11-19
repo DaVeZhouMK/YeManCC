@@ -2,12 +2,14 @@
 #include <cstdint>
 #include <limits>
 namespace ymcc::staticwake {
-// Initial collection only: admit one bounded Windows read unit every 4 ms.
+// Discovery collection/observation only: admit one read unit every 16 ms.
 // Commit from the actual admission time, never accumulate catch-up credits.
+// One wait covers the remaining gap; recheck cancellation before every read.
 // Strict readback, writes and restore do not use this pacer.
 struct CollectionReadPace {
     using U64=std::uint64_t;
-    static constexpr U64 gapMs=4;
+    static constexpr U64 gapMs=16;
+    static constexpr U64 waitSliceMs=gapMs;
     U64 next=0,admitted=0,requestedWaitMs=0;
     void reset(){next=0;admitted=0;requestedWaitMs=0;}
     U64 remaining(U64 now) const {return now<next?next-now:0;}
@@ -20,7 +22,7 @@ struct CollectionReadPace {
         while(allowed()) {
             const auto now=clock(),wait=remaining(now);
             if(!wait){admit(now);return allowed();}
-            const auto slice=wait<gapMs?wait:gapMs;
+            const auto slice=wait<waitSliceMs?wait:waitSliceMs;
             requestedWaitMs+=slice;sleep(slice);
         }
         return false;

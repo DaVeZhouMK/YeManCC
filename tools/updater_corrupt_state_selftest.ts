@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {installUpdaterFixtureEnvironment} from './lib/updater_fixture_environment';
 import { APP_VERSION } from '../src/version';
 const arg=process.argv[2]||'stale-check';
 const p=APP_VERSION.split('.').map(Number),version=p[0]+'.'+p[1]+'.'+(p[2]+1),sha='D'.repeat(64);
@@ -8,6 +9,7 @@ const saved=arg==='stale-check'?{phase:'checking',stage:'download',version,sha25
 class FixtureEvent extends Event{detail:unknown;constructor(type:string,init:{detail?:unknown}){super(type);this.detail=init.detail;}}
 (globalThis as any).CustomEvent=FixtureEvent;
 const win=new EventTarget() as any;win.chrome={webview:{addEventListener(_name:string,fn:typeof receive){receive=fn;},postMessage(req:any){if(typeof req.id!=='number')return;calls.push(req.cmd);queueMicrotask(()=>{if(req.cmd==='app.updateState')receive({data:{id:req.id,result:saved}});else if(req.cmd==='app.checkUpdate')receive({data:{id:req.id,result:{version,sha256:sha}}});else throw Error('FORBIDDEN '+req.cmd);});}}};
+installUpdaterFixtureEnvironment(win, event => receive(event));
 (globalThis as any).window=win;
 const m=await import('../src/bridge/updateManager');await m.ensureUpdateManager();
 assert.ok(!['checking','downloading','validating','installing'].includes(m.updateSnapshot.phase));checks++;

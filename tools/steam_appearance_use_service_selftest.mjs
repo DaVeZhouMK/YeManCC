@@ -1,20 +1,21 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {transformSync} from 'esbuild';
+import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {buildSync,transformSync} from 'esbuild';
 let clock=0;
+const preferenceModule={exports:{}};vm.runInNewContext(buildSync({entryPoints:[path.resolve(import.meta.dirname,'../src/bridge/bootModeGlobalPreferences.ts')],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text,{module:preferenceModule,exports:preferenceModule.exports,structuredClone,TextEncoder});
 const module={exports:{}};
-vm.runInNewContext(transformSync(fs.readFileSync(process.env.YMCC_STEAM_APPEARANCE_SERVICE_SOURCE||path.resolve(import.meta.dirname,'../src/bridge/steamAppearance.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,require:p=>p==='./ipc'?{invoke:async()=>{throw Error('no production IPC')}}:{fs:{},shell:{},settingsStore:{}},TextEncoder,btoa,performance:{now:()=>clock},Number,Error,JSON});
+vm.runInNewContext(transformSync(fs.readFileSync(process.env.YMCC_STEAM_APPEARANCE_SERVICE_SOURCE||path.resolve(import.meta.dirname,'../src/bridge/steamAppearance.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,require:p=>p==='./bootModeGlobalPreferences'?preferenceModule.exports:p==='./ipc'?{invoke:async()=>{throw Error('no production IPC')}}:{fs:{},shell:{},settingsStore:{}},TextEncoder,btoa,performance:{now:()=>clock},Number,Error,JSON});
 const {createSteamAppearance,STEAM_APPEARANCE_THEMES,validAppearanceSnapshot}=module.exports;
 function fixture(){
  clock=0;
  const snap={controlProtocol:2,targetId:'a'.repeat(16),revision:'b'.repeat(64),linked:true,backendReady:true,backendProcessCount:2,steamRunning:true,configuredMatchesBackend:true,note:'',themes:STEAM_APPEARANCE_THEMES.map(t=>({name:t.name,installed:true,configured:true,backendEnabled:true,parameterCount:0,error:''}))};
- const f={snap,policy:{supported:true,version:3,manualObservationProtocol:1,pid:42,birth:'100'},calls:[],statusReads:[],statusMs:0,begin:0,ensure:0,end:0,holdEnd:false,slowReady:0,readyReads:0,failEnsure:false,failIdle:false,failApply:false,failEnd:false,group:false,token:0,wait:null};
- f.api=createSteamAppearance({location:async()=>({directory:'C:/fixture/PowerControl'}),exists:async()=>true,hidden:async()=>{throw Error('detached launches forbidden')},delay:async ms=>{clock+=ms},idlePolicy:async()=>f.policy,
+ const f={snap,policy:{supported:true,version:3,manualObservationProtocol:1,sharedSteamReadProtocol:1,processQuery:'Local\\YMCC.CssInventory.'+'a'.repeat(32),pid:42,birth:'100'},calls:[],statusReads:[],statusMs:0,begin:0,ensure:0,end:0,holdEnd:false,slowReady:0,readyReads:0,failEnsure:false,failIdle:false,failApply:false,failEnd:false,group:false,token:0,wait:null};
+ f.api=createSteamAppearance({rememberBootPreferences:async states=>{f.preferenceWrites=(f.preferenceWrites||0)+1;f.preferences={...(f.preferences||{}),...states};},location:async()=>({directory:'C:/fixture/PowerControl'}),exists:async()=>true,hidden:async()=>{throw Error('detached launches forbidden')},delay:async ms=>{clock+=ms},idlePolicy:async()=>f.policy,
  beginUse:async()=>{f.begin++;f.group=true;return {ok:true,token:String(++f.token),pid:42,birth:'100',backendPath:'C:\\fixture\\CssLoader-Standalone-Headless.exe'}},ensureUse:async()=>{f.ensure++;if(f.failEnsure)throw Error('fixture Ensure failed');Object.assign(snap,{backendReady:!f.slowReady,backendProcessCount:2,backendIdle:false,configuredMatchesBackend:true});return {ok:true}},
  endUse:async token=>{f.end++;assert.equal(token,String(f.token));f.onEnd?.();if(f.holdRelease)await f.holdRelease;if(f.holdEnd)return {ok:true,minimumHoldPending:true};f.group=false;if(f.failEnd){Object.assign(snap,{backendReady:true,backendProcessCount:1,backendIdle:false});return {ok:false};}return {ok:true}},
  run:async(program,args,timeoutMs)=>{const action=args[args.indexOf('-Action')+1];f.lastArgs=[...args];f.calls.push(action);if(action==='Status'&&f.failStatus)throw Error('status transport failed');if(action==='Status'&&f.statusFailure)return {exitCode:1,stdout:JSON.stringify({ok:false,message:'status rejected'}),stderr:''};if(action==='Status'){f.statusReads.push({at:clock,timeoutMs});if(f.ensure){clock+=Math.min(f.statusMs,timeoutMs);if(f.statusMs>timeoutMs)throw Error('fixture timeout');}}if(f.wait)await f.wait;let result;
   if(action==='Status'&&f.ensure&&f.slowReady&&++f.readyReads>=f.slowReady)snap.backendReady=true;
   if(action==='Reconcile')result={ok:true,snapshot:structuredClone(snap)};
-  if(action==='Apply'){if(f.failApply)throw Error('fixture Apply failure');snap.revision='c'.repeat(64);result={ok:true,saved:true,snapshot:structuredClone(snap)}}
+  if(action==='Apply'){if(f.failApply)throw Error('fixture Apply failure');const payload=JSON.parse(Buffer.from(args[args.indexOf('-Payload')+1],'base64').toString('utf8'));for(const [name,value]of Object.entries(payload.states))snap.themes.find(row=>row.name===name).configured=value;snap.revision='c'.repeat(64);result={ok:true,saved:true,snapshot:structuredClone(snap)}}
   else if(action==='Idle'){if(f.failIdle)result={ok:false,message:'DOM not confirmed'};else{snap.backendIdle=true;Object.assign(snap,{backendReady:false,backendProcessCount:0});result={ok:true,snapshot:structuredClone(snap)}}}
   else result={ok:true,snapshot:structuredClone(snap)};
   if(action==='Reconcile'&&f.renderReceipt!==undefined)result.renderConfirmed=f.renderReceipt;
@@ -64,6 +65,7 @@ await check('appearance requests carry the native owner channel and exact Steam 
  assert.equal(f.lastArgs[f.lastArgs.indexOf('-SessionPid')+1],'42');assert.equal(f.lastArgs[f.lastArgs.indexOf('-SessionBirth')+1],'100');assert.equal(f.begin+f.ensure,0);
 });
 await check('malformed owner channel cannot be forwarded to PowerShell',async()=>{
- const f=fixture();f.policy.processQuery='Local\\YMCC.CssInventory.invalid" -Action Ensure';await f.api.read();assert(!f.lastArgs.includes('-ProcessQuery'));assert.equal(f.begin+f.ensure,0);
+ const f=fixture();f.policy.processQuery='Local\\YMCC.CssInventory.invalid" -Action Ensure';await assert.rejects(f.api.read(),/公共读取组件/);assert.equal(f.lastArgs,undefined);assert.equal(f.begin+f.ensure,0);
 });
+await check('missing public Steam protocol refuses old native before launching any PowerShell request',async()=>{const f=fixture();delete f.policy.sharedSteamReadProtocol;await assert.rejects(f.api.read(),/公共读取组件/);assert.deepEqual(f.calls,[]);assert.equal(f.begin+f.ensure,0)});
 const result={ok:true,passed:cases.length,cases,actualSteamOperations:0,actualCssOperations:0};if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));

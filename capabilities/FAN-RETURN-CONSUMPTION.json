@@ -1199,7 +1199,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEO2",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEO2S",
@@ -1254,7 +1262,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEO2S",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIR",
@@ -1309,7 +1325,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIR",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIR1S",
@@ -1364,7 +1388,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIR1S",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIRLite",
@@ -1419,7 +1451,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIRLite",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIRPlusAMD",
@@ -1484,7 +1524,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": null,
+        "appliesToInheritedGenericWriter": false,
+        "ceiiOverridesRemainSeparate": true
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIRPlusAMDMendocino",
@@ -1549,7 +1597,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": null,
+        "appliesToInheritedGenericWriter": false,
+        "ceiiOverridesRemainSeparate": true
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIRPlusIntel",
@@ -1614,7 +1670,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": null,
+        "appliesToInheritedGenericWriter": false,
+        "ceiiOverridesRemainSeparate": true
+      }
     },
     {
       "deviceId": "hc.device.AYANEOAIRPro",
@@ -1669,7 +1733,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOAIRPro",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOFlip1SDS",
@@ -1725,7 +1797,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOFlip1SDS",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOFlip1SKB",
@@ -1781,7 +1861,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOFlip1SKB",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOFlipDS",
@@ -1836,7 +1924,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOFlipDS",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOFlipKB",
@@ -1891,7 +1987,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOFlipKB",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOKUN",
@@ -1946,7 +2050,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOKUN",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": "aya-current-inherited-ec-consumption-20261107",
+        "appliesToInheritedGenericWriter": true,
+        "ceiiOverridesRemainSeparate": false
+      }
     },
     {
       "deviceId": "hc.device.AYANEOSlide",
@@ -2011,7 +2123,15 @@
       "remainingEvidence": [
         "Current-input, route-bound actual restore/close execution receipt; existing historical/selected results retain their own scope.",
         "Physical/final firmware ownership remains separate from software acceptance."
-      ]
+      ],
+      "currentAyaSourceContract": {
+        "document": "AYA-FAMILY-CONSUMPTION.json",
+        "modelClass": "HandheldCompanion.Devices.AYANEOSlide",
+        "scope": "Registry evidence remains callback compatibility. Current inherited write/virtual lifecycle has separate conditional source evidence; no physical release proof.",
+        "contractId": null,
+        "appliesToInheritedGenericWriter": false,
+        "ceiiOverridesRemainSeparate": true
+      }
     },
     {
       "deviceId": "hc.device.ClawA1M",
@@ -5312,5 +5432,142 @@
     "noNewFanFixtureRunOrWhole70RouteHardwareAcceptance": true,
     "physicalAcceptance": false,
     "wholeGoalComplete": false
+  },
+  "ayaFamilyFieldReconciliation098": {
+    "updatedHongKong": "2026-11-07T00:45:58.490523+08:00",
+    "document": "AYA-FAMILY-CONSUMPTION.json",
+    "fieldArchiveSha256": "29de13be7f8fdfb16dddf27e1668b555d4fc74ed306ea05b006b21fd73688064",
+    "currentConsumerSourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4",
+    "correctedScope": "The historical effectiveReturnContract/registryEvidenceMode describes original callback registry metadata, not all current per-write transport evidence or proof that a current close action returned OEM control.",
+    "sameRuntimeRoutesAndEvidenceModesPreserved": true,
+    "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107",
+    "annotatedFrozenAyaRoutes": [
+      "hc.device.AYANEO2",
+      "hc.device.AYANEO2S",
+      "hc.device.AYANEOAIR",
+      "hc.device.AYANEOAIR1S",
+      "hc.device.AYANEOAIRLite",
+      "hc.device.AYANEOAIRPlusAMD",
+      "hc.device.AYANEOAIRPlusAMDMendocino",
+      "hc.device.AYANEOAIRPlusIntel",
+      "hc.device.AYANEOAIRPro",
+      "hc.device.AYANEOFlip1SDS",
+      "hc.device.AYANEOFlip1SKB",
+      "hc.device.AYANEOFlipDS",
+      "hc.device.AYANEOFlipKB",
+      "hc.device.AYANEOKUN",
+      "hc.device.AYANEOSlide"
+    ],
+    "currentPackageOrPhysicalAcceptance": false
+  },
+  "sharedPowerConsumerSoftware134": {
+    "taskDate": "2026-11-13",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-134-FAN-SHARED-POWER-SUCCESSOR\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3327,
+      "sha256": "ad9842bf2beaf6864ad9c064babc04897919dffa18e5de1187644d4b53be879f"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-134-FAN-SHARED-POWER-SUCCESSOR\\PARENT-SEMANTICS-AND-PROVENANCE-INTAKE.json",
+      "bytes": 116044,
+      "sha256": "aecea45eed13791d8c64253c2c4654c52592c51b9c3ab0c33f0c1234c9a02102"
+    },
+    "matchingOrdinaryPackage": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\\FINAL-RESULT.json",
+      "bytes": 2798,
+      "sha256": "05caebf1a26901bc4f0458585a2caaabc464adf659a1965a93b52e13e9b49e45"
+    },
+    "sourceClosure": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\fan-consumption\\SOURCE-CLOSURE.json",
+      "bytes": 7576,
+      "sha256": "557467be41e88f2f0e67a9207d8c56ba452c734ede55ddee38987dbbf6d1a821"
+    },
+    "originalSourceReadyFalsePreserved": true,
+    "existingFamilyRoutesOnly": true,
+    "newRuntimeMapping": false,
+    "actualHostDeviceFinalBoundaryAccepted": false,
+    "physicalSleepRpmAccepted": false,
+    "oldNativeTimeoutNotReclassified": true,
+    "wholeLibraryComplete": false
+  },
+  "naturalPackageHostJoint135": {
+    "taskDate": "2026-11-13",
+    "boundedSoftwareStatus": "ACCEPTED_SOFTWARE_SCOPE",
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-135-FAN-PACKAGE-HOST-JOINT\\PACKAGE-HOST-JOINT-INTAKE.json",
+      "bytes": 71777,
+      "sha256": "9d2d171d602a2a6b2c8c7d47acf319e264282193329c0ef572d084e59c18e3f1"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-135-FAN-PACKAGE-HOST-JOINT\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2438,
+      "sha256": "1b13da52b2bab7ad462144d1242b23557b1d499b037d34198263b6f9884d2380"
+    },
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OEM-Native-Test-20261113-060357Z\\YeManCC.zip",
+      "bytes": 111748357,
+      "sha256": "9004a15422a437eb351c2d77b30810d168c93aba6a80d90a79ab09b98839b41d",
+      "entries": 624,
+      "files": 619,
+      "directories": 5
+    },
+    "loadedHost": {
+      "path": "G:\\YeManCC-Work\\Build\\Exports\\20261113-060357Z-oem-native\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\fan-host\\YeManFanHost.dll",
+      "bytes": 1794048,
+      "sha256": "f9ef2e92cac665a3830f5fe02f51ba744d39f9244713292847601cac36d01fff"
+    },
+    "jointChecks": 82,
+    "actualNativePowerProcessAndDeviceAreFixtures": true,
+    "nativeHostDeviceFinalBoundaryAccepted": false,
+    "physicalAccepted": false,
+    "priorFailuresAndCostsPreserved": true,
+    "wholeLibraryComplete": false
+  },
+  "filteredWakeFamilyContract136": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_FIELD_CONTRACT_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-136-FAN-FILTERED-WAKE-FAMILY-CONTRACT.json",
+      "bytes": 1098,
+      "sha256": "dbb5fc4c9111c28ef2b22b7239bb74f831672e486eca2a855a9a720cdf20d717"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-136-FAN-FILTERED-WAKE-FAMILY-CONTRACT\\CONSUMER-SUPPORT-CONDITIONS.json",
+      "bytes": 5108,
+      "sha256": "e228415aaf8f5ae61ea4ac1144391885d0d32f7f0919a7f3fb6e1d649c1573ea"
+    },
+    "archiveSha256": "1626be2b8a72d89af13bc36cecf47d0235df9ebc7256b8c53ab99d6a2ede36a9",
+    "fieldNativeIsHc133Native": false,
+    "newRuntimeMapping": false,
+    "existingFamilyRoutesOnly": true,
+    "actualHostNativeDeviceFinalBoundaryAccepted": false,
+    "physicalAccepted": false,
+    "wholeLibraryComplete": false
+  },
+  "backgroundReadySoftware138": {
+    "taskDate": "2026-11-13",
+    "boundedSoftwareStatus": "ACCEPTED_SOFTWARE_SCOPE_ONE_CONDITIONAL_FRONTEND_SCENARIO",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-138-FAN-BACKGROUND-READY-SOFTWARE.json",
+      "bytes": 1280,
+      "sha256": "6b2e51f440dd8ae20806ee7ca7e1d1484a5aa6b2a03937323c67beee90a4a685"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-138-FAN-BACKGROUND-READY-SOFTWARE\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2417,
+      "sha256": "62f6bd2fe5c9c7e7d2e34b40e18851a15dfe2721e18c6c1ef1c5cc009f5d3f52"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\fan-consumption\\FIELD-FOLLOWUP-SOURCE_READY.json",
+      "bytes": 5256,
+      "sha256": "33e9c7db6e70a4e7f255056669a08b26a4adfcedb8990502746c454bc7d01839"
+    },
+    "actualChecks": 1,
+    "virtualCadenceOnly": true,
+    "nativeHostDeviceFinalBoundaryAccepted": false,
+    "physicalAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false
   }
 }

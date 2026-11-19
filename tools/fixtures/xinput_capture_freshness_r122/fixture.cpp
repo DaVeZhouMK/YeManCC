@@ -1,6 +1,8 @@
 // Offline only. @@ markers receive byte-exact production slices, never rewritten.
 // XInput returns, time, lifecycle facts and external I/O are controlled stand-ins.
 #include "json.hpp"
+#include "sleep_power_observation.h"
+#include "input_host_shared_power_pure.h"
 #include "gamepad_backend_cost.h"
 #include "xinput_identity_refresh_policy.h"
 #include "input_frame_submission.h"
@@ -18,6 +20,7 @@ static std::atomic<unsigned long long> g_msiFeedbackModeGeneration{1};
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <memory>
 using json=nlohmann::json;
 using DWORD=std::uint32_t; using ULONGLONG=std::uint64_t; using SHORT=std::int16_t;
 struct XINPUT_GAMEPAD {std::uint16_t wButtons=0;std::uint8_t bLeftTrigger=0,bRightTrigger=0;SHORT sThumbLX=0,sThumbLY=0,sThumbRX=0,sThumbRY=0;};
@@ -29,11 +32,22 @@ constexpr int XINPUT_GAMEPAD_TRIGGER_THRESHOLD=30;
 #define ZeroMemory(p,n) std::memset(p,0,n)
 namespace ymcc::msi::virtualReportDiag {struct SourceStamp {};}
 @@TYPES@@
+@@PHYSICAL_READER_SAMPLE@@
+@@READ_OWNERS@@
 @@CONSTANTS@@
 static ULONGLONG fakeTick=10000;
 static ULONGLONG GetTickCount64(){return fakeTick;}
 static std::atomic<unsigned long long> g_powerGeneration{10},g_msiMainSourceRevision{90};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+
+// Controlled public power observation; actual capture/current helpers execute.
+static int readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,std::uint32_t bytes) noexcept {
+ if(!value||bytes<sizeof(*value))return 0;
+ *value={};value->generation=g_powerGeneration.load();value->phase=static_cast<std::uint32_t>(g_powerLifecycle.load());
+ value->observedNotificationSequence=1;value->publicationRevision=1;value->flags=ymcc::sleeppower::kKnown|(value->phase==0?ymcc::sleeppower::kHardwareAllowed:0u);
+ return 1;
+}
+
 static bool fakeKeepDuringStandby=false;
 static bool sgShouldKeepInputDuringStandby(){return fakeKeepDuringStandby;}
 static bool tickCostEnabled(){return false;}
@@ -90,11 +104,19 @@ static std::atomic<unsigned long long> g_inputHostVirtualIntentRevision{50};
 static std::atomic<unsigned> g_inputHostVirtualIntentWriters{0};
 static bool inputHostExitFenceRaised(){return fakeExitFence;}
 static InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;
+static struct { ymcc::VirtualOutputSourceWindow window; DWORD physicalMask; unsigned identity; } g_inputHostFallbackXinputRead;
 // Feedback transport is outside this XInput read fixture; do not bind a writer.
-static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& sample){sample.feedbackSource={};}
+static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& sample,ymcc::capabilities::controller::InputBinding){sample.feedbackSource={};}
 @@METHODS@@
 static void readXInputSlices(){
     ++totalReads;
+    // This original fixture tests the direct canonical XInput lane. Keep
+    // non-XInput runtime ports explicitly inactive; consume the exact new
+    // physical-reader Sample type and original production stamp block below.
+    ymcc::physicalreader::Sample physicalReaderSample{};
+    const bool usedPhysicalReader=false,rogRawInputSubstitution=false;
+    const bool usedCommonHid=false;
+    const struct { std::uint64_t sequence=0, observedTick=0; bool independentTriggers=false, completeBasic=false; std::uint32_t combinedTriggerRaw=0; bool isolationSharedRead=false; } commonHidRead;
 @@READ_PREFIX@@
 @@ADMISSION@@
 @@SELECTION@@
@@ -110,6 +132,7 @@ static unsigned checks=0;
 static void check(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error(message);}
 static bool zero(const XINPUT_GAMEPAD& p){return p.wButtons==0&&p.bLeftTrigger==0&&p.bRightTrigger==0&&p.sThumbLX==0&&p.sThumbLY==0&&p.sThumbRX==0&&p.sThumbRY==0;}
 static void reset(){
+ g_axisCalibrationXinputKeys.fill({});
  fakeTick=10000;g_powerGeneration=10;g_xinputTopologyEpoch=20;g_xinputSlotIdentityEpoch=30;g_msiMainSourceRevision=90;
  g_powerLifecycle=PowerLifecycle::Ready;fakeKeepDuringStandby=false;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;
  g_inputHostProcess=true;g_inputHostPrepared=true;g_inputHostNeutralized=true;g_inputHostTransportFault=false;fakeExitFence=false;g_inputHostVirtualIntentWriters=0;
@@ -133,6 +156,10 @@ int main(){
   fakeTick+=8;fakeApi[0].pad.wButtons=0x2000;readXInputSlices();
   check(canonicalCalls[0]==2&&ordinalCalls[0]==2,"each known tick must read both APIs");check(g_inputCaptureGamepadSnapshot.pad.wButtons==0x2000,"same packet must use actual second read");
   check(g_inputCaptureGamepadSnapshot.readAttemptSequence>first.readAttemptSequence,"new read attempt");check(verdict(ticket())==Verdict::Allowed,"current source allowed");
+  check(inputHostFrameSubmissionSample(&g_inputCaptureGamepadSnapshot).routeKnown,"actual standard XInput binding is known");
+  auto unbound=g_inputCaptureGamepadSnapshot;unbound.inputSource="fixture-unknown-source";
+  check(!inputHostFrameSubmissionSample(&unbound).routeKnown,"unknown source cannot obtain standard binding");
+  check(!inputHostFrameSubmissionSample(nullptr).routeKnown,"null source cannot obtain binding");
  });
  run("same-packet-all-zero-success-is-valid",[]{
   readXInputSlices();fakeTick+=8;fakeApi[0].pad={};readXInputSlices();
@@ -149,7 +176,12 @@ int main(){
  });
  run("undiscovered-slot-does-not-inherit-g-xinputPads",[]{
   g_xinputKnownSlotMask=0;g_xinputConnectedMask=15;g_xinputPads.fill(fakeApi[0].pad);g_xinputSpecialButtons.fill(true);g_xinputSpecialButton=true;
-  readXInputSlices();check(canonicalCalls==std::array<int,4>{},"unknown skipped outside discovery");check(g_xinputConnectedMask==0,"old connected mask cleared");
+  g_inputCaptureGamepadSnapshot.physicalReaderPid=17;g_inputCaptureGamepadSnapshot.physicalReaderSequence=41;
+  g_inputCaptureGamepadSnapshot.physicalReaderActualSlot=2;g_inputCaptureGamepadSnapshot.physicalReaderRawPad=fakeApi[0].pad;
+  g_inputCaptureGamepadSnapshot.rogRawInputSubstitution=true;
+  readXInputSlices();
+  check(g_inputCaptureGamepadSnapshot.physicalReaderPid==0&&g_inputCaptureGamepadSnapshot.physicalReaderSequence==0&&g_inputCaptureGamepadSnapshot.physicalReaderActualSlot==4&&zero(g_inputCaptureGamepadSnapshot.physicalReaderRawPad)&&!g_inputCaptureGamepadSnapshot.rogRawInputSubstitution,"inactive reader/raw ports cannot preserve prior provenance");
+  check(canonicalCalls==std::array<int,4>{},"unknown skipped outside discovery");check(g_xinputConnectedMask==0,"old connected mask cleared");
   check(std::all_of(g_xinputPads.begin(),g_xinputPads.end(),zero),"all cached pads cleared");check(zero(g_inputCaptureGamepadSnapshot.pad)&&!g_inputCaptureGamepadSnapshot.live,"no inherited buttons");
   check(g_inputCaptureGamepadSnapshot.readContextStable,"stable context alone does not imply live");check(verdict(ticket())==Verdict::SourceUnavailable,"unknown source rejected");
  });
@@ -161,6 +193,7 @@ int main(){
  for(bool boundary:{false,true})run(boundary?"boundary-discovery-control":"dirty-discovery-control",[=]{
   g_xinputKnownSlotMask=0;g_xinputVirtualEndpointProbed=0;if(boundary)g_xinputSlotFullScanOnce=true;else xinputSlotsMarkDiscoveryDirty();
   const auto topology=g_xinputTopologyEpoch.load();readXInputSlices();check(canonicalCalls==std::array<int,4>{1,1,1,1},"discovery probes all slots");
+  check(!g_xinputSlotFullScanOnce.load()&&!g_xinputDiscoveryDirty.load(),"one pending event consumed exactly once");
   check(g_inputCaptureGamepadSnapshot.readTopologyGeneration==topology&&g_inputCaptureGamepadSnapshot.readContextStable,"generation sampled after prior event");
   check(verdict(ticket())==Verdict::Allowed,"new discovery read allowed");
  });

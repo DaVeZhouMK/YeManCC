@@ -10,9 +10,14 @@ const record=(recoverable=false):FanActivitySnapshot=>({schemaVersion:1,active:!
 function gate<T>(){let resolve!:(v:T)=>void,entered!:()=>void;const ready=new Promise<void>(r=>entered=r),pending=new Promise<T>(r=>resolve=r);return {resolve,entered,ready,pending};}
 const inspect=(life:FanHostLifecycle)=>life as unknown as {desiredCurve:typeof curve|null;activeCurve:typeof curve|null;resumeCurve:typeof curve|null;sessionGeneration:number;process:{pid:number}|null};
 async function setup(){
- const host=new NoIoHost();let next:ReturnType<typeof gate<FanActivitySnapshot|null>>|null=null,reads=0;
+ const host=new NoIoHost();let next:ReturnType<typeof gate<FanActivitySnapshot|null>>|null=null,reads=0,launches=0;
  const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:60000,readNativePowerState:async()=>awake,
- launcher:{async start(){return {pid:100009,executable:'fixture-only.exe'};},async stop(){}},
+ launcher:{async start(){
+  // A newly launched process starts from the original NoIoHost cold state;
+  // it cannot inherit the predecessor object's completed Close flags.
+  if(launches++){host.generation=host.attempt=0;host.stateName='AwaitingControl';host.powerState='Unknown';host.opened=host.events=host.closed=false;host.lease=null;}
+  return {pid:100008+launches,executable:'fixture-only.exe'};
+ },async stop(){}},
  readNativeActivity:async()=>{reads++;const held=next;if(held){next=null;held.entered();return held.pending;}return record(true);}});
  life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);await life.start({manualRecovery:true});
  return {life,host,reads:()=>reads,hold(){const held=gate<FanActivitySnapshot|null>();next=held;return held;}};
@@ -22,6 +27,44 @@ async function enter(life:FanHostLifecycle,name:typeof entries[number]){if(name=
 let checks=0;const failures:string[]=[];
 async function check(name:string,run:()=>Promise<void>){checks++;try{await run();console.log('PASS '+name);}catch(e){failures.push(name+': '+String(e));console.log('FAIL '+name+': '+String(e));}}
 async function main(){
+ for(const terminal of ['off','close'] as const)await check('ordinary start cannot undo earlier '+terminal+' native intent cancellation',async()=>{
+  const f=await setup();try{
+   await f.life.apply(curve);if(terminal==='off')await f.life.disable();else await f.life.close();
+   await f.life.start();const writes=f.host.calls.filter(call=>call==='enable'||call==='preset').length;
+   await f.life.reattachRenderer();assert.equal(f.life.hasControlIntent,false,'ordinary viewing/start accepted a pre-OFF native record');
+   assert.equal(f.host.calls.filter(call=>call==='enable'||call==='preset').length,writes);
+   await f.life.apply(nextCurve);assert.equal(f.life.hasControlIntent,true,'authorized direct ON must remain reachable');
+   assert.deepEqual(inspect(f.life).desiredCurve,nextCurve);
+  }finally{await f.life.close().catch(()=>{});}
+ });
+ for(const entry of entries)for(const terminal of ['off','restore-unknown','unknown-state','close'] as const)await check('fresh native intent '+entry+' cannot revive an earlier '+terminal,async()=>{
+  const f=await setup(),restore=f.host.restoreOem.bind(f.host);
+  try{
+   await f.life.apply(curve);const predecessor=f.life.processId;
+   if(terminal==='close')await f.life.close();
+   else if(terminal==='unknown-state'){
+    // Explicit local-state seam: page getState intentionally only publishes
+    // telemetry and must not be misrepresented as a local unknown transition.
+    (f.life as unknown as {setState(value:'unknown'):void}).setState('unknown');
+    assert.equal(f.life.state,'unknown');await assert.rejects(f.life.disable(),/unknown/);
+   }else if(terminal==='restore-unknown'){
+    f.host.restoreOem=async()=>{f.host.calls.push('restore-unknown');throw Error('fixture restore result unknown');};
+    await assert.rejects(f.life.disable(),/fixture restore result unknown/);f.host.restoreOem=restore;
+   }else await f.life.disable();
+   // A fresh read returns the retained pre-OFF native crash record. This is
+   // deliberately not a delayed reply, and is independent of native cleanup.
+   const writes=f.host.calls.filter(call=>call==='enable'||call==='preset').length;
+   await enter(f.life,entry).catch(()=>{});
+   assert.equal(f.life.hasControlIntent,false,'fresh pre-OFF native record revived the cancelled intent');
+   assert.equal(f.host.calls.filter(call=>call==='enable'||call==='preset').length,writes,'fresh pre-OFF record submitted another curve');
+   if(terminal==='unknown-state')f.host.stateName='AwaitingControl';
+   await f.life.start({manualRecovery:true,reason:'fixture-new-explicit-on'});await f.life.apply(nextCurve);
+   if(terminal==='close')assert.notEqual(f.life.processId,predecessor,'Close must complete exact exit before a new fake Host identity');
+   assert.equal(f.life.hasControlIntent,true,'explicit OFF permanently blocked the next manual ON');
+   assert.deepEqual(inspect(f.life).desiredCurve,nextCurve);
+   assert.equal(f.host.calls.filter(call=>call==='enable').length,writes+1,'new manual ON must write the latest curve once');
+  }finally{f.host.restoreOem=restore;f.host.stateName='AwaitingControl';await f.life.close().catch(()=>{});}
+ });
  for(const entry of entries)for(const action of ['off','close','new-curve','new-power'] as const)await check('held native intent '+entry+' retires after '+action,async()=>{
   const f=await setup(),held=f.hold(),pending=enter(f.life,entry);await held.ready;
   try{
@@ -64,7 +107,7 @@ async function main(){
  for(const action of ['off','close','new-curve','new-preset','new-power'] as const)await check('crash startup belongs to original queue and retires after '+action,async()=>{
   const host=new NoIoHost(),held=gate<void>();let launches=0;
   const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:60000,readNativePowerState:async()=>awake,readNativeActivity:async()=>record(true),
-   launcher:{async start(){launches++;if(launches===1){held.entered();await held.pending;}return {pid:100011,executable:'fixture-only.exe'};},async stop(){}}});
+   launcher:{async start(){launches++;if(launches===1){held.entered();await held.pending;}else{host.generation=host.attempt=0;host.stateName='AwaitingControl';host.powerState='Unknown';host.opened=host.events=host.closed=false;host.lease=null;}return {pid:100010+launches,executable:'fixture-only.exe'};},async stop(){}}});
   life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);
   const pending=life.recoverAfterUncleanExit();await held.ready;let newer:Promise<unknown>=Promise.resolve();
   try{

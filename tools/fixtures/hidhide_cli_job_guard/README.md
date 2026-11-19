@@ -43,3 +43,17 @@ node tools/hidhide_cli_job_guard_selftest.mjs --out G:/<private>/fresh118 --tool
 故障仅在guard实际Kernel API叶/Heap分配包装上注入，覆盖prepare部分失败、inheritable-job拒绝、query/stop失败、现有名字碰撞、reset释放顺序；不替换guard算法。对所有成功测试不使用额外cleanup job。两个源码mutant实际编译：省略JOB_LIST update、去掉KILL_ON_JOB_CLOSE。原membership/父死后exit/迟到write断言必须捕获，编译失败或崩溃不算通过。
 
 本交付只验证启动叶及owned job生命周期，不验证main实际CLI接线、命令超时策略、writer store、冷启动job reopening或跨native冷清理。父死亡至内核完成终止有调度窗口；证据要求先确证退出再验证禁止迟到写，不承诺ExitProcess同一CPU瞬间的零延迟物理终止。
+
+## 空历史缓存的实际 LaunchScope 定向选择（2026-11-09）
+
+原入口支持互斥参数 `--binding-launch-only`：
+
+```text
+node tools/hidhide_cli_job_guard_selftest.mjs --out ABS_FRESH_PRIVATE_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN --binding-launch-only
+```
+
+只编译一个 Release 并选择本文件 fixture.cpp 的十个 `binding-launch/` 场景，不运行原默认、Checked、tracking-only 或旧语义 mutant 组。名字直接从原 fixture 获取并与实际 raw 严格相等；未知、拼错或组合选择拒绝。不新增全局 ID、默认父门或发布前置。
+
+覆盖实际 nativeRefreshWriter::LaunchScope 的 schema1/2 空历史零写打开、tracked Job 准备、真实 durable reserve、两个自有惰性子进程、creationReturned、精确 root/Job 结清及当前绑定重开；flush 提交失败禁止创建，保留真实重复/继承 owner 排他，以及非空 nativeVisibility（含零路径）和 active foreign 的拒绝反例。记录是历史提示，不是输出、设备归还或完整资源静默证明。
+
+本次 C++ 原消费者定向实跑 10 场景 / 278 检查通过。首轮核对器在编译成功后误把依赖路径大小写当字节变化，原 INCOMPLETE 保留；纠正仅复用同一 EXE，没有重编译或重跑旧组。随后正式 MJS 新参数分派也实际通过同一 10 场景 / 278 检查，原工具指纹拒绝保留，当前三个工具另建私有身份清单；未修改旧清单或放宽身份门。两路重复执行不增加唯一覆盖。原始证据见工作区 Testing/YMCC/Evidence/VC-Win5-AllRoutes-20261109 的 writer-launch-continuation-r2、writer-launch-canonical-consumption 和 writer-launch-canonical-current-tools；它们不是运行依赖。不执行产品、真实 CLI、Host、设备、驱动或 Steam。

@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
-import {oracle} from '../../../fixtures/hc_model_motion_consumer/oracle.mjs';
+import {oracle,legacyOracleSourcePaths} from '../../../fixtures/hc_model_motion_consumer/oracle.mjs';
 import {machineModelInputs} from '../machine-capability-signals/adapter.mjs';
 import {MATRIX_CHECKER,MATRIX_PROBE,MATRIX_TOOL_MANIFESTS,matrixToolchainInputs} from './matrix-evidence.mjs';
 export const REPO_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
@@ -18,18 +18,31 @@ const fixedSources=[
  'tools/fixtures/hc_legacy_motion_catalog/axis-parser-legacy-reference.cpp',
  'tools/fixtures/hc_legacy_motion_catalog/catalog.json','deps/handheldcompanion-runtime/HC-BASELINE.json','deps/handheldcompanion-runtime/source-files.sha256',
  'tools/fixtures/hc_model_motion_consumer/private-binding-contract.json','native/hc_oem_windows_motion_catalog.h','capabilities/hc-motion-policy.json','capabilities/HcMotionCapabilityCatalog.h','capabilities/HcMotionCapabilityCatalog.generated.h','tools/lib/hc_motion_catalog.mjs','tools/fixtures/hc_model_motion_consumer/unified-binding-contract.json','tools/fixtures/hc_model_motion_consumer/unified_binding.cpp',
- 'capabilities/upstream/f2e58468/OneXPlayer3.json','capabilities/upstream/f2e58468/OneXPlayer3.cs',
+ 'capabilities/HcOemInputCapabilityBinding.h','capabilities/HcOneXVendorInputContract.h','capabilities/hc-device-catalog.generated.h',
+ 'capabilities/upstream/f2e58468/IDevice.cs','capabilities/upstream/f2e58468/OneXPlayer3.json','capabilities/upstream/f2e58468/OneXPlayer3.cs',
+ 'capabilities/upstream/fdf0bf66/GPDWin5.cs','capabilities/upstream/fdf0bf66/IMUGyrometer.cs','capabilities/upstream/fdf0bf66/IMUAccelerometer.cs','capabilities/upstream/fdf0bf66/Win5MotionReview.json',
  'native/main.cpp','native/hc_model_motion_catalog.h','native/hc_legacy_motion_catalog.h','native/hc_generic_motion_catalog.h','native/hc_default_motion_catalog.h','native/msi_motion_capabilities.h','deps/json/json.hpp',
  ...['adapter.mjs','contracts.mjs','inputs.mjs','validation.mjs','evidence.mjs','run.mjs','Run-MotionConsumers.ps1','matrix-evidence.mjs','matrix-runner.mjs','owner-evidence.mjs','owner-runner.mjs','owner-fault-scheduler.mjs','owner-child-trace.mjs'].map(name=>MODULE_ROOT+name),
 ];
-/** All fixed upstream inputs are captured even when the oracle itself is missing. */
-export function motionConsumerInputs(repoRoot=REPO_ROOT) {
+function motionInputPaths(repoRoot){
  const repo=path.resolve(repoRoot),workspace=path.resolve(repo,'../../..'),model=machineModelInputs(repo),phase=path.join(workspace,'Build/Validation/HC-ModelCapabilities-20261017');
  const generic=path.join(phase,'ControllerMotion/GenericWindowsMotion-20261018');
  const reviewed=path.join(phase,'ControllerMotion/CurrentCatalog/2026-10-17T10-53-19-524Z');
  const artifacts=[path.join(reviewed,'EFFECTIVE-HC-MATRICES.json'),path.join(reviewed,'RESULT.json'),...model.artifacts.filter(file=>file!==model.baseline),path.join(phase,'LegacyMotion/main.before.cpp'),path.join(phase,'MotionConsumer/main.before.cpp'),path.join(phase,'ControllerMotion/main.before.cpp'),path.join(phase,'pc80-identity/inputs.json'),path.join(generic,'ADAPTER-CONTRACT.json'),path.join(generic,'SOURCE-SCOPE.json'),path.join(generic,'NativeBuild-R1/YeManCC-source/YeManCC/native/main.cpp'),path.join(phase,'ControllerMotion/WindowsProcessorOwnership-20261018/before/native/main.cpp')];
- let expected=null,oracleProblem=null;try{expected=oracle(workspace,repo);}catch(error){oracleProblem={code:error.code??'ORACLE_REJECTED',message:String(error.message).slice(0,180)};}
+ return {repo,workspace,artifacts};
+}
+function bindInputs({repo,workspace,artifacts},legacyPaths,expectations={}){
  let tools=null,toolchainProblem=null;try{tools=matrixToolchainInputs(repo);}catch(error){toolchainProblem={code:error.message};}
- const sources=[...fixedSources];for(const row of expected?.legacy?.sourceChecks??[])if(typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).includes('..'))sources.push(row.path);
- return {repo,workspace,sources:[...new Set(sources)],artifacts:[...new Set([...artifacts,...(tools?.files??[]).map(row=>row.path)])],expected,oracleProblem,tools,toolchainProblem};
+ return {repo,workspace,sources:[...new Set([...fixedSources,...legacyPaths])],artifacts:[...new Set([...artifacts,...(tools?.files??[]).map(row=>row.path)])],...expectations,tools,toolchainProblem};
+}
+export function motionConsumerDeclarations(repoRoot=REPO_ROOT){
+ const paths=motionInputPaths(repoRoot);
+ return bindInputs(paths,legacyOracleSourcePaths(paths.repo));
+}
+/** Execution still verifies every oracle input before running the producer. */
+export function motionConsumerInputs(repoRoot=REPO_ROOT){
+ const paths=motionInputPaths(repoRoot);
+ let expected=null,oracleProblem=null;try{expected=oracle(paths.workspace,paths.repo);}catch(error){oracleProblem={code:error.code??'ORACLE_REJECTED',message:String(error.message).slice(0,180)};}
+ const legacyPaths=(expected?.legacy?.sourceChecks??[]).map(row=>row.path).filter(relative=>typeof relative==='string'&&!path.isAbsolute(relative)&&!relative.split(/[\\/]/).includes('..'));
+ return bindInputs(paths,legacyPaths,{expected,oracleProblem});
 }

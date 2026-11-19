@@ -19,7 +19,10 @@ DEFAULT_OUT = ROOT.parents[2] / 'Build/Validation/VC-TIMER-EVIDENCE-20261022/ada
 VCVARS = Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
 COUNTERS = ('g_inputCaptureBusBusySkips', 'g_tickCostBusySkipCount')
 GLOBALS = ('g_domainLogEnabled', 'g_inputCaptureStop', 'g_inputCaptureBusTickMx',
-           'g_inputCaptureBusTickGlobal', 'g_inputTimerEvidence', 'g_tickCostWindowTicks', *COUNTERS)
+           'g_inputCaptureBusTickGlobal', 'g_inputTimerEvidence', 'g_tickCostWindowTicks', *COUNTERS,
+           'g_inputHostPersonaMx', 'g_inputCaptureOwnerDispatchesBus',
+           'kInputCaptureTickPeriod100nsBase', 'kInputCaptureTickPeriod100nsSdOverride',
+           'g_inputCaptureTickPeriod100ns', 'kInputCaptureGamepadPublishIntervalMs')
 FORBIDDEN = ('winmm.dll', 'user32.dll', 'win32u.dll', 'xinput', 'dinput8.dll',
              'hid.dll', 'setupapi.dll', 'steam_api', 'timesetevent', 'timekillevent',
              'sendinput', 'getasynckeystate', 'getrawinputdata', 'deviceiocontrol')
@@ -53,6 +56,9 @@ def extract(text):
     for name, pattern in (
         ('callback', r'^static\s+void\s+CALLBACK\s+inputCaptureTimerEventProc\s*\('),
         ('scope', r'^class\s+InputTimerCallbackEvidenceScope\s*\{'),
+        ('personaGetter', r'^static\s+const\s+char\s*\*\s*inputHostPersona\s*\([^;{]*\)\s*\{'),
+        ('periodRefresh', r'^static\s+void\s+inputCaptureRefreshEffectiveTickPeriod\s*\([^;{]*\)\s*\{'),
+        ('busLocation', r'^static\s+void\s+inputCaptureBusTick\s*\([^;{]*\)\s*\{'),
     ):
         matches = list(re.finditer(pattern, code, re.M))
         need(len(matches) == 1, 'Expected unique actual ' + name)
@@ -70,11 +76,11 @@ def extract(text):
             end = code.index(';', end)+1
         add(name, start, end)
     for name in GLOBALS:
-        matches = list(re.finditer(r'^static\s+[^;\n]*\b' + name + r'\b[^;]*;', code, re.M))
+        matches = list(re.finditer(r'^static\s+[^;\n={}]*?\b' + name + r'\b(?:\s*\[[^;\n]*?\])?\s*(?:[={][^;]*)?;', code, re.M))
         need(len(matches) == 1, 'Expected unique actual declaration: ' + name)
         add('global.' + name, matches[0].start(), matches[0].end())
     start = text.index('struct InputTimerAnomalyEvidence {')
-    add('anomalyBank', start, text.index('// ── HC tick parity', start))
+    add('anomalyBank', start, text.index('// ── HC rate diagnostic reference', start))
     for name in COUNTERS:
         matches = list(re.finditer(name + r'\.fetch_add\s*\([^;]+\);', code))
         need(len(matches) == 1, 'Expected actual increment: ' + name)
@@ -85,11 +91,47 @@ def extract(text):
         need(not re.search(name + r'(?:\.store\s*\(\s*0\b|\s*=\s*0\b)', code), 'Lost-count reset: ' + name)
     callback = mask_cpp(parts['callback']['text'])
     need(re.search(r'\{\s*InputTimerCallbackEvidenceScope\s+timerEvidence\(timerId,\s*user\);', callback), 'Scope must be first callback statement')
-    for call in ('inputCaptureBusTick', 'ymccLogBusTickThreadRole', 'inputCaptureRefreshEffectiveTickPeriod', 'SetEvent', 'tickCostAccumulate'):
+    for call in ('inputCaptureBusTick', 'ymccLogBusTickThreadRole', 'SetEvent', 'tickCostAccumulate'):
         need(len(re.findall(r'\b'+call+r'\s*\(', callback)) == 1, 'Original call count changed: ' + call)
     for args in (r'2', r'3', r'1,\s*g_inputCaptureBusTickGlobal'):
         need(len(re.findall(r'timerEvidence\.finish\(\s*'+args+r'\s*\)', callback)) == 1, 'Missing finish: ' + args)
     need('std::try_to_lock' in callback and 'std::unique_lock<std::mutex>' in callback, 'Actual BUS mutex changed')
+    need(not re.search(r'\binputCaptureRefreshEffectiveTickPeriod\s*\(', callback),
+         'MM callback must perform zero diagnostic refresh calls')
+    getter = mask_cpp(parts['personaGetter']['text'])
+    need(re.search(r'std::lock_guard<std::mutex>\s+lock\(g_inputHostPersonaMx\);', getter),
+         'Actual persona leaf mutex missing')
+    need('thread_local' not in getter and 'ymcc::controllerPersona::runtime' in getter,
+         'Actual getter must map under its mutex, not borrow TLS text')
+    bus = parts['busLocation']
+    bus_code = mask_cpp(bus['text'])
+    windows = list(re.finditer(r'if\s*\(\s*busWindowMs\s*>=\s*1000\s*\)\s*\{', bus_code))
+    need(len(windows) == 1, 'Expected unique original one-second BUS window')
+    window = windows[0]
+    opening = bus_code.index('{', window.start())
+    depth = 1
+    closing = opening + 1
+    while closing < len(bus_code) and depth:
+        depth += (bus_code[closing] == '{') - (bus_code[closing] == '}')
+        closing += 1
+    need(depth == 0, 'Unclosed BUS diagnostic window')
+    add('period.windowOpen', bus['start'] + window.start(), bus['start'] + opening + 1)
+    add('period.windowLocation', bus['start'] + window.start(), bus['start'] + closing)
+    pattern = (r'if\s*\(\s*!g_inputCaptureOwnerDispatchesBus\s*\)\s*'
+               r'inputCaptureRefreshEffectiveTickPeriod\s*\(\s*\)\s*;\s*'
+               r'const\s+long\s+long\s+period\s*=\s*'
+               r'g_inputCaptureTickPeriod100ns\.load\(std::memory_order_relaxed\);')
+    consumers = list(re.finditer(pattern, bus_code[opening + 1:closing - 1]))
+    need(len(consumers) == 1, 'Refresh/load must be adjacent under the original one-second window and negative owner gate')
+    consumer = consumers[0]
+    offset = bus['start'] + opening + 1
+    add('period.consume', offset + consumer.start(), offset + consumer.end())
+    need(len(re.findall(r'\bg_inputCaptureTickPeriod100ns\b', code)) == 3,
+         'Diagnostic atomic must have only its declaration, refresh store and one load')
+    need(len(re.findall(r'\binputCaptureRefreshEffectiveTickPeriod\s*\(', code)) == 2,
+         'Expected one actual refresh definition and its sole window call')
+    need(re.search(r'static\s+thread_local\s+bool\s+g_inputCaptureOwnerDispatchesBus\s*=\s*false\s*;', code),
+         'Original per-thread owner default changed')
     return parts
 
 
@@ -97,6 +139,8 @@ PRELUDE = r'''
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
+#include "controller_persona.h"
 #include <future>
 #include <iostream>
 #include <mutex>
@@ -107,13 +151,15 @@ PRELUDE = r'''
 #include "input_timer_evidence.h"
 using json = nlohmann::json;
 using UINT = unsigned;
+using UINT32 = std::uint32_t;
 using DWORD = unsigned long;
 using DWORD_PTR = std::uintptr_t;
 using HANDLE = void*;
 #define CALLBACK
 struct Calls {
     unsigned role=0, refresh=0, bus=0, event=0, scopeEnter=0, scopeExit=0;
-    unsigned accumulate=0, elapsed=0, gates=0, clock=0, tid=0, power=0;
+    unsigned accumulate=0, elapsed=0, gates=0, clock=0, tid=0, power=0, costClock=0;
+    int endGate=-1;
     bool costEnabled=false;
     DWORD_PTR lastEvent=0;
     unsigned long long now=100000, generation=77;
@@ -123,6 +169,9 @@ static thread_local Calls calls;
 static unsigned long long fakeGetTickCount64() noexcept { ++calls.clock; return ++calls.now; }
 static DWORD fakeGetCurrentThreadId() noexcept { ++calls.tid; return calls.threadId; }
 static bool fakeSetEvent(HANDLE event) noexcept { ++calls.event; calls.lastEvent=reinterpret_cast<DWORD_PTR>(event); return true; }
+static std::chrono::steady_clock::time_point fakeCostClockNow() noexcept {
+    ++calls.costClock; return std::chrono::steady_clock::time_point(std::chrono::microseconds(100));
+}
 #define GetTickCount64 fakeGetTickCount64
 #define GetCurrentThreadId fakeGetCurrentThreadId
 #define SetEvent fakeSetEvent
@@ -133,9 +182,12 @@ static unsigned long long currentPowerGeneration() noexcept { ++calls.power; ret
 static bool domainLogEnabled(const char* domain) noexcept {
     return std::string(domain)=="virtual" && g_domainLogEnabled[1].load(std::memory_order_acquire);
 }
-static bool tickCostEnabled() noexcept { ++calls.gates; return g_domainLogEnabled[1].load(std::memory_order_acquire); }
+static bool tickCostEnabled() noexcept {
+    ++calls.gates;
+    if (calls.endGate>=0 && calls.event) return calls.endGate!=0;
+    return g_domainLogEnabled[1].load(std::memory_order_acquire);
+}
 static void ymccLogBusTickThreadRole() noexcept { ++calls.role; }
-static void inputCaptureRefreshEffectiveTickPeriod() noexcept { ++calls.refresh; }
 static unsigned long long tickCostEpochUs(std::chrono::steady_clock::time_point) noexcept { return 11; }
 static unsigned long long tickCostThreadCycleSample() noexcept { return 12; }
 static unsigned long long tickCostElapsedUs(std::chrono::steady_clock::time_point) noexcept { ++calls.elapsed; return 13; }
@@ -195,6 +247,8 @@ static json callbackCases() {
         const auto costBefore=g_tickCostBusySkipCount.load();
         const auto windowsBefore=g_tickCostWindowTicks.load();
         const auto busBefore=g_inputCaptureBusTickGlobal;
+        constexpr long long periodSentinel = 99123;
+        g_inputCaptureTickPeriod100ns.store(periodSentinel);
         Calls observed;
         auto invoke=[&] {
             std::thread callback([&] {
@@ -206,7 +260,9 @@ static json callbackCases() {
         if(outcome==2) { OtherThreadLock held(g_inputCaptureBusTickMx); invoke(); }
         else invoke();
         const auto after=snapshot();
-        check(observed.role==1 && observed.refresh==1,"role/refresh call counts changed");
+        check(observed.costClock==(enabled?1u:0u),"disabled diagnostic callback read the cost clock");
+        check(observed.role==1 && observed.refresh==0,"callback role/zero-refresh contract changed");
+        check(g_inputCaptureTickPeriod100ns.load()==periodSentinel,"callback refreshed the diagnostic period");
         check(observed.scopeEnter==1 && observed.scopeExit==1 && observed.costEnabled==enabled,"cost scope count/gate changed");
         check(observed.bus==(outcome==1?1u:0u),"BUS count changed");
         check(observed.event==(eventPresent?1u:0u) && observed.lastEvent==user,"SetEvent count/actual user changed");
@@ -232,6 +288,27 @@ static json callbackCases() {
             check(exit.at("stopObserved")== (outcome==3),"stop observation changed");
         }
         rows.push_back({{"enabled",enabled},{"outcome",outcome},{"timerId",timerId},{"user",user},{"snapshot",after}});
+    }
+    // Same existing callback case: a gate transition never creates a missing start.
+    for (bool beginEnabled:{false,true}) for (unsigned outcome:{1u,2u,3u}) {
+        g_domainLogEnabled[1].store(beginEnabled);
+        g_inputCaptureStop.store(outcome==3);
+        Calls observed;
+        const auto beforeTicks=g_tickCostWindowTicks.load();
+        auto invoke=[&] {
+            std::thread callback([&] {
+                calls=Calls{};calls.endGate=beginEnabled?0:1;
+                inputCaptureTimerEventProc(0x9911,0,0x123456789abcULL,0,0);
+                observed=calls;
+            });callback.join();
+        };
+        if(outcome==2){OtherThreadLock held(g_inputCaptureBusTickMx);invoke();}else invoke();
+        check(observed.costEnabled==beginEnabled,"callback scope replaced entry gate");
+        check(observed.costClock==(beginEnabled?1u:0u),"transition read missing or unneeded start clock");
+        check(observed.accumulate==0 && observed.elapsed==0,"gate transition fabricated a complete callback cost");
+        check(g_tickCostWindowTicks.load()==beforeTicks,"gate transition advanced complete cost window");
+        check(observed.event==1 && observed.bus==(outcome==1?1u:0u),"gate transition changed BUS/event control");
+        rows.push_back({{"beginEnabled",beginEnabled},{"endEnabled",!beginEnabled},{"outcome",outcome}});
     }
     g_inputCaptureStop.store(false);
     return rows;
@@ -301,6 +378,54 @@ static json anomalyCases() {
     exportMarkers(after);
     return {{"captures",exports},{"contendedExport",contended},{"afterContention",after}};
 }
+
+// The branch and refresh/getter below are actual extracts. Only the input
+// elapsed value and settings object are test seams; no full BUS is claimed.
+static json diagnosticPeriodCases() {
+    struct Persona { const char* name; long long expected; };
+    const Persona personas[] = {{"steamdeck",40000},{"dualsense-edge",80000},
+        {"elite",80000},{"disabled",80000},{"unrecognized-persona",80000}};
+    json rows=json::array();
+    for(bool owner:{false,true}) for(long long elapsed:{0LL,999LL,1000LL,1001LL})
+        for(const auto& persona:personas) {
+            { std::lock_guard<std::mutex> leaf(g_inputHostPersonaMx);
+              g_realStickTest.virtualTargetPersona=persona.name; }
+            g_inputCaptureOwnerDispatchesBus=owner;
+            g_inputCaptureTickPeriod100ns.store(99123);
+            long long observed;
+            { std::lock_guard<std::mutex> bus(g_inputCaptureBusTickMx);
+              observed=actualDiagnosticPeriodWindow(elapsed); }
+            const auto expected=elapsed>=1000 && !owner ? persona.expected : 99123;
+            check(g_inputCaptureTickPeriod100ns.load()==expected,"window/MM/fallback period effect changed");
+            check(observed==(elapsed>=1000?expected:-1),"original one-second branch changed");
+            rows.push_back({{"ownerFallback",owner},{"elapsedMs",elapsed},
+                {"persona",persona.name},{"stored",expected},{"observed",observed}});
+        }
+    // Neither an early window nor the fallback gate may acquire the leaf lock.
+    {
+        OtherThreadLock held(g_inputHostPersonaMx);
+        const auto started=std::chrono::steady_clock::now();
+        g_inputCaptureTickPeriod100ns.store(99123);
+        g_inputCaptureOwnerDispatchesBus=false;
+        check(actualDiagnosticPeriodWindow(999)==-1,"early window unexpectedly consumed");
+        g_inputCaptureOwnerDispatchesBus=true;
+        check(actualDiagnosticPeriodWindow(1000)==99123,"fallback unexpectedly refreshed");
+        check(std::chrono::steady_clock::now()-started<std::chrono::seconds(1),"inactive consumer waited for persona mutex");
+    }
+    // A later admitted window re-reads the actual getter; no memoized persona.
+    g_inputCaptureOwnerDispatchesBus=false;
+    { std::lock_guard<std::mutex> leaf(g_inputHostPersonaMx);
+      g_realStickTest.virtualTargetPersona="steamdeck"; }
+    const char* retained=inputHostPersona();
+    check(actualDiagnosticPeriodWindow(1000)==40000,"SteamDeck reference changed");
+    { std::lock_guard<std::mutex> leaf(g_inputHostPersonaMx);
+      g_realStickTest.virtualTargetPersona=std::string(256,'x'); }
+    check(std::string(retained)=="steamdeck","getter did not retain a static runtime literal");
+    check(actualDiagnosticPeriodWindow(1000)==80000,"new persona did not reach next window");
+    check(kInputCaptureGamepadPublishIntervalMs==8,"actual timer request constant changed");
+    return rows;
+}
+
 // Main is the sole collector. Both counter operations below are exact extracts.
 static json conservation(bool actualCallback) {
     constexpr unsigned producers=8, perProducer=12500, total=producers*perProducer;
@@ -351,6 +476,7 @@ int main() {
         result["scope"]=scopeCase();
         result["anomalies"]=anomalyCases();
         result["conservation"]={conservation(true),conservation(false)};
+        result["diagnosticPeriod"]=diagnosticPeriodCases();
         result["unknown"]={"late token across owners","actual WinMM kill/drain","waitable/sleep callback coverage","physical input/Steam consumption"};
         result["pass"]=true; result["checks"]=checks;
         std::cout<<result.dump()<<'\n'; return 0;
@@ -376,7 +502,16 @@ def render(parts):
                 f'static unsigned long long collect{suffix}() {{\n{collect}return {local};\n}}\n')
         helpers += code
         probes += body('global.'+name)+code
-    fixture = PRELUDE+declarations+FAKES+body('scope')+body('anomalyBank')+body('callback')+helpers+TESTS
+    persona_context = 'struct PersonaSettingsSeam { std::string virtualTargetPersona; };\nstatic PersonaSettingsSeam g_realStickTest;\n'
+    period_window = ('static long long actualDiagnosticPeriodWindow(long long busWindowMs) {\n'
+                     + body('period.windowOpen') + body('period.consume')
+                     + 'return period;\n}\nreturn -1;\n}\n')
+    # Only the callback's diagnostic clock leaf is replaced, preserving the actual body.
+    callback = body('callback')
+    need(callback.count('std::chrono::steady_clock::now()') == 1, 'One actual callback cost clock required')
+    callback = callback.replace('std::chrono::steady_clock::now()', 'fakeCostClockNow()')
+    fixture = (PRELUDE+declarations+persona_context+body('personaGetter')+body('periodRefresh')
+               +FAKES+body('scope')+body('anomalyBank')+callback+period_window+helpers+TESTS)
     probes = re.sub(r'^#line[^\n]*\n', '', probes, flags=re.M)
     return fixture, probes
 
@@ -426,7 +561,7 @@ def main():
     run = output/('run-'+dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'-'+str(os.getpid()))
     run.mkdir(parents=True)
     receipt = {'pass':False,'status':'RUNNING','run':str(run),'repo':str(ROOT),
-               'scope':'offline actual main callback/wrapper/anomaly bank; real Recorder; fake Win32/BUS/role/cost',
+               'scope':'offline actual callback/wrapper/anomaly bank plus persona getter/refresh and extracted one-second window+owner gate; real Recorder/persona mapping; fake Win32/full BUS/role/cost',
                'unknown':['late token across owners','actual timer kill/retirement/drain','waitable/sleep fallback callbacks','real input/Steam consumption'],
                'profiles':[]}
     def publish():
@@ -435,7 +570,7 @@ def main():
         save(output/'RESULT.json',receipt)
     try:
         sources = {name:(ROOT/name).read_bytes() for name in
-                   ('native/main.cpp','native/input_timer_evidence.h','deps/json/json.hpp','tools/input_timer_evidence_adapter_selftest.py')}
+                   ('native/main.cpp','native/input_timer_evidence.h','native/controller_persona.h','deps/json/json.hpp','tools/input_timer_evidence_adapter_selftest.py')}
         text = sources['native/main.cpp'].decode('utf-8-sig')
         parts = extract(text)
         bom = 3 if sources['native/main.cpp'].startswith(b'\xef\xbb\xbf') else 0
@@ -517,6 +652,7 @@ def main():
                                   'sourceSha256':sha(mutant.read_bytes())})
             receipt['profiles'].append({'profile':profile,'pass':True,'checks':observed['checks'],
                                         'cases':len(observed['cases']),'conservation':observed['conservation'],
+                                        'diagnosticPeriodCases':len(observed['diagnosticPeriod']),
                                         'negativeCompiles':negatives,'positiveCounterCompile':True,
                                         'realControlImportsAbsent':True,'compiledInputs':len(inputs),
                                         'executableSha256':sha(exe.read_bytes()),'buildArguments':[str(x) for x in command]})

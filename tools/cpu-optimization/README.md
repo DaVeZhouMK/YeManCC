@@ -1,5 +1,15 @@
 # CPU optimization — developer-only external tools
 
+For future source-matched native captures, explicitly set the process-only
+`YEMAN_NATIVE_SYMBOLS=1` before the existing `native/build_native.bat` build.
+This keeps `/O2`, `/MT`, and `NDEBUG`, adds `/Z7` to the three YeManCC translation
+units, and links a full `Build/App/Native/YeManCC.pdb` with release reference/code
+folding and incremental linking disabled. The EXE records only `YeManCC.pdb` as
+its symbol lookup name. The default build is unchanged. Existing packaging
+selects the product binaries and excludes PDB files; keep the exact EXE/PDB and
+source/dependency epoch together in development evidence. This option neither
+deploys nor starts YMCC. It cannot resolve a different, already-installed EXE.
+
 Canonical development source consolidated from already-tested observation evidence. These are **external, manually invoked developer processes**, not a feature of the application. `module.json` is descriptive only (`developmentOnly=true`, `runtimeEntryPoints=[]`, `shipping=false`); it creates no permission, gate, fixture ID or default suite.
 
 ## Access and ownership boundary
@@ -62,11 +72,44 @@ Source pins, exact reversible transformations, unchanged-region SHA256 witnesses
 
 Use the canonical external capture with `-ProfileMode Scheduling` to select `YmccCpuScheduling.wprp`. The default `Samples` mode remains available. Both modes preserve held-handle PID/birth/path/EXE checks and only stop the owned WPR instance. Scheduling adds CSwitch/DPC/Interrupt events and keeps SampledProfile execution stacks; it does not walk a stack for each context switch. Source remains development-only with no product UI, IPC, startup or shipping entry.
 
-Run a short bounded Memory capture first. The requested64MiB ring has no guaranteed duration: inspect actual per-CPU switch boundaries and event loss before accepting a peak interval. Use a bounded File recording only if actual retention is insufficient. Whole-system tracing changes workload; diagnostic captures are not idle-CPU acceptance runs.
+Run a short bounded Memory capture first. Scheduling requests a 256 MiB system ring; Samples remains 64 MiB. Neither has a guaranteed history duration: inspect actual per-CPU switch coverage and event loss before accepting a peak interval. Keep the existing one-second tail for brief CPU peaks; increasing it can overwrite the triggering window. Use a bounded File recording if actual retention is insufficient. Whole-system tracing changes workload; diagnostic captures are not idle-CPU acceptance runs.
 
 The offline PreciseCpu analyzer selects the exact last-five-counter-row window, ranks whole-machine processes and target threads by scheduled runtime, and retains interrupt-adjusted estimates separately. Missing CSwitch edges, PID/TID ambiguity, unknown ownership, time inconsistencies and reported loss must remain visible. Sample counts locate execution paths and are not CPU duration or function call counts. Exact source/PDB identity is still required for code attribution.
 
+The offline interface also accepts an explicit saved row:
+
+`PreciseCpu <captureRoot> <freshOutputRoot> --target-pid PID --warmup-seconds 180 --sample 905`.
+Without `--sample`, the existing actual-trigger/maximum-counter selection is unchanged.
+With it, the analyzer uses exactly that row and sample-minus-four, checks all five
+row identities and clocks, and requires the whole explicit window to start after
+the requested warmup. Missing/bad rows never fall back to another window. An
+explicit result is labelled `explicit saved sample (not runtime trigger)`, even
+when the original recording has a different runtime trigger. Input recordings
+remain read-only; output must be fresh.
+
+This can inspect a window suggested by saved process-cycle counters as well as
+the highest CPU-time-counter window. Cycles are an additional selection signal,
+not CPU milliseconds or percent; scheduling coverage, raw/converted sample
+agreement and matching EXE/PDB/source must be verified for the selected window.
+`--self-test-saved-sample` runs only the 11 saved-row selection checks in a fresh
+retained input namespace per command invocation. Original `--self-test` and
+`--self-test-liveness` selections remain separate. None is a default product gate.
+
+
 Official Microsoft CPU Analysis and SystemProvider pages were retrieved and archived in the MethodUpgrade-20261102 evidence directory, including CPU Usage(Precise) details. Existing sampled-only traces cannot gain missing scheduling events by changing the parser.
+
+For a bounded filesystem diagnosis, explicitly select `-ProfileMode FileIO
+-FileMode`. `YmccCpuFileIo.wprp` records CPU samples, scheduling and file
+operations with selected operation stacks in a 128MiB collector pool. The
+profile is file-only; the capture refuses this mode without `-FileMode` and
+passes the same logging mode to WPR's profile-details query. This mode has
+greater observation cost and is for attribution only. Check lost events,
+actual retained windows, process/thread identity, filename resolution and
+stack availability separately. Operation counts are not CPU durations; an
+old executable still requires its own source/symbol evidence. The default
+Samples/Scheduling/Rog recording selections, identity checks, duration limits
+and owned-instance stop behavior remain unchanged. This adds no application
+entry point, startup integration or shipping payload.
 <!-- /SCHEDULING-METHOD-UPGRADE-20261102 -->
 
 
@@ -107,3 +150,47 @@ Observe-RogCpu.ps1可选ExpectedRootProcessId与ExpectedRootBirthFileTime100ns�
 
 离线analyzer同样核验参数中的显式root PID/birth；仅一项、错误PID或错误birth都取消root/Host可比资格，原始计数保留。PS5.1解析/默认参数绑定、真实错误birth首样本前拒绝，以及33项离线边界+6CLI有界检查均已执行。真实本机样本在Testing/YMCC/Evidence/RogCpu-20261104/LocalLiveHost。新增参数与本轮采集源均属于主线外部开发工具；已交付ROG ZIP仍保持冻结身份，不把不同工具SHA混作同一采样版本。
 <!-- /EXPLICIT-ROOT-NATIVE-PATH-20261104 -->
+
+
+## 开发期固定缓冲计数
+
+`rog-field/Observe-BufferedCpu.ps1` 要求 PowerShell 7，是显式 PID、出生 FILETIME、完整路径和 EXE SHA 绑定的只读入口。用新的外部 PowerShell 进程手动执行；不发现或重绑目标，不启动或控制应用、设备与睡眠，也不进入产品入口、安装或自启。原 ROG cohort/追踪入口和冻结采样包不随之重写。`ReadOnlyCounters.cs` 保持原字节；仅此新入口把该基底和 `BufferedCounterSource.json` 的三个精确片段组合成内存中的开发类型，记录基底、片段与实际编译文本的独立哈希，缺锚点/重复锚点或反向还原失败就拒绝。旧版 PowerShell 5.1 入口继续只编译原基底。
+
+计数循环只向预先分配的数值数组写入真实 QPC/CPU/cycles/等待阶段数据；结束并归还查询句柄后才转换 JSON、写文件。迟到后从实际读取结束重新计时，不补齐短窗。末段不足一个采样周期的区间单列；间隔异常、退出、错误出生/路径/SHA和原生句柄关闭错误保持失败或未知。`COUNTERS_COLLECTED` 只说明采集结束，不能当成长期 CPU 峰值、Host 祖先关系、设备静止或具体函数热点验收。
+
+示例参数需取自当前已验证的实例；不要套用旧 PID 或旧哈希：
+
+```powershell
+pwsh.exe -NoProfile -File .\rog-field\Observe-BufferedCpu.ps1 -ExpectedProcessId <PID> -ExpectedBirthFileTime100ns <FILETIME> -ExpectedImagePath <完整EXE路径> -ExpectedExeSha256 <SHA256> -EvidenceRoot <全新证据目录> -DurationSeconds 90 -IntervalMs 1000
+```
+
+
+<!-- PASSIVE-WINDOW-SCENE-20261110 -->
+## 被动窗口场景证据（2026-11-10）
+
+`rog-field/Observe-WindowScene.ps1` 是明确手动调用的外部开发观察器。它绑定指定PID、精确birth FILETIME、镜像路径/SHA及同进程HWND，只读取前台PID、选定窗口的存在/可见/最小化状态，以及显示、隐藏、销毁和前台变化事件；不读取窗口标题、按键内容或进程内存，不调用目标UI或设备接口。单次10–600秒，固定32768条数值容量，循环无JSON/文件IO；进程退出、窗口身份变化、溢出、hook失败或资源归还失败均保留未完成。三条OUTOFCONTEXT hook与查询句柄在退出前释放，无产品启动/打包入口。
+
+```powershell
+pwsh -NoProfile -File tools/cpu-optimization/rog-field/Observe-WindowScene.ps1 -ExpectedProcessId <PID> -ExpectedBirthFileTime100ns <FILETIME> -ExpectedImagePath <EXE绝对路径> -ExpectedExeSha256 <SHA256> -ExpectedWindowHandle <十进制HWND> -DurationSeconds 300 -EvidenceRoot <新的绝对证据目录>
+```
+
+可显式添加 `-RequireHiddenBackground`：在写入采样就绪的 `IDENTITY.json` 前，额外读取一次指定 HWND，窗口必须仍属当前 PID、不可见且该进程未占前台；不符便保留 `INITIAL-SCENE.json` 并拒绝。这只核初始场景，后续仍须核对完整 `SCENE.jsonl`，不能把中途唤起的 CPU 峰值算作静态隐藏后台。该选项不操作窗口、不给程序新增线程或定时器；省略时沿用原默认行为。
+
+与CPU原始计数按准确PID/birth及实际QPC重叠区间配对；不得把上一轮的窗口状态移记到新进程或窗口。`SCENE.jsonl`中的eventTimeMs32是系统事件时间，beforeQpc/afterQpc是延迟回调的实际观察时间，二者不能混用。事件回调可延迟，未观察到变化不证明没有丢失，也不证明物理手柄静止；此工具不自动授予“全程后台”或CPU验收。它只补场景证据，不能代替调用栈。
+
+`-SelfTest -EvidenceRoot <新目录>`只使用本观察器自有的不可见message-only测试窗口和NotifyWinEvent，检查真实hook回调、窗口/对象过滤、错误birth、未知窗口、容量耗尽与资源归还；不会操作YMCC。自测窗口相关写接口只在显式SELFTEST编译条件内，普通观察源码不含这些执行分支。该自测没有新增永久fixture ID，也不是默认发布门。
+<!-- /PASSIVE-WINDOW-SCENE-20261110 -->
+
+
+<!-- SELECTED-WINDOW-IDENTITY-20261110 -->
+选择HWND时先核对同一PID的原生窗口类、线程及普通生命周期日志中的主窗句柄；不要将Process.MainWindowHandle自动当成YMCC主窗。桌面HUD开启时，本机曾返回YMCC_MonitorDragInput；主程序主窗与YMCC_DesktopMonitorHUD、屏幕按钮是同进程中的不同窗口。观察参数只证明指定HWND的状态；记录HUD窗口不能替代主窗状态，也不能把迟开的主窗补录回填到更早的CPU区间。HUD显示、拖动或切模板应保留为实际场景，和主窗是否隐藏分别记录。
+<!-- /SELECTED-WINDOW-IDENTITY-20261110 -->
+
+<!-- CPU-SCHEDULING-RETENTION-20261112 -->
+The 2026-11-12 retention follow-up recovered complete coverage on all 32 CPUs with the same product build, a 256 MiB Scheduling ring and a one-second tail. The preceding 64 MiB / five-second-tail trace retained incomplete peak history despite EventsLost=0; that rejected evidence remains preserved. The larger ring is a developer capture setting, not a guarantee of retention or a product CPU optimization. Mainline profile and collector match the actually used follow-up bytes after UTF-8 BOM and line-ending normalization. See Testing/YMCC/Evidence/RogCpu-20261104/WindowOwnedPropertyNames-20261112/PeakRetentionFollowup/INTAKE.json. No runtime entry, publishing inclusion, autostart, target control, new fixture ID or default release check is added.
+<!-- /CPU-SCHEDULING-RETENTION-20261112 -->
+
+<!-- CPU-COUNTER-PARTS-20261112 -->
+External stack capture additionally preserves kernelCpu100ns and userCpu100ns as decimal strings from the same already-required GetProcessTimes read. The existing cpu100ns sum, rolling-window trigger, sampling interval, cycles, read QPC bounds and target-identity/exit checks are unchanged. No additional native query is made. Existing reports can ignore these additive fields; future reconciliation must keep missing fields UNKNOWN and must not infer accurate CPU time merely from the 100-ns unit or convert cycles with an assumed clock frequency.
+This is development-only evidence, not a product CPU optimization or completed reconciliation. The installed c20508c7 package, its frozen source/tools and original traces remain unchanged; the added fields have not yet been measured in a new Windows trace. The refusal and partial association from the game-background sample remain preserved under RegistryPropertySingleRead/InstalledValidation-20261112.
+<!-- /CPU-COUNTER-PARTS-20261112 -->

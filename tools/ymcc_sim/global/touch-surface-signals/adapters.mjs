@@ -8,13 +8,14 @@ export const TOUCH_SOURCE_INPUTS=Object.freeze([
  'native/screen_button_overlay.h','native/screen_control_glyphs.h','native/screen_special_actions.h','native/screen_standalone_special.h',
  'native/screen_touchpad_auto_hide.h','native/screen_touchpad_contact_visual.h','native/screen_touchpad_cursor_visibility.h',
  'native/screen_touchpad_cursor.h','native/screen_touchpad_display_policy.h','native/screen_touchpad_input_surface.h',
- 'native/screen_touchpad_owner.h','native/screen_touchpad_press_visual.h','native/screen_touchpad_visibility.h','native/screen_touchpads.h',
+ 'native/screen_touchpad_owner.h','native/screen_touchpad_resume.h','native/screen_touchpad_press_visual.h','native/screen_touchpad_visibility.h','native/screen_touchpads.h',
  'native/touch_dinput_fixture.h','native/touch_feedback_lease.h','native/touch_haptic_dispatch.h',
  'tools/ymcc_sim/global/input-signals/source-extract.mjs',
  'tools/ymcc_sim/global/touch-surface-signals/adapters.mjs','tools/ymcc_sim/global/touch-surface-signals/native-toolchain.mjs',
  'tools/ymcc_sim/global/touch-surface-signals/source-excerpts.mjs','tools/ymcc_sim/global/touch-surface-signals/touch-fixture.cpp',
  'tools/ymcc_sim/global/touch-surface-signals/legacy-event-time.cpp','tools/ymcc_sim/global/touch-surface-signals/touch-surface.mjs',
  'tools/ymcc_sim/global/touch-surface-signals/touch-surface.test.mjs',
+ 'tools/ymcc_sim/global/release-host-environment.mjs',
 ]);
 export function getTouchSurfaceAdapters(){return [{
  id:'controller.touch-surface',domain:'controller',title:'Formal touch surface ownership, feedback lease, ordering and lifecycle without OS input',

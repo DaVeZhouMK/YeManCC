@@ -31,6 +31,7 @@ struct Row {
     ULONGLONG birth=100; std::wstring path=expectedPath;
     bool sessionFail=false, openFail=false, alive=true, pathFail=false, birthFail=false;
     DWORD heldPid=0, heldSession=ownSession; bool heldSessionFail=false;
+    DWORD parentPid=0;
 };
 struct Held { bool snapshot=false; size_t index=0; Row row{0}; };
 enum class QueryMode { complete, unsupported, failed, malformed, allocationFailure };
@@ -64,6 +65,7 @@ inline BOOL toolRow(Held* held,PROCESSENTRY32W* output){
     if(!held||!held->snapshot){++s.violations;return FALSE;}
     if(held->index>=s.rows.size()){s.error=ERROR_NO_MORE_FILES;return FALSE;}
     const auto& row=s.rows[held->index];*output={};output->dwSize=sizeof(*output);output->th32ProcessID=row.pid;
+    output->th32ParentProcessID=row.parentPid;
     wcsncpy_s(output->szExeFile,row.name.c_str(),_TRUNCATE);return TRUE;
 }
 inline BOOL WINAPI first(HANDLE handle,PROCESSENTRY32W* output){auto* held=lookup(handle);if(s.firstFail){s.error=ERROR_ACCESS_DENIED;return FALSE;}if(held)held->index=0;return toolRow(held,output);}
@@ -89,6 +91,7 @@ inline NTSTATUS NTAPI query(SYSTEM_INFORMATION_CLASS kind,PVOID output,ULONG cap
     for(size_t i=0;i<s.rows.size();++i){const auto& row=s.rows[i];const auto bytes=(sizeof(SYSTEM_BASICPROCESS_INFORMATION)+(row.name.size()+1)*sizeof(wchar_t)+alignment-1)/alignment*alignment;
         std::memset(base+offset,0,bytes);SYSTEM_BASICPROCESS_INFORMATION record{};record.NextEntryOffset=i+1<s.rows.size()?static_cast<ULONG>(bytes):0;
         record.UniqueProcessId=reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(row.pid));record.SequenceNumber=row.birth;
+        record.InheritedFromUniqueProcessId=reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(row.parentPid));
         record.ImageName.Length=static_cast<USHORT>(row.name.size()*sizeof(wchar_t));record.ImageName.MaximumLength=static_cast<USHORT>((row.name.size()+1)*sizeof(wchar_t));
         record.ImageName.Buffer=reinterpret_cast<wchar_t*>(base+offset+sizeof(record));std::memcpy(record.ImageName.Buffer,row.name.c_str(),record.ImageName.MaximumLength);std::memcpy(base+offset,&record,sizeof(record));offset+=bytes;
     }return 0;

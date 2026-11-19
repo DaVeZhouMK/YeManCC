@@ -21,7 +21,9 @@
 #include "game_feedback_receipt.h"
 #include "HcControllerFeedbackCapabilityCatalog.h"
 #include "input_host_pipe_transport.h"
+#include "input_host_shared_power.h"
 #include "input_host_transaction_mutex.h"
+#include "input_host_diagnostic_dispatch.h"
 #include "input_host_transport_state.h"
 #include "input_host_selftest_rules.h"
 #include "input_frame_submission.h"
@@ -30,6 +32,8 @@
 #include "msi_input_host_transport_evidence.h"
 #include "msi_steamdeck_release_fence_1726.h"
 #include "input_chain_command_evidence.h"
+#include "virtual_recovery_intent.h"
+#include "virtual_start_protection.h"
 using json=nlohmann::json;
 using InputHostMutex=ymcc::inputHost::TransactionMutex<>;
 static InputHostMutex g_inputHostMx;
@@ -43,6 +47,19 @@ static DWORD g_inputHostSwitchRecoveryTransportError=ERROR_SUCCESS;
 // separate. The actual Request body, command deadlines and pipe owner execute.
 struct FixtureWireTuple { std::uint64_t epoch=0,power=0,requestId=0,sequence=0,acceptedSerial=0; bool protectedCycle=false; };
 static std::uint64_t inputHostStartProtectionNow() noexcept{return GetTickCount64();}
+static constexpr unsigned long long fixturePowerGeneration=3;
+static std::atomic<unsigned long long> g_powerGeneration{fixturePowerGeneration};
+@@WIRE_READ_STATE@@
+// A validated HELLO may report lineage, but this fixture never owns a Start ticket.
+static void inputHostRuntimeRecoveryBindStartTupleLocked(std::uint64_t request,
+        std::uint64_t power,const std::string&,bool created) noexcept {
+ if(request||power||created||g_inputHostSwitchRecoveryStartDeadline)std::terminate();
+}
+static bool domainLogEnabled(const char*) noexcept{return false;}
+// The request's normal-use incident publication is observed here; the separate
+// recovery owner is not activated by this wire/dispatch fixture.
+static std::vector<json> fixtureRuntimeRecoveryOffers;
+static void inputHostRuntimeRecoveryOfferLocked(const char* command,std::uint64_t sequence,DWORD error){fixtureRuntimeRecoveryOffers.push_back({{"command",command},{"sequence",sequence},{"error",error}});}
 static FixtureWireTuple inputHostTupleRecoveryTokenLocked(std::uint64_t epoch,std::uint64_t sequence){return {epoch,3,0,sequence,0,false};}
 static bool inputHostTupleRecoveryCurrentLocked(const FixtureWireTuple&) noexcept{return false;}
 static std::string inputHostTupleRecoveryReason(const FixtureWireTuple& token){return "tuple-mismatch-reopen:"+std::to_string(token.epoch);}
@@ -77,18 +94,41 @@ enum{ kTickCostFrameBuild,kTickCostReceiptValidate,kTickCostPipeWrite,kTickCostP
 static unsigned long long tickCostElapsedUs(std::chrono::steady_clock::time_point){return 0;}
 static void tickCostAccumulate(int,unsigned long long){}
 namespace ymcc::screenpads {static void observeNativeTransport(unsigned long long,bool){}}
+// Controlled fixture leaf over the actual public ABI. This is not Native's
+// notification producer, a second product power authority, or a sleep test.
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t size){
+ if(!out||size!=sizeof(*out))return 0;
+ *out={};out->generation=fixturePowerGeneration;out->publicationRevision=1;
+ out->observedNotificationSequence=1;out->suspendSerial=1;
+ out->phase=0;out->flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;return 1;
+}
+static bool sgShouldKeepInputDuringStandby(){return true;}
+static ymcc::inputHost::sharedPower::Cache g_inputHostInputPowerCache,g_inputHostLifecyclePowerCache;
+static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static void fixtureReleaseSharedPowerCaches()noexcept{
+ g_inputHostInputPowerCache.reset();g_inputHostLifecyclePowerCache.reset();g_sharedPowerRevocations.revoke();
+ // Any issued IO still owns its borrowed-event Scope until real terminal.
+}
 // This integration covers wire/dispatch; no normal-frame capture ticket is armed.
-struct InputFrameSubmission{ymcc::game_feedback::Sample gameMotorReply{};std::uint64_t gameMotorBinding=0;ymcc::input::frameSubmission::Ticket ticket{};bool physicalSourceAdmitted=false,sourceNeutralized=false;bool rejected=false;ymcc::input::frameSubmission::Verdict reason=ymcc::input::frameSubmission::Verdict::Allowed;};
+struct InputFrameSubmission{std::shared_ptr<ymcc::inputHost::sharedPower::Scope> powerScope;ymcc::game_feedback::Sample gameMotorReply{};std::uint64_t gameMotorBinding=0;ymcc::input::frameSubmission::Ticket ticket{};bool physicalSourceAdmitted=false,sourceNeutralized=false;bool rejected=false;ymcc::input::frameSubmission::Verdict reason=ymcc::input::frameSubmission::Verdict::Allowed;};
 static thread_local InputFrameSubmission* t_inputFrameSubmission=nullptr;
 static thread_local bool t_inputFrameTransportGuard=false;
-static bool inputHostFrameSubmissionRequestCurrent(const char*,json*,const char*){if(t_inputFrameSubmission)throw std::runtime_error("unexpected-live-capture-ticket");return true;}
-static bool inputHostFrameSubmissionMayIssue(void*)noexcept{return false;}
-static void inputHostFrameSubmissionTransportRejected()noexcept{std::terminate();}
 @@FRAME_SCOPE@@
+static bool inputHostFrameSubmissionRequestCurrent(const char*,json*,const char*){if(t_inputFrameSubmission)throw std::runtime_error("unexpected-live-capture-ticket");return true;}
+// This remains an explicit wire fixture leaf, not the full frame consumer.
+// The first gate below is extracted verbatim from actual main. Frame/OneX/
+// deferred owners stay excluded; only an actual current public Scope can issue.
+static bool inputHostFrameSubmissionMayIssue(void* context)noexcept{
+@@PUBLIC_ISSUE_GATE@@
+ if(context||t_inputFrameSubmission||t_inputHostOneXStartWrite||t_inputHostDeferredPhysicalHideWrite)return false;
+ return bool(t_inputHostRequestPower);
+}
+static void inputHostFrameSubmissionTransportRejected()noexcept{std::terminate();}
 @@CONSTANTS@@
 @@UNICODE@@
 @@NEW_ID@@
 static const char* inputHostBoundOrCurrentPersona(){return fixturePersona.c_str();}
+static std::string inputHostBuildPersonaSnapshot(){return fixturePersona;}
 static const char* inputHostBoundOrCurrentProfileIdentity(){return ymcc::controllerPersona::profileIdentity(fixturePersona);}
 static unsigned long long inputHostProtocolPowerGenerationLocked(){return 3;}
 static const char kC6aHexDigits[]="0123456789abcdef";
@@ -113,8 +153,10 @@ static std::wstring quote(const std::wstring& s){require(s.find_first_of(L"\"\r\
 struct Session{
  HANDLE child=nullptr,primary=nullptr;std::filesystem::path receipt;bool finished=false;
  Session(const std::wstring& dotnet,const std::wstring& dll,const std::filesystem::path& root,const std::string& id,const std::string& selected,const std::string& fault,DWORD watchedParent=0){
+  fixtureReleaseSharedPowerCaches();
   fixturePersona=selected;g_inputHostSequence=0;g_inputHostEpoch+=1;g_inputHostHostInstanceId.clear();g_inputHostRunId="offline-integration-"+id;
-  g_inputHostHello=g_inputHostPipeConnected=g_inputHostPipeRetired=g_inputHostTransportFault=false;queued.clear();commands=json::array();
+  g_inputHostHello=g_inputHostPipeConnected=g_inputHostPipeRetired=g_inputHostTransportFault=false;
+  g_inputHostPrepared=g_inputHostNeutralized=false;queued.clear();commands=json::array();
   g_inputHostPipeName=L"YMCC-private-integration-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+U2W(id);
   g_inputHostServerPipe=inputHostCreateServerPipeLocked();require(g_inputHostServerPipe!=nullptr,"actual-owned-server-factory");
   receipt=root/(id+"-managed.json");
@@ -124,7 +166,7 @@ struct Session{
   require(CreateProcessW(dotnet.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi)!=FALSE,"owned-managed-child-start");primary=pi.hThread;child=pi.hProcess;privateHostHandles+=2;g_inputHostProcess=child;
  }
  Session(const Session&)=delete;
- ~Session(){if(g_inputHostServerPipe){inputHostPipeCloseOwned(g_inputHostServerPipe);g_inputHostServerPipe=nullptr;}if(child){if(WaitForSingleObject(child,5000)!=WAIT_OBJECT_0){++hostForcedBackstops;TerminateProcess(child,93);WaitForSingleObject(child,2000);}checkedPrivateClose(child,privateHostHandles);}if(primary){if(WaitForSingleObject(primary,0)!=WAIT_OBJECT_0)++privateCloseFailures;checkedPrivateClose(primary,privateHostHandles);}g_inputHostProcess=nullptr;}
+ ~Session(){if(g_inputHostServerPipe){inputHostPipeCloseOwned(g_inputHostServerPipe);g_inputHostServerPipe=nullptr;}if(child){if(WaitForSingleObject(child,5000)!=WAIT_OBJECT_0){++hostForcedBackstops;TerminateProcess(child,93);WaitForSingleObject(child,2000);}checkedPrivateClose(child,privateHostHandles);}if(primary){if(WaitForSingleObject(primary,0)!=WAIT_OBJECT_0)++privateCloseFailures;checkedPrivateClose(primary,privateHostHandles);}g_inputHostProcess=nullptr;fixtureReleaseSharedPowerCaches();}
  json finish(DWORD expectedExit=0){
   require(WaitForSingleObject(child,5000)==WAIT_OBJECT_0,"owned-child-natural-exit");DWORD exit=999;require(GetExitCodeProcess(child,&exit)!=FALSE&&exit==expectedExit,"managed-child-exit-exact");++hostProcessJoins;require(WaitForSingleObject(primary,1000)==WAIT_OBJECT_0,"managed-primary-thread-exit-before-parent");++hostPrimaryJoins;finished=true;
   std::ifstream stream(receipt);require(bool(stream),"managed-final-receipt-present");json value;stream>>value;require(value.is_object(),"managed-final-receipt-object");return value;
@@ -133,6 +175,11 @@ struct Session{
 static bool send(const char* command,const char* expected,json payload=json::object(),bool fast=false){
  const auto before=g_inputHostSequence;json response;InputHostFastReceipt f;inputHostSelfTestRules::ReceiptObservation observation;
  const bool ok=inputHostRequestPreparedLocked(command,payload,expected,4000,&response,nullptr,nullptr,nullptr,fast?&f:nullptr,true,&observation);
+ if(ok){
+  if(std::strcmp(command,"PREPARE_TARGET")==0||std::strcmp(command,"RECREATE_TARGET")==0){g_inputHostPrepared=true;g_inputHostNeutralized=false;}
+  else if(std::strcmp(command,"SUBMIT_NEUTRAL")==0)g_inputHostNeutralized=true;
+  else if(std::strcmp(command,"RELEASE_TARGET")==0||std::strcmp(command,"SHUTDOWN")==0)g_inputHostPrepared=g_inputHostNeutralized=false;
+ }
  if(std::strcmp(command,"HELLO")==0&&ok){g_inputHostHello=true;ULONG clientPid=0;require(GetNamedPipeClientProcessId(g_inputHostServerPipe,&clientPid)!=FALSE&&clientPid==GetProcessId(g_inputHostProcess)&&clientPid!=GetCurrentProcessId(),"actual-private-pipe-connected-to-owned-managed-process");}
  commands.push_back({{"command",command},{"ok",ok},{"sequenceBefore",before},{"sequenceAfter",g_inputHostSequence},{"response",response},{"fastUsed",f.used},{"tupleVerified",observation.tupleVerified},{"transportFault",g_inputHostTransportFault}});return ok;
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs';import path from 'node:path';import assert from 'node:a
 const root=process.cwd(),out=path.resolve(process.env.YMCC_MONITOR_TEMPLATES_OUT||'../../../Build/Tasks/YMCC-Monitor-Templates-20261019');fs.mkdirSync(out,{recursive:true});
 const {build}=createRequire(path.join(root,'package.json'))('esbuild');
 const mocks={
- './settingsRepository':`export const readSettingsSection=async()=>structuredClone(globalThis.__templateSettings.rtss);export const saveSettingsSection=async()=>{};export const updateSettings=async fn=>fn(globalThis.__templateSettings);`,
+ './settingsRepository':`export const loadSettings=async()=>structuredClone(globalThis.__templateSettings);export const readSettingsSection=async()=>structuredClone(globalThis.__templateSettings.rtss);export const saveSettingsSection=async()=>{};export const updateSettings=async fn=>fn(globalThis.__templateSettings);`,
  './deckySidebar':`export const deckySidebar={get:async()=>null};`,
  './steamSettings':`export const steamSettings={get:async()=>({}),applyMonitor:async()=>({})};`,
  './yeman':`export const rtssRunning=async()=>false,toggleRtss=async()=>{},readOverlayLayout=async()=>'',setOverlayLayout=async()=>({}),readRtssZoom=async()=>5;`,
@@ -12,6 +12,12 @@ const mocks={
 };
 const bundle=await build({stdin:{loader:'ts',resolveDir:root,contents:`export * from './src/bridge/monitorHudModel';export * from './src/bridge/monitorOutput';export * from './src/bridge/monitorHudWire';export * from './src/bridge/shortcutActionFeedback';export * from './src/bridge/desktopHudOwner';`},bundle:true,write:false,format:'esm',platform:'node',plugins:[{name:'memory-io',setup(b){b.onResolve({filter:/.*/},a=>mocks[a.path]&&(a.importer.endsWith('monitorOutput.ts')||a.importer.endsWith('shortcutActionFeedback.ts'))?{path:a.path,namespace:'memory'}:null);b.onLoad({filter:/.*/,namespace:'memory'},a=>({contents:mocks[a.path],loader:'ts'}));}}]});
 const file=path.join(out,'production-under-test.mjs');fs.writeFileSync(file,bundle.outputFiles[0].text);const m=await import(pathToFileURL(file));const cases=[];const check=(name,fn)=>{fn();cases.push(name);};
+check('factory presets hide the FPS cap while explicitly saved choices survive',()=>{
+ for(const preset of ['simple','minimal','standard'])assert.equal(m.hudDataPresetFields(preset).fpsLimit,false);
+ const p=m.normalizeMonitorOutput();assert.equal(p.ymccTemplates.A.fields.fpsLimit,false);assert.equal(p.ymccTemplates.B.fields.fpsLimit,false);
+ const saved=m.normalizeMonitorOutput({ymccTemplate:'A',ymcc:{dataPreset:'custom',fields:{fps:true,fpsLimit:true}}});
+ assert.equal(saved.ymcc.fields.fpsLimit,true);assert.equal(m.normalizeMonitorOutput(JSON.parse(JSON.stringify(saved))).ymcc.fields.fpsLimit,true);
+});
 const legacy={ymccTemplate:'A',ymcc:{layout:'verticalLedger',scale:1.3,opacity:.65,fields:{fps:true,gpuUsage:true,cpuTemp:false},underlay:'none'}};
 check('new preferences and wire default B to 50 percent and retain A at 70 percent',()=>{const p=m.normalizeMonitorOutput();assert.equal(p.ymccTemplate,'B');assert.equal(p.ymcc.scale,.5);assert.equal(p.ymccTemplates.A.scale,.7);assert.equal(p.ymccTemplates.B.scale,.5);assert.equal(m.normalizeMonitorOutput(p,false).ymcc.scale,.5);assert.equal(p.ymcc.dataPreset,'minimal');assert.equal(p.ymcc.layout,'capsule');assert.equal(p.ymccTemplates.A.dataPreset,'simple');assert.equal(m.normalizeMonitorOutput(p,false).ymccTemplate,'B');assert.equal(m.normalizeMonitorOutput({...p,ymccTemplate:'A',ymcc:p.ymccTemplates.A}).ymccTemplate,'A');});
 check('partial B preferences get 50 percent while an explicit saved size survives',()=>{assert.equal(m.normalizeMonitorOutput({ymccTemplate:'B',ymcc:{fields:{fps:true}}}).ymcc.scale,.5);assert.equal(m.normalizeMonitorOutput({ymccTemplate:'B',ymcc:{scale:.83}}).ymcc.scale,.83);assert.equal(m.normalizeMonitorOutput({ymccTemplate:'B',ymccTemplates:{B:{dataPreset:'minimal'}}}).ymcc.scale,.5);});

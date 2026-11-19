@@ -10,9 +10,23 @@
 #include <fstream>
 #include <iostream>
 static std::atomic<unsigned long long> signals{0};
-static BOOL countedSetEvent(HANDLE h) { ++signals; return ::SetEvent(h); }
+static std::atomic<HANDLE> wakeHandle{nullptr},leaseHandle{nullptr};
+static std::atomic<unsigned long long> wakeSignals{0},leaseSignals{0};
+static BOOL countedSetEvent(HANDLE h) {
+ ++signals;
+ if(h==wakeHandle.load())++wakeSignals;
+ if(h==leaseHandle.load())++leaseSignals;
+ return ::SetEvent(h);
+}
+static DWORD countedWait(DWORD count,const HANDLE* handles,BOOL all,DWORD timeout) {
+ // ModeObserver::run waits on {stop, wake}. Revocation has a separate handle.
+ if(count==2&&handles)wakeHandle=handles[1];
+ return ::WaitForMultipleObjects(count,handles,all,timeout);
+}
 #define SetEvent countedSetEvent
+#define WaitForMultipleObjects countedWait
 #include "steam_ui_mode_observer.h"
+#undef WaitForMultipleObjects
 #undef SetEvent
 #include "steam_cssloader_guard.h"
 using namespace ymcc;
@@ -33,10 +47,21 @@ int wmain(int argc,wchar_t** argv) { try {
  until([&]{return shared.snapshot(session).value("mode",std::string{})=="desktop";});Sleep(20);
  const auto idleCpu=cpu(),idleIo=reads();Sleep(1000);
  const auto idleCpuUsed=cpu()-idleCpu,idleReads=reads()-idleIo;check(modeReads==1,"idle must not query mode");
- signals=0;const auto stormStart=GetTickCount64(),stormCpu=cpu();
+#ifndef YMCC_BASELINE_METRICS
+ auto lease=shared.observedSource(session);
+ check(lease.current()&&wakeHandle.load()&&lease.cancellationEvent()!=wakeHandle.load(),"fixture requires separate worker and source events");
+ leaseHandle=lease.cancellationEvent();
+#endif
+ signals=0;wakeSignals=0;leaseSignals=0;const auto stormStart=GetTickCount64(),stormCpu=cpu();
  for(unsigned i=0;i<50000;++i){check(shared.requestRefresh(session),"accepted hint");SwitchToThread();}
  const auto stormCpuUsed=cpu()-stormCpu,stormWall=GetTickCount64()-stormStart,stormSignals=signals.load();
- check(modeReads==1,"storm must not bypass shared minimum read gap");shared.shutdown();
+ const auto stormWakes=wakeSignals.load(),stormRevocations=leaseSignals.load();
+ check(modeReads==1,"storm must not bypass shared minimum read gap");
+#ifndef YMCC_BASELINE_METRICS
+ check(!lease.current()&&WaitForSingleObject(lease.cancellationEvent(),0)==WAIT_OBJECT_0,"stale source lease is revoked once");
+ lease={};leaseHandle=nullptr;
+#endif
+ shared.shutdown();
  const auto link=out/L"fixture"/L"link.txt";std::filesystem::create_directories(link.parent_path());
  {std::ofstream f(link);f<<"X:\\inert-css\\CssLoader-Standalone-Headless.exe";check(bool(f),"fixture write");}
  steamcss::Runtime css;steamcss::Config guard;std::atomic<unsigned> cssReads{0},cssProbes{0};
@@ -53,10 +78,11 @@ int wmain(int argc,wchar_t** argv) { try {
  check(cssReads==finalReads&&cssProbes==finalProbes,"guard idle must not scan or poll");
  std::filesystem::remove(link);until([&]{return css.snapshot().phase=="disabled";});css.shutdown();
 #ifndef YMCC_BASELINE_METRICS
- check(stormSignals==1,"50000 pending hints must signal once");check(unchangedModeIo==0,"unchanged modes must not reread the link");
+ check(stormWakes==1&&stormRevocations==1&&stormSignals==2,"50000 pending hints must signal one worker wake and one source revocation");
+ check(unchangedModeIo==0,"unchanged modes must not reread the link");
  check(idleCpuUsed<=312500&&guardIdleCpu<=312500,"idle worker CPU exceeds 31.25ms per one-second sample");
  check(idleReads==0&&guardIdleIo==0,"idle workers must not perform file reads");
 #endif
- nlohmann::json record{{"ok",true},{"eventHints",50000},{"sharedWakeSignals",stormSignals},{"sharedModeReadsDuringStorm",modeReads.load()-1},{"stormWallMs",stormWall},{"stormCpuMs",stormCpuUsed/10000.0},{"sharedIdleSampleMs",1000},{"sharedIdleCpuMs",idleCpuUsed/10000.0},{"sharedIdleFileReads",idleReads},{"unchangedModeHints",50},{"unchangedModeFileReads",unchangedModeIo},{"guardIdleSampleMs",1000},{"guardIdleCpuMs",guardIdleCpu/10000.0},{"guardIdleFileReads",guardIdleIo},{"realSteamOperations",0},{"realCssOperations",0}};
+ nlohmann::json record{{"ok",true},{"eventHints",50000},{"sharedWakeSignals",stormWakes},{"leaseRevocationSignals",stormRevocations},{"stormTotalSignals",stormSignals},{"sharedModeReadsDuringStorm",modeReads.load()-1},{"stormWallMs",stormWall},{"stormCpuMs",stormCpuUsed/10000.0},{"sharedIdleSampleMs",1000},{"sharedIdleCpuMs",idleCpuUsed/10000.0},{"sharedIdleFileReads",idleReads},{"unchangedModeHints",50},{"unchangedModeFileReads",unchangedModeIo},{"guardIdleSampleMs",1000},{"guardIdleCpuMs",guardIdleCpu/10000.0},{"guardIdleFileReads",guardIdleIo},{"realSteamOperations",0},{"realCssOperations",0}};
  std::ofstream result(out/L"event-budget.json");result<<record.dump(2);std::cout<<record.dump(2)<<'\n';return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

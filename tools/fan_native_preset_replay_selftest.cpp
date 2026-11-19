@@ -19,7 +19,7 @@ const std::string& FixtureActivityIdentityTextReference(const json& value){++ide
 std::string FixtureActivityIdentityOwnedCopy(const std::string& value){++identityTextCopies;identityBytesCopied+=value.size();return value;}
 
 struct Activity{bool active=true;int revision=1;json curve=json::array();std::string deviceClass="HandheldCompanion.Devices.GPDWin5",runToken="fixture-run",bootTag="fixture-boot",packageId="fixture-package";}g_fanActivity;
-std::mutex g_fanActivityMx;std::atomic<bool>g_fanActivityIntentActive{true};bool g_fanActivityRecoverable=false;std::string g_fanCurrentRunToken="fixture-run";
+std::mutex g_fanActivityMx;std::atomic<bool>g_fanActivityIntentActive{true},g_fanActivityRecoverable{false};std::string g_fanCurrentRunToken="fixture-run";
 struct Display{ULONGLONG current=1;ULONGLONG epoch()const{return current;}}g_monitorFanDisplay;
 unsigned writes=0,checks=0;json persisted;std::vector<std::string>failures;
 std::string fanActivityBootTag(){return"fixture-boot";}std::string fanActivityCurrentPackageId(){return"fixture-package";}
@@ -55,7 +55,12 @@ try{
  }else if(scenario=="identity-change"){
   auto response=reply(old);response["state"]["factoryType"]="HandheldCompanion.Devices.MSI.ClawCG3EM";observe(json::object(),response,"/api/state");expect(g_fanActivity.deviceClass=="HandheldCompanion.Devices.MSI.ClawCG3EM","new current identity was cached away");response["state"]["factoryType"]="HandheldCompanion.Devices.ROGAlly";expect(g_fanActivity.deviceClass=="HandheldCompanion.Devices.MSI.ClawCG3EM","persistent identity aliases a destroyed/changed reply");observe(json::object(),response,"/api/state");expect(g_fanActivity.deviceClass=="HandheldCompanion.Devices.ROGAlly","changed reply identity was not refreshed");response["deviceClass"]="HandheldCompanion.Devices.GPDWin5";response["state"]["factoryType"]="HandheldCompanion.Devices.OneXPlayerX1Mini";observe(json::object(),response,"/api/state");expect(g_fanActivity.deviceClass=="HandheldCompanion.Devices.ROGAlly","conflicting identities overwrote the previous valid value");expect(writes==0,"identity state observation began writing disk");
  }else if(scenario=="revoke"){
+  g_fanActivityRecoverable=true;
+  observe(json::object(),reply(balanced),"/api/disable",500);expect(fanActivitySnapshotJson()["recoverable"]==true,"failed OFF revoked unconfirmed native crash intent");
+  g_monitorFanDisplay.current=2;observe(json::object(),reply(balanced),"/api/disable",200,1);expect(fanActivitySnapshotJson()["recoverable"]==true,"stale OFF revoked the current native crash intent");g_monitorFanDisplay.current=1;
   observe(json{{"name","balanced"}},reply(balanced));observe(json::object(),reply(balanced),"/api/disable");expect(!g_fanActivityIntentActive&&!g_fanActivity.active,"new preset ignored explicit OFF");expect(writes==2,"OFF persistence responsibility changed");
+  expect(fanActivitySnapshotJson()["recoverable"]==false,"successful current OFF retained native crash-recovery qualification");
+  observe(json{{"nodes",manual}},reply(manual),"/api/enable");expect(g_fanActivityIntentActive&&g_fanActivity.active,"a later explicit ON became unreachable after crash-intent retirement");
  }else throw std::runtime_error("unknown scenario");
  std::cout<<json{{"ok",failures.empty()},{"scenario",scenario},{"checks",checks},{"failures",failures},{"record",fanActivitySnapshotJson()},{"persisted",persisted},{"persistenceWrites",writes},{"identityTextCopies",identityTextCopies},{"identityTextReads",identityTextReads},{"identityBytesCopied",identityBytesCopied},{"hardwareCalls",0},{"cpuBenchmark",false}}.dump()<<'\n';return failures.empty()?0:1;
 }catch(const std::exception&error){std::cout<<json{{"ok",false},{"fixtureError",error.what()},{"scenario",scenario}}.dump()<<'\n';return 2;}}

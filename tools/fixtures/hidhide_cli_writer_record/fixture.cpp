@@ -18,20 +18,23 @@
 namespace io {
 enum class Role { Owner, Record, Temporary };
 enum class Fault { None, TempCreate, Write, ShortWrite, Flush, Close, Move, Read, ShortRead,
-    OwnerType, RecordType, TempType, OwnerInfoChange, ParentReparse, OwnerReparse, RecordReparse, RecordAttributes };
+    OwnerType, RecordType, TempType, OwnerInfoChange, ParentReparse, OwnerReparse, RecordReparse, RecordAttributes, HintHistoricalRead };
 inline Fault fault=Fault::None;
 inline std::map<HANDLE,Role> handles;
 inline unsigned writes=0,flushes=0,moves=0,ownerWrites=0,ownerInfos=0,creates=0;
 inline bool closeFailed=false,crashAfterCreate=false;
+inline bool bindingHintSelection=false;
+inline unsigned hintRecordOpens=0,hintRecordReads=0;
+inline bool hintHistoricalFaultHit=false;
 inline std::vector<std::string> order;
-Role role(const std::wstring& p){if(p.ends_with(L".owner"))return Role::Owner;return (p.find(L".cli-writer.tmp.")!=std::wstring::npos||p.find(L".native-refresh-writer.tmp.")!=std::wstring::npos)?Role::Temporary:Role::Record;}
+Role role(const std::wstring& p){if(bindingHintSelection&&p.find(L".tmp.")!=std::wstring::npos)return Role::Temporary;if(p.ends_with(L".owner"))return Role::Owner;return (p.find(L".cli-writer.tmp.")!=std::wstring::npos||p.find(L".native-refresh-writer.tmp.")!=std::wstring::npos)?Role::Temporary:Role::Record;}
 Role role(HANDLE h){const auto i=handles.find(h);return i==handles.end()?Role::Record:i->second;}
-void reset(Fault selected=Fault::None){fault=selected;writes=flushes=moves=ownerWrites=ownerInfos=creates=0;closeFailed=false;order.clear();}
+void reset(Fault selected=Fault::None){fault=selected;writes=flushes=moves=ownerWrites=ownerInfos=creates=0;closeFailed=false;order.clear();hintRecordOpens=hintRecordReads=0;hintHistoricalFaultHit=false;}
 HANDLE create(LPCWSTR p,DWORD access,DWORD sharing,LPSECURITY_ATTRIBUTES security,DWORD creation,DWORD flags,HANDLE templateFile){
     ++creates;const auto r=role(p);
     if(r==Role::Temporary&&fault==Fault::TempCreate){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
     const auto h=::CreateFileW(p,access,sharing,security,creation,flags,templateFile);
-    if(h!=INVALID_HANDLE_VALUE){handles.emplace(h,r);if(r==Role::Temporary)order.push_back("create");}
+    if(h!=INVALID_HANDLE_VALUE){handles.emplace(h,r);if(r==Role::Temporary)order.push_back("create");if(bindingHintSelection&&r==Role::Record&&(access&GENERIC_READ))++hintRecordOpens;}
     if(h!=INVALID_HANDLE_VALUE&&r==Role::Owner&&creation==CREATE_NEW&&crashAfterCreate)::ExitProcess(73);
     return h;
 }
@@ -49,6 +52,8 @@ BOOL write(HANDLE h,LPCVOID data,DWORD count,LPDWORD written,LPOVERLAPPED overla
 BOOL flush(HANDLE h){++flushes;order.push_back("flush");if(fault==Fault::Flush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}return ::FlushFileBuffers(h);}
 BOOL move(LPCWSTR from,LPCWSTR to,DWORD flags){++moves;order.push_back("move");if(fault==Fault::Move){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}return ::MoveFileExW(from,to,flags);}
 BOOL read(HANDLE h,LPVOID data,DWORD count,LPDWORD got,LPOVERLAPPED overlap){
+    if(bindingHintSelection&&role(h)==Role::Record)++hintRecordReads;
+    if(bindingHintSelection&&fault==Fault::HintHistoricalRead&&role(h)==Role::Record&&hintRecordOpens==2&&count>1){hintHistoricalFaultHit=true;SetLastError(ERROR_READ_FAULT);return FALSE;}
     if(fault==Fault::Read){SetLastError(ERROR_READ_FAULT);return FALSE;}
     return ::ReadFile(h,data,fault==Fault::ShortRead&&count>1?count-1:count,got,overlap);
 }
@@ -74,6 +79,7 @@ BOOL info(HANDLE h,LPBY_HANDLE_FILE_INFORMATION out){const auto ok=::GetFileInfo
 #define GetFileInformationByHandle io::info
 #include "hidhide_cli_writer_store.h"
 #include "native_refresh_writer_store.h"
+#include "virtual_target_return_session.h"
 #undef CreateFileW
 #undef CloseHandle
 #undef WriteFile
@@ -441,12 +447,15 @@ void nativeCases(const std::filesystem::path& root){
         check(!s.markChild(2,"native-attempt-119",child())&&snapshot(s)==before&&bytes(p)==before,"real sharing conflict preserves committed state");CloseHandle(reader);
     });
     run("native/session/invalid-and-IO-never-empty",[&]{
-        unsigned n=0;auto foreign=nativeRecord();foreign.machineBinding="other-machine";
+        unsigned n=0;auto foreign=nativeRecord(true);foreign.machineBinding="other-machine";
         auto unfenced=J::parse(encoded(nativeRecord()));unfenced.erase("writerFence");
         auto wrongFence=J::parse(encoded(nativeRecord()));wrongFence["writerFence"]="unknown";
         for(const auto& bad:std::vector<std::string>{"","{}","broken",encoded(foreign),encoded(reserved()),unfenced.dump(),wrongFence.dump(),std::string(nw::maxRecordBytes+1,' ')}){
             const auto p=file(L"invalid-"+std::to_wstring(++n)+L".json");raw(p,bad);auto s=nw::Session::open(p,machine);
             check(!s.ready()&&!s.record()&&s.error().code==nw::SessionErrorCode::Invalid&&s.openedFrom()==nw::LoadState::Invalid,"invalid/foreign is never empty");
+            if(bad=="{}")check(s.error().reason=="writer-shape-invalid","native invalid shape retains decoder reason");
+            if(bad=="broken")check(s.error().reason=="writer-parse-failed","native malformed JSON retains decoder reason");
+            if(bad==encoded(foreign))check(s.error().reason=="record-machine-binding-mismatch","native foreign machine distinguished from decode failure");
             check(!s.reserve(1,nativeAttempt())&&bytes(p)==bad,"failed session cannot publish");}
         for(const auto fault:{io::Fault::Read,io::Fault::ShortRead,io::Fault::RecordAttributes}){
             const auto p=file(L"read-"+std::to_wstring(int(fault))+L".json");raw(p,encoded(nativeRecord()));io::reset(fault);
@@ -506,7 +515,264 @@ void nativeCases(const std::filesystem::path& root){
     });
 }
 
+
+// Private directed extension of the canonical writer fixture. Historical data is
+// provenance only; none of these Session checks decides product Start admission.
+namespace bindingHint {
+namespace tr=ymcc::targetReturn;
+inline const std::string expected="windows-machine-guid:11111111-2222-4333-8444-555555555555";
+inline const std::string weakExpected="weak-computer-name:private-session-hint";
+template<class S> bool matched(const S& s){
+    if constexpr(requires { s.historyBindingMatched(); })return s.historyBindingMatched();
+    else return true; // Compilable old-source semantic control; never invent false.
+}
+std::string encode(const tr::Record& r){std::string out;if(!tr::encode(r,out))throw std::runtime_error("private target encoding failed");return out;}
+tr::Origin origin(bool physical=false){
+    tr::Origin o;o.transactionId="binding-hint-target-119";o.parent={11901,"134368044937265940"};
+    o.host={11902,"134368044937266000"};o.hostInstanceId="binding-hint-host-119";o.runId="binding-hint-run-119";
+    o.epoch=119;o.targetId="binding-hint-target";o.persona="dualsense-edge";
+    if(physical)o.physicalRoot="USB\\VID_045E&PID_028E\\private-root";return o;
+}
+struct Cli {
+    using Record=cw::Record;using Session=cw::Session;
+    static const char* name(){return "cli";}
+    static std::string field(){return R"hintFIELD({"active":null,"machineBinding":"windows-machine-guid:46baa1b1-8ed1-46fe-8ea9-33f325c8f824","revision":4234,"schemaVersion":1})hintFIELD";}
+    static bool decode(const std::string& s,Record& r){return cw::decode(s,r);}
+    static std::string encode(const Record& r){return ::encoded(r);}
+    static auto load(const std::wstring& p,const std::string& b){return cw::load(p,b);}
+    static Session open(const std::wstring& p,const std::string& b){return Session::open(p,b);}
+    static bool reserve(Session& s){return s.reserve(s.record()->revision,::attempt("binding-hint-cli-119"));}
+    static Record debt(Record r){r.active=::attempt("binding-hint-cli-119");return r;}
+    static std::vector<std::pair<std::string,Record>> debts(Record r){
+        auto a=debt(r),b=a;b.active->stage=cw::Stage::MayRun;b.active->child=::child();
+        return {{"reserved-childless",a},{"may-run-child",b}};
+    }
+};
+struct Native {
+    using Record=nw::Record;using Session=nw::Session;
+    static const char* name(){return "native";}
+    static std::string field(){return R"hintFIELD({"active":null,"machineBinding":"windows-machine-guid:46baa1b1-8ed1-46fe-8ea9-33f325c8f824","revision":349,"schemaVersion":1,"writerFence":"inherited-exclusive-owner-file-v1"})hintFIELD";}
+    static bool decode(const std::string& s,Record& r){return nw::decode(s,r);}
+    static std::string encode(const Record& r){return ::encoded(r);}
+    static auto load(const std::wstring& p,const std::string& b){return nw::load(p,b);}
+    static Session open(const std::wstring& p,const std::string& b){return Session::open(p,b);}
+    static bool reserve(Session& s){return s.reserve(s.record()->revision,::nativeAttempt("binding-hint-native-119"));}
+    static Record debt(Record r){r.active=::nativeAttempt("binding-hint-native-119");return r;}
+    static std::vector<std::pair<std::string,Record>> debts(Record r){
+        auto a=debt(r),b=a;b.active->child=::child();auto v=r;v.schemaVersion=nw::kVisibilitySchemaVersion;v.nativeVisibility=::nativeVisibility();
+        return {{"reserved-childless",a},{"bound-child",b},{"native-visibility",v}};
+    }
+};
+struct Target {
+    using Record=tr::Record;using Session=tr::Session;
+    static const char* name(){return "target";}
+    static std::string field(){return R"hintFIELD({"machineBinding":"windows-machine-guid:46baa1b1-8ed1-46fe-8ea9-33f325c8f824","obligations":[],"revision":188,"schemaVersion":1})hintFIELD";}
+    static bool decode(const std::string& s,Record& r){return tr::decode(s,r);}
+    static std::string encode(const Record& r){return bindingHint::encode(r);}
+    static auto load(const std::wstring& p,const std::string& b){return tr::load(p,b);}
+    static Session open(const std::wstring& p,const std::string& b){return Session::open(p,b);}
+    static bool reserve(Session& s){return s.reserveTarget(s.record()->revision,origin(),{true,true});}
+    static Record debt(Record r){r.obligations.push_back({origin(),{},{},true});return r;}
+    static std::vector<std::pair<std::string,Record>> debts(Record r){
+        auto target=debt(r),pin=r,paths=r,issued=r;
+        pin.obligations.push_back({origin(),{},tr::AcceptedPsPin{"SWD\\HIDMAESTRO\\EXACT_ROOT",{"HID\\VID_054C&PID_0DF2\\EXACT_HID"},7},false});
+        paths.obligations.push_back({origin(true),{{"HID\\VID_045E&PID_028E&IG_00\\private-node",tr::DispatchStage::Reserved}},{},false});
+        issued=paths;issued.obligations.front().paths.front().stage=tr::DispatchStage::MayHaveIssued;
+        return {{"target-only-no-ACK",target},{"accepted-PS-pin-only",pin},{"reserved-path-only",paths},{"may-have-issued-path-only",issued}};
+    }
+};
+using Case=std::pair<std::string,std::function<void()>>;
+std::string label(const char* family,const char* test){return std::string("binding-hint/")+family+"/"+test;}
+bool noWrites(){return io::writes==0&&io::flushes==0&&io::moves==0&&io::ownerWrites==0;}
+template<class F> bool parseField(typename F::Record& r){const bool ok=F::decode(F::field(),r);check(ok,"exact captured field record strict-decodes");return ok;}
+template<class F> bool publicInvalid(const std::wstring& p,const std::string& b){const auto r=F::load(p,b);return r.state==decltype(r.state)::Invalid&&!r.record;}
+template<class F> bool publicValid(const std::wstring& p,const std::string& b,const J& exact){const auto r=F::load(p,b);return r.state==decltype(r.state)::Valid&&r.record&&J::parse(F::encode(*r.record))==exact;}
+J committed(const J& before,const J& debt,const std::string& current){auto want=debt;want["machineBinding"]=current;want["revision"]=before.at("revision").get<std::uint64_t>()+1;return want;}
+// CREATE_NEW terminal receipts, unlike controlled source perturbations via raw().
+void newReceipt(const std::wstring& p,const J& value){
+    const auto text=value.dump(2)+"\n";HANDLE h=CreateFileW(p.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("hint receipt CreateNew failed");
+    DWORD wrote=0;const bool ok=WriteFile(h,text.data(),DWORD(text.size()),&wrote,nullptr)!=FALSE&&wrote==text.size()&&FlushFileBuffers(h)!=FALSE;
+    const bool closed=CloseHandle(h)!=FALSE;if(!ok||!closed)throw std::runtime_error("hint receipt write/flush/close failed");
+}
+template<class F> int crashFirstUpdate(const std::wstring& p,const std::wstring& report){
+    const auto original=F::field();typename F::Record r;bool decoded=F::decode(original,r);
+    auto s=F::open(p,expected);const bool ready=s.ready();
+    const bool opened=ready&&s.record()&&!matched(s)&&s.openedFrom()==decltype(s.openedFrom())::Invalid&&
+        F::encode(*s.record())==original&&bytes(p)==original&&noWrites()&&io::hintRecordOpens==1&&io::hintRecordReads==2;
+    const bool saved=decoded&&opened&&F::reserve(s);
+    const auto want=decoded?committed(J::parse(original),J::parse(F::encode(F::debt(r))),expected):J();
+    const bool exact=saved&&matched(s)&&J::parse(F::encode(*s.record()))==want&&J::parse(bytes(p))==want;
+    newReceipt(report,{{"pass",exact},{"family",F::name()},{"openWasReadOnlyHint",opened},{"committedBeforeAbruptExit",exact},{"expectedExitCode",73}});
+    if(!exact)return 74;
+    // The same original ownedChild launcher observes this exact terminal code.
+    // No Session destructor runs after the durable first update.
+    ExitProcess(73);return 75;
+}
+int crashDispatch(const std::wstring& kind,const std::wstring& p,const std::wstring& report){
+    const auto file=std::filesystem::path(p),receipt=std::filesystem::path(report);
+    if(!file.is_absolute()||!receipt.is_absolute()||file.parent_path()!=receipt.parent_path()||std::filesystem::exists(receipt))return 64;
+    io::bindingHintSelection=true;io::reset();
+    if(kind==L"cli")return crashFirstUpdate<Cli>(p,report);
+    if(kind==L"native")return crashFirstUpdate<Native>(p,report);
+    if(kind==L"target")return crashFirstUpdate<Target>(p,report);
+    return 64;
+}
+template<class F> void familyCases(const std::filesystem::path& root,std::vector<Case>& selected){
+    const auto file=[root](const std::string& suffix){return (root/(std::string(F::name())+"-"+suffix+".json")).wstring();};
+    selected.push_back({label(F::name(),"field-empty-open-reserve-reopen"),[file]{
+        typename F::Record r;if(!parseField<F>(r))return;const auto exact=F::field();const auto p=file("field");const auto old=r.machineBinding;
+        raw(p,exact);check(publicInvalid<F>(p,expected),"public load keeps unmatched history Invalid and record null");
+        check(publicValid<F>(p,old,J::parse(exact)),"public load with declared old binding is Valid");io::reset();
+        const auto want=committed(J::parse(exact),J::parse(F::encode(F::debt(r))),expected);
+        {
+            auto s=F::open(p,expected);check(s.ready(),"field empty foreign is a ready historical hint");if(!s.ready())return;
+            check(s.record()!=nullptr,"ready hint exposes exact historical record");if(!s.record())return;
+            check(!matched(s),"unmatched hint reports historyBindingMatched false");
+            check(s.openedFrom()==decltype(s.openedFrom())::Invalid,"openedFrom retains original fast-match Invalid");
+            check(F::encode(*s.record())==exact&&bytes(p)==exact,"open retains old binding revision payload and exact disk bytes");
+            check(noWrites()&&io::hintRecordOpens==1&&io::hintRecordReads==2,"hint open has one record snapshot two reads and zero writes");
+            {auto other=F::open(p,expected);check(!other.ready()&&!other.record(),"ready hint holds original exclusive owner against second Session");}
+            io::reset();const bool saved=F::reserve(s);check(saved,"ordinary reserve commits current responsibility after empty hint");if(!saved)return;
+            check(matched(s),"only committed first update publishes matched true");
+            check(J::parse(F::encode(*s.record()))==want&&J::parse(bytes(p))==want,"commit rebases current binding revision plus one and complete real responsibility");
+            check(publicValid<F>(p,expected,want)&&publicInvalid<F>(p,old),"committed current binding loads Valid and old binding no longer fast matches");
+        }
+        io::reset();{auto reopened=F::open(p,expected);check(reopened.ready(),"nonempty committed history reopens with current expected");if(!reopened.ready())return;
+            check(reopened.record()&&J::parse(F::encode(*reopened.record()))==want&&matched(reopened),"nonempty reopen preserves all responsibility and matched provenance");
+            check(reopened.openedFrom()==decltype(reopened.openedFrom())::Valid&&noWrites(),"nonempty reopen is Valid and read only");}
+        const auto cold=file("crash-first-update"),reply=file("crash-receipt");raw(cold,exact);io::reset();
+        const auto kind=std::string(F::name());const auto code=ownedChild({L"--binding-hint-crash-first-update",std::wstring(kind.begin(),kind.end()),cold,reply});
+        check(code==73,"owned fixture exits abruptly after durable first update without Session destructor");
+        if(!std::filesystem::exists(reply)){check(false,"owned crash producer supplied terminal receipt");return;}
+        const auto receipt=J::parse(bytes(reply));childReports.push_back(receipt);check(receipt.value("pass",false),"owned crash producer checked exact first-update responsibility");
+        check(J::parse(bytes(cold))==want,"durable new binding and responsibility survive abrupt producer exit");
+        io::reset();{auto reopened=F::open(cold,expected);check(reopened.ready(),"fresh Session reopens nonempty after abrupt producer exit");if(!reopened.ready())return;
+            check(reopened.record()&&J::parse(F::encode(*reopened.record()))==want&&matched(reopened)&&noWrites(),"post-crash reopen keeps complete nonempty responsibility without rewriting");}
+    }});
+    selected.push_back({label(F::name(),"matched-empty-read-only"),[file]{
+        typename F::Record r;if(!parseField<F>(r))return;const auto p=file("matched");const auto exact=F::field();raw(p,exact);io::reset();
+        auto s=F::open(p,r.machineBinding);check(s.ready(),"matched empty retains original ready behavior");if(!s.ready())return;
+        check(s.record()&&F::encode(*s.record())==exact&&matched(s),"matched empty retains exact record and true binding provenance");
+        check(s.openedFrom()==decltype(s.openedFrom())::Valid&&bytes(p)==exact&&noWrites(),"matched open is Valid and zero write");
+        check(io::hintRecordOpens==1&&io::hintRecordReads==2,"matched open uses same single snapshot as unmatched hint");
+    }});
+    selected.push_back({label(F::name(),"foreign-debt-not-empty"),[file]{
+        typename F::Record r;if(!parseField<F>(r))return;
+        for(const auto& [name,debt]:F::debts(r)){
+            const auto p=file("debt-"+name);const auto wire=F::encode(debt);raw(p,wire);io::reset();
+            check(publicInvalid<F>(p,expected),name+": public load keeps foreign responsibility private");io::reset();
+            {auto s=F::open(p,expected);check(!s.ready()&&!s.record(),name+": nonempty foreign cannot be mistaken for an empty hint");
+                check(bytes(p)==wire&&noWrites(),name+": refusal does not consume or rewrite responsibility");}
+        }
+    }});
+    selected.push_back({label(F::name(),"invalid-and-read-io-not-empty"),[file]{
+        const auto wire=F::field();auto future=J::parse(wire);future["schemaVersion"]=99;
+        auto duplicate=wire;duplicate.insert(1,"\"revision\":1,");
+        const std::vector<std::pair<std::string,std::string>> invalid={{"schema",future.dump()},{"duplicate-key",duplicate},{"broken","broken"}};
+        for(const auto& [name,bad]:invalid){const auto p=file("invalid-"+name);raw(p,bad);io::reset();auto s=F::open(p,expected);
+            check(!s.ready()&&!s.record(),name+": undecoded bytes are never an empty hint");check(bytes(p)==bad&&noWrites(),name+": invalid source remains unchanged");}
+        for(const auto fault:{io::Fault::Read,io::Fault::ShortRead,io::Fault::RecordType,io::Fault::OwnerType,io::Fault::OwnerInfoChange,io::Fault::ParentReparse,io::Fault::OwnerReparse,io::Fault::RecordReparse}){
+            const auto p=file("io-"+std::to_string(int(fault)));raw(p,wire);raw(p+L".owner","");io::reset(fault);
+            {auto s=F::open(p,expected);check(!s.ready()&&!s.record(),"read/type/owner/reparse uncertainty never creates an empty hint fault="+std::to_string(int(fault)));
+                check(bytes(p)==wire&&noWrites(),"failed IO open leaves exact old bytes and zero writes fault="+std::to_string(int(fault)));}
+            io::reset();
+        }
+    }});
+    selected.push_back({label(F::name(),"owner-exclusion-and-hardlink"),[file]{
+        typename F::Record r;if(!parseField<F>(r))return;const auto wire=F::field();const auto p=file("owner-competition");raw(p,wire);io::reset();
+        {auto owner=F::open(p,r.machineBinding);check(owner.ready(),"matched setup holds real exclusive owner");if(!owner.ready())return;
+            auto second=F::open(p,expected);check(!second.ready()&&!second.record(),"foreign empty cannot bypass an occupied stable owner");check(bytes(p)==wire&&noWrites(),"owner competition leaves history unchanged");}
+        for(const bool ownerLink:{false,true}){
+            const auto q=file(ownerLink?"owner-hardlink":"record-hardlink"),alias=file(ownerLink?"owner-alias":"record-alias");raw(q,wire);raw(q+L".owner","");
+            const auto source=ownerLink?q+L".owner":q;const bool linked=CreateHardLinkW(alias.c_str(),source.c_str(),nullptr)!=FALSE;
+            check(linked,"private actual hardlink setup succeeds");if(!linked)return;io::reset();
+            {auto s=F::open(q,expected);check(!s.ready()&&!s.record(),"multi-link owner or record cannot be a ready hint");check(bytes(q)==wire&&noWrites(),"hardlink rejection does not rewrite old record");}
+        }
+    }});
+    selected.push_back({label(F::name(),"reserve-fault-preserves-hint"),[file]{
+        typename F::Record r;if(!parseField<F>(r))return;const auto wire=F::field();
+        for(const auto fault:{io::Fault::Write,io::Fault::Flush,io::Fault::Move}){
+            const auto p=file("reserve-fault-"+std::to_string(int(fault)));raw(p,wire);io::reset();
+            {auto s=F::open(p,expected);check(s.ready(),"foreign empty hint ready before injected reserve fault");if(!s.ready())return;
+                const auto memory=F::encode(*s.record());io::reset(fault);const bool saved=F::reserve(s);
+                check(!saved,"injected temporary write flush or move rejects commit fault="+std::to_string(int(fault)));
+                check(s.ready()&&s.record()&&F::encode(*s.record())==memory&&memory==wire,"failed commit keeps old binding revision and empty payload in memory");
+                check(bytes(p)==wire&&!matched(s),"failed commit keeps old exact bytes and unmatched false provenance");
+                check(s.openedFrom()==decltype(s.openedFrom())::Invalid,"failed write does not promote original fast-match state");
+                const bool reached=fault==io::Fault::Write?io::writes>0:fault==io::Fault::Flush?io::flushes>0:io::moves>0;
+                check(reached,"selected failure reached actual temporary write flush or move wrapper");io::reset();}
+        }
+    }});
+}
+std::vector<Case> select(const std::filesystem::path& root){
+    std::vector<Case> out;familyCases<Cli>(root,out);familyCases<Native>(root,out);familyCases<Target>(root,out);
+    out.push_back({label("native","empty-path-visibility-not-empty"),[root]{
+        nw::Record r;if(!parseField<Native>(r))return;r.schemaVersion=nw::kVisibilitySchemaVersion;r.nativeVisibility=::nativeVisibility();r.nativeVisibility->paths.clear();
+        const auto p=(root/L"native-empty-path-visibility.json").wstring();const auto wire=Native::encode(r);raw(p,wire);io::reset();
+        check(publicInvalid<Native>(p,expected),"typed visibility with empty paths remains foreign historical responsibility");io::reset();
+        auto s=Native::open(p,expected);check(!s.ready()&&!s.record(),"nativeVisibility object is not empty even when paths are empty");
+        check(bytes(p)==wire&&noWrites(),"visibility object and complete old bytes remain intact");
+    }});
+    out.push_back({label("target","weak-expected-provenance"),[root]{
+        tr::Record r;if(!parseField<Target>(r))return;const auto p=(root/L"target-weak-expected.json").wstring();const auto wire=Target::field();raw(p,wire);io::reset();
+        const auto want=committed(J::parse(wire),J::parse(Target::encode(Target::debt(r))),weakExpected);
+        {auto s=Target::open(p,weakExpected);check(s.ready(),"empty target history is provenance even with weak current expected");if(!s.ready())return;
+            check(s.record()&&Target::encode(*s.record())==wire&&!matched(s)&&noWrites(),"weak expected grants no rebind or cleanup on open");
+            const bool saved=Target::reserve(s);check(saved,"ordinary target responsibility commits with weak current provenance");if(!saved)return;
+            check(matched(s)&&J::parse(Target::encode(*s.record()))==want&&J::parse(bytes(p))==want,"weak binding is only committed provenance with full real responsibility");}
+        io::reset();auto reopened=Target::open(p,weakExpected);check(reopened.ready(),"nonempty target reopens using weak current provenance");if(!reopened.ready())return;
+        check(reopened.record()&&J::parse(Target::encode(*reopened.record()))==want&&matched(reopened)&&noWrites(),"weak provenance reopen does not grant or consume cleanup authority");
+    }});
+    out.push_back({label("target","direct-empty-rebind-rejected"),[root]{
+        tr::Record old;if(!parseField<Target>(old))return;
+        const auto p=(root/L"target-direct-empty-rebind.json").wstring();const auto wire=Target::field();raw(p,wire);io::reset();
+        auto owner=Target::open(p,old.machineBinding);check(owner.ready(),"direct-store setup retains original matched owner");if(!owner.ready())return;
+        auto candidate=old;candidate.machineBinding=expected;candidate.revision=old.revision+1;candidate.sourceRecord=wire;
+        io::reset();const auto saved=tr::store(p,candidate);
+        check(!saved.committed()&&saved.state==tr::StoreState::Invalid,"public store refuses empty-to-empty binding change despite exact sourceRecord and revision plus one");
+        check(bytes(p)==wire&&noWrites(),"empty-to-empty refusal preserves exact old bytes with zero writes");
+        check(owner.record()&&Target::encode(*owner.record())==wire&&matched(owner),"direct-store refusal preserves matched owner's old in-memory record");
+    }});
+    out.push_back({label("target","historical-read-retryable-preserved"),[root]{
+        tr::Record old;if(!parseField<Target>(old))return;
+        const auto p=(root/L"target-historical-read-retryable.json").wstring();const auto wire=Target::field();raw(p,wire);io::reset();
+        auto s=Target::open(p,expected);check(s.ready(),"foreign empty hint ready before second historical read fault");if(!s.ready())return;
+        const auto memory=Target::encode(*s.record());io::reset(io::Fault::HintHistoricalRead);const bool saved=Target::reserve(s);
+        check(!saved,"second historical read failure rejects ordinary target reserve");
+        check(io::hintHistoricalFaultHit&&io::hintRecordOpens==2&&io::hintRecordReads==3,"fault reaches body read of historical fallback after initial current-binding mismatch");
+        check(s.error().code==tr::SessionErrorCode::RetryableIo&&s.error().win32Error==ERROR_READ_FAULT,"historical RetryableIo and original ERROR_READ_FAULT propagate");
+        check(s.error().reason=="destination-record-unconfirmed:record-read-incomplete","historical read reason is not masked by first binding mismatch");
+        check(s.ready()&&s.record()&&Target::encode(*s.record())==memory&&memory==wire&&!matched(s),"read failure preserves exact old memory binding revision payload and unmatched provenance");
+        check(bytes(p)==wire&&noWrites(),"historical read failure does not write or change old bytes");io::reset();
+    }});
+    return out;
+}
+int main(const std::filesystem::path& root,const std::filesystem::path& result){
+    if(!root.is_absolute()||!std::filesystem::is_directory(root)||!result.is_absolute()||std::filesystem::exists(result))return 65;
+    const auto rp=result.lexically_normal().parent_path(),base=root.lexically_normal();
+    // Preserve the original files/ + sibling RESULT.json invocation layout;
+    // both remain in the caller's single explicitly owned run directory.
+    if(rp!=base&&rp!=base.parent_path())return 65;
+    const auto privateRoot=root/L"binding-hint-only";if(!std::filesystem::create_directory(privateRoot))return 66;
+    io::bindingHintSelection=true;const auto selected=select(privateRoot);J planned=J::array();for(const auto& [name,body]:selected)planned.push_back(name);
+    for(const auto& [name,body]:selected)::run(name,body);
+    J actual=J::array();for(const auto& c:cases)actual.push_back(c.at("name"));
+    check(selected.size()==22&&actual==planned,"binding-hint-only executes exact selected twenty-two cases and no default cases");
+    const J terminal={{"pass",failures.empty()},{"bindingHintOnly",true},{"nativeRefreshOnly",false},{"selection","binding-hint-only"},
+        {"canonicalTestId","hidhide_cli_writer_record"},{"caseCount",cases.size()},{"assertions",assertions},{"cases",cases},{"failures",failures},
+        {"selectedCaseNames",planned},{"actualCaseNames",actual},{"legacyDefaultCasesExecuted",0},{"checkedExecuted",false},
+        {"realPrivateFileIo",true},{"realIndependentNativeProcesses",children},{"ownerCreationCrashProcesses",0},{"postCommitAbruptFixtureExits",crashChildren},
+        {"expectedPostCommitAbruptFixtureExits",3},{"childRuns",childReports},{"productStartAdmissionTested",false},
+        {"normalProductHostRealCliOrDevicesExecuted",false},{"scope","Exclusive historical empty hint and first real reserve publication; no migration, archive, cleanup or Start authority"}};
+    newReceipt(result.wstring(),terminal);std::cout<<J({{"pass",failures.empty()},{"bindingHintOnly",true},{"cases",cases.size()},{"assertions",assertions},{"failures",failures.size()},{"children",children}}).dump()<<"\n";
+    return failures.empty()?0:1;
+}
+} // namespace bindingHint
+
 int wmain(int argc,wchar_t** argv){
+    if(argc==4&&std::wstring(argv[3])==L"--binding-hint-only")return bindingHint::main(std::filesystem::path(argv[1]),std::filesystem::path(argv[2]));
+    if(argc==5&&std::wstring(argv[1])==L"--binding-hint-crash-first-update")return bindingHint::crashDispatch(argv[2],argv[3],argv[4]);
     if(argc==5&&std::wstring(argv[1])==L"--native-probe"){
         auto s=nw::Session::open(argv[2],machine);const bool expected=std::wstring(argv[4])==L"ready";
         raw(argv[3],J({{"pass",s.ready()==expected},{"ready",s.ready()},{"expectedReady",expected},{"error",s.error().reason},{"hasRecord",s.record()!=nullptr}}).dump());return s.ready()==expected?0:1;
@@ -558,7 +824,7 @@ int wmain(int argc,wchar_t** argv){
         run(label,[&]{const auto p=file((L"fault-"+std::to_wstring(int(f))+L".json").c_str());auto s=cw::Session::open(p,machine);need(s.ready()&&s.reserve(1,attempt()),"seed old file");const auto before=bytes(p),memory=snapshot(s);io::reset(f);check(!s.markMayRun(2,"attempt-119",child()),"fault update rejected");check(snapshot(s)==memory&&bytes(p)==before&&rev(s)==2,"fault preserves old file and memory");check(s.error().code==cw::SessionErrorCode::RetryableIo,"fault reported explicitly");io::reset();check(s.markMayRun(2,"attempt-119",child()),"same valid session can retry once explicitly");});
     }
     run("store/real-replacement-lock-preserves",[&]{const auto p=file(L"locked-destination.json");auto s=cw::Session::open(p,machine);need(s.ready()&&s.reserve(1,attempt()),"seed actual destination");const auto before=bytes(p);HANDLE reader=CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);need(reader!=INVALID_HANDLE_VALUE,"real reader omits delete share");check(!s.markMayRun(2,"attempt-119",child()),"real replacement sharing conflict rejected");check(snapshot(s)==before&&bytes(p)==before,"real failure preserves memory and old inode bytes");CloseHandle(reader);});
-    run("session/invalid-IO-and-machine-never-empty",[&]{unsigned n=0;for(const auto& value:std::vector<std::string>{"", "{}", "broken",encoded([]{auto r=empty();r.machineBinding="foreign";return r;}())}){const auto p=file((L"invalid-"+std::to_wstring(++n)+L".json").c_str());raw(p,value);auto s=cw::Session::open(p,machine);check(!s.ready()&&!s.record()&&s.error().code==cw::SessionErrorCode::Invalid,"invalid/mismatch is not empty fallback");check(!s.reserve(1,attempt())&&bytes(p)==value,"failed session cannot publish");}for(const auto f:{io::Fault::Read,io::Fault::ShortRead,io::Fault::RecordAttributes}){const auto p=file((L"read-"+std::to_wstring(int(f))+L".json").c_str());raw(p,encoded(reserved()));io::reset(f);{auto s=cw::Session::open(p,machine);check(!s.ready()&&!s.record()&&s.error().code==cw::SessionErrorCode::RetryableIo,"IO is not Missing or empty");}io::reset();}});
+    run("session/invalid-IO-and-machine-never-empty",[&]{unsigned n=0;for(const auto& value:std::vector<std::string>{"", "{}", "broken",encoded([]{auto r=reserved();r.machineBinding="foreign";return r;}())}){const auto p=file((L"invalid-"+std::to_wstring(++n)+L".json").c_str());raw(p,value);auto s=cw::Session::open(p,machine);check(!s.ready()&&!s.record()&&s.error().code==cw::SessionErrorCode::Invalid,"invalid/mismatch is not empty fallback");if(value=="{}")check(s.error().reason=="writer-shape-invalid","CLI invalid shape retains decoder reason");if(value=="broken")check(s.error().reason=="writer-parse-failed","CLI malformed JSON retains decoder reason");if(value!=""&&value!="{}"&&value!="broken")check(s.error().reason=="record-machine-binding-mismatch","CLI foreign machine distinguished from decode failure");check(!s.reserve(1,attempt())&&bytes(p)==value,"failed session cannot publish");}for(const auto f:{io::Fault::Read,io::Fault::ShortRead,io::Fault::RecordAttributes}){const auto p=file((L"read-"+std::to_wstring(int(f))+L".json").c_str());raw(p,encoded(reserved()));io::reset(f);{auto s=cw::Session::open(p,machine);check(!s.ready()&&!s.record()&&s.error().code==cw::SessionErrorCode::RetryableIo,"IO is not Missing or empty");}io::reset();}});
     run("session/import-historical-dead-identities-no-authority",[&]{const auto p=file(L"historical.json");auto r=running();r.active->parent={0xfffffffeu,"1"};r.active->child=cw::ProcessIdentity{0xfffffffdu,"2"};raw(p,encoded(r));auto s=cw::Session::open(p,machine);check(s.ready()&&snapshot(s)==encoded(r),"historical identities import without process probes or mutation");check(!s.reserve(1,attempt("new")),"historical active writer still blocks a second reservation");});
     run("path/explicit-absolute-and-existing-parent",[&]{for(const auto& p:std::vector<std::wstring>{L"relative.json",L"C:drive-relative.json",L"\\\\server\\share\\record.json",file(L"..\\escape.json"),file(L"ads:stream"),file(L"NUL.json"),file(L"trail. ")}){auto s=cw::Session::open(p,machine);check(!s.ready()&&!s.record(),"invalid explicit path rejected");}auto s=cw::Session::open(file(L"missing-parent\\writer.json"),machine);check(!s.ready()&&s.error().code==cw::SessionErrorCode::RetryableIo,"missing parent is IO, never auto-created");});
     run("owner/unknown-existing-content",[&]{const auto p=file(L"nonempty-owner.json");raw(p+L".owner","unknown-owner-content");auto s=cw::Session::open(p,machine);check(!s.ready()&&s.error().code==cw::SessionErrorCode::Invalid,"nonempty owner rejected");check(bytes(p+L".owner")=="unknown-owner-content"&&!std::filesystem::exists(p),"unknown owner is never truncated or repaired");});

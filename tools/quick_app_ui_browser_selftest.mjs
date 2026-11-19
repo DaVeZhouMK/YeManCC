@@ -12,10 +12,19 @@ const req = createRequire(path.join(root, 'package.json'));
 const { build } = req('esbuild');
 const { parse, compileScript, compileStyle } = req('vue/compiler-sfc');
 const runtime = process.env.YMCC_UI_BROWSER_MODULE_DIR || 'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
-const { chromium } = createRequire(path.join(runtime, '_quick-app-ui-selftest.cjs'))('playwright');
+const flags=process.argv.slice(2);assert(flags.length<=1&&flags.every(v=>v==='--build-only'),'unknown QuickApp browser selection');
+const { chromium } = flags.includes('--build-only') ? {chromium:null} : createRequire(path.join(runtime, '_quick-app-ui-selftest.cjs'))('playwright');
 const out = process.env.YMCC_UI_BROWSER_OUT || path.resolve(root, '../../Build/Validation/quick-app-ui-20261006');
 fs.mkdirSync(out, { recursive: true });
+const sourceHashes={};
+const pinSource=(file,bytes)=>{const key=path.relative(root,file).replaceAll('\\','/'),value=createHash('sha256').update(bytes).digest('hex');if(sourceHashes[key])assert.equal(sourceHashes[key],value,'source changed during QuickApp build: '+key);sourceHashes[key]=value;};
+pinSource(fileURLToPath(import.meta.url),fs.readFileSync(fileURLToPath(import.meta.url)));
 const source = fs.readFileSync(path.join(root, 'src/views/QuickAppView.vue'), 'utf8');
+const settingsContract=path.join(root,'PowerControl/settings-baseline.json');pinSource(settingsContract,fs.readFileSync(settingsContract));
+const launchBridgeFile=path.join(root,'src/bridge/yeman.ts'),launchBridgeBytes=fs.readFileSync(launchBridgeFile);pinSource(launchBridgeFile,launchBridgeBytes);
+const launchAt=launchBridgeBytes.toString('utf8').indexOf('let steamLaunchInFlight =');assert(launchAt>=0);
+const launchBridgeSlice=launchBridgeBytes.toString('utf8').slice(launchAt);
+
 for (const handler of ['onLaunchLs', 'onOptiScalerCurrent', 'onSpeedApply', 'onSpeedOff']) {
   assert(source.includes(`async function ${handler}(`), `Hidden function implementation was removed: ${handler}`);
 }
@@ -26,7 +35,7 @@ const mocks = {
     export const getLosslessGameState=async()=>({enabled:false}),setLosslessScalingEnabled=async()=>({notice:'fixture'}),oneClickOptiScaler=async()=>{},dirnameOf=p=>p.slice(0,p.lastIndexOf('/')),
       optiscalerAnalyze=async()=>({}),optiConsoleInstalled=async()=>false,openOptiConsole=async()=>{};
   `,
-  '@/bridge/gamedetect': `import {ref} from 'vue';export const detectedGameName=ref('');export async function detectGame(){return null};export async function refreshGameStatus(){return null};export function subscribeGameStatus(cb){cb(null);return ()=>{}}`,
+  '@/bridge/gamedetect': `import {ref} from 'vue';export const detectedGameName=ref('');export async function detectGame(){return null};export async function refreshGameStatus(){return null};export const isCurrentGameTarget=()=>false;export function subscribeGameStatus(cb){cb(null);return ()=>{}}`,
   '@/bridge/speedhack': `export const SPEED_PRESETS=[1,1.5,2,3,5,10];export const applyGameSpeed=async()=>{},clearGameSpeed=async()=>{},isMinecraftTarget=()=>false`,
   '@/bridge/gameproc': `export const closeGame=async()=>{},waitForProcessExit=async()=>{}`,
   '@/bridge/quickActionLock': `export function tryAcquireQuickAction(){return {release(){}}}`,
@@ -35,18 +44,19 @@ const mocks = {
       const f=window.__fixture;f.iconReads??=[];f.iconReads.push(p);f.activeIcons=(f.activeIcons||0)+1;f.maxActiveIcons=Math.max(f.maxActiveIcons||0,f.activeIcons);
       try{if(f.holdIconPaths?.includes(p))await new Promise(r=>(f.releaseIcons??={})[p]=r);if(f.failIconPaths?.includes(p))throw Error('mock icon read denied');return f.iconResults?.[p]??null;}finally{f.activeIcons--;}
     },exists:async(p)=>Object.hasOwn(window.__fixture.files,p),readTextFile:async(p)=>{if((window.__fixture.failRead&&p===window.__settingsFile)||window.__fixture.readDeniedPaths?.includes(p))throw Error('mock read denied');if(!Object.hasOwn(window.__fixture.files,p))throw Error('ENOENT '+p);return window.__fixture.files[p]},rename:async(a,b)=>{window.__fixture.files[b]=window.__fixture.files[a];delete window.__fixture.files[a];return true}};
-    export const settingsStore={write:async(p,content)=>{const f=window.__fixture;if(f.holdSave)await new Promise(r=>f.releaseSave=r);if(f.failSave)return false;const doc=JSON.parse(content);if(f.files[p])f.files[p+'.bak']=f.files[p];f.files[p]=content;sessionStorage.setItem('quick-app-test-disk',JSON.stringify(f.files));f.apps=doc.quickApps.apps;f.writes.push(doc);return true}};
+    export const settingsStore={write:async(p,content)=>{const f=window.__fixture;if(f.holdSave)await new Promise(r=>f.releaseSave=r);if(f.failSave)return false;const doc=JSON.parse(content);if(f.files[p]){try{JSON.parse(f.files[p]);f.files[p+'.bak']=f.files[p];}catch{f.files[p+'.corrupt-fixture']=f.files[p];}}f.files[p]=content;sessionStorage.setItem('quick-app-test-disk',JSON.stringify(f.files));f.apps=doc.quickApps.apps;f.writes.push(doc);return true}};
     export const shell={execute:async(p,args)=>{window.__fixture.executions.push({path:p,args})},open:async()=>{},run:async()=>({stdout:''})};
     export const dialog={openFile:async()=>window.__fixture.picked};
     export const registry={read:async()=>96,write:async()=>true};
-    export const display={getModes:async()=>({current:'fixture',modes:[{id:'fixture',width:1920,height:1080,refresh:60,orientation:0}]}),setMode:async(m)=>m,setTopology:async()=>{}};
+    export const display={getModes:async()=>structuredClone(window.__fixture.displayState??{current:'fixture',modes:[{id:'fixture',width:1920,height:1080,refresh:60,orientation:0}]}),setMode:async(m,options)=>{const f=window.__fixture;(f.displayWrites??=[]).push({mode:JSON.parse(JSON.stringify(m)),options:JSON.parse(JSON.stringify(options))});const result=f.displayReply??{...m,ok:true,preferenceSaved:!f.failDisplayPreference,preferenceReason:'开机全局显示偏好未保存'};if(f.displayState)f.displayState.current=result.id;return JSON.parse(JSON.stringify(result));},setTopology:async()=>{}};
   `,
   '@/bridge/music': `
     import {ref} from 'vue';export const folder=ref(''),baseUrl=ref(''),tracks=ref([]),index=ref(0),playing=ref(false),mode=ref('order'),error=ref(''),currentName=ref(''),hasFolder=ref(false),volume=ref(1),muted=ref(false);
     export const chooseFolder=async()=>{},scanFolder=async()=>{},togglePlay=()=>{},playNext=()=>{},playPrev=()=>{},setMode=v=>mode.value=v,setVolume=v=>volume.value=v,persistVolume=()=>{},toggleMute=()=>muted.value=!muted.value;
   `,
   '@/bridge/performanceSchedule': 'export async function loadPerformanceSchedule(){return {quickMode:false}};',
-  '@/bridge/yeman': 'export async function summonGet(){return {enabled:true}};',
+  '@/bridge/yeman': `import {shell} from '@/bridge/api';const invoke=async()=>{throw Error('Steam native dispatch is outside this generic UI fixture');};${launchBridgeSlice}
+export async function summonGet(){return {enabled:true}};`,
   '@/robust/frontendDiagnostics': 'export function reportFrontendTrace(){};',
   '@/router': "export const ROUTES=[{path:'/quickapp'}];",
 };
@@ -61,13 +71,14 @@ const bundle = await build({
     startGamepad({router:{currentRoute:{value:{path:'/quickapp'}},push:async()=>{}},onAction(){}});
     let inputSequence=0;window.__gamepadAction=action=>window.dispatchEvent(new CustomEvent('ipc:gamepad.ui-input',{detail:{action,uiSeq:++inputSequence,provenance:{session:'quick-app-fixture'}}}));
   ` },
-  bundle: true, write: false, format: 'iife', platform: 'browser',
+  bundle: true, write: false, metafile:true, format: 'iife', platform: 'browser',loader:{'.svg':'dataurl','.png':'dataurl'},
   alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"production"' },
   plugins: [{ name: 'quick-app-ui-fixture', setup(b) {
     b.onResolve({ filter: /.*/ }, args => {if(args.path==='./api'&&['settingsRepository.ts','quickAppFileIcons.ts'].some(name=>args.importer.endsWith(name)))return {path:'@/bridge/api',namespace:'fixture'};return args.path in mocks ? { path: args.path, namespace: 'fixture' } : null;});
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: mocks[args.path], loader: 'ts', resolveDir: root }));
     b.onLoad({ filter: /\.vue$/ }, args => {
-      const { descriptor, errors } = parse(fs.readFileSync(args.path, 'utf8'), { filename: args.path });
+      const bytes=fs.readFileSync(args.path);pinSource(args.path,bytes);
+      const { descriptor, errors } = parse(bytes.toString('utf8'), { filename: args.path });
       assert.equal(errors.length, 0);
       const id = 'data-v-' + createHash('sha256').update(args.path).digest('hex').slice(0, 8);
       const compiled = compileScript(descriptor, { id, inlineTemplate: true });
@@ -77,11 +88,14 @@ const bundle = await build({
       }
       return { contents: compiled.content.replace('export default', 'const _component =') + `\n_component.__scopeId=${JSON.stringify(id)};export default _component;`, loader: 'ts', resolveDir: path.dirname(args.path) };
     });
+    b.onLoad({filter:/\.(?:ts|js|json|png|svg)$/},args=>{if(!args.path.startsWith(path.join(root,'src')+path.sep))return;const bytes=fs.readFileSync(args.path);pinSource(args.path,bytes);const ext=path.extname(args.path).slice(1);return {contents:bytes,loader:ext==='png'||ext==='svg'?'dataurl':ext,resolveDir:path.dirname(args.path)};});
   } }],
 });
 const js = bundle.outputFiles[0].text;
-const css = fs.readFileSync(path.join(root, 'src/styles/tokens.css'), 'utf8') + '\n' + styles.join('\n');
+const tokenBytes=fs.readFileSync(path.join(root,'src/styles/tokens.css'));pinSource(path.join(root,'src/styles/tokens.css'),tokenBytes);
+const css = tokenBytes.toString('utf8') + '\n' + styles.join('\n');
 const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Quick app UI isolated validation</title><style>${css}\nbody{margin:0;background:var(--bg-solid);padding:16px;font-family:system-ui,sans-serif;}#app{max-width:760px;margin:0 auto}.card{padding:16px;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--bg-panel)}</style><main id="app"></main><script src="/fixture.js"></script></html>`;
+if(flags.includes('--build-only')){const report={status:'QUICKAPP_REAL_COMPONENT_BUNDLE_BUILT',sourceHashes,actualBridgeSlice:true,bundleInputs:bundle.metafile.inputs,browserExecuted:false,realSteamActions:0,defaultBrowserGroupExecuted:false};fs.writeFileSync(path.join(out,'build-only.json'),JSON.stringify(report,null,2),{flag:'wx'});console.log(JSON.stringify(report));process.exit(0);}
 const server = createServer((request, response) => {
   response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8');
   response.end(request.url === '/fixture.js' ? js : html);
@@ -531,8 +545,31 @@ try {
   assert.equal(await page.evaluate(()=>window.__fixture.writes.length),0);
   cases.push('F5 reload re-derives source icons without persisting image data or modifying existing apps/unknown fields');
 
+  for(const height of [720,800]){
+    await page.setViewportSize({width:1280,height});
+    await page.evaluate(()=>{const f=window.__fixture;f.displayWrites=[];f.displayState={current:'1920x1080@60/0',known:true,modes:[{id:'1920x1080@60/0',width:1920,height:1080,refresh:60,orientation:0},{id:'1920x1080@120/0',width:1920,height:1080,refresh:120,orientation:0},{id:'1280x720@60/0',width:1280,height:720,refresh:60,orientation:0},{id:'1280x720@120/0',width:1280,height:720,refresh:120,orientation:0}]};window.__remountPage();});
+    const resolution=page.getByRole('button',{name:'当前显示器分辨率',exact:true}),refresh=page.getByRole('button',{name:'当前显示器刷新率',exact:true});
+    await resolution.waitFor();await page.waitForFunction(()=>document.querySelector('[aria-label="当前显示器分辨率"]')?.disabled===false);
+    await resolution.click();await page.getByRole('option',{name:'1280 × 720',exact:true}).click();await page.waitForFunction(()=>window.__fixture.displayWrites.length===1);
+    await page.waitForFunction(()=>document.querySelector('.ok-bar')?.textContent.includes('1280'));
+    assert.deepEqual(await page.evaluate(()=>window.__fixture.displayWrites.at(-1).options),{fields:['resolution']});
+    await refresh.click();await page.getByRole('option',{name:'120Hz',exact:true}).click();await page.waitForFunction(()=>window.__fixture.displayWrites.length===2);
+    assert.deepEqual(await page.evaluate(()=>window.__fixture.displayWrites.at(-1).options),{fields:['hz']});
+    await page.evaluate(()=>window.__fixture.failDisplayPreference=true);await refresh.click();await page.getByRole('option',{name:'60Hz',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('.err-bar')?.textContent.includes('开机全局显示偏好未保存'));
+    assert.match(await resolution.textContent(),/1280/);assert.match(await refresh.textContent(),/60Hz/);
+    await page.evaluate(()=>{const f=window.__fixture;f.failDisplayPreference=false;f.displayReply={id:'1280x720@120/0',width:1920,height:1080,refresh:120,orientation:0,ok:true};});
+    await refresh.click();await page.getByRole('option',{name:'120Hz',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('.err-bar')?.textContent.includes('实际回读尚未确认'));
+    assert.equal(await page.locator('.ok-bar').count(),0,'old success message survived an unconfirmed display request');
+    await page.evaluate(()=>{const f=window.__fixture;delete f.displayReply;f.displayState.current='';f.displayState.known=false;window.__remountPage();});
+    await resolution.waitFor();await page.waitForFunction(()=>document.querySelector('[aria-label="当前显示器分辨率"]')?.disabled===false);
+    assert.doesNotMatch(await resolution.textContent(),/1280|1920/);assert.equal(await refresh.isDisabled(),true);
+    cases.push('Display selectors preserve explicit fields and separate actual/partial/unknown receipts at 1280x'+height);
+  }
   assert.deepEqual(errors, []);
-  const report = { suite: 'Quick app UI browser', passed: cases.length, cases, screenshots, pageErrors: errors, scope: 'Real QuickAppView + real settingsRepository and Vue reactivity; synthetic disk/native-write ACK only mocked; save failures, reload and legacy/backup recovery tested; no installed config changes' };
+  const sourceChanges=Object.entries(sourceHashes).filter(([file,before])=>createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')!==before).map(([file])=>file);assert.deepEqual(sourceChanges,[]);
+  const report = { suite: 'Quick app UI browser', passed: cases.length, cases, screenshots, pageErrors: errors, sourceHashes, sourceChanges, scope: 'Real QuickAppView + real settingsRepository and Vue reactivity; synthetic disk/native-write ACK only mocked; save failures, reload and legacy/backup recovery tested; no installed config changes' };
   fs.writeFileSync(path.join(out, 'browser-results.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } finally {

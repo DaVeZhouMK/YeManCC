@@ -5,12 +5,20 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 const require = createRequire(path.resolve('package.json'));
 const { transformSync } = require('esbuild');
+const serviceSourceIndex=process.argv.indexOf('--performance-service-source');
+const serviceSource=serviceSourceIndex<0?'src/bridge/performanceSchedule.ts':process.argv[serviceSourceIndex+1];
+assert(serviceSourceIndex<0||typeof serviceSource==='string'&&path.isAbsolute(serviceSource)&&process.argv.includes('--boot-preferences-only')&&(process.argv.includes('--boot-performance-partial-only')||process.argv.includes('--boot-performance-events-only')||process.argv.includes('--boot-performance-resident-only')||process.argv.includes('--boot-performance-lifecycle-only')&&process.argv.some(value=>value.startsWith('--boot-performance-lifecycle-case='))),'Explicit service candidate requires a selected partial/event/resident group or exact lifecycle case');
 const clone = x => structuredClone(x);
-function evaluate(file, imports = {}, globals = {}) {
+function evaluate(file, imports = {}, globals = {}, suffix = '') {
   const module = {exports:{}};
-  vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:'ts',format:'cjs'}).code,
+  const exactInput=fs.readFileSync(file,'utf8')+'\n'+suffix,transformed=transformSync(exactInput,{loader:'ts',format:'cjs'}).code;
+  if(process.argv.includes('--boot-performance-resident-only')){const directory=path.join(process.argv[2],'evaluated-inputs');fs.mkdirSync(directory,{recursive:true});const serial=String(fs.readdirSync(directory).length/3).padStart(4,'0'),stem=path.join(directory,serial);fs.writeFileSync(stem+'.input.ts',exactInput,{flag:'wx'});fs.writeFileSync(stem+'.output.cjs',transformed,{flag:'wx'});fs.writeFileSync(stem+'.mapping.json',JSON.stringify({file:path.resolve(file),suffix,loader:'ts',format:'cjs'}),{flag:'wx'});}
+  vm.runInNewContext(transformed,
     {module,exports:module.exports,require:n=>{if(n in imports)return imports[n];throw Error('Unexpected import '+n)},console,structuredClone,performance,Date,setTimeout,clearTimeout,TextEncoder,TextDecoder,...globals});
   return module.exports;
+}
+function profileTargetHelpers(){
+ return evaluate('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':evaluate('src/bridge/gamePolicyHysteresis.ts')});
 }
 const models = evaluate('src/bridge/performanceControls.ts');
 const frameModel = evaluate('src/bridge/frameRateModel.ts');
@@ -22,30 +30,52 @@ let settings={rtss:{frameRates:frameModel.frameRatePair({}),future:'KEEP'},perfo
 const source={value:'ac'}, files=new Map(), writes=[], listeners=new Set();
 const sourcePath='C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
 files.set(sourcePath,JSON.stringify({version:1,entries:{},rtss:{}}));
-const frames={...frameModel,ensureGlobalFrameRates:async()=>clone(settings.rtss.frameRates),
+const frames={...frameModel,loadGlobalFrameRates:async()=>settings.rtss.templateDefaults===true?frameModel.frameRatePair(null,deviceTemplate==='desktop'?200:120,60):frameModel.frameRatePair(settings.rtss.frameRates),ensureGlobalFrameRates:async()=>settings.rtss.templateDefaults===true?frameModel.frameRatePair(null,deviceTemplate==='desktop'?200:120,60):frameModel.frameRatePair(settings.rtss.frameRates),
   applyIndependentFrameRates:async()=>{writes.push({kind:'fps'});return true},publishFrameRatesChanged(){}};
 const target={getPolicyGame:()=>game,detectPolicyGame:async()=>game,gamePolicyKey:g=>(g.path||g.name).split(/[\\/]/).pop().toLowerCase(),isPolicyTargetCurrent:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated};
-const repository={loadSettings:async()=>clone(settings),SETTINGS_FILE:'C:\\SOFT\\YeMan\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
+const repository={loadSettings:async()=>{ownerReads.settings++;return clone(settings)},SETTINGS_FILE:'C:\\SOFT\\YeMan\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
   getSettingsSectionRevision:key=>{const json=JSON.stringify(settings[key]||{});if(json!==sectionJson){sectionJson=json;++sectionRevision}return sectionRevision},
   readSettingsSection:async key=>{ownerReads.settings++;return clone(settings[key]||{})},mergeSettings:(a,b)=>({...a,...b}),
   saveSettingsSection:async(key,value)=>{if(failSave)throw Error('disk full');settings[key]=clone(value)},replaceSettingsSection:async(key,value)=>{settings[key]=clone(value)},
   updateSettings:async mutate=>{const next=clone(settings);mutate(next);if(failSave)throw Error('disk full');settings=next;afterSettingsCommit?.()}};
-const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:async()=>side,detectPowerModeReliable:async()=>{ownerReads.source++;return side},ensureRememberedYemanSchemeActive:async()=>{},
+const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:async()=>side,detectPowerModeReliable:async()=>{ownerReads.source++;return side},ensureRememberedYemanSchemeActive:async()=>{},ensureSelectedPowerScheme:async(_scheme,checkpoint)=>{checkpoint?.();},
   getTdpHardwareMinimum:()=>2,getTdpHardwareMaximum:()=>150,getTdpExecutionCapability:async()=>({selected:'fixture'}),
   detectCoreArchitecture:async()=>({heterogeneous:true}),PW:{YEMAN:'test-yeman'},getActiveScheme:async()=> 'test-yeman',setActiveScheme:async()=>{},
   setCoreModeAc:async mode=>writes.push({kind:'core',side:'ac',mode}),setCoreModeDc:async mode=>writes.push({kind:'core',side:'dc',mode}),
   setTdp:async(s,w,opts={})=>{if(tdpWriteMode==='throw')throw Error('TDP transport unavailable');if(tdpWriteMode!=='none')opts.onAccepted?.(Math.min(acceptedLimit,w));writes.push({kind:'tdp',side:s,w});if(flipOnTdp){side='dc';source.value='dc';flipOnTdp=false}return tdpWriteMode!=='false'},
   applyManualPowerParams:async p=>{writes.push({kind:'cpu',...clone(p)});return true},applyCpuProfilePowerParams:async()=>{},rebuildYemanScheme:async()=>{},setRtssLimit:async()=>{},readRtssLimit:async()=>120};
-const schedule=evaluate('src/bridge/performanceSchedule.ts',{
+let realFloatBackend=null;
+function freshSchedule(){return evaluate(serviceSource,{
  './controllerPersona':evaluate('src/bridge/controllerPersona.ts'),
+ './bootModeGlobalPreferences':evaluate('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':evaluate('src/bridge/inputConfigHash.ts'),'./settingsBaseline':evaluate('src/bridge/settingsBaseline.ts',{'../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync('PowerControl/settings-baseline.json','utf8'))})}),
   './performanceControls':models,'./powerSource':{powerSourceMode:source},'./gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:true,smtAvailable:true}),applyGameCorePolicy:async(t,m,h)=>{writes.push({kind:'smt',pid:t.pid,h});return {ok:true,applied:true}}},
   './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>{ownerReads.files++;return files.get(p)},writeTextFileAtomic:async(p,v)=>{files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
-  './settingsSnapshot':evaluate('src/bridge/settingsSnapshot.ts',{'vue':require('vue')}),'./frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{detectGame:async()=>game,validateGameTarget:async()=>true,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
-  './autofloat':{pauseContinuousFloatForTdpEdit:async()=>{const owner=residentOwner;if(!owner)return null;return {current:()=>residentOwner===owner,accept:(requested,accepted)=>{owner.lastReceipt={requested,accepted}},release(){}}},disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{residentOwner={current,applyCore};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
-},{Date:TestDate});
+  './settingsSnapshot':evaluate('src/bridge/settingsSnapshot.ts',{'vue':require('vue')}),'./frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{isGameStatusCurrent:()=>true,detectGame:async()=>game,validateGameTarget:async()=>true,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
+  './autofloat':realFloatBackend??{pauseContinuousFloatForTdpEdit:async()=>{const owner=residentOwner;if(!owner)return null;return {current:()=>residentOwner===owner,accept:(requested,accepted)=>{owner.lastReceipt={requested,accepted}},release(){}}},disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{residentOwner={current,applyCore};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
+},{Date:TestDate});}
+const schedule=freshSchedule();
+if(process.argv.includes('--boot-preferences-only')){
+ const {runPerformancePreferenceOwners}=await import('./boot_modes_fixture/performancePreferences.mjs');
+ const out=process.argv[2];if(!out)throw Error('Explicit preference evidence path required');
+ const report=await runPerformancePreferenceOwners({out,schedule,models,frameModel,repository,evaluate,source,target,yeman,freshSchedule,
+  configureTdp:(mode='ack',limit=150)=>{tdpWriteMode=mode;acceptedLimit=limit;},hardwareWrites:()=>writes,
+  configureFloat:backend=>{realFloatBackend=backend;},
+  frameService:frames,
+  configure:(value,epoch,template,policyGame=null)=>{settings=value;generation=epoch;if(template)deviceTemplate=template;side='ac';source.value='ac';game=policyGame;residentOwner=null;},currentSettings:()=>settings});
+ console.log(JSON.stringify({pass:report.pass,actualCases:report.rows.length,scope:'boot-preferences-only'}));process.exit(0);
+}
 const cases=[];
 async function check(name,run){await run();cases.push(name)}
-await check('读取新配置不启用、不写硬件；默认掌机55/30与AC120/DC60',async()=>{const before=JSON.stringify(settings);const s=await schedule.getContinuousPerformanceSnapshot();assert.equal(s.bank.mode,'auto');assert.equal(s.bank.tdp,55);assert.equal(s.frameRates.dc.fps,60);assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,0)});
+await check('读取新配置不启用、不写硬件；默认掌机55/30与AC120/DC60',async()=>{const before=JSON.stringify(settings);const s=await schedule.getContinuousPerformanceSnapshot();assert.equal(s.bank.mode,'auto');assert.equal(s.bank.tdp,55);assert.equal(s.frameRates.dc.fps,60);assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,0);
+ const baseline=clone(await schedule.getContinuousPerformanceSnapshot());const b={...ownerReads};
+ const plain=clone(await schedule.getContinuousPerformanceSnapshot());const plainReads=Object.fromEntries(Object.keys(b).map(k=>[k,ownerReads[k]-b[k]]));const c={...ownerReads},timings=[];
+ const traced=clone(await schedule.getContinuousPerformanceSnapshot('effective',undefined,(stage,elapsedMs)=>{timings.push({stage,elapsedMs});}));
+ assert.deepEqual(traced,plain);assert.deepEqual(plain,baseline);assert.deepEqual(Object.fromEntries(Object.keys(c).map(k=>[k,ownerReads[k]-c[k]])),plainReads);
+ assert.deepEqual(timings.map(x=>x.stage).sort(),['performanceSchedule','performanceGameConfig','performancePowerMode','performanceGame','performanceCore','performanceTdpCapability','performanceCpuProfiles','performanceFrameRates'].sort());
+ assert(timings.every(x=>Number.isFinite(x.elapsedMs)&&x.elapsedMs>=0));let throws=0;
+ const isolated=clone(await schedule.getContinuousPerformanceSnapshot('effective',undefined,()=>{throws++;throw Error('PRIVATE diagnostic unavailable');}));
+ assert.equal(throws,8);assert.deepEqual(isolated,plain);assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,0);
+});
 await check('手动/自动共用当前侧TDP；当前侧CPU写入不污染DC',async()=>{const s=await schedule.getContinuousPerformanceSnapshot();const result=await schedule.updateContinuousPerformanceControls(s.identity,{mode:'manual',tdp:28,manual:{frequencyMHz:3100,aggressiveness:63,turbo:false}});assert.equal(result.bank.tdp,28);assert.equal(result.bank.manual.frequencyMHz,3100);assert.equal(result.controls.dc.tdp,30);const cpu=writes.filter(w=>w.kind==='cpu').at(-1);assert.deepEqual(Array.from(cpu.sides),['ac']);assert.equal(cpu.acMinState,62);assert.equal(cpu.acTurbo,false);const r=await schedule.updateContinuousPerformanceControls(result.identity,{mode:'auto'});assert.equal(r.bank.tdp,28);assert.equal(r.bank.manual.frequencyMHz,3100)});
 await check('无游戏/无GPU/无帧率时手动倾向照常写CPU，最右限制最左放开且不改另一侧',async()=>{
  const before=await schedule.getContinuousPerformanceSnapshot(),prior=clone(before.bank),dc=clone(before.controls.dc);
@@ -66,7 +96,7 @@ if (process.argv.includes('--slider-only')) {
 }
 await check('旧revision与PID复用/切游戏/切电源提交均拒绝',async()=>{let s=await schedule.getContinuousPerformanceSnapshot();await schedule.updateContinuousPerformanceControls(s.identity,{tdp:27});await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));s=await schedule.getContinuousPerformanceSnapshot();side='dc';source.value='dc';await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));side='ac';source.value='ac';s=await schedule.getContinuousPerformanceSnapshot();game={pid:9,processCreated:'1009',name:'a.exe',path:'C:/Games/a.exe'};await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}))});
 await check('专属从全局复制一次，后续两套TDP和CPU参数独立保存',async()=>{const global=await schedule.loadPerformanceSchedule();const controls=schedule.continuousControlsFromSchedule(global);const profile=global.profiles.ac.performance;await schedule.saveGameCustomConfig({version:1,entries:{'a.exe':{enabled:false,displayName:'A',ac:profile,dc:profile,controls,padPersona:'dualsense-edge',gyroOverride:'racing'}},rtss:{}});let dedicated=await schedule.getContinuousPerformanceSnapshot('dedicated');await schedule.updateContinuousPerformanceControls(dedicated.identity,{tdp:18,auto:{bias:75}});const shared=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(shared.identity,{tdp:32});dedicated=await schedule.getContinuousPerformanceSnapshot('dedicated');assert.equal(dedicated.bank.tdp,18);assert.equal(dedicated.bank.auto.bias,75);const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.padPersona,'dualsense-edge');assert.equal(entry.gyroOverride,'racing')});
-await check('仅帧率/SMT不启用未配置性能，不改TDP；SMT只作用识别EXE',async()=>{settings.performanceSchedule={configured:false,enabled:false};let s=await schedule.getContinuousPerformanceSnapshot('global');const before=writes.length;await schedule.updateContinuousPerformanceControls(s.identity,{frameRate:{fps:30,ceiling:45,lastFps:30}});assert.equal(settings.performanceSchedule.configured,false);assert.equal(writes.slice(before).filter(w=>w.kind==='tdp'||w.kind==='cpu').length,0);s=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(s.identity,{hyperThreadMode:'off'});assert.equal(settings.performanceSchedule.configured,false);const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.enabled,false);assert.equal(entry.smtIndependent,true);assert.equal(writes.filter(w=>w.kind==='smt').at(-1).pid,9)});
+await check('仅帧率/SMT不启用未配置性能，不改TDP；公用SMT保存后只作用识别EXE',async()=>{settings.performanceSchedule={configured:false,enabled:false};let s=await schedule.getContinuousPerformanceSnapshot('global');const before=writes.length;await schedule.updateContinuousPerformanceControls(s.identity,{frameRate:{fps:30,ceiling:45,lastFps:30}});assert.equal(settings.performanceSchedule.configured,false);assert.equal(writes.slice(before).filter(w=>w.kind==='tdp'||w.kind==='cpu').length,0);s=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(s.identity,{hyperThreadMode:'off'});assert.equal(settings.performanceSchedule.configured,false);const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.enabled,false);assert.equal(entry.smtIndependent,false);assert.equal(settings.performanceSchedule.hyperThreadPolicy,'off');assert.equal(writes.filter(w=>w.kind==='smt').at(-1).pid,9)});
 await check('FPS/TDP同一事务保存；保存失败不先写硬件或部分提交',async()=>{let s=await schedule.getContinuousPerformanceSnapshot('global');const next=await schedule.updateContinuousPerformanceControls(s.identity,{tdp:24,frameRate:{fps:45,ceiling:60,lastFps:45}});assert.equal(next.bank.tdp,24);assert.equal(next.frameRates.ac.fps,45);const before=JSON.stringify(settings),count=writes.length;failSave=true;await assert.rejects(schedule.updateContinuousPerformanceControls(next.identity,{tdp:22,frameRate:{fps:60,ceiling:60,lastFps:60}}));failSave=false;assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,count)});
 await check('未改动的DC、RTSS扩展字段和其他模块保留',async()=>{assert.equal(settings.other.keep,42);assert.equal(settings.rtss.future,'KEEP');assert.equal(settings.rtss.frameRates.dc.fps,60);assert.equal(settings.performanceSchedule.controls.dc.tdp,30)});
 await check('硬件写TDP期间切电源，不能继续CPU写入旧侧',async()=>{const s=await schedule.getContinuousPerformanceSnapshot('global'),before=writes.length;flipOnTdp=true;await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));assert.equal(writes.slice(before).filter(w=>w.kind==='cpu').length,0);side='ac';source.value='ac'});
@@ -83,7 +113,24 @@ await check('单项五秒验收、未知CPU/Low不授权节能；低帧先撤回
 });
 await check('允许两边相同核心模式；旧专属快照不再引用全局挡位',()=>{const global=schedule.defaultPerformanceScheduleConfig();const entry={ac:clone(global.profiles.ac.eco),dc:clone(global.profiles.dc.eco),acMode:'eco',dcMode:'eco'};entry.ac.tdpMax=11;global.profiles.ac.eco.tdpMax=99;assert.equal(schedule.resolveGameCustomProfiles(entry,global).ac.tdpMax,11);const b=models.defaultContinuousBank('ac');b.auto.coreLow=b.auto.coreHigh='bigOnly';assert.equal(models.continuousCoreAt(b,5),'bigOnly');assert.equal(models.continuousCoreAt(b,50),'bigOnly')});
 await check('设置目录代数变化使旧请求失效',async()=>{const s=await schedule.getContinuousPerformanceSnapshot('global');generation++;await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:25}))});
-await check('非YMCC电源方案只允许专属恢复，不接管全局bank',()=>{const source=fs.readFileSync('src/bridge/performanceSchedule.ts','utf8');assert(source.includes("if (options.dedicatedOnly === true) return 'none';"));});
+await check('旧专属恢复来源不接管全局bank；明确恢复已记忆配置的来源仍可执行',async()=>{
+ const previous={settings:clone(settings),game,side,source:source.value,scheme:yeman.getActiveScheme};
+ try{
+  game=null;side='ac';source.value='ac';yeman.getActiveScheme=async()=> 'external-scheme';
+  const config=await schedule.loadPerformanceSchedule();config.configured=true;config.enabled=true;config.suspended=false;
+  config.controls=schedule.continuousControlsFromSchedule(config);config.controls.ac.mode='auto';
+  await schedule.savePerformanceSchedule(config,{origin:'runtime'});
+  const before=JSON.stringify(settings),count=writes.length;
+  assert.equal(await schedule.restorePerformanceScheduleIfConfigured('ac',{dedicatedOnly:true}),'none');
+  assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,count,'passive dedicated-only recovery wrote the global bank');
+  assert.equal(await schedule.restorePerformanceScheduleIfConfigured('ac',{dedicatedOnly:true,restoreRemembered:true}),'auto');
+  assert(writes.slice(count).some(row=>row.kind==='tdp'),'explicit remembered restore did not reach the existing TDP owner');
+  assert(writes.slice(count).some(row=>row.kind==='cpu'),'explicit remembered restore did not reach the existing CPU owner');
+ }finally{
+  settings=previous.settings;game=previous.game;side=previous.side;source.value=previous.source;yeman.getActiveScheme=previous.scheme;
+  await schedule.loadPerformanceSchedule();
+ }
+});
 await check('手柄自动/手动都写同一连续bank，不嵌套队列且遵守当前滑块上限',async()=>{
  game=null;side='ac';source.value='ac';clockMs+=3100;
  let current=await schedule.getContinuousPerformanceSnapshot('global');
@@ -145,7 +192,7 @@ await check('顶部输入编辑与手柄TDP交错：复现旧整份快照覆盖�
   const cfg=await schedule.loadGameCustomConfig(),script=fs.readFileSync(file,'utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1],tree=createSourceFile('profile.ts',script,ScriptTarget.Latest,true,ScriptKind.TS),names=['clone','makeEntry','captureProfileTarget','saveInputPatch'];
   const funcs=tree.statements.filter(n=>isFunctionDeclaration(n)&&names.includes(n.name?.text)).map(n=>n.getText(tree)).join('\n');
   let expectedTdp=null,interleaved=false;const notices=[];
-  const ui=evaluateSource(funcs+'\nmodule.exports={saveInputPatch}',{toRaw:x=>x,props:{game:clone(game)},key:{value:'a.exe'},busy:{value:false},entry:{value:clone(cfg.entries['a.exe'])},config:{value:clone(cfg)},schedule:{value:await schedule.loadPerformanceSchedule()},gameName:{value:'A'},isPadPersonaOverride:()=>true,isGyroOverride:()=>true,tryAcquireQuickAction:()=>()=>{},currentVirtualTargetPolicy:()=>null,requireVirtualTargetAllowed:()=>{},getSettingsGeneration:()=>generation,loadPerformanceSchedule:schedule.loadPerformanceSchedule,loadGameCustomConfig:schedule.loadGameCustomConfig,saveGameCustomConfig:schedule.saveGameCustomConfig,patchGameCustomProfile:schedule.patchGameCustomProfile,syncInputState:()=>{},announce:(...args)=>notices.push(args),emit:()=>{},getContinuousPerformanceSnapshot:async scope=>{const snapshot=await schedule.getContinuousPerformanceSnapshot(scope);if(!interleaved){interleaved=true;clockMs+=3100;const result=await schedule.adjustContinuousPerformanceTdp(1);assert.equal(result.applied,true);expectedTdp=result.tdp;}return snapshot;}});
+  const ui=evaluateSource(funcs+'\nmodule.exports={saveInputPatch}',{...profileTargetHelpers(),toRaw:x=>x,props:{game:clone(game)},key:{value:'a.exe'},busy:{value:false},entry:{value:clone(cfg.entries['a.exe'])},config:{value:clone(cfg)},schedule:{value:await schedule.loadPerformanceSchedule()},gameName:{value:'A'},isPadPersonaOverride:()=>true,isGyroOverride:()=>true,tryAcquireQuickAction:()=>()=>{},currentVirtualTargetPolicy:()=>null,requireVirtualTargetAllowed:()=>{},getSettingsGeneration:()=>generation,loadPerformanceSchedule:schedule.loadPerformanceSchedule,loadGameCustomConfig:schedule.loadGameCustomConfig,saveGameCustomConfig:schedule.saveGameCustomConfig,patchGameCustomProfile:schedule.patchGameCustomProfile,syncInputState:()=>{},announce:(...args)=>notices.push(args),emit:()=>{},getContinuousPerformanceSnapshot:async scope=>{const snapshot=await schedule.getContinuousPerformanceSnapshot(scope);if(!interleaved){interleaved=true;clockMs+=3100;const result=await schedule.adjustContinuousPerformanceTdp(1);assert.equal(result.applied,true);expectedTdp=result.tdp;}return snapshot;}});
   await ui.saveInputPatch({gyroOverride:'fps',padPersona:'dualsense-edge'},'saved');const saved=await schedule.loadGameCustomConfig();return {saved,expectedTdp,notices};
  }
  function evaluateSource(source,globals){const module={exports:{}};vm.runInNewContext(transformSync(source,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,...globals});return module.exports;}
@@ -155,7 +202,7 @@ await check('顶部输入编辑与手柄TDP交错：复现旧整份快照覆盖�
  fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'profile-input-hotkey-interleave.json'),JSON.stringify({pass:true,before,after:{tdpAfterHotkey:after.expectedTdp,savedTdp:a.controls.ac.tdp,padPersona:a.padPersona,gyroOverride:a.gyroOverride,otherPerformanceFieldsPreserved:true,framesPreserved:true}},null,2));
 });
 await check('专属字段事务只接收输入/启用字段，过期PID/设置代次/启用状态均拒绝，创建与回滚不覆盖性能',async()=>{
- const target={exe:'a.exe',pid:game.pid,processCreated:String(game.processCreated),generation},before=await schedule.loadGameCustomConfig(),controls=clone(before.entries['a.exe'].controls);
+ const target=profileTargetHelpers().captureGameCustomProfileTarget(game,generation),before=await schedule.loadGameCustomConfig(),controls=clone(before.entries['a.exe'].controls);
  await assert.rejects(schedule.patchGameCustomProfile(target,{controls}));await assert.rejects(schedule.patchGameCustomProfile(target,{padPersona:'invalid'}));await assert.rejects(schedule.patchGameCustomProfile(target,{enabled:'false'}));assert.deepEqual(clone((await schedule.loadGameCustomConfig()).entries['a.exe'].controls),controls);
  game={...game,processCreated:'reused'};await assert.rejects(schedule.patchGameCustomProfile(target,{padPersona:'elite'}));game={...game,processCreated:target.processCreated};generation++;await assert.rejects(schedule.patchGameCustomProfile(target,{padPersona:'elite'}));generation--;
  await schedule.patchGameCustomProfile(target,{enabled:false},undefined,{expectedEnabled:true});await assert.rejects(schedule.patchGameCustomProfile(target,{enabled:false},undefined,{expectedEnabled:true}));

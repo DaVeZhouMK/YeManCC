@@ -9,6 +9,7 @@
 #include <thread>
 #include <utility>
 #include "http_request_deadline.h"
+#include "sleep_power_revocation.h"
 #include "fan_response_contract.h"
 // Meter only real parent handle setup/retirement; request and callbacks stay real WinHTTP.
 int sessionSetups=0,connectionSetups=0,parentCloses=0;
@@ -31,6 +32,17 @@ std::uint64_t fixtureOwnerRevision=1;
 struct FixtureSelection {std::uint64_t revision()const{return fixtureOwnerRevision;}};
 FixtureSelection& fanKeepaliveProcessSelection(){static FixtureSelection selection;return selection;}
 std::atomic<bool> g_fanLeaseKeepaliveStop{false},g_exitRequested{false};
+std::atomic<bool> sharedPowerKnown{true},sharedPowerPending{false},sharedDiagnosticPublication{false};
+std::atomic<std::uint64_t> sharedPublication{1};
+ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+[[maybe_unused]] static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes)noexcept{
+ if(!sharedPowerKnown.load()||bytes<sizeof(*out))return 0;*out={};out->generation=1;out->suspendSerial=1;out->observedNotificationSequence=1;
+ out->publicationRevision=sharedDiagnosticPublication.load()?sharedPublication.fetch_add(1):sharedPublication.load();
+ out->flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed|(sharedPowerPending.load()?ymcc::sleeppower::kNotificationPending:0u);return 1;
+}
+[[maybe_unused]] static unsigned long long currentFanPowerGeneration(){return 1;}
+[[maybe_unused]] static bool fanHostPowerMayWrite(){return sharedPowerKnown.load()&&!sharedPowerPending.load();}
+[[maybe_unused]] static bool fanHostPowerMayResume(){return fanHostPowerMayWrite();}
 struct FixtureMonitor {ULONGLONG epoch(){return 1;}void observe(ULONGLONG,DWORD,const json&,long long){++displayObserved;}} g_monitorFanDisplay;
 std::string fanHostReadSessionToken(){++credentialReads;return fixtureCase=="missing-token"?std::string{}:"fixture-token-"+fixtureCase;}
 bool fanHostExactProcessRunning(){++identityReads;return fixtureCase!="wrong-identity";}
@@ -53,6 +65,10 @@ int main(int argc,char** argv){
  if(fixtureCase=="cancel-headers"||fixtureCase=="cancel-body"||fixtureCase=="exit-body"){
   cancel=std::thread([]{Sleep(80);if(fixtureCase=="exit-body")g_exitRequested=true;else g_fanLeaseKeepaliveStop=true;});
  }
+ if(fixtureCase=="shared-pending")sharedPowerPending=true;
+ if(fixtureCase=="shared-unknown"||fixtureCase=="shared-unknown-then-current")sharedPowerKnown=false;
+ if(fixtureCase=="shared-publication")sharedDiagnosticPublication=true;
+ if(fixtureCase=="shared-cancel-body")cancel=std::thread([]{Sleep(80);g_sharedPowerRevocations.revoke();});
  std::string lease="must-be-cleared",code="must-be-cleared";DWORD status=999;
  bool ok=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);
  const std::string scenario=fixtureCase;int acceptedCalls=ok?1:0;bool lastCallOk=ok;bool middleRefusalClearedLease=false;
@@ -71,6 +87,7 @@ int main(int argc,char** argv){
  if(cancel.joinable())cancel.join();
  const auto elapsed=GetTickCount64()-began;
  bool retryOk=false;
+ if(fixtureCase=="shared-unknown-then-current"){sharedPowerKnown=true;fixtureCase="normal";retryOk=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);}
  if(fixtureCase=="slow-body"){fixtureCase="normal";retryOk=fanLeaseKeepalivePostHeartbeat("fixture-lease-0001",&lease,&status,&code);}
  std::cout<<json{{"ok",ok},{"elapsed",elapsed},{"lease",lease},{"code",code},{"status",status},{"authRejected",authRejected},{"headerFailed",headerFailed},{"displayObserved",displayObserved},{"retryOk",retryOk},{"acceptedCalls",acceptedCalls},{"lastCallOk",lastCallOk},{"credentialReads",credentialReads},{"identityReads",identityReads},{"sessionSetups",sessionSetups},{"connectionSetups",connectionSetups},{"parentCloses",parentCloses},{"middleRefusalClearedLease",middleRefusalClearedLease}}.dump()<<"\n";
  return 0;

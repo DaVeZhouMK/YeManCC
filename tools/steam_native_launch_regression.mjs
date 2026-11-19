@@ -11,7 +11,7 @@ export function nativeLaunchTests(root,evidence,{noIoFixture,expectedFixtureSha2
   ['replayed-boot','core','if(state.bootConsumed){','if(false&&state.bootConsumed){','one boot start is consumed across helper and YMCC restart'],
   ['running-reopened','core','if(presence.steam>0){','if(false&&presence.steam>0){','running Steam has no startup args/addons/mode URI'],
   ['early-second-start','core','now-state.dispatchedAt<40000','now-state.dispatchedAt<20000','logon second request before 40s stays fenced across fresh consumer'],
-  ['manual-timed-ban','core','if(origin==Origin::Logon && state.dispatched &&','if(state.dispatched &&','failed manual primary and fallback do not impose a timed retry ban'],
+  ['manual-timed-ban','core','if(origin!=Origin::Manual && state.dispatched &&','if(state.dispatched &&','failed manual primary and fallback do not impose a timed retry ban'],
   ['ambiguous-primary-replayed','core','if(primary!=SteamSpawnOutcome::NotCreated&&primary!=SteamSpawnOutcome::OwnedChildDestroyed)return false;','if(false)return false;','ambiguous primary never gets a fallback'],
   ['fallback-ignores-absence','core','if(!io.manualSteamFallbackAllowed(executable))return false;','if(false)return false;','Steam reappearing before fallback prevents replay'],
   ['css-linked-twice','windows','basename==L"cssloader-standalone-headless.exe"','false','actual addon parser only accepts enabled paths and excludes CSS aliases']

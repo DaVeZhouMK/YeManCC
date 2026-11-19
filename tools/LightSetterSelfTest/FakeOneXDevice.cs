@@ -70,8 +70,12 @@ namespace HandheldCompanion.Devices
   public HidLibrary.HidDevice Hid=>hidDevice!;
   public int HidWriteAttempts;
   public void ForgetHid()=>hidDevice=null;
-  public virtual bool SetLedBrightness(int value)=>WriteLighting();
-  public virtual bool SetLedColor(System.Windows.Media.Color main,System.Windows.Media.Color second,FakeLed level,int speed)=>WriteLighting();
+  public bool BrightnessOk=true, ColorOk=true;
+  public List<(string Command,long Tick,int Value)> LightingCommands {get;}=[];
+  public virtual bool SetLedBrightness(int value)
+  {LightingCommands.Add(("brightness",System.Diagnostics.Stopwatch.GetTimestamp(),value));return WriteLighting() && BrightnessOk;}
+  public virtual bool SetLedColor(System.Windows.Media.Color main,System.Windows.Media.Color second,FakeLed level,int speed)
+  {LightingCommands.Add(("color",System.Diagnostics.Stopwatch.GetTimestamp(),(int)level));return WriteLighting() && ColorOk;}
   private bool WriteLighting(){if(hidDevice?.IsConnected is not true)return false;HidWriteAttempts++;if(hidDevice.ThrowWrite)throw new IOException("Injected AOKZOE HID failure");return !hidDevice.FailWrite;}
  }
  public class AOKZOEA1Pro : AOKZOEA1 { }

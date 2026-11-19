@@ -34,6 +34,12 @@ public static unsafe class InProcessEntry
     }
 
     [UnmanagedCallersOnly(CallConvs=new[]{typeof(CallConvCdecl)})]
+    public static void NotifySystemPower()
+    {
+        try{runtime.NotifySystemPower();}catch{ /* Notifications never cross the ABI with an exception. */ }
+    }
+
+    [UnmanagedCallersOnly(CallConvs=new[]{typeof(CallConvCdecl)})]
     public static void Free(byte* memory)
     {
         try{if(memory!=null)Marshal.FreeHGlobal((nint)memory);}catch{ /* No managed exception may cross the ABI. */ }
@@ -49,6 +55,35 @@ internal sealed class InProcessRuntime
     readonly object stateGate=new(),operationGate=new();
     readonly Func<string,string,Func<bool>,Func<(bool Present,bool Ac,int? Percent)>,HostDomainRouter> createDomains;
     readonly NativePowerReader powerReader=new();
+    readonly NativeSystemPowerReader systemPowerReader=new();
+    readonly bool useSharedSystemPower;
+    readonly Action<Action> queueSystemPower;
+    sealed record PowerAdmission(ulong Generation,ulong Revision,ulong SuspendSerial,ulong NotificationSequence);
+    volatile PowerAdmission? powerAdmission;
+    ulong highestSystemRevision,completedSuspendSerial;
+    bool pauseCompleted;
+    int systemWorkQueued,systemWorkVersion,monitoring;
+    readonly object systemWorkGate=new();
+    int systemWorkOutstanding,systemWorkRunning;
+    internal int SystemPowerWorkOutstanding{get{lock(systemWorkGate)return systemWorkOutstanding;}}
+    internal int SystemPowerWorkRunning{get{lock(systemWorkGate)return systemWorkRunning;}}
+    bool WaitSystemPowerWork(TimeSpan timeout)
+    {
+        long until=Environment.TickCount64+(long)timeout.TotalMilliseconds;
+        lock(systemWorkGate)
+        {
+            while(systemWorkOutstanding!=0)
+            {
+                long left=until-Environment.TickCount64;if(left<=0)return false;
+                Monitor.Wait(systemWorkGate,TimeSpan.FromMilliseconds(left));
+            }
+            return true;
+        }
+    }
+    NativeRequestOwner? requestOwner;
+    internal bool RequestOwnerCurrent()=>requestOwner?.Current()??true;
+    void RequireRequestOwner(){if(!RequestOwnerCurrent())throw new IOException("BOOT_CHARGE_REQUEST_EXPIRED");}
+    bool DomainReady()=>Ready()&&RequestOwnerCurrent();
     readonly bool requiresNativePowerReader;
     readonly Func<Action,TimeSpan,IDisposable> schedule;
     readonly Func<Action<PowerModes>,Action,IDisposable> subscribe;
@@ -65,7 +100,8 @@ internal sealed class InProcessRuntime
         Func<Action,TimeSpan,IDisposable>? schedule=null,
         Func<Action<PowerModes>,Action,IDisposable>? subscribe=null,TimeSpan? shutdownTimeout=null,
         Func<IDisposable>? acquireOwner=null,
-        Func<string,string,Func<bool>,Func<(bool Present,bool Ac,int? Percent)>,HostDomainRouter>? createPowerDomains=null)
+        Func<string,string,Func<bool>,Func<(bool Present,bool Ac,int? Percent)>,HostDomainRouter>? createPowerDomains=null,
+        bool? useSharedSystemPower=null,Action<Action>? queueSystemPower=null)
     {
         // Legacy fixtures replace all facts themselves. Production and shared
         // reader fixtures must bind before owner acquisition or domain creation.
@@ -73,12 +109,14 @@ internal sealed class InProcessRuntime
         requiresNativePowerReader=createDomains is null||createPowerDomains is not null;
         this.acquireOwner=acquireOwner??(()=>InProcessOwnerLease.Acquire());
         this.schedule=schedule??((tick,interval)=>new System.Threading.Timer(_=>tick(),null,interval,interval));
-        this.subscribe=subscribe??((power,ending)=>new PowerSubscription(power,ending));
+        this.useSharedSystemPower=useSharedSystemPower??(createDomains is null&&createPowerDomains is null);
+        this.queueSystemPower=queueSystemPower??(work=>{if(!ThreadPool.QueueUserWorkItem(static value=>((Action)value!).Invoke(),work))throw new IOException("公共睡眠任务未排入线程池");});
+        this.subscribe=subscribe??((_,ending)=>new PowerSubscription(ending));
         this.shutdownTimeout=shutdownTimeout??ShutdownTimeout;
         if(this.shutdownTimeout<TimeSpan.Zero||this.shutdownTimeout>ShutdownTimeout)throw new ArgumentOutOfRangeException(nameof(shutdownTimeout));
     }
 
-    static HostDomainRouter CreateDomains(string powerRoot,string stateRoot,Func<bool> ready,
+    HostDomainRouter CreateDomains(string powerRoot,string stateRoot,Func<bool> ready,
         Func<(bool Present,bool Ac,int? Percent)> power)
     {
         TraceLog.Configure(stateRoot);
@@ -86,8 +124,8 @@ internal sealed class InProcessRuntime
         TraceLog.Write("in-process-start",new {identity.Manufacturer,identity.BoardProduct,identity.SystemProduct,identity.Processor,identity.Bios,identity.EcMajor,identity.EcMinor,
             powerRoot,stateRoot,pollingIntervalMs=(int)PollingInterval.TotalMilliseconds},true);
         return new HostDomainRouter(
-            ()=>new Controller(identity,new Store(stateRoot),route=>Providers.Open(route,powerRoot),power,ready),
-            domainReady=>new SecondaryDisplayController(identity,new Store(stateRoot),ready:domainReady),ready);
+            ()=>new Controller(identity,new Store(stateRoot,RequestOwnerCurrent),route=>Providers.Open(route,powerRoot),power,ready,RequestOwnerCurrent),
+            domainReady=>new SecondaryDisplayController(identity,new Store(stateRoot,RequestOwnerCurrent),ready:domainReady),ready);
     }
 
     internal byte[] Invoke(ReadOnlyMemory<byte> input)
@@ -135,28 +173,39 @@ internal sealed class InProcessRuntime
         RuntimeContract.Validate(request);
         if(op is not ("get" or "refresh" or "release" or "set" or "restore" or
             "secondaryDisplay.get" or "secondaryDisplay.set" or "secondaryDisplay.toggle" or "secondaryDisplay.release"))throw new IOException("未知进程内操作");
+        var admittedOwner=NativeRequestOwner.Capture(envelope);admittedOwner?.RequireCurrent();
         string power=Root(envelope,"powerRoot"),state=Root(envelope,"stateRoot");
         lock(stateGate)
         {
             RequireRunning();CheckRoots(power,state);powerReader.Bind(envelope,requiresNativePowerReader);
+            if(useSharedSystemPower)systemPowerReader.Bind(envelope);
             powerRoot??=power;stateRoot??=state;
         }
         lock(operationGate)
         {
-            RequireRunning();
+            requestOwner=admittedOwner;
+            try
+            {
+            RequireRequestOwner();RequireRunning();
             // WindowsFacts/WMI and all domain locks stay outside stateGate so
             // shutdown can seal immediately even if an operation never returns.
+            ReconcileSystemPower();
+            if(useSharedSystemPower&&domains is null&&!Ready())throw new IOException("公共睡眠层尚未就绪，未创建设备域");
             owner??=acquireOwner();
             RequireRunning();
-            domains??=createDomains(power,state,()=>!stopped&&!suspended,powerReader.Read);
+            RequireRequestOwner();
+            domains??=createDomains(power,state,DomainReady,powerReader.Read);
             RequireRunning();
             StartMonitoring();
             RequireRunning();
             var result=domains.Dispatch(request);
-            RequireRunning(); // A slow admitted WMI read cannot publish a stopped generation.
+            RequireRequestOwner();RequireRunning(); // A slow admitted WMI read cannot publish a stopped or expired request.
+            if(useSharedSystemPower&&!Ready())throw new IOException("公共睡眠代次已变化，旧请求结果未发布");
             if(result is Snapshot battery)TraceLog.Result(op,battery);
             else if(result is SecondaryDisplaySnapshot display)TraceLog.SecondaryDisplayResult(op,display);
             return result;
+            }
+            finally{requestOwner=null;} // Cleared under operationGate before native Invoke returns.
         }
     }
 
@@ -173,7 +222,8 @@ internal sealed class InProcessRuntime
         try
         {
             RequireRunning();var scheduled=schedule(Tick,PollingInterval);
-            lock(stateGate){timer=scheduled;RequireRunning();}
+            lock(stateGate){timer=scheduled;RequireRunning();Volatile.Write(ref monitoring,1);}
+            if(useSharedSystemPower)NotifySystemPower();
         }
         catch
         {
@@ -207,13 +257,14 @@ internal sealed class InProcessRuntime
     internal void Tick()
     {
         // Do not queue overlapping/late timer callbacks behind slow WMI.
-        if(stopped||suspended||!Monitor.TryEnter(operationGate))return;
-        try{if(!stopped&&!suspended)domains?.Tick();}
+        if(stopped||(!useSharedSystemPower&&suspended)||!Monitor.TryEnter(operationGate))return;
+        try{if(!stopped){ReconcileSystemPower();if(Ready())domains?.Tick();}}
         catch(Exception error){TraceLog.Error("in-process-tick-error",error);}
         finally{Monitor.Exit(operationGate);}
     }
     internal void PowerChanged(PowerModes mode)
     {
+        if(useSharedSystemPower){NotifySystemPower();return;} // Legacy injected fixtures only; production has no OS power subscription.
         if(stopped)return;
         if(mode==PowerModes.Suspend)suspended=true;
         try
@@ -228,16 +279,96 @@ internal sealed class InProcessRuntime
         catch(Exception error){TraceLog.Error("in-process-power-error",error);}
     }
 
+    bool Ready()
+    {
+        if(stopped||suspended)return false;
+        if(!useSharedSystemPower)return true;
+        var admitted=powerAdmission;if(admitted is null)return false;
+        var current=systemPowerReader.Read();
+        return current.Ready&&current.Generation==admitted.Generation&&current.SuspendSerial==admitted.SuspendSerial&&
+            current.ObservedNotificationSequence==admitted.NotificationSequence&&
+            current.PublicationRevision>=Math.Max(admitted.Revision,highestSystemRevision);
+    }
+    // Called only under operationGate. Public revocation is checked directly by
+    // Ready even while this consumer waits behind slow WMI; no OS Resume grants permission.
+    void ReconcileSystemPower()
+    {
+        if(!useSharedSystemPower||stopped)return;
+        var current=systemPowerReader.Read();
+        if(current.Valid&&current.PublicationRevision>highestSystemRevision)highestSystemRevision=current.PublicationRevision;
+        if(!current.Known||current.PublicationRevision<highestSystemRevision)
+        {
+            suspended=true;
+            if(!pauseCompleted){domains?.Suspend();pauseCompleted=true;}
+            return;
+        }
+        highestSystemRevision=current.PublicationRevision;
+        var previous=powerAdmission;
+        bool changed=previous is not null&&(previous.Generation!=current.Generation||previous.SuspendSerial!=current.SuspendSerial);
+        if(!current.Ready||changed)
+        {
+            suspended=true;
+            if(!pauseCompleted||completedSuspendSerial!=current.SuspendSerial)
+            {
+                pauseCompleted=false;domains?.Suspend();
+                completedSuspendSerial=current.SuspendSerial;pauseCompleted=true;
+            }
+        }
+        if(!current.Ready)return;
+        bool resume=suspended&&pauseCompleted;
+        powerAdmission=new(current.Generation,current.PublicationRevision,current.SuspendSerial,current.ObservedNotificationSequence);
+        suspended=false;
+        // Cleanup may have blocked. Never resume from its earlier snapshot.
+        if(!Ready()){suspended=true;return;}
+        if(resume)domains?.Resume();
+        pauseCompleted=false;
+    }
+    internal bool SystemPowerWorkPending=>Volatile.Read(ref systemWorkQueued)!=0;
+    internal void NotifySystemPower()
+    {
+        if(stopped||!useSharedSystemPower)return;
+        Interlocked.Increment(ref systemWorkVersion);
+        ScheduleSystemPower();
+    }
+    void ScheduleSystemPower()
+    {
+        lock(systemWorkGate)
+        {
+            if(stopped||Volatile.Read(ref monitoring)==0||systemWorkQueued!=0)return;
+            systemWorkQueued=1;systemWorkOutstanding++;
+        }
+        try{queueSystemPower(DrainSystemPower);}
+        catch{lock(systemWorkGate){systemWorkQueued=0;systemWorkOutstanding--;Monitor.PulseAll(systemWorkGate);}} // Next public event/request/60s tick can reconcile; never block native delivery.
+    }
+    void DrainSystemPower()
+    {
+        lock(systemWorkGate)systemWorkRunning++;
+        int observed=Volatile.Read(ref systemWorkVersion);
+        try{lock(operationGate){if(!stopped)ReconcileSystemPower();}}
+        catch(Exception error){TraceLog.Error("in-process-system-power-error",error);}
+        finally
+        {
+            try
+            {
+                lock(systemWorkGate)systemWorkQueued=0;
+                if(!stopped&&observed!=Volatile.Read(ref systemWorkVersion))ScheduleSystemPower();
+            }
+            finally{lock(systemWorkGate){systemWorkRunning--;systemWorkOutstanding--;Monitor.PulseAll(systemWorkGate);}}
+        }
+    }
+
     internal object Shutdown()
     {
         Task<string?> pending;
         lock(stateGate)
         {
-            stopped=true;suspended=true;powerReader.Stop();
+            lock(systemWorkGate){stopped=true;suspended=true;Volatile.Write(ref monitoring,0);}
+            powerReader.Stop();systemPowerReader.Stop();
             if(cleanup is null||cleanup.IsCompleted&&(cleanup.IsFaulted||cleanup.IsCanceled||cleanup.Result is not null))
                 cleanup=Task.Run(Cleanup);
             pending=cleanup;
         }
+        long waitStart=Environment.TickCount64;
         bool completed;
         try{completed=pending.Wait(shutdownTimeout);}catch{completed=true;}
         string? cleanupError=null;
@@ -246,6 +377,10 @@ internal sealed class InProcessRuntime
             try{cleanupError=pending.GetAwaiter().GetResult();}
             catch(Exception error){cleanupError=error.Message;}
         }
+        // Never wait for a pool callback while holding operationGate: it may need that gate to return.
+        var left=TimeSpan.FromMilliseconds(Math.Max(0,shutdownTimeout.TotalMilliseconds-(Environment.TickCount64-waitStart)));
+        bool workDrained=WaitSystemPowerWork(left);
+        completed=completed&&workDrained;
         // Controller.Shutdown can retain unresolved restoration debt internally.
         // Its return is never proof of hardware restoration or journal deletion.
         return new {ok=completed&&cleanupError is null,execution="in-process",stopped=true,
@@ -274,15 +409,12 @@ internal sealed class InProcessRuntime
 
     sealed class PowerSubscription : IDisposable
     {
-        readonly PowerModeChangedEventHandler power;
         readonly SessionEndingEventHandler ending;
-        public PowerSubscription(Action<PowerModes> onPower,Action onEnding)
+        public PowerSubscription(Action onEnding)
         {
-            power=(_,e)=>onPower(e.Mode);ending=(_,_)=>onEnding();
-            SystemEvents.PowerModeChanged+=power;
-            try{SystemEvents.SessionEnding+=ending;}catch{SystemEvents.PowerModeChanged-=power;throw;}
+            ending=(_,_)=>onEnding();SystemEvents.SessionEnding+=ending;
         }
-        public void Dispose(){try{SystemEvents.PowerModeChanged-=power;}finally{SystemEvents.SessionEnding-=ending;}}
+        public void Dispose(){SystemEvents.SessionEnding-=ending;}
     }
 }
 

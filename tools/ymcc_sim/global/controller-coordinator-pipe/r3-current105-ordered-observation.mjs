@@ -5,10 +5,23 @@ import {createHash} from 'node:crypto';
 const hashSource=bytes=>createHash('sha256').update(bytes).digest('hex');
 const planBytes=fs.readFileSync(new URL('./r3-current105-source-order.json',import.meta.url));if(hashSource(planBytes)!=='9ce43009e475c3bc935f2698ed7febeabce9958e58176d87b2003625bae431f1')throw Error('CURRENT_ORDERED_SOURCE_PLAN_CHANGED');const sealed=JSON.parse(planBytes.toString('utf8'));
 const need=(value,code)=>{if(!value)throw Error('CURRENT_ORDERED_'+code);};
-export function currentOrderedPlan(){return structuredClone(sealed.occurrences);}
-export function observeCurrentOrderedReport(report){
- const expected=currentOrderedPlan();
- need(sealed.kind==='STATIC_SOURCE_PROJECTION_NOT_NATIVE_EXECUTION','STATIC_PLAN_LABEL_REQUIRED');
+const terminal26Contract='current105-terminal26-sdk-lifetime-compact-v1';
+const terminal26File=new URL('./r3-terminal26-runtime-expectations.json',import.meta.url);
+const terminal26Sha256='42a59c8226fb5852cd7d19b57fd9b1036cfe26d4e1482f84252df993f5325842';
+let terminal26Sealed;
+function terminal26Data(){
+ if(!terminal26Sealed){const bytes=fs.readFileSync(terminal26File);need(hashSource(bytes)===terminal26Sha256,'TERMINAL26_CONTRACT_CHANGED');const value=JSON.parse(bytes.toString('utf8'));need(value.kind==='EXACT_TERMINAL26_SOFTWARE_RUNTIME_EXPECTATIONS'&&value.managedInputContract===terminal26Contract&&value.publicRuntimeAccepted===false&&value.sourceApprovalGranted===false,'TERMINAL26_SCOPE_REQUIRED');terminal26Sealed=value;}
+ return terminal26Sealed;
+}
+function planFor(options={}){
+ const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',terminal26Contract].includes(id),'UNKNOWN_MANAGED_CONTRACT');
+ return id===terminal26Contract?terminal26Data().sourceOrder:sealed;
+}
+export function terminal26RuntimeExpected(role){const wanted=terminal26Data().expectations[role];need(wanted,'TERMINAL26_ROLE_NOT_QUALIFIED');return structuredClone(wanted);}
+export function currentOrderedPlan(options={}){return structuredClone(planFor(options).occurrences);}
+export function observeCurrentOrderedReport(report,options={}){
+ const selected=planFor(options),expected=currentOrderedPlan(options);
+ need(selected.kind==='STATIC_SOURCE_PROJECTION_NOT_NATIVE_EXECUTION','STATIC_PLAN_LABEL_REQUIRED');
  need(Array.isArray(report?.cases)&&report.cases.length===expected.length,'COMPLETE_SOURCE_OCCURRENCES_REQUIRED');
  need(Array.isArray(report.assertionTrace)&&Array.isArray(report.failures),'ORIGINAL_TRACES_REQUIRED');
  const cases=report.cases.map((actual,index)=>{const row=expected[index];need(actual.name===row.name,'SOURCE_ORDER_CHANGED:'+row.sourceOrdinal);need(actual.sourceOrdinal===row.sourceOrdinal&&actual.nameOccurrence===row.nameOccurrence,'CASE_OCCURRENCE_CHANGED:'+row.sourceOrdinal);return {...structuredClone(actual),occurrenceId:row.occurrenceId};});
@@ -27,9 +40,9 @@ export function observeCurrentOrderedReport(report){
  need(failed.length===report.failures.length&&report.failures.every((failure,index)=>{const actual=failed[index];return failure.case===actual.case&&failure.assertion===actual.assertion&&failure.sourceOrdinal===actual.sourceOrdinal&&failure.nameOccurrence===actual.nameOccurrence&&failure.checkIndex===actual.checkIndex;}),'ORIGINAL_FAILURES_CHANGED');
  need(report.status===(failed.length?'FAIL':'PASS'),'STATUS_CONTRADICTS_BUSINESS_ASSERTIONS');
  const boundary=report.orderedReturn?.preTargetReturnBody,post=report.orderedReturn?.postTargetReturnTail;
- need(boundary?.afterSourceOrdinal===sealed.preTargetReturnBodyBoundary&&post?.afterSourceOrdinal===expected.length,'SEPARATE_DEBT_BOUNDARIES_REQUIRED');
+ need(boundary?.afterSourceOrdinal===selected.preTargetReturnBodyBoundary&&post?.afterSourceOrdinal===expected.length,'SEPARATE_DEBT_BOUNDARIES_REQUIRED');
  need(boundary.lastCaseName===expected[boundary.afterSourceOrdinal-1].name&&post.lastCaseName===expected.at(-1).name,'BOUNDARY_CASE_CHANGED');
- need(boundary.checks===assertionTrace.filter(row=>row.sourceOrdinal<=sealed.preTargetReturnBodyBoundary).length&&post.checks===report.checks,'BOUNDARY_CHECK_OFFSET_DIFFERS');
+ need(boundary.checks===assertionTrace.filter(row=>row.sourceOrdinal<=selected.preTargetReturnBodyBoundary).length&&post.checks===report.checks,'BOUNDARY_CHECK_OFFSET_DIFFERS');
  need(typeof boundary.resources?.msiModeDebt==='boolean'&&typeof post.resources?.msiModeDebt==='boolean','OBSERVED_DEBT_VALUES_REQUIRED');
  need(Array.isArray(boundary.nativeEvents)&&Array.isArray(post.nativeEvents),'BOUNDARY_RAW_EVENTS_REQUIRED');
  return {status:'ORDERED_OBSERVATION_ONLY',businessAcceptancePerformed:false,originalStatus:report.status,cases,assertionTrace,failures:structuredClone(report.failures),orderedReturn:structuredClone(report.orderedReturn),observed:{cases:cases.length,uniqueNames:new Set(cases.map(row=>row.name)).size,checks:report.checks},expectedRuntimeChecks:null,expectedOwnedChildren:null,partitionClosureVerified:false};

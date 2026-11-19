@@ -18,6 +18,8 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Windows.Threading;
 
+using YeManCC.SharedSleepPower;
+
 namespace YeManFanHost;
 
 internal static class Program
@@ -1094,6 +1096,7 @@ internal sealed record HostOptions(
     string? FanProvider = null)
 {
     public bool MockZeroHardwareEvidence { get; init; }
+    internal string? SharedPowerBusinessProfile { get; init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -1137,6 +1140,7 @@ internal sealed record HostOptions(
         var msiReadOnlySample = false;
         // HC-SLIM-01 R3 §6.2②：风扇写入 provider 内部选路（缺省 null ⇒ 发布默认 hc）。
         string? fanProvider = null;
+        string? sharedPowerBusinessProfile = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -1268,6 +1272,10 @@ internal sealed record HostOptions(
                     // 只接受 hc/backend；非法值由 RealHcBackend 构造函数 fail-closed 拒绝。
                     fanProvider = Next(args, ref i);
                     break;
+                case "--shared-power-business-profile":
+                    sharedPowerBusinessProfile = Next(args, ref i);
+                    if (sharedPowerBusinessProfile != "native-f5-deadline-v1") throw new ArgumentException("Unknown shared power business profile");
+                    break;
                 case "--help":
                 case "-h":
                     help = true;
@@ -1277,6 +1285,8 @@ internal sealed record HostOptions(
             }
         }
 
+        if (sharedPowerBusinessProfile is not null && parentPid is not > 0)
+            throw new ArgumentException("FAN_SHARED_POWER_PARENT_PID_REQUIRED");
         if (mockZeroHardwareEvidence && (!mockHandshake || realBackend || allowWrites))
             throw new ArgumentException("MOCK_ZERO_HARDWARE_REQUIRES_MOCK_ONLY");
         if (port is < 1024 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
@@ -1288,7 +1298,7 @@ internal sealed record HostOptions(
             if (sessionToken.Length == 0) throw new ArgumentException("Fan Host 会话令牌文件为空", nameof(sessionTokenPath));
         }
         sessionToken ??= Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        return new HostOptions(port, parentPid, parentName, selfTest, allowWrites, hcPath, hcRuntimeRoot, configPath, help, realBackend, mockHandshake, mockHandshake ? mockResumeRebuildDelayMs : 0, mockHandshake ? mockHcOpenHoldMs : 0, mockHandshake && mockNoPublishedSnapshot, mockHandshake && mockHeartbeatLegacyGate, mockHandshake && mockHeartbeatRenewLease, mockHandshake && mockUserControlLegacyGate, mockLoopStopSkipSettle, mockLoopStopClaimVerified, authorizationPath, confirmation, sessionToken, sessionTokenPath, hcCandidateAssembly, hcExpectedSha256, hcDeviceType, asusReadback, successorTakeover, predecessorInstanceId, successorBudgetMs, mockHandshake && mockUiFreeEscalation, msiReadOnlySample, fanProvider) { MockZeroHardwareEvidence = mockZeroHardwareEvidence };
+        return new HostOptions(port, parentPid, parentName, selfTest, allowWrites, hcPath, hcRuntimeRoot, configPath, help, realBackend, mockHandshake, mockHandshake ? mockResumeRebuildDelayMs : 0, mockHandshake ? mockHcOpenHoldMs : 0, mockHandshake && mockNoPublishedSnapshot, mockHandshake && mockHeartbeatLegacyGate, mockHandshake && mockHeartbeatRenewLease, mockHandshake && mockUserControlLegacyGate, mockLoopStopSkipSettle, mockLoopStopClaimVerified, authorizationPath, confirmation, sessionToken, sessionTokenPath, hcCandidateAssembly, hcExpectedSha256, hcDeviceType, asusReadback, successorTakeover, predecessorInstanceId, successorBudgetMs, mockHandshake && mockUiFreeEscalation, msiReadOnlySample, fanProvider) { MockZeroHardwareEvidence = mockZeroHardwareEvidence, SharedPowerBusinessProfile = sharedPowerBusinessProfile };
     }
 
     private static string Next(string[] args, ref int index)
@@ -1367,7 +1377,10 @@ internal sealed class HostDiagnosticLog
     private readonly Dictionary<string, (long TickMs, string State)> pollingSuccessLastWrite = new(StringComparer.Ordinal);
     private long runtimeBytes = -1;
     private bool rotationWarningEmitted;
+    private bool writeFailureEvidencePending;
+    private WriteFailureCounter faultWriteFailures, runtimeWriteFailures;
     private Func<object?>? contextProvider;
+    private Func<object?>? powerBoundaryTerminalContextProvider;
 
     /**
      * 裁决 H5（2026-09-19）：**免门**白名单故障事件。日志门是逐次读 flag，门开启前的
@@ -1378,6 +1391,7 @@ internal sealed class HostDiagnosticLog
     private static readonly HashSet<string> GateFreeFaultEvents = new(StringComparer.Ordinal)
     {
         "oem.power-boundary", "oem.power-boundary-summary", "oem.power-hook-unavailable",
+        "power.remote-resource-settlement", // One terminal receipt per exact import; never polling.
         "power.fault-locked",
         "power.awaiting-close-cleanup",
         "recovery.retry-terminal",
@@ -1404,6 +1418,7 @@ internal sealed class HostDiagnosticLog
         "hc.fan-dispatch-failure-retired",
         "hc.fan-dispatch-cancelled",
         "hc-operation.write-cancelled",
+        "hc-abandoned-device-open.detected", // First observation per detected episode, not every sample.
         "temperature.monitor-stale-retired",
         "hc.timeout-returned-retired",
         "auth.rejected",
@@ -1600,6 +1615,7 @@ internal sealed class HostDiagnosticLog
     public string Path => path;
 
     public void SetContextProvider(Func<object?> provider) => contextProvider = provider;
+    internal void SetPowerBoundaryTerminalContextProvider(Func<object?> provider) => powerBoundaryTerminalContextProvider = provider;
 
     /** 日志门当前是否开启（flag 缺失/内容非显式真值 ⇒ 关）。 */
     private bool IsGateEnabledUnlocked()
@@ -1769,6 +1785,22 @@ internal sealed class HostDiagnosticLog
 
     public void Write(string eventName, object? details = null) => WriteCore(eventName, details, null);
 
+    private struct WriteFailureCounter
+    {
+        private long count;
+        private string? lastStage;
+        private int lastHResult;
+
+        internal void Observe(string stage, Exception error)
+        {
+            if (count < long.MaxValue) ++count;
+            lastStage = stage;
+            lastHResult = error.HResult;
+        }
+
+        internal object? Snapshot() => count == 0 ? null : new { count, lastStage, lastHResult };
+    }
+
     private void WriteCore(string eventName, object? details, bool? gateEnabledHint)
     {
         try
@@ -1800,7 +1832,17 @@ internal sealed class HostDiagnosticLog
                 // FAN-931 P1.2：例行成功事件跳过完整上下文构造（实测占这类记录约 80% 字节）。
                 if (!LightweightContextEvents.Contains(eventName))
                 {
-                    try { context = contextProvider?.Invoke(); }
+                    var selectedContextProvider = contextProvider;
+                    if ((eventName is "oem.power-boundary" or "oem.power-boundary-sample") && details is not null &&
+                        powerBoundaryTerminalContextProvider is { } terminalProvider)
+                    {
+                        detailElement ??= JsonSerializer.SerializeToElement(details, JsonDefaults.Options);
+                        if (detailElement is { ValueKind: JsonValueKind.Object } detail &&
+                            detail.TryGetProperty("state", out var boundaryState) &&
+                            boundaryState.ValueKind == JsonValueKind.String && boundaryState.ValueEquals("scope-ended"))
+                            selectedContextProvider = terminalProvider;
+                    }
+                    try { context = selectedContextProvider?.Invoke(); }
                     catch (Exception ex) { context = new { contextError = ex.GetType().Name }; }
                 }
                 var timestampUtc = DateTimeOffset.UtcNow;
@@ -1838,6 +1880,13 @@ internal sealed class HostDiagnosticLog
                 var error = Evidence(detailElement, "error");
                 var timeout = Evidence(detailElement, "timeout");
                 var generation = Evidence(detailElement, "generation");
+                // Snapshot only after a file failure. The capture precedes both sink attempts.
+                var writeFailures = writeFailureEvidencePending ? new
+                {
+                    version = 1,
+                    faultLedger = faultWriteFailures.Snapshot(),
+                    runtime = runtimeWriteFailures.Snapshot(),
+                } : null;
                 var record = new
                 {
                     schemaVersion = SchemaVersion,
@@ -1870,9 +1919,19 @@ internal sealed class HostDiagnosticLog
                     timeout,
                     context,
                     details = (object?)detailElement ?? new { },
+                    logWriteFailureEvidence = writeFailures,
                 };
                 var line = JsonSerializer.Serialize(record, JsonDefaults.Options) + Environment.NewLine;
-                if (gateFreeFault) File.AppendAllText(faultPath, line, Encoding.UTF8);
+                writeFailureEvidencePending = false;
+                if (gateFreeFault)
+                {
+                    try { File.AppendAllText(faultPath, line, Encoding.UTF8); }
+                    catch (Exception failure)
+                    {
+                        faultWriteFailures.Observe("append", failure);
+                        writeFailureEvidencePending = true;
+                    }
+                }
                 if (gateEnabled) AppendRuntimeWithRotation(line, Encoding.UTF8.GetByteCount(line));
             }
         }
@@ -1935,15 +1994,20 @@ internal sealed class HostDiagnosticLog
      */
     private void AppendRuntimeWithRotation(string line, int byteCount)
     {
+        var stage = "active-length";
         try
         {
             if (runtimeBytes < 0) runtimeBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+            stage = "rotation";
             if (runtimeBytes > 0 && runtimeBytes + byteCount > runtimeMaxBytes) RotateRuntimeUnlocked();
+            stage = "append";
             File.AppendAllText(path, line, Encoding.UTF8);
             runtimeBytes += byteCount;
         }
-        catch
+        catch (Exception error)
         {
+            runtimeWriteFailures.Observe(stage, error);
+            writeFailureEvidencePending = true;
             runtimeBytes = -1;
             EmitRotationWarning();
         }
@@ -3343,7 +3407,10 @@ internal sealed partial class RealHcBackend : IDisposable
 
     // FAN-966: immutable producer ownership. The curve reference is opaque and
     // changes only when a new control command commits or control is retired.
-    internal readonly record struct FanDispatchOwner(long GateEpoch, long ControlCycle, object? Curve);
+    internal readonly record struct FanDispatchOwner(long GateEpoch, long ControlCycle, object? Curve)
+    {
+        internal FanRemotePowerScope? PublicPower { get; init; }
+    }
     internal sealed class BoundFanDispatchFailure(Exception cause, FanDispatchOwner owner)
         : Exception(cause.Message, cause)
     {
@@ -3351,9 +3418,12 @@ internal sealed partial class RealHcBackend : IDisposable
         internal FanDispatchOwner Owner { get; } = owner;
     }
     private FanDispatchOwner CaptureFanDispatchOwner(long? admittedEpoch = null) =>
-        new(admittedEpoch ?? Volatile.Read(ref suspendGateEpoch), ControlCycleId, Volatile.Read(ref activeCurveDuties));
+        new(admittedEpoch ?? Volatile.Read(ref suspendGateEpoch), ControlCycleId, Volatile.Read(ref activeCurveDuties))
+        { PublicPower = PublicPowerForAction };
     internal bool IsFanDispatchOwnerCurrent(FanDispatchOwner owner, bool allowTimeoutGateDrift = false) =>
         owner.ControlCycle == ControlCycleId && ReferenceEquals(owner.Curve, Volatile.Read(ref activeCurveDuties))
+        && (!SharedPowerContext.Required || owner.PublicPower is { } captured &&
+            PublicPowerForAction is { } current && captured.SharesAuthority(current) && !current.IsRevoked)
         && (allowTimeoutGateDrift || owner.GateEpoch == Volatile.Read(ref suspendGateEpoch));
     private void ReportFanDispatchFailure(Exception cause, FanDispatchOwner owner)
     {
@@ -3774,12 +3844,12 @@ internal sealed partial class RealHcBackend : IDisposable
     private long oneXFanOpenAdmissionEpoch;
     private bool OneXFanOpenStillCurrent(long epoch) =>
         !operationTimedOut && Volatile.Read(ref suspendGateEpoch) == epoch
-            && Volatile.Read(ref closeWriteBlocked) == 0;
+            && Volatile.Read(ref closeWriteBlocked) == 0 && RequireCurrentPublicPower();
 
     private MsiFanDeviceLifecycle? msiFanLifecycle;
     private long msiFanOpenAdmissionEpoch;
 
-    public void Open() => OnStaBounded(OpenCore);
+    public void Open() => OnStaPowerBounded(OpenCore, "fan-open");
 
     private object? retiredDeviceReference;
     private long retiredControlCycleId;
@@ -3792,6 +3862,7 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void BeginOpenAttemptEvidence()
     {
+        legacyCallbackNoReturnAtRetirement = false;
         openAttempted = true;
         hcOpenInvocationStarted = false;
         if (!IsOpen) externalProfileQueue.BeginSession();
@@ -3803,6 +3874,7 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void BeginHcOpenInvocationEvidence()
     {
+        interruptedResumeOpen = null;
         // A genuinely retired inherited session may yield to the next original
         // virtual lifecycle, including a vendor-override route. Pending debt may not.
         if (inheritedEcFanSession is { CloseReturned: true })
@@ -3838,6 +3910,7 @@ internal sealed partial class RealHcBackend : IDisposable
             var msiOpenGateEpoch = Volatile.Read(ref suspendGateEpoch);
             msiFanOpenAdmissionEpoch = msiOpenGateEpoch;
             oneXFanOpenAdmissionEpoch = msiOpenGateEpoch;
+            var priorReleaseSettled = PriorWin5FanReleaseSettled;
             BeginOpenAttemptEvidence();
             try
             {
@@ -3866,10 +3939,12 @@ internal sealed partial class RealHcBackend : IDisposable
                 CaptureSessionRouteMarker();
                 closed = false;
             }
-            catch
+            catch (Exception error)
             {
                 // E-2（2026-09-24）：Open 失败不得把 Open 期间的相位泄漏给后续操作。
                 SetHcPhase(null);
+                var interrupted = CaptureInterruptedResumeOpen(error, priorReleaseSettled);
+                var unwritten = InterruptedResumeOpenOwesNoFanRelease(interrupted);
                 // Never manufacture a Close() call for a failed HC Open().
                 // Some HC device overrides can emit their OEM release command
                 // without an IsOpen guard, so only a successfully opened HC
@@ -3895,6 +3970,11 @@ internal sealed partial class RealHcBackend : IDisposable
                     hcOpenInvocationStarted = false;
                     sessionDeviceReference = null;
                     ClearSessionRouteMarker();
+                    legacyCallbackNoReturnAtRetirement = SettleUnwrittenInterruptedOpen(unwritten);
+                }
+                else if (interrupted is not null && !HcVirtualCloseReturned)
+                {
+                    interruptedResumeOpen = interrupted;
                 }
                 else if (!hcOpenInvocationStarted)
                 {
@@ -4078,13 +4158,13 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         if (SourceControlConnected)
         {
-            OnStaBounded(() => { EnsureRealWriteSession(); return true; }, "source-open-ready");
+            OnStaPowerBounded(() => { EnsureRealWriteSession(); return true; }, "source-open-ready");
             return;
         }
         Interlocked.Increment(ref hcDeviceOpenInFlight);
         try
         {
-            var preparation = OnStaBounded(PrepareOpenEventsCore, "open-events-begin");
+            var preparation = OnStaPowerBounded(PrepareOpenEventsCore, "open-events-begin");
             var need = preparation.Need;
             if (need == HcDeviceOpenNeed.WaitForDeviceInserted)
             {
@@ -4102,7 +4182,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     throw new InvalidOperationException(
                         $"HC_DEVICE_OPEN_REJECTED: {operation.Describe()}");
             }
-            OnStaBounded(() => OpenEventsFinalizeCore(preparation.Admission), "open-events-finalize");
+            OnStaPowerBounded(() => OpenEventsFinalizeCore(preparation.Admission), "open-events-finalize");
         }
         finally
         {
@@ -4908,11 +4988,10 @@ internal sealed partial class RealHcBackend : IDisposable
                 profileGuid = profile is null ? null : Convert.ToString(GetMember(profile, "Guid")),
                 fanMode = fan is null ? null : Convert.ToString(GetMember(fan, "fanMode")),
                 requestedCurve = (fan is null ? null : GetMember(fan, "fanSpeeds") as double[])?.Take(11).ToArray(),
-                lifecycleContext = context, hcRuntimeIdentity = StaticPowerObservationRuntimeIdentity(), hcSourcePolicy = "locked-baseline-unmodified",
-                registryScenarioOperation = "not-observed-no-new-registry-operation",
-                requestedTdp = "not-observed", oemPlReadback = "not-observed",
-                leafEvidence = "not-observed-pinned-HC-has-no-observation-hook",
-                verificationScope = "Host-invocation-boundary-only-not-leaf-WMI-or-physical-power" };
+                lifecycleContext = context, hcRuntimeIdentity = StaticPowerObservationRuntimeIdentity(),
+                // Version 1 denotes the fixed policy in the archive reading guide.
+                powerObservationScopeSchema = 1,
+                leafEvidence = "not-observed-pinned-HC-has-no-observation-hook" };
             // Same static state in an existing repeated callback belongs in detail,
             // not the permanent/base lane. No timer and no controller state changes.
             var fingerprint = JsonSerializer.Serialize(new { owner, callSite, metadata.phase, metadata.deviceClass,
@@ -5371,6 +5450,7 @@ internal sealed partial class RealHcBackend : IDisposable
             // calculation and the device callback that requests fan duty.
             try
             {
+                using var publicPower = EnterControlPublicPower();
                 SetFanProfileTemperature(fanProfile, temp);
                 var duty = ReadFanProfileSpeed(fanProfile);
                 if (!IsFanDispatchOwnerCurrent(dispatchOwner) || AreTemperatureWritesBlocked()) return;
@@ -5382,6 +5462,7 @@ internal sealed partial class RealHcBackend : IDisposable
                 if (double.IsFinite(duty) && duty >= 0 && duty <= 100 && IsFanDispatchOwnerCurrent(dispatchOwner) && !AreTemperatureWritesBlocked())
                     Volatile.Write(ref monitorTarget, new MonitorTarget(dispatchOwner, duty, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
             }
+            catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED") { }
             catch (Exception ex)
             {
                 // Never let a timer callback escape into HC's sensor thread.
@@ -5625,18 +5706,19 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void WriteFanProfileDuty(double duty, long? admittedEpoch = null)
     {
+        RequireCurrentPublicPower();
         if (SourceControlConnected) { WritePinnedSourceDuty(duty, admittedEpoch); return; }
         var currentDevice = device ?? throw new InvalidOperationException("HC device unavailable");
         if (oneXFanLifecycle is not null)
         {
             // Always precede the legacy delegate cache: void HC writers discard false.
-            oneXFanLifecycle.SetDuty(duty, () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+            oneXFanLifecycle.SetDuty(duty, () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch) && RequireCurrentPublicPower());
             return;
         }
         if (GetInheritedEcFanWriter(currentDevice) is { } ecWriter)
         {
             var epoch = oneXFanOpenAdmissionEpoch;
-            ecWriter.SetDuty(duty, () => InheritedEcFanWriteCurrent(currentDevice, epoch));
+            ecWriter.SetDuty(duty, () => InheritedEcFanWriteCurrent(currentDevice, epoch) && RequireCurrentPublicPower());
             return;
         }
         var writer = ReferenceEquals(fanDutyWriterDevice, currentDevice) ? fanDutyWriter : null;
@@ -5737,6 +5819,7 @@ internal sealed partial class RealHcBackend : IDisposable
     }
 
     private bool AreTemperatureWritesBlocked() =>
+        PublicControlWritesBlocked ||
         operationTimedOut ||
         // 第十轮返修（P1-B）：版本化睡眠写门——放行当且仅当"解除时记录的
         // 期望版本"与当前 gate 版本相等（睡眠宣布/关闭/超时都会递增 gate，
@@ -6301,6 +6384,7 @@ internal sealed partial class RealHcBackend : IDisposable
         var acted = false;
         try
         {
+            using var publicPower = EnterControlPublicPower();
             var modeRevision = Volatile.Read(ref msiFirmwareModeObservedRevision);
             if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease)
             {
@@ -6309,7 +6393,7 @@ internal sealed partial class RealHcBackend : IDisposable
                 // Capture the sleep epoch before queueing, not after a later wake.
                 var admittedEpoch = Volatile.Read(ref suspendGateEpoch);
                 var dispatchOwner = timerOwner ?? CaptureFanDispatchOwner(admittedEpoch);
-                try { acted = OnStaBounded(() => PowerProfileWatchdogTickCore(admittedEpoch, dispatchOwner), "msi-mode-fan-replay"); }
+                try { acted = OnStaPowerBounded(() => PowerProfileWatchdogTickCore(admittedEpoch, dispatchOwner), "msi-mode-fan-replay"); }
                 catch (FanApiException ex) when (ex.Code == "HC_OPERATION_BUSY")
                 {
                     // No firmware command ran. Only this explicit deferral may
@@ -6328,6 +6412,7 @@ internal sealed partial class RealHcBackend : IDisposable
                         RecordExternalProfileFailure(pending, ex, "sta-admission");
                     }
                 }
+                catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED") { }
                 catch (Exception ex)
                 {
                     Interlocked.Exchange(ref msiFirmwareModeSettledRevision, modeRevision);
@@ -6339,6 +6424,7 @@ internal sealed partial class RealHcBackend : IDisposable
             }
             else acted = PowerProfileWatchdogTickCore(admittedOwner: timerOwner);
         }
+        catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED") { }
         finally
         {
             var durationTicks = Stopwatch.GetTimestamp() - started;
@@ -6460,6 +6546,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     profileTemplateFingerprint,
                 });
             }
+            catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED") { return false; }
             catch (Exception ex)
             {
                 if (firmwareModeChanged)
@@ -6677,14 +6764,19 @@ internal sealed partial class RealHcBackend : IDisposable
         if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease &&
             admittedGateEpoch is null && AreTemperatureWritesBlocked())
             throw new FanApiException(409, "FAN_WRITE_SUPERSEDED", "当前睡眠写门尚未放行，拒绝未受理的曲线写入");
-        return OnStaBounded(() => ApplyCurveCore(nodes, epoch));
+        return OnStaPowerBounded(() => ApplyCurveCore(nodes, epoch));
     }
 
     private bool ApplyCurveCore(IReadOnlyList<FanNode> nodes, long admittedGateEpoch)
     {
         lock (hardwareGate)
         {
-        if (SourceControlConnected) return ApplyPinnedSourceCurveCore(nodes, admittedGateEpoch);
+        if (SourceControlConnected)
+        {
+            var result = ApplyPinnedSourceCurveCore(nodes, admittedGateEpoch);
+            if (result) AdoptCurrentWritePowerForControl(rearmExisting: false);
+            return result;
+        }
         EnsureRealWriteSession();
         if (!oemBaselineCaptured)
             throw new FanApiException(409, "FAN_ROUTE_RESTORE_UNAVAILABLE", "尚未完成 HC 路线上下文初始化，拒绝写入");
@@ -6810,6 +6902,7 @@ internal sealed partial class RealHcBackend : IDisposable
         if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
             PublishMaximumFanTarget(); // Bind to the committed curve, not its predecessor.
         activeMsiCurveNodes = route.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease ? nodes.ToArray() : null;
+        AdoptCurrentWritePowerForControl(rearmExisting: false);
         EnsurePowerProfileWatchdog();
         return true;
         }
@@ -6825,7 +6918,7 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         // FAN-931 P0：心跳驱动的 STA 校验调用次数（P2A 的判定依据之一）。
         Interlocked.Increment(ref FanPerfCounters.StaVerifyRequests);
-        OnStaBounded(heartbeatVerificationWork, "heartbeat-session-verify");
+        OnStaPowerBounded(heartbeatVerificationWork, "heartbeat-session-verify");
     }
 
     private void VerifyActiveCurveSessionCore()
@@ -6913,13 +7006,24 @@ internal sealed partial class RealHcBackend : IDisposable
             // applications; only this Host-driven release takes the narrow path.
             if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease)
                 DispatchMsiReleaseViaNarrowInterface();
+            else if (oneXFanLifecycle is { } oneXReleaseLifecycle)
+                RestoreOneXControl(oneXReleaseLifecycle);
             else
                 ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));
         }
         catch (Exception)
         {
             // 回调未返回：按路线模式结算（非 ASUS 记回调未返回的失败，供诊断/失败锁判据）。
-            _ = SettleOperationEvidence(releaseScope, "oem-restore", callbackReturned: false);
+            // Keep this attempt's route-bound verdict; the original exception
+            // still owns control flow and cannot be replaced by release success.
+            var failedRelease = SettleOperationEvidence(releaseScope, "oem-restore", callbackReturned: false);
+            asusReleaseWriteOutcome = failedRelease.Kind;
+            oemReleaseActionKind = FanHostEngine.ReleaseActionKindName(FanHostEngine.ClassifyReleaseAction(failedRelease.Kind));
+            oemReleaseActionEvidence =
+                $"hc-profile verdict={failedRelease.Kind} receipts={failedRelease.ReceiptCount} " +
+                $"explicitFailure={failedRelease.ExplicitFailure} unknown={failedRelease.Unknown} " +
+                $"noneTransported={failedRelease.NoneTransported} detail={failedRelease.Detail}";
+            lastControlWriteEvidence = WriteEvidenceName(failedRelease);
             throw;
         }
         var releaseWrite = AsusPrimaryReleaseVerdictForSelfTest
@@ -7829,6 +7933,8 @@ internal sealed partial class RealHcBackend : IDisposable
         using var powerObservation = BeginPowerObservation("FanHost.HC.ProfileCallback", "ApplyPowerProfile/" + sourceName, profile);
         // Initial enable, next adjustment, wake and event-driven replays share this boundary.
         var submittedFan = GetMember(profile, "FanProfile");
+        var publicControlWrite = string.Equals(Convert.ToString(submittedFan is null ? null : GetMember(submittedFan, "fanMode")), "Software", StringComparison.OrdinalIgnoreCase);
+        if (publicControlWrite) RequireCurrentPublicPower();
         if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease &&
             string.Equals(Convert.ToString(submittedFan is null ? null : GetMember(submittedFan, "fanMode")),
                 "Software", StringComparison.OrdinalIgnoreCase) && hcBoundaryForSelfTest is null)
@@ -7900,6 +8006,7 @@ internal sealed partial class RealHcBackend : IDisposable
         }
         try
         {
+            if (publicControlWrite) RequireCurrentPublicPower();
             BeginLegacyCallbackFanReturnRisk();
             // This remains the single fan-write boundary. The Host does not
             // synthesize vendor writes or reinterpret a callback as hardware
@@ -7909,12 +8016,17 @@ internal sealed partial class RealHcBackend : IDisposable
             else if (UsesBackendFanWriter)
                 ApplyAsusCurveViaBackend(profile);
             else if (oneXFanLifecycle is not null)
-                oneXFanLifecycle.SetControl(callbackPhase == "F3-controlled",
-                    () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+            {
+                if (callbackPhase == "F3-controlled")
+                    oneXFanLifecycle.SetControl(true, () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch) && RequireCurrentPublicPower());
+                else
+                    ReturnOneXControl(oneXFanLifecycle);
+            }
             else if (device is { } currentDevice && GetInheritedEcFanWriter(currentDevice) is { } ecWriter)
             {
                 var epoch = oneXFanOpenAdmissionEpoch;
-                ecWriter.SetControl(callbackPhase == "F3-controlled", () => InheritedEcFanWriteCurrent(currentDevice, epoch));
+                ecWriter.SetControl(callbackPhase == "F3-controlled", () => InheritedEcFanWriteCurrent(currentDevice, epoch) &&
+                    (callbackPhase != "F3-controlled" || RequireCurrentPublicPower()));
             }
             else
                 Invoke("PowerProfileManager_Applied", profile, source);
@@ -7988,7 +8100,15 @@ internal sealed partial class RealHcBackend : IDisposable
         if (isSoftware)
         {
             var requested = GetMember(fan, "fanSpeeds") as double[] ?? Array.Empty<double>();
-            var result = backendFanCapability.ApplySoftwareCurve(requested);
+            YeManFanBackend.Capabilities.FanCapabilityResult result;
+            try { result = backendFanCapability.ApplySoftwareCurve(requested, () => RequireCurrentPublicPower()); }
+            catch (OperationCanceledException)
+            {
+                // This exact overload's bool-false callback is cancellation;
+                // actual transport exceptions have already kept their receipt.
+                // Prefix I/O facts remain in the capability session/observers.
+                throw FanRemotePowerContext.Superseded();
+            }
             EmitDiagnostic("fan.capability.result", () => result);
         }
         else
@@ -8247,7 +8367,11 @@ internal sealed partial class RealHcBackend : IDisposable
     internal (string Settlement, string Detail) HcCloseReleaseSettlementForSelfTest =>
         (hcCloseReleaseSettlement, hcCloseReleaseDetail);
 
-    public void Close(bool stopDeviceManager = true) => OnStaBounded(() => CloseCore(stopDeviceManager), "close");
+    public void Close(bool stopDeviceManager = true) => OnStaBounded(() =>
+    {
+        CloseCore(stopDeviceManager);
+        RecordPublicSdkCloseReturned();
+    }, "close");
 
     /** Non-blocking power-boundary guard; the queued restore still owns all
      * HC calls, but no temperature callback may issue a new hardware write. */
@@ -8337,6 +8461,9 @@ internal sealed partial class RealHcBackend : IDisposable
             // process-close owner will perform the final virtual Close call.
             return;
         }
+        var noLegacyCallbackReturnAtClose = HasBoundLegacyCallbackNoReturnObligation;
+        var settlingUnwrittenInterruptedOpen = InterruptedResumeOpenOwesNoFanRelease(interruptedResumeOpen);
+        legacyCallbackNoReturnAtRetirement = false;
         try
         {
             SetHcPhase("close.temperature-monitor-stop");
@@ -8361,6 +8488,7 @@ internal sealed partial class RealHcBackend : IDisposable
             // ROGAlly.Close() performs AsusACPI.Close, controller restoration,
             // HID disposal and base.Close in HC's original order.
             CloseHcDevice();
+            interruptedResumeOpen = null;
             // A returned virtual Close is a completed HC lifecycle boundary;
             // it is not a generic Hardware-profile callback or a physical
             // OEM ownership acknowledgement. Preserve any earlier explicit
@@ -8369,7 +8497,8 @@ internal sealed partial class RealHcBackend : IDisposable
             // settlement (`SettleMsiCloseRelease`) already wrote the precise
             // evidence, so this generic fallback must not overwrite it.
             if (!oemRestoreVerified
-                && Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease)
+                && Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease
+                && oneXFanLifecycle is null)
             {
                 oemRestoreEvidence = "hc-device-close-returned-no-hardware-callback";
                 oemOwnershipStatus = "hc-close-returned-physical-unknown";
@@ -8387,6 +8516,7 @@ internal sealed partial class RealHcBackend : IDisposable
             closed = true;
             retiredDeviceReference = device;
             retiredControlCycleId = ControlCycleId;
+            legacyCallbackNoReturnAtRetirement = SettleUnwrittenInterruptedOpen(settlingUnwrittenInterruptedOpen) || noLegacyCallbackReturnAtClose;
         }
         finally
         {
@@ -8435,7 +8565,7 @@ internal sealed partial class RealHcBackend : IDisposable
                         msiFanLifecycle.Close();
                     else if (oneXFanLifecycle is not null)
                     {
-                        try { oneXFanLifecycle.Close(); }
+                        try { CloseOneXFanDevice(oneXFanLifecycle); }
                         catch (Exception error) { oneXCloseFailure = error; throw; }
                     }
                     else
@@ -9011,7 +9141,7 @@ internal sealed partial class RealHcBackend : IDisposable
     internal bool MsiCurveCommandStillCurrentForSelfTest(long epoch) => MsiCurveCommandStillCurrent(epoch);
     private bool MsiWmiOpenStillCurrent(long expectedGateEpoch) =>
         !operationTimedOut && Volatile.Read(ref suspendGateEpoch) == expectedGateEpoch
-            && Volatile.Read(ref closeWriteBlocked) == 0;
+            && Volatile.Read(ref closeWriteBlocked) == 0 && RequireCurrentPublicPower();
 
     internal static IReadOnlyList<string> RunMsiWmiOpenAdmissionSelfTest()
     {
@@ -9065,6 +9195,12 @@ internal sealed partial class RealHcBackend : IDisposable
                 throw new InvalidOperationException("MSI initialization no longer owns this Open request");
             Diagnostic?.Invoke("open.msi-wmi-registration", new { stage = "ready-for-hc-open", result,
                 fanWriteSuccessClaimed = false, deviceType = device.GetType().FullName });
+        }
+        catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED")
+        {
+            // Public cancellation owns no registry/PnP failure or second
+            // recovery action. Keep the original scope/409 across preparation.
+            throw;
         }
         catch (Exception error)
         {
@@ -10954,15 +11090,27 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         private readonly RealHcBackend owner;
         private readonly Func<T> action;
+        private FanRemotePowerScope? publicPower;
 
-        public StaWorkItem(RealHcBackend owner, Func<T> action, string operationName)
+        public StaWorkItem(RealHcBackend owner, Func<T> action, string operationName,
+            long admissionStarted, TimeSpan admissionBudget, FanRemotePowerScope? publicPower = null)
         {
             this.owner = owner;
             this.action = action;
             OperationName = operationName;
+            AdmissionStarted = admissionStarted;
+            AdmissionBudget = admissionBudget;
+            if (publicPower is not null)
+                this.publicPower = publicPower.Retain() ?? throw FanRemotePowerContext.Superseded();
         }
 
         public string OperationName { get; }
+        private long AdmissionStarted { get; }
+        private TimeSpan AdmissionBudget { get; }
+        // Read/written only under staGate. Enqueued is not executing: a starved
+        // message pump must not turn an unsubmitted request into a device fault.
+        public bool Started { get; set; }
+        public bool AdmissionExpired => Stopwatch.GetElapsedTime(AdmissionStarted) >= AdmissionBudget;
         public ManualResetEventSlim Completed { get; } = new(false);
         public Exception? Failure { get; private set; }
         public T? Result { get; private set; }
@@ -10972,15 +11120,31 @@ internal sealed partial class RealHcBackend : IDisposable
         public void RejectUnexecuted()
         {
             Failure = new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭，请求未执行");
+            ReleasePublicPower();
+            Completed.Set();
+        }
+
+        public void RejectExpiredAdmission()
+        {
+            Failure = StaAdmissionBusy();
+            ReleasePublicPower();
             Completed.Set();
         }
 
         public void Execute()
         {
-            try { Result = action(); }
+            try
+            {
+                using var context = publicPower is null ? null : owner.SharedPowerContext.Enter(publicPower);
+                if (publicPower is not null && !publicPower.IsCurrent) throw FanRemotePowerContext.Superseded();
+                Result = action();
+                if (publicPower is not null && !publicPower.IsCurrent) throw FanRemotePowerContext.Superseded();
+            }
             catch (Exception ex) { Failure = ex; }
             // The dispatcher publishes completion only after retiring this owner.
         }
+
+        public void ReleasePublicPower() => Interlocked.Exchange(ref publicPower, null)?.Dispose();
     }
 
     private Dispatcher EnsureStaDispatcher()
@@ -11104,6 +11268,29 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void ExecuteStaWorkItem<T>(StaWorkItem<T> workItem)
     {
+        lock (staGate)
+        {
+            // A queued callback may survive cancellation/Abort. It cannot claim
+            // a replacement owner or perform any part of its former action.
+            if (!ReferenceEquals(activeStaWorkItem, workItem)) return;
+            if (staDispatcherStopping || Volatile.Read(ref hcFactoryDisposed) != 0)
+            {
+                activeStaWorkItem = null;
+                workItem.RejectUnexecuted();
+                Monitor.PulseAll(staGate);
+                return;
+            }
+            // Both the waiting caller and the dispatcher enforce the original
+            // deadline. The caller itself may have been descheduled past it.
+            if (workItem.AdmissionExpired)
+            {
+                activeStaWorkItem = null;
+                workItem.RejectExpiredAdmission();
+                Monitor.PulseAll(staGate);
+                return;
+            }
+            workItem.Started = true;
+        }
         EmitStaOperationDiagnostic(workItem, beginning: true, timedOut: false);
         workItem.Execute();
 
@@ -11124,6 +11311,7 @@ internal sealed partial class RealHcBackend : IDisposable
             }
             Monitor.PulseAll(staGate);
         }
+        workItem.ReleasePublicPower();
         workItem.Completed.Set();
         EmitStaOperationDiagnostic(workItem, beginning: false, timedOut: timedOutCallReturned);
         if (timedOutCallReturned)
@@ -11133,16 +11321,36 @@ internal sealed partial class RealHcBackend : IDisposable
         }
     }
 
-    private T OnStaBounded<T>(Func<T> action, string operationName = "hc-operation")
+    private static FanApiException StaAdmissionBusy() =>
+        new(409, "HC_OPERATION_BUSY", "HC 串行调用仍在处理，本次请求未执行，请重试")
+        {
+            Details = new { retryAfterMs = 250, submitted = false, hardwareFailureClaimed = false },
+        };
+
+    private T OnStaBounded<T>(Func<T> action, string operationName = "hc-operation") =>
+        OnStaBoundedCore(action, operationName, null);
+
+    private T OnStaBoundedCore<T>(Func<T> action, string operationName, FanRemotePowerScope? publicPower)
     {
         Thread? lifecycleThread;
         lock (staGate) lifecycleThread = staThread;
-        if (lifecycleThread is not null && Thread.CurrentThread == lifecycleThread) return action();
+        if (lifecycleThread is not null && Thread.CurrentThread == lifecycleThread)
+        {
+            using var context = publicPower is null ? null : SharedPowerContext.Enter(publicPower);
+            if (publicPower is not null && !publicPower.IsCurrent) throw FanRemotePowerContext.Superseded();
+            var result = action();
+            if (publicPower is not null && !publicPower.IsCurrent) throw FanRemotePowerContext.Superseded();
+            return result;
+        }
 
         var budget = TimeSpan.FromSeconds(15);
         var started = Stopwatch.GetTimestamp();
-        var workItem = new StaWorkItem<T>(this, action, operationName);
+        var workItem = new StaWorkItem<T>(this, action, operationName, started, budget, publicPower);
+        var submitted = false;
+        try
+        {
         var dispatcher = EnsureStaDispatcher();
+        DispatcherOperation? dispatch = null;
         var admissionWaited = false;
         lock (staGate)
         {
@@ -11154,10 +11362,7 @@ internal sealed partial class RealHcBackend : IDisposable
             {
                 var remaining = budget - Stopwatch.GetElapsedTime(started);
                 if (remaining <= TimeSpan.Zero)
-                    throw new FanApiException(409, "HC_OPERATION_BUSY", "HC 串行调用仍在处理，本次请求未执行，请重试")
-                    {
-                        Details = new { retryAfterMs = 250, submitted = false, hardwareFailureClaimed = false },
-                    };
+                    throw StaAdmissionBusy();
                 if (activeStaWorkItem is null) break;
                 admissionWaited = true;
                 Monitor.Wait(staGate, remaining);
@@ -11171,9 +11376,10 @@ internal sealed partial class RealHcBackend : IDisposable
             activeStaWorkItem = workItem;
             try
             {
-                _ = dispatcher.BeginInvoke(
+                dispatch = dispatcher.BeginInvoke(
                     DispatcherPriority.Send,
                     new Action(workItem.Dispatch));
+                submitted = true;
             }
             catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
             {
@@ -11194,14 +11400,28 @@ internal sealed partial class RealHcBackend : IDisposable
         if (!workItem.Completed.Wait(completionRemaining > TimeSpan.Zero ? completionRemaining : TimeSpan.Zero))
         {
             var timedOut = false;
+            var rejectedQueued = false;
             lock (staGate)
             {
                 if (!workItem.Completed.IsSet && ReferenceEquals(activeStaWorkItem, workItem))
                 {
-                    operationTimedOut = true;
-                    timedOut = true;
+                    if (!workItem.Started)
+                    {
+                        activeStaWorkItem = null;
+                        workItem.RejectExpiredAdmission();
+                        Monitor.PulseAll(staGate);
+                        rejectedQueued = true;
+                    }
+                    else
+                    {
+                        operationTimedOut = true;
+                        timedOut = true;
+                    }
                 }
             }
+            // Avoid retaining cancelled closures on a starved pump. The owner
+            // check above remains authoritative even if Abort loses a race.
+            if (rejectedQueued) dispatch?.Abort();
             if (timedOut)
             {
                 // Immediately stop temperature-driven writes. The pending HC
@@ -11217,6 +11437,8 @@ internal sealed partial class RealHcBackend : IDisposable
 
         if (workItem.Failure is not null) throw workItem.Failure;
         return workItem.Result!;
+        }
+        finally { if (!submitted) workItem.ReleasePublicPower(); }
     }
 
     private T OnSta<T>(Func<T> action) => OnStaBounded(action);
@@ -13031,6 +13253,12 @@ internal sealed partial class FanHostEngine : IDisposable
     // 状态目录，使被外部强终止后的替代 Host 仍能读到剩余预算与已用尝试数，并据此
     // 执行"每故障周期至多一次自动更换"的边界（超限 ⇒ 失败终态 + 用户显式重试入口）。
     private RecoveryCycleRecord? recoveryCycle;
+    // Acceptance may return while Close owns gate. Publish only this exact
+    // accepted debt from its already-read predecessor before terminal settlement.
+    private sealed record DeferredRecoveryCyclePublication(
+        RecoveryCycleRecord Cycle, RecoveryCycleRecord? ExpectedPrevious);
+    private DeferredRecoveryCyclePublication? deferredRecoveryCyclePublication;
+    private Task? recoveryCyclePublicationTask;
     private bool recoveryCycleInherited;
     // 显式用户重试（caller-visible /api/close）是唯一允许"开启新周期"的自动性豁免；
     // 自动重试 / 定时器 / 替代 Host 一律不得凭此绕过周期预算。
@@ -13127,7 +13355,12 @@ internal sealed partial class FanHostEngine : IDisposable
         long Generation, int AttemptId,
         // 第十一轮返修（R5）：请求接受时建立的不可变取消版本（贯穿 worker 与提交核对）——
         // worker 不得在启动时重读版本（否则会把期间新睡眠的版本当成旧恢复的授权）。
-        long AcceptedPowerEpoch, long AcceptedPendingEpoch, long AcceptedGateEpoch);
+        long AcceptedPowerEpoch, long AcceptedPendingEpoch, long AcceptedGateEpoch)
+    {
+        internal FanRemotePowerScope? PublicPower { get; init; }
+        internal long AcceptedPendingStamp { get; init; } = -1;
+        internal AcceptedResumeBusiness? Business { get; init; }
+    }
     private object? activeResumeOperation;
     private int resumeAttemptCounter;
     // 第二十一轮返修（P1）：单槽"结算终态"留存——最近一次结算（completed/failed/
@@ -13228,15 +13461,22 @@ internal sealed partial class FanHostEngine : IDisposable
             ListenerState = "Starting",
         };
         realBackend = options.RealBackend && !options.MockHandshake ? new RealHcBackend(options) : null;
+        SharedPowerContext.ResumeParentForWrite = ResolveAuthenticatedResumeParent;
+        if (realBackend is not null) realBackend.SharedPowerContext = SharedPowerContext;
         // FAN-204 Q1-b：负例开关（仅 mock）——让读路径退回阻塞读，供 AC15c 负例证明判定非空转。
         if (options.MockHandshake && options.MockNoPublishedSnapshot) publishedSnapshotDisabledForMock = true;
         // FAN-204 Q1-b：启动即发布一份读快照（读者在首次持锁窗口内也有可判定答复）。
         PublishSnapshotLocked();
         if (realBackend is not null)
         {
-            realBackend.FanDispatchFailure = OnBackendFanDispatchFailure;
-            realBackend.TemperatureMonitorStale = OnBackendTemperatureMonitorStale;
-            realBackend.TimedOutOperationReturned = OnTimedOutHcOperationReturned;
+            realBackend.FanDispatchFailure = error => CompletePublicResourceOwner(() => OnBackendFanDispatchFailure(error));
+            realBackend.TemperatureMonitorStale = signal => CompletePublicResourceOwner(() => OnBackendTemperatureMonitorStale(signal));
+            realBackend.PublicResourcesChanged = DrainRemotePowerReturns;
+            realBackend.TimedOutOperationReturned = receipt =>
+            {
+                try { OnTimedOutHcOperationReturned(receipt); }
+                finally { DrainRemotePowerReturns(); }
+            };
             realBackend.Diagnostic = (eventName, details) => this.diagnostics.Write(eventName, details);
             realBackend.DiagnosticLazy = (eventName, detailsFactory) => this.diagnostics.WriteLazy(eventName, detailsFactory);
             realBackend.BindStaOperationDiagnostics(this.diagnostics);
@@ -13247,6 +13487,7 @@ internal sealed partial class FanHostEngine : IDisposable
             };
         }
         this.diagnostics.SetContextProvider(BuildDiagnosticContext);
+        this.diagnostics.SetPowerBoundaryTerminalContextProvider(BuildPowerBoundaryTerminalContext);
         this.diagnostics.Write("route.catalog", new
         {
             routeCount = RealHcBackend.KnownFanRouteCount,
@@ -13600,6 +13841,69 @@ internal sealed partial class FanHostEngine : IDisposable
         return (hotThreads, threadsAdded);
     }
 
+    // Entered rows continue to report the full context. At scope end keep fresh
+    // responsibility, manager and recovery state; the immutable invocation metadata stays in details.
+    private object BuildPowerBoundaryTerminalContext() => new
+    {
+        contextScope = "fan-power-boundary-terminal-v1",
+        state.State,
+        state.PowerState,
+        state.PowerOperationGeneration,
+        state.PowerOperationAttempt,
+        state.PowerOperationStatus,
+        resumePhase = DeriveResumePhase(state),
+        resumePhaseGeneration = state.PowerOperationGeneration,
+        controlAccepting = IsControlAccepting(state),
+        leaseActive = state.Lease is not null,
+        state.LeaseGeneration,
+        state.UnknownState,
+        hardwareWritesEnabled = !options.MockZeroHardwareEvidence && state.HardwareWritesEnabled,
+        hardwareWritesObserved = !options.MockZeroHardwareEvidence && state.HardwareWritesObserved,
+        state.OemRestoreConfirmed,
+        state.HcRestoreCallbackReturned,
+        state.OemRestoreEvidence,
+        state.OemOwnershipStatus,
+        state.OemPhysicalOwnershipConfirmed,
+        state.HcCloseCleanupPending,
+        state.HcVirtualCloseReturned,
+        state.HcDeviceManagerStopCompleted,
+        state.HcDeviceManagerStopInvoked,
+        state.HcManagerCleanupEvidence,
+        state.HcDeviceManagerLifecycle,
+        hcManagerFactoryLifecycle = realBackend?.HcManagerFactoryLifecycle ?? state.HcManagerFactoryLifecycle,
+        hcManagerFactoryStarted = realBackend?.HcManagerFactoryStarted ?? state.HcManagerFactoryStarted,
+        hcManagerFactoryIsolated = realBackend?.HcManagerFactoryIsolated ?? state.HcManagerFactoryIsolated,
+        hcManagerStatuses = realBackend?.ManagerStatusSnapshot() ?? state.HcManagerStatuses,
+        hcOpenEventsInvoked = realBackend?.HcOpenEventsInvoked ?? false,
+        hcOperationPhase = realBackend?.CurrentHcPhase ?? state.HcOperationPhase,
+        lastUpdateSource = realBackend?.LastUpdateSource ?? state.LastUpdateSource,
+        externalProfileEventsSubscribed = realBackend?.ExternalProfileEventsSubscribed,
+        lastExternalProfileSource = realBackend?.LastExternalProfileSource,
+        state.LastError,
+        state.RecoveryReadbackRequired,
+        recoveryCycle = SnapshotRecoveryCycleForDiagnostics(),
+        recoveryClaimEvidence = RecoveryClaimEvidence(),
+    };
+
+    private object? SnapshotRecoveryCycleForDiagnostics()
+    {
+        var cycle = recoveryCycle;
+        return cycle is null ? null : new
+        {
+            cycleId = cycle.CycleId,
+            inherited = recoveryCycleInherited,
+            parentPid = cycle.ParentPid,
+            attempts = cycle.Attempts,
+            maxAttempts = RecoveryRetryMaxAttempt,
+            replacements = cycle.Replacements,
+            remainingMs = RemainingRecoveryCycleMs(cycle),
+            terminal = cycle.Terminal,
+            completed = cycle.Completed,
+            startedAtUtc = cycle.StartedAtUtc,
+            lastReason = cycle.LastReason,
+        };
+    }
+
     private object BuildDiagnosticContext()
     {
         // FAN-931 P0：只统计"确实构造了完整上下文"的次数（轻量事件已在上游跳过）。
@@ -13684,20 +13988,7 @@ internal sealed partial class FanHostEngine : IDisposable
             powerOperationStatus = state.PowerOperationStatus,
             // FAN-925 T0-X：故障周期账目（剩余预算 / 已用尝试 / 自动更换次数 / 终态）
             // 必须与"状态变化原因"一起导出，不能被旧 Ready 掩盖。
-            recoveryCycle = recoveryCycle is null ? null : new
-            {
-                cycleId = recoveryCycle.CycleId,
-                inherited = recoveryCycleInherited,
-                parentPid = recoveryCycle.ParentPid,
-                attempts = recoveryCycle.Attempts,
-                maxAttempts = RecoveryRetryMaxAttempt,
-                replacements = recoveryCycle.Replacements,
-                remainingMs = RemainingRecoveryCycleMs(recoveryCycle),
-                terminal = recoveryCycle.Terminal,
-                completed = recoveryCycle.Completed,
-                startedAtUtc = recoveryCycle.StartedAtUtc,
-                lastReason = recoveryCycle.LastReason,
-            },
+            recoveryCycle = SnapshotRecoveryCycleForDiagnostics(),
             // FAN-925 / HC 回函 D1–D3：不可宣称项一律显式字段（导出可直接断言）。
             recoveryClaimEvidence = RecoveryClaimEvidence(),
         };
@@ -14005,6 +14296,17 @@ internal sealed partial class FanHostEngine : IDisposable
             var snapshot = snapshotJsonCopy.Copy(state);
             ApplyDerivedSnapshotFields(snapshot);
             return snapshot;
+        }
+    }
+
+    // Parent finalization consumes the same exact retired-session fact as
+    // Close. Keep it fresh under the engine gate; no DTO flag or cached grant.
+    internal bool ParentRecoveryCanFinalize()
+    {
+        lock (gate)
+        {
+            return LocalFanHostServer.ParentRecoveryIsSafeToFinalize(
+                Snapshot(), realBackend?.ClosedLegacyCallbackWithoutReturnObligation == true);
         }
     }
 
@@ -14442,6 +14744,7 @@ internal sealed partial class FanHostEngine : IDisposable
     {
         lock (gate)
         {
+            RetireResumeBusinessForManualLocked("new-manual-device-owner");
             EnsureNotStopped();
             EnsureControlAvailable();
             if (state.HardwareWritesEnabled || state.Lease is not null)
@@ -14517,6 +14820,7 @@ internal sealed partial class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("open-events");
         lock (gate)
         {
+            RetireResumeBusinessForManualLocked("new-manual-device-owner");
             EnsureNotStopped();
             EnsureControlAvailable();
             // §17.1-2（仅自测）：在**同一个 gate 内**、**生产调用点**复现"三阶段设备打开
@@ -14554,6 +14858,7 @@ internal sealed partial class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("acquire-control");
         lock (gate)
         {
+            RetireResumeBusinessForManualLocked("new-manual-device-owner");
             EnsureNotStopped();
             EnsureControlAvailable();
             if (realBackend?.SourceControlMode == true && realBackend.SourceControlCloseComplete &&
@@ -14600,6 +14905,7 @@ internal sealed partial class FanHostEngine : IDisposable
             var lease = new FanLease($"{prefix}-{Guid.NewGuid():N}", ++generation, now + 15000, "YeManCC");
             state.Lease = lease;
             state.LeaseGeneration = lease.Generation;
+            RecordPublicLeaseAcquired(lease);
             state.State = automaticResumeInProgress ? "Resuming" : "Ready";
             leaseTimer?.Dispose();
             // R1（§3.2.5）：到期回调必须能自证"我仍是创建它的**那一个**租约"。
@@ -14825,6 +15131,7 @@ internal sealed partial class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("enable");
         lock (gate)
         {
+            RetireResumeBusinessForManualLocked("new-manual-curve-owner");
             var admittedGateEpoch = realBackend?.SuspendGateEpochForResume;
             diagnostics.Write("api.enable.begin", new { state = state.State, hasLease = state.Lease is not null });
             EnsureControlAvailable();
@@ -14879,7 +15186,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 try { realBackend!.ApplyCurve(nodes, admittedGateEpoch); }
                 catch (Exception ex)
                 {
-                    if (ex is FanApiException { Code: "FAN_WRITE_SUPERSEDED" })
+                    if (ex is FanApiException { Code: "FAN_WRITE_SUPERSEDED" or "FAN_PUBLIC_POWER_SUPERSEDED" })
                         state.HardwareWritesEnabled = previouslyEnabled;
                     diagnostics.Write("api.enable.hc-write-failure", new { error = ExceptionText(ex) });
                     RecoverAfterHardwareFailure(ex);
@@ -14935,8 +15242,8 @@ internal sealed partial class FanHostEngine : IDisposable
     private static FanNode[] PresetNodes(string? name) => name?.ToLowerInvariant() switch
     {
         "soft" => new[] { new FanNode(0, 0), new FanNode(40, 0), new FanNode(70, 20), new FanNode(100, 80) },
-        "balanced" => new[] { new FanNode(0, 0), new FanNode(40, 20), new FanNode(70, 45), new FanNode(100, 90) },
-        "aggressive" => new[] { new FanNode(0, 0), new FanNode(40, 30), new FanNode(70, 75), new FanNode(100, 100) },
+        "balanced" => new[] { new FanNode(0, 0), new FanNode(40, 30), new FanNode(70, 65), new FanNode(90, 100) },
+        "aggressive" => new[] { new FanNode(0, 0), new FanNode(40, 30), new FanNode(65, 67), new FanNode(80, 100) },
         _ => throw new FanApiException(400, "INVALID_PRESET", "未知风扇预设"),
     };
 
@@ -14961,6 +15268,7 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private void CancelControlIntentUnlocked(string source)
     {
+        RetireResumeBusinessLocked(source, newIntent: true);
         var operation = activeResumeOperation;
         var pending = Volatile.Read(ref resumeContinuationRequested) != 0;
         suspendedCurve = null;
@@ -14976,7 +15284,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 ParentIdentityMatchesEpisode(recoveryCycle);
             if (existing is not null && !string.Equals(existing.PredecessorInstanceId, engineInstanceId, StringComparison.Ordinal) && !inheritedOwner)
                 throw new IOException("Control intent belongs to another Host instance");
-            File.Delete(ControlIntentPath());
+            if (existing is not null) File.Delete(ControlIntentPath());
             controlIntentJournalBlocked = false;
         }
         catch (Exception error)
@@ -15442,6 +15750,7 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private object SuspendUnlocked()
     {
+        RetireResumeBusinessLocked("new-host-suspend");
         if (stopped) return SnapshotUnlocked();
         // 第一批：新睡眠取代进行中的恢复——操作记录标 superseded，
         // 并清 resume 接续登记（旧任务不得解除新睡眠保护）。
@@ -15568,6 +15877,7 @@ internal sealed partial class FanHostEngine : IDisposable
         resumeTerminalAttempt = attemptId;
         resumeTerminalStatus = status;
         resumeTerminalOutcome = outcome;
+        RecordResumeBusinessTerminalLocked(attemptId, status, outcome);
     }
 
     /**
@@ -15577,6 +15887,7 @@ internal sealed partial class FanHostEngine : IDisposable
      */
     private void SettlePendingContinuationAsSupersededUnlocked()
     {
+        Interlocked.Exchange(ref resumeContinuationPublicPower, null)?.Dispose();
         if (Volatile.Read(ref resumeContinuationRequested) == 0) return;
         var pendingId = resumeContinuationId;
         if (pendingId <= 0) return;
@@ -15593,13 +15904,19 @@ internal sealed partial class FanHostEngine : IDisposable
      * A 先登记并已在等待、B 后登记 ⇒ 此前只有 B 能拿到结果）。不同周期一律铸新身份
      * （旧登记由新睡眠显式结算为 superseded）。
      */
-    private long RegisterContinuationUnlocked(long cycleValue, long cycleStamp)
+    private long RegisterContinuationUnlocked(long cycleValue, long cycleStamp, FanRemotePowerScope? publicPower = null)
     {
         if (Volatile.Read(ref resumeContinuationRequested) != 0 && resumeContinuationId > 0 &&
-            SameSuspendCycle(resumeContinuationValue, resumeContinuationStamp, cycleValue, cycleStamp))
+            SameSuspendCycle(resumeContinuationValue, resumeContinuationStamp, cycleValue, cycleStamp) &&
+            (publicPower is null && resumeContinuationPublicPower is null ||
+             publicPower is not null && resumeContinuationPublicPower is not null && publicPower.SameAuthority(resumeContinuationPublicPower)))
         {
             return resumeContinuationId;
         }
+        var retainedPower = publicPower?.Retain();
+        if (publicPower is not null && retainedPower is null) throw FanRemotePowerContext.Superseded();
+        SettlePendingContinuationAsSupersededUnlocked();
+        resumeContinuationPublicPower = retainedPower;
         var id = ++resumeContinuationCounter;
         resumeContinuationId = id;
         resumeContinuationValue = cycleValue;
@@ -15615,8 +15932,9 @@ internal sealed partial class FanHostEngine : IDisposable
      * API 等待者做 operation/attempt 关联）。参数与副作用不变。
      * `expectedPendingStamp`：接受点的消费授权归属（-1 = 未指定，按现场快照）。
      */
-    private ResumeAdmission StartAutomaticResumeUnlocked(long expectedPendingEpoch = -1, long expectedPendingStamp = -1, long continuationId = 0)
+    private ResumeAdmission StartAutomaticResumeUnlocked(long expectedPendingEpoch = -1, long expectedPendingStamp = -1, long continuationId = 0, AcceptedResumeBusiness? acceptedBusiness = null)
     {
+        using var publicPower = SharedPowerContext.Capture();
         // 第一批返修（R3）：归属判定用本协议维护的 resumeWorkerActive，
         // 不得用 Task.IsCompleted（任务体最后一段与 CLR 完成标记之间存在调度窗口，
         // 在该窗口内登记接续会没有 worker 消费）。
@@ -15628,7 +15946,7 @@ internal sealed partial class FanHostEngine : IDisposable
             var snapshot = SuspendProtectionAuthorizationSnapshot;
             var cycleValue = expectedPendingEpoch >= 0 ? expectedPendingEpoch : snapshot.Value;
             var cycleStamp = expectedPendingStamp >= 0 ? expectedPendingStamp : snapshot.Stamp;
-            var registeredId = RegisterContinuationUnlocked(cycleValue, cycleStamp);
+            var registeredId = RegisterContinuationUnlocked(cycleValue, cycleStamp, publicPower);
             state.PowerOperationStatus = "pending";
             // 第二十四轮（任务书 D）：日志必须能按同一身份重放请求——登记身份 + 完整授权
             // （值 + 归属）落盘，供 A→B→C→A 链的日志串联核对。
@@ -15652,7 +15970,13 @@ internal sealed partial class FanHostEngine : IDisposable
         // 同属一次接受；若期间有新睡眠，待办版本已被改写 ⇒ CAS 失败 ⇒ 整体丢弃。
         var acceptedGateEpoch = realBackend?.SuspendGateEpochForResume ?? 0;
         var acceptedPowerEpoch = Volatile.Read(ref powerEpoch);
-        if (!TryConsumeSuspendProtection(acceptedPendingEpoch, acceptedPendingStamp))
+        // Initial acceptance consumes protection. Same-business continuation uses
+        // the preserved proof, never reads or clears a later protection token.
+        var consumedOriginal = acceptedBusiness is not null &&
+            ReferenceEquals(acceptedResumeBusiness, acceptedBusiness) &&
+            acceptedBusiness.Authorization.Value == acceptedPendingEpoch && acceptedBusiness.Authorization.Stamp == acceptedPendingStamp &&
+            ResumeBusinessOwnerCurrentLocked(acceptedBusiness) && BusinessDeadlineCurrent(acceptedBusiness.FirstGrant.Request);
+        if (acceptedBusiness is not null ? !consumedOriginal : !TryConsumeSuspendProtection(acceptedPendingEpoch, acceptedPendingStamp))
         {
             state.PowerOperationStatus = "superseded";
             diagnostics.Write("power.resume-continuation-discarded", new
@@ -15668,7 +15992,8 @@ internal sealed partial class FanHostEngine : IDisposable
         // 第十二轮返修（P1-A）：CAS 消费就是"解除保护"本身——不再对布尔镜像
         // 做任何独立清零（此前"CAS 成功后无条件清 systemSuspendPending"允许
         // 新睡眠在两条语句之间被旧恢复清掉保护）。
-        var curve = suspendedCurve is null
+        var sessionOnly = acceptedBusiness?.SessionOnly ?? (publicPower?.SessionOnlyResume == true);
+        var curve = sessionOnly ? Array.Empty<FanNode>() : acceptedBusiness is not null ? acceptedBusiness.Curve.ToArray() : suspendedCurve is null
             ? null
             : suspendedCurve.Select(node => new FanNode(node.TempC, node.DutyPercent)).ToArray();
         // Q1（FAN-204 s31 补充裁决 C）：**仅沙箱**的慢重建注入的第二半——mock 下"带曲线入睡"
@@ -15694,7 +16019,16 @@ internal sealed partial class FanHostEngine : IDisposable
             ++resumeAttemptCounter,
             acceptedPowerEpoch,
             acceptedPendingEpoch,
-            acceptedGateEpoch);
+            acceptedGateEpoch) { PublicPower = publicPower?.Retain(), AcceptedPendingStamp = acceptedPendingStamp, Business = acceptedBusiness };
+        if (publicPower is not null && operation.PublicPower is null) throw FanRemotePowerContext.Superseded();
+        if (acceptedBusiness is null) operation = AttachAcceptedResumeBusinessLocked(operation, curve);
+        else
+        {
+            acceptedBusiness.Operation = operation; acceptedBusiness.ExecutionReturned = false;
+            acceptedBusiness.Phase = "Running"; acceptedBusiness.Reason = "original-business-continuation";
+            acceptedBusiness.AttemptStatus = "executing"; acceptedBusiness.AttemptOutcome = null;
+            PublishResumeBusinessLocked();
+        }
         activeResumeOperation = operation;
         // 第二十二轮（P1#1）：若本次 attempt 由"接续消费"启动，留存该消费的登记身份
         // 与周期——对应等待者据此精确解析到本 attempt 的终态。
@@ -15712,8 +16046,8 @@ internal sealed partial class FanHostEngine : IDisposable
         // later non-power recovery is governed by its own explicit contract.
         recoveryRetryUsesSystemPendingClose = false;
         automaticResumeInProgress = true;
-        state.OpenCalled = false;
-        state.OpenEventsCalled = false;
+        state.OpenCalled = acceptedBusiness?.OpenReturned ?? false;
+        state.OpenEventsCalled = acceptedBusiness?.EventsReturned ?? false;
         automaticResumeResult = null;
         if (curve is null)
         {
@@ -15731,6 +16065,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 RecordResumeTerminalLocked(operation.AttemptId, "superseded", null);
                 diagnostics.Write("power.resume-commit-superseded", new { state = state.State, attempt = operation.AttemptId });
                 if (ReferenceEquals(activeResumeOperation, operation)) activeResumeOperation = null;
+                operation.PublicPower?.Dispose();
                 return new ResumeAdmission(SnapshotUnlocked(), operation.AttemptId, operation.AttemptId, "attempt", continuationId);
             }
             automaticResumeInProgress = false;
@@ -15750,6 +16085,7 @@ internal sealed partial class FanHostEngine : IDisposable
             // 第一批返修（R3 兼容）：同步完成的空恢复没有 worker 在跑——
             // 立即注销本次身份，避免后续延迟任务把它误认成自己的归属。
             if (ReferenceEquals(activeResumeOperation, operation)) activeResumeOperation = null;
+            operation.PublicPower?.Dispose();
             return new ResumeAdmission(SnapshotUnlocked(), operation.AttemptId, operation.AttemptId, "attempt", continuationId);
         }
         diagnostics.Write("power.resume-auto-rebuild.begin", new
@@ -15761,14 +16097,35 @@ internal sealed partial class FanHostEngine : IDisposable
             // 把"唤醒边沿黑盒"变成可判因（只读、只增字段、不改判定）。
             hcReceipts = realBackend?.HcReceiptsEvidence,
         });
-        resumeWorkerActive = 1;
-        resumeTask = Task.Run(() => CompleteAutomaticResume(curve));
+        StartAutomaticResumeWorkerLocked(curve, operation);
         return new ResumeAdmission(SnapshotUnlocked(), operation.AttemptId, operation.AttemptId, "attempt", continuationId);
     }
+
+    private void StartAutomaticResumeWorkerLocked(IReadOnlyList<FanNode> curve, ResumeOperationIdentity operation)
+    {
+        resumeWorkerActive = 1;
+        var publicWorker = operation.PublicPower?.TrackWorker();
+        try
+        {
+            resumeTask = Task.Run(() => CompleteAutomaticResume(curve, operation));
+            _ = resumeTask.ContinueWith(_ =>
+            {
+                try { publicWorker?.Dispose(); }
+                finally { OnAcceptedResumeTaskReturned(operation); }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch { publicWorker?.Dispose(); RetireResumeBusinessLocked("worker-start-failed"); throw; }
+    }
+
+    private bool AutomaticResumeOwnerCurrentForSettlement(object? operation) =>
+        operation is ResumeOperationIdentity accepted && ReferenceEquals(activeResumeOperation, operation)
+        && Volatile.Read(ref powerEpoch) == accepted.AcceptedPowerEpoch
+        && !stopped && !state.CloseCalled && !SuspendProtectionPending;
 
     private bool AutomaticResumeOperationCurrent(object? operation) =>
         operation is ResumeOperationIdentity accepted && ReferenceEquals(activeResumeOperation, operation)
         && Volatile.Read(ref powerEpoch) == accepted.AcceptedPowerEpoch
+        && (accepted.PublicPower is null || accepted.PublicPower.IsCurrent)
         && !stopped && !state.CloseCalled && !SuspendProtectionPending;
 
     private T AutomaticResumeStep<T>(object? operation, Func<T> action)
@@ -15778,17 +16135,19 @@ internal sealed partial class FanHostEngine : IDisposable
         // curve to reach Enable before its success was discarded.
         lock (gate)
         {
+            RequireResumePublicPower(operation as ResumeOperationIdentity);
+            EnsureResumeBusinessStepAdmission(operation as ResumeOperationIdentity);
             if (!AutomaticResumeOperationCurrent(operation)) throw ResumeSupersededError();
             return action();
         }
     }
 
-    private void CompleteAutomaticResume(IReadOnlyList<FanNode> curve)
+    private void CompleteAutomaticResume(IReadOnlyList<FanNode> curve, object? capturedOperation = null)
     {
         var workerThreadId = Environment.CurrentManagedThreadId;
         Volatile.Write(ref automaticResumeWorkerThreadId, workerThreadId);
         // 第一批返修：捕获本任务的操作身份；提交前必须核对仍是当前归属。
-        var operation = activeResumeOperation;
+        var operation = capturedOperation ?? activeResumeOperation;
         // 第十一轮返修（R5）：使用"请求接受点"捕获的不可变版本——
         // 不得在 worker 启动时重读（否则会把期间新睡眠的版本当成旧恢复的授权）。
         var epochAtStart = operation is ResumeOperationIdentity accepted ? accepted.AcceptedPowerEpoch : 0;
@@ -15797,6 +16156,8 @@ internal sealed partial class FanHostEngine : IDisposable
         var attemptId = operation is ResumeOperationIdentity identity ? identity.AttemptId : 0;
         try
         {
+            using var publicContext = (operation as ResumeOperationIdentity)?.PublicPower is { } scope
+                ? SharedPowerContext.Enter(scope) : null;
             // Q1（FAN-204 s31 补充裁决 C）：**仅沙箱**的慢重建注入——真机 HC 重建实测
             // ≈10.2 s，而 mock 重建几乎瞬时，AC15 无法覆盖"宿主忙"过渡窗。本延迟只在
             // `--mock-handshake` + 显式 `--mock-resume-rebuild-delay-ms` 同时存在时非零
@@ -15827,29 +16188,42 @@ internal sealed partial class FanHostEngine : IDisposable
             // Call the same public engine boundaries used by the UI, but do
             // it from the resident Host so WebView loss cannot skip HC
             // Open/OpenEvents/lease/curve reconstruction.
-            _ = AutomaticResumeStep(operation, Open);
-            KeepAutomaticResumeState(operation);
-            _ = AutomaticResumeStep(operation, OpenEvents);
-            KeepAutomaticResumeState(operation);
-            var lease = AutomaticResumeStep(operation, () =>
+            if ((operation as ResumeOperationIdentity)?.Business?.OpenReturned != true)
             {
-                var acquired = AcquireControl();
-                // Publish ownership in the same gate as acquisition. OFF must
-                // never see a worker lease whose owner record is still absent.
-                automaticResumePlaceholderLeaseId = acquired.LeaseId;
-                automaticResumePlaceholderLeaseGeneration = acquired.Generation;
-                return acquired;
-            });
-            diagnostics.Write("power.resume-placeholder-lease-created", new
-            {
-                attempt = attemptId,
-                leaseGeneration = lease.Generation,
-                controlResponsibility = "host-resume-intent",
-                leaseTokenRecorded = false,
-            });
+                _ = AutomaticResumeStep(operation, Open);
+                lock (gate) MarkResumeBusinessStepLocked(operation as ResumeOperationIdentity, events: false);
+            }
             KeepAutomaticResumeState(operation);
-            var enableRequest = BuildEnableRequest(curve, lease.LeaseId);
-            _ = AutomaticResumeStep(operation, () => Enable(enableRequest));
+            if ((operation as ResumeOperationIdentity)?.Business?.EventsReturned != true)
+            {
+                _ = AutomaticResumeStep(operation, OpenEvents);
+                lock (gate) MarkResumeBusinessStepLocked(operation as ResumeOperationIdentity, events: true);
+            }
+            KeepAutomaticResumeState(operation);
+            // A Native-authenticated manual session-only business restores the
+            // original Open/Events only. No old curve, control lease or Enable.
+            if ((operation as ResumeOperationIdentity)?.Business?.SessionOnly != true)
+            {
+                var lease = AutomaticResumeStep(operation, () =>
+                {
+                    var acquired = AcquireControl();
+                    // Publish ownership in the same gate as acquisition. OFF must
+                    // never see a worker lease whose owner record is still absent.
+                    automaticResumePlaceholderLeaseId = acquired.LeaseId;
+                    automaticResumePlaceholderLeaseGeneration = acquired.Generation;
+                    return acquired;
+                });
+                diagnostics.Write("power.resume-placeholder-lease-created", new
+                {
+                    attempt = attemptId,
+                    leaseGeneration = lease.Generation,
+                    controlResponsibility = "host-resume-intent",
+                    leaseTokenRecorded = false,
+                });
+                KeepAutomaticResumeState(operation);
+                var enableRequest = BuildEnableRequest(curve, lease.LeaseId);
+                _ = AutomaticResumeStep(operation, () => Enable(enableRequest));
+            }
             // HC G5 keeps the fan write gate closed until Open, OpenEvents,
             // owner acquisition and the first profile write have completed.
             // Opening it at the start of recovery allowed a temperature tick
@@ -15860,6 +16234,7 @@ internal sealed partial class FanHostEngine : IDisposable
             bool ownedBeforeReopen;
             lock (gate)
             {
+                RequireResumePublicPower(operation as ResumeOperationIdentity);
                 ownedBeforeReopen = !stopped
                     && operation is not null
                     && ReferenceEquals(activeResumeOperation, operation)
@@ -15898,6 +16273,7 @@ internal sealed partial class FanHostEngine : IDisposable
             var committedResume = false;
             lock (gate)
             {
+                RequireResumePublicPower(operation as ResumeOperationIdentity);
                 if (!stopped
                     && operation is not null
                     && ReferenceEquals(activeResumeOperation, operation)
@@ -15908,19 +16284,20 @@ internal sealed partial class FanHostEngine : IDisposable
                     automaticResumeResult = true;
                     suspendedCurve = null;
                     state.PowerState = "On";
-                    state.State = "Ready";
+                    var sessionOnlyCompleted = (operation as ResumeOperationIdentity)?.Business?.SessionOnly == true;
+                    state.State = sessionOnlyCompleted ? "AwaitingControl" : "Ready";
                     state.LastError = null;
                     state.PowerOperationStatus = "completed";
-                    state.PowerOperationOutcome = "restored";
+                    state.PowerOperationOutcome = sessionOnlyCompleted ? "await-user" : "restored";
                     // 第二十一轮返修（P1）：结算本 attempt 终态（等待者隔离）。
-                    RecordResumeTerminalLocked(attemptId, "completed", "restored");
+                    RecordResumeTerminalLocked(attemptId, "completed", state.PowerOperationOutcome);
                     // R1（裁决 §3.2.2/§3.2.3）：走到本分支即等价满足全部前件——
                     // operation 仍为当前归属、`powerEpoch == epochAtStart`（未被新睡眠取代）、
                     // 未 stopped、无待处理睡眠保护，且本次 Enable 已成功返回（失败会走 catch）。
                     // 因此在此**窄撤销本 worker 自己的占位租约**，并保持已恢复的
                     // activeCurve / 硬件写授权 / Host 控制责任：不 RestoreHardware、
                     // 不转 AwaitingControl、不伪造客户端租约、不清后来客户端取得的租约。
-                    RevokeAutomaticResumePlaceholderLeaseLocked(attemptId);
+                    if (!sessionOnlyCompleted) RevokeAutomaticResumePlaceholderLeaseLocked(attemptId);
                     // 第一批返修：本 worker 退出——注销自身身份（避免延迟任务误认归属）。
                     if (ReferenceEquals(activeResumeOperation, operation)) activeResumeOperation = null;
                     committedResume = true;
@@ -15950,7 +16327,26 @@ internal sealed partial class FanHostEngine : IDisposable
         {
             lock (gate)
             {
-                if (!AutomaticResumeOperationCurrent(operation))
+                var publicPower = (operation as ResumeOperationIdentity)?.PublicPower;
+                var deviceFailure = publicPower?.FirstDeviceActionFailure;
+                var originalFailure = deviceFailure ?? ex;
+                var cancelledTerminal = deviceFailure is null ? "superseded" : "failed";
+                if (ex is FanApiException { Code: "FAN_PUBLIC_POWER_SUPERSEDED", FailureOrigin: FanPowerFailureOrigin.PublicAdmission } &&
+                    deviceFailure is null && publicPower is not null && publicPower.LastFailure is null &&
+                    AutomaticResumeOwnerCurrentForSettlement(operation))
+                {
+                    automaticResumeInProgress = false;
+                    automaticResumeResult = false;
+                    state.PowerOperationStatus = cancelledTerminal;
+                    state.PowerOperationOutcome = "public-power-superseded";
+                    state.State = state.PowerState == "Suspended" ? "Suspended" : "AwaitingControl";
+                    RevokeAutomaticResumePlaceholderLeaseLocked(attemptId, "public-power-superseded");
+                    AwaitNextResumeBusinessGrantLocked((ResumeOperationIdentity)operation!, ex);
+                    RecordResumeTerminalLocked(attemptId, cancelledTerminal, null);
+                    activeResumeOperation = null;
+                    return;
+                }
+                if (!AutomaticResumeOwnerCurrentForSettlement(operation))
                 {
                     // The lock-free sleep announcement can invalidate this
                     // owner before SuspendUnlocked gets its turn. Retire only
@@ -15962,11 +16358,11 @@ internal sealed partial class FanHostEngine : IDisposable
                         activeResumeOperation = null;
                         if (state.PowerOperationAttempt == attemptId)
                         {
-                            state.PowerOperationStatus = "superseded";
+                            state.PowerOperationStatus = cancelledTerminal;
                             state.PowerOperationOutcome = "boundary-superseded";
                         }
                     }
-                    RecordResumeTerminalLocked(attemptId, "superseded", null);
+                    RecordResumeTerminalLocked(attemptId, cancelledTerminal, null);
                     return;
                 }
                 // HC parity: a suspend boundary may close the device while
@@ -15979,9 +16375,9 @@ internal sealed partial class FanHostEngine : IDisposable
                 {
                     automaticResumeInProgress = false;
                     // 第一批：被新睡眠/关闭取代——完成记录不得声称恢复。
-                    state.PowerOperationStatus = "superseded";
+                    state.PowerOperationStatus = cancelledTerminal;
                     // 第二十一轮返修（P1）：结算本 attempt 终态（等待者隔离）。
-                    RecordResumeTerminalLocked(attemptId, "superseded", null);
+                    RecordResumeTerminalLocked(attemptId, cancelledTerminal, null);
                     return;
                 }
                 // 第一批返修（P1#3）：失败结论同样必须属于当前归属。
@@ -15991,18 +16387,18 @@ internal sealed partial class FanHostEngine : IDisposable
                 {
                     automaticResumeInProgress = false;
                     if (ReferenceEquals(activeResumeOperation, operation)) activeResumeOperation = null;
-                    state.PowerOperationStatus = "superseded";
+                    state.PowerOperationStatus = cancelledTerminal;
                     // 第二十一轮返修（P1）：结算本 attempt 终态（等待者隔离）。
-                    RecordResumeTerminalLocked(attemptId, "superseded", null);
+                    RecordResumeTerminalLocked(attemptId, cancelledTerminal, null);
                     return;
                 }
                 if (operation is null || !ReferenceEquals(activeResumeOperation, operation))
                 {
                     // 第一批返修（P2）：退出路径结算本操作的执行账目（无新接管时）。
                     if (activeResumeOperation is null || ReferenceEquals(activeResumeOperation, operation)) automaticResumeInProgress = false;
-                    state.PowerOperationStatus = "superseded";
+                    state.PowerOperationStatus = cancelledTerminal;
                     // 第二十一轮返修（P1）：结算本 attempt 终态（等待者隔离）。
-                    RecordResumeTerminalLocked(attemptId, "superseded", null);
+                    RecordResumeTerminalLocked(attemptId, cancelledTerminal, null);
                     return;
                 }
                 automaticResumeInProgress = false;
@@ -16015,7 +16411,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 state.UnknownState = HasLiveHardwareSession();
                 state.State = state.UnknownState ? "FaultLocked" : "AwaitingControl";
                 state.PowerState = state.UnknownState ? "Unknown" : "On";
-                state.LastError = $"HC_RESUME_REBUILD_FAILED: {ExceptionText(ex)}";
+                state.LastError = $"HC_RESUME_REBUILD_FAILED: {ExceptionText(originalFailure)}";
                 diagnostics.Write("power.resume-auto-rebuild.failure", new
                 {
                     state = state.State,
@@ -16031,6 +16427,14 @@ internal sealed partial class FanHostEngine : IDisposable
             // 不撤销任何租约与预算；这里只注销本 worker 的占位身份记录（若提交分支已撤销
             // 过，此调用为空操作）。放在接续消费之前，避免覆盖接续 worker 自己登记的租约身份。
             ForgetAutomaticResumePlaceholderLease(attemptId, "worker-exit-without-commit");
+            lock (gate)
+            {
+                if ((operation as ResumeOperationIdentity)?.PublicPower is { } retainedPower)
+                {
+                    if (HasLiveHardwareSession()) residentResumePublicPower.Add(retainedPower);
+                    else retainedPower.Dispose();
+                }
+            }
             // Clear the internal bypass after the final state transition. A
             // later API request must observe Ready/AwaitingControl and never
             // inherit the resume worker's admission privilege.
@@ -16051,13 +16455,15 @@ internal sealed partial class FanHostEngine : IDisposable
                 // 第二十二轮（P1#1）：连同登记的稳定身份与授权归属一起消费。
                 var pendingId = resumeContinuationId;
                 var pendingStamp = resumeContinuationStamp;
+                using var pendingPublicPower = resumeContinuationPublicPower;
+                resumeContinuationPublicPower = null;
                 Volatile.Write(ref resumeContinuationEpoch, 0);
                 resumeContinuationId = 0;
                 resumeContinuationValue = 0;
                 resumeContinuationStamp = -1;
                 if (Interlocked.Exchange(ref resumeContinuationRequested, 0) != 0)
                 {
-                    if (stopped)
+                    if (stopped || state.CloseCalled || Volatile.Read(ref closeWriteBlocked) != 0)
                     {
                         state.PowerOperationStatus = "superseded";
                         // 消费但未启动 attempt：留存该登记的显式终态（superseded）。
@@ -16073,7 +16479,18 @@ internal sealed partial class FanHostEngine : IDisposable
                         // 第十/二十二轮返修：携带登记时的取消版本 + 授权归属 + 登记身份；
                         // 若期间有新睡眠已宣布（授权已推进），新版校验会丢弃本次接续
                         // （不再清掉新睡眠的保护），等待者也会得到显式终态。
-                        StartAutomaticResumeUnlocked(pendingEpoch, pendingStamp, pendingId);
+                        try
+                        {
+                            using var continuationContext = pendingPublicPower is null ? null : SharedPowerContext.Enter(pendingPublicPower);
+                            StartAutomaticResumeUnlocked(pendingEpoch, pendingStamp, pendingId);
+                        }
+                        catch (FanApiException error) when (error.Code == "FAN_PUBLIC_POWER_SUPERSEDED")
+                        {
+                            resumeSettledContinuationId = pendingId;
+                            resumeSettledContinuationValue = pendingEpoch;
+                            resumeSettledContinuationStamp = pendingStamp;
+                            state.PowerOperationStatus = "superseded";
+                        }
                     }
                 }
             }
@@ -16108,6 +16525,7 @@ internal sealed partial class FanHostEngine : IDisposable
             {
                 attempt = attemptId,
                 reason = lease is null ? "no-lease-present" : "lease-not-owned-by-resume-worker",
+                resumeTransitionReason = reason,
                 controlResponsibility = "host-resume-intent",
                 nextAdjustmentStillRequired = reason != "user-control-cancelled",
             });
@@ -16115,6 +16533,7 @@ internal sealed partial class FanHostEngine : IDisposable
             automaticResumePlaceholderLeaseGeneration = 0;
             return;
         }
+        RecordPublicLeaseReturned(lease);
         state.Lease = null;
         state.LeaseGeneration = null;
         leaseTimer?.Dispose();
@@ -16377,6 +16796,11 @@ internal sealed partial class FanHostEngine : IDisposable
     {
         lock (gate)
         {
+            if (BusinessProfileSelected && SharedPowerContext.Borrowed is { } scope)
+            {
+                if (TryFindAcceptedBusinessLocked(scope, out var known)) return known;
+                RequireBusinessProfileGrant(scope);
+            }
             if (stopped) return new ResumeAdmission(SnapshotUnlocked(), 0, 0, "noop", 0);
             if (state.UnknownState || state.State == "FaultLocked") return new ResumeAdmission(SnapshotUnlocked(), 0, 0, "noop", 0);
             // See Resume(): never let a duplicate Windows notification erase
@@ -16552,7 +16976,7 @@ internal sealed partial class FanHostEngine : IDisposable
                     acceptance.AcceptedAtUtc,
                     queuedNow,
                 });
-            if (queuedNow) _ = Task.Run(CompleteParentExitHandoff);
+            if (queuedNow) _ = Task.Run(() => CompletePublicResourceOwner(CompleteParentExitHandoff));
         }
         return new
         {
@@ -16577,6 +17001,8 @@ internal sealed partial class FanHostEngine : IDisposable
      */
     private ParentExitAcceptance? EnsureParentExitAcceptance()
     {
+        var retained = Volatile.Read(ref parentExitAcceptance);
+        if (retained is not null) return retained;
         lock (acceptanceGate)
         {
             if (parentExitAcceptance is not null) return parentExitAcceptance;
@@ -16659,6 +17085,10 @@ internal sealed partial class FanHostEngine : IDisposable
     {
         lock (gate)
         {
+            // Pending grants are business borrowers, not device/SDK return proof.
+            // Retire them on this actual exit owner, without waiting for a page
+            // snapshot or a later Channel drain to release the accepted business.
+            RetireResumeBusinessLocked("parent-exit");
             // §5.1（FAN-926 P1）：worker 行只需补**阶段**。"谁执行、结算归谁"已经由诊断上下文
             // （每行都带的 `hostInstanceId` + `context.recoveryCycle.cycleId`）导出，
             // 这里绝不重复第二份同一事实（否则两处会漂移）。
@@ -17082,6 +17512,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 throw new InvalidOperationException("HC Close 返回但生命周期边界未完整完成");
             if (alreadyRetiredBeforeClose && realBackend.HasVerifiedRetiredDeviceWithoutNewOpen)
             {
+                ObserveRetiredNoReturnObligation();
                 state.OpenCalled = false;
                 state.OpenEventsCalled = false;
                 state.HardwareWritesEnabled = false;
@@ -17134,10 +17565,14 @@ internal sealed partial class FanHostEngine : IDisposable
             // 使 route-lost 之后以"无需读回、收尾安全"对外，而那一轮一次释放动作都没做。
             // 现在只豁免"本轮确实没有写入历史"的诚实对照；有写历史而无释放动作证据 ⇒
             // **保留未结算责任**（如实标未证 + 记重开需求），仍允许同一 owner 在稳定路由上重开。
-            var noWriteHistoryThisCycle = !state.HardwareWritesObserved;
+            // Keep process history visible. A bound legacy session explicitly
+            // deemed not-applicable before Close owes no new return after an
+            // interrupted reopen; the exact retired device must still match.
+            var currentSessionReturnNotApplicable = realBackend.ClosedLegacyCallbackWithoutReturnObligation;
+            var noWriteHistoryThisCycle = !state.HardwareWritesObserved || currentSessionReturnNotApplicable;
             // §3.4／D4：唯一判定入口；调用点**没有**传清理/关闭边界的位置（入参已删）。
             var releaseSafe = RouteLostCloseIsRelease(
-                state.HardwareWritesObserved,
+                !noWriteHistoryThisCycle,
                 state.OemReleaseActionKind);
             if (!releaseSafe)
             {
@@ -17195,6 +17630,8 @@ internal sealed partial class FanHostEngine : IDisposable
                 ownershipClaim = false,
                 hcCloseComplete,
                 hardwareCallbackReturned = state.OemRestoreConfirmed,
+                noWriteHistoryThisCycle,
+                currentSessionReturnNotApplicable,
                 state.HcVirtualCloseReturned,
                 state.HcDeviceManagerStopCompleted,
                 state.HcDeviceManagerLifecycle,
@@ -17253,6 +17690,15 @@ internal sealed partial class FanHostEngine : IDisposable
 
     // Lease loss is an emergency cleanup path.  It must not merely discard
     // the lease in memory while leaving HC software control active.
+    private bool ObserveRetiredNoReturnObligation()
+    {
+        if (realBackend?.ClosedLegacyCallbackWithoutReturnObligation != true ||
+            ParseReleaseAction(realBackend.OemReleaseActionKind) != OemReleaseAction.NotApplicable) return false;
+        state.OemReleaseActionKind = realBackend.OemReleaseActionKind;
+        state.OemReleaseActionEvidence = realBackend.OemReleaseActionEvidence;
+        return true;
+    }
+
     private bool RestoreHardware(bool close, bool stopDeviceManager = true, bool skipOemRestore = false, string cause = "unspecified")
     {
         if (MockFanHandshakeFlag)
@@ -17327,13 +17773,12 @@ internal sealed partial class FanHostEngine : IDisposable
             // Keep `OemRestoreConfirmed` reserved for HC's Hardware callback;
             // a virtual Close is a separate lifecycle acknowledgement. The
             // optional ASUS readback remains diagnostic evidence only.
+            var noWriteHistory = !state.HardwareWritesObserved || ObserveRetiredNoReturnObligation();
             var releaseConfirmed = IsOemReleaseSafe(
-                state.HardwareWritesObserved,
+                !noWriteHistory,
                 state.OemReleaseActionKind);
             state.HardwareWritesEnabled = false;
-            state.UnknownState = !IsOemReleaseSafe(
-                state.HardwareWritesObserved,
-                state.OemReleaseActionKind);
+            state.UnknownState = !releaseConfirmed;
             state.HcCloseCleanupPending = false;
             if (state.UnknownState)
             {
@@ -17345,7 +17790,6 @@ internal sealed partial class FanHostEngine : IDisposable
             // "无需恢复"里（名字说 not-required、实际可能是故障锁定）⇒ 拆为两件：
             //   ① 确无写历史/无会话      ⇒ not-applicable（不是失败，也不宣称交还）
             //   ② 有写历史但无活会话      ⇒ release-unproven-no-live-session（未证，不宣称交还）
-            var noWriteHistory = !state.HardwareWritesObserved;
             diagnostics.Write(noWriteHistory
                 ? "restore.not-applicable-no-write-history"
                 : "restore.release-unproven-no-live-session", new
@@ -17566,7 +18010,7 @@ internal sealed partial class FanHostEngine : IDisposable
     {
         "not-applicable-no-write-history" => OemReleaseAction.NotApplicable,
         "proven-by-scope-receipts" or "proven-by-host-hc-acpi-fallback" or "proven-by-msi-structured-release" or
-            "proven-by-source-auto-register-and-terminal-close" => OemReleaseAction.Proven,
+            "proven-by-source-auto-register-and-terminal-close" or "proven-by-onex-ec-release" => OemReleaseAction.Proven,
         "failed-release-action" => OemReleaseAction.Failed,
         "compat-route-without-scope" => OemReleaseAction.CompatRouteWithoutScope,
         "unknown-release-action" => OemReleaseAction.Unknown,
@@ -17631,6 +18075,7 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private void ClearLease()
     {
+        RecordPublicLeaseReturned(state.Lease);
         state.Lease = null;
         state.LeaseGeneration = null;
         leaseTimer?.Dispose();
@@ -17640,18 +18085,24 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private void RecoverAfterHardwareFailure(Exception error)
     {
-        if (error is FanApiException { Code: "FAN_WRITE_SUPERSEDED" or "HC_OPEN_EVENTS_POWER_SUPERSEDED" })
+        if (error is FanApiException { Code: "FAN_WRITE_SUPERSEDED" or "HC_OPEN_EVENTS_POWER_SUPERSEDED" or "FAN_PUBLIC_POWER_SUPERSEDED" } cancellation)
         {
             // Event subscription rollback is local. The already-announced power
             // boundary retains device Close/return ownership, exactly as for a
             // superseded fan write; retain the cause without a second restore.
-            if (error is FanApiException { Code: "HC_OPEN_EVENTS_POWER_SUPERSEDED" })
+            if (cancellation.Code == "HC_OPEN_EVENTS_POWER_SUPERSEDED")
                 state.LastError = ExceptionText(error);
             // Sleep/Close/timeout has already retired this local write. Its
             // lifecycle owner performs cleanup; don't erase committed intent
             // or invent a second OEM/Close owner from this cancellation.
             diagnostics.Write("hc-operation.write-cancelled", new
-            { state = state.State, writesMayHaveOccurred = true, hardwareFailureClaimed = false });
+            {
+                state = state.State,
+                cancellationCode = cancellation.Code,
+                failureOrigin = cancellation.FailureOrigin.ToString(),
+                writesMayHaveOccurred = true,
+                hardwareFailureClaimed = false,
+            });
             return;
         }
         if (error is FanApiException { Code: "HC_OPERATION_BUSY" })
@@ -17760,10 +18211,13 @@ internal sealed partial class FanHostEngine : IDisposable
             elapsedMs = elapsed,
             windowMs = RecoveryRetryWindowMs,
         });
-        recoveryTimer = new Timer(_ =>
+        Timer? scheduledTimer = null;
+        scheduledTimer = new Timer(_ => CompletePublicResourceOwner(() =>
         {
             lock (gate)
             {
+                // A disposed callback may already be queued; it cannot consume a later timer owner.
+                if (!ReferenceEquals(recoveryTimer, scheduledTimer)) return;
                 recoveryTimer?.Dispose();
                 recoveryTimer = null;
                 if (stopped || (state.State != "FaultLocked" && state.State != "AwaitingCloseCleanup")) return;
@@ -17902,7 +18356,8 @@ internal sealed partial class FanHostEngine : IDisposable
                 }
                 else ScheduleRecoveryRetry();
             }
-        }, null, delayMs, Timeout.Infinite);
+        }), null, delayMs, Timeout.Infinite);
+        recoveryTimer = scheduledTimer;
     }
 
     private void EnterRecoveryRetryTerminalState(string reason)
@@ -18155,35 +18610,80 @@ internal sealed partial class FanHostEngine : IDisposable
         }
     }
 
-    private bool PersistRecoveryCycleLocked()
+    private bool PersistRecoveryCycleLocked(RecoveryCycleRecord? expectedPrevious = null)
     {
         if (recoveryCycle is null) return false;
-        // §3.1（FAN-926 P1）：受理的 ACK **之前绝不碰磁盘**——冷盘/AV 首次写入实测 ~460 ms，
-        // 会冲破既有"交接不被 gate 持有期阻塞"的 250 ms 快速门。周期已在内存建立；替代 Host
-        // 只可能在预算之后才被拉起，那时这次落盘早已完成（预算继承读的是磁盘，不读内存引用）。
         if (acceptanceFastPathActive)
         {
-            _ = Task.Run(() =>
+            var publication = new DeferredRecoveryCyclePublication(recoveryCycle, expectedPrevious);
+            deferredRecoveryCyclePublication = publication;
+            recoveryCyclePublicationTask = Task.Run(() =>
             {
-                lock (gate) { lock (acceptanceGate) { PersistRecoveryCycleSynchronously(); } }
+                lock (gate)
+                {
+                    lock (acceptanceGate)
+                    {
+                        // A Close owner may already have published and settled it.
+                        // A late worker must never write the later global cycle.
+                        if (ReferenceEquals(deferredRecoveryCyclePublication, publication))
+                            PersistRecoveryCycleSynchronously();
+                    }
+                }
             });
             return true;
         }
         return PersistRecoveryCycleSynchronously();
     }
 
-    /** 仅受理线程在建立周期的短短一段里为 true；用 ThreadStatic 保证只影响该线程。 */
     [ThreadStatic] private static bool acceptanceFastPathActive;
+
+    private static bool SameRecoveryCycleRecord(RecoveryCycleRecord? left, RecoveryCycleRecord? right) =>
+        left is null ? right is null : right is not null &&
+        string.Equals(JsonSerializer.Serialize(left, JsonDefaults.Options),
+            JsonSerializer.Serialize(right, JsonDefaults.Options), StringComparison.Ordinal);
+
+    private RecoveryCycleRecord? PublishDeferredRecoveryCycleLocked()
+    {
+        var pending = deferredRecoveryCyclePublication;
+        if (pending is null) return null;
+        if (recoveryJournalBlocked)
+            throw new IOException("Unconfirmed journal cannot publish deferred recovery acceptance");
+        var current = recoveryCycle;
+        if (current is null || current.CycleId != pending.Cycle.CycleId ||
+            current.ParentPid != pending.Cycle.ParentPid || current.StartedAtUtc != pending.Cycle.StartedAtUtc ||
+            current.Attempts < pending.Cycle.Attempts || current.Replacements < pending.Cycle.Replacements ||
+            (pending.Cycle.Terminal && !current.Terminal) || (pending.Cycle.Completed && !current.Completed))
+            throw new IOException("Deferred recovery publication no longer owns the retained cycle and budget");
+        var durable = ReadRecoveryJournal<RecoveryCycleRecord>(RecoveryCycleStatePath());
+        // Absence is legal only when this accepted cycle had no predecessor.
+        // Unknown annotations participate in the exact normalized preimage too.
+        if (!SameRecoveryCycleRecord(durable, pending.ExpectedPrevious) &&
+            !SameRecoveryCycleRecord(durable, pending.Cycle))
+            throw new IOException("Deferred recovery predecessor changed before durable publication");
+        if (!SameRecoveryCycleRecord(durable, current))
+            WriteRecoveryJournal(RecoveryCycleStatePath(), current, true);
+        deferredRecoveryCyclePublication = null;
+        return current;
+    }
 
     private bool PersistRecoveryCycleSynchronously()
     {
-        if (recoveryCycle is null) return false;
-        try { WriteRecoveryJournal(RecoveryCycleStatePath(), recoveryCycle, true); return true; }
-        catch (Exception ex)
+        lock (acceptanceGate)
         {
-            BlockRecoveryJournal("cycle", ex);
-            diagnostics.Write("recovery.cycle-write-failed", new { error = ExceptionText(ex) });
-            return false;
+            if (recoveryCycle is null) return false;
+            try
+            {
+                var published = PublishDeferredRecoveryCycleLocked();
+                if (!ReferenceEquals(published, recoveryCycle))
+                    WriteRecoveryJournal(RecoveryCycleStatePath(), recoveryCycle, true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                BlockRecoveryJournal("cycle", ex);
+                diagnostics.Write("recovery.cycle-write-failed", new { error = ExceptionText(ex) });
+                return false;
+            }
         }
     }
 
@@ -18275,6 +18775,8 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private bool EnsureRecoveryCycleCoreLocked(string reason)
     {
+        if (!acceptanceFastPathActive && deferredRecoveryCyclePublication is not null &&
+            !PersistRecoveryCycleSynchronously()) return false;
         var parentPid = options.ParentPid ?? 0;
         var previouslyBlocked = recoveryJournalBlocked;
         var persisted = ReadPersistedRecoveryCycle();
@@ -18312,7 +18814,7 @@ internal sealed partial class FanHostEngine : IDisposable
                     LastUpdatedAtUtc = DateTime.UtcNow,
                 };
                 recoveryRetryAttempt = Math.Max(recoveryRetryAttempt, recoveryCycle.Attempts);
-                return PersistRecoveryCycleLocked() && RemainingRecoveryCycleMs(recoveryCycle) > 0;
+                return PersistRecoveryCycleLocked(persisted) && RemainingRecoveryCycleMs(recoveryCycle) > 0;
             }
         }
         if (persisted is not null && recoveryCycle is not null &&
@@ -18351,7 +18853,7 @@ internal sealed partial class FanHostEngine : IDisposable
             recoveryCycleExplicitRetryRequested = false;
             var previous = recoveryCycle;
             recoveryCycle = NewRecoveryCycleLocked(parentPid, "explicit-retry-after-terminal:" + reason);
-            if (!PersistRecoveryCycleLocked())
+            if (!PersistRecoveryCycleLocked(persisted))
             {
                 recoveryCycle = previous;
                 return false;
@@ -18392,7 +18894,7 @@ internal sealed partial class FanHostEngine : IDisposable
                     reason, cycleId = recoveryCycle.CycleId, attempts = recoveryCycle.Attempts,
                     replacements = recoveryCycle.Replacements, remainingMs = remaining,
                 });
-                PersistRecoveryCycleLocked();
+                PersistRecoveryCycleLocked(persisted);
                 return false;
             case RecoveryCycleAdoption.RefuseReplacementCap:
                 // 每故障周期至多一次自动 Host 更换：本次启动属于同一周期的第二次自动接管 ⇒ 拒绝。
@@ -18407,7 +18909,7 @@ internal sealed partial class FanHostEngine : IDisposable
                     reason, cycleId = recoveryCycle.CycleId, replacements = recoveryCycle.Replacements,
                     attempts = recoveryCycle.Attempts, remainingMs = remaining,
                 });
-                PersistRecoveryCycleLocked();
+                PersistRecoveryCycleLocked(persisted);
                 return false;
             case RecoveryCycleAdoption.Inherit:
                 recoveryCycle = persisted! with
@@ -18425,7 +18927,7 @@ internal sealed partial class FanHostEngine : IDisposable
                     reason, cycleId = recoveryCycle.CycleId, replacements = recoveryCycle.Replacements,
                     attempts = recoveryRetryAttempt, remainingMs = remaining,
                 });
-                return PersistRecoveryCycleLocked();
+                return PersistRecoveryCycleLocked(persisted);
             default:
                 recoveryCycle = NewRecoveryCycleLocked(parentPid, reason);
                 recoveryCycleInherited = false;
@@ -18433,7 +18935,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 {
                     reason, trigger = explicitRetry ? "explicit-retry" : "automatic", cycleId = recoveryCycle.CycleId,
                 });
-                if (!PersistRecoveryCycleLocked())
+                if (!PersistRecoveryCycleLocked(persisted))
                 {
                     if (persisted is not null)
                     {
@@ -18450,37 +18952,41 @@ internal sealed partial class FanHostEngine : IDisposable
 
     private bool CompleteRecoveryCycleLocked(string reason)
     {
-        if (recoveryCycle is null) return !recoveryJournalBlocked && !controlIntentJournalBlocked;
-        var unsettled = recoveryCycle;
-        try
+        lock (acceptanceGate)
         {
-            if (recoveryJournalBlocked || controlIntentJournalBlocked)
-                throw new IOException("Unconfirmed recovery journals cannot settle ownership");
-            var durable = ReadRecoveryJournal<RecoveryCycleRecord>(RecoveryCycleStatePath());
-            if (durable is null || durable.CycleId != unsettled.CycleId ||
-                durable.ParentPid != unsettled.ParentPid || durable.StartedAtUtc != unsettled.StartedAtUtc ||
-                durable.Attempts > unsettled.Attempts || durable.Replacements > unsettled.Replacements)
-                throw new IOException("Recovery completion is not bound to the retained cycle and budget");
-            recoveryCycle = unsettled with { Completed = true, LastReason = reason, LastUpdatedAtUtc = DateTime.UtcNow };
-            // Completion requires a durable receipt, never the deferred acceptance ACK.
-            if (!PersistRecoveryCycleSynchronously())
+            if (recoveryCycle is null) return !recoveryJournalBlocked && !controlIntentJournalBlocked;
+            var unsettled = recoveryCycle;
+            try
+            {
+                if (recoveryJournalBlocked || controlIntentJournalBlocked)
+                    throw new IOException("Unconfirmed recovery journals cannot settle ownership");
+                PublishDeferredRecoveryCycleLocked();
+                var durable = ReadRecoveryJournal<RecoveryCycleRecord>(RecoveryCycleStatePath());
+                if (durable is null || durable.CycleId != unsettled.CycleId ||
+                    durable.ParentPid != unsettled.ParentPid || durable.StartedAtUtc != unsettled.StartedAtUtc ||
+                    durable.Attempts > unsettled.Attempts || durable.Replacements > unsettled.Replacements)
+                    throw new IOException("Recovery completion is not bound to the retained cycle and budget");
+                recoveryCycle = unsettled with { Completed = true, LastReason = reason, LastUpdatedAtUtc = DateTime.UtcNow };
+                // Completion requires a durable receipt, never the deferred acceptance ACK.
+                if (!PersistRecoveryCycleSynchronously())
+                {
+                    recoveryCycle = unsettled;
+                    return false;
+                }
+            }
+            catch (Exception ex)
             {
                 recoveryCycle = unsettled;
+                BlockRecoveryJournal("cycle", ex);
                 return false;
             }
+            diagnostics.Write("recovery.cycle-completed", new
+            {
+                reason, cycleId = recoveryCycle.CycleId, attempts = recoveryCycle.Attempts,
+                replacements = recoveryCycle.Replacements,
+            });
+            return true;
         }
-        catch (Exception ex)
-        {
-            recoveryCycle = unsettled;
-            BlockRecoveryJournal("cycle", ex);
-            return false;
-        }
-        diagnostics.Write("recovery.cycle-completed", new
-        {
-            reason, cycleId = recoveryCycle.CycleId, attempts = recoveryCycle.Attempts,
-            replacements = recoveryCycle.Replacements,
-        });
-        return true;
     }
 
     private void MarkRecoveryCycleTerminalLocked(string reason)
@@ -19524,6 +20030,7 @@ internal sealed partial class FanHostEngine : IDisposable
             runtimeDiagnosticsTimer = null;
             ClearLease();
             StopCurveTimer();
+            SettleReturnedResumePublicPower();
         }
         realBackend?.Dispose();
     }
@@ -19556,6 +20063,8 @@ internal sealed partial class FanHostEngine : IDisposable
                 "hc-default-table-readback-confirmed",
                 StringComparison.Ordinal);
         }
+        SettleReturnedResumePublicPower();
+        RefreshResumeBusinessReadFence();
         var snapshot = snapshotJsonCopy.Copy(state);
         // Q1（FAN-204 s31 补充裁决 2026-09-23）：恢复阶段真值 / 建议轮询间隔 / 控制可发送性 /
         // 最近写入收据——由 ApplyDerivedSnapshotFields 统一派生（与公开 Snapshot() 同一实现）。
@@ -19670,7 +20179,7 @@ internal sealed class ListenerRetryBudget
     }
 }
 
-internal sealed class LocalFanHostServer : IDisposable
+internal sealed partial class LocalFanHostServer : IDisposable
 {
     /** FAN-204 Q1-b：/api/resume 去重/未知分支的收据读预算（有界，远小于任何客户端预算）。 */
     private const int ResumeReceiptReadBudgetMs = 400;
@@ -19718,12 +20227,24 @@ internal sealed class LocalFanHostServer : IDisposable
         PowerIngressTarget Target,
         PowerEventMetadata Metadata,
         Func<object> Action,
-        TaskCompletionSource<object?>? Completion);
+        TaskCompletionSource<object?>? Completion)
+    {
+        internal FanRemotePowerScope? PublicPower { get; init; }
+        internal bool AcceptedBusinessContinuation { get; init; }
+    }
 
     public LocalFanHostServer(FanHostEngine engine, HostOptions options, HostDiagnosticLog? diagnostics = null)
     {
         this.engine = engine;
         this.options = options;
+        engine.AcceptedResumeBusinessReady = action =>
+        {
+            if (stopCts.IsCancellationRequested || powerIngress.IsClosing ||
+                !powerTransitions.Writer.TryWrite(new PowerTransition("resume-business-continuation", PowerIngressTarget.Ready,
+                    new PowerEventMetadata(0, "native.business-continuation"), action, null)
+                    { AcceptedBusinessContinuation = true }))
+                throw new InvalidOperationException("Original power executor unavailable");
+        };
         sessionTokenUtf8 = Encoding.UTF8.GetBytes(options.SessionToken ?? string.Empty);
         this.diagnostics = diagnostics ?? new HostDiagnosticLog();
         // 第十六轮返修（admission/commit）：准入发布的"边沿归属"接线——睡眠保护
@@ -19734,6 +20255,13 @@ internal sealed class LocalFanHostServer : IDisposable
             (parentStartTimeUtc, parentExecutablePath) = CaptureParentIdentity(parentPid);
         else if (!string.IsNullOrWhiteSpace(options.ParentProcessName))
             (parentStartTimeUtc, parentExecutablePath) = CaptureNamedParentIdentity(options.ParentProcessName);
+        if (engine.BusinessProfileSelected)
+        {
+            // Fixed package contract: hold the real Native parent before accepting HTTP.
+            engine.SharedPowerContext.RequireImportedPower();
+            try { sharedPowerBusinessIdentity = CaptureSharedPowerBusinessIdentity(); }
+            catch { DisposeRemoteParent(); throw; }
+        }
         listener = CreateListener();
     }
 
@@ -19965,6 +20493,7 @@ internal sealed class LocalFanHostServer : IDisposable
         // one may initiate it. Later calls only observe completion.
         if (Interlocked.Exchange(ref stopRequested, 1) != 0) return;
         powerIngress.BeginClose();
+        engine.RetireAcceptedResumeBusinessForServerExit();
         try { engine.Close(); }
         catch (Exception ex)
         {
@@ -20004,7 +20533,7 @@ internal sealed class LocalFanHostServer : IDisposable
         var escalated = false;
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (ParentRecoveryIsSafeToFinalize(engine.Snapshot()))
+            if (engine.ParentRecoveryCanFinalize())
             {
                 StopListenerAfterConfirmedEngineClose(StopListenerPath.BoundedFinalizeSafe);
                 return;
@@ -20098,7 +20627,7 @@ internal sealed class LocalFanHostServer : IDisposable
     internal static bool ParentRecoveryIsSafeToFinalizeForSelfTest(HostState snapshot) =>
         ParentRecoveryIsSafeToFinalize(snapshot);
 
-    private static bool ParentRecoveryIsSafeToFinalize(HostState snapshot)
+    internal static bool ParentRecoveryIsSafeToFinalize(HostState snapshot, bool currentSessionReturnNotApplicable = false)
     {
         var liveWrites = snapshot.HardwareWritesEnabled || snapshot.HardwareWrites;
         // §3.1/§3.4（FAN-925B）：释放动作证据与 HC 资源清理**分列**。
@@ -20109,8 +20638,12 @@ internal sealed class LocalFanHostServer : IDisposable
             snapshot.HcDeviceManagerStopCompleted &&
             snapshot.HcManagerFactoryLifecycle == "Started" &&
             snapshot.HcDeviceManagerLifecycle == "Started";
+        // Only the engine's current backend can supply this bound fact. A
+        // completed Close alone, or a caller's historical snapshot, cannot.
+        var boundNoReturn = currentSessionReturnNotApplicable && !snapshot.SourceFanMode &&
+            FanHostEngine.ParseReleaseAction(snapshot.OemReleaseActionKind) == OemReleaseAction.NotApplicable;
         var releaseEvidence = FanHostEngine.IsOemReleaseSafe(
-            snapshot.HardwareWritesObserved,
+            snapshot.HardwareWritesObserved && !boundNoReturn,
             snapshot.OemReleaseActionKind);
         var cleanupEvidence = snapshot.SourceFanMode
             ? !snapshot.SourceFanClosePending && (!snapshot.SourceFanOwnerEntered || snapshot.SourceFanClosed)
@@ -20204,6 +20737,20 @@ internal sealed class LocalFanHostServer : IDisposable
         TaskCompletionSource<object?>? completion = null,
         Action? acceptedCallback = null)
     {
+        // [LIFECYCLE:FAN:POWER-QUEUE] Capture the HTTP request before the
+        // independent Channel reader. A later import cannot supply old work.
+        // Native callback without a grant is a stale resume, never a new source;
+        // suspend/return keeps its original admission and cleanup path.
+        FanRemotePowerScope? publicPower = null;
+        if (target == PowerIngressTarget.Ready && engine.SharedPowerContext.Required)
+        {
+            var request = engine.SharedPowerContext.Borrowed;
+            if (request is null || (publicPower = request.Retain()) is null)
+                return PowerPublishResult.Stale;
+        }
+        var queued = false;
+        try
+        {
         // TryPublish is lock-free and Channel.TryWrite is non-blocking.  Do
         // not add diagnostics here: this method is called by the Windows
         // callback as well as by the API request path.
@@ -20215,7 +20762,11 @@ internal sealed class LocalFanHostServer : IDisposable
         {
             if (target == PowerIngressTarget.Suspended)
                 engine.BlockWritesForSuspendNow();
-            return powerTransitions.Writer.TryWrite(new PowerTransition(name, target, metadata, action, completion));
+            queued = powerTransitions.Writer.TryWrite(new PowerTransition(name, target, metadata, action, completion)
+            {
+                PublicPower = publicPower,
+            });
+            return queued;
         },
         // 第十八轮返修：claim 成功瞬间铸造接受记录（不可变身份 + claim 时的保护
         // 提交边界）——边界在 TryPublish 内部取，杜绝"claim 后、Enter 前被抢占"
@@ -20249,6 +20800,11 @@ internal sealed class LocalFanHostServer : IDisposable
             }
         }
         return result;
+        }
+        finally
+        {
+            if (!queued) publicPower?.Dispose();
+        }
     }
 
     // R2 safe integration hooks. They invoke the production callback and queue
@@ -20339,7 +20895,13 @@ internal sealed class LocalFanHostServer : IDisposable
         {
             await foreach (var transition in powerTransitions.Reader.ReadAllAsync(cancellationToken))
             {
-                if (cancellationToken.IsCancellationRequested) return;
+                try
+                {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    transition.Completion?.TrySetCanceled(cancellationToken);
+                    return;
+                }
                 if (powerIngress.IsClosing)
                 {
                     Interlocked.Increment(ref skippedPowerTransitions);
@@ -20355,6 +20917,10 @@ internal sealed class LocalFanHostServer : IDisposable
                 }
                 try
                 {
+                    using var publicScope = transition.PublicPower is { } power
+                        ? engine.SharedPowerContext.Enter(power)
+                        : !transition.AcceptedBusinessContinuation && transition.Target == PowerIngressTarget.Ready && engine.SharedPowerContext.Required
+                            ? throw FanRemotePowerContext.Superseded() : null;
                     Interlocked.Increment(ref executedPowerTransitions);
                     var result = transition.Action();
                     transition.Completion?.TrySetResult(result);
@@ -20377,6 +20943,18 @@ internal sealed class LocalFanHostServer : IDisposable
                         source = transition.Metadata.Source,
                     });
                 }
+                catch (FanApiException ex) when (ex.Code == "FAN_PUBLIC_POWER_SUPERSEDED")
+                {
+                    transition.Completion?.TrySetException(ex);
+                    diagnostics.Write("power.transition-superseded", new
+                    {
+                        transition.Name,
+                        target = transition.Target.ToString(),
+                        generation = transition.Metadata.Generation,
+                        source = transition.Metadata.Source,
+                        reason = "public-scope-retired",
+                    });
+                }
                 catch (Exception ex)
                 {
                     transition.Completion?.TrySetException(ex);
@@ -20390,9 +20968,25 @@ internal sealed class LocalFanHostServer : IDisposable
                     });
                     Console.Error.WriteLine($"YeManFanHost {transition.Name} transition failed: {ex.GetType().Name}: {ex.Message}");
                 }
+                }
+                finally
+                {
+                    transition.PublicPower?.Dispose();
+                    engine.DrainRemotePowerReturns();
+                }
             }
         }
         catch (OperationCanceledException) { }
+        finally
+        {
+            // These items never entered the action. Active SDK/worker borrowers
+            // retain their own scope until their real return; no ACK is inferred.
+            while (powerTransitions.Reader.TryRead(out var pending))
+            {
+                pending.PublicPower?.Dispose();
+                pending.Completion?.TrySetCanceled();
+            }
+        }
     }
 
     private async Task WatchParentAsync(CancellationToken cancellationToken)
@@ -20663,6 +21257,7 @@ internal sealed class LocalFanHostServer : IDisposable
         {
             case "attempt":
             case "deferred":
+            case "known-business":
                 // 已接纳：重建（若有）在后台继续。gateway 只报告"已接纳 + 当前阶段"。
                 return ShapeResumeAccepted(metadata.Generation, admission, snapshot);
             case "noop":
@@ -20865,6 +21460,12 @@ internal sealed class LocalFanHostServer : IDisposable
             var method = methodForLog;
             // FAN-931 P0：请求入口计数（定长、无分配热点；调用者归类只是 UA 启发式诊断）。
             FanPerfCounters.RecordRequest(path, context.Request.UserAgent);
+            // Parse the original body first, then import once in this exact async
+            // context after session authentication. Cleanup/read never mint power.
+            var body = method == "POST" && path != "/api/handshake"
+                ? await ReadJsonAsync(context.Request) : default;
+            using var requestPublicPower = EnterRequestPublicPower(context.Request, method, path);
+            if (path == "/api/heartbeat") engine.AdoptAuthenticatedWriteChild();
             object result;
             HostState? readResponseSnapshot = null;
             object CaptureResponseState(object value)
@@ -20878,12 +21479,29 @@ internal sealed class LocalFanHostServer : IDisposable
             if (method == "GET" && path == "/health")
             {
                 readResponseSnapshot = engine.SnapshotForRead();
-                result = new { ok = true, host = "YeManFanHost", protocolVersion = 2, sessionRequired = true, parentPid = options.ParentPid, parentProcess = options.ParentProcessName, state = readResponseSnapshot };
+                result = new { ok = true, host = "YeManFanHost", protocolVersion = 2, sessionRequired = true, parentPid = options.ParentPid, parentProcess = options.ParentProcessName, sharedPowerBusiness = sharedPowerBusinessIdentity, state = readResponseSnapshot };
             }
             else if (method == "GET" && path == "/api/state")
             {
-                readResponseSnapshot = engine.SnapshotForRead();
-                result = new { ok = true, state = readResponseSnapshot };
+                var selectedBusiness = ParseResumeBusinessSelection(context.Request);
+                if (selectedBusiness is { } selected)
+                {
+                    var header = context.Request.Headers[RemotePowerOfferHeaderV1.HeaderName];
+                    if (header is not null)
+                    {
+                        using var delivery = EnterResumeBusinessDelivery(context.Request, selected);
+                        engine.StageAcceptedResumeParent(selected);
+                    }
+                    readResponseSnapshot = engine.SnapshotForRead();
+                    result = new { ok = true, state = readResponseSnapshot, resumeBusiness = engine.ReadAcceptedResumeBusiness(selected) };
+                }
+                else
+                {
+                    if (context.Request.Headers[RemotePowerOfferHeaderV1.HeaderName] is not null)
+                        throw new FanApiException(400, "FAN_RESUME_SELECTOR_REQUIRED", "Authenticated continuation requires exact business selection");
+                    readResponseSnapshot = engine.SnapshotForRead();
+                    result = new { ok = true, state = readResponseSnapshot };
+                }
             }
             // FAN-931 P0：只读计数导出（认证入口已在上方判定；不含 token/lease 秘密）。
             // 带上非秘密的实例/进程身份与样本起点，使采集端能把"这份计数"绑到同一实例同一采集窗。
@@ -20912,17 +21530,22 @@ internal sealed class LocalFanHostServer : IDisposable
             }
             else if (method == "POST" && path == "/api/suspend")
             {
-                var body = await ReadJsonAsync(context.Request);
                 result = await SuspendFromApiAsync(body).ConfigureAwait(false);
             }
             else if (method == "POST" && path == "/api/resume")
             {
-                var body = await ReadJsonAsync(context.Request);
+                var sessionOnly = false;
+                if (body.TryGetProperty("sessionOnly", out var mode))
+                {
+                    if (mode.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new FanApiException(400, "FAN_RESUME_MODE_INVALID", "sessionOnly must be a boolean");
+                    sessionOnly = mode.GetBoolean();
+                }
+                engine.SelectAuthenticatedResumeMode(sessionOnly);
                 result = await ResumeFromApiAsync(body).ConfigureAwait(false);
             }
             else
             {
-                var body = await ReadJsonAsync(context.Request);
                 result = (method, path) switch
                 {
                     ("POST", "/api/open") => OpenFromApi(),
@@ -20999,7 +21622,11 @@ internal sealed class LocalFanHostServer : IDisposable
             diagnostics.Write("api.request-host-error", new { requestId, method = methodForLog, path = pathForLog, error = ExceptionText(ex), state = hostErrorState.State, lastError = hostErrorState.LastError, durationMs = hostErrorMs, httpStatus = 500 });
             await WriteJsonAsync(context, 500, new { ok = false, error = new { code = "HOST_ERROR", message = ex.Message }, state = hostErrorState });
         }
-        finally { CloseResponse(context); }
+        finally
+        {
+            CloseResponse(context);
+            engine.DrainRemotePowerReturns();
+        }
     }
 
     private static string ExceptionText(Exception ex) => string.Join(" -> ", Unwrap(ex).Select(e => e.GetType().Name + ": " + e.Message));
@@ -21230,6 +21857,8 @@ internal sealed class LocalFanHostServer : IDisposable
         listener.Close();
         powerTransitions.Writer.TryComplete();
         stopCts.Dispose();
+        DisposeRemoteParent();
+        engine.DrainRemotePowerReturns();
         watchdogFaultObserver = null;
     }
 
@@ -21299,6 +21928,7 @@ internal sealed class FanApiException : Exception
 {
     public int StatusCode { get; }
     public string Code { get; }
+    internal FanPowerFailureOrigin FailureOrigin { get; init; }
     /**
      * FAN-204 Q1-c（2026-09-24 裁决）：结构化拒绝的**附加可判定字段**（如 heartbeat 快速拒绝的
      * generation/resumePhase/retryAfterMs/controlAccepting/leaseRenewed）。默认 null ⇒ 既有失败
@@ -22175,7 +22805,7 @@ internal static class FanRouteEvidenceSelfTest
                 var failure = CaptureRestoreFailure(backend);
                 if (failure == "<no-failure>" || releaseMock.ReleaseMsiFanControlInvocationCount != 1 ||
                     releaseMock.LastMsiFanReleaseCause != "oem-restore" ||
-                    backend.OemReleaseActionKind != "not-attempted" || backend.OemRestoreVerified)
+                    FanHostEngine.ParseReleaseAction(backend.OemReleaseActionKind) != OemReleaseAction.Failed || backend.OemRestoreVerified)
                     throw new InvalidOperationException(
                         $"FAN-934 {factory}: a throwing HC release routine must rethrow and never verify release " +
                         $"(failure={failure} releaseInvocations={releaseMock.ReleaseMsiFanControlInvocationCount} " +
@@ -22189,7 +22819,7 @@ internal static class FanRouteEvidenceSelfTest
                 boundary.CallbackFailure = boom;
                 var failure = CaptureRestoreFailure(backend);
                 if (failure != boom.Message || boundary.CallbackInvocationCount != 1 ||
-                    backend.OemReleaseActionKind != "not-attempted" || backend.OemRestoreVerified)
+                    FanHostEngine.ParseReleaseAction(backend.OemReleaseActionKind) != OemReleaseAction.Failed || backend.OemRestoreVerified)
                     throw new InvalidOperationException(
                         $"FAN-934 {factory}: a throwing HC callback must rethrow and never verify release " +
                         $"(failure={failure} callbacks={boundary.CallbackInvocationCount} " +
@@ -23424,6 +24054,93 @@ internal static class FanRouteEvidenceSelfTest
             }
         }
 
+        return checks;
+    }
+}
+
+// Side-effect-free storm checks execute the real engine with existing Safe/mock seams.
+internal static class FanPublicLifecycleStormSelfTest
+{
+    private const BindingFlags Fields = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static object? Get(object owner, string name) => owner.GetType().GetField(name, Fields)!.GetValue(owner);
+    private static void Call(object owner, string name) => owner.GetType().GetMethod(name, Fields)!.Invoke(owner, null);
+
+    // Deliver the callback belonging to an already queued, now disposed timer.
+    // The timer itself is real; neither the recovery action nor its guard is replaced.
+    private static TimerCallback CaptureCallback(object owner, int depth = 0)
+    {
+        foreach (var field in owner.GetType().GetFields(Fields))
+        {
+            var value = field.GetValue(owner);
+            if (value is TimerCallback callback) return callback;
+            if (value is not null && depth < 3 && value.GetType().Namespace == "System.Threading")
+            {
+                try { return CaptureCallback(value, depth + 1); }
+                catch (InvalidOperationException) { }
+            }
+        }
+        throw new InvalidOperationException("Self-test timer callback is unavailable");
+    }
+
+    internal static async Task<IReadOnlyList<string>> RunAsync()
+    {
+        var checks = new List<string>();
+        using (var engine = new FanHostEngine(HostOptions.Parse(new[]
+        {
+            "--port", "8891", "--mock-handshake", "--mock-resume-rebuild-delay-ms", "500",
+        }), new HostDiagnosticLog()))
+        {
+            engine.SuspendForSystemPower();
+            engine.ResumeForSystemPower();
+            var worker = (Task)Get(engine, "resumeTask")!;
+            for (var attempt = 0; attempt < 100 && (int)Get(engine, "automaticResumeWorkerThreadId")! == 0; attempt++)
+                await Task.Delay(2).ConfigureAwait(false);
+            engine.SuspendForSystemPower();
+            engine.ResumeForSystemPower();
+            if ((int)Get(engine, "resumeContinuationRequested")! != 1)
+                throw new InvalidOperationException("Self-test did not register the second resume");
+            // Keep the real Safe Close failure seam: mock restore would otherwise
+            // unconditionally succeed, so it cannot represent this counterexample.
+            typeof(HostOptions).GetField("<MockHandshake>k__BackingField", Fields)!
+                .SetValue(Get(engine, "options"), false);
+            engine.InjectUncertainStateForSelfTest();
+            try { engine.Close(); } catch (FanApiException) { }
+            var failedClose = engine.Snapshot().State;
+            if (failedClose is not ("FaultLocked" or "AwaitingCloseCleanup"))
+                throw new InvalidOperationException("Self-test Close did not fail: " + failedClose);
+            await worker.ConfigureAwait(false);
+            var final = engine.Snapshot().State;
+            if (final != failedClose || final == "Resuming")
+                throw new InvalidOperationException($"Failed Close={failedClose}; late continuation={final}");
+            engine.ResolveUncertainStateForSelfTest();
+            checks.Add("deferred-resume-after-failed-close");
+        }
+
+        using (var engine = new FanHostEngine(HostOptions.Parse(new[] { "--port", "8891" }), new HostDiagnosticLog()))
+        {
+            engine.ClearRecoveryCycleForSelfTest();
+            engine.InjectUncertainStateForSelfTest();
+            engine.EnterFaultLockedAndScheduleRecoveryForSelfTest();
+            var oldTimer = (Timer)Get(engine, "recoveryTimer")!;
+            oldTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            var oldCallback = CaptureCallback(oldTimer);
+            Call(engine, "StopRecoveryRetry");
+            engine.EnterFaultLockedAndScheduleRecoveryForSelfTest();
+            var currentTimer = (Timer)Get(engine, "recoveryTimer")!;
+            currentTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            var attempts = engine.RecoveryRetryAttemptForSelfTest;
+            oldCallback(null);
+            if (!ReferenceEquals(currentTimer, Get(engine, "recoveryTimer")) || attempts != engine.RecoveryRetryAttemptForSelfTest)
+                throw new InvalidOperationException("Old callback changed the current timer or consumed its budget");
+            // Positive direction: the current owner still performs normal cleanup.
+            CaptureCallback(currentTimer)(null);
+            if (ReferenceEquals(currentTimer, Get(engine, "recoveryTimer")) || engine.RecoveryRetryAttemptForSelfTest <= attempts)
+                throw new InvalidOperationException("Current timer did not perform its original recovery action");
+            engine.ResolveUncertainStateForSelfTest();
+            Call(engine, "StopRecoveryRetry");
+            engine.ClearRecoveryCycleForSelfTest();
+            checks.Add("old-recovery-timer-cannot-consume-new-owner");
+        }
         return checks;
     }
 }
@@ -25792,6 +26509,7 @@ internal static class FanHostSelfTest
         }
         checks.AddRange(PowerTransitionIngress.RunSelfTest().Select(check => $"r2-{check}"));
         checks.AddRange(await RunPowerCallbackQueueIntegrationSelfTestAsync().ConfigureAwait(false));
+        checks.AddRange(await FanPublicLifecycleStormSelfTest.RunAsync().ConfigureAwait(false));
         // §4.5 / F07（FAN-925B）：UI 持续不可用 + route-lost 的结合场景（真实重试定时器，无任何 UI 回调）。
         checks.AddRange(await RunUiUnavailableRouteLostScenarioAsync().ConfigureAwait(false));
         // §3（FAN-926 P1 / CP-07）：parent-exit 的真实受理顺序（H1–H5、H8）。

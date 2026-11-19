@@ -1,0 +1,116 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include "settings_baseline.h"
+#include "boot_mode_preferences.h"
+using json=nlohmann::json;
+static std::function<void()> onContention;
+static unsigned contentions=0;
+struct ObservedEntryLock {
+ std::unique_lock<std::mutex> lock;
+ explicit ObservedEntryLock(std::mutex& mutex):lock(mutex,std::defer_lock){if(!lock.try_lock()){++contentions;if(onContention)onContention();lock.lock();}}
+};
+static void fixtureChild(HANDLE,const char*,bool=false);
+#include "steam_cssloader_use.h"
+using namespace ymcc;
+static json document;
+static std::mutex settingsMx,effectsMx;
+static std::atomic<unsigned> ownerReads{0};
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/css-native-owner.json";
+struct SettingsFileGuard {std::lock_guard<std::mutex> lock{settingsMx};};
+static std::string ymSettingsReadRaw(const std::wstring& path){if(path!=YM_SETTINGS_FILE)throw std::runtime_error("Unexpected settings path");++ownerReads;return document.dump();}
+// ORIGINAL_OWNER
+static struct {bool isolated=false;} g_aiFanMockSession;
+static std::atomic<bool> g_exitRequested{false};
+static std::string W2U(const std::wstring& text){return std::string(text.begin(),text.end());}
+static struct {steamsession::Session value;steamsession::Session sessionSnapshot(){return value;}} g_steamSettingsObserver;
+static steamcssuse::Runtime g_steamCssUse(false,35821,[]{return steamcsseditor::State::Absent;});
+static std::map<std::string,std::function<json(const json&)>> handlers;
+static void ipc_on(const std::string& name,std::function<json(const json&)> callback){handlers[name]=std::move(callback);}
+// ORIGINAL_REGISTRATIONS
+static std::string selectedStage,change;
+static bool changed=false;
+static std::vector<std::string> effects;
+static std::size_t atChange=0;
+static void need(bool value,const std::string& why){if(!value)throw std::runtime_error(why);}
+static void mutate(){
+ SettingsFileGuard held;if(changed)return;changed=true;{std::lock_guard lock(effectsMx);atChange=effects.size();}
+ if(change=="revision")document["input"]["revision"]=8;
+ if(change=="hash")document["input"]["diagnostics"]["inputLoggingEnabled"]=!document["input"]["diagnostics"]["inputLoggingEnabled"].get<bool>();
+ if(change=="mode")document["extensions"]["bootModes"]["revision"]=4;
+ if(change=="result")document["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")document["input"]["startupObservedBoot"]="replacement-boot";
+ if(change=="ack")document["input"]["hostAcknowledgedRevision"]=17;
+ if(change=="unrelated")document["extensions"]["peer"]=true;
+}
+struct ObservedChild {HANDLE handle=nullptr;DWORD pid=0;ULONGLONG birth=0;std::string stage;bool assigned=false,groupAssigned=false;~ObservedChild(){if(handle)CloseHandle(handle);}};
+static std::vector<std::unique_ptr<ObservedChild>> children;
+static void fixtureChild(HANDLE handle,const char* stage,bool groupAssigned){
+ auto item=std::make_unique<ObservedChild>();need(DuplicateHandle(GetCurrentProcess(),handle,GetCurrentProcess(),&item->handle,SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,0),"Owned child observation handle unavailable");item->pid=GetProcessId(handle);FILETIME born{},exit{},kernel{},user{};need(GetProcessTimes(handle,&born,&exit,&kernel,&user)!=FALSE,"Owned helper birth unavailable");item->birth=(ULONGLONG(born.dwHighDateTime)<<32)|born.dwLowDateTime;item->stage=stage;item->groupAssigned=groupAssigned;BOOL assigned=FALSE;IsProcessInJob(handle,nullptr,&assigned);item->assigned=assigned!=FALSE;children.push_back(std::move(item));
+ if(selectedStage==stage)mutate();
+}
+struct OwnedProcess {HANDLE handle=nullptr;~OwnedProcess(){if(handle){TerminateProcess(handle,0);WaitForSingleObject(handle,2000);CloseHandle(handle);}}};
+static std::wstring self(){wchar_t buffer[32768]{};GetModuleFileNameW(nullptr,buffer,32768);return buffer;}
+static HANDLE launchOwned(const std::wstring& exe){auto command=L"\""+exe+L"\" --owned-idle";STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION child{};need(CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&child)!=FALSE,"Owned inert process launch failed");CloseHandle(child.hThread);return child.hProcess;}
+static bool live(HANDLE handle){return handle&&WaitForSingleObject(handle,0)==WAIT_TIMEOUT;}
+static void reset(const json& defaults,const json& wire){
+ document=defaults;document["input"]=wire.at("expectedBootContext").at("input");document["extensions"]=wire.at("expectedBootContext").at("extensions");ownerReads=0;contentions=0;changed=false;selectedStage.clear();change="current";onContention=nullptr;children.clear();std::lock_guard lock(effectsMx);effects.clear();atChange=0;
+}
+static json childRows(){json result=json::array();for(const auto& child:children)result.push_back({{"pid",child->pid},{"birth",std::to_string(child->birth)},{"stage",child->stage},{"assignedToAJob",child->assigned},{"groupAssignmentObserved",child->groupAssigned},{"signaled",WaitForSingleObject(child->handle,2000)==WAIT_OBJECT_0}});return result;}
+static void expireAndRelease(uint64_t token){
+ {SettingsFileGuard held;document["input"]["revision"]=999;}
+ if(token){auto result=g_steamCssUse.release(token);need(!result.error&&!result.remaining,"Stale request cleanup was not confirmed");}
+ std::lock_guard lock(g_steamCssUse.mutex_);need(!g_steamCssUse.token_&&!g_steamCssUse.ensure_&&!g_steamCssUse.helper_,"Stale native CSS use retained bounded helper or token");
+}
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();
+ try{
+  if(argc>1&&std::string(argv[1])=="--owned-idle"){Sleep(INFINITE);return 0;}
+  need(argc==6,"defaults, wire, root, selection, raw required");json defaults,wire;std::ifstream(argv[1])>>defaults;std::ifstream(argv[2])>>wire;const auto root=std::filesystem::absolute(argv[3]);const bool before=std::string(argv[4])=="before",assignmentOnly=std::string(argv[4])=="assignment";std::filesystem::create_directories(root/L"steam-appearance");std::ofstream raw(argv[5],std::ios::app);
+  const auto steamImage=root/L"steam.exe",backend=root/L"CssLoader-Standalone-Headless.exe",entry=root/L"steam-appearance.ps1",link=root/L"backend.path";std::filesystem::copy_file(self(),steamImage);std::filesystem::copy_file(self(),backend);
+  std::ofstream(entry)<<"# SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1\nStart-Sleep -Seconds 10\n";
+  std::ofstream(root/L"steam-appearance/resident.ps1")<<"# AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend\n";std::ofstream(root/L"steam-appearance/idle.ps1")<<"# AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults\n";std::ofstream(link)<<backend.string();
+  OwnedProcess steam,css;steam.handle=launchOwned(steamImage.wstring());css.handle=launchOwned(backend.wstring());FILETIME born{},exit{},kernel{},user{};need(GetProcessTimes(steam.handle,&born,&exit,&kernel,&user)!=FALSE,"Owned Steam exact birth unavailable");g_steamSettingsObserver.value={root.wstring(),GetProcessId(steam.handle),123,(ULONGLONG(born.dwHighDateTime)<<32)|born.dwLowDateTime};
+  need(g_steamCssUse.initialize(entry.wstring(),link.wstring(),180000,4000,[](const std::string& stage,const auto&,const auto&,const auto&){
+   {std::lock_guard lock(effectsMx);effects.push_back(stage);}if(selectedStage=="begin-publication"&&stage=="begin")mutate();
+  },0,[]{return true;},[]{return ULONGLONG(4);}),"Actual native CSS Runtime initialization failed");g_steamCssUse.observeSteam(g_steamSettingsObserver.value);registerCssNativeOwner();
+  for(const auto& mode:wire["modes"])for(const std::string operation:{"begin","ensure"})for(const std::string kind:{"revision","hash","mode","result","observed","ack","unrelated","current"}){
+   if(assignmentOnly)continue;
+   if(before&&(mode["mode"]!="global"||operation!="begin"||kind!="hash"))continue;
+   reset(defaults,mode);selectedStage="mutex";change=kind;const bool allowed=kind=="ack"||kind=="unrelated"||kind=="current";uint64_t token=0;if(operation=="ensure")token=g_steamCssUse.begin(g_steamSettingsObserver.value).token;
+   auto request=mode[operation=="begin"?"beginRequest":"ensureRequest"];if(operation=="ensure")request["token"]=std::to_string(token);json reply;std::string error;
+   std::unique_lock held(g_steamCssUse.mutex_);std::promise<void> entered;auto ready=entered.get_future();onContention=[&]{entered.set_value();};std::thread worker([&]{try{reply=handlers.at("steamAppearance."+(operation=="begin"?std::string("beginUse"):std::string("ensureUse")))(request);}catch(const std::exception& e){error=e.what();}});
+   const bool contended=ready.wait_for(std::chrono::seconds(1))==std::future_status::ready;if(contended)mutate();held.unlock();worker.join();onContention=nullptr;need(contended&&contentions==1,"Actual native entry mutex contention not observed");
+   std::vector<std::string> late;{std::lock_guard lock(effectsMx);late.assign(effects.begin()+static_cast<std::ptrdiff_t>(atChange),effects.end());}
+   uint64_t actualToken=0;{std::lock_guard lock(g_steamCssUse.mutex_);actualToken=g_steamCssUse.token_;}expireAndRelease(actualToken);const auto observedChildren=childRows();for(const auto& child:observedChildren)need(child["signaled"]==true,"Owned helper process survived stale release");
+   json row={{"mode",mode["mode"]},{"operation",operation},{"kind",kind},{"allowed",allowed},{"changed",changed},{"contentions",contentions},{"workerJoined",true},{"ownerReads",ownerReads.load()},{"error",error},{"reply",reply},{"lateEffects",late},{"children",observedChildren},{"nativeOwnedTokenAndHelperZero",true},{"residentAlive",live(css.handle)},{"steamAlive",live(steam.handle)}};raw<<row.dump()<<'\n';raw.flush();rows.push_back(row);
+   if(allowed)need(error.empty()&&reply.value("ok",false),"Current native CSS request failed");
+   else{bool lateMutation=false;for(const auto& effect:late)if(effect=="begin"||effect=="ensure-helper-start"||effect=="manual-use-ended")lateMutation=true;need(error=="BOOT_CSS_REQUEST_EXPIRED"&&!lateMutation,"expired native CSS request was accepted");}
+  }
+  if(!before){
+   for(const auto& mode:wire["modes"])for(const std::string stage:{"created-suspended","assigned-suspended","resumed","begin-publication"}){
+    if(assignmentOnly&&stage!="assigned-suspended")continue;
+    reset(defaults,mode);uint64_t token=0;if(stage!="begin-publication")token=g_steamCssUse.begin(g_steamSettingsObserver.value).token;selectedStage=stage;change="hash";auto request=mode[stage=="begin-publication"?"beginRequest":"ensureRequest"];if(token)request["token"]=std::to_string(token);std::string error;try{handlers.at(stage=="begin-publication"?"steamAppearance.beginUse":"steamAppearance.ensureUse")(request);}catch(const std::exception& e){error=e.what();}
+    need(changed&&error=="BOOT_CSS_REQUEST_EXPIRED","Stale native helper boundary was not rejected");uint64_t current=0;{std::lock_guard lock(g_steamCssUse.mutex_);current=g_steamCssUse.token_;}expireAndRelease(current);const auto observed=childRows();for(const auto& child:observed)need(child["signaled"]==true,"A created helper survived rejected native request");controls.push_back({{"mode",mode["mode"]},{"stage",stage},{"error",error},{"children",observed},{"nativeOwnedTokenAndHelperZero",true},{"residentAlive",live(css.handle)}});
+   }
+   if(!assignmentOnly){
+   reset(defaults,wire["modes"][0]);auto invalid=wire["modes"][0]["beginRequest"];invalid["origin"]="ordinary";bool refused=false;try{handlers.at("steamAppearance.beginUse")(invalid);}catch(...){refused=true;}need(refused&&children.empty(),"Invalid origin reached a helper");controls.push_back({{"stage","invalid-origin-before-native-use"}});
+   reset(defaults,wire["modes"][0]);const auto ordinary=handlers.at("steamAppearance.beginUse")(json::object());const auto token=ordinary.at("token").get<std::string>();const auto ensured=handlers.at("steamAppearance.ensureUse")({{"token",token}});need(ordinary.value("ok",false)&&ensured.value("ok",false)&&ownerReads==0,"Ordinary native use gained boot owner reads");g_steamCssUse.shutdown();const auto observed=childRows();for(const auto& child:observed)need(child["signaled"]==true,"Owned helper survived native Runtime shutdown");need(!g_steamCssUse.worker_.joinable()&&!g_steamCssUse.wake_&&!g_steamCssUse.stop_&&!g_steamCssUse.ensure_&&!g_steamCssUse.helper_,"Native Runtime resources not returned");need(live(css.handle)&&live(steam.handle),"Native cleanup killed resident backend or Steam");controls.push_back({{"stage","ordinary-no-owner-reads-and-real-shutdown"},{"ownerReads",0},{"children",observed},{"runtimeWorkerAndHandlesReturned",true},{"residentAndSteamRetained",true}});
+   }else g_steamCssUse.shutdown();
+  }else g_steamCssUse.shutdown();
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls},{"realSteamBusinessOperations",0},{"ownedInertProcessesOnly",true}}.dump()<<'\n';return 0;
+ }catch(const std::exception& e){g_steamCssUse.shutdown();std::cout<<json{{"status","FAIL"},{"error",e.what()},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 1;}
+}

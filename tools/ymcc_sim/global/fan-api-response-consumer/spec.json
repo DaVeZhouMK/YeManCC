@@ -2,14 +2,19 @@
   "schemaVersion": 1,
   "original": "tools/fan_api_response_contract_selftest.ts",
   "sources": [
+    "PowerControl/settings-baseline.json",
     "package.json",
-    "tools/fan_api_response_contract_selftest.ts",
     "src/bridge/api.ts",
+    "src/bridge/bootModeGlobalPreferences.ts",
     "src/bridge/fanApi.ts",
     "src/bridge/fanDiagnostics.ts",
+    "src/bridge/inputConfigHash.ts",
     "src/bridge/ipc.ts",
-    "tools/ymcc_sim/global/host-process.ps1",
-    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs"
+    "src/bridge/settingsBaseline.ts",
+    "src/bridge/steamInstallationFacts.ts",
+    "tools/fan_api_response_contract_selftest.ts",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/host-process.ps1"
   ],
   "buildInputs": [
     "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@babel+parser@7.29.8/node_modules/@babel/parser/lib/index.js",
@@ -53,10 +58,15 @@
     "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/dist/vue.cjs.prod.js",
     "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/index.js",
     "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/index.mjs",
+    "PowerControl/settings-baseline.json",
     "src/bridge/api.ts",
+    "src/bridge/bootModeGlobalPreferences.ts",
     "src/bridge/fanApi.ts",
     "src/bridge/fanDiagnostics.ts",
+    "src/bridge/inputConfigHash.ts",
     "src/bridge/ipc.ts",
+    "src/bridge/settingsBaseline.ts",
+    "src/bridge/steamInstallationFacts.ts",
     "tools/fan_api_response_contract_selftest.ts"
   ],
   "expectedTotalChecks": 81,
@@ -72,5 +82,59 @@
     "description": "Private source copy wrongly accepts a rotated heartbeat lease identity; original public adapter assertion must fail."
   },
   "productChanges": 0,
-  "mainDependency": false
+  "mainDependency": false,
+  "executionSourcePins": [
+    {
+      "path": "PowerControl/settings-baseline.json",
+      "sha256": "6f8b1f0fd99a5a484053c0ab049a82c84ae75bbbfe232f2095e24cf312387356"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8d3bfb91328051152684948977dd07cded6f9d7ddc46887844b28153ba24b60d"
+    },
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "44ed82a90be3142178a0b06bfbd5576e182fe3760a27096187ded593406fa848"
+    },
+    {
+      "path": "src/bridge/bootModeGlobalPreferences.ts",
+      "sha256": "f42893fd5b88d9b9af640d7e4ced81380f73a18da2fd07e80da07c5dfad461a0"
+    },
+    {
+      "path": "src/bridge/fanApi.ts",
+      "sha256": "a4f7c9e670a9bfca6c77f248f1b635ac757e1236d6eee1de98265fa8bf9737b5"
+    },
+    {
+      "path": "src/bridge/fanDiagnostics.ts",
+      "sha256": "407bc1b7dfe38d939e6768b3f53c1edf55908cff1a30dd4f4f8691d6df3a8e38"
+    },
+    {
+      "path": "src/bridge/inputConfigHash.ts",
+      "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+    },
+    {
+      "path": "src/bridge/ipc.ts",
+      "sha256": "dd43d7efe55e90d457145b226d204008d523ea1022943482470fe30c83432cb5"
+    },
+    {
+      "path": "src/bridge/settingsBaseline.ts",
+      "sha256": "74e0f0006515a60eb8e63a40ff176beaa73e9f79ac1980fd08b3ebe8c78629d8"
+    },
+    {
+      "path": "src/bridge/steamInstallationFacts.ts",
+      "sha256": "e94b52884e6e54ef7910dfb438ff27ed335968b03e007ba82534afdef3c82a41"
+    },
+    {
+      "path": "tools/fan_api_response_contract_selftest.ts",
+      "sha256": "7899146536a0a1e09feae42383251b84c1dbaddd84d2a52230dee6d85f007601"
+    },
+    {
+      "path": "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+      "sha256": "c5e844b9ecf161b0a7406612a90bf1398153136750c44a454aaf12c44ecac589"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "0779bc14096e2e8cdcc7046cf3072bfdd36fb4ed8d1c01f969b8babb2759efdb"
+    }
+  ]
 }

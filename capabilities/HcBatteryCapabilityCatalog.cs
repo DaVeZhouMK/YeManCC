@@ -67,6 +67,7 @@ public sealed class HcBatteryCapabilityDispatcher<T> where T : class
     {
         static string Norm(string value)=>value.Trim().ToUpperInvariant();
         var m=Norm(manufacturer);var board=Norm(boardProduct);var system=Norm(systemProduct);
+        BatteryCapabilityBinding<T>? selected=null;
         foreach(var binding in bindings)
         {
             var r=binding.Descriptor;
@@ -79,8 +80,12 @@ public sealed class HcBatteryCapabilityDispatcher<T> where T : class
                 ? r.Values.Any(v=>string.Equals(v,rawValue,StringComparison.Ordinal))
                 : r.Values.Any(v=>Norm(v)==value);
             if (manufacturerMatches && valueMatches &&
-                (r.ProcessorPattern is null || Regex.IsMatch(processor,r.ProcessorPattern,RegexOptions.IgnoreCase))) return binding;
+                (r.ProcessorPattern is null || Regex.IsMatch(processor,r.ProcessorPattern,RegexOptions.IgnoreCase)))
+            {
+                if (selected is not null) return null;
+                selected=binding;
+            }
         }
-        return null;
+        return selected;
     }
 }

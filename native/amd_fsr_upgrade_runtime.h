@@ -254,6 +254,11 @@ public:
             policy=std::move(parsed);policySnapshot_=std::move(source);return true;
         } catch(...) {return false;}
     }
+#if defined(_MSC_FULL_VER) && _MSC_FULL_VER == 194435229
+    // MSVC 19.44.35229 c2.dll crashes in this cold method in the large /O2 TU.
+    // Keep policy semantics intact; only this compiler/method loses optimization.
+#pragma optimize("", off)
+#endif
     bool save(const Json& policy) override {
         try {
             if(!active() || !policySnapshot_.known || !validPolicy(policy)) return false;
@@ -295,6 +300,9 @@ public:
             policySnapshot_=std::move(saved);return true;
         } catch(...) {return false;}
     }
+#if defined(_MSC_FULL_VER) && _MSC_FULL_VER == 194435229
+#pragma optimize("", on)
+#endif
     bool write(const Adapter& expected,bool target) override {
         if(!active() || !admitted(expected) || !session_.services || presentAmd(cpu_).empty()) return false;
         adlx::IADLXGPUListPtr gpus;if(ADLX_FAILED(session_.system->GetGPUs(&gpus)) || !gpus || gpus->Size()>32) return false;

@@ -1,4 +1,4 @@
-import {createApp,h,computed,ref,onBeforeUnmount,KeepAlive} from 'vue';
+import {createApp,h,computed,ref,onBeforeUnmount,KeepAlive,nextTick} from 'vue';
 import PowerView from '@/views/PowerView.vue';
 import {state,settings} from './runtimePorts';
 // This page fixture starts after the app's separately tested default-task bootstrap.
@@ -22,3 +22,6 @@ vm.provide('globalRefreshKey',ref(0));
 vm.mount('#app');
 (window as any).__bootRemountPower=()=>{powerGeneration.value++;};
 (window as any).__bootUnmount=()=>vm.unmount();
+// Wait for the actual Vue flush; fixed RAF delays unnecessarily throttle every
+// isolated button operation. The consumer still waits for each async result.
+(window as any).__bootAfterRender=()=>nextTick();

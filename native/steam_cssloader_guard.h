@@ -1,4 +1,5 @@
 #pragma once
+#include "worker_thread_name.h"
 // CSSLoader uses the shared Steam session and finite startup probes.
 // A bounded startup use reuses the single resident backend or starts a missing one.
 // No Steam launch or recurring discovery. Abnormal verified exits have a capped recovery window.
@@ -9,6 +10,7 @@
 #include "process_inventory.h"
 #include "steam_session_observer.h"
 #include "steam_cssloader_mode.h"
+#include "sleep_power_state.h"
 #include "decky_sidebar_launch.h"
 #include <array>
 #include <filesystem>
@@ -140,7 +142,7 @@ public:
     explicit Budget(std::array<DWORD, 3> delays = {10000, 30000, 35000}) : delays_(delays) {}
     void begin(ULONGLONG now, bool immediate = false) { used_ = 0; resume(now); if (immediate) due_ = now; }
     void pause() { armed_ = false; }
-    void resume(ULONGLONG now) { armed_ = used_ < delays_.size(); if (armed_) due_ = now + delays_[used_]; }
+    void resume(ULONGLONG now, bool immediate = false) { armed_ = used_ < delays_.size(); if (armed_) due_ = immediate ? now : now + delays_[used_]; }
     DWORD timeout(ULONGLONG now) const { return !armed_ ? INFINITE : now >= due_ ? 0 : static_cast<DWORD>(due_ - now); }
     bool take(ULONGLONG now) { if (timeout(now) != 0) return false; ++used_; resume(now); return true; }
     unsigned used() const { return used_; }
@@ -151,6 +153,15 @@ struct State {
     std::string phase = "waiting-steam", reason;
     unsigned automaticRecoveries = 0;
     DWORD steamPid = 0; ULONGLONG steamBirth = 0;
+    struct ModeHandoff {
+        ModeHandoffPath path = ModeHandoffPath::None;
+        std::uint64_t generation = 0, suspendSerial = 0, notificationSequence = 0;
+        std::uint64_t readerReturnedTick = 0, publishedTick = 0, enqueuedTick = 0, acceptedTick = 0;
+    } modeHandoff;
+};
+struct ObservedUse {
+    HANDLE completion = nullptr;
+    std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identity;
 };
 struct Config {
     std::wstring linkFile;
@@ -159,17 +170,23 @@ struct Config {
     std::function<bool(const ymcc::steamsession::Session&)> isIdle;
     std::function<HANDLE(const ymcc::steamsession::Session&, bool, bool)> confirmIdle;
     std::function<bool(const ymcc::steamsession::Session&)> isResidentConfirmed;
+    std::function<ObservedUse(const ymcc::steamsession::Session&, bool, bool, const ymcc::sleeppower::SharedPowerV1*)> confirmObserved;
+    std::function<bool(const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>&)> identityCurrent;
     std::function<Result()> probeExisting; // Same read-only backend boundary; isolated fixtures replace IO.
     std::function<bool(const ymcc::steamsession::Session&)> invalidateBackend; // Revoke old helper/results; retain CSS family.
     std::function<HANDLE(const ymcc::steamsession::Session&)> confirmExisting; // Read-only, never Ensure/reapply/start.
-    std::array<DWORD, 3> resumeDelays{10000, 20000, 30000}; // Ready +10/+30/+60s; finite, never an idle poll.
+    std::array<DWORD, 3> resumeDelays{0, 30000, 30000}; // Ready now/+30/+60s; fresh shared mode still gates CSS.
     std::function<ULONGLONG()> powerGeneration; // Reject work from an older power episode.
+    ymcc::sleeppower::Reader powerReader = nullptr; // Current public scope; no private observation.
     DWORD crashDelayMs = 30000; // Exit-triggered one-shot; isolated fixtures shorten it.
     std::function<bool()> mayLaunch; // Existing application exit fence; never changes user consent.
     std::function<void(const State&)> changed; // Event-only UI recovery; no frontend timer.
     std::function<ModeSample(const ymcc::steamsession::Session&)> readMode;
     std::function<bool(const ymcc::steamsession::Session&)> refreshMode; // Invalidate old cache and schedule the existing shared reader.
+    std::function<bool(const ymcc::steamsession::Session&)> hasAccountModeObservation; // Exact-session read already owned by the shared layer.
+    std::function<bool(const ymcc::steamsession::Session&)> accountPublicationAhead;
     std::array<DWORD, 3> modeDelays{600, 5000, 30000}; // Debounce / read gap / exhausted-failure gap.
+    std::function<bool(const ymcc::steamsession::Session&, const ymcc::sleeppower::SharedPowerV1&, std::string&)> refreshPublicResumeMode;
 };
 class Runtime {
     std::mutex lifecycle_, stateMutex_;
@@ -180,17 +197,38 @@ class Runtime {
     ULONGLONG lastRebindGeneration_ = 0;
     ymcc::steamsession::Session rebindSession_;
     ULONGLONG lastResumeGeneration_ = 0;
+    ymcc::sleeppower::SharedPowerV1 lastResumePower_, resumePower_;
     ymcc::steamsession::Session resumeSession_;
     ModeSample pendingMode_;
     ymcc::steamsession::Session pendingModeSession_;
+    void queueMode(const ymcc::steamsession::Session& session, const ModeSample& mode, bool waitingOnly, bool preservePending) {
+        std::lock_guard lock(stateMutex_);
+        if (stopping_ || !desired_.pid || !state_.linked || !config_.readMode || !(desired_ == session) ||
+            (preservePending && modePending_) ||
+            (waitingOnly && state_.phase != "waiting-steam-ui" &&
+                !(state_.phase == "applying" && state_.reason == "resume-css-recheck")) ||
+            (mode.mode != UiMode::Desktop && mode.mode != UiMode::BigPicture) || mode.epoch.size() > 96) return;
+        const bool wake = !modePending_;
+        pendingMode_ = mode; pendingModeSession_ = session; modePending_ = true;
+        // Hand-off replay is not a new observer publication.
+        pendingMode_.path = ModeHandoffPath::None;
+        pendingMode_.enqueuedTick = 0;
+        if (!preservePending && mode.mode == UiMode::BigPicture && lastResumePower_.generation) {
+            pendingMode_.path = waitingOnly ? ModeHandoffPath::StableNotice : ModeHandoffPath::ChangedNotice;
+            if (mode.timing.matches(lastResumePower_)) pendingMode_.enqueuedTick = GetTickCount64();
+        }
+        if (wake && wake_) SetEvent(wake_);
+    }
     void publish(const Link& link, const ymcc::steamsession::Session& session, const std::string& phase,
-                 const std::string& reason, unsigned attempts, DWORD pid = 0, bool started = false) {
+                 const std::string& reason, unsigned attempts, DWORD pid = 0, bool started = false,
+                 const State::ModeHandoff& handoff = {}) {
         State copy;
         { std::lock_guard lock(stateMutex_);
-          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_, session.pid, session.created}; copy = state_; }
+          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_, session.pid, session.created, handoff}; copy = state_; }
         try { if (config_.changed) config_.changed(copy); } catch (...) {} // No observer/UI blockage.
     }
     void run() {
+        ymcc::threadRole::describe(L"YMCC.CssGuard");
         HANDLE directoryEvent = INVALID_HANDLE_VALUE, backend = nullptr, idleHelper = nullptr;
         bool idleRequested = false, modeCycle = false, linkDirty = true;
         // Keep an exact historical backend receipt for crash admission only.
@@ -206,6 +244,7 @@ class Runtime {
         ExitRecovery recovery(config_.crashDelayMs);
         Budget resumeBudget(config_.resumeDelays);
         ULONGLONG resumeGeneration = 0;
+        ymcc::sleeppower::SharedPowerV1 resumePower;
         bool resumeNeedsFreshMode = false, resumeHelperActive = false;
         ymcc::steamsession::Session resumeTarget;
         bool exitParked = false, recoveringExit = false, exitAwaitingReady = false, readOnlyHandoff = false, handoffModePending = false;
@@ -230,6 +269,8 @@ class Runtime {
         ModeWindow modeWindow(config_.modeDelays[0], config_.modeDelays[1], config_.modeDelays[2]);
         bool waitingForMode = false;
         Budget budget(config_.delays); Link link; ymcc::steamsession::Session session; bool initialized = false;
+        ULONGLONG helperAccount = 0; bool unconfirmedUse = false, accountRetryPending = false;
+        std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> helperIdentity;
         // Subscribe before reading the link so an enable/disable cannot be lost.
         watchDirectory();
         if (directoryEvent == INVALID_HANDLE_VALUE) { publish({}, {}, "failed", "link-notification-unavailable", 0); return; }
@@ -238,9 +279,10 @@ class Runtime {
             bool manualRecheck = false, uiRecheck = false, hasConfirmedMode = false, resumeRequested = false;
             ymcc::steamsession::Session resumedSession, reboundSession; bool rebindRequested = false;
             ULONGLONG requestedGeneration = 0;
+            ymcc::sleeppower::SharedPowerV1 requestedPower;
             { std::lock_guard lock(stateMutex_); if (stopping_) break; next = desired_; manualRecheck = manualRecheck_; manualRecheck_ = false; uiRecheck = uiRecheck_;
               hasConfirmedMode = modePending_; confirmedMode = pendingMode_; confirmedSession = pendingModeSession_; modePending_ = false;
-              resumeRequested = resumeRecheck_; resumedSession = resumeSession_; requestedGeneration = lastResumeGeneration_; resumeRecheck_ = false;
+              resumeRequested = resumeRecheck_; resumedSession = resumeSession_; requestedGeneration = lastResumeGeneration_; requestedPower = resumePower_; resumeRecheck_ = false;
               rebindRequested = rebindPending_; reboundSession = rebindSession_; rebindPending_ = false; }
             // Synchronize same-process account metadata without resetting mode,
             // startup/crash budgets, helper ownership or the Steam observation.
@@ -257,36 +299,57 @@ class Runtime {
             if (manualRecheck || !next.pid || !nextLink.enabled || !sameSession(next, resumeTarget) ||
                 (initialized && !(nextLink == link)) ||
                 (config_.powerGeneration && resumeGeneration != config_.powerGeneration()) ||
-                (config_.mayLaunch && !config_.mayLaunch())) {
-                resumeBudget.pause(); resumeGeneration = 0; resumeNeedsFreshMode = resumeHelperActive = false;
+                (!resumePower.generation && config_.mayLaunch && !config_.mayLaunch())) {
+                resumeBudget.pause(); resumeGeneration = 0; resumeNeedsFreshMode = resumeHelperActive = false; resumePower = {};
             }
             if (resumeRequested && (!exitParked || exitAwaitingReady) && next.pid && nextLink.enabled && sameSession(next, resumedSession) &&
-                (!config_.powerGeneration || requestedGeneration == config_.powerGeneration())) {
-                resumeTarget = next; resumeGeneration = requestedGeneration; resumeNeedsFreshMode = true; resumeHelperActive = false;
+                (!config_.powerGeneration || requestedGeneration == config_.powerGeneration()) &&
+                (!requestedPower.generation || ymcc::sleeppower::powerCurrent(config_.powerReader, requestedPower))) {
+                resumeTarget = next; resumeGeneration = requestedGeneration; resumePower = requestedPower; resumeNeedsFreshMode = true; resumeHelperActive = false;
                 resumeBudget.begin(GetTickCount64());
                 budget.pause(); modeWindow.park(); hasConfirmedMode = false;
                 publish(nextLink, next, "waiting-steam-ui", "resume-css-settle-delay", 0);
             }
-            const bool resumeRecheck = resumeGeneration && resumeBudget.take(GetTickCount64()) &&
+            // A completed manual edit gets its existing read-only handoff first.
+            // Refused handoff leaves the original resume slot untouched.
+            const bool resumeRecheck = !rebindRequested && resumeGeneration && resumeBudget.take(GetTickCount64()) &&
                 (!exitParked || exitAwaitingReady) &&
                 next.pid && nextLink.enabled && sameSession(next, resumeTarget);
             if (resumeRecheck && exitAwaitingReady) { exitAwaitingReady = false; exitParked = false; recoveringExit = true; }
+            if (resumeRecheck && resumePower.generation && !ymcc::sleeppower::powerCurrent(config_.powerReader, resumePower)) {
+                // UNKNOWN consumes only the existing finite slot; it cannot authorize
+                // stale work, erase remaining slots or mint a new retry wave.
+                publish(nextLink, next, "waiting-steam-ui", "resume-public-power-unavailable", resumeBudget.used());
+                continue;
+            }
             if (resumeRecheck) {
-                // The worker invalidates the old shared mode BEFORE any ensure.
+                // Require a current public observation before any ensure.
                 // Window/power callbacks never run CDP or launch a process.
-                bool requested = false; try { requested = config_.refreshMode && config_.refreshMode(next); } catch (...) {}
+                bool requested = false;
+                std::string reusedEpoch;
+                try {
+                    if (resumePower.generation && config_.refreshPublicResumeMode)
+                        requested = config_.refreshPublicResumeMode(next, resumePower, reusedEpoch);
+                    else requested = config_.refreshMode && config_.refreshMode(next);
+                } catch (...) {}
                 if (!requested) {
                     budget.pause(); modeWindow.reset();
                     if (resumeBudget.timeout(GetTickCount64()) == INFINITE) resumeNeedsFreshMode = false;
                     publish(nextLink, next, "waiting-steam-ui", "resume-mode-refresh-unavailable", resumeBudget.used());
                     continue;
                 }
-                hasConfirmedMode = false; resumeNeedsFreshMode = false; // Only a fresh shared result can confirm this generation.
+                // Record the same current document that this Ready use may apply.
+                // A late delivery of that document must not create a new edge.
+                hasConfirmedMode = !reusedEpoch.empty(); resumeNeedsFreshMode = false;
+                if (hasConfirmedMode) {
+                    confirmedSession = next;
+                    confirmedMode = {UiMode::BigPicture, std::move(reusedEpoch)};
+                }
             }
             if (!initialized || manualRecheck || resumeRecheck || !(nextLink == link) || !sameSession(next, session)) {
                 const bool changed = !initialized || !(nextLink == link) || !sameSession(next, session);
-                if (manualRecheck || resumeRecheck) { readOnlyHandoff = false; handoffModePending = false; idleRequested = false; if (idleHelper) { CloseHandle(idleHelper); idleHelper = nullptr; } }
-                if (changed) { readOnlyHandoff = false; handoffModePending = false; modeWindow.reset(); waitingForMode = false; modeCycle = false; idleRequested = false; if (idleHelper) { CloseHandle(idleHelper); idleHelper = nullptr; } }
+                if (manualRecheck || resumeRecheck) { unconfirmedUse = accountRetryPending = false; readOnlyHandoff = false; handoffModePending = false; idleRequested = false; if (idleHelper) { CloseHandle(idleHelper); idleHelper = nullptr; } }
+                if (changed) { unconfirmedUse = accountRetryPending = false; readOnlyHandoff = false; handoffModePending = false; modeWindow.reset(); waitingForMode = false; modeCycle = false; idleRequested = false; if (idleHelper) { CloseHandle(idleHelper); idleHelper = nullptr; } }
                 if (initialized && !(nextLink == link) && session.pid && config_.invalidateBackend) {
                     // OFF/path replacement revokes only our temporary helper and
                     // stale confirmation; the independent CSS family survives.
@@ -307,9 +370,11 @@ class Runtime {
                 else publish(link, session, !link.error.empty() ? "blocked" : !link.enabled ? "disabled" : exitParked ? "waiting-appearance" : "waiting-steam",
                     exitParked ? "loader-exit-requires-manual-or-budgeted-recovery" : link.error, 0);
             }
-            const auto allowed = [&] {
+            const auto allowed = [&](const ymcc::sleeppower::SharedPowerV1* attempt = nullptr) {
                 std::lock_guard lock(stateMutex_);
-                return !stopping_ && sameSession(desired_, session) && (!config_.mayLaunch || config_.mayLaunch());
+                return !stopping_ && sameSession(desired_, session) && (!config_.mayLaunch || config_.mayLaunch()) &&
+                    (!resumePower.generation || ymcc::sleeppower::powerCurrent(config_.powerReader, resumePower)) &&
+                    (!attempt || (!resumeRecheck_ && ymcc::sleeppower::powerCurrent(config_.powerReader, *attempt)));
             };
             if (rebindRequested && session.pid && link.enabled && sameSession(session, reboundSession) &&
                 allowed() && config_.confirmExisting && readLink(config_.linkFile) == link) {
@@ -325,6 +390,7 @@ class Runtime {
                     exitAwaitingReady = recoveringExit = false; exitParked = true; modeCycle = false;
                     if (idleHelper) CloseHandle(idleHelper);
                     closeBackend(); idleRequested = true; idleHelper = confirmation;
+                    unconfirmedUse = accountRetryPending = false;
                     readOnlyHandoff = true; handoffModePending = false;
                 }
                 publish(link, session, confirmation ? "verifying" : "waiting-appearance",
@@ -351,8 +417,57 @@ class Runtime {
                     publish(link, session, "waiting-appearance", exitAwaitingReady ? "loader-crash-awaiting-ready" : "loader-crash-mode-refresh-unavailable", budget.used());
                 }
             }
-            if (session.pid && link.enabled && !exitParked && !resumeNeedsFreshMode && config_.readMode) {
-                const bool delivered = hasConfirmedMode && sameSession(confirmedSession, session);
+            // The exact use can lose its public identity while account/PID and
+            // document remain unchanged. Its existing completion wakes this worker.
+            bool identityRetired = false;
+            bool awaitingAccountPublication = false;
+            if (unconfirmedUse && helperIdentity && config_.identityCurrent) {
+                try { identityRetired = !config_.identityCurrent(helperIdentity); } catch (...) {}
+            }
+            if (unconfirmedUse && budget.used() < config_.delays.size() &&
+                (helperAccount != session.account || identityRetired) && session.pid && link.enabled &&
+                !exitParked && !readOnlyHandoff && !resumeNeedsFreshMode && config_.readMode && allowed()) {
+                const auto accountAhead = [&] {
+                    try { return identityRetired && config_.accountPublicationAhead && config_.accountPublicationAhead(session); }
+                    catch (...) { return false; }
+                };
+                awaitingAccountPublication = accountAhead();
+                bool joined = false;
+                bool refreshed = !identityRetired;
+                if (identityRetired && !awaitingAccountPublication) {
+                    if (helperAccount != session.account && config_.hasAccountModeObservation) {
+                        try { joined = config_.hasAccountModeObservation(session); } catch (...) {}
+                    }
+                    if (joined) refreshed = true;
+                    else { try { refreshed = config_.refreshMode && config_.refreshMode(session); } catch (...) {} }
+                    // The public account can advance during the rejected refresh.
+                    if (!refreshed) awaitingAccountPublication = accountAhead();
+                }
+                unconfirmedUse = awaitingAccountPublication;
+                idleRequested = false; budget.pause();
+                accountRetryPending = waitingForMode = refreshed;
+                if (awaitingAccountPublication) {
+                    // Keep the unused attempt for observeSteam's existing wake.
+                    // The old account's mode is not usable while delivery catches up.
+                    hasConfirmedMode = false; modeWindow.park();
+                    publish(link, session, "waiting-appearance", "appearance-awaiting-account-observation", budget.used());
+                } else if (refreshed) {
+                    if (identityRetired) hasConfirmedMode = false; // A pre-refresh mailbox cannot admit the successor.
+                    if (joined) {
+                        // The public owner already retired the old account's mode.
+                        // Its new result may have arrived before the old helper finished.
+                        try {
+                            const auto mode = config_.readMode(session);
+                            if (mode.mode == UiMode::BigPicture || mode.mode == UiMode::Desktop) {
+                                confirmedMode = mode; confirmedSession = session; hasConfirmedMode = true;
+                            }
+                        } catch (...) {}
+                    }
+                    modeWindow.request(GetTickCount64());
+                } else publish(link, session, "waiting-appearance", "appearance-identity-refresh-unavailable", budget.used());
+            }
+            if (!awaitingAccountPublication && session.pid && link.enabled && !exitParked && !resumeNeedsFreshMode && config_.readMode) {
+                const bool delivered = hasConfirmedMode && confirmedSession == session;
                 if (uiRecheck && !delivered) modeWindow.request(GetTickCount64());
                 if (delivered || modeWindow.take(GetTickCount64())) {
                     { std::lock_guard lock(stateMutex_); uiRecheck_ = false; }
@@ -371,19 +486,51 @@ class Runtime {
                         if (!(readLink(config_.linkFile) == link)) { linkDirty = true; modeWindow.reset(); continue; }
                         readOnlyHandoff = false; handoffModePending = false; modeCycle = true; idleRequested = false;
                         if (idleHelper) { CloseHandle(idleHelper); idleHelper = nullptr; }
-                        closeBackend(); budget.begin(GetTickCount64(), true);
-                        publish(link, session, "applying", "bigpicture-entered", 0);
+                        closeBackend();
+                        if (accountRetryPending && !entered) {
+                            budget.resume(GetTickCount64(), true);
+                            publish(link, session, budget.timeout(GetTickCount64()) == INFINITE ? "waiting-appearance" : "applying",
+                                "appearance-account-recheck", budget.used());
+                        } else {
+                            unconfirmedUse = accountRetryPending = false; budget.begin(GetTickCount64(), true);
+                            State::ModeHandoff handoff;
+                            if (resumeGeneration && resumePower.generation && mode.mode == UiMode::BigPicture &&
+                                (!delivered || mode.path != ModeHandoffPath::None)) {
+                                const bool sameScope = mode.timing.matches(resumePower);
+                                handoff = {delivered ? mode.path : ModeHandoffPath::CacheFallback, resumePower.generation,
+                                    resumePower.suspendSerial, resumePower.observedNotificationSequence,
+                                    sameScope ? mode.timing.readerReturnedTick : 0, sameScope ? mode.timing.publishedTick : 0,
+                                    delivered && sameScope ? mode.enqueuedTick : 0, GetTickCount64()};
+                            }
+                            publish(link, session, "applying", "bigpicture-entered", 0, 0, false, handoff);
+                        }
                     }
                 }
             }
             if (!exitParked && !resumeNeedsFreshMode && budget.take(GetTickCount64())) {
                 if (!(readLink(config_.linkFile) == link)) { linkDirty = true; continue; }
+                ymcc::sleeppower::SharedPowerV1 attemptPower;
+                const bool scoped = config_.confirmObserved && config_.powerReader;
+                if (scoped && (!allowed() || !ymcc::sleeppower::capturePower(config_.powerReader, attemptPower))) {
+                    publish(link, session, "waiting-steam-ui", "appearance-public-power-unavailable", budget.used());
+                    continue;
+                }
+                // The next Ready can arrive while ensure probes the existing
+                // backend. This attempt must not consume its newer mode proof.
+                const auto attemptAllowed = [&] {
+                    return allowed(scoped ? &attemptPower : nullptr);
+                };
                 Result result;
-                try { result = config_.ensure ? config_.ensure(link, session, allowed) : probeBackend(); }
+                try { result = config_.ensure ? config_.ensure(link, session, attemptAllowed) : probeBackend(); }
                 catch (...) { result = {nullptr, 0, "failed", "guard-check-failed"}; }
                 if (!allowed()) {
                     if (result.process) CloseHandle(result.process); budget.pause();
                     publish(link, session, "canceled", "lifecycle-changed", budget.used()); continue;
+                }
+                if (scoped && !attemptAllowed()) {
+                    if (result.process) CloseHandle(result.process);
+                    publish(link, session, "canceled", "appearance-ready-scope-changed", budget.used());
+                    continue;
                 }
                 closeBackend(); backend = result.process;
                 waitingForMode = result.phase == "waiting-steam-ui";
@@ -398,10 +545,17 @@ class Runtime {
                 // Exactly one startup use for either external or YMCC Steam.
                 // Missing CSS is started only for an enabled verified session;
                 // an idle receipt never replenishes it; abnormal exit recovery has its own fixed cap.
-                if (startupCandidate && !idleRequested && config_.confirmIdle && allowed() && readLink(config_.linkFile) == link) {
+                if (startupCandidate && !idleRequested && (config_.confirmObserved || config_.confirmIdle) && attemptAllowed() && readLink(config_.linkFile) == link) {
                     idleRequested = true; budget.pause();
-                    try { idleHelper = config_.confirmIdle(session, !backend, modeCycle); } catch (...) { idleHelper = nullptr; }
+                    helperIdentity.reset();
+                    try {
+                        if (config_.confirmObserved) {
+                            auto observed = config_.confirmObserved(session, !backend, modeCycle, scoped ? &attemptPower : nullptr);
+                            idleHelper = observed.completion; helperIdentity = std::move(observed.identity);
+                        } else idleHelper = config_.confirmIdle(session, !backend, modeCycle);
+                    } catch (...) { idleHelper = nullptr; helperIdentity.reset(); }
                     if (idleHelper) {
+                        helperAccount = session.account; unconfirmedUse = accountRetryPending = false;
                         modeCycle = false;
                         // A fresh helper owns a bounded use, not another wake
                         // attempt. Wait for its real completion without consuming
@@ -465,7 +619,8 @@ class Runtime {
                 const bool completedReadOnly = readOnlyHandoff;
                 if (completedReadOnly) {
                     readOnlyHandoff = false; exitParked = false;
-                    if (handoffModePending) observeMode(session, handoffMode);
+                    // The saved sample predates any new delivery still in the mailbox.
+                    if (handoffModePending) queueMode(session, handoffMode, false, true);
                     handoffModePending = false;
                 }
                 if (config_.isResidentConfirmed) {
@@ -473,6 +628,7 @@ class Runtime {
                     // not a recurring lookup. A failed helper never earns Ready.
                     auto resident = config_.probeExisting ? config_.probeExisting() : probeBackend(); backend = resident.process;
                     if (backend && config_.isResidentConfirmed(session)) {
+                        unconfirmedUse = accountRetryPending = false;
                         confirmedBackend = backendIdentity(backend);
                         // A pre-resume helper may finish during the settle
                         // delay. Its old DOM receipt cannot consume the new wave.
@@ -482,6 +638,7 @@ class Runtime {
                         publish(link, session, resumeNeedsFreshMode ? "waiting-steam-ui" : "ready",
                             resumeNeedsFreshMode ? "resume-css-settle-delay" : "appearance-applied-resident", budget.used(), resident.pid);
                     } else {
+                        unconfirmedUse = !completedReadOnly;
                         readOnlyHandoff = false; if (recoveringExit) { exitParked = true; recoveringExit = false; }
                         if (completedResumeUse && resumeGeneration) resumeBudget.resume(GetTickCount64());
                         publish(link, session, "waiting-appearance", "appearance-unconfirmed", budget.used(), resident.pid);
@@ -503,7 +660,7 @@ public:
             if (wake) CloseHandle(wake); if (stop) CloseHandle(stop);
             std::lock_guard lock(stateMutex_); state_.phase = "failed"; state_.reason = "guard-events-unavailable"; return false;
         }
-        { std::lock_guard lock(stateMutex_); config_ = std::move(config); stopping_ = false; uiRecheck_ = modePending_ = resumeRecheck_ = rebindPending_ = false; lastRebindGeneration_ = 0; rebindSession_ = {}; lastResumeGeneration_ = 0; resumeSession_ = {}; wake_ = wake; stop_ = stop; }
+        { std::lock_guard lock(stateMutex_); config_ = std::move(config); stopping_ = false; uiRecheck_ = modePending_ = resumeRecheck_ = rebindPending_ = false; lastRebindGeneration_ = 0; rebindSession_ = {}; lastResumeGeneration_ = 0; lastResumePower_ = {}; resumePower_ = {}; resumeSession_ = {}; wake_ = wake; stop_ = stop; }
         try { worker_ = std::thread([this] { try { run(); } catch (...) {
             std::lock_guard lock(stateMutex_); state_.phase = "failed"; state_.reason = "guard-worker-failed";
         } }); }
@@ -519,7 +676,7 @@ public:
         const bool processChanged = !sameSession(desired_, session);
         // Account discovery is not a new process/startup budget. Still retain
         // the FULL session: the shared mode owner requires the current account.
-        desired_ = session; if (processChanged) modePending_ = false;
+        desired_ = session; if (processChanged || (modePending_ && !(pendingModeSession_ == session))) modePending_ = false;
         if (wake_) SetEvent(wake_);
     }
     // Called on the shared WinEvent observer thread: just latch and wake.
@@ -531,20 +688,38 @@ public:
     }
     // Only the shared verified-mode completion calls this. A latest-value
     // mailbox bounds memory/wakes; identity and link are rechecked on the worker.
-    void observeMode(const ymcc::steamsession::Session& session, const ModeSample& mode) {
-        std::lock_guard lock(stateMutex_);
-        if (stopping_ || !desired_.pid || !state_.linked || !config_.readMode || !sameSession(desired_, session) ||
-            (mode.mode != UiMode::Desktop && mode.mode != UiMode::BigPicture) || mode.epoch.size() > 96) return;
-        const bool wake = !modePending_;
-        pendingMode_ = mode; pendingModeSession_ = session; modePending_ = true;
-        if (wake && wake_) SetEvent(wake_);
+    void observeMode(const ymcc::steamsession::Session& session, const ModeSample& mode, bool waitingOnly = false) {
+        queueMode(session, mode, waitingOnly, false);
     }
     bool requestResumeRecovery(const ymcc::steamsession::Session& session, ULONGLONG generation) {
         std::lock_guard lock(stateMutex_);
         if (stopping_ || !generation || generation <= lastResumeGeneration_) return false;
-        lastResumeGeneration_ = generation; // OFF/absent sessions also consume duplicates.
+        lastResumeGeneration_ = generation; lastResumePower_ = {}; resumePower_ = {}; // Legacy generation-only caller.
         if (!desired_.pid || !state_.linked || !config_.readMode || !config_.refreshMode || !sameSession(desired_, session)) return false;
         resumeSession_ = session; const bool wake = !resumeRecheck_; resumeRecheck_ = true;
+        if (wake && wake_) SetEvent(wake_);
+        return true;
+    }
+    bool requestPublicResumeRecovery(const ymcc::steamsession::Session& session, const ymcc::sleeppower::SharedPowerV1& power) {
+        std::lock_guard lock(stateMutex_);
+        if (stopping_ || !ymcc::sleeppower::powerCurrent(config_.powerReader, power) ||
+            power.generation < lastResumeGeneration_) return false;
+        if (lastResumePower_.generation) {
+            if (power.suspendSerial < lastResumePower_.suspendSerial ||
+                power.observedNotificationSequence < lastResumePower_.observedNotificationSequence ||
+                (power.generation == lastResumePower_.generation &&
+                 power.suspendSerial == lastResumePower_.suspendSerial &&
+                 power.observedNotificationSequence == lastResumePower_.observedNotificationSequence)) return false;
+        }
+        // Consume verified OFF/absent scopes too. Revision-only publication is
+        // metadata; only the public notification/suspend boundary grants a wave.
+        lastResumeGeneration_ = power.generation; lastResumePower_ = power;
+        // The initial Ready publication has no observed sleep boundary. Keep it
+        // as a baseline without interrupting the normal startup appearance use.
+        if (!power.suspendSerial && !power.observedNotificationSequence) return false;
+        if (!desired_.pid || !state_.linked || !config_.readMode || !config_.refreshMode || !sameSession(desired_, session)) return false;
+        resumePower_ = power; resumeSession_ = session;
+        const bool wake = !resumeRecheck_; resumeRecheck_ = true;
         if (wake && wake_) SetEvent(wake_);
         return true;
     }
@@ -566,7 +741,7 @@ public:
         std::lock_guard lifecycle(lifecycle_);
         { std::lock_guard lock(stateMutex_); stopping_ = true; if (stop_) SetEvent(stop_); }
         if (worker_.joinable()) worker_.join();
-        { std::lock_guard lock(stateMutex_); if (wake_) CloseHandle(wake_); if (stop_) CloseHandle(stop_); wake_ = stop_ = nullptr; desired_ = {}; manualRecheck_ = uiRecheck_ = modePending_ = resumeRecheck_ = rebindPending_ = false; lastRebindGeneration_ = 0; rebindSession_ = {}; resumeSession_ = {}; lastResumeGeneration_ = 0; pendingMode_ = {}; pendingModeSession_ = {}; }
+        { std::lock_guard lock(stateMutex_); if (wake_) CloseHandle(wake_); if (stop_) CloseHandle(stop_); wake_ = stop_ = nullptr; desired_ = {}; manualRecheck_ = uiRecheck_ = modePending_ = resumeRecheck_ = rebindPending_ = false; lastRebindGeneration_ = 0; rebindSession_ = {}; resumeSession_ = {}; lastResumeGeneration_ = 0; lastResumePower_ = {}; resumePower_ = {}; pendingMode_ = {}; pendingModeSession_ = {}; }
     }
 };
 } // namespace ymcc::steamcss

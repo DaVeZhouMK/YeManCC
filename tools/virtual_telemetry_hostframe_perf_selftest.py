@@ -39,12 +39,62 @@ def function(text,marker):
     starts=[m.start() for m in re.finditer(re.escape(marker),text)]
     candidates=[]
     for start in starts:
-        opening=text.find('{',start)
+        if marker in ("static void gamepadSerialPostEvent(", "static void gamepadSerialPostOwnedEvent("):
+            parameters = (r"const std::string& event, const json& data = \{\}" if marker.endswith("PostEvent(") else r"std::string event, json data")
+            signature = re.match(re.escape(marker) + parameters + r"\)\s*\{", text[start:])
+            if signature is None:
+                continue  # Declaration, not the complete current definition.
+            opening = start + signature.end() - 1
+        else:
+            opening=text.find('{',start)
         semicolon=text.find(';',start)
         if opening>=0 and (semicolon<0 or opening<semicolon):
             end=close_brace(text,opening)+1;candidates.append((start,end,text[start:end]))
     if len(candidates)!=1:raise ValueError(f'Expected one function body for {marker}: {len(candidates)}')
     return candidates[0]
+
+def serial_mailbox_binding(text):
+    if "g_gamepadSerialEventMailbox" not in text:
+        return ""
+    roots = re.findall(r"^static auto\* const g_gamepadSerialEventMailbox = new ymcc::ipc::ResultMailbox<GamepadSerialEvent>\(\);[^\n]*", text, re.M)
+    includes = re.findall(r'^#include "ipc_result_mailbox.h"[^\n]*', text, re.M)
+    if len(roots) != 1 or len(includes) != 1:
+        raise ValueError("actual serial mailbox declaration/include must bind exactly once")
+    return roots[0]
+
+
+def serial_action_power_binding(text):
+    if "g_gamepadSerialActionPower" not in text:
+        return ""
+    declarations = re.findall(r"^static thread_local unsigned long long g_gamepadSerialActionPower\s*=\s*0;[^\n]*", text, re.M)
+    if len(declarations) != 1:
+        raise ValueError("actual serial action-power TLS declaration must bind exactly once")
+    return declarations[0]
+
+
+def serial_support(event_struct, root, action_power=""):
+    # Compile the actual type and zero-initialized TLS; metadata never enters JSON.
+    support = event_struct
+    if action_power:
+        support += "\n#define YMCC_SERIAL_ACTION_POWER 1\n" + action_power + "\n"
+    if not root:
+        return support
+    # Header is loaded globally by the C++ fixture, before any namespace.
+    return support + "\n#define YMCC_SERIAL_EVENT_MAILBOX 1\n" + root + "\n" + (
+        "struct SerialMailboxRetirement { ~SerialMailboxRetirement() { g_gamepadSerialEventMailbox->retire(); } };\n"
+        "static SerialMailboxRetirement serialMailboxRetirement;\n")
+
+
+def serial_wrapper(body, root):
+    member = body.replace("static void ", "void ", 1)
+    if root and "gamepadSerialPostOwnedEvent(" in member:
+        marker = "[](std::uintptr_t token)"
+        if member.count(marker) != 1:
+            raise ValueError("one mailbox send callback is required")
+        # Only captures fixture window/exit/PostMessage members; body is exact.
+        member = member.replace(marker, "[this](std::uintptr_t token)", 1)
+    return member
+
 
 def fragments(text):
     cbStart,cbEnd,callback=function(text,'static void inputCaptureOnGamepad(')
@@ -91,43 +141,53 @@ def fragments(text):
         'aliasAudit':'Earlier source observers consume const json references synchronously; stored state is scalar/string copies. The frame evidence logger copies its proof into an owned log record. No async hostFrame reference/address escapes in these observer bodies.'}
     assert proof['eventFieldCount']==27 and proof['hostFrameValueReads']==9
     assert proof['allValueReadsBeforeHostFrameEntry'] and proof['hostFrameEntryIsFinalInitializerEntry'] and proof['noHostFrameIdentifierAfterCall']
-    return {'callback':callback,'before':init,'candidate':candidate,'call':call,'plane':plane,'wrappers':wrappers,'struct':eventStruct,'proof':proof}
+    return {'callback':callback,'before':init,'candidate':candidate,'call':call,'plane':plane,'wrappers':wrappers,'struct':eventStruct,'mailboxRoot':serial_mailbox_binding(text),'actionPowerDeclaration':serial_action_power_binding(text),'proof':proof}
 
 def generated(parts):
     methods=''
     for prefix,init in [('before',parts['before']),('candidate',parts['candidate'])]:
         methods+='json '+prefix+'Initializer() {\n'+parts['plane']+'\nreturn '+init+';\n}\n'
         call=parts['call'] if prefix=='before' else parts['call'].replace('{"hostFrame", hostFrame}','{"hostFrame", std::move(hostFrame)}',1)
-        methods+='void '+prefix+'Post() {\n'+parts['plane']+'\n'+call+'\n}\n'
+        methods+='void '+prefix+'Post() {\n'+parts['plane']+'\n'+call+('\ncapturePosted();' if parts['mailboxRoot'] else '')+'\n}\n'
         methods+='void '+prefix+'Gated() {\nif (g_hwnd && now - g_inputCaptureLastUi >= 80) {\ng_inputCaptureLastUi = now;\n'+prefix+'Post();\n}\n}\n'
-    wrappers='\n\n'.join(value.replace('static void ','void ',1) for value in parts['wrappers'])
+    wrappers='\n\n'.join(serial_wrapper(value,parts['mailboxRoot']) for value in parts['wrappers'])
     return methods,wrappers
 
 def main():
+    global REPO
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,default=DEFAULT_OUTPUT)
     parser.add_argument('--sample',type=Path,default=SAMPLE)
+    parser.add_argument('--repo-root',type=Path,default=REPO)
+    parser.add_argument('--source-main',type=Path,help='Explicit private source; no production write')
     args=parser.parse_args()
+    REPO=args.repo_root.resolve()
+    sourcePath=(args.source_main or REPO/'native/main.cpp').resolve();raw=sourcePath.read_bytes();text=raw.decode('utf-8-sig')
+    if re.search(r'^static void gamepadSerialPostOwnedGyroTelemetry\(', text, re.M):
+        raise RuntimeError('Historical JSON-only hostFrame candidate does not apply to typed telemetry. Use virtual_telemetry_hostframe_current_perf_selftest.py --typed-telemetry-build --phase prepare; --source-main remains available for an explicit historical JSON source.')
+    parts=fragments(text);methods,wrappers=generated(parts)
     args.output.mkdir(parents=True,exist_ok=True)
     out=args.output/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S'));out.mkdir()
-    sourcePath=REPO/'native/main.cpp';raw=sourcePath.read_bytes();text=raw.decode('utf-8-sig')
-    parts=fragments(text);methods,wrappers=generated(parts)
-    harnessPath=REPO/'tools/virtual_telemetry_hostframe_perf_selftest.cpp';harness=harnessPath.read_bytes()
+    harnessPath=Path(__file__).with_suffix('.cpp');harness=harnessPath.read_bytes()
+    mailboxPath=REPO/'native/ipc_result_mailbox.h';mailboxRaw=mailboxPath.read_bytes()
     jsonPath=REPO/'deps/json/json.hpp';jsonRaw=jsonPath.read_bytes();sampleRaw=args.sample.read_bytes()
     (out/'source-main.cpp').write_bytes(raw);(out/'json.hpp').write_bytes(jsonRaw);(out/'fixture.cpp').write_bytes(harness)
     (out/'sample.json').write_bytes(sampleRaw)
+    (out/'ipc_result_mailbox.h').write_bytes(mailboxRaw)
     (out/'event-extracted.h').write_text(methods,encoding='utf-8')
     (out/'owned-wrappers-extracted.h').write_text(wrappers,encoding='utf-8')
-    (out/'event-struct-extracted.h').write_text(parts['struct'],encoding='utf-8')
+    (out/'event-struct-extracted.h').write_text(serial_support(parts['struct'],parts['mailboxRoot'],parts['actionPowerDeclaration']),encoding='utf-8')
     (out/'before-initializer.cpp').write_text(parts['before'],encoding='utf-8')
     (out/'candidate-initializer.cpp').write_text(parts['candidate'],encoding='utf-8')
     (out/'initializer.diff').write_text(''.join(difflib.unified_diff(parts['before'].splitlines(True),parts['candidate'].splitlines(True),fromfile='before/gyro.telemetry-initializer',tofile='candidate/gyro.telemetry-initializer')),encoding='utf-8')
     (out/'ownership-proof.json').write_text(json.dumps(parts['proof'],ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     binding={'sourcePath':str(sourcePath),'sourceSha256AtEntry':SHA(raw),'jsonHeaderSha256':SHA(jsonRaw),
+        'mailboxHeaderPath':str(mailboxPath),'mailboxHeaderSha256':SHA(mailboxRaw),'mailboxRoot':parts['mailboxRoot'],
+        'serialAdapters':'Member send lambda captures this; after original post returns, real take transfers payload to original observation/delete path. Root retires once at process exit.',
         'harnessSha256':SHA(harness),'runnerSha256':SHA(Path(__file__).read_bytes()),'samplePath':str(args.sample.resolve()),'sampleSha256':SHA(sampleRaw),
         'sampleUse':'R2 saved real G3E scalar/IMU values; hostFrame fixtures follow current source schema, not a claim of real captured hostFrame or full-product telemetry.',
         'candidateOnly':True,'productionWriteSet':[],
-        'adapters':'Two wrappers change static free-function declarations to member methods only; bodies exact. Sensor meta, window/exit/cost flags, PostMessage and renderer dispatch are fixture-owned in-memory seams. No Windows message is posted.',
+        'adapters':'Two wrappers become member methods; the mailbox send lambda captures this for the fixture window/exit/PostMessage seams; other body bytes stay exact. Sensor meta, window/exit/cost flags, PostMessage and renderer dispatch are fixture-owned in-memory seams. No Windows message is posted.',
         'extracted':{key:SHA(value.encode()) for key,value in parts.items() if isinstance(value,str)},
         'cppVersion':'C++20','jsonAllocator':'nlohmann::json default std::allocator; counted ordinary/aligned operator new; timing counters disabled in separate timing runs.'}
     (out/'source-binding.json').write_text(json.dumps(binding,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
@@ -159,7 +219,12 @@ def main():
                     row={'variant':variant,'faultIndex':position,'returnCode':-999,'exitHex':None,'timeout':True,'stdout':str(error.stdout or ''),'stderr':str(error.stderr or '')}
                 if row['returnCode']==0:
                     row['result']=json.loads(row['stdout'])
-                    assert row['result']['badAllocCaught']==(position<limit),'Fault trial caught-state inconsistent'
+                    expectedCaught=position < limit-(1 if parts['mailboxRoot'] else 0)
+                    assert row['result']['badAllocCaught']==expectedCaught,'Fault trial caught-state inconsistent'
+                    if parts['mailboxRoot'] and position==limit-1:
+                        assert not row['result']['deliveryQueued'] and row['result']['postCalls']==0,'Mailbox insertion failure must discard without send'
+                    elif position>=limit:
+                        assert row['result']['deliveryQueued'],'Successful boundary lost event'
                     assert row['result']['liveAllocationBalance']==0,'Caught failure or complete owned path leaked a fixture allocation'
                 faults.append(row)
         result['isolatedAllocationFaults']=faults
@@ -167,8 +232,8 @@ def main():
         (out/(profile+'-isolated-faults.json')).write_text(json.dumps(faults,indent=2)+'\n',encoding='utf-8')
         profiles.append(result)
     finalRaw=sourcePath.read_bytes();finalParts=fragments(finalRaw.decode('utf-8-sig'))
-    assert all(finalParts[k]==parts[k] for k in ['callback','before','plane','wrappers','struct']),'Bound production fragments drifted during run'
-    assert jsonPath.read_bytes()==jsonRaw and harnessPath.read_bytes()==harness,'Bound header or harness drifted'
+    assert all(finalParts[k]==parts[k] for k in ['callback','before','plane','wrappers','struct','mailboxRoot']),'Bound production fragments drifted during run'
+    assert jsonPath.read_bytes()==jsonRaw and harnessPath.read_bytes()==harness and mailboxPath.read_bytes()==mailboxRaw,'Bound header or harness drifted'
     result={'pass':True,'runDirectory':str(out),'binding':binding,'ownershipProof':parts['proof'],'profiles':profiles,
         'productionModified':False,'sourceSha256AtEnd':SHA(finalRaw),'wholeSourceStableDuringRun':raw==finalRaw,'boundFragmentsStable':True,
         'scope':'Only isolated extracted C++ fixture runs; actual full initializer plus actual owned message/emitter bodies, default real json.hpp. Windows/UI/device calls are in-memory seams. No Host/native main or device SDK executed.'}

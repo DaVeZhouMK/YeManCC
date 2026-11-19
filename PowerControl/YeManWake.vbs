@@ -1,4 +1,2 @@
-Set ws = CreateObject("Wscript.Shell")
-
-
-ws.Run "cmd /c ""C:\SOFT\YeMan\PowerControl\YeManWake.bat""", 0, True
+WScript.Echo "This legacy sleep command is retired. Use the power settings in YeManCC."
+WScript.Quit 1

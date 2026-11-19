@@ -1,0 +1,20 @@
+/* Unchanged selected Valve rules read from the local SharedJSContext on 2026-11-08.
+   The Home component renders active, previous (OffScreen), then preload.
+   OffScreen's final opacity comes from its exit animation, not a static rule.
+   Source capture: Testing/YMCC/Evidence/DeckyWallpaper-StaticSelection-20261108/NATIVE-BACKGROUND-CSS.json.
+   Isolated browser fixture; never navigates or changes the installed Steam. */
+._3Mp8R2wnoCl6ko0HAX8IHE { width: 100%; height: 100%; object-fit: cover; animation-timing-function: cubic-bezier(0.17, 0.45, 0.14, 0.83); animation-duration: 0.3s; animation-fill-mode: backwards; transition-property: transform, opacity; transition-duration: 0.5s; transition-timing-function: cubic-bezier(0.17, 0.45, 0.14, 0.83); opacity: 0.7; will-change: transform, opacity; filter: brightness(50%); }
+.BigArtMode ._3Mp8R2wnoCl6ko0HAX8IHE { opacity: 1; filter: brightness(100%); }
+._3Mp8R2wnoCl6ko0HAX8IHE.Yk-I2az42lZgbInNlu06r { background-color: rgb(61, 68, 80); }
+._3Mp8R2wnoCl6ko0HAX8IHE.Yk-I2az42lZgbInNlu06r._30M_n3XIKv5anMLmKiahOz { animation-name: _1-Jeye88bVEcYHHSUIdzHo; animation-fill-mode: forwards; }
+._3Mp8R2wnoCl6ko0HAX8IHE.Yk-I2az42lZgbInNlu06r._3dydsnWmvqlpzBU8cUO3kf { animation-name: Ji84az5vq8CqaNbss79Xj; animation-fill-mode: forwards; }
+._3Mp8R2wnoCl6ko0HAX8IHE._3dydsnWmvqlpzBU8cUO3kf:not(.Yk-I2az42lZgbInNlu06r) { animation-name: _1HKCBMOO07EWF-XoiqtNln; opacity: 1; }
+._3Mp8R2wnoCl6ko0HAX8IHE._30M_n3XIKv5anMLmKiahOz:not(.Yk-I2az42lZgbInNlu06r) { animation-name: _22nzPNKReQkNRGtwIFGIy2; opacity: 1; }
+.MYh5NAv2dEuZH1E8bRwKH { display: none; }
+.QNkOtW3xS-yj6LviWHvnd, ._30D-80Lg-Luy-KxOumBlaY { position: absolute; inset: 0px; z-index: 0; mask-image: radial-gradient(75% 83% at 50% 18%, rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.6) 76%, rgba(0, 0, 0, 0) 100%); mask-composite: source-out; }
+.BigArtMode .QNkOtW3xS-yj6LviWHvnd, .BigArtMode ._30D-80Lg-Luy-KxOumBlaY { mask-image: linear-gradient(to top, rgba(0, 0, 0, 0) 0%, rgb(0, 0, 0) 20%, rgb(0, 0, 0) 75%, rgba(0, 0, 0, 0.85) 100%); }
+@media (prefers-contrast: more) { .QNkOtW3xS-yj6LviWHvnd, ._30D-80Lg-Luy-KxOumBlaY { opacity: 0; } }
+._30D-80Lg-Luy-KxOumBlaY ._1SRoxsfD-XkekIXfr0ofs3 { position: absolute; top: 0px; left: 0px; width: 100%; height: 100%; opacity: 1; animation: 25s ease 0s 2 alternate none running _3WXchKkPvnl2QloRaF5aQ7; }
+.LowPerfMode ._30D-80Lg-Luy-KxOumBlaY ._1SRoxsfD-XkekIXfr0ofs3 { animation: auto ease 0s 1 normal none running none; }
+@keyframes Ji84az5vq8CqaNbss79Xj { 0% { transform: translateX(0px) scale(1); opacity: 1; } 100% { transform: translateX(-32px) scale(1.08); opacity: 0; } }
+@keyframes _1-Jeye88bVEcYHHSUIdzHo { 0% { transform: translateX(0px) scale(1); opacity: 1; } 100% { transform: translateX(32px) scale(1.08); opacity: 0; } }

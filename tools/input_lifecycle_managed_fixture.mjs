@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createOfflineHostFixture} from './msi_steamdeck_release_fence_1726_selftest.mjs';
-import {toolchainFiles} from './ymcc_sim/global/inputhost-protocol/adapter.mjs';
+import {toolchainFiles,relocatedToolchain} from './ymcc_sim/global/inputhost-protocol/adapter.mjs';
 
 const self=fileURLToPath(import.meta.url),repo=path.resolve(path.dirname(self),'..');
 const evidenceRoot=path.resolve(repo,'../../../Build/Validation/VirtualController-Lifecycle-20261019/integration/managed');
@@ -40,13 +40,17 @@ export function buildManagedFixture(out,options={}){
  need(within(evidenceRoot)||within(ownershipEvidenceRoot)||(currentEvidenceRoot&&within(currentEvidenceRoot)),'--out must be a new child of an authorized lifecycle evidence root');
  need(!fs.existsSync(out),'Fresh output required: '+out);fs.mkdirSync(out,{recursive:true});
  const commands=[];
- function run(name,args){const r=spawnSync('dotnet',args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true,env:{...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:'true'}});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({name,args,exit:r.status,error:r.error?.message??null});need(!r.error&&r.status===0,name+' failed: '+path.join(out,name+'.log'));return r.stdout;}
+ const declared=JSON.parse(fs.readFileSync(path.join(repo,'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json'),'utf8').replace(/^\uFEFF/,''));
+ const toolchain=relocatedToolchain(repo,options.toolchainRoot??declared.dotnetRoot);
+ const dotnet=toolchain?path.join(toolchain.dotnetRoot,'dotnet.exe'):'dotnet';
+ const commandEnv={...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:'true',...(toolchain?{DOTNET_ROOT:toolchain.dotnetRoot,DOTNET_MULTILEVEL_LOOKUP:'0',DOTNET_CLI_HOME:out,DOTNET_CLI_USE_MSBUILD_SERVER:'0',MSBUILDDISABLENODEREUSE:'1'}:{})};
+ function run(name,args){const r=spawnSync(dotnet,args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true,env:commandEnv});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({name,executable:dotnet,args,exit:r.status,error:r.error?.message??null});need(!r.error&&r.status===0,name+' failed: '+path.join(out,name+'.log'));return r.stdout;}
  try{
  const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/SteamDeckPadReportObservation.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','InputHost/CompactFrameReplyBinding.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
  if(options.psOwnershipSelfTest)names.push('tools/ps_endpoint_ownership_selftest.cs','tools/ps_endpoint_ownership_selftest.mjs');
  const inputs=names.map(relative=>{const p=path.join(repo,relative),bytes=fs.readFileSync(p),snapshot=path.join(out,'input-sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{path:p,relative,snapshot,sha256:hash(bytes),bytes:bytes.length};});
  const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snapshot,'utf8').replace(/^\uFEFF/,'');
- const tools=toolchainFiles(repo).map(p=>{need(fs.existsSync(p)&&fs.statSync(p).isFile(),'Missing compiler/framework input: '+p);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
+ const tools=toolchainFiles(repo,toolchain).map(p=>{need(fs.existsSync(p)&&fs.statSync(p).isFile(),'Missing compiler/framework input: '+p);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
  const source=read('InputHost/Program.cs'),host=path.join(repo,'InputHost');
  const generated=createOfflineHostFixture(out,host,true,{externalGameOutputHelper:true,externalGameFeedbackCatalog:true});let fake=generated.fake;
  need(!/\bclass\s+HcControllerGameFeedbackCapabilityCatalog\b/.test(fake),'Game feedback catalog must be compiled separately, not embedded');
@@ -142,6 +146,19 @@ export function buildManagedFixture(out,options={}){
  legacy=replaceOnce(legacy,'private static int Main()','private static int UnusedLegacySelfTestEntry()');
  let compatibility='using YeManInputHost.Diagnostics;\n'+read('tools/inputhost_lifecycle_selftest.cs');
  compatibility=replaceOnce(compatibility,'private sealed class Stage','private sealed partial class Stage');
+ // The standalone protocol fixture needs only a no-op static writer. This
+ // composition compiles the production instance observer and its static sink.
+ if(compatibility.includes('private static class HostVirtualSignalEvidence')){
+  const inherited=member(compatibility,'private static class HostVirtualSignalEvidence');
+  const expected='private static class HostVirtualSignalEvidence { internal static void WriteBounded(string directory,string line){} }';
+  need(inherited.text.replace(/\s+/g,'')===expected.replace(/\s+/g,''),'Standalone virtual signal writer is not the reviewed inert boundary');
+  compatibility=replaceOnce(compatibility,inherited.text,'');
+ }
+ const costDiagnostic=member(compatibility,'private sealed class CostDiagnostic');
+ const inertCostDiagnostic='private sealed class CostDiagnostic { public CostDiagnostic(bool enabled,string dir,Action<string,string>? writer=null){} public void InvalidateController(){} }';
+ need(costDiagnostic.text.replace(/\s+/g,'')===inertCostDiagnostic.replace(/\s+/g,''),'Standalone cost diagnostics are not the reviewed inert boundary');
+ compatibility=replaceOnce(compatibility,costDiagnostic.text,costDiagnostic.text.replace('public void InvalidateController(){}',
+  'public void InvalidateController(){} public bool TryWriteSignalLog(string line)=>false; public object SnapshotSignalLogCounters()=>new { scope="isolated-disabled-writer" };'));
  // The standalone protocol test has a deliberately inert SDK witness terminal.
  // This composed fixture compiles the real helper and injects its actual session
  // field above, so the standalone nested type/field must not shadow or duplicate it.
@@ -171,6 +188,14 @@ export function buildManagedFixture(out,options={}){
  compatibility=replaceOnce(compatibility,'return Fixture.OutputStops;','return ManagedOutputStopResult(Fixture.OutputStops);');
  compatibility=replaceOnce(compatibility,'\"injected-reader-stall\"','\"sdk-output-stop-timeout\"');
  const pieces=['private static async Task<HostTerminalCleanup.LoopResult> RunPipeClientAsync(','private sealed class MessageCodec'].map(marker=>({...member(source,marker),marker}));
+ // This SDK-free child executes the actual loop/session/settlement; the
+ // process-entry exit owner is an explicit null leaf. Its real termination and
+ // held-file behavior are tested by the original parent lifecycle child cases.
+ const processExitFields=[...source.matchAll(/^    private static HostTerminalCleanup[.]ProcessExit[?] _terminalProcessExit;/gm)];
+ need(processExitFields.length<=1,'Nonunique process-entry exit owner');
+ if(source.includes('_terminalProcessExit'))need(processExitFields.length===1,'Missing process-entry exit owner declaration');
+ const processExitDeclaration=processExitFields[0]?.[0]??'';
+
  const files={
  'SignalSdkTerminal.cs':`// Inert SDK data shapes for the actual HostVirtualSignalEvidence observer.
 // The enum/state shape matches the existing report-chain SDK stand-ins.
@@ -184,7 +209,7 @@ namespace HIDMaestro {
 `,
  'ExtractedHost.cs':fake,'FixtureTerminals.cs':compatibility,'LegacyFixture.cs':legacy,
  'ManagedEntry.cs':managedEntry,
- 'ProductionPipe.cs':'using System.Diagnostics; using System.IO.Pipes; using System.Text; using YeManInputHost.Diagnostics;\ninternal static partial class Program {\n'+pieces.map(r=>r.text).join('\n')+'\n}\n',
+ 'ProductionPipe.cs':'using System.Diagnostics; using System.IO.Pipes; using System.Text; using YeManInputHost.Diagnostics;\ninternal static partial class Program {\n'+processExitDeclaration+'\n'+pieces.map(r=>r.text).join('\n')+'\n}\n',
  'ParentProcessLifetime.cs':read('InputHost/ParentProcessLifetime.cs'),
   'PsEndpointOwnership.cs':read('InputHost/PsEndpointOwnership.cs')
  };
@@ -201,10 +226,11 @@ namespace HIDMaestro {
  fs.writeFileSync(path.join(out,'NuGet.Config'),'<configuration><packageSources><clear /></packageSources></configuration>\n',{flag:'wx'});
  fs.writeFileSync(path.join(out,'FixtureInputs.targets'),`<Project><Target Name="RecordManagedFixtureInputs" AfterTargets="CoreCompile"><ItemGroup><_ManagedImports Include="$(MSBuildAllProjects)"/></ItemGroup><WriteLinesToFile File="$(MSBuildProjectDirectory)/evaluated-inputs.txt" Lines="@(Compile-&gt;'Compile&#x9;%(FullPath)');@(ReferencePath-&gt;'Reference&#x9;%(FullPath)');@(Analyzer-&gt;'Analyzer&#x9;%(FullPath)');@(_ManagedImports-&gt;'Import&#x9;%(FullPath)')" Overwrite="true" Encoding="UTF-8"/></Target></Project>\n`,{flag:'wx'});
  const generatedInputs=[...Object.keys(files),'Fixture.csproj','NuGet.Config','FixtureInputs.targets'].map(name=>{const p=path.join(out,name);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
- const bindings={schemaVersion:1,semanticMutation,semanticMutationScope:semanticMutation?"Explicit negative generated Host response condition only; source and pipe/codec bodies otherwise preserved":null,sources:inputs,generatedInputs,toolchainAllowlist:tools,ranges:[...generated.receipt,...signalMembers.map(({text,...r})=>({...r,file:path.join(host,'Program.cs'),sha256:hash(text),copiedVerbatim:true})),...pieces.map(({text,...r})=>({...r,file:path.join(host,'Program.cs'),sha256:hash(text),copiedVerbatim:true}))],constants:constants.join('\n'),scope:{productionPipeLoop:'verbatim',productionMessageCodec:'verbatim',productionParentLifetime:'verbatim',hostSession:'Existing actual-consumer extraction; existing fake clock replacements retained. Handle, HandleLocked, ReleaseLocal and ReleaseLocalLocked are not stubbed.',terminals:'Existing SDK/PnP/neutral/frame/diagnostic fakes reused. Stage diagnostic observation and one-shot fake output-stop result extended only in generated copies.',normalHostMainExecuted:false,realSdkLoaded:false,hardwareIo:false,productFilesEdited:false},toolchainMeaning:'Declared compiler/framework allowlist, not all files are claimed loaded; evaluated-inputs.txt identifies actual Compile/Reference/Analyzer/Import rows.'};
+ const bindings={schemaVersion:1,semanticMutation,semanticMutationScope:semanticMutation?"Explicit negative generated Host response condition only; source and pipe/codec bodies otherwise preserved":null,sources:inputs,generatedInputs,toolchainAllowlist:tools,ranges:[...generated.receipt,...signalMembers.map(({text,...r})=>({...r,file:path.join(host,'Program.cs'),sha256:hash(text),copiedVerbatim:true})),...pieces.map(({text,...r})=>({...r,file:path.join(host,'Program.cs'),sha256:hash(text),copiedVerbatim:true}))],constants:constants.join('\n'),scope:{productionPipeLoop:'verbatim',productionMessageCodec:'verbatim',productionParentLifetime:'verbatim',hostSession:'Existing actual-consumer extraction; existing fake clock replacements retained. Handle, HandleLocked, ReleaseLocal and ReleaseLocalLocked are not stubbed.',terminals:'Existing SDK/PnP/neutral/frame/diagnostic fakes reused. Stage diagnostic observation and one-shot fake output-stop result extended only in generated copies.',normalHostMainExecuted:false,processEntryExitOwnerNullInThisConsumer:true,processEntryExitVerifiedByOriginalParentLifecycleChildren:true,realSdkLoaded:false,hardwareIo:false,productFilesEdited:false},toolchainMeaning:'Declared compiler/framework allowlist, not all files are claimed loaded; evaluated-inputs.txt identifies actual Compile/Reference/Analyzer/Import rows.'};
  const bindingText=JSON.stringify(bindings),bindingHash=hash(bindingText);
  fs.writeFileSync(path.join(out,'BuildIdentity.g.cs'),'internal static class ManagedFixtureIdentity { internal const string InputManifestSha256="'+bindingHash+'"; }\n',{flag:'wx'});
  const sdkVersion=run('sdk-version',['--version']).trim();
+ if(toolchain)need(sdkVersion===toolchain.sdkVersion,'Explicit reviewed SDK version changed');
  run('build',['build',project,'-c','Release','--nologo','-v:minimal']);
  const ledger=fs.readFileSync(path.join(out,'evaluated-inputs.txt'),'utf8').replace(/^\uFEFF/,'');
  const actual=ledger.split(/\r?\n/).filter(Boolean).map(line=>{const [kind,...parts]=line.split('\t'),p=path.resolve(parts.join('\t'));need(['Compile','Reference','Analyzer','Import'].includes(kind)&&fs.existsSync(p),'Unbound actual compile input: '+line);return{kind,path:p,sha256:fileHash(p)};});
@@ -240,12 +266,12 @@ namespace HIDMaestro {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===self){try{
  const args=process.argv.slice(2);
- need([2,4,6].includes(args.length)&&args[0]==='--out','Use --out ABS_NEW_DIRECTORY [--mutation omit-recreate-owned-pin] [--evidence-root ABS_EXISTING_OWNED_ROOT]');
+ need([2,4,6,8].includes(args.length)&&args[0]==='--out','Use --out ABS_NEW_DIRECTORY [--mutation omit-recreate-owned-pin] [--evidence-root ABS_EXISTING_OWNED_ROOT] [--toolchain-root ABS_REVIEWED_SDK_ROOT]');
  const selected=new Map();
  for(let i=2;i<args.length;i+=2){
   const key=args[i],value=args[i+1];
-  need(['--mutation','--evidence-root'].includes(key)&&!selected.has(key)&&typeof value==='string'&&value.trim()!==''&&!value.startsWith('--'),'Invalid or repeated managed build option');
+  need(['--mutation','--evidence-root','--toolchain-root'].includes(key)&&!selected.has(key)&&typeof value==='string'&&value.trim()!==''&&!value.startsWith('--'),'Invalid or repeated managed build option');
   selected.set(key,value);
  }
- console.log(JSON.stringify(buildManagedFixture(args[1],{semanticMutation:selected.get('--mutation')??null,...(selected.has('--evidence-root')?{evidenceRoot:selected.get('--evidence-root')}:{})}),null,2));
+ console.log(JSON.stringify(buildManagedFixture(args[1],{semanticMutation:selected.get('--mutation')??null,...(selected.has('--evidence-root')?{evidenceRoot:selected.get('--evidence-root')}:{}),...(selected.has('--toolchain-root')?{toolchainRoot:selected.get('--toolchain-root')}:{})}),null,2));
 }catch(error){console.error(error.stack??error.message);process.exitCode=1;}}

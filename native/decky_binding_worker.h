@@ -44,7 +44,7 @@ struct Request {
     ymcc::steamsession::Session steam;
     DWORD windowsSession=0;
     Json bootstrap;
-    bool requireFreshContext=false,retainedFrontendOnly=false,liveUiAccount=false;
+    bool requireFreshContext=false,retainedFrontendOnly=false,liveUiAccount=false,delegatedIdentity=false;
 };
 inline Request parse(std::string_view bytes){
     require(!bytes.empty()&&bytes.size()<=maximumRequestBytes,"mirror-bootstrap-worker-request-size");
@@ -59,8 +59,11 @@ inline Request parse(std::string_view bytes){
     Request result;
     result.id=value.at("id").get<std::string>();require(hex(result.id,32),"mirror-bootstrap-worker-request-invalid");
     result.generation=decimal(value.at("generation"));
-    const auto& identity=value.at("steam");require(identity.is_object()&&(identity.size()==5||identity.size()==6),"mirror-bootstrap-worker-identity-invalid");
-    if(identity.size()==6){require(identity.contains("accountSource")&&identity.at("accountSource")=="verified-steam-ui","mirror-bootstrap-worker-identity-invalid");result.liveUiAccount=true;}
+    const auto& identity=value.at("steam");require(identity.is_object(),"mirror-bootstrap-worker-identity-invalid");
+    result.liveUiAccount=identity.contains("accountSource");result.delegatedIdentity=identity.contains("identitySource");
+    require(identity.size()==5+static_cast<std::size_t>(result.liveUiAccount)+static_cast<std::size_t>(result.delegatedIdentity),"mirror-bootstrap-worker-identity-invalid");
+    if(result.liveUiAccount)require(identity.at("accountSource")=="verified-steam-ui","mirror-bootstrap-worker-identity-invalid");
+    if(result.delegatedIdentity)require(identity.at("identitySource")=="shared-steam-observer.v1","mirror-bootstrap-worker-identity-invalid");
     result.steam.root=ymcc::steamlive::normalizedPath(wide(identity.at("root")));
     require(!result.steam.root.empty()&&std::filesystem::path(result.steam.root).is_absolute(),"mirror-bootstrap-worker-identity-invalid");
     result.steam.pid=number(identity.at("pid"));result.steam.created=decimal(identity.at("created"));result.steam.account=number(identity.at("account"));result.windowsSession=number(identity.at("windowsSession"),false);
@@ -70,12 +73,17 @@ inline Request parse(std::string_view bytes){
     result.bootstrap=value.at("bootstrap");
     require(result.bootstrap.is_object()&&hex(result.bootstrap.value("token",std::string{}),64)&&hex(result.bootstrap.value("runId",std::string{}),32)&&result.bootstrap.contains("endpoint")&&result.bootstrap.at("endpoint").is_string(),"mirror-bootstrap-worker-request-invalid");
     if(result.retainedFrontendOnly)require(hex(result.bootstrap.value("frontendBuildId",std::string{}),64),"mirror-bootstrap-worker-request-invalid");
+    if(result.bootstrap.contains("retainedFrontendBuildId"))require(result.retainedFrontendOnly&&
+        hex(result.bootstrap.value("retainedFrontendBuildId",std::string{}),64)&&
+        result.bootstrap.at("retainedFrontendBuildId")!=result.bootstrap.at("frontendBuildId"),"mirror-bootstrap-worker-request-invalid");
     return result;
 }
 // ActiveProcess.pid can outlive Steam. Observer already discovers a unique live
 // Steam when this value is stale; accept that SAME verified lease in the child.
 // Different live Steam or unreadable identity still vetoes. Do not write registry.
-// PID/birth/image/account/Windows user/session and registry root stay authoritative.
+// PID/birth/image/Windows user/session and registry root stay authoritative.
+// ActiveUser is advisory for typed current-UI bindings; bootstrap still checks
+// the actual UI witness before defining credentials and revokes on UI changes.
 inline bool registeredPidCompatible(DWORD registered,DWORD expected,const std::wstring& root){
     if(!registered||registered==expected)return true;
     const auto process=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,registered);
@@ -89,39 +97,60 @@ inline bool registeredPidCompatible(DWORD registered,DWORD expected,const std::w
     }
     CloseHandle(process);return stale;
 }
-class SteamLease {
+template<bool AllowLegacyFixture>
+class BasicSteamLease {
     HANDLE process_=nullptr;
     const Request& request_;
     const std::wstring registryPath_;
+    HANDLE delegatedCancel_=nullptr; // Borrowed from the authenticated inherited child channel.
+    mutable std::atomic<bool> delegatedRevoked_{false};
 public:
-    // Alternate registry scope is for isolated native tests only.
-    explicit SteamLease(const Request& request,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr):request_(request),registryPath_(registryPath){
+    // Only an explicit fixture instantiation can use a local registry path.
+    explicit BasicSteamLease(const Request& request,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr,HANDLE delegatedCancel=nullptr):request_(request),registryPath_(AllowLegacyFixture?registryPath:std::wstring{}),delegatedCancel_(delegatedCancel){
+        const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;throw std::runtime_error("mirror-bootstrap-session-changed");};
+        if constexpr(!AllowLegacyFixture){
+            if(!request_.delegatedIdentity)reject("steam-delegation-required");
+        }
         ULONGLONG born=0;
         process_=ymcc::steamsession::verifiedProcess(request.steam.pid,request.steam.root,&born);
         try{
             // Named predicates only: never include user/account/token values in
             // diagnostics. This explains a refusal without weakening the lease.
-            const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;throw std::runtime_error("mirror-bootstrap-session-changed");};
             if(!process_||born!=request.steam.created)reject("steam-process-or-birth");
-            if(!ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid))reject("steam-user-or-session");
+            DWORD session=0;
+            if(!ymcc::deckymirror::sameWindowsTokenUser(process_,&session))reject("steam-user-or-session");
+            if(request_.delegatedIdentity){
+                if(!request_.steam.account)reject("steam-account");
+                if(!delegatedCancel_||delegatedCancel_==INVALID_HANDLE_VALUE||WaitForSingleObject(delegatedCancel_,0)!=WAIT_TIMEOUT)reject("steam-delegation-revoked");
+                if(session!=request_.windowsSession)reject("steam-windows-session");
+            }
             require(current(rejectedCheck),"mirror-bootstrap-session-changed");
         }
         catch(...){if(process_)CloseHandle(process_);process_=nullptr;throw;}
     }
-    ~SteamLease(){if(process_)CloseHandle(process_);}
-    SteamLease(const SteamLease&)=delete;
+    ~BasicSteamLease(){if(process_)CloseHandle(process_);}
+    BasicSteamLease(const BasicSteamLease&)=delete;
     bool current(std::string* rejectedCheck=nullptr)const{
         const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;return false;};
         if(rejectedCheck)rejectedCheck->clear();
         if(!process_||WaitForSingleObject(process_,0)!=WAIT_TIMEOUT)return reject("steam-process-exited");
-        DWORD session=0;if(!ProcessIdToSessionId(request_.steam.pid,&session)||session!=request_.windowsSession)return reject("steam-windows-session");
-        const auto registered=ymcc::steamsession::regNumber(registryPath_,L"pid");
-        if(!ymcc::deckysession::registryCompatible(ymcc::steamsession::regNumber(registryPath_,L"ActiveUser"),request_.steam.account,request_.liveUiAccount))return reject("steam-account");
-        if(ymcc::steamsession::steamRoot(registryPath_)!=request_.steam.root)return reject("steam-root");
-        if(!registeredPidCompatible(registered,request_.steam.pid,request_.steam.root))return reject("steam-registered-pid");
-        return true;
+        if(request_.delegatedIdentity){
+            if(delegatedRevoked_.load(std::memory_order_acquire)||!delegatedCancel_||delegatedCancel_==INVALID_HANDLE_VALUE||WaitForSingleObject(delegatedCancel_,0)!=WAIT_TIMEOUT){
+                delegatedRevoked_.store(true,std::memory_order_release);return reject("steam-delegation-revoked");
+            }
+            return true; // Parent publication revokes the inherited per-request signal.
+        }
+        if constexpr(AllowLegacyFixture){
+            DWORD session=0;if(!ProcessIdToSessionId(request_.steam.pid,&session)||session!=request_.windowsSession)return reject("steam-windows-session");
+            const auto registered=ymcc::steamsession::regNumber(registryPath_,L"pid");
+            if(!ymcc::deckysession::registryCompatible(ymcc::steamsession::regNumber(registryPath_,L"ActiveUser"),request_.steam.account,request_.liveUiAccount))return reject("steam-account");
+            if(ymcc::steamsession::steamRoot(registryPath_)!=request_.steam.root)return reject("steam-root");
+            if(!registeredPidCompatible(registered,request_.steam.pid,request_.steam.root))return reject("steam-registered-pid");
+            return true;
+        }else return reject("steam-delegation-required");
     }
 };
+using SteamLease=BasicSteamLease<false>;
 struct Event {
     HANDLE value=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     Event(){require(value!=nullptr,"mirror-bootstrap-worker-event-failed");}
@@ -147,6 +176,18 @@ inline Json contextIdentity(HANDLE context) {
     return {{"pid",pid},{"birth",std::to_string((static_cast<ULONGLONG>(birth.dwHighDateTime)<<32)|birth.dwLowDateTime)},
         {"path",utf8},{"session",session}};
 }
+// Report this original watch's actual return state. No retry, close or new
+// lifetime owner is introduced by diagnostics; failed cleanup ends this child.
+template<class Diagnostic>
+bool finishWatch(ymcc::deckymirror::BootstrapWatch& watch,Diagnostic&& diagnostic){
+    const bool returned=watch.stop();
+    if(!returned){
+        const auto cleanup=watch.retirement();
+        diagnostic(Json{{"bootstrapStage","failed"},{"reason","mirror-bootstrap-cleanup-incomplete"},
+            {"closeAccepted",cleanup.closeAccepted},{"finalNotification",cleanup.finalNotification},{"error",cleanup.error}});
+    }
+    return returned;
+}
 // Emit is confined to the child. A noncooperative transport cannot retain the
 // parent's Runtime stack: the process owner cancels/ends this entire child Job.
 // It must serialize one framed packet, and returns false when the parent is gone.
@@ -163,8 +204,11 @@ int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
         // Arbitrary bootstrap JSON cannot nominate an account or bypass registry.
         require(!request.bootstrap.contains("account")&&!request.bootstrap.contains("accountSource"),"mirror-bootstrap-worker-request-invalid");
         if(request.liveUiAccount){request.bootstrap["account"]=request.steam.account;request.bootstrap["accountSource"]="verified-steam-ui";}
-        auto cancellation=std::make_shared<ymcc::deckymirror::CancelToken>(inheritedCancel);
-        require(!cancellation->canceled(),"mirror-bootstrap-canceled");SteamLease steam(request,L"Software\\Valve\\Steam",&rejectedSessionCheck);Event watchDone;
+        // A delegated producer owns its revoke event; watch-local stop cannot revoke it.
+        auto cancellation=request.delegatedIdentity
+            ?std::make_shared<ymcc::deckymirror::CancelToken>(inheritedCancel,ymcc::deckymirror::CancelToken::ObserveOwner{})
+            :std::make_shared<ymcc::deckymirror::CancelToken>(inheritedCancel);
+        require(!cancellation->canceled(),"mirror-bootstrap-canceled");SteamLease steam(request,L"Software\\Valve\\Steam",&rejectedSessionCheck,inheritedCancel);Event watchDone;
         ymcc::deckymirror::BootstrapWatch watch;
         const auto diagnostic=[&](const Json& detail){
             bool finished=detail.value("bootstrapStage",std::string{})=="failed"||detail.value("bootstrapStage",std::string{})=="terminal";
@@ -180,12 +224,12 @@ int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
         send("result",result);resultEmitted=true;
         if(!result.value("ok",false)){watch.stop();return 2;}
         require(context!=nullptr,"mirror-bootstrap-context-watch-unavailable");
-        HANDLE waiting[]{cancellation->event(),context,watchDone.value};
-        const auto end=WaitForMultipleObjects(3,waiting,FALSE,INFINITE);
-        require(end<WAIT_OBJECT_0+3,"mirror-bootstrap-worker-wait-failed");
+        HANDLE waiting[]{cancellation->event(),context,watchDone.value,cancellation->ownerEvent()};
+        const auto end=WaitForMultipleObjects(cancellation->ownerEvent()?4:3,waiting,FALSE,INFINITE);
+        require(end<WAIT_OBJECT_0+(cancellation->ownerEvent()?4u:3u),"mirror-bootstrap-worker-wait-failed");
         // This indefinite wait exists only inside the owned child and wakes on
         // cancel/context exit/watch termination. Parent hard stop is independent.
-        watch.stop();return 0;
+        return finishWatch(watch,[&](const Json& detail){send("diagnostic",detail);})?0:2;
     }catch(const std::exception& error){
         if(identified){try{
             if(!resultEmitted){

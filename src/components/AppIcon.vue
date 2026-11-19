@@ -12,7 +12,8 @@ import gyro_off from '../assets/input-status/gyro-off.svg';
 import touch_steam from '../assets/input-status/touch-steam-574.svg';
 import calibration_steam from '../assets/input-status/calibration-steam-517.svg';
 import return_desktop from '../assets/input-status/return-desktop-steam-69.svg';
-const statusMasks:Record<string,string>={'controller-xbox':controller_xbox,'controller-native':controller_native,'controller-sd':controller_sd,'controller-ps5':controller_ps5,'mouse-solid':mouse_solid,'gyro-on':gyro_on,'gyro-off':gyro_off,'touch-steam':touch_steam,'calibration-steam':calibration_steam,'return-desktop':return_desktop};
+import custom_touch from '../assets/custom-touch/custom.svg';
+const statusMasks:Record<string,string>={'controller-xbox':controller_xbox,'controller-native':controller_native,'controller-sd':controller_sd,'controller-ps5':controller_ps5,'mouse-solid':mouse_solid,'gyro-on':gyro_on,'gyro-off':gyro_off,'touch-steam':touch_steam,'calibration-steam':calibration_steam,'return-desktop':return_desktop,'custom-touch':custom_touch};
 
 const props = defineProps<{ name: string; strokeWidth?: number }>();
 const lightIconNames = new Set(['gauge', 'gamepad', 'rotate']);

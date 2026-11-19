@@ -370,6 +370,7 @@ $required = @(
   (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.dll'),
   (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.runtimeconfig.json'),
   (Join-Path $NativeBuild 'YeManCC.exe'),
+  (Join-Path $NativeBuild 'native-build-identity.json'),
   (Join-Path $NativeBuild 'YeManRecoveryService.exe'),
   (Join-Path $NativeBuild 'YeManControllerVisibilityProbe.exe'),
   (Join-Path $NativeBuild 'YMCCRtssProfileHelper.exe'),

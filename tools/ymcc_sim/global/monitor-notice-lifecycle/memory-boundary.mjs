@@ -32,7 +32,7 @@ class MemoryEventTarget {
   count() { return [...this.listeners.values()].reduce((n, set) => n + set.size, 0); }
 }
 
-export function createMemoryHost(bundle, policy = {}) {
+export function createMemoryHost(bundle, policy = {}, outer = null) {
   const clock = new MemoryClock(), dom = new MemoryEventTarget();
   const windows = new Map(), operations = new Map(), trace = [], nativeListeners = new Set(), held = [];
   let serial = 20, actionSerial = 0, generation = 1, lateCallbacksDelivered = 0, stoppedAt = null;
@@ -42,7 +42,22 @@ export function createMemoryHost(bundle, policy = {}) {
     operations.delete(id); record('native.response', { requestId: id, result: result ?? null, error: error ?? null });
     for (const listener of nativeListeners) listener({ data: error === undefined ? { id, result } : { id, error } });
   };
-  const emit = (event, data = {}) => { record('native.event', { event, data }); for (const listener of nativeListeners) listener({ data: { event, data } }); };
+  let publicationRevision=1,notificationSequence=1;
+  let powerSnapshot={phase:'ready',generation,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision,observedNotificationSequence:notificationSequence,notificationPending:false};
+  const emitRaw = (event, data = {}) => { record('native.event', { event, data }); for (const listener of nativeListeners) listener({ data: { event, data } }); };
+  const publishPowerSnapshot=(value,{store=true}={})=>{
+    const snapshot=structuredClone(value);
+    if(store){powerSnapshot=snapshot;publicationRevision=Math.max(publicationRevision,snapshot.publicationRevision??0);notificationSequence=Math.max(notificationSequence,snapshot.observedNotificationSequence??0);}
+    record('native.power.publication',{snapshot,storedAsCurrent:store});emitRaw('power.lifecycleChanged',snapshot);
+  };
+  const emit = (event, data = {}) => {
+    const phases={'power.pending':'suspending','power.suspending':'suspending','power.resuming':'resuming','power.resumed':'ready'};
+    if(phases[event]){
+      const phase=phases[event],currentGeneration=Number.isSafeInteger(data.generation)&&data.generation>0?data.generation:generation;
+      publishPowerSnapshot({phase,generation:currentGeneration,known:true,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready',publicationRevision:++publicationRevision,observedNotificationSequence:++notificationSequence,notificationPending:false});
+    }
+    emitRaw(event,data);
+  };
   const makeWindow = args => {
     const value = { id: ++serial, leaseId: args.leaseId, nonce: args.nonce, generation, ready: policy.deferReady !== true, healthy: true, visible: false };
     windows.set(value.id, value); record('native.window.created', value);
@@ -50,6 +65,7 @@ export function createMemoryHost(bundle, policy = {}) {
   };
   const finish = request => {
     const { id, cmd, args } = request;
+    if (cmd === 'power.lifecycle') { record('native.power.read',{snapshot:powerSnapshot});response(id,structuredClone(powerSnapshot));return; }
     if (cmd === 'diagnostics.frontendTrace') { response(id, {ok:true}); return; } // Diagnostic terminal only; native persistence checked separately.
     if (cmd === 'monitorNotice.status') {
       const first = [...windows.values()][0]; response(id, { id: first?.id ?? 0, ...(first ? { nonce: first.nonce } : {}), available: policy.available !== false, leaseProtocol: 1, ...(first ? { leaseId: first.leaseId } : {}), ready: first?.ready === true, recoveryBlocked: policy.recoveryBlocked === true });
@@ -93,7 +109,8 @@ export function createMemoryHost(bundle, policy = {}) {
     } else if (cmd === 'monitorNotice.frame') {
       const value = windows.get(args.hudId), accepted = !!value && value.nonce === args.nonce && value.healthy;
       if (accepted) value.visible = true; response(id, accepted);
-    } else throw Error('UNEXPECTED_NATIVE_COMMAND:' + cmd);
+    } else if (outer) response(id, outer.reply(cmd, args));
+    else throw Error('UNEXPECTED_NATIVE_COMMAND:' + cmd);
   };
   const webview = {
     addEventListener(type, listener) { if (type !== 'message') throw Error('UNEXPECTED_WEBVIEW_LISTENER'); nativeListeners.add(listener); },
@@ -109,12 +126,18 @@ export function createMemoryHost(bundle, policy = {}) {
   };
   class CustomEvent { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
   const MemoryDate = class extends Date { constructor(...args) { super(...(args.length ? args : [clock.now])); } static now() { return clock.now; } };
-  const context = vm.createContext({ window: dom, document: { documentElement: { dataset: { theme: 'blue-black' } } },
+  const documentElement = { dataset: { theme: 'blue-black' } };
+  const documentTarget = outer ? Object.assign(new MemoryEventTarget(), { documentElement, visibilityState: 'visible' }) : { documentElement };
+  const context = vm.createContext({ window: dom, document: documentTarget,
     crypto: { randomUUID }, Date: MemoryDate, setTimeout: clock.set, clearTimeout: clock.clear,
-    CustomEvent, structuredClone, queueMicrotask, console, URLSearchParams, AbortController });
+    CustomEvent, structuredClone, queueMicrotask, console, URLSearchParams, AbortController,
+    ...(outer ? { TextEncoder, TextDecoder, Event: CustomEvent } : {}) });
   dom.chrome = { webview }; dom.setTimeout = clock.set; dom.clearTimeout = clock.clear;
   new vm.Script(bundle, { filename: 'actual-monitor-notice.bundle.js' }).runInContext(context, { timeout: 5000 });
-  const api = context.NoticeLifecycleActual; api.setLogSink(entry => record('ipc.complete', entry)); const host = api.startMonitorNoticeHost();
+  const api = context.NoticeLifecycleActual; api.setLogSink(entry => record('ipc.complete', entry));
+  const capture = target => new Map([...target.listeners].map(([event, callbacks]) => [event, new Set(callbacks)]));
+  const baseline = outer ? { window: capture(dom), document: capture(documentTarget) } : null;
+  const host = outer ? outer.start(api) : api.startMonitorNoticeHost();
   const preferences = { popupEnabled: true, ymccTemplate: 'A', ymcc: { opacity: .8, dragLocked: false } };
   function feedback(extra = {}) {
     const value = { schemaVersion: 1, id: 'fixture-feedback-' + ++actionSerial, actionId: 'display.brightnessAdjust', origin: 'controller-shortcut', state: 'applied',
@@ -124,7 +147,7 @@ export function createMemoryHost(bundle, policy = {}) {
   }
   function snapshot() {
     const inspected = structuredClone(host.inspect());
-    return { at: clock.now, currentGeneration: generation, host: inspected,
+    return { at: clock.now, currentGeneration: generation, host: inspected,sharedPower:structuredClone(api.getSharedPowerLifecycleDiagnostics()),
       remainingOwnedResources: { windows: windows.size, timers: clock.timers.size, subscriptions: dom.count(),
         pendingIpc: trace.filter(t => t.type === 'native.request').length - trace.filter(t => t.type === 'ipc.complete').length, nativeOperations: operations.size, opening: Number(inspected.opening), ownerReferences: Number(inspected.owner !== null), stateEntries: inspected.state.seen },
       windows: [...windows.values()].map(value => ({ ...value })), calls: trace.filter(t => t.type === 'native.request').length,
@@ -137,10 +160,22 @@ export function createMemoryHost(bundle, policy = {}) {
       windows: windows.size, recovered: !!resource && resource.nonce === owner.nonce && resource.ready && resource.healthy && owner.ready && resource.generation === generation };
     record('independent.health', observed); return observed;
   }
-  return { host, api, clock, trace, windows, operations, policy, preferences, feedback, emit, snapshot, health,
+  function outerResources() {
+    if (!baseline) throw Error('OUTER_HOST_BOUNDARY_REQUIRED');
+    const splitSubscriptions = (target, moduleCallbacks) => {
+      const select = moduleOwned => [...target.listeners].flatMap(([event, callbacks]) => [...callbacks]
+        .filter(callback => (moduleCallbacks.get(event)?.has(callback) === true) === moduleOwned).map(() => event)).sort();
+      return { host: select(false), module: select(true) };
+    };
+    const domSubscriptions = { window: splitSubscriptions(dom, baseline.window), document: splitSubscriptions(documentTarget, baseline.document) };
+    return { windows: windows.size, timers: clock.timers.size, domSubscriptions, nativeOperations: operations.size,
+      moduleLifetimeWebViewMessageListeners: nativeListeners.size, host: structuredClone(host.inspect()) };
+  }
+  return { host, api, clock, trace, windows, operations, policy, preferences, feedback, emit, snapshot, health,publishPowerSnapshot,
+    ...(outer ? { outerResources } : {}),
     async ready() { host.ready(preferences); await clock.flush(); },
     stop() { if (stoppedAt === null) stoppedAt = clock.now; record('host.stop'); host.stop(); },
-    async lateReplies() { for (const request of held.splice(0)) { lateCallbacksDelivered++; record('late.native.reply.delivered', { cmd: request.cmd }); finish(request); await clock.flush(); } },
+    async lateReplies() { for (const request of held.splice(0)) { lateCallbacksDelivered++; record('late.native.reply.delivered', { cmd: request.cmd, ...(outer ? { requestId: request.id } : {}) }); finish(request); await clock.flush(); } },
     externalLoss(reason = 'transient carrier loss') { for (const resource of [...windows.values()]) { windows.delete(resource.id); record('external.window.loss', { id: resource.id, reason }); emit('monitorNotice.closed', { id: resource.id, nonce: resource.nonce }); } },
     nextGeneration() { generation++; record('power.generation', { generation }); },
     deliverRetiredCallbacks() { for (const { type, listener } of dom.history.slice()) { lateCallbacksDelivered++; record('late.dom.callback.delivered', { event: type }); listener(new CustomEvent(type, { detail: type === 'ipc:input.shortcutFeedback' ? { schemaVersion: 0 } : {} })); } },

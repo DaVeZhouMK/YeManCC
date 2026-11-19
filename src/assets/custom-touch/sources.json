@@ -1,0 +1,138 @@
+{
+  "source": "Existing reviewed YMCC preview; Steam local controller_base/images/api/dark silhouettes, monochrome outline treatment; custom icon Steam UI slice 546",
+  "inputs": [
+    {
+      "file": "steamdeck-A.svg",
+      "sha256": "62ce9ae9a16dc7d14e20cdce247b0121e423030750a451fda41069a447fe0eae"
+    },
+    {
+      "file": "steamdeck-B.svg",
+      "sha256": "99bbc05ebf64ac9a2f7356a56cc99b728866905ca8e9c0220c3ca0fd552bd7da"
+    },
+    {
+      "file": "steamdeck-X.svg",
+      "sha256": "abdfa64c30a1f56b0d04d0fc0345b347a6b7b5d745f88b76a2e85d14908341ab"
+    },
+    {
+      "file": "steamdeck-Y.svg",
+      "sha256": "4f7382e6224e9c74ecbeda1f5474728f56659cebcf04a38117882f52083a77f8"
+    },
+    {
+      "file": "steamdeck-LT.svg",
+      "sha256": "e9b692b1399d0f79c2b2930bcbc9e68ff69b7aec31353c1b7a46745ccd56a713"
+    },
+    {
+      "file": "steamdeck-LB.svg",
+      "sha256": "bb2605835f8bfae753e04858276585a84faab409a4ed96f47b991708334767d0"
+    },
+    {
+      "file": "steamdeck-RT.svg",
+      "sha256": "8bc1b60378daebd70ac3e5fa457429f23295a7e93ff138099b6e1c2e89b0c213"
+    },
+    {
+      "file": "steamdeck-RB.svg",
+      "sha256": "829cfdf7aa60c0c9dcc1946c3104811d08506a38721c506f1e0b93b0813c21e8"
+    },
+    {
+      "file": "steamdeck-back.svg",
+      "sha256": "5eb4bb9d16192859ab320bbc20c4f2977ea6e7ecc6bf4b3eca53c1a7ac5e47e3"
+    },
+    {
+      "file": "steamdeck-start.svg",
+      "sha256": "eec53cd92a6db751600d300bca92f68b21516f59e26a90c39d22d839646fe2d2"
+    },
+    {
+      "file": "steamdeck-dpad.svg",
+      "sha256": "3692f7fd0259ecc50686bbd39bcae52c4dd7517448a8fe44e4d94372067659ce"
+    },
+    {
+      "file": "xbox-A.svg",
+      "sha256": "62ce9ae9a16dc7d14e20cdce247b0121e423030750a451fda41069a447fe0eae"
+    },
+    {
+      "file": "xbox-B.svg",
+      "sha256": "99bbc05ebf64ac9a2f7356a56cc99b728866905ca8e9c0220c3ca0fd552bd7da"
+    },
+    {
+      "file": "xbox-X.svg",
+      "sha256": "abdfa64c30a1f56b0d04d0fc0345b347a6b7b5d745f88b76a2e85d14908341ab"
+    },
+    {
+      "file": "xbox-Y.svg",
+      "sha256": "4f7382e6224e9c74ecbeda1f5474728f56659cebcf04a38117882f52083a77f8"
+    },
+    {
+      "file": "xbox-LT.svg",
+      "sha256": "4c628069496ad08b23efdcb748bbe24c28e042d4d3db8ef5405acf40bb7b7e96"
+    },
+    {
+      "file": "xbox-LB.svg",
+      "sha256": "597d3103d825cfd6cdba30bd19797c57fb09789fb97c9aa91960fa844c80ae29"
+    },
+    {
+      "file": "xbox-RT.svg",
+      "sha256": "5a97048def052915e5ac3e24e5e4642d84b3926fa1f07d742db4ed3e4112d417"
+    },
+    {
+      "file": "xbox-RB.svg",
+      "sha256": "4a137672f146941908b1bf17186e9e80b8e3ef90e2458af804e174a8740967ed"
+    },
+    {
+      "file": "xbox-back.svg",
+      "sha256": "82d5066758699433b699eb21ba197372369e464719df826265f0ee4d5ece43f1"
+    },
+    {
+      "file": "xbox-start.svg",
+      "sha256": "94c6a39b2c82d5979cbec353a9448780f3b25be9761a087153e31d2860d2ec10"
+    },
+    {
+      "file": "xbox-dpad.svg",
+      "sha256": "3692f7fd0259ecc50686bbd39bcae52c4dd7517448a8fe44e4d94372067659ce"
+    },
+    {
+      "file": "ps5-A.svg",
+      "sha256": "d1b0aad88c63276aa57e4a5a36fd21299352de33cd2d5ffd09ef652e4d095f19"
+    },
+    {
+      "file": "ps5-B.svg",
+      "sha256": "796a72a59714028151f0c7d16c5cecf5869c6a06b125de366c812b0a3ffc1f8a"
+    },
+    {
+      "file": "ps5-X.svg",
+      "sha256": "767207ecbf4499a9cf2d798479f3698b844a43db98768c73df9d964922186309"
+    },
+    {
+      "file": "ps5-Y.svg",
+      "sha256": "0ad4ee0c3e32a36de46ad658d4fa8a92b41b3ead786c131b8df88c26c4602ae4"
+    },
+    {
+      "file": "ps5-LT.svg",
+      "sha256": "ae5837e12aa3ab81fea6b1524d573d16ac8d74d1f27dec69c643172925c20606"
+    },
+    {
+      "file": "ps5-LB.svg",
+      "sha256": "c4eb3bfdca42e9cced894729963b558a8164d871efb5a50e72167cf1e2e1d7b7"
+    },
+    {
+      "file": "ps5-RT.svg",
+      "sha256": "0812628adfe5e7acbb23ba341b31bd8fd4abe3e739e45ec5be91f3b37a918cdf"
+    },
+    {
+      "file": "ps5-RB.svg",
+      "sha256": "aec5bdfd8b3388433a20704bf7d9a0af1b4f354aa45865c33ecafaf032eb602a"
+    },
+    {
+      "file": "ps5-back.svg",
+      "sha256": "a4a066478c1e8f893a7f00b80103b6fb9339e9225d5befd2a1f52dd2f3a118a9"
+    },
+    {
+      "file": "ps5-start.svg",
+      "sha256": "cb29ee3a47704b6c329deba18ff6662e8214a4699ae63701b18b7baf9b4970a3"
+    },
+    {
+      "file": "ps5-dpad.svg",
+      "sha256": "e914f153a9e8c4d4c49ef8af1c61dc69093c35b564ebcd1d3830caa762588f31"
+    }
+  ],
+  "shoulderTreatment": "Retained Steam outline; compact regular Segoe UI 10px labels; native object-fit contain matches preview"
+}

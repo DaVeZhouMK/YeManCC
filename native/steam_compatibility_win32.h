@@ -14,6 +14,11 @@
 #include "steam_compatibility_publish_contracts.h"
 #include "steam_compatibility_read_graph.h"
 #include "steam_compatibility_publish_graph.h"
+#include "steam_compatibility_field_record_graph.h"
+#include "steam_compatibility_field_publication_graph.h"
+#include "steam_compatibility_field_ui_graph.h"
+#include "steam_reference_coordinate_view.h"
+#include "steam_reference_field_maps.h"
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -37,7 +42,18 @@ struct PeMetadata {
     std::vector<RuntimeFunction> functions;
     std::vector<ImportSlot> imports;
 };
+enum class ReferenceId { Canonical, Field20261114 };
+struct ReferenceBinding {
+    ReferenceId id = ReferenceId::Canonical;
+    ModuleKind kind = ModuleKind::Client;
+    std::shared_ptr<const coordinates::Map> coordinates;
+    // This identifies the compiled complete migration contract, never a file
+    // hash allowlist. Disk and loaded qualification still prove all F bytes.
+    const char* certificate = nullptr;
+};
 struct Qualification {
+    ReferenceId referenceId = ReferenceId::Canonical;
+    ModuleKind kind = ModuleKind::Client;
     std::optional<Layout> layout;
     Evidence record, ui, publisher;
     FileIdentity identity;
@@ -47,12 +63,39 @@ struct Qualification {
     std::uint64_t fileBytesRead = 0, digestBytesHashed = 0;
     std::shared_ptr<const PeMetadata> metadata;
     std::shared_ptr<const GraphResolution> graph;
+    std::shared_ptr<const ReferenceBinding> reference;
     bool dynamicallyLocated = false;
     const char* reason = "compatibility-unqualified";
     DWORD win32Error = ERROR_SUCCESS;
     bool cacheHit = false;
 };
+inline constexpr const char fieldClientCertificate[] = "ymcc-cf-client-complete-707-dir64-v1";
+inline constexpr const char fieldUiCertificate[] = "ymcc-cf-ui-complete-139-v1";
+inline bool referenceBindingCurrent(const Qualification& disk) noexcept {
+    try {
+    if(!disk.layout||!validLayout(*disk.layout)||!disk.metadata)return false;
+    if(!validModuleKind(disk.kind))return false;
+    if(disk.referenceId==ReferenceId::Canonical)return !disk.reference;
+    if(disk.referenceId!=ReferenceId::Field20261114||!disk.reference)return false;
+    const auto& ref=*disk.reference;
+    if(ref.id!=ReferenceId::Field20261114||*disk.layout!=Layout::OwnerScoped||
+       !validModuleKind(ref.kind)||ref.kind!=disk.kind||!disk.graph||!disk.graph->evidence.matched||!ref.coordinates)return false;
+    const auto expected=ref.kind==ModuleKind::Client?field_reference::clientMap():field_reference::uiMap();
+    const auto certificate=ref.kind==ModuleKind::Client?fieldClientCertificate:fieldUiCertificate;
+    return ref.coordinates==expected&&ref.certificate==certificate&&
+        disk.graph->imageSize==disk.metadata->imageSize;
+    }catch(...){return false;}
+}
 namespace detail {
+inline std::uint64_t graphImageSize(const GraphSpec& specification) {
+    std::uint64_t end=0;
+    for(const auto& section:specification.sections)end=(std::max)(end,section.rva+(std::max)(section.virtualSize,section.rawSize));
+    return (end+0xfff)&~std::uint64_t(0xfff);
+}
+inline Evidence checkFieldLayout(const Image& image,ModuleKind kind,bool publication=false) {
+    if(kind==ModuleKind::Ui)return checkRanges(image,field_ui::fixedRanges);
+    return publication?checkRanges(image,field_publication::fixedRanges):checkRanges(image,field_record::fixedRanges);
+}
 struct Handle {
     HANDLE value = INVALID_HANDLE_VALUE;
     explicit Handle(HANDLE h) : value(h) {}
@@ -187,7 +230,10 @@ public:
                     else if(thunk>0xffffffffULL-2||!stringAt(static_cast<std::uint32_t>(thunk)+2,512,symbol))return false;
                     const auto slot=std::uint64_t(descriptor.FirstThunk)+std::uint64_t(n)*8;
                     if(slot>=metadata.imageSize||8>metadata.imageSize-slot||metadata.imports.size()>=65536)return false;
-                    metadata.imports.push_back({static_cast<std::uint32_t>(slot),thunk,library,symbol});
+                    metadata.imports.push_back({static_cast<std::uint32_t>(slot),thunk,library,symbol,
+                        static_cast<std::uint32_t>(std::uint64_t(lookup)+std::uint64_t(n)*8),
+                        static_cast<std::uint32_t>(std::uint64_t(imports.VirtualAddress)+i*sizeof(descriptor)),
+                        descriptor.OriginalFirstThunk,descriptor.FirstThunk,descriptor.Name});
                 }
                 if(!end)return false;
             }
@@ -222,20 +268,63 @@ public:
         }
         return true;
     }
-    Image image() const { return {[this](std::uint64_t rva, void* target, std::size_t bytes) { return read(rva, target, bytes); }, metadata.preferredBase, metadata.imageSize, metadata.sections, metadata.functions}; }
+    Image image() const { return {[this](std::uint64_t rva, void* target, std::size_t bytes) { return read(rva, target, bytes); }, metadata.preferredBase, metadata.imageSize, metadata.sections, metadata.functions, false, metadata.imports}; }
 };
 inline Qualification qualifyBytes(const std::vector<unsigned char>& data, ModuleKind kind) {
-    Qualification result;if(!validModuleKind(kind)){result.reason="compatibility-module-kind-invalid";return result;} PeFile file(data);
+    Qualification result;result.kind=kind;if(!validModuleKind(kind)){result.reason="compatibility-module-kind-invalid";return result;} PeFile file(data);
     if (!file.parse()) { result.reason = "compatibility-pe-invalid"; return result; }
     const auto image = file.image(); unsigned matched = 0;
-    for (const auto layout : {Layout::Legacy, Layout::Public}) {
+    for (const auto layout : {Layout::Legacy, Layout::Public, Layout::OwnerScoped}) {
         Evidence record, ui, publisher;
         if (kind == ModuleKind::Client) { record = checkRecordLayout(image, layout); publisher = checkPublishLayout(image, layout); }
         else ui = checkUiLayout(image, layout);
-        const bool ok = kind == ModuleKind::Client ? record.matched && publisher.matched : ui.matched;
+        // A complete fixed-layout proof keeps its known code coordinates.
+        // New graph/import declarations are still consumed in that coordinate
+        // system, including every supplemental callee and its references.
+        bool ok = kind == ModuleKind::Client ? record.matched && publisher.matched : ui.matched;
+        const bool graphRequired=kind==ModuleKind::Client?
+            (!recordGraph(layout).imports.empty()||!publishGraph(layout).imports.empty()):!uiGraph(layout).imports.empty();
+        if(ok&&graphRequired){
+            GraphResolution calibrated;
+            if(kind==ModuleKind::Client){const std::array<GraphSpec,2> specs{recordGraph(layout),publishGraph(layout)};
+                calibrated=resolveGraphs(image,specs,true);}
+            else calibrated=resolveCalibratedGraph(image,uiGraph(layout));
+            if(!calibrated.evidence.matched){ok=false;
+                if(kind==ModuleKind::Client){record=calibrated.evidence;publisher=calibrated.evidence;}else ui=calibrated.evidence;}
+            else {result.graph=std::make_shared<const GraphResolution>(std::move(calibrated));result.dynamicallyLocated=false;}
+        }
         if (ok) { ++matched; result.layout = layout; result.record = record; result.publisher = publisher; result.ui = ui; }
         else if (!matched) { result.record = record; result.publisher = publisher; result.ui = ui; }
     }
+    const auto tryFieldReference=[&](bool calibrated){
+        // A separately certified complete reference family is selected only
+        // after the existing canonical families fail. F never synthesizes C
+        // bytes for admission; both fixed and required contracts are F's own.
+        GraphResolution graph;
+        const auto resolve=[&](bool useFixedCoordinates){
+            if(kind==ModuleKind::Client){const std::array<GraphSpec,2> specs{field_record::graph(),field_publication::graph()};return resolveGraphs(image,specs,useFixedCoordinates);}
+            return useFixedCoordinates?resolveCalibratedGraph(image,field_ui::graph()):resolveGraph(image,field_ui::graph());
+        };
+        graph=resolve(calibrated);
+        if(graph.evidence.matched){
+            const auto map=kind==ModuleKind::Client?field_reference::clientMap():field_reference::uiMap();
+            Image reference=image;
+            reference.read=referenceImageRead(graph,image.read,image.preferredBase,graph.specification.preferredBase);
+            reference.preferredBase=graph.specification.preferredBase;
+            reference.imageSize=graphImageSize(graph.specification);reference.sections=graph.specification.sections;reference.functions={};
+            const auto first=checkFieldLayout(reference,kind);
+            const auto second=kind==ModuleKind::Client?checkFieldLayout(reference,kind,true):first;
+            if(map&&map->fieldImageSize()==reference.imageSize&&first.matched&&second.matched){
+                matched=1;result.layout=Layout::OwnerScoped;result.referenceId=ReferenceId::Field20261114;
+                if(kind==ModuleKind::Client){result.record=first;result.publisher=second;}else result.ui=first;
+                result.graph=std::make_shared<const GraphResolution>(std::move(graph));
+                result.reference=std::make_shared<const ReferenceBinding>(ReferenceBinding{ReferenceId::Field20261114,kind,map,
+                    kind==ModuleKind::Client?fieldClientCertificate:fieldUiCertificate});
+                result.dynamicallyLocated=!calibrated;
+            }else{if(kind==ModuleKind::Client){result.record=first;result.publisher=second;}else result.ui=first;}
+        }else if(kind==ModuleKind::Client){result.record=graph.evidence;result.publisher=graph.evidence;}else result.ui=graph.evidence;
+    };
+    if(!matched)tryFieldReference(true);
     if(!matched){
         // A fast calibration miss is not a version rejection. Discover complete
         // code shapes at their actual positions and join their typed references.
@@ -248,10 +337,12 @@ inline Qualification qualifyBytes(const std::vector<unsigned char>& data, Module
             else reference={0x1196360,0x17a0f0,0xbde90,0xec3c0,newer?0x639890ULL:0x639770ULL,
                 newer?0xda95c8ULL:0xda91a8ULL,newer?0xdb0cd8ULL:0xdb0888ULL,newer?0xdb0d08ULL:0xdb08b8ULL,
                 newer?0xdb0720ULL:0xdb02d0ULL,newer?0x6275a0ULL:0x627480ULL};
+            if(kind==ModuleKind::Ui&&layout==Layout::OwnerScoped)reference={0x11cb640,0x1817d0,0xbe4c0,0xf33e0,0x65c6d0,0xdd4e88,0xddc5d8,0xddc608,0xddbff8,0x64a530};
+            if(kind==ModuleKind::Client&&layout==Layout::OwnerScoped)reference={0xcfed0,0x18546d8,0x138ff40,0x138fff8,0x139d580,0x139d6d0,0x4f8240};
             for(auto& value:reference){const auto actual=translateRva(graph,value);if(!actual)return std::vector<std::uint64_t>();value=*actual;}
             return reference;
         };
-        for(const auto layout:{Layout::Legacy,Layout::Public}){
+        for(const auto layout:{Layout::Legacy,Layout::Public,Layout::OwnerScoped}){
             GraphResolution graph;
             if(kind==ModuleKind::Client){const std::array<GraphSpec,2> specs{recordGraph(layout),publishGraph(layout)};graph=resolveGraphs(image,specs);}
             else graph=resolveGraph(image,uiGraph(layout));
@@ -268,7 +359,8 @@ inline Qualification qualifyBytes(const std::vector<unsigned char>& data, Module
             }else if(!matched){if(kind==ModuleKind::Client){result.record=graph.evidence;result.publisher=graph.evidence;}else result.ui=graph.evidence;}
         }
     }
-    if (matched != 1) { result.layout.reset(); result.graph.reset();result.reason = matched ? "compatibility-contract-ambiguous" : "compatibility-contract-unrecognized"; return result; }
+    if(!matched)tryFieldReference(false);
+    if (matched != 1) { result.layout.reset(); result.graph.reset();result.reference.reset();result.reason = matched ? "compatibility-contract-ambiguous" : "compatibility-contract-unrecognized"; return result; }
     result.metadata = std::make_shared<const PeMetadata>(std::move(file.metadata)); result.reason = result.dynamicallyLocated ? "compatibility-relocated-contract-matched" : "compatibility-contract-matched"; return result;
 }
 }
@@ -284,10 +376,31 @@ inline Qualification qualifyFile(const std::wstring& path, ModuleKind kind, bool
         failure.reason = "compatibility-file-identity-or-size"; return failure;
     }
     struct CacheEntry { std::wstring path; ModuleKind kind; FileIdentity identity; Qualification value; };
+    struct FlightEntry { std::wstring path; ModuleKind kind; FileIdentity identity; std::weak_ptr<std::mutex> mutex; };
     static std::mutex mutex; static std::vector<CacheEntry> cache;
+    static std::vector<FlightEntry> flights;
+    std::shared_ptr<std::mutex> flight;
     {
         std::lock_guard<std::mutex> lock(mutex);
-        for (const auto& entry : cache) if (entry.path == path && entry.kind == kind && entry.identity == before && (!requireDigest || !entry.value.sha256.empty())) {
+        for (const auto& entry : cache) if (entry.path == path && entry.kind == kind && entry.identity == before && (!requireDigest || !entry.value.sha256.empty()) && (!entry.value.layout || referenceBindingCurrent(entry.value))) {
+            auto result = entry.value; result.cacheHit = true; result.fileBytesRead = 0; result.digestBytesHashed = 0; return result;
+        }
+        // Only cold callers register an in-flight calculation. No file handle,
+        // bytes or result is retained here; expired slots leave on the next miss.
+        flights.erase(std::remove_if(flights.begin(),flights.end(),
+            [](const auto& entry){return entry.mutex.expired();}),flights.end());
+        for (const auto& entry : flights) if (entry.path == path && entry.kind == kind && entry.identity == before) {
+            flight = entry.mutex.lock();
+            if (flight) break;
+        }
+        if (!flight) { flight = std::make_shared<std::mutex>(); flights.push_back({path,kind,before,flight}); }
+    }
+    // The metadata mutex never covers disk IO or waiting. Different held file
+    // identities can qualify independently, including a replacement at this path.
+    std::unique_lock<std::mutex> flightLock(*flight);
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& entry : cache) if (entry.path == path && entry.kind == kind && entry.identity == before && (!requireDigest || !entry.value.sha256.empty()) && (!entry.value.layout || referenceBindingCurrent(entry.value))) {
             auto result = entry.value; result.cacheHit = true; result.fileBytesRead = 0; result.digestBytesHashed = 0; return result;
         }
     }
@@ -324,34 +437,43 @@ inline Qualification qualifyFile(const std::wstring& path, ModuleKind kind, bool
     return result;
 }
 inline std::uint64_t resolvedRva(const Qualification& disk,std::uint64_t reference){
+    if(!referenceBindingCurrent(disk))return 0;
+    if(disk.reference){const auto actual=coordinates::composedAddress(*disk.reference->coordinates,*disk.graph,reference);return actual?*actual:0;}
     if(!disk.graph)return reference;const auto actual=translateRva(*disk.graph,reference);return actual?*actual:0;
 }
 inline std::uint64_t referenceImageSize(const Qualification& disk,std::uint64_t actualSize){
-    if(!disk.graph)return actualSize;std::uint64_t end=0;
-    for(const auto& section:disk.graph->specification.sections)end=(std::max)(end,section.rva+(std::max)(section.virtualSize,section.rawSize));
-    return (end+0xfff)&~std::uint64_t(0xfff);
+    if(!referenceBindingCurrent(disk))return 0;
+    if(disk.reference)return disk.reference->coordinates->canonicalImageSize();
+    return disk.graph?detail::graphImageSize(disk.graph->specification):actualSize;
 }
-inline ReadRva adaptProcessRead(const Qualification& disk,std::uint64_t moduleBase,std::uint64_t moduleSize,const ReadRva& raw){
-    if(!disk.graph)return raw;
-    const auto graph=disk.graph;const auto viewSize=referenceImageSize(disk,moduleSize);
-    const ReadRva module=[raw,moduleBase,moduleSize](std::uint64_t rva,void* target,std::size_t size){
-        return rva<moduleSize&&size<=moduleSize-rva&&raw(moduleBase+rva,target,size);};
-    const auto view=referenceImageRead(*graph,module,moduleBase,moduleBase);
-    return [graph,view,raw,moduleBase,moduleSize,viewSize](std::uint64_t address,void* target,std::size_t bytes){
-        if(address>=moduleBase&&address-moduleBase<viewSize)return bytes<=viewSize-(address-moduleBase)&&view(address-moduleBase,target,bytes);
-        if(!raw(address,target,bytes))return false;
-        // Heap identities remain actual addresses. Only a module pointer whose
-        // exact typed/code location was resolved is normalized for the old core.
-        if(bytes==8){std::uint64_t value=0;std::memcpy(&value,target,8);
-            if(value>=moduleBase&&value-moduleBase<moduleSize){const auto actual=value-moduleBase;std::optional<std::uint64_t> reference;
-                for(const auto& point:graph->points)if(point.actual==actual){if(reference&&*reference!=point.reference)return false;reference=point.reference;}
-                for(const auto& range:graph->ranges)if(actual>=range.actual&&actual-range.actual<range.size){const auto next=range.reference+(actual-range.actual);
-                    if(reference&&*reference!=next)return false;reference=next;}
-                if(reference){value=moduleBase+*reference;std::memcpy(target,&value,8);}
-            }
-        }
-        return true;
+inline ymcc::steamdiagnostic::ReadViews makeProcessReadViews(const Qualification& disk,
+    std::uint64_t moduleBase,std::uint64_t moduleSize,const ReadRva& raw){
+    if(!referenceBindingCurrent(disk)||!raw||moduleBase<0x10000||moduleSize!=disk.metadata->imageSize||
+       moduleBase>0x7fffffffffffULL||!moduleSize||moduleSize-1>0x7fffffffffffULL-moduleBase)return {};
+    if(disk.reference)return coordinates::referenceReadViews(disk.reference->coordinates,disk.graph,moduleBase,moduleSize,raw);
+    if(disk.graph){
+        // The canonical UI profiles compare the vtable root, while their
+        // complete declared getter slot is at root+0x50. Bind just this typed
+        // root from that same proved eight-byte slot, including relocated C.
+        const auto root=*disk.layout==Layout::OwnerScoped?0xdd4e88ULL:
+            *disk.layout==Layout::Public?0xda95c8ULL:0xda91a8ULL;
+        const std::array<coordinates::Point,1> roots{{{root,root,coordinates::PointUse::TypedModulePointer,0,0x50}}};
+        return coordinates::canonicalGraphReadViews(disk.graph,moduleBase,moduleSize,raw,referenceImageSize(disk,moduleSize),
+            disk.kind==ModuleKind::Ui?std::span<const coordinates::Point>(roots):std::span<const coordinates::Point>{});
+    }
+    // A complete canonical fixed-content qualification requires no coordinate
+    // translation, including unknown image hashes. Do not infer pointer intent
+    // from a scalar value: only the explicit typed operation uses this identity.
+    ymcc::steamdiagnostic::ReadViews result{raw,raw,{}};
+    result.explicitModulePointerNormalizer=[moduleBase,moduleSize](std::uint64_t value,std::uint64_t& output){
+        if(value<moduleBase||value-moduleBase>=moduleSize)return false;output=value;return true;
     };
+    return result;
+}
+// Retain the old module-reading source API for existing movement controls.
+// Object data and pointer normalization require the explicit ReadViews ports.
+inline ReadRva adaptProcessRead(const Qualification& disk,std::uint64_t base,std::uint64_t size,const ReadRva& raw){
+    return makeProcessReadViews(disk,base,size,raw).canonicalModule;
 }
 // Convert actual loaded-image reads to preferred-base PE bytes for the exact
 // same complete contracts. This verifies code and relocated vtable references;
@@ -362,7 +484,7 @@ inline Evidence qualifyLoaded(const Qualification& disk, ModuleKind kind, const 
     const std::function<bool(std::uint64_t)>& importedTarget = {},
     const NamedImportValidator& namedImportedTarget = {}, LoadedDiagnostic* diagnostic = nullptr) {
     LoadedDiagnostic local; auto& detail = diagnostic ? *diagnostic : local; detail = {};
-    if (!validModuleKind(kind)||!disk.layout || !disk.metadata || !loaded || loadedBase < 0x10000 ||
+    if (!validModuleKind(kind)||disk.kind!=kind||!referenceBindingCurrent(disk) || !loaded || loadedBase < 0x10000 ||
         loadedBase>0x7fffffffffffULL||!loadedSize||loadedSize-1>0x7fffffffffffULL-loadedBase||
         loadedSize != disk.metadata->imageSize) return {false, 0, 0, 0, "compatibility-loaded-identity-invalid"};
     const auto metadata = disk.metadata; const auto delta = loadedBase - metadata->preferredBase;
@@ -428,17 +550,27 @@ inline Evidence qualifyLoaded(const Qualification& disk, ModuleKind kind, const 
             std::memcpy(static_cast<unsigned char*>(target) + (low - rva), reinterpret_cast<const unsigned char*>(&it->originalThunk) + (low - it->rva), static_cast<std::size_t>(high - low));
         }
         return true;
-    }, metadata->preferredBase, metadata->imageSize,metadata->sections,metadata->functions,true};
+    }, metadata->preferredBase, metadata->imageSize,metadata->sections,metadata->functions,true,metadata->imports};
     Image contract=normalized;
     if(disk.graph){contract.read=referenceImageRead(*disk.graph,normalized.read,metadata->preferredBase,disk.graph->specification.preferredBase);
-        contract.preferredBase=disk.graph->specification.preferredBase;contract.imageSize=referenceImageSize(disk,loadedSize);
+        contract.preferredBase=disk.graph->specification.preferredBase;contract.imageSize=detail::graphImageSize(disk.graph->specification);
         contract.sections=disk.graph->specification.sections;contract.functions={};}
-    if (kind == ModuleKind::Ui) return finish(checkUiLayout(contract, *disk.layout));
-    auto record = finish(checkRecordLayout(contract, *disk.layout)); if (!record.matched) return record;
-    const auto publisher = finish(checkPublishLayout(contract, *disk.layout));
-    if (!publisher.matched) return publisher;
-    record.rangesChecked += publisher.rangesChecked; record.bytesChecked += publisher.bytesChecked;
-    record.mutableRangesIgnored += publisher.mutableRangesIgnored;
+    Evidence record;
+    if(kind==ModuleKind::Ui){record=finish(disk.reference?detail::checkFieldLayout(contract,kind):checkUiLayout(contract,*disk.layout));if(!record.matched)return record;}
+    else {
+        record=finish(disk.reference?detail::checkFieldLayout(contract,kind):checkRecordLayout(contract,*disk.layout));if(!record.matched)return record;
+        const auto publisher=finish(disk.reference?detail::checkFieldLayout(contract,kind,true):checkPublishLayout(contract,*disk.layout));if(!publisher.matched)return publisher;
+        record.rangesChecked+=publisher.rangesChecked;record.bytesChecked+=publisher.bytesChecked;
+        record.mutableRangesIgnored+=publisher.mutableRangesIgnored;
+    }
+    const auto appendRequired=[&](const GraphSpec& specification,const GraphResolution* graph){
+        const auto required=finish(checkLoadedRequired(specification,normalized,contract,graph));
+        if(!required.matched){record=required;return false;}
+        record.rangesChecked+=required.rangesChecked;record.bytesChecked+=required.bytesChecked;return true;
+    };
+    if(disk.graph){if(!appendRequired(disk.graph->specification,disk.graph.get()))return record;}
+    else if(kind==ModuleKind::Ui){if(!appendRequired(uiGraph(*disk.layout),nullptr))return record;}
+    else if(!appendRequired(recordGraph(*disk.layout),nullptr)||!appendRequired(publishGraph(*disk.layout),nullptr))return record;
     return record;
 }
 }

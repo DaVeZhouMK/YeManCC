@@ -15626,7 +15626,7 @@
             {
               "role": "entry",
               "path": "FanLab/LightSetter/Program.cs",
-              "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+              "sha256": "d662e3ba94a09a71221b9c918a6acf1cca065261e72d9c2fd758eab17ee84876"
             },
             {
               "role": "owner",
@@ -17601,7 +17601,7 @@
             {
               "role": "entry",
               "path": "FanLab/LightSetter/Program.cs",
-              "sha256": "72b0fccbf895432ddbd2c762d22087cba487623a1b393026d52f5d2a7589308c"
+              "sha256": "d662e3ba94a09a71221b9c918a6acf1cca065261e72d9c2fd758eab17ee84876"
             },
             {
               "role": "owner",
@@ -17628,6 +17628,112 @@
             "Windows reports are ID0 plus the64-byte V2 payload. Brightness follows HueSync ties-even whole-update levels1/3/4; percent0 sends disabled/level1. HC always-enabled zero is not the off encoding.",
             "Source-bound software admission and complete writes do not claim hardware, descriptor capture, physical effects or full-tree snapshot currency."
           ]
+        }
+      ],
+      "oemOwnership": [
+        {
+          "deviceId": "hc.device.AYANEO2",
+          "deviceClass": "HandheldCompanion.Devices.AYANEO2",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEO2S",
+          "deviceClass": "HandheldCompanion.Devices.AYANEO2S",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIR",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIR",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": true,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIR1S",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIR1S",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIRLite",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIRLite",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIRPlusAMD",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+          "protocol": "ceii-ram",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "8fac56a1154b1c7e598910b09e8e1395c1c98d95c0d81efcf9c9e8d511e3ce3d"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIRPlusAMDMendocino",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+          "protocol": "ceii-ram",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "8fac56a1154b1c7e598910b09e8e1395c1c98d95c0d81efcf9c9e8d511e3ce3d"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIRPlusIntel",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+          "protocol": "ceii-ram",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "8fac56a1154b1c7e598910b09e8e1395c1c98d95c0d81efcf9c9e8d511e3ce3d"
+        },
+        {
+          "deviceId": "hc.device.AYANEOAIRPro",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPro",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOFlip1SKB",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOFlip1SKB",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOFlipKB",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOFlipKB",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOKUN",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOKUN",
+          "protocol": "legacy-cec",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+          "sharedChargeIndicatorDeclared": false,
+          "releaseMethodSha256": "834b43ebfadf6a1ed03440d569000a67a678137b9225fa3852f86fd2ddf4ba5a"
+        },
+        {
+          "deviceId": "hc.device.AYANEOSlide",
+          "deviceClass": "HandheldCompanion.Devices.AYANEOSlide",
+          "protocol": "ceii-ram",
+          "methodOwner": "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+          "sharedChargeIndicatorDeclared": true,
+          "releaseMethodSha256": "8fac56a1154b1c7e598910b09e8e1395c1c98d95c0d81efcf9c9e8d511e3ce3d"
         }
       ],
       "brightnessCompatibility": [
@@ -17674,15 +17780,15 @@
           "reason": "Retain the reviewed in-process MSI command-interface HID writer; exact model registration replaces family-only dispatch"
         }
       ],
-      "catalogSha256": "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3"
+      "catalogSha256": "74f233e93628ec1e3ccddb37e4c909f34e44738e1e7804880a4be23a2c786a20"
     },
     "battery": {
       "schemaVersion": 1,
       "ruleDocument": "native/BatteryHost/battery-routes.json",
-      "ruleDocumentSha256": "e698f7735cd307a6b184232419d76b9e5d5a42c85d74d858a77479671869ffe8",
-      "registeredRules": 42,
+      "ruleDocumentSha256": "11c0709b6b5c5100fc2b3e9430f8bfaf9867d64919ae691567775e6de291994e",
+      "registeredRules": 43,
       "frozenModelRules": 34,
-      "reviewedExtensionRules": 8,
+      "reviewedExtensionRules": 9,
       "providerRoutes": [
         "asus-ally-acpi",
         "lenovo-go-conservation",
@@ -17692,6 +17798,7 @@
         "ayaneo-ceii-bypass",
         "oxp-x1-amd-ec",
         "oxp-x1-intel-ec",
+        "oxp-x2-mini-pro-direct-ec",
         "oxp3-wmi-ec",
         "valve-deck-firmware",
         "gpd-win-mini-2025",
@@ -18777,6 +18884,34 @@
         },
         {
           "index": 40,
+          "ruleId": "battery.rule.oxp-x2-mini-pro-direct-ec.OneXPlayerX2MiniPro",
+          "deviceId": "ymcc.device.OneXPlayerX2MiniPro",
+          "deviceClass": "OneXPlayerX2MiniPro",
+          "origin": "reviewed-native-extension",
+          "sourceDeclaredBattery": false,
+          "provider": "oxp-x2-mini-pro-direct-ec",
+          "identity": {
+            "manufacturers": [
+              "ONE-NETBOOK",
+              "ONE-NETBOOK TECHNOLOGY CO., LTD."
+            ],
+            "field": "boardProduct",
+            "values": [
+              "ONEXPLAYER X2Mini PRO"
+            ],
+            "deviceClass": "OneXPlayerX2MiniPro"
+          },
+          "firmwareGate": {
+            "kind": "oxp-x2-mini-pro-field-firmware",
+            "bios": "0.22",
+            "ecMajor": 0,
+            "ecMinor": 12
+          },
+          "min": 50,
+          "kind": "firmware-percent"
+        },
+        {
+          "index": 41,
           "ruleId": "battery.rule.oxp3-wmi-ec.OneXPlayer3",
           "deviceId": "ymcc.device.OneXPlayer3",
           "deviceClass": "OneXPlayer3",
@@ -18804,7 +18939,7 @@
           "kind": "firmware-percent"
         },
         {
-          "index": 41,
+          "index": 42,
           "ruleId": "battery.rule.oxp-superx-dual-ec.OneXPlayerSuperX",
           "deviceId": "ymcc.device.OneXPlayerSuperX",
           "deviceClass": "OneXPlayerSuperX",
@@ -19866,32 +20001,36 @@
           "sha256": "b7739fcca971613740875c1b3ae5a5125ffdec4933164eccfd75e59e913d2fa7"
         },
         {
+          "file": "capabilities/upstream/onexconsole-0.10.4-fix3/X2MiniProCharge.source-facts.json",
+          "sha256": "9e67e2fae0d48ac5966d30d9d24707c1c37697888223d24f8d6a050d24894c5f"
+        },
+        {
           "file": "tools/battery-charge-generate-routes.mjs",
-          "sha256": "09643e31b06f85ac8a116531020123b62dd15f4ba46de940e17e4dd05a481803"
+          "sha256": "31099bf1c4e0a3ab78f2a28fbce9e42b20120d8147ab784c4d7dee0937bdd602"
         },
         {
           "file": "native/BatteryHost/Policy.cs",
-          "sha256": "461e28b82236d14b152fbefc646ada06d6df59526d429aada7828866e054148d"
+          "sha256": "9c1f2987bb0144788224b8fd75933b440ab24d34946e5cb43f39a8d72f9e5a7d"
         },
         {
           "file": "native/BatteryHost/Controller.cs",
-          "sha256": "6ed67dd8184bb1cd42adaf26c10ecab9fd19ef622d922adba02e91e912f9d1e7"
+          "sha256": "59ffb52b851533a2f8e38c59c9a10a214e98e37378b90fa028caf34493115f62"
         },
         {
           "file": "native/BatteryHost/Providers.cs",
-          "sha256": "009533f6907162b0683046460130ae92d5e7f44825d9513b45d514a26c2e3aa7"
+          "sha256": "05bfdbd79a8790ab1d514467afc32717774fe1187b3ec68b60b9b223c70c429a"
         },
         {
           "file": "native/BatteryHost/MsiWmi.cs",
-          "sha256": "7ba83b436617b37b86799028e9726fae1638b4a7062ab33cb3ee23babfc68900"
+          "sha256": "af73ce512d2ba4c1b54972cc7d18d9d3fe91de20885f238efc805562bfe83db1"
         },
         {
           "file": "native/BatteryHost/MsiApProvider.cs",
-          "sha256": "206dcf6572758eb7416d922a3dd4dd991b9483ad1281fa443e4a1d633ba5df3d"
+          "sha256": "5bd4335b757e1bf9d93e746b72865efd7bca198fc24f3aef0ffd8d25e29d2ddd"
         },
         {
           "file": "capabilities/hc-battery-policy.json",
-          "sha256": "aecc37934a23c05c5e39785fae3b0b2c56c4f97fe5e327aa6ff28aedc5a17b27"
+          "sha256": "9795d136da4c127ea40bd1a83d29ff30370705847282b6f040b6486b25c9017a"
         },
         {
           "file": "capabilities/upstream/xmax-6d728795/SuperXCharge.source-facts.json",
@@ -19903,11 +20042,11 @@
         },
         {
           "file": "capabilities/HcBatteryCapabilityCatalog.cs",
-          "sha256": "8a867cd3f43311e13060565371121c43b3a0e6143eeab5bec837030fe5b36f70"
+          "sha256": "217a70097e34bf84283b4ef143b80dd29a58a123f8f1ea6be5c4ce0c5079e14b"
         },
         {
           "file": "tools/lib/hc_battery_catalog.mjs",
-          "sha256": "a29332371f41fa05e82957893de67020cb2759ad8ceb931bc33805a4a62adffb"
+          "sha256": "84316887c7aa56dd9d9605ef2c0697903f51a5a793e234b416180099fb6e6f6e"
         },
         {
           "file": "native/BatteryHost/SuperXUmaChargeReader.cs",
@@ -19931,7 +20070,7 @@
         },
         {
           "file": "native/BatteryHost/InProcessEntry.cs",
-          "sha256": "6869ab5bfac294a10ef630da203dbb05327afd606ae4156253d7566dc09ebe4a"
+          "sha256": "880eabb13299216ad985b4bff2c38c7bc0de48b5b337bae3dc5de6fcf8343b1e"
         },
         {
           "file": "native/BatteryHost/HostDomainRouter.cs",
@@ -19940,9 +20079,17 @@
         {
           "file": "native/BatteryHost/SecondaryDisplayController.cs",
           "sha256": "51085b4ae0103107d3f014c72a3f275a3f0764c51aa1b808759aae39c23a4b79"
+        },
+        {
+          "file": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
+          "sha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc"
+        },
+        {
+          "file": "capabilities/upstream/f2e58468/OneXPlayer3.json",
+          "sha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a"
         }
       ],
-      "catalogSha256": "ddc97068d887c9e414b137e59e71e6adfbed4ea5f41fdbf6cfda12c3274e3ada"
+      "catalogSha256": "808b14c8406b0a4fe6de0397727332f9b26c23130c86fba5c1b8c36d3c199b03"
     },
     "motion": {
       "schemaVersion": 1,
@@ -19950,8 +20097,8 @@
         {
           "kind": "Reviewed",
           "file": "native/hc_model_motion_catalog.h",
-          "count": 27,
-          "sha256": "cf7a49d67944d30ffe9efa16e428c27ebe216234a57fd49673fcb1f1a60f9546"
+          "count": 28,
+          "sha256": "5da41bda03cad01ed10151637c498ba136de20cb0b97e3aad1b1caa83d05d07d"
         },
         {
           "kind": "Legacy",
@@ -19984,7 +20131,7 @@
           ]
         }
       ],
-      "registeredRecipes": 95,
+      "registeredRecipes": 96,
       "rows": [
         {
           "index": 0,
@@ -20420,6 +20567,22 @@
         },
         {
           "index": 27,
+          "kind": "Reviewed",
+          "slot": 27,
+          "capabilityId": "motion.reviewed.GPDWin5.27",
+          "deviceId": "hc.device.GPDWin5",
+          "origin": "frozen-HC-identity",
+          "deviceClass": "HandheldCompanion.Devices.GPDWin5",
+          "selectorId": "hc-fdf0bf66:reviewed:GPDWin5",
+          "gyroMatrixId": "hc-fdf0bf66:gpd-win5:gyro:y-neg-z-neg-x",
+          "accelMatrixId": "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y",
+          "sourceSha256": "d0524d599683d07b67fb191b77a9f1efef6ee7068849d2dd618ba6cb650e109f",
+          "controllerPreferred": false,
+          "windowsAdmitted": true,
+          "primaryKind": "Reviewed"
+        },
+        {
+          "index": 28,
           "kind": "Legacy",
           "slot": 0,
           "capabilityId": "motion.legacy.AOKZOEA1.0",
@@ -20435,7 +20598,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 28,
+          "index": 29,
           "kind": "Legacy",
           "slot": 1,
           "capabilityId": "motion.legacy.AOKZOEA1Pro.1",
@@ -20451,7 +20614,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 29,
+          "index": 30,
           "kind": "Legacy",
           "slot": 2,
           "capabilityId": "motion.legacy.AOKZOEA1X.2",
@@ -20467,7 +20630,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 30,
+          "index": 31,
           "kind": "Legacy",
           "slot": 3,
           "capabilityId": "motion.legacy.AOKZOEA2.3",
@@ -20483,7 +20646,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 31,
+          "index": 32,
           "kind": "Legacy",
           "slot": 4,
           "capabilityId": "motion.legacy.AYANEO2.4",
@@ -20499,7 +20662,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 32,
+          "index": 33,
           "kind": "Legacy",
           "slot": 5,
           "capabilityId": "motion.legacy.AYANEO2021.5",
@@ -20515,7 +20678,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 33,
+          "index": 34,
           "kind": "Legacy",
           "slot": 6,
           "capabilityId": "motion.legacy.AYANEO2S.6",
@@ -20531,7 +20694,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 34,
+          "index": 35,
           "kind": "Legacy",
           "slot": 7,
           "capabilityId": "motion.legacy.AYANEOAIR.7",
@@ -20547,7 +20710,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 35,
+          "index": 36,
           "kind": "Legacy",
           "slot": 8,
           "capabilityId": "motion.legacy.AYANEOAIR1S.8",
@@ -20563,7 +20726,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 36,
+          "index": 37,
           "kind": "Legacy",
           "slot": 9,
           "capabilityId": "motion.legacy.AYANEOAIRLite.9",
@@ -20579,7 +20742,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 37,
+          "index": 38,
           "kind": "Legacy",
           "slot": 10,
           "capabilityId": "motion.legacy.AYANEOAIRPlusAMD.10",
@@ -20595,7 +20758,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 38,
+          "index": 39,
           "kind": "Legacy",
           "slot": 11,
           "capabilityId": "motion.legacy.AYANEOAIRPlusAMDMendocino.11",
@@ -20611,7 +20774,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 39,
+          "index": 40,
           "kind": "Legacy",
           "slot": 12,
           "capabilityId": "motion.legacy.AYANEOAIRPlusIntel.12",
@@ -20627,7 +20790,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 40,
+          "index": 41,
           "kind": "Legacy",
           "slot": 13,
           "capabilityId": "motion.legacy.AYANEOAIRPro.13",
@@ -20643,7 +20806,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 41,
+          "index": 42,
           "kind": "Legacy",
           "slot": 14,
           "capabilityId": "motion.legacy.AYANEOFlip1SDS.14",
@@ -20659,7 +20822,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 42,
+          "index": 43,
           "kind": "Legacy",
           "slot": 15,
           "capabilityId": "motion.legacy.AYANEOFlip1SKB.15",
@@ -20675,7 +20838,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 43,
+          "index": 44,
           "kind": "Legacy",
           "slot": 16,
           "capabilityId": "motion.legacy.AYANEOFlipDS.16",
@@ -20691,7 +20854,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 44,
+          "index": 45,
           "kind": "Legacy",
           "slot": 17,
           "capabilityId": "motion.legacy.AYANEOFlipKB.17",
@@ -20707,7 +20870,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 45,
+          "index": 46,
           "kind": "Legacy",
           "slot": 18,
           "capabilityId": "motion.legacy.AYANEOKUN.18",
@@ -20723,7 +20886,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 46,
+          "index": 47,
           "kind": "Legacy",
           "slot": 19,
           "capabilityId": "motion.legacy.AYANEONEXT.19",
@@ -20739,7 +20902,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 47,
+          "index": 48,
           "kind": "Legacy",
           "slot": 20,
           "capabilityId": "motion.legacy.AYANEONEXTLite.20",
@@ -20755,7 +20918,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 48,
+          "index": 49,
           "kind": "Legacy",
           "slot": 21,
           "capabilityId": "motion.legacy.AYANEOSlide.21",
@@ -20771,7 +20934,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 49,
+          "index": 50,
           "kind": "Legacy",
           "slot": 22,
           "capabilityId": "motion.legacy.AynLoki.22",
@@ -20787,7 +20950,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 50,
+          "index": 51,
           "kind": "Legacy",
           "slot": 23,
           "capabilityId": "motion.legacy.GPDWin4.23",
@@ -20803,7 +20966,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 51,
+          "index": 52,
           "kind": "Legacy",
           "slot": 24,
           "capabilityId": "motion.legacy.GPDWin4.24",
@@ -20819,7 +20982,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 52,
+          "index": 53,
           "kind": "Legacy",
           "slot": 25,
           "capabilityId": "motion.legacy.GPDWin5.25",
@@ -20832,10 +20995,10 @@
           "sourceSha256": "845d4e3575cb9763cb3cc7b719a73788501e845c71446cbf072a5777bf0b4454",
           "controllerPreferred": false,
           "windowsAdmitted": true,
-          "primaryKind": "Legacy"
+          "primaryKind": "Reviewed"
         },
         {
-          "index": 53,
+          "index": 54,
           "kind": "Legacy",
           "slot": 26,
           "capabilityId": "motion.legacy.GPDWinMax2.26",
@@ -20851,7 +21014,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 54,
+          "index": 55,
           "kind": "Legacy",
           "slot": 27,
           "capabilityId": "motion.legacy.GPDWinMax2.27",
@@ -20867,7 +21030,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 55,
+          "index": 56,
           "kind": "Legacy",
           "slot": 28,
           "capabilityId": "motion.legacy.GPDWinMax2Intel.28",
@@ -20883,7 +21046,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 56,
+          "index": 57,
           "kind": "Legacy",
           "slot": 29,
           "capabilityId": "motion.legacy.GPDWinMini.29",
@@ -20899,7 +21062,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 57,
+          "index": 58,
           "kind": "Legacy",
           "slot": 30,
           "capabilityId": "motion.legacy.GPDWinMini.30",
@@ -20915,7 +21078,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 58,
+          "index": 59,
           "kind": "Legacy",
           "slot": 31,
           "capabilityId": "motion.legacy.GPDWinMini.31",
@@ -20931,7 +21094,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 59,
+          "index": 60,
           "kind": "Legacy",
           "slot": 32,
           "capabilityId": "motion.legacy.GamingZone.32",
@@ -20947,7 +21110,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 60,
+          "index": 61,
           "kind": "Legacy",
           "slot": 33,
           "capabilityId": "motion.legacy.LegionGoSZ1.33",
@@ -20963,7 +21126,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 61,
+          "index": 62,
           "kind": "Legacy",
           "slot": 34,
           "capabilityId": "motion.legacy.LegionGoSZ2.34",
@@ -20979,7 +21142,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 62,
+          "index": 63,
           "kind": "Legacy",
           "slot": 35,
           "capabilityId": "motion.legacy.LegionGoTablet.35",
@@ -20995,7 +21158,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 63,
+          "index": 64,
           "kind": "Legacy",
           "slot": 36,
           "capabilityId": "motion.legacy.LegionGoTablet2.36",
@@ -21011,7 +21174,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 64,
+          "index": 65,
           "kind": "Legacy",
           "slot": 37,
           "capabilityId": "motion.legacy.LokiMiniPro.37",
@@ -21027,7 +21190,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 65,
+          "index": 66,
           "kind": "Legacy",
           "slot": 38,
           "capabilityId": "motion.legacy.LokiZero.38",
@@ -21043,7 +21206,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 66,
+          "index": 67,
           "kind": "Legacy",
           "slot": 39,
           "capabilityId": "motion.legacy.MinisforumV3.39",
@@ -21059,7 +21222,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 67,
+          "index": 68,
           "kind": "Legacy",
           "slot": 40,
           "capabilityId": "motion.legacy.OneXPlayer2.40",
@@ -21075,7 +21238,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 68,
+          "index": 69,
           "kind": "Legacy",
           "slot": 41,
           "capabilityId": "motion.legacy.OneXPlayer2Pro.41",
@@ -21091,7 +21254,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 69,
+          "index": 70,
           "kind": "Legacy",
           "slot": 42,
           "capabilityId": "motion.legacy.OneXPlayerApex.42",
@@ -21107,7 +21270,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 70,
+          "index": 71,
           "kind": "Legacy",
           "slot": 43,
           "capabilityId": "motion.legacy.OneXPlayerG1AMD.43",
@@ -21123,7 +21286,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 71,
+          "index": 72,
           "kind": "Legacy",
           "slot": 44,
           "capabilityId": "motion.legacy.OneXPlayerG1Intel.44",
@@ -21139,7 +21302,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 72,
+          "index": 73,
           "kind": "Legacy",
           "slot": 45,
           "capabilityId": "motion.legacy.OneXPlayerMiniAMD.45",
@@ -21155,7 +21318,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 73,
+          "index": 74,
           "kind": "Legacy",
           "slot": 46,
           "capabilityId": "motion.legacy.OneXPlayerMiniIntel.46",
@@ -21171,7 +21334,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 74,
+          "index": 75,
           "kind": "Legacy",
           "slot": 47,
           "capabilityId": "motion.legacy.OneXPlayerMiniPro.47",
@@ -21187,7 +21350,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 75,
+          "index": 76,
           "kind": "Legacy",
           "slot": 48,
           "capabilityId": "motion.legacy.OneXPlayerOneXFly.48",
@@ -21203,7 +21366,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 76,
+          "index": 77,
           "kind": "Legacy",
           "slot": 49,
           "capabilityId": "motion.legacy.OneXPlayerOneXFlyF1Pro.49",
@@ -21219,7 +21382,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 77,
+          "index": 78,
           "kind": "Legacy",
           "slot": 50,
           "capabilityId": "motion.legacy.OneXPlayerX1AMD.50",
@@ -21235,7 +21398,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 78,
+          "index": 79,
           "kind": "Legacy",
           "slot": 51,
           "capabilityId": "motion.legacy.OneXPlayerX1Intel.51",
@@ -21251,7 +21414,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 79,
+          "index": 80,
           "kind": "Legacy",
           "slot": 52,
           "capabilityId": "motion.legacy.OneXPlayerX1Mini.52",
@@ -21267,7 +21430,7 @@
           "primaryKind": "Reviewed"
         },
         {
-          "index": 80,
+          "index": 81,
           "kind": "Legacy",
           "slot": 53,
           "capabilityId": "motion.legacy.OneXPlayerX1Pro.53",
@@ -21283,7 +21446,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 81,
+          "index": 82,
           "kind": "Legacy",
           "slot": 54,
           "capabilityId": "motion.legacy.ROGAlly.54",
@@ -21299,7 +21462,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 82,
+          "index": 83,
           "kind": "Legacy",
           "slot": 55,
           "capabilityId": "motion.legacy.ROGAllyX.55",
@@ -21315,7 +21478,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 83,
+          "index": 84,
           "kind": "Legacy",
           "slot": 56,
           "capabilityId": "motion.legacy.SuiPlay0X1.56",
@@ -21331,7 +21494,7 @@
           "primaryKind": "Legacy"
         },
         {
-          "index": 84,
+          "index": 85,
           "kind": "Default",
           "slot": 0,
           "capabilityId": "motion.default.GPDWin2.0",
@@ -21347,7 +21510,7 @@
           "primaryKind": "Default"
         },
         {
-          "index": 85,
+          "index": 86,
           "kind": "Default",
           "slot": 1,
           "capabilityId": "motion.default.GPDWin3.1",
@@ -21363,7 +21526,7 @@
           "primaryKind": "Default"
         },
         {
-          "index": 86,
+          "index": 87,
           "kind": "Default",
           "slot": 2,
           "capabilityId": "motion.default.SteamMachine.2",
@@ -21379,7 +21542,7 @@
           "primaryKind": "Default"
         },
         {
-          "index": 87,
+          "index": 88,
           "kind": "Generic",
           "slot": 0,
           "capabilityId": "motion.generic.DefaultDevice.0",
@@ -21395,7 +21558,7 @@
           "primaryKind": "Generic"
         },
         {
-          "index": 88,
+          "index": 89,
           "kind": "Generic",
           "slot": 1,
           "capabilityId": "motion.generic.ASUS.1",
@@ -21411,7 +21574,7 @@
           "primaryKind": "Generic"
         },
         {
-          "index": 89,
+          "index": 90,
           "kind": "Private",
           "slot": 0,
           "capabilityId": "motion.private.ClawA1M.0",
@@ -21427,7 +21590,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 90,
+          "index": 91,
           "kind": "Private",
           "slot": 1,
           "capabilityId": "motion.private.ClawA2VM.1",
@@ -21443,7 +21606,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 91,
+          "index": 92,
           "kind": "Private",
           "slot": 2,
           "capabilityId": "motion.private.ClawBZ2EM.2",
@@ -21459,7 +21622,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 92,
+          "index": 93,
           "kind": "Private",
           "slot": 3,
           "capabilityId": "motion.private.ClawCG3EM.3",
@@ -21475,7 +21638,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 93,
+          "index": 94,
           "kind": "Private",
           "slot": 4,
           "capabilityId": "motion.private.XboxROGAlly.4",
@@ -21491,7 +21654,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 94,
+          "index": 95,
           "kind": "Private",
           "slot": 5,
           "capabilityId": "motion.private.XboxROGAllyX.5",
@@ -21511,7 +21674,7 @@
         "controller-source-qualified recipe/submit/calibration binding"
       ],
       "availability": "registration-is-not-provider-admission-or-physical-acceptance",
-      "catalogSha256": "04681b0f2e0d54ffde0a99a759dc5baaabe37c429b370bb92f9682e554aac16b"
+      "catalogSha256": "f47120a9b81ac2c178cf0718b052922e60fb3f01666360b1f2496d7a9a2f54b5"
     },
     "controller": {
       "schemaVersion": 1,

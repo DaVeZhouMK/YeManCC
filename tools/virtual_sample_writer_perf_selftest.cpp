@@ -70,6 +70,10 @@ struct NAME { \
     static void drain() { NS::inputCaptureDrainQueuedSamples(); } \
     static std::deque<json>& queue() { return NS::g_inputCaptureSampleQueue; } \
     static uint64_t& drops() { return NS::g_inputCaptureSampleQueueDrops; } \
+    static void seedDrops(uint64_t value) { \
+        std::lock_guard<std::mutex> lock(NS::g_inputCaptureSampleQueueMx); \
+        NS::g_inputCaptureSampleQueueDrops = value; NS::fixtureSetPendingForTest(value != 0); \
+    } \
     static std::mutex& mutex() { return NS::g_inputCaptureSampleQueueMx; } \
     static std::ofstream& writer() { return NS::g_inputCaptureLog; } \
     static uint32_t writes() { return NS::g_inputCaptureSampleWrites; } \
@@ -81,7 +85,7 @@ struct NAME { \
         if (fspath::exists(path)) fspath::remove(path); \
         if (fspath::exists(path.wstring() + L".prev")) fspath::remove(path.wstring() + L".prev"); \
         std::lock_guard<std::mutex> lock(NS::g_inputCaptureSampleQueueMx); \
-        std::deque<json> empty; empty.swap(NS::g_inputCaptureSampleQueue); NS::g_inputCaptureSampleQueueDrops = 0; \
+        std::deque<json> empty; empty.swap(NS::g_inputCaptureSampleQueue); NS::g_inputCaptureSampleQueueDrops = 0; NS::fixtureSetPendingForTest(false); \
     } \
 };
 FIXTURE_ADAPTER(Old, oldqueue)
@@ -332,6 +336,21 @@ static void flushCases(const json& v,const fspath::path& root) {
     CHECK(fileBytes(root/"flush-old.jsonl")==fileBytes(root/"flush-new.jsonl"));
     cases.push_back({{"case","unchanged-sample-flush-16-and-nonsample-flush"},{"pass",true}});
 }
+
+template<class Path> static void emptyAndDropOnly(const fspath::path& file) {
+    Path::reset(file);
+    for(unsigned i=0;i<256;++i)Path::drain();
+    CHECK(Path::queue().empty()&&Path::drops()==0&&Path::writes()==0);
+    CHECK(!fspath::exists(file)&&!Path::writer().is_open());
+    Path::seedDrops(7);
+    Path::drain();Path::writer().flush();const auto rows=fileRows(file);
+    require(rows.size()==1,"drop-only record emitted",__LINE__);
+    CHECK(rows[0]==json({{"t",777},{"kind","sample-queue-drop"},{"dropped",7},{"reason","diagnostic-writer-backlog"},{"writerPid",424242}}));
+    CHECK(Path::queue().empty()&&Path::drops()==0);
+    const auto bytes=fileBytes(file);Path::drain();Path::writer().flush();CHECK(fileBytes(file)==bytes);
+    Path::writer().close();
+}
+
 struct Measurement {double ns;AllocationCount count;};
 static uint64_t benchmarkSink=0;
 static Measurement measureWriter(const json& payload,bool candidate,unsigned batches,bool alloc) {
@@ -389,6 +408,8 @@ int wmain(int argc,wchar_t** argv) {
         serializationBoundaries();
         const auto selected=json::parse(fileBytes(data/"selected.json"));
         const json real=selected[0].at("payload");
+        emptyAndDropOnly<Old>(root/"empty-drop-old.jsonl");emptyAndDropOnly<New>(root/"empty-drop-new.jsonl");
+        cases.push_back({{"case","empty-drain-no-file-and-drop-only-once"},{"pass",true}});
         json large=real;large["fixtureOnlyLarge"] = json::array({real,real,real,real});
         large["escaped"] = std::string(1024,'X')+"微星😀\t\"\\";
         for(const auto& entry:std::vector<std::pair<std::string,json>>{{"real",real},{"large",large}}) {

@@ -79,6 +79,43 @@ await fault('no-metadata-hang-reopens-locally-with-bounded-budget',async()=>{con
  await f.advance(15000+2000+15000);check(f.created()===3&&f.failed.length===0&&f.timers.size===1,'persistent metadata hang must not declare a shared asset corrupt');const timer=[...f.timers.keys()][0];for(let i=0;i<100;i++)f.show(i+2);check(f.created()===3&&f.failed.length===0&&[...f.timers.keys()][0]===timer&&[...f.timers.values()][0].delay===60000,'unrelated rerenders cannot refill quick retries or rearm the one minute retry');
  }finally{f.pool.stop();}});
 await fault('post-ready-silent-freeze-releases-decoder-and-recovers',async()=>{const f=faultFixture();try{f.show();const old=f.ready();await flush();old.currentTime=70;old.fire('timeupdate');await f.advance(15000);check(!old.src,'no-progress deadline must release a silently frozen decoder');await f.advance(500);const next=f.ready();check(Math.abs(next.currentTime-70)<.1,'local reopen preserves confirmed playback position');await flush();check(!next.paused&&!!next.src&&f.failed.length===0,'transient freeze recovers before invalidating cache');}finally{f.pool.stop();}});
+// Win5 2026-11-17: RE2 shortcut 3219175393, cached 720p/51,378,432 bytes.
+// The same context had ready records at 9,738 / 18,115 / 26,843ms, but
+// no interruption reason. Inject browser stall signals, not a guessed cause.
+await fault('win5-post-ready-waiting-confirms-stall-without-fifteen-second-wait',async()=>{const f=faultFixture();try{
+ f.show();const old=f.ready();await flush();old.currentTime=70;old.fire('timeupdate');await f.advance(1000);old.fire('waiting');
+ check(f.timers.size===1&&[...f.timers.values()][0].delay===2500,'waiting replaces the ordinary watch with one short confirmation');
+ await f.advance(2499);check(!!old.src,'short buffering gets time to recover without tearing down video');await f.advance(1);check(!old.src&&old.paused&&f.failed.length===0,'confirmed no-progress stall releases only the local decoder');
+ await f.advance(500);const next=f.ready();check(f.created()===2&&Math.abs(next.currentTime-70)<.1&&!next.paused,'local recovery retains position after a three-second event-to-reopen budget');
+ }finally{f.pool.stop();}});
+await fault('win5-stall-storm-keeps-original-confirmation-deadline',async()=>{const f=faultFixture();try{
+ f.show();const n=f.ready();await flush();n.fire('stalled');const timer=[...f.timers.keys()][0];await f.advance(2000);for(let i=0;i<200;i++){n.fire('waiting');n.fire('stalled');}
+ check(f.timers.size===1&&[...f.timers.keys()][0]===timer,'event storms neither multiply nor postpone the confirmation');await f.advance(500);check(!n.src&&f.failed.length===0,'original confirmation still expires under repeated stall signals');
+ }finally{f.pool.stop();}});
+await fault('win5-short-recovery-retains-the-existing-transient-retry-budget',async()=>{const f=faultFixture();try{
+ f.show();for(let attempt=0;attempt<3;attempt++){const n=f.ready();await flush();n.fire('waiting');await f.advance(2500);check(!n.src&&f.failed.length===0&&f.timers.size===1,'warm stall releases one decoder without invalidating cached bytes');if(attempt<2)await f.advance([500,2000][attempt]);}
+ const timer=[...f.timers.keys()][0];check([...f.timers.values()][0].delay===60000,'repeated short recoveries retain the existing slow cooldown');for(let i=0;i<50;i++)f.show(100+i);check([...f.timers.keys()][0]===timer,'same-asset renders cannot bypass or postpone exhausted retry budget');await f.advance(60000);check(f.created()===4&&f.failed.length===0,'one selected-foreground reopen occurs after the slow cooldown');
+ }finally{f.pool.stop();}});
+await fault('win5-buffering-with-real-progress-does-not-reopen',async()=>{for(const delivered of [true,false]){const f=faultFixture();try{
+ f.show();const n=f.ready();await flush();n.currentTime=40;n.fire('timeupdate');n.fire('stalled');const timer=[...f.timers.keys()][0];await f.advance(1000);n.currentTime=41;if(delivered)n.fire('timeupdate');
+ check([...f.timers.keys()][0]===timer,'progress records state without allocating another timer');await f.advance(1500);check(f.created()===1&&!!n.src&&!n.paused&&f.failed.length===0,'actual progress cancels suspicion even without a timeupdate event');check(f.timers.size===1,'healthy playback returns to one slow watch');
+ }finally{f.pool.stop();}}});
+await fault('win5-playing-signal-alone-cannot-conceal-a-real-freeze',async()=>{const f=faultFixture();try{
+ f.show();const n=f.ready();await flush();n.fire('waiting');await f.advance(2000);n.fire('playing');await f.advance(500);check(!n.src&&f.failed.length===0,'only media position progress clears the short stall confirmation');
+ }finally{f.pool.stop();}});
+await fault('win5-late-stall-signal-never-postpones-an-earlier-watch',async()=>{const f=faultFixture();try{
+ f.show();const n=f.ready();await flush();await f.advance(14000);n.fire('waiting');await f.advance(999);check(!!n.src,'earlier progress deadline still grants its remaining interval');await f.advance(1);check(!n.src&&f.timers.size===1&&[...f.timers.values()][0].delay===500,'late stall signal cannot extend the pre-existing recovery deadline');
+ }finally{f.pool.stop();}});
+await fault('win5-initial-metadata-and-random-seek-keep-cold-load-budget',async()=>{const f=faultFixture();try{
+ f.show();const n=f.media[0],timer=[...f.timers.keys()][0];for(const event of ['waiting','stalled','pause'])n.fire(event);n.readyState=2;n.fire('loadedmetadata');n.seeking=true;for(const event of ['waiting','stalled','pause'])n.fire(event);
+ check(f.timers.size===1&&[...f.timers.keys()][0]===timer&&[...f.timers.values()][0].delay===15000,'loading metadata and initial random seek never use the warm-playback deadline');
+ }finally{f.pool.stop();}});
+await fault('win5-short-stall-cancelled-by-background-and-new-selection',async()=>{for(const cause of ['hidden','off','blur','selection'] as const){const f=faultFixture();try{
+ f.show();const n=f.ready();await flush();n.fire('waiting');const late=[...f.timers.values()][0].run;
+ if(cause==='hidden'){f.doc.visibilityState='hidden';f.show();}else if(cause==='off'){f.setAllowed(false);f.pool.stop();}else if(cause==='blur'){f.setFocus(false);f.show();}else {f.show(9,'replacement');await f.advance(100);}
+ const created=f.created(),timer=[...f.timers.keys()][0];late();await f.advance(3000);check(f.created()===created&&f.failed.length===0,'old short deadline cannot revive retired playback: '+cause);
+ if(cause==='selection')check(f.timers.size===1&&[...f.timers.keys()][0]===timer,'retired stall cannot steal replacement progress watch');else check(f.timers.size===0&&f.media.every(n=>!n.src&&n.paused),'background/OFF owns no decoder or confirmation timer');
+ }finally{f.pool.stop();}}});
 await fault('never-settled-play-is-bounded-and-old-events-inert',async()=>{const f=faultFixture('pending');try{f.show();const old=f.ready();for(let i=0;i<200;i++)old.fire('canplay');check(f.plays()===1,'pending play never multiplies under ready storm');await f.advance(15000+500);check(f.created()===2&&!old.src,'never-settled play cannot pin a source forever');const count=f.created();for(const ev of ['error','loadedmetadata','canplay','timeupdate'])old.fire(ev);check(f.created()===count&&f.failed.length===0,'old events cannot corrupt replacement');}finally{f.pool.stop();}});
 await fault('error-and-play-refusal-storms-share-one-retry',async()=>{for(const mode of ['normal','reject'] as const){const f=faultFixture(mode);try{f.show();const n=f.ready();if(mode==='normal')for(let i=0;i<200;i++)n.fire('error');await flush();check(!n.src&&f.timers.size===1,'explicit failure leaves one retry and zero live old source');await f.advance(500);check(f.created()===2,'repeated errors do not enqueue multiple reloads');}finally{f.pool.stop();}}});
 await fault('healthy-progress-keeps-single-low-rate-watch-and-reclaims-budget',async()=>{const f=faultFixture();try{f.show();const n=f.ready();await flush();for(let i=0;i<8;i++){n.currentTime=20+i;n.fire('timeupdate');await f.advance(5000);check(f.created()===1&&f.failed.length===0,'real playback progress must not cause reload');check(f.timers.size<=1,'progress updates do not create per-frame timer fanout');}check(f.plays()===1,'healthy updates never repeat play');}finally{f.pool.stop();}check(f.timers.size===0,'stop removes the progress deadline');});
@@ -92,15 +129,15 @@ await fault('real-sustained-playback-restores-only-the-local-retry-budget',async
  }finally{f.pool.stop();}});
 
 // All transient cases share this original consumer, inert media and virtual clock.
-const transientCauses=['no-metadata','silent-freeze','seek-hang','pending-play','reject-play','abort-play','throw-play','error-without-mediaerror','media-aborted-1','media-network-2'] as const;
+const transientCauses=['no-metadata','silent-freeze','seek-hang','pending-play','reject-play','abort-play','throw-play','error-without-mediaerror','media-aborted-1','media-network-2','media-source-rejected-4'] as const;
 for(const cause of transientCauses)await fault('tmnt-transient-'+cause+'-never-invalidates-shared-asset',async()=>{
  const mode:PlayMode=cause==='pending-play'?'pending':cause==='reject-play'?'reject':cause==='abort-play'?'abort':cause==='throw-play'?'throw':'normal';
  const f=faultFixture(mode,tmntIncident.frame,tmntIncident.metadata);try{
   f.show();for(let attempt=0;attempt<3;attempt++){
-   const n=f.media.at(-1);if(cause!=='no-metadata')f.ready();
+   const n=f.media.at(-1);if(cause!=='no-metadata'&&cause!=='media-source-rejected-4')f.ready();
    if(cause==='seek-hang')n.seeking=true;
    if(['no-metadata','silent-freeze','seek-hang','pending-play'].includes(cause))await f.advance(15000);
-   else if(cause.startsWith('media-')||cause==='error-without-mediaerror')f.error(cause==='media-aborted-1'?1:cause==='media-network-2'?2:null);
+   else if(cause.startsWith('media-')||cause==='error-without-mediaerror')f.error(cause==='media-aborted-1'?1:cause==='media-network-2'?2:cause==='media-source-rejected-4'?4:null);
    await flush();check(f.failed.length===0,tmntIncident.key+' '+cause+' must never report shared corruption after attempt '+attempt);
    check(f.timers.size===1&&f.media.every(n=>!n.src&&n.paused),'each transient interruption releases its decoder and keeps exactly one retry');
    if(attempt<2){check([...f.timers.values()][0].delay===[500,2000][attempt],'two original quick retry delays remain unchanged');await f.advance([500,2000][attempt]);}
@@ -114,10 +151,18 @@ for(const cause of transientCauses)await fault('tmnt-transient-'+cause+'-never-i
   check(f.failed.length===0,'successful later playback leaves shared invalidation callback untouched');
  }finally{f.pool.stop();}check(f.timers.size===0&&f.media.every(n=>!n.src&&n.paused),'transient fixture stop owns no timer or decoder');
 });
-for(const code of [3,4])await fault('tmnt-current-mediaerror-'+code+'-reports-once-with-latest-tuple',async()=>{
+await fault('tmnt-source-rejected-backoff-cannot-resurrect-in-background',async()=>{
  const f=faultFixture('normal',tmntIncident.frame,tmntIncident.metadata);try{
-  f.show();for(let attempt=0;attempt<3;attempt++){f.ready();if(attempt===2)f.show(99);const n=f.error(code);for(let i=0;i<100;i++)n.fire('error');await flush();if(attempt<2){check(f.failed.length===0&&f.timers.size===1,'hard media errors also get both local reopen attempts');await f.advance([500,2000][attempt]);}}
-  check(f.failed.length===1&&f.timers.size===0,'current decode/unsupported error reports exactly once after both local retries');
+  f.show();f.error(4);await f.advance(500);f.error(4);await f.advance(2000);f.error(4);
+  check(f.failed.length===0&&f.timers.size===1&&[...f.timers.values()][0].delay===60000,'source rejection owns one local backoff, not shared invalidation');
+  const late=[...f.timers.values()][0].run;f.setAllowed(false);f.pool.stop();late();await f.advance(60000);
+  check(f.timers.size===0&&f.created()===3&&f.media.every(n=>!n.src&&n.paused),'hidden route cancels backoff and even a queued callback cannot reopen the video');
+ }finally{f.pool.stop();}
+});
+await fault('tmnt-current-mediaerror-3-reports-once-with-latest-tuple',async()=>{
+ const f=faultFixture('normal',tmntIncident.frame,tmntIncident.metadata);try{
+  f.show();for(let attempt=0;attempt<3;attempt++){f.ready();if(attempt===2)f.show(99);const n=f.error(3);for(let i=0;i<100;i++)n.fire('error');await flush();if(attempt<2){check(f.failed.length===0&&f.timers.size===1,'hard media errors also get both local reopen attempts');await f.advance([500,2000][attempt]);}}
+  check(f.failed.length===1&&f.timers.size===0,'current decode error reports exactly once after both local retries');
   const value=f.failed[0];check(value.appId==='1361510'&&value.contextSeq===99&&value.entry.assetId===tmntIncident.assetId&&value.entry.bindingRevision===6,'hard failure preserves the latest context and exact asset/binding CAS tuple');
   for(let i=0;i<100;i++){f.show(100+i);for(const n of f.media)n.fire('error');}check(f.failed.length===1&&f.created()===3,'same terminal hard-error tuple never reports twice');
   await f.advance(200);f.show(300,'another-asset');await f.advance(200);f.show(301);check(f.created()===5&&!!f.media.at(-1).src,'leaving and later reselecting the same game can open it again');

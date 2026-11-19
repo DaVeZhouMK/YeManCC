@@ -118,12 +118,14 @@ catalog policy must keep SD enabled, keyboard disabled, six exact HC source hash
 matching the lock index, and its original provider hash. Generator files are
 identity inputs only; this entry does not execute the generator or its other domains.
 
-Tools come solely from the unchanged
+Tools come solely from
 `motion-consumer-signals/matrix-evidence.mjs::matrixToolchainInputs(repo)`.
 It validates the six-layer manifest chain and returns the entire approved
 **582-file** set. Every declared tool must exist and match its approved SHA-256;
-none is dropped when missing. There is no new manifest, new tool authorization or
-weakened parent pin. Node/PowerShell paths and bootstrap hashes must match; cmd and
+none is dropped when missing. The last two layers use the same byte-pinned
+historical copies as Motion; there is no new tool authorization or weakened pin.
+PowerShell is read from the validated base manifest. Node/PowerShell paths and
+bootstrap hashes must match; cmd and
 vcvars64 must also belong to this same set. Node injection and compiler environment
 options are cleared in the child environment.
 

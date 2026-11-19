@@ -14,6 +14,20 @@ inline constexpr const char* reasonNames[] = {
     "valid", "no-scope", "start-disabled", "end-disabled", "wrong-thread",
     "backwards-elapsed", "start-cycles-unavailable", "end-cycles-unavailable", "backwards-cycles"
 };
+inline constexpr char windowScopeField[] = "scopeSchema";
+inline constexpr unsigned windowScopeSchema = 1;
+template<class Json>
+Json windowScopeGuide() {
+    return {{"event", "input-capture-tick-cost"}, {"field", "callbackProvenance"},
+        {"schemaField", windowScopeField}, {"schema", windowScopeSchema},
+        {"descriptions", {
+            {"elapsedSpan", "callback entry to frameStarted; waitable fallback includes BUS lock wait"},
+            {"cycleUnit", "raw current-thread cycles; frequency dependent, not CPU microseconds"},
+            {"gateProvenance", "start/end snapshots; intermediate off/on unobserved; disabled-end not recorded"},
+            {"coverage", "preamble only; preHost/sampleLog validity in legacyCycleProvenance; calibration unchanged"},
+            {"population", "preamble consumers with end gate enabled; not callback entries or tickCount"}}},
+        {"readRule", "Use the same bundle's descriptions only for missing fields in callbackProvenance with the exact integer scopeSchema and matching event. Preserve inline values; an absent object or unknown schema supplies no descriptions. Counts and cycle values remain inline."}};
+}
 struct CycleSample { bool known = false; Value value = 0; };
 struct Context {
     bool enabled = false;

@@ -105,6 +105,11 @@ static std::vector<MatrixCase> makeCases(const json& base){
     add(cases,"scalar-number-type",json(1),json(1.0),false);
     return cases;
 }
+template<class Json> static Json reverseObjects(const Json& value){
+ if(value.is_object()){Json out=Json::object();for(auto it=value.crbegin();it!=value.crend();++it)out[it.key()]=reverseObjects(it.value());return out;}
+ if(value.is_array()){Json out=Json::array();for(const auto& item:value)out.push_back(reverseObjects(item));return out;}
+ return value;
+}
 template<class Json>
 static json checkCases(const std::vector<MatrixCase>& cases,const char* kind){
     json receipts=json::array();unsigned checks=0;
@@ -117,8 +122,13 @@ static json checkCases(const std::vector<MatrixCase>& cases,const char* kind){
         const bool actual=ymcc::virtualOutputPublicationEquivalent(a,b),reverse=ymcc::virtualOutputPublicationEquivalent(b,a);
         // ordered_json parse canonicalizes positive signed values to unsigned; its expected type-only cases are separately instantiated below.
         const bool storageOnly=c.id.rfind("control-integer-storage-type",0)==0;
-        const bool expected=std::is_same_v<Json,json>?c.expected:(storageOnly?true:c.expected);
-        checks+=4;
+        const auto storagePath=storageOnly?c.id.substr(std::string("control-integer-storage-type").size()):std::string{};
+        const bool collapsedStorage=storageOnly && left.at(typename Json::json_pointer(storagePath)).type()==right.at(typename Json::json_pointer(storagePath)).type() && left.at(typename Json::json_pointer(storagePath))==right.at(typename Json::json_pointer(storagePath));
+        const bool expected=std::is_same_v<Json,json>?c.expected:(storageOnly?collapsedStorage:c.expected);
+        const Json permuted=reverseObjects(b);const auto permutedBefore=permuted.dump();
+        const bool permutedActual=ymcc::virtualOutputPublicationEquivalent(a,permuted),permutedReverse=ymcc::virtualOutputPublicationEquivalent(permuted,a);
+        if(permutedActual!=expected||permutedReverse!=expected||permuted.dump()!=permutedBefore)throw std::runtime_error(std::string(kind)+" permuted object order failed "+c.id);
+        checks+=7;
         const bool passed=actual==expected&&reverse==expected&&a.dump()==beforeA&&b.dump()==beforeB;
         receipts.push_back({{"id",c.id},{"expected",expected},{"actual",actual},{"reverse",reverse},{"passed",passed}});
         if(!passed)throw std::runtime_error(std::string(kind)+" matrix failed "+c.id+" expected="+std::to_string(expected)+" actual="+std::to_string(actual));

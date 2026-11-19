@@ -46,6 +46,27 @@ foreach($relative in $modules){
         }finally{[IO.File]::WriteAllBytes($file,$original)}
     }
 }
+$resident=Join-Path $target 'steam-appearance\resident.ps1';$original=[IO.File]::ReadAllBytes($resident)
+try {
+    [IO.File]::WriteAllText($resident,([Text.Encoding]::UTF8.GetString($original).Replace('$script:AppearanceListenerQueryProtocol=1','$script:AppearanceListenerQueryProtocol=0')),(New-Object Text.UTF8Encoding($true)))
+    $result=Invoke-OwnedLibrary
+    $json=$result.output|ConvertFrom-Json
+    if($result.exitCode -ne 1 -or $result.error.Length -ne 0 -or $json.ok -ne $false -or !$json.message.Contains('steam-appearance\resident.ps1')){throw 'Mixed old resident module was not refused at component load'}
+    $cases.Add([pscustomobject]@{module='steam-appearance\resident.ps1';mutation='old-listener-protocol';exitCode=$result.exitCode;json=$true;stderrEmpty=$true})
+}finally{[IO.File]::WriteAllBytes($resident,$original)}
+foreach($mutation in @(
+    [pscustomobject]@{module='steam-appearance\resident.ps1';old='$script:AppearanceProcessQueryProtocol=3';replacement='$script:AppearanceProcessQueryProtocol=2'},
+    [pscustomobject]@{module='steam-appearance\idle.ps1';old='$script:AppearanceSharedSteamProtocol=1';replacement='$script:AppearanceSharedSteamProtocol=0'})){
+    $file=Join-Path $target $mutation.module;$original=[IO.File]::ReadAllBytes($file)
+    try {
+        $text=[Text.Encoding]::UTF8.GetString($original)
+        if(!$text.Contains($mutation.old)){throw 'Expected shared component marker absent'}
+        [IO.File]::WriteAllText($file,$text.Replace($mutation.old,$mutation.replacement),(New-Object Text.UTF8Encoding($true)))
+        $result=Invoke-OwnedLibrary;$json=$result.output|ConvertFrom-Json
+        if($result.exitCode -ne 1 -or $result.error.Length -ne 0 -or $json.ok -ne $false -or !$json.message.Contains($mutation.module)){throw 'Mixed old shared Steam component was accepted'}
+        $cases.Add([pscustomobject]@{module=$mutation.module;mutation='old-shared-protocol';exitCode=$result.exitCode;json=$true;stderrEmpty=$true})
+    }finally{[IO.File]::WriteAllBytes($file,$original)}
+}
 $healthy=Invoke-OwnedLibrary
 if($healthy.exitCode -ne 0 -or $healthy.output.Trim().Length -or $healthy.error.Length){throw 'Healthy exact library import regressed'}
 $cases.Add([pscustomobject]@{module='all';mutation='none';exitCode=$healthy.exitCode;libraryLoaded=$true})

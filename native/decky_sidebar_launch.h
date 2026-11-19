@@ -42,6 +42,22 @@ inline bool unelevated(HANDLE token){
     if(!IsValidSid(sid))return false;const auto count=*GetSidSubAuthorityCount(sid);
     return count>0&&*GetSidSubAuthority(sid,count-1)<=SECURITY_MANDATORY_MEDIUM_RID;
 }
+// Recovery may observe a candidate after an elevated-shell refusal. This never
+// duplicates a token, starts a process, or changes UAC. create() below repeats
+// ALL original user/session/logon/image/primary-token checks before launching.
+inline bool ordinarySourceObserved(){
+    Handle caller;DWORD size=0;TOKEN_ELEVATION elevation{};
+    if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&caller.value)||
+       !GetTokenInformation(caller.value,TokenElevation,&elevation,sizeof(elevation),&size))return false;
+    if(!elevation.TokenIsElevated)return unelevated(caller.value);
+    const HWND window=GetShellWindow();DWORD pid=0;
+    if(!window||!GetWindowThreadProcessId(window,&pid)||!pid)return false;
+    Handle process,source;process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+    if(!process.value||WaitForSingleObject(process.value,0)!=WAIT_TIMEOUT||
+       !OpenProcessToken(process.value,TOKEN_QUERY,&source.value)||!unelevated(source.value))return false;
+    DWORD observed=0;
+    return GetShellWindow()==window&&GetWindowThreadProcessId(window,&observed)&&observed==pid;
+}
 inline Result create(const std::wstring& executable,std::wstring& command,wchar_t* environment,
                      const std::wstring& directory,STARTUPINFOW& startup,PROCESS_INFORMATION& child){
     Result result;auto fail=[&](const char* stage,DWORD error){result.stage=stage;result.error=error?error:ERROR_ACCESS_DENIED;return result;};

@@ -70,7 +70,7 @@ try {
   const before=await snap();assert.equal(before.disabled,false,'inner switch must remain clickable during mirror admission');
   await page.locator('.fan-toggle').click();
   await page.evaluate(()=>window.__chain.releaseGate());
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   const after=await snap();assert.equal(after.trace.filter(x=>x.op==='enable').length,1,'page click must reuse one owner and one write');assert.equal(after.trace.filter(x=>x.op==='launch').length,1,'page click must not launch a second Host');
  });
  assert.deepEqual(errors,[]);const summary={ok:cases.every(x=>x.ok),checks:cases.length,cases,pageErrors:errors,scope:'real FanView + real mirror actions + real FanHostLifecycle; inert adapter/native/launcher; no device/CPU benchmark'};fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(summary,null,2));console.log(JSON.stringify({ok:summary.ok,checks:summary.checks,results:path.join(out,'results.json')}));if(!summary.ok)process.exitCode=1;

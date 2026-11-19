@@ -12,7 +12,7 @@ const load=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 try {
  const generated=call(process.execPath,[path.join(repo,'tools/hc_capability_catalog_generate.mjs'),'--check','--out',path.join(out,'catalog-check')],out,'catalog-check.log');if(generated.status!==0)throw Error('CONTROLLER_TOTAL_CATALOG_NOT_CURRENT');
  for(const [id,script]of [['frame','input_frame_submission_selftest.mjs'],['pipe','input_frame_pipe_issue_selftest.mjs'],['power','input_power_gate_r122_selftest.mjs'],['msi-read','msi_canonical_submission_r123_selftest.mjs']]) {
-  const target=path.join(out,id),execution=call(process.execPath,[path.join(repo,'tools',script),'--out',target],out,id+'.log');
+  const target=path.join(out,id),execution=call(process.execPath,[path.join(repo,'tools',script),'--out',target,...(id==='pipe'?['--case-group','original']:[])],out,id+'.log');
   if(execution.status!==0)throw Error('CONTROLLER_ACTUAL_CONSUMER_FAILED:'+id);
   const report=load(path.join(target,'LATEST.json'));
   const configs=report.results??report.profiles,expected=id==='pipe'?['Release','Checked']:['Release-diagnostic-off','Release-diagnostic-on','Checked-diagnostic-off','Checked-diagnostic-on'];

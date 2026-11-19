@@ -1,5 +1,7 @@
 import { on, invoke } from './ipc';
+import { launchSteamAddon } from './yeman';
 import { powerLifecycle, shell, windowApi } from './api';
+import { onSharedPowerLifecycle } from './powerLifecycleState';
 import { readSettingsSection } from './settingsRepository';
 import { createControllerShortcutActions, type ShortcutActionOutcome, type ShortcutExecutionContext } from './controllerShortcutActions';
 import { tryAcquireQuickAction } from './quickActionLock';
@@ -92,12 +94,18 @@ export function startControllerShortcutRuntime() {
         const apps=Array.isArray(saved.apps)?saved.apps:[];
         const app=apps.find(item=>item&&typeof item==='object'&&item.path===params.appPath);
         if(!app)throw Error(apps.length?'SHORTCUT_APP_REMOVED':'SHORTCUT_NO_APPS');
-        await ready(context);if(!await shell.execute(params.appPath,[]))throw Error('SHORTCUT_APP_START_FAILED');context.checkpoint();
+        await ready(context);if(!await launchSteamAddon(params.appPath,{userInitiated:true,isCurrent:()=>{context.checkpoint();return true}}))throw Error('SHORTCUT_APP_START_FAILED');context.checkpoint();
         const name=typeof app.name==='string'&&app.name?app.name.slice(0,64):'快捷应用';
         return {state:'applied',title:'快捷应用',message:'已请求启动 '+name+'。',value:{text:name}};
       }),
     },
   });
-  const stops=[on('input.shortcutAction',actions.enqueue),on('power.pending',()=>actions.invalidate()),on('power.suspending',()=>actions.invalidate()),on('power.resumed',()=>actions.invalidate())];
+  let observedPower='';
+  const stops=[on('input.shortcutAction',actions.enqueue),on('power.pending',()=>actions.invalidate()),onSharedPowerLifecycle(snapshot=>{
+    if(ended)return;
+    const next=JSON.stringify([snapshot.generation,snapshot.phase,snapshot.known!==false,snapshot.inputReady,snapshot.hardwareWritesAllowed]);
+    if(next===observedPower)return;
+    observedPower=next;actions.invalidate();
+  })];
   return {stop(){ended=true;actions.stop();fanActions.stop();for(const stop of stops)stop()},idle:actions.idle};
 }

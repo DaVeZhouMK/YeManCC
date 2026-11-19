@@ -1,4 +1,6 @@
 #pragma once
+#include "steam_native_record_layout.h"
+#include "steam_diagnostic_read_views.h"
 #include "json.hpp"
 #include <array>
 #include <cstddef>
@@ -14,81 +16,36 @@ namespace ymcc::steamrecord {
 using Json = nlohmann::json;
 using Read = std::function<bool(std::uint64_t, void*, std::size_t)>;
 using Stable = std::function<bool()>;
-enum class ProfileId { Legacy1791918634, Public1792618285 };
-inline constexpr char kClientSha256[] = "e9045710ec7ee47d7b7488d1c5dda2d933dec7e251e965967a5c48f4df68eb4e";
-inline constexpr char kProfileVersion[] = "steamclient64-e9045710-cuser-record-v1";
-inline const char* profileSha256(ProfileId id) {
-    switch (id) {
-    case ProfileId::Legacy1791918634: return kClientSha256;
-    case ProfileId::Public1792618285: return "253e0a11a4415b38c78a42f7bdd6ecc426455f06c1ba6453a48090df3142dbbc";
-    }
-    return nullptr;
-}
-inline const char* profileVersion(ProfileId id) {
-    switch (id) {
-    case ProfileId::Legacy1791918634: return kProfileVersion;
-    case ProfileId::Public1792618285: return "steamclient64-253e0a11-cuser-record-v1";
-    }
-    return nullptr;
-}
-inline std::optional<ProfileId> profileIdForSha256(std::string_view sha256) {
-    // Exact full digest; no prefix, build-number or unknown-enum fallback.
-    for (const auto id : {ProfileId::Legacy1791918634, ProfileId::Public1792618285})
-        if (sha256 == profileSha256(id)) return id;
-    return std::nullopt;
-}
+using ReadViews = ymcc::steamdiagnostic::ReadViews;
 struct Query {
     std::uint64_t moduleBase = 0, moduleSize = 0, account64 = 0, gameId64 = 0;
     std::uint32_t expectedPid = 0;
     bool profileVerified = false;
     ProfileId profile = ProfileId::Legacy1791918634;
 };
+// A value from this exact completed reader, not a process/account/power lease.
+// No JSON constructor, implicit truth value, or action-admission predicate.
+class TypedNativeRoleObservation final {
+public:
+    struct NativeRoles {
+        std::uint32_t primaryLivenessPid = 0, foregroundComparisonPid = 0;
+    };
+    const Query& query() const noexcept { return query_; }
+    std::size_t matchingTargetRecordCount() const noexcept { return count_; }
+    const std::optional<NativeRoles>& nativeRoles() const noexcept { return roles_; }
+private:
+    friend Json observeWithReadViews(const Query&, const ReadViews&, const Stable&,
+        std::optional<TypedNativeRoleObservation>*);
+    TypedNativeRoleObservation(Query query, std::size_t count,
+        std::optional<NativeRoles> roles) noexcept
+        : query_(query), count_(count), roles_(roles) {}
+    Query query_;
+    std::size_t count_;
+    std::optional<NativeRoles> roles_;
+};
 namespace detail {
 inline constexpr std::uint64_t kMinAddress = 0x10000, kMaxAddress = 0x7fffffffffff;
 inline constexpr std::size_t kMaxReadCalls = 2047, kMaxReadBytes = 65536, kMaxSingleRead = 64;
-struct Rejected { const char* reason; };
-// Independently qualified against each fixed PE. Equal fields are intentional;
-// code/RIP/RTTI evidence and full function ranges are in client-profile evidence.
-struct ProfileLayout {
-    std::uint64_t getterRva, engineRoot, engineVtable, engineInterfaceVtable, userVtable, userInterfaceVtable;
-    std::array<unsigned char, 14> getterBytes;
-    std::uint64_t engineInterfaceOffset, userVectorOffset, userCountOffset, userStride, userEntryOffset;
-    std::uint64_t userInterfaceOffset, accountOffset, recordsOffset, recordCountOffset, recordStride, gameIdOffset, pidPairOffset;
-    std::array<std::uint64_t, 7> predicateRvas;
-    std::array<std::array<unsigned char, 7>, 7> predicateBytes;
-    std::array<std::size_t, 7> predicateSizes;
-    std::uint64_t predicateFlagsOffset, predicateCounterOffset, predicateAlternateOffset;
-    const char* predicateVersion;
-};
-inline const ProfileLayout& profileLayout(ProfileId id) {
-    static constexpr ProfileLayout legacy {
-        0xcfdc0, 0x181d008, 0x1361f38, 0x1361ff0, 0x136fa80, 0x136fbd0,
-        {0x48,0x8b,0x81,0x9a,0xe3,0xff,0xff,0x48,0x89,0x02,0x48,0x8b,0xc2,0xc3},
-        0xfe0, 0x1080, 0x1090, 0x10, 8, 0x1e70, 0x20a, 0x2568, 0x2578, 0x330, 8, 0x198,
-        {0x9d7a9c,0x9d7bc9,0x9d7b2a,0x9d7a5f,0x9d7aef,0x9d7bb6,0x9d7bd9},
-        {{{0x0f,0xb6,0x8b,0x01,0x02,0x00,0x00}, {0xff,0x83,0xa8,0x01,0x00,0x00},
-          {0x8b,0x8b,0x68,0x02,0x00,0x00}, {0x88,0x83,0x00,0x02,0x00,0x00},
-          {0x88,0x83,0x00,0x02,0x00,0x00}, {0x88,0x83,0x00,0x02,0x00,0x00},
-          {0x88,0x83,0x00,0x02,0x00,0x00}}}, {7,6,6,6,6,6,6},
-        0x200, 0x1a8, 0x268, "steamclient64-e9045710-predicate-inputs-v1"
-    };
-    static constexpr ProfileLayout publicBuild {
-        0xcfdc0, 0x181e008, 0x1362478, 0x1362530, 0x1370030, 0x1370180,
-        {0x48,0x8b,0x81,0x9a,0xe3,0xff,0xff,0x48,0x89,0x02,0x48,0x8b,0xc2,0xc3},
-        0xfe0, 0x1080, 0x1090, 0x10, 8, 0x1e70, 0x20a, 0x2568, 0x2578, 0x330, 8, 0x198,
-        {0x9d7b7c,0x9d7ca9,0x9d7c0a,0x9d7b3f,0x9d7bcf,0x9d7c96,0x9d7cb9},
-        {{{0x0f,0xb6,0x8b,0x01,0x02,0x00,0x00}, {0xff,0x83,0xa8,0x01,0x00,0x00},
-          {0x8b,0x8b,0x68,0x02,0x00,0x00}, {0x88,0x83,0x00,0x02,0x00,0x00},
-          {0x88,0x83,0x00,0x02,0x00,0x00}, {0x88,0x83,0x00,0x02,0x00,0x00},
-          {0x88,0x83,0x00,0x02,0x00,0x00}}}, {7,6,6,6,6,6,6},
-        0x200, 0x1a8, 0x268, "steamclient64-253e0a11-predicate-inputs-v1"
-    };
-    switch (id) {
-    case ProfileId::Legacy1791918634: return legacy;
-    case ProfileId::Public1792618285: return publicBuild;
-    }
-    throw Rejected{"profile-unknown"};
-}
 
 inline void require(bool value, const char* reason) {
     if (!value) throw Rejected{reason};
@@ -109,23 +66,57 @@ inline std::uint64_t moduleAnchor(const Query& q, std::uint64_t displacement, st
     return address;
 }
 
+inline std::uint64_t userInterfaceSelf(std::uint64_t user, ProfileId id) {
+    return offset(user, profileLayout(id).userInterfaceOffset);
+}
+inline std::uint64_t accountAddressFromInterface(std::uint64_t self, ProfileId id) {
+    const auto& layout = profileLayout(id);
+    require(self >= layout.userInterfaceOffset, "interface-self-underflow");
+    return offset(self - layout.userInterfaceOffset, layout.accountOffset);
+}
+
 // Counts attempted callback reads as well as successful ones. The callback must
 // provide an exact read on true. No native pointer is dereferenced by this core.
 class Reader {
     const Read& read_;
+    const Read* module_ = nullptr;
+    const ymcc::steamdiagnostic::ModulePointerNormalizer* normalize_ = nullptr;
 public:
     std::size_t calls = 0, bytes = 0;
     explicit Reader(const Read& read) : read_(read) {}
-    void read(std::uint64_t address, void* destination, std::size_t size) {
+    explicit Reader(const ReadViews& views) : read_(views.rawObject), module_(&views.canonicalModule),
+        normalize_(&views.explicitModulePointerNormalizer) {}
+    Reader(ReadViews&&) = delete;
+    Reader(const ReadViews&&) = delete;
+    void readWith(const Read& callback, std::uint64_t address, void* destination, std::size_t size) {
         require(size != 0 && size <= kMaxSingleRead, "read-size-invalid");
         require(inRange(address, size), "address-out-of-range");
         require(calls < kMaxReadCalls && size <= kMaxReadBytes - bytes, "read-budget-exceeded");
         ++calls;
         bytes += size;
         bool ok = false;
-        try { ok = read_(address, destination, size); }
+        try { ok = callback(address, destination, size); }
         catch (...) { throw Rejected{"memory-read-exception"}; }
         require(ok, "memory-read-failed");
+    }
+    void read(std::uint64_t address, void* destination, std::size_t size) {
+        readWith(read_, address, destination, size);
+    }
+    void moduleRead(std::uint64_t address, void* destination, std::size_t size) {
+        readWith(module_ && *module_ ? *module_ : read_, address, destination, size);
+    }
+    std::uint64_t moduleU64(std::uint64_t address) {
+        std::array<unsigned char, 8> data{}; moduleRead(address, data.data(), data.size());
+        std::uint64_t value=0; for(std::size_t i=0;i<data.size();++i)value|=std::uint64_t(data[i])<<(8*i);
+        return value;
+    }
+    std::uint64_t modulePointer(std::uint64_t address) {
+        const auto value=u64(address);
+        if(!normalize_ || !*normalize_)return value;
+        std::uint64_t normalized=0; bool okay=false;
+        try { okay=(*normalize_)(value,normalized); }
+        catch(...) { throw Rejected{"module-pointer-normalization-exception"}; }
+        require(okay,"module-pointer-normalization-failed"); return normalized;
     }
     // Steam's verified layout is little endian; decode explicitly on every host.
     std::uint64_t u64(std::uint64_t address) {
@@ -154,7 +145,7 @@ inline void checkGetter(Reader& r, const Query& q) {
     const auto& p = profileLayout(q.profile);
     const auto& expected = p.getterBytes;
     std::array<unsigned char, 14> loaded{};
-    r.read(moduleAnchor(q, p.getterRva, expected.size()), loaded.data(), loaded.size());
+    r.moduleRead(moduleAnchor(q, p.getterRva, expected.size()), loaded.data(), loaded.size());
     require(loaded == expected, "getter-mismatch");
 }
 struct Selection {
@@ -168,7 +159,7 @@ struct Selection {
 };
 inline void checkSelection(Reader& r, const Query& q, const Selection& s) {
     const auto& p = profileLayout(q.profile);
-    require(r.u64(moduleAnchor(q, p.engineRoot, 8)) == s.engine, "user-selection-changed");
+    require(r.moduleU64(moduleAnchor(q, p.engineRoot, 8)) == s.engine, "user-selection-changed");
     require(r.u64(offset(s.engine, p.userVectorOffset)) == s.vector &&
         r.count(offset(s.engine, p.userCountOffset), 32, "user-vector-count-invalid") == s.count,
         "user-selection-changed");
@@ -179,17 +170,17 @@ inline void checkSelection(Reader& r, const Query& q, const Selection& s) {
 inline Selection selectUser(Reader& r, const Query& q) {
     const auto& p = profileLayout(q.profile);
     Selection s;
-    s.engine = r.u64(moduleAnchor(q, p.engineRoot, 8));
-    require(r.u64(s.engine) == moduleAnchor(q, p.engineVtable, 8) &&
-        r.u64(offset(s.engine, p.engineInterfaceOffset)) == moduleAnchor(q, p.engineInterfaceVtable, 8), "engine-type-mismatch");
+    s.engine = r.moduleU64(moduleAnchor(q, p.engineRoot, 8));
+    require(r.modulePointer(s.engine) == moduleAnchor(q, p.engineVtable, 8) &&
+        r.modulePointer(offset(s.engine, p.engineInterfaceOffset)) == moduleAnchor(q, p.engineInterfaceVtable, 8), "engine-type-mismatch");
     s.vector = r.u64(offset(s.engine, p.userVectorOffset));
     s.count = r.count(offset(s.engine, p.userCountOffset), 32, "user-vector-count-invalid");
     vectorRange(s.vector, s.count, p.userStride);
     unsigned matches = 0;
     for (std::uint32_t i = 0; i < s.count; ++i) {
         const auto user = r.u64(offset(s.vector, p.userStride * i + p.userEntryOffset));
-        require(r.u64(user) == moduleAnchor(q, p.userVtable, 8) &&
-            r.u64(offset(user, p.userInterfaceOffset)) == moduleAnchor(q, p.userInterfaceVtable, 8), "user-type-mismatch");
+        require(r.modulePointer(user) == moduleAnchor(q, p.userVtable, 8) &&
+            r.modulePointer(offset(user, p.userInterfaceOffset)) == moduleAnchor(q, p.userInterfaceVtable, 8), "user-type-mismatch");
         s.entries.push_back(user);
         // Other accounts are compared transiently. Their record headers and
         // records are never read, nor are their account values exported.
@@ -268,7 +259,7 @@ inline void checkPredicateAnchor(Reader& r, const Query& q, std::size_t index) {
     std::array<unsigned char, 7> loaded{};
     const auto size = p.predicateSizes[index];
     require(size != 0 && size <= loaded.size(), "read-size-invalid");
-    r.read(moduleAnchor(q, p.predicateRvas[index], size), loaded.data(), size);
+    r.moduleRead(moduleAnchor(q, p.predicateRvas[index], size), loaded.data(), size);
     for (std::size_t i = 0; i < size; ++i)
         require(loaded[i] == p.predicateBytes[index][i], "predicate-profile-anchor-mismatch");
 }
@@ -320,10 +311,14 @@ inline bool stable(const Stable& check) {
 // Diagnostic evidence only. Even equal before/after reads cannot exclude ABA,
 // concurrent changes between fields, PID reuse, or an unknown login generation.
 // The adapter owns hash/process/account provenance and supplies Stable checks.
-inline Json observe(const Query& query, const Read& read, const Stable& stable) {
+inline Json observeWithReadViews(const Query& query, const ReadViews& inputViews, const Stable& stable,
+    std::optional<TypedNativeRoleObservation>* typedOutput = nullptr) {
     using namespace detail;
+    const ReadViews views = inputViews; // callbacks cannot retarget this reader mid-observation
     // Copy inputs so callbacks cannot silently redirect this observation.
     const Query q = query;
+    // Copy before reset: query may be borrowed from the previous observation.
+    if (typedOutput) typedOutput->reset();
     Json result = {
         {"source", "steam-native-cuser-record-diagnostic"}, {"profileVersion", profileVersion(q.profile) ? profileVersion(q.profile) : "unknown"},
         {"authority", "diagnostic-only-no-admission"}, {"status", "unavailable"}, {"available", false},
@@ -335,7 +330,7 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
         {"otherAccountsRecordsRead", false},
         {"predicateInputs", predicateInputsUnknown("bound-record-unavailable", q.profile)}
     };
-    Reader r(read);
+    Reader r(views);
     bool identityStarted = false;
     std::vector<Target> targets;
     auto predicateInputs = predicateInputsUnknown("unique-target-not-bound", q.profile);
@@ -344,7 +339,7 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
         const auto& p = profileLayout(q.profile);
         require(q.profileVerified, "profile-unverified");
         require(q.account64 != 0 && q.gameId64 != 0 && q.expectedPid != 0, "identity-missing");
-        require(static_cast<bool>(read), "reader-unavailable");
+        require(static_cast<bool>(views.rawObject), "reader-unavailable");
         require(static_cast<bool>(stable), "stability-check-unavailable");
         require(inRange(q.moduleBase, q.moduleSize), "module-range-invalid");
         // Validate all fixed module anchors before making any memory read.
@@ -391,6 +386,7 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
     if (targets.size() > 1) {
         result["reason"] = "target-record-ambiguous";
         result["matchingTargetRecordCount"] = targets.size();
+        if (typedOutput) *typedOutput = TypedNativeRoleObservation(q, targets.size(), std::nullopt);
         return result;
     }
     result["status"] = "observed";
@@ -409,6 +405,20 @@ inline Json observe(const Query& query, const Read& read, const Stable& stable) 
         result["foregroundComparisonPid"] = target.foreground;
         result["originalPrimaryMatched"] = matched;
     }
+    if (typedOutput) {
+        std::optional<TypedNativeRoleObservation::NativeRoles> roles;
+        if (targets.size() == 1) roles = TypedNativeRoleObservation::NativeRoles{
+            targets.front().primary, targets.front().foreground};
+        *typedOutput = TypedNativeRoleObservation(q, targets.size(), roles);
+    }
     return result;
+}
+inline Json observeWithRoles(const Query& query, const Read& read, const Stable& stable,
+    std::optional<TypedNativeRoleObservation>* typedOutput) {
+    return observeWithReadViews(query, ReadViews{read, {}, {}}, stable, typedOutput);
+}
+// Source-compatible diagnostic-only entry point. Both paths execute one reader.
+inline Json observe(const Query& query, const Read& read, const Stable& stable) {
+    return observeWithRoles(query, read, stable, nullptr);
 }
 } // namespace ymcc::steamrecord

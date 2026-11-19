@@ -36,7 +36,7 @@ export function loadOriginalEnvironment({sharedWorker,root,tool,sharedModule}){
 // Review the complete captured bytes, reconstruct every prior locked input and
 // keep missing/changed inputs as a refusal before any compiler or worker starts.
 export function verifyCurrentSleepSourceReview(repo){
- const relative="tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",expected="2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267";
+ const relative="tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",expected="02c282f3686e6912c19461c5c1ab126f049526819e6744a47f7abb8aad6ad04e";
  const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
  const need=(v,m)=>{if(!v)throw Error(m);};
  const bytes=fs.readFileSync(path.join(repo,relative));need(digest(bytes)===expected,'SLEEP_SOURCE_REVIEW_CHANGED');
@@ -78,4 +78,16 @@ export function verifyCalibrationNode(config,pythonAudit){
  const receipt=JSON.parse(fs.readFileSync(config.nodeBoundaryReceipt,'utf8'));
  need(receipt.status==='PASS'&&receipt.exitCode===0&&receipt.denied.length===0&&receipt.allowedWriteCount===0&&!receipt.explicitExitCalled,'NONUSER_CALIBRATION_NODE_BOUNDARY_FAILED');
  return {configuration:{path:config.nodeBoundaryConfig,sha256:createHash('sha256').update(fs.readFileSync(config.nodeBoundaryConfig)).digest('hex')},path:config.nodeBoundaryReceipt,sha256:createHash('sha256').update(fs.readFileSync(config.nodeBoundaryReceipt)).digest('hex'),...receipt};
+}
+
+// One original batch recipe, rendered by both Python and its exact audit rule.
+export function joinedSenderBatchLines({project,out,tool}){
+ const sdk='C:\\Program Files (x86)\\Windows Kits\\10';
+ if(tool.windowsSdkVersion!=='10.0.26100.0')throw Error('NONUSER_JOINED_SDK_RECIPE_CHANGED');
+ const quote=value=>{value=String(value);if(/["%\r\n]/.test(value))throw Error('NONUSER_JOINED_BUILD_PATH');return '"'+value+'"';};
+ const version=tool.windowsSdkVersion,template=fs.readFileSync(path.join(project,'tools/fixtures/sleep_non_user_wake/resume_sender_join.cmd.in'),'utf8');
+ const values={VCVARS:quote(path.resolve(tool.vcvars64)),INCLUDE:['ucrt','shared','um','winrt','cppwinrt'].map(x=>path.join(sdk,'Include',version,x)).join(';'),LIB:['ucrt','um'].map(x=>path.join(sdk,'Lib',version,x,'x64')).join(';'),JSON_ROOT:quote(path.join(project,'deps/json')),NATIVE_ROOT:quote(path.join(project,'native')),CPP:quote(path.join(out,'joined.cpp')),DEPENDENCIES:quote(path.join(out,'deps/joined.json')),OBJECT:quote(path.join(out,'joined.obj')),EXE:quote(path.join(out,'joined.exe'))};
+ const rendered=template.replace(/\{\{([A-Z_]+)\}\}/g,(_all,name)=>{if(!Object.hasOwn(values,name))throw Error('NONUSER_JOINED_RECIPE_TOKEN');return values[name];});
+ if(rendered.includes('{{'))throw Error('NONUSER_JOINED_RECIPE_TOKEN');
+ return rendered.split(/\r?\n/).filter(line=>line.trim());
 }

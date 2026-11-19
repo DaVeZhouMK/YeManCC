@@ -9,7 +9,9 @@ async function setup(controlled=true){const host=new NoIoHost();let held:ReturnT
  const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:60000,resumeWaitDeadlineMs:800,readNativeActivity:async()=>null,readNativePowerState:async()=>{const wait=held;if(wait){held=null;wait.entered();return wait.pending;}return native;},launcher:{async start(){return{pid:101414,executable:'fixture-only.exe'};},async stop(){}}});
  life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);await life.start({manualRecovery:true});if(controlled)await life.apply(curve);
  return {life,host,setNative(s:PowerLifecycleState){native=s;},hold(){const wait=gate();held=wait;return wait;}};}
-let checks=0;const failures:string[]=[];async function check(name:string,run:()=>Promise<void>){checks++;try{await run();console.log('PASS '+name);}catch(e){failures.push(name+': '+String(e));console.log('FAIL '+name+': '+String(e));}}
+const selectedShared=process.argv.slice(2);
+if(selectedShared.length>1||selectedShared.some(v=>!['--shared-source-only','--shared-cold-only'].includes(v)))throw new Error('Unknown or conflicting Fan power observation selection');
+let checks=0;const failures:string[]=[];async function check(name:string,run:()=>Promise<void>){if(selectedShared.length&&(!name.startsWith('shared ')||(selectedShared[0]==='--shared-cold-only'&&!name.includes('cold HC Open'))))return;checks++;try{await run();console.log('PASS '+name);}catch(e){failures.push(name+': '+String(e));console.log('FAIL '+name+': '+String(e));}}
 async function main(){
  for(const oldPhase of ['suspending','suspended','resuming'] as const)await check('late native '+oldPhase+' cannot revoke the newer same-cycle wake edge',async()=>{
   const f=await setup();f.life.observePowerBoundary('suspending',6);const held=f.hold();
@@ -86,6 +88,18 @@ async function main(){
   try{held.resolve({...awake(7),phase:'suspended',resumeReady:false,hardwareWritesAllowed:false});assert.equal(await pending,true);assert.equal(f.life.coordinatorSnapshot.powerGeneration,7);assert.equal(f.life.coordinatorSnapshot.wakeReadyGeneration,null);assert.equal(f.host.calls.length,calls);}
   finally{held.resolve(null);await pending.catch(()=>{});await f.life.close().catch(()=>{});}
  });
+ for(const kind of ['unknown','pending'] as const){
+  const untrusted=()=>({...awake(),...(kind==='unknown'?{known:false}:{known:true,notificationPending:true})}) as PowerLifecycleState;
+  await check('shared '+kind+' cannot interpret a retained manual click as OFF',async()=>{
+   const f=await setup();try{f.setNative(untrusted());assert.equal(await f.life.needsManualRecoveryForControlAsync(),true);assert.equal(f.host.calls.filter(c=>c==='disable').length,0);}finally{f.setNative(awake());await f.life.close().catch(()=>{});}
+  });
+  await check('shared '+kind+' cannot invent a fresh recovery owner or budget',async()=>{
+   const f=await setup();try{f.setNative(untrusted());const before=f.life.coordinatorSnapshot;assert.equal(await f.life.requestRecoveryAfterObservedHostState('shared-'+kind),false);assert.equal(f.life.recoveryActive,false);assert.deepEqual(f.life.coordinatorSnapshot,before);}finally{f.setNative(awake());await f.life.close().catch(()=>{});}
+  });
+  await check('shared '+kind+' refuses cold HC Open then fresh same-cycle permission remains reachable',async()=>{
+   const f=await setup(false);try{f.setNative(untrusted());Object.assign(f.host,{generation:6,attempt:1,powerState:'On'});const life=f.life as any,context=life.admissionContext('shared-cold-open',life.controlIntentRevisionValue);const remote={...f.host.snapshot(),powerOperationOutcome:'await-user'};let refused=false;try{await life.completeHcOpenForAdmission(remote,context);}catch{refused=true;}assert.equal(refused,true,'uncertain public power opened HC');assert(!f.host.calls.includes('open'));f.setNative(awake());await life.completeHcOpenForAdmission(remote,context);assert.equal(f.host.calls.filter(c=>c==='open').length,1);assert.equal(f.host.calls.filter(c=>c==='events').length,1);}finally{f.setNative(awake());await f.life.close().catch(()=>{});}
+  });
+ }
  console.log(JSON.stringify({ok:failures.length===0,checks,failures,hardwareCalls:0,scope:'actual public observed-recovery + same-cycle native edges; held native snapshot; Host/process/power fixtures; no device/CPU benchmark'}));if(failures.length)process.exitCode=1;
 }
 void main();

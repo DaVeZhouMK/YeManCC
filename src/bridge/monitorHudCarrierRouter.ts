@@ -1,8 +1,8 @@
 // Two carriers remain subroutes of ONE YMCC output. Default desktop visibility
 // never queries Steam. Steam preference is explicit; an unknown close is not a hide.
 import { normalizeMonitorOutput, type MonitorOutputPreferences } from './monitorHudModel';
-import type { OutputAck } from './monitorOutputCoordinator';
-export interface HudCarrierPort {available():Promise<boolean>|boolean;visible():boolean;state?():'shown'|'hidden'|'unknown';setVisible(show:boolean,prefs:MonitorOutputPreferences):Promise<OutputAck>;}
+import type { OutputAck,MonitorOutputCurrent } from './monitorOutputCoordinator';
+export interface HudCarrierPort {available():Promise<boolean>|boolean;visible():boolean;state?():'shown'|'hidden'|'unknown';setVisible(show:boolean,prefs:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>;}
 export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPort,policy:'steam-first'|'desktop-global'='steam-first'){
   let queue:Promise<unknown>=Promise.resolve(),active:'steam'|'desktop'|null=null,steamTouched=false;
   let preferences=normalizeMonitorOutput();
@@ -16,9 +16,11 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
     }
     return await steam.available()?'steam':await desktop.available()?'desktop':null;
   }
-  async function apply(show:boolean,raw:MonitorOutputPreferences):Promise<OutputAck>{
-    preferences=normalizeMonitorOutput(raw);
-    const destination=show?await kind(preferences):null;
+  async function apply(show:boolean,raw:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>{
+    const requireCurrent=async()=>{if(current&&!await current())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');};
+    const owned=<T>(operation:()=>Promise<T>):Promise<T>=>current?(async()=>{await requireCurrent();const result=await operation();await requireCurrent();return result;})():operation();
+    await requireCurrent();preferences=normalizeMonitorOutput(raw);
+    const destination=show?await owned(()=>kind(preferences)):null;
     if(show&&!destination)return {confirmed:false,reason:'原生监控输出承载暂不可用。'};
     // An untouched/unknown Steam plugin cannot veto the default global desktop.
     // Once this owner attempted Steam, it must reclaim that exact carrier first.
@@ -32,7 +34,7 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
       const failures:string[]=[];
       for(const [name,carrier]of closing){
         try{
-          const ack=await carrier.setVisible(false,preferences);
+          const ack=await owned(()=>carrier.setVisible(false,preferences,current));
           if(!ack.confirmed){failures.push(ack.reason||name+' 旧窗口关闭未确认。');continue;}
           if(name==='steam')steamTouched=false;
           if(active===name)active=null;
@@ -41,26 +43,26 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
       return failures.length?{confirmed:false,reason:failures.join('；')}:{confirmed:true};
     }
     for(const [name,carrier]of carriers){
-      const ack=await carrier.setVisible(false,preferences);
+      const ack=await owned(()=>carrier.setVisible(false,preferences,current));
       if(!ack.confirmed)return {confirmed:false,reason:ack.reason??name+' 旧窗口关闭未确认。'};
       if(name==='steam')steamTouched=false;
       if(active===name)active=null;
     }
-    const current=await kind(preferences);
+    const currentKind=await owned(()=>kind(preferences));
     // A disappeared Steam binding should fall back to the globally usable desktop,
     // not turn a ready desktop into a game prerequisite. Other changes stay guarded.
-    const selected=policy==='desktop-global'&&destination==='steam'&&current==='desktop'?'desktop':destination;
-    if(current!==selected)return {confirmed:false,reason:'监控承载在切换中改变；没有开启新窗口。'};
+    const selected=policy==='desktop-global'&&destination==='steam'&&currentKind==='desktop'?'desktop':destination;
+    if(currentKind!==selected)return {confirmed:false,reason:'监控承载在切换中改变；没有开启新窗口。'};
     if(selected==='steam')steamTouched=true;
-    const ack=await (selected==='steam'?steam:desktop).setVisible(true,preferences);
+    const ack=await owned(()=>(selected==='steam'?steam:desktop).setVisible(true,preferences,current));
     if(ack.confirmed){active=selected;return ack;}
     if(policy!=='desktop-global'||selected!=='steam')return ack;
     // A failed create may still have made a real Steam popup. Never forge closure.
-    const closed=await steam.setVisible(false,preferences);
+    const closed=await owned(()=>steam.setVisible(false,preferences,current));
     if(!closed.confirmed)return {confirmed:false,reason:'Steam HUD 失败且旧窗口关闭未确认；未叠开桌面窗口。'+(closed.reason??'')};
     steamTouched=false;
-    if(!await desktop.available())return {confirmed:false,reason:'Steam HUD 未显示，桌面载体也不可用。'};
-    const fallback=await desktop.setVisible(true,preferences);
+    if(!await owned(async()=>await desktop.available()))return {confirmed:false,reason:'Steam HUD 未显示，桌面载体也不可用。'};
+    const fallback=await owned(()=>desktop.setVisible(true,preferences,current));
     if(fallback.confirmed){active='desktop';return {confirmed:true,reason:'Steam 内部 HUD 未确认显示，已确认关闭并恢复全局桌面 HUD。'};}
     return {confirmed:false,reason:fallback.reason??'Steam HUD 未显示，桌面恢复未确认。'};
   }
@@ -71,5 +73,5 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
   }
   return {available:async(prefs?:MonitorOutputPreferences)=>!!await kind(prefs),kind,state,
     visible:()=>policy==='desktop-global'&&!steamTouched&&active!=='steam'?desktop.visible():steam.visible()||desktop.visible(),active:()=>active,
-    setVisible(show:boolean,prefs:MonitorOutputPreferences){const snapshot=normalizeMonitorOutput(prefs);const result=queue.then(()=>apply(show,snapshot));queue=result.catch(()=>{});return result;}};
+    setVisible(show:boolean,prefs:MonitorOutputPreferences,current?:MonitorOutputCurrent){const snapshot=normalizeMonitorOutput(prefs);const result=queue.then(()=>apply(show,snapshot,current));queue=result.catch(()=>{});return result;}};
 }

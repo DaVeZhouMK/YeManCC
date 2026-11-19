@@ -5,6 +5,8 @@
     "theme": "blue-black",
     "dynamicBackgroundEnabled": true,
     "steamWallpaperPauseOnBattery": false,
+    "steamControllerCursorHide": true,
+    "steamMenuGameIdRepair": true,
     "backgroundOpacity": 0.7,
     "backgroundBlur": 0,
     "backgroundPositionX": 50,
@@ -51,6 +53,7 @@
     "version": 2,
     "configured": true,
     "enabled": true,
+    "templateDefaults": true,
     "active": {
       "ac": "elite",
       "dc": "medium"
@@ -148,6 +151,8 @@
   "startupDesired": {
     "virtualGamepadPersona": "disabled",
     "gyroPreset": "off",
+    "steamOverlayOnBoot": true,
+    "gameBarControllerOnBoot": false,
     "bootControlCenter": true,
     "fanControl": false,
     "rtss": false,

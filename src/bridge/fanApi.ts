@@ -1,5 +1,5 @@
 import { http } from './api';
-import { fanDiagnosticLogLazy, fanDiagnosticLoggingEnabled, getFanDiagnosticPowerGeneration } from './fanDiagnostics';
+import { fanDiagnosticLogLazy, fanDiagnosticLoggingEnabled, fanDiagnosticStateKey, getFanDiagnosticLoggingEpoch, getFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
 /** Main-program boundary for the imported Fan API. Disabled by default. */
 export type FanPreset = 'soft' | 'balanced' | 'aggressive';
@@ -126,7 +126,7 @@ export interface FanState {
 export interface FanApiAdapter {
   readonly enabled: boolean;
   handshake(timeoutMs?: number): Promise<FanHandshake>;
-  getState(timeoutMs?: number): Promise<FanState>;
+  getState(timeoutMs?: number, diagnosticSource?: 'page-telemetry'): Promise<FanState>;
   enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState>;
   applyPreset(name: FanPreset, leaseId?: string, nodes?: readonly FanNode[]): Promise<FanState>;
   disable(leaseId?: string, options?: { controlIntentOnly?: boolean }): Promise<FanState>;
@@ -397,6 +397,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
   readonly enabled = true;
   private sessionToken?: string;
   private requestHeaders: Readonly<Record<string, string>>;
+  private telemetryLogAnchor?: { key: string; requestId: string; generation: number; loggingEpoch: number; repeats: number };
   constructor(private readonly baseUrl: string, sessionToken?: string) {
     this.sessionToken = sessionToken;
     this.requestHeaders = this.createRequestHeaders();
@@ -405,6 +406,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     if (token === this.sessionToken) return;
     this.sessionToken = token;
     this.requestHeaders = this.createRequestHeaders();
+    this.telemetryLogAnchor = undefined;
   }
   private createRequestHeaders(): Readonly<Record<string, string>> {
     // Replace on rotation so in-flight requests retain their original credential.
@@ -445,16 +447,22 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     const code = unknown ? 'FAN_HTTP_RESULT_UNKNOWN' : 'FAN_API_RESPONSE_INVALID';
     return new FanApiError(`${code}: 风扇返回收据无效，请核对实际状态后重试`, status, code, path);
   }
-  private async request(path: string, method: 'GET' | 'POST', body?: unknown, timeoutMs?: number): Promise<any> {
+  private async request(path: string, method: 'GET' | 'POST', body?: unknown, timeoutMs?: number,
+    diagnosticSource?: 'page-telemetry'): Promise<any> {
     const startedAt = Date.now();
     const bodyText = body === undefined ? undefined : JSON.stringify(body);
     let responseReceived = false;
     let responseStatus: number | undefined;
     let diagnosticRequestId: string | undefined;
+    const telemetry = diagnosticSource === 'page-telemetry' && path === '/api/state' && method === 'GET';
+    const headers = this.requestHeaders;
+    const telemetryGeneration = telemetry && fanDiagnosticLoggingEnabled.value ? getFanDiagnosticPowerGeneration() : undefined;
+    const telemetryLoggingEpoch = telemetryGeneration !== undefined ? getFanDiagnosticLoggingEpoch() : undefined;
+    if (path === '/api/state' && telemetryGeneration === undefined) this.telemetryLogAnchor = undefined;
     try {
       const response = await http.request(`${this.baseUrl}${path}`, {
         method,
-        headers: this.requestHeaders,
+        headers,
         body: bodyText,
         timeoutMs: this.timeoutFor(path, timeoutMs),
       });
@@ -491,23 +499,66 @@ export class HttpFanApiAdapter implements FanApiAdapter {
       const code = typeof hostError?.code === 'string' ? hostError.code : undefined;
       const receiptValid = validFanResponseReceipt(path, parsed, body);
       if (fanDiagnosticLoggingEnabled.value) {
-        fanDiagnosticLogLazy('api.response', () => ({
-          observationSchemaVersion: 2,
-          method,
-          path,
-          status: response.status,
-          ok: response.status >= 200 && response.status < 300 && parsed.ok !== false && receiptValid,
-          durationMs: Date.now() - startedAt,
-          requestId: diagnosticRequestId,
-          receiptValid,
-          receipt: summarizeFanReceipt(parsed),
-          bodyCompleteObserved: typeof response.bodyComplete === 'boolean',
-          ...(typeof response.bodyComplete === 'boolean' ? { bodyComplete: response.bodyComplete } : {}),
-          generation: getFanDiagnosticPowerGeneration(),
-          errorCode: code,
-          request: summarizeRequestBody(body),
-          response: summarizeFanState(parsed.state ?? parsed),
-        }));
+        fanDiagnosticLogLazy('api.response', () => {
+          const durationMs = Date.now() - startedAt;
+          const responseState = summarizeFanState(parsed.state ?? parsed);
+          const receipt = summarizeFanReceipt(parsed);
+          const generation = getFanDiagnosticPowerGeneration();
+          let stateSnapshot: { kind: 'full' | 'unchanged'; baselineRequestId?: string } | undefined;
+          let loggedState = responseState;
+          if (telemetry) {
+            const loggingEpoch = getFanDiagnosticLoggingEpoch();
+            // Compact only a complete healthy page observation in the same log and power window.
+            const key = response.status === 200 && response.bodyComplete === true && parsed.ok === true && receiptValid
+              && !hostError && responseState?.state === 'Ready' && responseState.hardwareWritesEnabled === true
+              && responseState.unknownState === false && responseState.hcCloseCleanupPending === false
+              && responseState.controlAccepting === true && responseState.oemRestoreConfirmed === false
+              && generation === telemetryGeneration && loggingEpoch === telemetryLoggingEpoch && headers === this.requestHeaders
+              && diagnosticRequestId && /^[a-f0-9]{32}$/.test(diagnosticRequestId)
+              ? fanDiagnosticStateKey(responseState, receipt) : undefined;
+            const previous = this.telemetryLogAnchor;
+            if (key !== undefined && diagnosticRequestId && previous?.key === key && previous.requestId !== diagnosticRequestId
+                && previous.generation === generation && previous.loggingEpoch === loggingEpoch && previous.repeats < 15) {
+              previous.repeats += 1;
+              stateSnapshot = { kind: 'unchanged', baselineRequestId: previous.requestId };
+              loggedState = {};
+              for (const name of ['state', 'powerState', 'resumePhase', 'powerOperationGeneration', 'powerOperationAttempt',
+                'controlAccepting', 'leaseGeneration', 'unknownState', 'hcCloseCleanupPending', 'hardwareWritesEnabled',
+                'hardwareWritesObserved', 'oemRestoreConfirmed', 'recoveryReadbackRequired', 'lastTemperatureC', 'currentDutyPercent']) {
+                if (responseState && name in responseState) loggedState[name] = responseState[name];
+              }
+            } else {
+              stateSnapshot = { kind: 'full' };
+              this.telemetryLogAnchor = key !== undefined && diagnosticRequestId
+                ? { key, requestId: diagnosticRequestId, generation, loggingEpoch, repeats: 0 } : undefined;
+            }
+          }
+          const request = summarizeRequestBody(body);
+          // A complete successful renewal can carry the exact three fixed
+          // projections by schema. Any additional observed fact stays inline.
+          const compactHeartbeat = path === '/api/heartbeat' && method === 'POST' && response.status === 200
+            && response.bodyComplete === true && receiptValid && parsed.ok === true && parsed.error === undefined
+            && diagnosticRequestId !== undefined && /^[a-f0-9]{32}$/.test(diagnosticRequestId)
+            && request?.leasePresent === true && Object.keys(request).length === 1
+            && responseState?.ok === true && Object.keys(responseState).length === 1
+            && receipt.ok === true && Object.keys(receipt).length === 1;
+          return {
+            observationSchemaVersion: 2,
+            method,
+            path,
+            status: response.status,
+            ok: response.status >= 200 && response.status < 300 && parsed.ok !== false && receiptValid,
+            durationMs,
+            requestId: diagnosticRequestId,
+            receiptValid,
+            bodyCompleteObserved: typeof response.bodyComplete === 'boolean',
+            ...(typeof response.bodyComplete === 'boolean' ? { bodyComplete: response.bodyComplete } : {}),
+            generation,
+            errorCode: code,
+            ...(compactHeartbeat ? { heartbeatReceiptSchema: 1 } : { receipt, request, response: loggedState }),
+            ...(stateSnapshot ? { diagnosticSource, stateSnapshot } : {}),
+          };
+        });
       }
       if (response.status < 200 || response.status >= 300 || parsed.ok === false) {
         // Preserve a Host error code for lifecycle safety policy. The UI still
@@ -519,6 +570,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
       if (!receiptValid) throw this.invalidResponse(path, method, response.status);
       return parsed;
     } catch (error) {
+      if (telemetry) this.telemetryLogAnchor = undefined;
       if (fanDiagnosticLoggingEnabled.value) {
         fanDiagnosticLogLazy(responseReceived ? 'api.request-failure' : 'api.transport-failure', () => ({
           observationSchemaVersion: 2,
@@ -548,7 +600,9 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     return fanResponseState(path, parsed) as FanState;
   }
   handshake(timeoutMs?: number): Promise<FanHandshake> { return this.request('/api/handshake', 'POST', undefined, timeoutMs); }
-  async getState(timeoutMs?: number): Promise<FanState> { return (await this.request('/api/state', 'GET', undefined, timeoutMs)).state as FanState; }
+  async getState(timeoutMs?: number, diagnosticSource?: 'page-telemetry'): Promise<FanState> {
+    return (await this.request('/api/state', 'GET', undefined, timeoutMs, diagnosticSource)).state as FanState;
+  }
   async enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState> {
     return (await this.request('/api/enable', 'POST', { nodes, ...(leaseId ? { leaseId } : {}) })).state as FanState;
   }

@@ -35,19 +35,21 @@ static std::size_t rawAt(const std::vector<unsigned char>& b,std::uint64_t rva){
         if(rva>=section.VirtualAddress&&rva-section.VirtualAddress<section.SizeOfRawData){const auto raw=section.PointerToRawData+(rva-section.VirtualAddress);if(raw>=b.size())throw std::runtime_error("fixture-raw");return static_cast<std::size_t>(raw);}}
     throw std::runtime_error("fixture-rva");
 }
-static void sample(const fs::path& input,const fs::path& output,c::ModuleKind kind,unsigned index){
+static void sample(const fs::path& input,const fs::path& output,c::ModuleKind kind,unsigned index,bool checkOwnerScoped=false){
     auto data=bytes(input);const auto original=c::detail::qualifyBytes(data,kind);if(!original.layout||!original.metadata)throw std::runtime_error("original-contract");
     const auto fixture=output/("sample-"+std::to_string(index)+".pe.bin");write(fixture,data);
     const auto label=std::to_string(index);unsigned callbacks=0;
+    if(checkOwnerScoped)check(label+"/qualified-owner-scoped-layout",*original.layout==c::Layout::OwnerScoped);
     const r::HashFile forbidden=[&](const std::wstring&)->std::string{++callbacks;throw std::runtime_error("legacy-external-hash-must-not-run");};
     r::Context context;context.steamPid=171;context.steamBirth=177; // synthetic disk-cache key only
     r::Module module{original.metadata->preferredBase,original.metadata->imageSize,fixture.wstring()};
     auto verify=[&](bool expected,const std::string& exactDigest){
         r::FileStamp stamp{};if(!r::fileStamp(fixture.wstring(),stamp))throw std::runtime_error("fixture-stamp-read");
-        std::string digest;bool accepted=false;
-        if(kind==c::ModuleKind::Client){r::DiskProfile profile;accepted=r::verifiedDiskProfile(context,module,stamp,forbidden,&profile);digest=profile.sha256;}
-        else{auto profile=ymcc::steamappstate::ProfileId::Legacy1791918634;c::Qualification proof;accepted=u::verifiedDiskProfile(context,module,stamp,forbidden,&profile,&digest,&proof);}
+        std::string digest;bool accepted=false,profileMatches=false;
+        if(kind==c::ModuleKind::Client){r::DiskProfile profile;accepted=r::verifiedDiskProfile(context,module,stamp,forbidden,&profile);digest=profile.sha256;profileMatches=profile.profileId==ymcc::steamrecord::ProfileId::OwnerScoped;}
+        else{auto profile=ymcc::steamappstate::ProfileId::Legacy1791918634;c::Qualification proof;accepted=u::verifiedDiskProfile(context,module,stamp,forbidden,&profile,&digest,&proof);profileMatches=profile==ymcc::steamappstate::ProfileId::OwnerScoped;}
         check(label+"/acceptance-"+std::to_string(cases.size()),accepted==expected);
+        if(checkOwnerScoped&&expected)check(label+"/selected-owner-scoped-profile-"+std::to_string(cases.size()),profileMatches);
         check(label+"/actual-digest-"+std::to_string(cases.size()),digest==exactDigest);
         check(label+"/no-independent-hash-"+std::to_string(cases.size()),callbacks==0);
     };
@@ -63,9 +65,18 @@ static void sample(const fs::path& input,const fs::path& output,c::ModuleKind ki
     {r::Handle exclusive(CreateFileW(fixture.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr));check(label+"/adapter-cache-retains-no-file-handle",exclusive.valid());}
     check(label+"/fixture-deletes-while-cache-alive",fs::remove(fixture));
 }
-int wmain(int argc,wchar_t** argv){if(argc!=6)return 64;
+int wmain(int argc,wchar_t** argv){
+    const bool selected=argc>=4&&std::wstring(argv[2])==L"--scope";
+    bool clientOnly=false,uiOnly=false;
+    if(selected){
+        if((argc!=6&&argc!=8)||std::wstring(argv[3])!=L"owner-scoped")return 64;
+        if(argc==8){if(std::wstring(argv[6])!=L"--case")return 64;
+            clientOnly=std::wstring(argv[7])==L"client";uiOnly=std::wstring(argv[7])==L"ui";if(!clientOnly&&!uiOnly)return 64;}
+    }else{if(argc!=6)return 64;for(int i=2;i<argc;++i)if(std::wstring(argv[i]).starts_with(L"--"))return 64;}
     bool passed=true;std::string reason;
-    try{const fs::path out(argv[1]);fs::create_directories(out);for(unsigned i=0;i<4;++i)sample(argv[i+2],out,i<2?c::ModuleKind::Client:c::ModuleKind::Ui,i);}
+    try{const fs::path out(argv[1]);fs::create_directories(out);
+        if(selected){if(!uiOnly)sample(argv[4],out,c::ModuleKind::Client,0,true);if(!clientOnly)sample(argv[5],out,c::ModuleKind::Ui,1,true);}
+        else for(unsigned i=0;i<4;++i)sample(argv[i+2],out,i<2?c::ModuleKind::Client:c::ModuleKind::Ui,i);}
     catch(const std::exception& e){passed=false;reason=e.what();}
     const J result={{"schema","ymcc.steam-qualified-digest-adapter.v1"},{"passed",passed},{"checks",cases.size()},{"cases",cases},{"reason",reason},{"targetProcessAccess",0},{"memoryWrites",0},{"diskFixturesOnly",true},
 #ifdef YMCC_TEST_VENDOR_ADAPTER

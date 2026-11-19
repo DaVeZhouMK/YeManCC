@@ -1,4 +1,4 @@
-// REQUIRED ordinary export evidence for recorded standby without software DRIPS.
+// REQUIRED explicit-export Windows transition diagnostics, independent of auxiliary DRIPS.
 // Only explicit log export calls this. No resident worker, power action or retry.
 struct SgWindowsSleepExport {
     json receipt;
@@ -16,39 +16,33 @@ struct SgWindowsSleepExport {
         }
     }
 };
-static std::vector<std::string> sgSleepExportFactCandidates() {
+static json sgSleepExportSelectAnomaly() {
     std::vector<std::string> facts;
     {std::lock_guard<std::mutex> lock(g_sgFactMx);facts.assign(g_sgFacts.begin(),g_sgFacts.end());}
-    if(!ymcc::sleepexport::selectAnomaly(facts).is_null())return facts;
+    auto selected=ymcc::sleepexport::selectAnomaly(facts);
+    if(!selected.is_null())return selected;
     // Existing ordinary log only, bounded tail at explicit export. A partial
     // concurrently appended record is ignored by the strict selector.
     try {
         std::ifstream in(fspath::path(SG_FACT_LOG),std::ios::binary);
-        if(!in)return facts;
+        if(!in)return nullptr;
         in.seekg(0,std::ios::end);const auto end=in.tellg();
-        if(end<=0)return facts;
+        if(end<=0)return nullptr;
         constexpr std::streamoff cap=1024*1024;
         const auto offset=(std::max)(std::streamoff{0},static_cast<std::streamoff>(end)-cap);
         in.seekg(offset);
         std::string bytes(static_cast<std::size_t>(static_cast<std::streamoff>(end)-offset),'\0');
         in.read(bytes.data(),static_cast<std::streamsize>(bytes.size()));
         bytes.resize(static_cast<std::size_t>(in.gcount()));
-        std::istringstream bounded(bytes);std::string line;
-        if(offset)std::getline(bounded,line);
-        std::deque<std::string> tail;
-        while(std::getline(bounded,line)) {
-            if(line.size()>ymcc::sleepexport::maxFactBytes)continue;
-            tail.push_back(std::move(line));
-            if(tail.size()>ymcc::sleepexport::maxFacts)tail.pop_front();
-        }
-        std::vector<std::string> historical(tail.begin(),tail.end());
-        if(!ymcc::sleepexport::selectAnomaly(historical).is_null())return historical;
+        return ymcc::sleepexport::selectAnomalyFromFileTail(bytes,offset!=0);
     }catch(...){/* Missing historical evidence never grants a power action. */}
-    return facts;
+    return nullptr;
 }
-static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dataDir) {
+static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dataDir,const std::string& exportId={},
+        unsigned long long generation=currentPowerGeneration()) {
     SgWindowsSleepExport result;
-    const auto generation=currentPowerGeneration();
+    // logs.exportAll owns the existing export mutex for this whole call.
+    static ymcc::sleepexport::DeadlineCooldown recentDeadline;
     const auto current=[generation] {
         return !g_exitRequested.load(std::memory_order_acquire)&&
             g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&
@@ -56,7 +50,12 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
     };
     fspath::path reportPath,receiptPath;
     std::size_t commandOutputBytes=0;
-    const auto query=[&](std::uint32_t timeout)->ymcc::sleepexport::QueryResult {
+    ymcc::sleepexport::QueryFailureOutputBytes commandFailureOutput;
+    ymcc::sleepexport::CaptureFinalization commandFinalization;
+    ymcc::sleepexport::CaptureLoopTiming captureLoopTiming;
+    bool commandTimedOut=false;
+    std::optional<std::uint64_t> preparationMs,captureCallMs,reportFileReadMs;
+    const auto runQuery=[&](std::uint32_t timeout)->ymcc::sleepexport::QueryResult {
         ymcc::sleepexport::QueryResult q;
         const auto started=GetTickCount64();
         try {
@@ -64,7 +63,7 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
             if(!root.is_absolute()||!fspath::is_directory(root,ec)||ec) {q.readError="diagnostic-directory-unavailable";return q;}
             GUID id{};wchar_t nonce[64]{};
             if(FAILED(CoCreateGuid(&id))||!StringFromGUID2(id,nonce,64)) {q.readError="diagnostic-identity-unavailable";return q;}
-            const std::wstring stem=std::wstring(L"windows-sleepstudy-")+nonce;
+            const std::wstring stem=std::wstring(L"windows-systempowerreport-")+nonce;
             reportPath=root/(stem+L".xml");receiptPath=root/(stem+L".json");
             for(const auto& path:{reportPath,receiptPath}) {
                 ec.clear();const auto state=fspath::symlink_status(path,ec);
@@ -79,11 +78,18 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
             if(!count||count>=32768) {q.readError="absolute-System32-unavailable";return q;}
             const auto exe=std::wstring(system,count)+L"\\powercfg.exe";
             if(exe.size()<3||exe[1]!=L':'||exe[2]!=L'\\') {q.readError="System32-path-not-absolute";return q;}
-            const auto cmd=quote_windows_arg(exe)+L" /sleepstudy /xml /duration 1 /output "+quote_windows_arg(reportPath.wstring());
-            const auto run=runCapture(cmd,timeout,[&]{return !current();});
+            const auto cmd=quote_windows_arg(exe)+L" /systempowerreport /xml /duration 1 /output "+quote_windows_arg(reportPath.wstring());
+            const auto commandStarted=GetTickCount64();
+            const auto run=runCapture(cmd,timeout,[&]{return !current();},nullptr,nullptr,nullptr,&captureLoopTiming);
+            captureCallMs=GetTickCount64()-commandStarted;
+            preparationMs=commandStarted-started;
             q.ran=run.ran;q.exitCode=run.exitCode;q.completion=run.completion;q.win32Error=run.win32Error;
-            commandOutputBytes=run.out.size();
+            commandTimedOut=q.ran&&q.exitCode==ERROR_TIMEOUT&&q.win32Error==ERROR_SUCCESS&&q.completion=="deadline";
+            commandOutputBytes=run.out.size();commandFinalization=run.captureFinalization;
+            if(!q.ran||q.exitCode!=0||q.win32Error!=0||q.completion!="child-exit")
+                commandFailureOutput.observe(run.out);
             if(run.ran&&run.exitCode==0&&q.completion=="child-exit"&&current()) {
+                const auto readStarted=GetTickCount64();
                 ec.clear();const auto state=fspath::symlink_status(reportPath,ec);
                 if(ec||state.type()!=fspath::file_type::regular)q.readError="current-report-not-regular";
                 else {
@@ -95,12 +101,98 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
                         if(in.gcount()!=static_cast<std::streamsize>(bytes)||in.peek()!=std::char_traits<char>::eof()) {q.xml.clear();q.readError="current-report-changed-or-unreadable";}
                     }
                 }
+                reportFileReadMs=GetTickCount64()-readStarted;
             }
         }catch(...){q.xml.clear();q.readError="diagnostic-query-exception";}
-        q.elapsedMs=GetTickCount64()-started;return q;
+        q.elapsedMs=GetTickCount64()-started;
+        return q;
+    };
+    bool deadlineRecorded=false;
+    const auto query=[&](std::uint32_t timeout){
+        auto result=runQuery(timeout);
+        if(current())try {
+            recentDeadline.observe(generation,GetTickCount64(),result,exportId);
+            deadlineRecorded=recentDeadline.known;
+        }catch(...){recentDeadline.known=false;}
+        return result;
     };
     try {
-        result.receipt=ymcc::sleepexport::collect(sgSleepExportFactCandidates(),current,query);
+        result.receipt=ymcc::sleepexport::collectWithAnomaly(sgSleepExportSelectAnomaly,current,query,
+            &recentDeadline,generation,GetTickCount64());
+        if(deadlineRecorded)try {
+            if(result.receipt.contains("query") && result.receipt.value("reason","")=="query-not-completed-successfully")
+                result.receipt["deadlineRetryPolicy"]=recentDeadline.retryPolicy();
+        }catch(...){}
+        const auto& deadlineJob=captureLoopTiming.deadlineJob;
+        if(commandTimedOut&&result.receipt.contains("query")&&deadlineJob.observed&&current())try {
+            result.receipt["deadlineJobAccounting"]={{"schema",1},{"scope","owned-command-job-before-deadline-termination"},
+                {"available",deadlineJob.available},{"elapsedMs",deadlineJob.elapsedMs},
+                {"win32Error",deadlineJob.available?json(nullptr):json(deadlineJob.win32Error)},
+                {"totalProcesses",deadlineJob.available?json(deadlineJob.totalProcesses):json(nullptr)},
+                {"activeProcesses",deadlineJob.available?json(deadlineJob.activeProcesses):json(nullptr)},
+                {"userTime100ns",deadlineJob.available?json(deadlineJob.userTime100ns):json(nullptr)},
+                {"kernelTime100ns",deadlineJob.available?json(deadlineJob.kernelTime100ns):json(nullptr)}};
+        }catch(...){}
+        const auto& deadlineRoot=captureLoopTiming.deadlineRoot;
+        if(commandTimedOut&&result.receipt.contains("query")&&deadlineRoot.observed&&current())try {
+            result.receipt["deadlineRootAccounting"]={{"schema",1},{"scope","owned-command-root-before-deadline-termination"},
+                {"available",deadlineRoot.available},{"elapsedMs",deadlineRoot.elapsedMs},
+                {"win32Error",deadlineRoot.available?json(nullptr):json(deadlineRoot.win32Error)},
+                {"userTime100ns",deadlineRoot.available?json(deadlineRoot.userTime100ns):json(nullptr)},
+                {"kernelTime100ns",deadlineRoot.available?json(deadlineRoot.kernelTime100ns):json(nullptr)}};
+        }catch(...){}
+        // Inspect the owned output name once after capture, without consuming a failed report.
+        if(commandTimedOut&&result.receipt.contains("query")&&!reportPath.empty()&&current())try {
+            WIN32_FILE_ATTRIBUTE_DATA info{};
+            const auto started=GetTickCount64();
+            const bool found=GetFileAttributesExW(reportPath.c_str(),GetFileExInfoStandard,&info)!=FALSE;
+            const DWORD error=found?ERROR_SUCCESS:GetLastError();
+            const auto elapsed=GetTickCount64()-started;
+            if(current()) {
+                const bool regular=found&&!(info.dwFileAttributes&
+                    (FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DEVICE));
+                const auto size=(static_cast<std::uint64_t>(info.nFileSizeHigh)<<32)|info.nFileSizeLow;
+                result.receipt["deadlineReportPath"]={{"schema",1},{"scope","owned-report-path-after-current-capture-deadline;metadata-only"},
+                    {"state",regular?"regular-file-metadata":found?"non-regular-path":
+                        (error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)?"path-not-found":"attribute-query-failed"},
+                    {"bytes",regular?json(size):json(nullptr)},{"win32Error",found?json(nullptr):json(error)},
+                    {"elapsedMs",elapsed}};
+            }
+        }catch(...){}
+        unsigned finalizationEvidenceBuildFailures=0;
+        if(!result.receipt.contains("query"))commandFinalization.entered=false;
+        try {
+            auto evidence=ymcc::sleepexport::captureFinalizationEvidence(commandFinalization);
+            if(evidence.is_null())++finalizationEvidenceBuildFailures;
+            result.receipt["commandCaptureFinalization"]=std::move(evidence);
+        }catch(...){++finalizationEvidenceBuildFailures;}
+        try{result.receipt["commandCaptureFinalizationBuildFailures"]=finalizationEvidenceBuildFailures;}catch(...){}
+        if(result.receipt.contains("query")&&captureCallMs&&preparationMs)try {
+            json phases={{"preparation",*preparationMs},{"captureCall",*captureCallMs}};
+            if(captureLoopTiming.observed) {
+                phases["setupThroughResume"]=captureLoopTiming.setupThroughResumeElapsedMs;
+                phases["captureLoop"]=captureLoopTiming.loopElapsedMs;
+            }
+            if(reportFileReadMs)phases["reportFileRead"]=*reportFileReadMs;
+            result.receipt["queryPhaseElapsedMs"]=std::move(phases);
+        }catch(...){}
+        unsigned outputEvidenceBuildFailures=0;
+        if(!result.receipt.contains("query"))commandFailureOutput.observed=false;
+        // Final drainage after job termination can see pipe closure that did not occur in the capture loop.
+        const auto& pipe=captureLoopTiming.pipe;
+        if(commandFailureOutput.observed&&captureLoopTiming.observed&&pipe.observed())try {
+            result.receipt["commandCapturePipe"]={{"schema",1},{"scope","current-failed-query-capture-loop-before-finalization"},
+                {"emptyPeekObserved",pipe.emptyPeekObserved},{"nonemptyPeekObserved",pipe.nonemptyPeekObserved},
+                {"emptyReadObserved",pipe.emptyReadObserved},{"bytesReadObserved",pipe.bytesReadObserved},
+                {"firstPeekError",pipe.firstPeekError?json(*pipe.firstPeekError):json(nullptr)},
+                {"firstReadError",pipe.firstReadError?json(*pipe.firstReadError):json(nullptr)}};
+        }catch(...){}
+        try {
+            auto bytes=ymcc::sleepexport::queryFailureOutputBytesEvidence(commandFailureOutput);
+            if(bytes.is_null())++outputEvidenceBuildFailures;
+            result.receipt["commandFailureOutputBytes"]=std::move(bytes);
+        }catch(...){++outputEvidenceBuildFailures;}
+        try{result.receipt["commandFailureOutputEvidenceBuildFailures"]=outputEvidenceBuildFailures;}catch(...){}
         result.receipt["commandOutputBytes"]=commandOutputBytes;
         result.receipt["historyDays"]=1;
         result.receipt["correlation"]="Windows report history; match original event timestamp; not live retry authority";
@@ -118,5 +210,6 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
         result.files.clear();result.receipt={{"status","UNKNOWN"},{"reportAvailable",false},
             {"reason","diagnostic-export-exception"},{"automaticRepairAuthorized",false},{"mandatoryEvidence",true}};
     }
-    return result;
+    // Keep cleanup with the local owner until this explicit handoff.
+    return SgWindowsSleepExport(std::move(result));
 }

@@ -3,7 +3,7 @@
   "caseId": "sleep.single-pid-freeze-consumer",
   "fixture": {
     "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/fixture.cpp.in",
-    "sha256": "775f2a86ff8efc4c5f98813a059b981e076f4c7cba28b3980e6d0e62e4e2b878",
+    "sha256": "d0fec76de697cfed1de7ce57335ec2ee15b457e344bb2b35d100047b9007674c",
     "positiveGroups": 26
   },
   "productSources": [
@@ -33,7 +33,10 @@
     "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
     "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
     "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json"
   ],
   "reviewedSharedLeafIdentities": [
     {
@@ -42,39 +45,39 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
-      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+      "sha256": "7e5600fdd9a0e396a4d75b96f4ed4f6eaad178d12eae74a139e9aa9aafc55738"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+      "sha256": "de5026dfc3c6207a92b979f1f43d3b7c8cdcc0764f8a77c81c56ed69cca5173b"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
-      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+      "sha256": "30ea844250b2735c55d26ea582bf9d4318181d181dc2d260908dff8e2bdb417d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
-      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+      "sha256": "920faaf9193486e91a82a71c22f27c11e6696f7257b4e250f6fec0836ec51728"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
-      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+      "sha256": "4a01815cd4bf7aaca1b9624d998c5121d273077a9bee75aae1101f4c5bdf440f"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
-      "sha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3"
+      "sha256": "dd666ee2db082b2df9f9be93e220e1ec2febe46a827f7fa92e8025009746ca4c"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "39aa4ead41e3f519eb3eae18e03d744409ae5da4d2522039baef86378d69afaa"
+      "sha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
-      "sha256": "e3d5fecda246cfc4f75861eedeff5b6ea93fad4eccaaafcb7bf644a6e4d403f2"
+      "sha256": "f348f7aa4cc5d48ae494ed3b992564cc280a09ba6b8a569e51531ff7da8ae6c8"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
@@ -90,7 +93,19 @@
     },
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "5b531a161afb33cd0596b92444a38caabb9fe2e23b80c981516f71c926a6c3bb"
+      "sha256": "0779bc14096e2e8cdcc7046cf3072bfdd36fb4ed8d1c01f969b8babb2759efdb"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+      "sha256": "de30cde09750df4d5333888d776d49fc48300e3877d0fb5de07bc59bf4dd900b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+      "sha256": "9f65184c97fd697d1e88948c89310f452bf3ecc3426e7ed02621710f54170426"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+      "sha256": "59fe824f254e4e9ec2114338edbc7b061a81ffe0cda14bcca0f6dec86de69199"
     }
   ],
   "reviewedFunctions": [
@@ -108,11 +123,11 @@
     },
     {
       "name": "sgSuspendGameByPidUnlocked",
-      "sha256": "990a30a256b07b0b5f604b9269193dbcc0f775a7b230f815f65390537b2a96d3"
+      "sha256": "5baed197f584080446043fd1ddd2c5d4a60bd0abfe378adc5619eea61d259515"
     }
   ],
-  "externalPorts": 17,
-  "portScope": "17 analyzed direct helper callouts:14 explicit memory fixture ports and3 exact pure production marker parsers. Parsers read the fixture memory sgReadFile leaf. Actual sgSuspendGameByPidUnlocked executes with countedNativeSuspend pointer only; no real NT, process,Host,Steam or device operation.",
+  "externalPorts": 22,
+  "portScope": "22 direct callouts: 19 memory ports and 3 exact marker parsers. Startup inventory and pause file ownership are controlled in memory; optional manual callbacks remain absent on the original paths.",
   "faults": [
     {
       "label": "fault-opened-identity",
@@ -149,8 +164,8 @@
     {
       "label": "fault-native-failure-status",
       "path": "native/main.cpp",
-      "before": "if (h) CloseHandle(h);\n            if (status >= 0) {",
-      "after": "if (h) CloseHandle(h);\n            if (status >= 0 || (identityMatches && fnNtSuspend)) {",
+      "before": "if (status >= 0) {\n                if (!markerDir.empty())\n                    sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration);",
+      "after": "if (status >= 0 || (identityMatches && fnNtSuspend)) {\n                if (!markerDir.empty())\n                    sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration);",
       "expectedAssertion": "!r.at(\"paused\").get<bool>()&&r.at(\"okCount\")==0&&r.at(\"failCount\")==1&&suspendedPids==std::vector<DWORD>{100}&&markers.empty()&&closedHandles==std::vector<DWORD>{100}",
       "expectedContextMarker": "nativeOk=false"
     }
@@ -162,7 +177,7 @@
     "comparisons": 1524,
     "publicAccepted": false
   },
-  "directDependencyCallouts": 17,
+  "directDependencyCallouts": 22,
   "dependencyBoundary": [
     {
       "name": "nativeValveValidateCurrentTarget",
@@ -264,6 +279,36 @@
       "name": "CloseHandle",
       "role": "release owned opened handle",
       "safeTestBoundary": "memory handle bookkeeping",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "GetLastError",
+      "role": "read actual OpenProcess error",
+      "safeTestBoundary": "inert fixture diagnostic value; not OS/process/action authority",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "GetTickCount64",
+      "role": "record actual NT dispatch and return timestamps",
+      "safeTestBoundary": "inert fixture diagnostic value; not OS/process/action authority",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgCollectStartupResumeScopeUnlocked",
+      "role": "submit startup inventory before pause",
+      "safeTestBoundary": "inert in the pause fixture; startup inventory has a separate consumer",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgAcquirePauseFiles",
+      "role": "obtain a pause lease for the selected directory and PID",
+      "safeTestBoundary": "memory lease only; no real file handles",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "ResumeLease::current",
+      "role": "check pause lease and current request before side effects",
+      "safeTestBoundary": "memory lease and supplied guard only",
       "implementation": "explicit fixture memory port"
     }
   ],
@@ -389,8 +434,12 @@
     "sourceApproval": false
   },
   "sourceCompatibilityReview": {
-    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
+    "manifest": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+    "sha256": "59fe824f254e4e9ec2114338edbc7b061a81ffe0cda14bcca0f6dec86de69199",
+    "reviewedInheritedRules": [
+      "archiveCompilerInputs",
+      "environment"
+    ],
     "oldIdentitiesRetained": true,
     "fullReverseDeltaRequired": true,
     "sourceApproval": false
@@ -593,5 +642,68 @@
       }
     ],
     "originalGroupsAndNegativesPreserved": true
+  },
+  "activePauseSourceMaintenance": {
+    "changedSharedLeafIdentities": [
+      {
+        "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+        "beforeSha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344",
+        "afterSha256": "7e5600fdd9a0e396a4d75b96f4ed4f6eaad178d12eae74a139e9aa9aafc55738"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+        "beforeSha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b",
+        "afterSha256": "de5026dfc3c6207a92b979f1f43d3b7c8cdcc0764f8a77c81c56ed69cca5173b"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+        "beforeSha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1",
+        "afterSha256": "30ea844250b2735c55d26ea582bf9d4318181d181dc2d260908dff8e2bdb417d"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+        "beforeSha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547",
+        "afterSha256": "920faaf9193486e91a82a71c22f27c11e6696f7257b4e250f6fec0836ec51728"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+        "beforeSha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7",
+        "afterSha256": "4a01815cd4bf7aaca1b9624d998c5121d273077a9bee75aae1101f4c5bdf440f"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+        "beforeSha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3",
+        "afterSha256": "dd666ee2db082b2df9f9be93e220e1ec2febe46a827f7fa92e8025009746ca4c"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+        "beforeSha256": "39aa4ead41e3f519eb3eae18e03d744409ae5da4d2522039baef86378d69afaa",
+        "afterSha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+        "beforeSha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004",
+        "afterSha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
+      },
+      {
+        "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+        "beforeSha256": "e3d5fecda246cfc4f75861eedeff5b6ea93fad4eccaaafcb7bf644a6e4d403f2",
+        "afterSha256": "f348f7aa4cc5d48ae494ed3b992564cc280a09ba6b8a569e51531ff7da8ae6c8"
+      },
+      {
+        "path": "tools/ymcc_sim/global/host-process.ps1",
+        "beforeSha256": "5b531a161afb33cd0596b92444a38caabb9fe2e23b80c981516f71c926a6c3bb",
+        "afterSha256": "0779bc14096e2e8cdcc7046cf3072bfdd36fb4ed8d1c01f969b8babb2759efdb"
+      }
+    ],
+    "priorSourceCompatibilityReview": {
+      "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+      "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
+      "oldIdentitiesRetained": true,
+      "fullReverseDeltaRequired": true,
+      "sourceApproval": false
+    },
+    "evidencePathExportUnchanged": true,
+    "originalAssertionsAndFaultsUnchanged": true
   }
 }

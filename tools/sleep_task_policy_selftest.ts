@@ -123,7 +123,7 @@ requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 5000ULL');
 requireNative('if (wakeReason != 7 && wakeReason != 8) return false;');
 requireNative('const bool userIntent506 = sleepReason == 1 || sleepReason == 3;');
 requireNative('sgStartSleepRetry(SgRetryKind::EntryFailure, "s0-kernel-entry-failure")');
-requireNative('sgAdvanceSleepRetry("s0-retry-entry-failure")');
+requireNative('sgObserveUnattributedSleepRetryFailure("s0-retry-entry-failure",wakeReason,wakeAt)');
 const s0Wake = section('case WM_SG_S0_WAKE:', 'case WM_SG_S4_WAKE:');
 assert.ok(
   s0Wake.indexOf('if (entryFailure) {') >= 0 &&
@@ -162,9 +162,9 @@ assert.ok(!acdcOnly.includes('sgEvaluateExternalDeviceWake();'),
 // Automatic wake never restores the lease. Explicit user/S4/query-cancel/failure does.
 requireNative('sleep automatic wake held for explicit user resume');
 requireNative('handlePowerResumeNotification(SgWork::WakeSuspend, "resume_suspend")');
-requireNative('sgAbortSleepIntent("s0-user-power-button-wake")');
-requireNative('sgAbortSleepIntent("kernel-s4-wake")');
-requireNative('sgAbortSleepIntent("query-canceled")');
+requireNative('sgAbortSleepIntent("s0-user-power-button-wake", eventFileTime)');
+requireNative('sgAbortSleepIntent("kernel-s4-wake", static_cast<ULONGLONG>(l))');
+requireNative('sgAbortSleepIntent("query-canceled", powerReceipt.fileTime100ns)');
 requireNative('static void sgFinishSleepRetryFailure(const char* reason)');
 requireNative('sgResumeTrackedAll();');
 

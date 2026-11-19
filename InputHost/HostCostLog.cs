@@ -18,23 +18,32 @@ internal static class HostCostLog
 
     internal static object Snapshot() => new
     {
-        schemaVersion = 3, fileMaxBytes = FileMaxBytes, recordMaxBytes = RecordMaxBytes,
+        // Policy text for this window schema lives in the export reading guide.
+        schemaVersion = 4, fileMaxBytes = FileMaxBytes, recordMaxBytes = RecordMaxBytes,
         retainedBytesBudget = HostCostArchive.TotalMaxBytes,
-        budgetScope = "single-active-file;newest-complete-lines;no-new-archives;legacy-cleanup-status-explicit",
-        archive = HostCostArchive.Snapshot(), compactions = Interlocked.Read(ref _compactions), rotations = 0,
+        archive = HostCostArchive.Snapshot(includePolicyText: false), compactions = Interlocked.Read(ref _compactions), rotations = 0,
         ioFailures = Interlocked.Read(ref _ioFailures), contended = Interlocked.Read(ref _contended),
-        oversizeRows = Interlocked.Read(ref _oversize), archiveBackpressure = 0,
-        scope = "active-payload-byte-cap;receipt-excluded;writer-process-counters;not-atomic-with-export-or-other-Host-processes"
+        oversizeRows = Interlocked.Read(ref _oversize), archiveBackpressure = 0
     };
 
     internal static bool Append(string directory, string line,
         int fileMaxBytes = FileMaxBytes, int recordMaxBytes = RecordMaxBytes, bool scheduleArchive = true)
     {
-        // Injectable limits/dispatch are for isolated file fixtures only.
         try
         {
             if (fileMaxBytes <= 0 || recordMaxBytes <= 0 || string.IsNullOrEmpty(line)) return false;
-            var bytes = Utf8.GetBytes(line);
+            return AppendUtf8(directory, Utf8.GetBytes(line), fileMaxBytes, recordMaxBytes, scheduleArchive);
+        }
+        catch { Interlocked.Increment(ref _ioFailures); return false; }
+    }
+
+    internal static bool AppendUtf8(string directory, byte[] bytes,
+        int fileMaxBytes = FileMaxBytes, int recordMaxBytes = RecordMaxBytes, bool scheduleArchive = true)
+    {
+        // Injectable limits/dispatch are for isolated file fixtures only.
+        try
+        {
+            if (fileMaxBytes <= 0 || recordMaxBytes <= 0 || bytes.Length == 0) return false;
             if (bytes.Length + 1 > recordMaxBytes)
             {
                 Interlocked.Increment(ref _oversize);

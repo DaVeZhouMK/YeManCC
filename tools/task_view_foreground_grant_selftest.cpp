@@ -2,6 +2,10 @@
 #define NOMINMAX
 #include <windows.h>
 #include <cstdint>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -16,6 +20,8 @@ namespace forbidden_os {
 ULONGLONG tick(); DWORD thread(); DWORD process(); DWORD window(HWND, LPDWORD);
 HWND foreground(); DWORD error(); void setError(DWORD); BOOL allow(DWORD);
 LRESULT send(HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR);
+HANDLE currentProcess(); BOOL duplicate(HANDLE,HANDLE,HANDLE,LPHANDLE,DWORD,BOOL,DWORD);
+DWORD childId(HANDLE); BOOL close(HANDLE);
 }
 #define GetTickCount64 forbidden_os::tick
 #define GetCurrentThreadId forbidden_os::thread
@@ -26,6 +32,10 @@ LRESULT send(HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR);
 #define SetLastError forbidden_os::setError
 #define AllowSetForegroundWindow forbidden_os::allow
 #define SendMessageTimeoutW forbidden_os::send
+#define GetCurrentProcess forbidden_os::currentProcess
+#define DuplicateHandle forbidden_os::duplicate
+#define GetProcessId forbidden_os::childId
+#define CloseHandle forbidden_os::close
 #include "../native/task_view_foreground_grant.h"
 
 using json = nlohmann::json;
@@ -107,13 +117,96 @@ struct FakeOps {
             check(std::find(allowed.begin(),allowed.end(),operation) != allowed.end(),"unexpected side effect");
         for (const auto& attempt : allows) {
             check(attempt.pid != 0 && attempt.pid != ASFW_ANY,"broad/invalid grant");
-            check(attempt.foreground == hwnd(1) || attempt.foreground == hwnd(2) || attempt.foreground == hwnd(4),"grant while foreign foreground");
+            check(attempt.thread == uiThread,"grant must remain on owning UI thread");
         }
         check(!sendCalls || (destination == hwnd(1) && waitSeen == 250 && tokenSeen != 0),"message target/token/budget");
         // There is deliberately no focus/input mutator in Ops. Source and import audits
         // independently reject real focus, input, process and COM calls before execution.
     }
 };
+
+// Pause the receiving thread after the broker claims a token but before its OS call.
+// Sender and receiver have separate Ops/error/trace storage; only the gate is shared.
+struct DeliveryGate {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false, released = false, gateTimedOut = false;
+    bool insideApi = false, beforeClaim = false;
+    std::size_t allowCount = 0;
+    fg::DeliveryReceipt completion;
+    void pause() noexcept {
+        std::unique_lock<std::mutex> lock(mutex);
+        entered = true; cv.notify_all();
+        if (!cv.wait_for(lock,std::chrono::seconds(5),[&] { return released; })) gateTimedOut = true;
+    }
+    bool waitEntered() noexcept {
+        std::unique_lock<std::mutex> lock(mutex);
+        return cv.wait_for(lock,std::chrono::seconds(3),[&] { return entered; });
+    }
+    void release() noexcept { std::lock_guard<std::mutex> lock(mutex); released = true; cv.notify_all(); }
+};
+struct InFlightOps : FakeOps {
+    DeliveryGate& gate;
+    bool receiver;
+    std::thread delivery;
+    bool enteredInTime = false;
+    InFlightOps(fg::Broker& value, DeliveryGate& sync, bool ui = false) : FakeOps(value), gate(sync), receiver(ui) {
+        if (receiver) current = uiThread;
+    }
+    ~InFlightOps() { finish(); }
+    void finish() noexcept { gate.release(); if (delivery.joinable()) delivery.join(); }
+    void setError(DWORD value) noexcept {
+        FakeOps::setError(value);
+        if (receiver && value == ERROR_SUCCESS && !gate.insideApi && !gate.beforeClaim) gate.pause();
+    }
+    DWORD windowThread(HWND window, DWORD& pid) noexcept {
+        const auto result = FakeOps::windowThread(window,pid);
+        if (receiver && gate.beforeClaim) gate.pause();
+        return result;
+    }
+    bool allow(DWORD pid) noexcept {
+        const bool result = FakeOps::allow(pid);
+        if (receiver && gate.insideApi) gate.pause();
+        return result;
+    }
+    bool send(HWND window, WPARAM token, DWORD wait, DWORD_PTR&) noexcept {
+        trace.push_back("send"); ++sendCalls; destination = window; tokenSeen = token;
+        tokens.push_back(token); waitSeen = wait;
+        delivery = std::thread([this,window,token] {
+            InFlightOps ui(broker,gate,true);
+            broker.deliver(ui,window,token,&gate.completion);
+            gate.allowCount = ui.allows.size();
+        });
+        enteredInTime = gate.waitEntered();
+        lastError = ERROR_TIMEOUT;
+        return false;
+    }
+};
+
+
+struct PinModel {
+    HANDLE original = reinterpret_cast<HANDLE>(0x501), copy = reinterpret_cast<HANDLE>(0x502);
+    DWORD pid = readyChild, lastError = 0;
+    unsigned duplicates = 0, closes = 0;
+    bool originalOpen = true, copyOpen = false, failDuplicate = false;
+    HANDLE duplicatedFrom = nullptr;
+};
+struct PinOps {
+    std::shared_ptr<PinModel> model;
+    void setError(DWORD error) const noexcept { model->lastError = error; }
+    HANDLE duplicate(HANDLE original) const noexcept {
+        ++model->duplicates; model->duplicatedFrom = original;
+        if (model->failDuplicate || original != model->original || !model->originalOpen) {
+            model->lastError = ERROR_ACCESS_DENIED; return nullptr;
+        }
+        model->copyOpen = true; return model->copy;
+    }
+    DWORD childId(HANDLE copy) const noexcept { return copy == model->copy && model->copyOpen ? model->pid : 0; }
+    void close(HANDLE copy) const noexcept {
+        if (copy == model->copy && model->copyOpen) { ++model->closes; model->copyOpen = false; }
+    }
+};
+
 void outcome(bool accepted, const FakeOps& ops, bool expected, DWORD error, std::size_t allows, unsigned sends) {
     check(accepted == expected,"request acceptance");
     check(ops.lastError == error,"error was lost or rewritten");
@@ -143,7 +236,8 @@ template<class F> void run(const char* name, F test) {
 int main() {
     using namespace fixture;
     run("constants-opaque-scalar-token-and-250ms-bound",[] {
-        check(fg::message == WM_APP + 825,"message identifier");
+        check(fg::message == WM_APP + 831,"message identifier");
+        check(fg::message != WM_APP + 825 && fg::message != WM_APP + 830,"sleep evidence/minimize message collision");
         check(fg::maximumWaitMs == 250,"250ms maximum");
     });
     run("assumed-permission-model-pool-denied-owner-ui-accepted",[] {
@@ -172,10 +266,10 @@ int main() {
         check(receipt.stage == (allowed ? fg::DeliveryStage::ApiAccepted : fg::DeliveryStage::ApiRejected),"actual API stage lost");
         check(receipt.error == o.lastError,"API error not bound to scalar receipt");
     });
-    run("receipt-foreign-foreground-is-not-a-windows-api-denial",[] {
-        fg::Broker b; FakeOps o(b); o.foreground=hwnd(3); fg::DeliveryReceipt receipt;
-        outcome(b.request(o,hwnd(1),readyChild,&receipt),o,false,5,0,1);
-        check(receipt.stage==fg::DeliveryStage::ForeignForeground && !receipt.apiAttempted(),"guard masquerades as API failure");
+    run("receipt-foreign-foreground-defers-to-real-windows-authority",[] {
+        fg::Broker b; FakeOps o(b); o.foreground=hwnd(3); o.apiAccepted=false;fg::DeliveryReceipt receipt;
+        outcome(b.request(o,hwnd(1),readyChild,&receipt),o,false,5,1,1);
+        check(receipt.stage==fg::DeliveryStage::ApiRejected && receipt.apiAttempted(),"OS rejection must remain explicit");
     });
     run("receipt-wrong-ui-thread-is-not-a-windows-api-denial",[] {
         fg::Broker b; FakeOps o(b); o.deliveryThread=poolThread; fg::DeliveryReceipt receipt;
@@ -209,13 +303,13 @@ int main() {
         fg::Broker b; FakeOps o(b); o.deliveryThread = poolThread;
         outcome(b.request(o,hwnd(1),readyChild),o,false,5,0,1);
     });
-    for (const bool lost : {false,true}) run(lost ? "lost-foreground-denied" : "foreign-foreground-denied",[lost] {
+    for (const bool lost : {false,true}) run(lost ? "null-foreground-windows-authority" : "foreign-foreground-windows-authority",[lost] {
         fg::Broker b; FakeOps o(b); o.foreground = lost ? nullptr : hwnd(3);
-        outcome(b.request(o,hwnd(1),readyChild),o,false,5,0,1);
+        outcome(b.request(o,hwnd(1),readyChild),o,true,0,1,1);
     });
     for (const bool lost : {false,true}) run(lost ? "foreground-lost-during-send" : "foreground-changed-during-send",[lost] {
         fg::Broker b; FakeOps o(b); o.beforeDeliver = [&] { o.foreground = lost ? nullptr : hwnd(3); };
-        outcome(b.request(o,hwnd(1),readyChild),o,false,5,0,1);
+        outcome(b.request(o,hwnd(1),readyChild),o,true,0,1,1);
     });
     run("same-process-other-foreground-window-accepted",[] {
         fg::Broker b; FakeOps o(b); o.foreground = hwnd(4);
@@ -376,11 +470,107 @@ int main() {
         outcome(b.request(o,hwnd(1),readyChild + 1),o,true,0,1,2);
         check(o.tokens.size() == 2 && o.tokens[0] != o.tokens[1] && o.allows[0].pid == readyChild + 1,"retry reused token/child");
     });
+
+    run("timeout-after-token-claim-keeps-single-inflight",[] {
+        fg::Broker b; DeliveryGate gate; InFlightOps sender(b,gate);
+        fg::DeliveryReceipt receipt;
+        const bool first = b.request(sender,hwnd(1),readyChild,&receipt);
+        FakeOps next(b);
+        const bool second = b.request(next,hwnd(1),readyChild+1);
+        const DWORD secondError = next.lastError;
+        const auto secondSends = next.sendCalls;
+        const auto secondAllows = next.allows.size();
+        sender.finish();
+        check(sender.enteredInTime && !gate.gateTimedOut,"bounded cross-thread rendezvous");
+        check(!first && !receipt.deliveryKnown() && receipt.error == ERROR_TIMEOUT,"sender timeout receipt changed");
+        check(!second && secondError == ERROR_BUSY && secondSends == 0 && secondAllows == 0,"timeout admitted another grant while old delivery still entered");
+        outcome(b.request(next,hwnd(1),readyChild+1),next,true,0,1,1);
+    });
+    run("cancel-before-os-entry-does-not-run-late-grant",[] {
+        fg::Broker b; DeliveryGate gate; InFlightOps sender(b,gate);
+        fg::DeliveryReceipt receipt;
+        const bool accepted = b.request(sender,hwnd(1),readyChild,&receipt);
+        sender.finish();
+        check(sender.enteredInTime && !gate.gateTimedOut,"bounded cross-thread rendezvous");
+        check(!accepted && !receipt.deliveryKnown(),"timeout incorrectly claims withdrawal/known OS outcome");
+        check(gate.allowCount == 0 && gate.completion.stage == fg::DeliveryStage::Cancelled,"cancelled entered delivery invoked OS after sender returned");
+    });
+
+
+    run("duplicate-original-process-handle-pins-exact-identity",[] {
+        auto model = std::make_shared<PinModel>();
+        auto pin = fg::pinProcess(PinOps{model},model->original,readyChild);
+        check(pin && pin.get() == model->copy && model->copyOpen,"duplicate was not retained");
+        check(model->duplicates == 1 && model->duplicatedFrom == model->original,"identity was reopened or wrong handle duplicated");
+        model->originalOpen = false;
+        auto receiverPin = pin; pin.reset();
+        check(model->copyOpen && model->closes == 0,"sender release lost exact process identity");
+        receiverPin.reset();
+        check(!model->copyOpen && model->closes == 1,"process identity not closed exactly once");
+    });
+    run("duplicate-failure-and-child-mismatch-never-publish-identity",[] {
+        auto model = std::make_shared<PinModel>(); model->failDuplicate = true;
+        check(!fg::pinProcess(PinOps{model},model->original,readyChild),"failed duplicate accepted");
+        check(model->lastError == ERROR_ACCESS_DENIED && model->closes == 0,"duplicate error/ownership changed");
+        model->failDuplicate = false; model->pid = readyChild+1;
+        check(!fg::pinProcess(PinOps{model},model->original,readyChild),"wrong process identity accepted");
+        check(model->lastError == ERROR_INVALID_PARAMETER && model->closes == 1 && !model->copyOpen,"wrong identity leaked");
+        const auto duplicates = model->duplicates;
+        check(!fg::pinProcess(PinOps{model},nullptr,readyChild) && model->duplicates == duplicates,"invalid original handle duplicated");
+    });
+    run("timed-out-inflight-retains-original-process-pin-until-completion",[] {
+        fg::Broker b; DeliveryGate gate; InFlightOps sender(b,gate);
+        auto model = std::make_shared<PinModel>();
+        auto pin = fg::pinProcess(PinOps{model},model->original,readyChild);
+        fg::DeliveryReceipt receipt;
+        const bool accepted = b.request(sender,hwnd(1),readyChild,&receipt,pin);
+        model->originalOpen = false; pin.reset();
+        const bool pinnedAfterSender = model->copyOpen && model->closes == 0;
+        sender.finish();
+        check(sender.enteredInTime && !gate.gateTimedOut,"bounded cross-thread rendezvous");
+        check(!accepted && !receipt.deliveryKnown() && pinnedAfterSender,"timeout lost its exact original helper identity");
+        check(gate.allowCount == 0 && !model->copyOpen && model->closes == 1,"cancelled delivery leaked identity or ran OS");
+    });
+    run("old-preclaim-snapshot-cannot-read-replacement-request",[] {
+        fg::Broker b; DeliveryGate gate; gate.beforeClaim = true; InFlightOps sender(b,gate);
+        auto model = std::make_shared<PinModel>();
+        auto pin = fg::pinProcess(PinOps{model},model->original,readyChild);
+        fg::DeliveryReceipt receipt;
+        const bool accepted = b.request(sender,hwnd(1),readyChild,&receipt,pin);
+        pin.reset(); model->originalOpen = false;
+        FakeOps next(b);
+        const bool second = b.request(next,hwnd(1),readyChild+1);
+        const bool oldStillPinned = model->copyOpen;
+        sender.finish();
+        check(sender.enteredInTime && !gate.gateTimedOut,"bounded cross-thread rendezvous");
+        check(!accepted && !receipt.deliveryKnown() && second,"cancelled pending slot failed to admit independent request");
+        check(oldStillPinned && gate.allowCount == 0 && gate.completion.stage == fg::DeliveryStage::Cancelled,"old snapshot read/released replacement identity");
+        check(next.allows.size() == 1 && next.allows.front().pid == readyChild+1 && model->closes == 1,"replacement or original identity corrupted");
+    });
+    run("timeout-inside-os-call-remains-unknown-pinned-and-single-inflight",[] {
+        fg::Broker b; DeliveryGate gate; gate.insideApi = true; InFlightOps sender(b,gate);
+        auto model = std::make_shared<PinModel>();
+        auto pin = fg::pinProcess(PinOps{model},model->original,readyChild);
+        fg::DeliveryReceipt receipt;
+        const bool accepted = b.request(sender,hwnd(1),readyChild,&receipt,pin);
+        pin.reset(); model->originalOpen = false;
+        const bool pinnedDuringCall = model->copyOpen;
+        FakeOps next(b); const bool second = b.request(next,hwnd(1),readyChild+1);
+        const DWORD secondError = next.lastError;
+        sender.finish();
+        check(sender.enteredInTime && !gate.gateTimedOut,"bounded cross-thread rendezvous");
+        check(!accepted && !receipt.deliveryKnown() && receipt.error == ERROR_TIMEOUT,"late OS completion overwrote sender unknown receipt");
+        check(!second && secondError == ERROR_BUSY && next.sendCalls == 0 && next.allows.empty(),"unknown in-OS result allowed replay/second grant");
+        check(pinnedDuringCall && gate.allowCount == 1 && gate.completion.apiAccepted(),"entered OS result incorrectly described as withdrawn");
+        check(!model->copyOpen && model->closes == 1,"completed OS call leaked process identity");
+        outcome(b.request(next,hwnd(1),readyChild+1),next,true,0,1,1);
+    });
+
     bool pass = true; for (const auto& item : cases) if (!item["pass"].get<bool>()) pass = false;
     std::cout << json({{"pass",pass},{"count",cases.size()},{"checks",checks},{"cases",cases},{"records",records},
         {"allOpsInMemory",true},{"actualOSInput",false},{"focusChangedByBroker",false},
         {"productExecuted",false},{"actualHelperExecuted",false},{"comInvoked",false},{"windowsOpsInvoked",false},
-        {"threadModel","logical pool/UI IDs; send invokes actual Broker::deliver synchronously"},
+        {"threadModel","logical pool/UI IDs plus bounded real-thread in-flight delivery rendezvous"},
         {"scope","actual foreground header under FakeOps; OS scheduling, COM and visible TaskView are not proven"}}).dump(2) << '\n';
     return pass ? 0 : 1;
 }

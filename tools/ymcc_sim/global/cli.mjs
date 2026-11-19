@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { configureCandidateAdapters } from './candidate-options.mjs';
+import { configureCandidateAdapters, validateCommonHidSelection } from './candidate-options.mjs';
 import { sha256File, runAdapters, validateAdapters, verdictFor, compareRuns, makeRunDirectory, defaultEvidenceRoot, makeCoverageWorkItems } from './runner.mjs';
 
 export function missingCatalogTools(resolve=specifier=>import.meta.resolve(specifier)){
@@ -17,9 +17,10 @@ export function missingCatalogTools(resolve=specifier=>import.meta.resolve(speci
 
 export function parseArgs(args) {
   const options = { mode: 'inventory', profile: 'desktop', domains: [], tests: [], receipts: [], requireAll: false };
-  const allowed = new Set(['mode','profile','domain','test','capability','out-dir','payload-root','powershell','log-path','baseline','candidate','log-root','archive','python','receipt','complete-host-contract','runtime-root','shared-runtime-root','lighting-payload-root','expected-helper-sha256','hc-profile','hc-version','legacy-host-root','fan-tool-load-plan','fan-tool-load-plan-sha256','monitor-field-log-input']);
+  const allowed = new Set(['mode','profile','domain','test','capability','out-dir','payload-root','powershell','log-path','baseline','candidate','log-root','archive','python','receipt','complete-host-contract','runtime-root','shared-runtime-root','lighting-payload-root','expected-helper-sha256','hc-profile','hc-version','legacy-host-root','fan-tool-load-plan','fan-tool-load-plan-sha256','monitor-field-log-input','common-hid-runtime-case','MainFile','HeaderRoot']);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if(arg==='--common-hid-runtime-only'){if(options.commonHidRuntimeOnly)throw Error('DUPLICATE_ARGUMENT:common-hid-runtime-only');options.commonHidRuntimeOnly=true;continue;}
     if (arg === '--require-all') { options.requireAll = true; continue; }
     if (arg === '--audit-registered') { if(options.auditRegistered)throw Error('DUPLICATE_ARGUMENT:audit-registered');options.auditRegistered=true;continue; }
     if (arg === '--help') { options.help = true; continue; }
@@ -40,6 +41,7 @@ export function parseArgs(args) {
   if(options.auditRegistered&&options.mode!=='audit')throw Error('AUDIT_REGISTERED_REQUIRES_AUDIT_MODE');
   if (options.monitorFieldLogInput && !['log-check','replay-plan'].includes(options.mode)) throw Error('MONITOR_FIELD_INPUT_REQUIRES_LOG_MODE');
   if (options.capabilities) assertCapabilityMode(options.mode);
+  validateCommonHidSelection(options);
   delete options._seen;
   return options;
 }
@@ -179,10 +181,12 @@ export async function main(args = process.argv.slice(2), { repoRoot = path.resol
     console.log('YMCC_SIM_ENVIRONMENT_BLOCKED '+JSON.stringify(environment));return 10;
   }
   const [{ buildCatalog }, { getAdapters }, sleep, ownership] = await Promise.all([import('./catalog.mjs'), import('./adapters.mjs'), import('./sleep.mjs'), import('./capability-lifecycle/ownership-catalog.mjs')]);
-  const {getExtraAdapters}=await import('./extra-adapters.mjs');
   const selectedIds=!options.capabilities&&options.tests.length&&['run','plan','audit'].includes(options.mode)?options.tests:undefined;
   const identityOnly=['plan','inventory'].includes(options.mode);
-  const adapters = validateAdapters(configureCandidateAdapters([...getAdapters(repoRoot,{identityOnly,selectedIds}), ...sleep.getSleepAdapters(repoRoot,{identityOnly,selectedIds}), ...getExtraAdapters(repoRoot,{selectedIds})], options), repoRoot);
+  const registered=options.commonHidRuntimeOnly
+    ? (await import('./controller-catalog/adapter.mjs')).getControllerCatalogAdapters(repoRoot).filter(adapter=>options.tests.includes(adapter.id))
+    : [...getAdapters(repoRoot,{identityOnly,selectedIds}),...sleep.getSleepAdapters(repoRoot,{identityOnly,selectedIds}),...(await import('./extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds})];
+  const adapters = validateAdapters(configureCandidateAdapters(registered,options,repoRoot), repoRoot);
   let logPlan = null;
   if (options.mode === 'log-check') {
     if (!options.archive) throw new Error('LOG_CHECK_REQUIRES_ARCHIVE');
@@ -227,7 +231,8 @@ export async function main(args = process.argv.slice(2), { repoRoot = path.resol
   const ownershipCatalog = ownership.getOwnershipInventory({ repoRoot, adapters });
   const catalog = { ...sourceCatalog, ownershipCatalog };
   fs.writeFileSync(path.join(runDir, 'catalog.json'), JSON.stringify(catalog, null, 2));
-  const plan = selected.map(item => ({ ...item, runnableHere: item.kind !== 'powershell' || item.scope !== 'host-mock' || Boolean(options.payloadRoot) }));
+  // A declared prerequisite refusal takes precedence over the payload check.
+  const plan = selected.map(item => ({ ...item, runnableHere: !item.blockedReason && (item.kind !== 'powershell' || item.scope !== 'host-mock' || Boolean(options.payloadRoot)) }));
   fs.writeFileSync(path.join(runDir, 'plan.json'), JSON.stringify({ schemaVersion: 1, profile: options.profile, adapters: plan, ownershipCatalog, ...(capabilitySelection ? {capabilitySelection} : {}), noTestsExecuted: true }, null, 2));
   const run = {
     schemaVersion: 1, tool: 'ymcc_sim-global', runId, mode: options.mode, profile: options.profile,

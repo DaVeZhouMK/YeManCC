@@ -1,6 +1,7 @@
 // GameTargetArbiter race self-test. No process control is performed.
 // The IPC mock models a valve switch while the previous target is paused.
 import './mock-shell';
+import { readFileSync } from 'node:fs';
 import { refreshGameStatus, refreshGameStatusStrict, subscribeGameStatus, clearGameCache, isGameStatusCurrent, getCurrentGame } from '@/bridge/gamedetect';
 
 (globalThis as any).window.setInterval = setInterval;
@@ -23,6 +24,12 @@ let resumeArgs: any = null;
 const controlCalls: any[] = [];
 let invalidateDuringIdentity = false;
 const configurationOnly = process.argv.includes("--config-failure-only");
+const wireAt = process.argv.indexOf('--native-empty-wire');
+if (wireAt >= 0 && (configurationOnly || process.argv.length !== wireAt + 2)) throw new Error('Exclusive native-empty-wire fixture path required');
+const nativeWire: { name: string; snapshot: any }[] | null = wireAt < 0 ? null : JSON.parse(readFileSync(process.argv[wireAt + 1], 'utf8')).frames;
+const wireNames = ['empty-first','empty-repeat','pending','complete-after-pending','game-start','game-exit'];
+if (nativeWire && (nativeWire.length !== wireNames.length || nativeWire.some((row, i) => row.name !== wireNames[i]))) throw new Error('Exact native wire frame selection required');
+let wireIndex = 0;
 let ruleReadUnavailable = false;
 let configGeneration = 0;
 
@@ -40,6 +47,7 @@ function target(pid: number): Target {
 
 (globalThis as any).__mockIpcResponder = (command: string, args: any) => {
   if (command === 'game.detect') {
+    if (nativeWire) return structuredClone(nativeWire[wireIndex].snapshot);
     if (ruleReadUnavailable) throw new Error('GAME_TARGET_OBSERVATION_UNAVAILABLE');
     return configurationOnly ? { ...target(valvePid), valid: true, generation: ++configGeneration, identityGeneration: 1 } : target(valvePid);
   }
@@ -72,6 +80,40 @@ function assert(condition: unknown, message: string): asserts condition {
 async function main(): Promise<void> {
   const stop = subscribeGameStatus(() => {});
   try {
+    if (nativeWire) {
+      const cases: string[] = [];
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame() === null, 'initial native empty observation not current');
+      cases.push('initial native empty becomes current');
+      wireIndex = 1;
+      assert(nativeWire[0].snapshot.generation === nativeWire[1].snapshot.generation, 'native producer did not reuse empty generation');
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame() === null, 'same-generation native empty was rejected');
+      cases.push('same-generation native empty stays current');
+      wireIndex = 2;
+      let rejected = false;
+      try { await refreshGameStatusStrict(); } catch { rejected = true; }
+      assert(rejected && !isGameStatusCurrent(), 'pending native discovery became complete idle');
+      cases.push('pending native discovery revokes readiness');
+      wireIndex = 3;
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame() === null, 'complete native empty did not restore readiness');
+      cases.push('fresh complete native empty restores readiness');
+      wireIndex = 4;
+      const game = await refreshGameStatusStrict();
+      assert(game && isGameStatusCurrent() && getCurrentGame()?.pid === game.pid, 'native game start did not replace empty target');
+      cases.push('native game start replaces empty target');
+      wireIndex = 5;
+      await refreshGameStatusStrict();
+      assert(isGameStatusCurrent() && getCurrentGame() === null, 'native game exit did not replace game target');
+      cases.push('native game exit becomes current empty target');
+      const { closeGame } = await import('@/bridge/gameproc');
+      const result = await closeGame(game.pid, game.name, game.processCreated);
+      assert(!result.ok && controlCalls.length === 0 && resumeArgs === null, 'old game identity retained process control after native empty target');
+      cases.push('exited identity cannot control a process');
+      console.log(JSON.stringify({ status: 'PASS', selector: 'native-empty-wire', cases, nativeFrames: nativeWire.length, actualGamedetectConsumer: true, realControls: 0 }));
+      return;
+    }
     if (configurationOnly) {
       await refreshGameStatusStrict();
       assert(isGameStatusCurrent() && getCurrentGame()?.pid === valvePid, 'healthy initial game authority missing');

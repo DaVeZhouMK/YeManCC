@@ -6,11 +6,12 @@
 #include <cstring>
 #include <functional>
 #include <span>
+#include <string>
 
 // A compatibility layout is selected by the code/data contract actually read.
 // Full image hashes and marketing/client build versions do not grant admission.
 namespace ymcc::steamcompat {
-enum class Layout { Legacy, Public };
+enum class Layout { Legacy, Public, OwnerScoped };
 using ReadRva = std::function<bool(std::uint64_t, void*, std::size_t)>;
 struct SectionSpec {
     std::uint64_t rva = 0, virtualSize = 0, rawSize = 0;
@@ -18,12 +19,20 @@ struct SectionSpec {
     std::array<char, 8> name{};
 };
 struct RuntimeFunction { std::uint64_t tableRva = 0, begin = 0, end = 0, unwind = 0; };
+struct ImportSlot {
+    std::uint32_t rva = 0;
+    std::uint64_t originalThunk = 0;
+    std::string library, symbol;
+    std::uint32_t lookupRva = 0, descriptorRva = 0, lookupTableRva = 0,
+        firstThunkRva = 0, libraryNameRva = 0;
+};
 struct Image {
     ReadRva read;
     std::uint64_t preferredBase = 0, imageSize = 0;
     std::span<const SectionSpec> sections{};
     std::span<const RuntimeFunction> functions{};
     bool loadedImage = false;
+    std::span<const ImportSlot> imports{};
 };
 struct Range {
     std::uint64_t rva = 0;
@@ -81,7 +90,7 @@ inline Evidence checkRanges(const Image& image, std::span<const Range> ranges) n
     proof.matched = true; proof.failedRva = 0; proof.reason = "contract-matched"; return proof;
 }
 inline bool validLayout(Layout layout) noexcept {
-    return layout == Layout::Legacy || layout == Layout::Public;
+    return layout == Layout::Legacy || layout == Layout::Public || layout == Layout::OwnerScoped;
 }
 inline Evidence invalidLayout() noexcept { return {false, 0, 0, 0, "contract-layout-invalid"}; }
 }

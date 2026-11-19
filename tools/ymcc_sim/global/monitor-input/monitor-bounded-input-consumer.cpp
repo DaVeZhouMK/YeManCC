@@ -14,10 +14,19 @@ static BOOL fixtureGetPointerInfo(UINT32 id,POINTER_INFO* value){
  if(pointerMetadataEnabled&&id==pointerMetadata.pointerId){*value=pointerMetadata;return TRUE;}
  return GetPointerInfo(id,value);
 }
+static HWND observedLeaseTimerWindow=nullptr,rejectedLeaseTimerWindow=nullptr;
+static unsigned observedLeaseTimerCalls=0;static UINT observedLeaseTimerDuration=0;
+static UINT_PTR fixtureSetTimer(HWND window,UINT_PTR id,UINT duration,TIMERPROC proc){
+ if(window==observedLeaseTimerWindow){++observedLeaseTimerCalls;observedLeaseTimerDuration=duration;}
+ if(window==rejectedLeaseTimerWindow){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return 0;}
+ return SetTimer(window,id,duration,proc);
+}
+#define SetTimer fixtureSetTimer
 #define GetPointerInfo fixtureGetPointerInfo
 #define ScreenToClient fixtureScreenToClient
 #define ClientToScreen fixtureClientToScreen
 #include "monitor_desktop_hud.test.h"
+#undef SetTimer
 #undef GetPointerInfo
 #undef ScreenToClient
 #undef ClientToScreen
@@ -75,7 +84,9 @@ static LRESULT CALLBACK lowerProc(HWND h,UINT m,WPARAM w,LPARAM l){return DefWin
 static void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 static Json rectangle(const RECT& r){return {{"left",r.left},{"top",r.top},{"width",r.right-r.left},{"height",r.bottom-r.top}};}
 int wmain(int argc,wchar_t** argv){
- if(argc!=3)return 2;Json cases=Json::array(),events=Json::array();bool ok=true;std::string error;
+ if(argc!=3)return 2;const bool leaseOnly=std::wstring(argv[2])==L"--lease-timer",activationOnly=std::wstring(argv[2])==L"--input-activation",sharedPowerNoticeOnly=std::wstring(argv[2])==L"--shared-power-notice",sharedPowerOnly=sharedPowerNoticeOnly||std::wstring(argv[2])==L"--shared-power";
+ if(!leaseOnly&&!activationOnly&&!sharedPowerOnly&&std::wstring(argv[2])!=L"--private-replay")return 2;
+ Json cases=Json::array(),events=Json::array();bool ok=true;std::string error;
  const auto check=[&](const char* name,bool good,Json detail=Json::object()){ok&=good;cases.push_back({{"name",name},{"ok",good},{"detail",detail}});};
  const HDESK original=GetThreadDesktop(GetCurrentThreadId());HDESK desk=CreateDesktopW((L"YMCC-Bounded-Input-"+std::to_wstring(GetCurrentProcessId())).c_str(),nullptr,nullptr,0,GENERIC_ALL,nullptr);
  HWND lower=nullptr;bool com=false;
@@ -95,6 +106,130 @@ int wmain(int argc,wchar_t** argv){
     s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->viewportKey=Carrier::viewportInfo(*s).dump();s->crosshair=true;s->drag.position={.1,.1,true,false,1};
     auto controller=Microsoft::WRL::Make<NoticeControllerRecorder>();s->controller=controller;carrier.current=s;carrier.refresh(s);return std::pair{s,controller};
    };
+
+   if(sharedPowerOnly){
+    for(bool notice:{false,true}){
+     if(sharedPowerNoticeOnly&&!notice)continue;
+     Carrier gated;bool permitted=true;Config controlled=cfg;controlled.noticeOnly=notice;controlled.powerAllowed=[&]{return permitted;};gated.initialize(nullptr,controlled);
+     auto [d,record]=create(gated,notice?982:981,notice);d->crosshair=!notice;gated.refresh(d);const HWND display=d->hwnd,input=d->inputWindow;const std::string prefix=notice?"notice: ":"monitor: ";
+     const auto verify=[&](const char* name,bool good){if(!sharedPowerNoticeOnly||std::string(name)=="shared denial releases owned mouse touch and drag")check((prefix+name).c_str(),good);};
+     verify("shared Ready admits the owned presentation",IsWindowVisible(display)&&record->visible);
+     if(!notice){SendMessageW(input,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(30,25));need(d->mouseContact,"Owned monitor contact unavailable");}
+     permitted=false;gated.sharedPowerChanged();
+     verify("shared denial hides display and renderer immediately",!IsWindowVisible(display)&&!record->visible&&!d->armed);
+     verify("shared denial releases owned mouse touch and drag",!d->mouseContact&&!d->touchContact&&!d->drag.contact()&&(!d->inputWindow||!IsWindowVisible(d->inputWindow))&&(!input||GetCapture()!=input));
+     gated.refresh(d);verify("queued refresh cannot revive a held presentation",!IsWindowVisible(display)&&!record->visible);
+     permitted=true;gated.sharedPowerChanged();verify("Ready alone cannot resurrect the old frame",!IsWindowVisible(display)&&!d->armed);
+     d->armed=true;d->expires=wallNow()+1000;gated.refresh(d);verify("fresh current frame resumes the existing owner",IsWindowVisible(display)&&record->visible&&gated.current==d);
+     gated.close(d->id,d->nonce);verify("shared lifecycle closes only its owned resources",!IsWindow(display)&&(!input||!IsWindow(input))&&IsWindow(lower)&&record->closeCalls==1);
+    }
+   }else if(activationOnly){
+    for(bool focusOnly:{false,true}){
+     Carrier activated;activated.initialize(nullptr,cfg);auto [d,record]=create(activated,focusOnly?912:911);
+     d->crosshair=false;activated.refresh(d);const HWND display=d->hwnd,input=d->inputWindow;
+     SetActiveWindow(lower);need(GetActiveWindow()==lower,"Owned baseline activation unavailable");
+     SendMessageW(input,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(30,25));
+     need(d->mouseContact&&d->drag.contact(),"Owned contact setup unavailable");
+     if(focusOnly)SetFocus(input);else SetActiveWindow(input);
+     const std::string kind=focusOnly?"focus":"activation";
+     check((kind+": unexpected input ownership withdraws panel contact").c_str(),!IsWindowVisible(input)&&!IsWindowEnabled(input)&&!d->mouseContact&&!d->touchContact&&!d->drag.contact()&&GetCapture()!=input);
+     check((kind+": input does not retain active window or keyboard focus").c_str(),GetActiveWindow()!=input&&GetFocus()!=input);
+     // Restore only our private lower owner, then exercise the normal refresh.
+     activated.stopInteraction(d);SetActiveWindow(lower);activated.refresh(d);RECT actual{};const HWND restored=d->inputWindow;GetWindowRect(restored,&actual);
+     check((kind+": normal refresh restores bounded nonactivating input").c_str(),IsWindowVisible(restored)&&IsWindowEnabled(restored)&&EqualRect(&actual,&d->panel)&&GetActiveWindow()!=restored&&GetFocus()!=restored&&hudinput::inert(display));
+     activated.close(d->id,d->nonce);
+     check((kind+": cleanup destroys only the owned monitor windows").c_str(),!IsWindow(display)&&!IsWindow(input)&&!IsWindow(restored)&&IsWindow(lower)&&record->closeCalls==1&&!record->visibleAtClose);
+    }
+   }else if(leaseOnly){
+    const auto countEvent=[&](const char* event,int id){unsigned count=0;for(const auto& e:events)if(e.value("name",std::string{})==event&&e["value"].value("id",0)==id)++count;return count;};
+    const auto dequeueTimer=[&](HWND window,MSG& message,UINT remove,unsigned limit){
+     const auto started=GetTickCount64();do{
+      if(PeekMessageW(&message,window,WM_TIMER,WM_TIMER,remove)){need(message.wParam==Carrier::leaseTimer,"Unexpected owned timer");return true;}
+      if(GetTickCount64()-started>=limit)return false;Sleep(1);
+     }while(true);
+    };
+    for(bool notice:{false,true}){
+     const std::string kind=notice?"notice":"monitor";
+     Carrier leased;Config leaseConfig=cfg;leaseConfig.noticeOnly=notice;leased.initialize(nullptr,leaseConfig);
+     auto [d,record]=create(leased,notice?902:901,notice);const HWND display=d->hwnd;observedLeaseTimerWindow=display;
+     const auto verify=[&](const std::string& label,bool passed,Json detail=Json::object()){check((kind+": "+label).c_str(),passed,detail);};
+     unsigned long long sequence=d->seq;
+     const auto admit=[&](unsigned duration){const auto expires=wallNow()+duration;Json payload={{"hudId",d->id},{"nonce",d->nonce},{"seq",++sequence},{"expiresAt",expires}};
+      if(notice){payload["type"]="monitor-notice";payload["protocol"]=1;payload["feedback"]={{"expiresAtUnixMs",expires}};}
+      else{payload["show"]=true;payload["data"]={{"source","ymcc-uniform"}};}
+      const bool accepted=notice?leased.noticeFrame(d->id,d->nonce,payload):leased.frame(d->id,d->nonce,payload);
+      if(accepted){d->layout=true;leased.refresh(d);}return accepted;
+     };
+     try{
+      need(admit(50),"Old owned lease was not admitted");MSG old{};
+      need(dequeueTimer(display,old,PM_NOREMOVE,2000),"Windows did not generate the old lease WM_TIMER");
+      verify("Windows generated prior lease message without removing it",old.hwnd==display&&old.message==WM_TIMER&&old.wParam==Carrier::leaseTimer,{{"messageTime",old.time},{"oldExpires",d->expires}});
+      const auto priorExpired=countEvent("desktopHud.expired",d->id),priorHide=countEvent("monitorNotice.hide",d->id);
+      need(admit(1000),"Current renewal was not admitted");const auto currentSequence=d->seq,currentExpires=d->expires;
+      verify("renewal admitted on the same live owner",d->armed&&d->hwnd==display&&IsWindow(display)&&wallNow()<currentExpires);
+      MSG pending{};need(dequeueTimer(display,pending,PM_REMOVE,100),"Previously generated timer vanished");
+      need(pending.time==old.time,"The dispatched timer was not the prior queued message");
+      need(wallNow()<currentExpires,"Current renewal expired before the old message could be dispatched");
+      const auto timerCallsBefore=observedLeaseTimerCalls;DispatchMessageW(&pending);
+      verify("prior message rearms only the remaining current deadline",observedLeaseTimerCalls==timerCallsBefore+1&&observedLeaseTimerDuration>0&&observedLeaseTimerDuration<=1000);
+      verify("queued prior timer preserves the renewed current lease",d->armed&&d->seq==currentSequence&&d->expires==currentExpires&&countEvent("desktopHud.expired",d->id)==priorExpired&&countEvent("monitorNotice.hide",d->id)==priorHide&&IsWindowVisible(display),{{"priorMessageTime",pending.time},{"currentSeq",currentSequence},{"currentExpires",currentExpires},{"armedAfterDispatch",d->armed},{"reason",d->reason}});
+      MSG actualExpiry{};const bool replacementExists=dequeueTimer(display,actualExpiry,PM_REMOVE,2000);
+      verify("current replacement timer survives the queued prior message",replacementExists);
+      if(!replacementExists){need(admit(50),"Recovery setup rejected after missing replacement timer");need(dequeueTimer(display,actualExpiry,PM_REMOVE,2000),"Recovery expiry timer not generated");}
+      const auto expiredBefore=countEvent("desktopHud.expired",d->id);
+      // Windows timer granularity may deliver before the wall-clock deadline.
+      // Consume those real messages and require the same valid lease to survive.
+      unsigned earlyMessages=0;bool earlyRetained=true;const auto waitStarted=GetTickCount64();
+      while(wallNow()<d->expires){
+       DispatchMessageW(&actualExpiry);earlyRetained=earlyRetained&&d->armed;
+       ++earlyMessages;need(GetTickCount64()-waitStarted<2000&&earlyMessages<100,"Replacement timer did not reach its current deadline");
+       need(dequeueTimer(display,actualExpiry,PM_REMOVE,2000),"Early timer lost the current lease deadline");
+      }
+      DispatchMessageW(&actualExpiry);
+      verify("actual current expiration hides once and revokes admission",earlyRetained&&!d->armed&&!IsWindowVisible(display)&&!record->visible&&countEvent("desktopHud.expired",d->id)==expiredBefore+1,{{"earlyMessages",earlyMessages}});
+      MSG after{};verify("actual expiration cancels the owned lease timer",!PeekMessageW(&after,display,WM_TIMER,WM_TIMER,PM_REMOVE));
+      verify("fresh frame resumes after genuine expiration",admit(5000)&&d->armed&&IsWindowVisible(display)&&d->seq>currentSequence);
+     }catch(...){leased.close(d->id,d->nonce,"lease-timer-fixture-error");throw;}
+     observedLeaseTimerWindow=nullptr;const HWND input=d->inputWindow;leased.close(d->id,d->nonce,"lease-timer-fixture-complete");
+     verify("close destroys owned windows and renderer once",!leased.current&&!IsWindow(display)&&!IsWindow(input)&&record->closeCalls==1&&!record->visibleAtClose);
+    }
+    for(bool retire:{false,true}){
+     Carrier fallback;fallback.initialize(nullptr,cfg);auto [d,record]=create(fallback,retire?904:903);const HWND display=d->hwnd,input=d->inputWindow;
+     const auto failures=fallback.recovery.failures();
+     if(retire){d->url="https://app.localhost/hud-output.html?fixture=lease-retire";auto args=Microsoft::WRL::Make<RendererCloseMessage>(d->url,Json{{"id",1},{"cmd","desktopHud.close"},{"args",{{"hudId",d->id},{"nonce",d->nonce}}}});fallback.receive(d,args.Get());}
+     else fallback.fail(d,"lease-failure-control");
+     MSG update{};while(PeekMessageW(&update,display,Carrier::updateMessage,Carrier::updateMessage,PM_REMOVE)){}
+     need(d->expires>wallNow(),"Fallback future lease setup invalid");SendMessageW(display,WM_TIMER,Carrier::leaseTimer,0);
+     check(retire?"retiring owner still closes despite future data lease":"failed renderer still closes despite future data lease",!fallback.current&&!IsWindow(display)&&!IsWindow(input)&&record->closeCalls==1&&fallback.recovery.failures()==failures+(retire?0:1));
+    }
+    {
+     Carrier pending;Config noticeConfig=cfg;noticeConfig.noticeOnly=true;pending.initialize(nullptr,noticeConfig);auto [d,record]=create(pending,905,true);const HWND display=d->hwnd;d->ready=false;
+     SendMessageW(display,WM_TIMER,Carrier::leaseTimer,0);
+     check("unready notice retains renderer-ready timeout closure",!pending.current&&!IsWindow(display)&&record->closeCalls==1);
+    }
+    {
+     Carrier unavailable;unavailable.initialize(nullptr,cfg);auto [d,record]=create(unavailable,906);const HWND display=d->hwnd,input=d->inputWindow;const auto failures=unavailable.recovery.failures();
+     d->expires=wallNow()+5000;rejectedLeaseTimerWindow=display;SendMessageW(display,WM_TIMER,Carrier::leaseTimer,0);rejectedLeaseTimerWindow=nullptr;
+     check("replacement timer allocation failure hides and retires only its owner",!unavailable.current&&!IsWindow(display)&&!IsWindow(input)&&record->closeCalls==1&&!record->visibleAtClose&&unavailable.recovery.failures()==failures+1);
+     Json late={{"hudId",d->id},{"nonce",d->nonce},{"seq",d->seq+1},{"expiresAt",wallNow()+5000},{"show",true},{"data",{{"source","ymcc-uniform"}}}};
+     check("late frame cannot revive the owner after timer allocation failure",!unavailable.frame(d->id,d->nonce,late));
+    }
+    for(bool notice:{false,true}){
+     Carrier unavailable;Config local=cfg;local.noticeOnly=notice;unavailable.initialize(nullptr,local);
+     auto [d,record]=create(unavailable,notice?908:907,notice);const HWND display=d->hwnd,input=d->inputWindow;
+     const auto failures=unavailable.recovery.failures();const auto expires=wallNow()+5000;
+     Json payload={{"hudId",d->id},{"nonce",d->nonce},{"seq",d->seq+1},{"expiresAt",expires}};
+     if(notice){payload["type"]="monitor-notice";payload["protocol"]=1;payload["feedback"]={{"expiresAtUnixMs",expires}};}
+     else{payload["show"]=true;payload["data"]={{"source","ymcc-uniform"}};}
+     rejectedLeaseTimerWindow=display;
+     const bool admitted=notice?unavailable.noticeFrame(d->id,d->nonce,payload):unavailable.frame(d->id,d->nonce,payload);
+     rejectedLeaseTimerWindow=nullptr;
+     const std::string kind=notice?"notice":"monitor";
+     check((kind+": lease admission rejects timer allocation failure").c_str(),!admitted&&!d->armed);
+     check((kind+": lease admission failure destroys display input and controller").c_str(),!unavailable.current&&!IsWindow(display)&&!IsWindow(input)&&record->closeCalls==1&&!record->visibleAtClose&&unavailable.recovery.failures()==failures+1);
+     unavailable.close(d->id,d->nonce,"admission-failure-fixture-cleanup");
+    }
+   }else{
    {
     HWND anchor=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"YMCCBoundedLower",L"",WS_POPUP,0,0,300,600,nullptr,nullptr,cls.hInstance,nullptr);
     need(anchor!=nullptr,"Private summon anchor unavailable");
@@ -143,6 +278,25 @@ int wmain(int argc,wchar_t** argv){
     positioned.close(d->id,d->nonce);check("placement test closes owned monitor windows",!IsWindow(d->hwnd)&&!d->inputWindow);DestroyWindow(anchor);
    }
    auto [s,record]=create(owner,7);need(s->inputWindow&&s->input.active(),"Bounded native input unavailable");
+   // No contact or sensor update is needed to expose a native renderer child.
+   // This child deliberately starts without any input-protection flags.
+   const auto childInert=[](HWND h){return h&&!IsWindowEnabled(h)&&
+     (GetWindowLongPtrW(h,GWL_EXSTYLE)&(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE))==(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE);};
+   const auto childState=[&](HWND h){return Json{{"enabled",IsWindowEnabled(h)!=FALSE},{"style",(UINT64)GetWindowLongPtrW(h,GWL_STYLE)},
+     {"exStyle",(UINT64)GetWindowLongPtrW(h,GWL_EXSTYLE)},{"displayReason",s->reason},{"displayArmed",s->armed},{"inputActive",s->input.active()}};};
+   HWND rendererChild=CreateWindowExW(0,L"YMCCBoundedLower",L"",WS_CHILD|WS_VISIBLE,0,0,400,300,s->hwnd,nullptr,cls.hInstance,nullptr);
+   need(rendererChild!=nullptr,"Renderer child unavailable");
+   check("resident display child is input inert before the next frame",childInert(rendererChild),childState(rendererChild));
+   EnableWindow(rendererChild,TRUE);SetWindowLongPtrW(rendererChild,GWL_EXSTYLE,0);
+   check("renderer child cannot regain input between frames",childInert(rendererChild),childState(rendererChild));
+   HWND rendererGrandchild=CreateWindowExW(0,L"YMCCBoundedLower",L"",WS_CHILD|WS_VISIBLE,0,0,800,600,rendererChild,nullptr,cls.hInstance,nullptr);
+   need(rendererGrandchild!=nullptr,"Nested renderer child unavailable");
+   check("late nested renderer child inherits display input isolation",childInert(rendererGrandchild),childState(rendererGrandchild));
+   owner.refresh(s);
+   check("renderer tree isolation leaves the separate drag input enabled",childInert(rendererChild)&&childInert(rendererGrandchild)&&s->input.active(),childState(rendererChild));
+   check("renderer child rejects mouse and touch activation",SendMessageW(rendererChild,WM_NCHITTEST,0,0)==HTTRANSPARENT&&
+     SendMessageW(rendererChild,WM_MOUSEACTIVATE,0,0)==MA_NOACTIVATE&&SendMessageW(rendererChild,WM_POINTERACTIVATE,0,0)==PA_NOACTIVATE);
+   DestroyWindow(rendererGrandchild);DestroyWindow(rendererChild);
    auto reset=[&]{owner.stopInteraction(s);s->drag.position.locked=false;s->drag.position.placed=true;s->drag.position.x=.1;s->drag.position.y=.1;++s->drag.position.revision;s->expires=wallNow()+60000;s->armed=s->layout=true;s->visibility=hudvisibility::Mode::Always;owner.refresh(s);};
    auto mouse=[&](UINT m,WPARAM buttons,int x,int y){SendMessageW(s->inputWindow,m,buttons,MAKELPARAM(x,y));};
    auto pointer=[&](UINT msg,UINT32 id,POINTER_INPUT_TYPE type,int dx,int dy,POINTER_FLAGS flags,POINTER_BUTTON_CHANGE_TYPE change=POINTER_CHANGE_NONE,DWORD age=0){
@@ -429,7 +583,10 @@ int wmain(int argc,wchar_t** argv){
      reset();mouse(WM_LBUTTONDOWN,MK_LBUTTON,30,25);SetCapture(state->inputWindow);const auto previous=inputWithdrawalState(*state);failNextAllocation=true;owner.stopInteraction(state);
      check("diagnostic allocation failure never blocks actual input release",!failNextAllocation&&!state->drag.contact()&&!IsWindowVisible(state->inputWindow)&&GetCapture()!=state->inputWindow&&inputWithdrawalState(*state)==previous);
    }};failedDiagnostic(s);
+   HWND retiringChild=CreateWindowExW(0,L"YMCCBoundedLower",L"",WS_CHILD|WS_VISIBLE,0,0,20,20,s->hwnd,nullptr,cls.hInstance,nullptr);
+   need(retiringChild!=nullptr,"Retiring renderer child unavailable");
    const HWND displayWindow=s->hwnd,inputWindow=s->inputWindow;owner.close(s->id,s->nonce);check("monitor close destroys both HWNDs and closes renderer",!IsWindow(displayWindow)&&!IsWindow(inputWindow)&&record->closed&&!record->visibleAtClose&&!owner.current);
+   check("display descendant guard is destroyed with its owner window",!IsWindow(retiringChild));
    bool closedEvidence=false;for(const auto& event:events)if(event.value("name",std::string{})=="desktopHud.closed"&&event["value"].value("id",0)==s->id)closedEvidence=event["value"].contains("inputWithdrawal")&&event["value"]["inputWithdrawal"].value("inputMode",std::string{})=="native-panel-no-capture-v1";
    check("ordinary close lifecycle event retains bounded input evidence",closedEvidence);
    bool releasedEvidence=false;for(const auto& event:events)if(event.value("name",std::string{})=="desktopHud.closed"&&event["value"].value("id",0)==s->id&&event["value"].contains("inputRelease")){
@@ -438,10 +595,14 @@ int wmain(int argc,wchar_t** argv){
    check("close lifecycle proves both windows and input terminal were released",releasedEvidence);
 
    check("monitor lifetime never created an independent input runtime",!runtime.compositor);
+   }
    DestroyWindow(lower);lower=nullptr;
   }
  }catch(const winrt::hresult_error& e){ok=false;error="WinRT:"+std::to_string((long)e.code());}catch(const std::exception& e){ok=false;error=e.what();}
  if(lower)DestroyWindow(lower);if(com)winrt::uninit_apartment();if(desk){SetThreadDesktop(original);CloseDesktop(desk);}
- const Json result={{"ok",ok},{"cases",cases},{"error",error},{"events",events},{"systemInputInjected",false},{"privateDesktop",true},{"visibleDesktopSwitched",false},{"physicalHaptics",false},{"scope","Actual production carrier on owned private HWNDs; native messages, pointer metadata recorder, COM controller recorder. No physical/UU claim."}};
- std::ofstream(argv[1])<<result.dump(2);std::cout<<Json{{"ok",ok},{"cases",cases.size()},{"error",error}}.dump()<<std::endl;return ok?0:3;
+ const Json result={{"ok",ok},{"selection",sharedPowerNoticeOnly?"shared-power-notice":sharedPowerOnly?"shared-power":activationOnly?"input-activation":leaseOnly?"lease-timer":"default"},{"cases",cases},{"error",error},{"events",events},{"systemInputInjected",false},{"privateDesktop",true},{"visibleDesktopSwitched",false},{"physicalHaptics",false},{"scope","Actual production carrier on owned private HWNDs; native messages, pointer metadata recorder, COM controller recorder. No physical/UU claim."}};
+ if(leaseOnly){
+  const auto bytes=result.dump(2);HANDLE output=CreateFileW(argv[1],GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+  if(output==INVALID_HANDLE_VALUE)return 4;DWORD written=0;const bool saved=WriteFile(output,bytes.data(),(DWORD)bytes.size(),&written,nullptr)&&written==bytes.size()&&FlushFileBuffers(output);CloseHandle(output);if(!saved)return 4;
+ }else std::ofstream(argv[1])<<result.dump(2);std::cout<<Json{{"ok",ok},{"cases",cases.size()},{"error",error}}.dump()<<std::endl;return ok?0:3;
 }

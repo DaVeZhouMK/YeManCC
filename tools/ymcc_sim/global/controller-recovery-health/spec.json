@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "caseCount": 47,
-  "checkCount": 68,
+  "checkCount": 80,
   "caseNames": [
     "single-ACK-source-none-no-new-ACK",
     "one-ACK-wall-clock-only",

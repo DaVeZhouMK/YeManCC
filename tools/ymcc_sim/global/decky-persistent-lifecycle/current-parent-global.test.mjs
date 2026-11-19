@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 import vm from 'node:vm';
 import {OWNED_SOURCES} from './owned-adapter.mjs';
 import {validateCurrentEnvelope,validateBaselineReceipt,aggregateSeven,coverageMap,allocateBudget,sourceMap,naturalExit,verifyCurrentDisk,parentDeclaration,legacyMigration,EXACT_25,REQUIREMENTS,JS_REGRESSIONS,NATIVE_REGRESSIONS,BUDGETS,currentChildToolPins} from './current-parent-global.mjs';
-import {verifyDeferredResourceRevalidation,verifyDeferredResourceExecution,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
+import {typedIds,verifyDeferredResourceRevalidation,verifyDeferredResourceExecution,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {validateOriginalResult as validateCurrentOriginal,ORIGINAL_CASES as originalCoreCases} from './owned-run.mjs';
-import {createRequiredStageGuard,raceInitialProducerFailure,collectInitialProducersAfterFailure} from './current-parent-global.mjs';
+import {createRequiredStageGuard,raceInitialProducerFailure,collectInitialProducersAfterFailure,originalJsRegressionArgs} from './current-parent-global.mjs';
 // Explicit finite factory controls only; the original history-bound suite stays in else.
 const requiredStageFilterText=process.env.YMCC_PARENT_GLOBAL_CASE_FILTER;
 if(requiredStageFilterText!==undefined){
@@ -66,6 +66,32 @@ if(requiredStageFilterText!==undefined){
   return {native,baseline,done,trace,proofs,cleanupErrors,cases,failures,stops,get cause(){return observedCause;}};
  }
  const directedControls=[
+  ['original Host runs once before both heavy producers and still honors diagnostic collection',async()=>{
+   const parent=fs.readFileSync(new URL('./current-parent-global.mjs',import.meta.url),'utf8');
+   const hostMatch=parent.match(/^const HOST_JS_REGRESSION='([^']+)';$/m);assert(hostMatch);
+   const host=hostMatch[1],hostId='original.'+host;
+   const first=parent.indexOf('  const runOriginalJs='),heavy=parent.indexOf('  if(!baselineResult&&declaration.rawProgramLauncher){',first);
+   const late=parent.indexOf('  for(const name of JS_REGRESSIONS)',heavy),end=parent.indexOf('\n',late);
+   assert(first>=0&&heavy>first&&late>heavy&&end>late);
+   for(const id of ['current.native.entry','original.plugins.decky-update-recovery']){
+    const launch=parent.indexOf("=launch('"+id+"'",heavy);assert(launch>heavy&&launch<late,id);
+   }
+   for(const [failed,collect] of [[false,false],[true,false],[true,true]]){
+    const trace=[],cases=[],stops=[],report={rawEvidence:[]},repo=path.resolve('memory-repo'),work=path.join(repo,'work'),out=path.join(repo,'out');
+    const add=(id,passed,details)=>cases.push({id,passed,...details});
+    const guard=createRequiredStageGuard({cases,collectAfterFailure:collect,recordFailure:id=>add(id,false),recordStop:row=>stops.push(row)});
+    const context={assert,path,report,repo,work,out,process:{env:{}},processExec:'fake-node',guard,add,JS_REGRESSIONS,HOST_JS_REGRESSION:host,originalJsRegressionArgs,naturalExit,
+     fs:{existsSync:()=>true},pin:file=>file,read:()=>({status:'passed',cases:['original fake Host result']}),trace,
+     exec(id,program,args,timeoutMs,{env,cwd}){trace.push(id);assert.equal(program,'fake-node');assert.equal(cwd,repo);assert.equal(timeoutMs,60000);
+      if(id===hostId){assert.deepEqual(args,[path.join(repo,'tools',host+'.mjs')]);assert.equal(env.YMCC_DECKY_ARTIFACT_ROOT,path.join(work,host));}
+      return {id,exitCode:failed&&id===hostId?1:0,elapsedMs:1,timeoutMs,stdout:{path:'fake-stdout'}};
+     }};
+    const schedule=vm.runInNewContext('(async()=>{\n'+parent.slice(first,heavy)+"trace.push('native','baseline');\n"+parent.slice(late,end)+'\n})()',context,{timeout:2000});
+    if(failed&&!collect){await assert.rejects(schedule,/UNEXPECTED_CHILD_EXIT/);assert.deepEqual(trace,[hostId]);assert.equal(stops[0].id,hostId);}
+    else{await schedule;assert.deepEqual(trace,[hostId,'native','baseline',...JS_REGRESSIONS.filter(name=>name!==host).map(name=>'original.'+name)]);assert.deepEqual(stops,[]);}
+    assert.equal(cases.filter(row=>row.id===hostId).length,1);assert.equal(cases[0].passed,!failed);
+   }
+  }],
   ['initial producer baseline nonzero cancels and awaits unresolved native once before stopping',async()=>{
    const c=initialProducerControl(),failed=initialProof('original.plugins.decky-update-recovery',{exitCode:1}),cancelled=initialProof('current.native.entry',{exitCode:99,error:'RAW_PRODUCER_CANCELLED'});let finished=false;c.done.then(()=>{finished=true;});
    c.baseline.resolve(failed);await flushInitialProducers();assert.equal(c.native.cancelCalls,1);assert.equal(finished,false);assert.deepEqual(c.trace,[]);assert.strictEqual(c.proofs[0],failed);assert.equal(c.stops[0].id,failed.id);
@@ -376,11 +402,15 @@ check('deferred resource child execution remains same-budget and fully released'
 // These are finite original-verifier controls, not a new business parent/ID.
 const jointDeferredEnvelope=()=>{
  const nested=['recover','ready','off','hash','cleanup','admission'].map(variant=>({...deferredResourceRow(variant),passed:true}));
- const cases=[...originalCoreCases.map(row=>({id:row.id,passed:true})),...nested];
+ const supplied=new Map([...originalCoreCases.map(row=>({id:row.id,passed:true})),...nested].map(row=>[row.id,row]));
+ const cases=Object.values(typedIds).map(id=>supplied.get(id)??{id,passed:true});
  return {schema:'ymcc.typed-binding-runtime-gate.v1',tests:cases.length,passedCount:cases.length,cases,passed:true,selection:'',deadlineMs:3200,productCallbackMode:'typed-only; legacy macro absent',realSteamOrDeviceActions:0,originalHistoricalFailurePreserved:true,fieldWakeOrS4Verified:false,hostPackagePassed:false,deferredResourceExecution:{selected:true,childExecutions:1,pid:123,exitCode:0,jobActiveProcesses:0,ownedParentHandlesAfterClose:0,parentReaderThreads:0,originalSharedOuterBudgetMs:45000,cases:6,elapsedMs:10000,parentObservationElapsedMs:35000,image:'test-current.exe',raw:'owned/result.json'}};
 };
 const jointDeferredRun=()=>({selection:null,runExit:0,error:null,compilerExit:0,changedOriginalInputs:[],status:'pass'});
-check('joint deferred boundary complete original aggregation consumes exact current six',()=>{assert.equal(validateCurrentOriginal(jointDeferredEnvelope(),jointDeferredRun()).completeCurrentProducer,true);});
+check('joint deferred boundary complete original aggregation consumes exact current six',()=>{
+ const value=jointDeferredEnvelope();assert.equal(validateCurrentOriginal(value,jointDeferredRun()).completeCurrentProducer,true);
+ for(const replace of [false,true]){const incomplete=jointDeferredEnvelope();if(replace)incomplete.cases.find(row=>row.id===typedIds.loaderTempPath).id='native.unreviewed-positive-replacement';else incomplete.cases=incomplete.cases.filter(row=>row.id!==typedIds.loaderTempPath);incomplete.tests=incomplete.cases.length;incomplete.passedCount=incomplete.cases.length;assert.throws(()=>validateCurrentOriginal(incomplete,jointDeferredRun()),/ORIGINAL_TYPED_COMPLETE_MEMBERSHIP/);}
+});
 for(const [name,change]of [
  ['whole group omitted',r=>{delete r.deferredResourceExecution;for(const row of r.cases)delete row.afterDeferredBootstrap;}],
  ['one nested boundary omitted',r=>delete r.cases.find(row=>row.afterDeferredBootstrap).afterDeferredBootstrap],

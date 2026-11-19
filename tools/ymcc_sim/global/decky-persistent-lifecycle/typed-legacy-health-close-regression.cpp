@@ -31,6 +31,7 @@ inline BOOL WINAPI cancel(HANDLE handle,LPOVERLAPPED overlapped){++cancels;retur
 #include "typed-legacy-health-close-helpers.inc"
 #include "decky_sidebar_broker.h"
 #include "decky_update_recovery.h"
+#include "decky_sidebar_automatic_repair.h"
 #undef CreateProcessW
 #undef CreateProcessWithTokenW
 #undef CreateJobObjectW
@@ -43,6 +44,8 @@ inline BOOL WINAPI cancel(HANDLE handle,LPOVERLAPPED overlapped){++cancels;retur
 #error Current typed health-close forbids legacy Runtime callbacks.
 #endif
 #include <deque>
+#include "boot_mode_preferences.h"
+#include "settings_baseline.h"
 #include "owned-json-channel.h"
 namespace hc {
 using namespace rtfixture;using Json=nlohmann::json;using namespace ymcc::deckysidebar;
@@ -83,11 +86,15 @@ namespace ownedworker {
 using namespace ymcc::deckybinding;using namespace ymcc::deckybinding::worker;
 class SteamLease {
     detail::Handle parent;const Request& request;
+    std::unique_ptr<ymcc::deckybinding::worker::SteamLease> delegated;
 public:
     // Accept the exact current worker port. The registry selector belongs to
     // the independent installed-identity gate; this fixture observes its own
     // real parent lease and reports the same named, value-free refusals.
-    explicit SteamLease(const Request& value,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr):request(value){
+    explicit SteamLease(const Request& value,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr,HANDLE delegatedCancel=nullptr):request(value){
+        // Shared requests consume the actual product lease and inherited cancel.
+        // The old owned-only fallback remains for requests without delegation.
+        if(value.delegatedIdentity){delegated=std::make_unique<ymcc::deckybinding::worker::SteamLease>(value,registryPath,rejectedCheck,delegatedCancel);return;}
         (void)registryPath;
         if(rejectedCheck)rejectedCheck->clear();
         ULONGLONG birth=0;parent.value=ymcc::steamsession::verifiedProcess(request.steam.pid,request.steam.root,&birth);
@@ -98,6 +105,7 @@ public:
     }
     SteamLease(const SteamLease&)=delete;
     bool current(std::string* rejectedCheck=nullptr)const{
+        if(delegated)return delegated->current(rejectedCheck);
         const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;return false;};
         if(rejectedCheck)rejectedCheck->clear();
         if(!parent.value||WaitForSingleObject(parent.value,0)!=WAIT_TIMEOUT)return reject("steam-process-exited");
@@ -195,6 +203,15 @@ namespace consumer {
 using namespace hc;using json=nlohmann::json;
 inline Runtime g_deckySidebarRuntime;inline std::shared_ptr<Client> client=std::make_shared<Client>();
 inline ymcc::deckymirror::Broker g_deckyMirrorBroker;inline ymcc::deckyupdate::Recovery g_deckyUpdateRecovery;
+inline ymcc::deckyrepair::AutomaticRepair g_deckyAutomaticRepair;
+inline ymcc::deckyupdate::ManualBaseline g_deckyManualBaseline;
+// This health-only fixture never acquires a managed launch-mode wait.
+// Retire its empty external port while the real repair/baseline owners above
+// execute their production cancellation methods.
+inline unsigned managedModeWaitStops=0;
+inline void deckySidebarEndManagedModeWait(){++managedModeWaitStops;}
+inline std::atomic<unsigned long long> powerGeneration{1};
+inline unsigned long long currentPowerGeneration(){return powerGeneration.load(std::memory_order_acquire);}
 inline HWND g_hwnd=nullptr;inline std::mutex g_deckyEventMutex;inline std::deque<json> g_deckyEvents;inline bool g_deckyEventPosted=false;
 constexpr UINT WM_DECKY_MIRROR_EVENT=WM_USER+30;
 inline std::atomic<unsigned> launched{0},plans{0},ownerSafetyCalls{0},settingsWrites{0};
@@ -202,7 +219,20 @@ inline std::wstring POWER_CONTROL_DIR;inline std::filesystem::path settingsPath;
 inline std::mutex changedMutex;inline std::condition_variable changed;
 inline std::string W2U(const std::wstring& text){const auto size=WideCharToMultiByte(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0,nullptr,nullptr);need(size>=0,"owned-root-utf8");std::string result(static_cast<size_t>(size),'\0');WideCharToMultiByte(CP_UTF8,0,text.data(),static_cast<int>(text.size()),result.data(),size,nullptr,nullptr);return result;}
 struct OwnedSessionInput {
+    mutable std::unique_ptr<ymcc::steamsession::Observer> publisher;
     ymcc::steamsession::Session sessionSnapshot()const{ymcc::steamsession::Session result;result.root=ymcc::steamlive::normalizedPath(std::filesystem::path(detail::executable()).parent_path().wstring());result.pid=GetCurrentProcessId();detail::Handle observed{ymcc::steamsession::verifiedProcess(result.pid,result.root,&result.created)};need(observed.value!=nullptr,"owned-session-input");result.account=12345678;return result;}
+    std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identitySnapshot()const{
+        if(!publisher)publisher=std::make_unique<ymcc::steamsession::Observer>();
+        auto result=std::make_shared<ymcc::steamsession::IdentitySnapshot>();result->session=sessionSnapshot();result->presence=1;
+        result->registeredPid=result->session.pid;
+        result->rootReadError=result->registeredPidReadError=result->accountReadError=ERROR_SUCCESS; // Supplied owned-fixture facts only.
+        result->windowsSessionKnown=ProcessIdToSessionId(result->session.pid,&result->windowsSession)!=FALSE;
+        ymcc::steamsession::IdentityPublicationFixture::publish(*publisher,*result);return publisher->identitySnapshot();
+    }
+    std::shared_ptr<ymcc::steamsession::IdentityDelegation> delegateIdentity(const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>& expected,DWORD account,bool fromUi)const{
+        return publisher?publisher->delegateIdentity(expected,account,fromUi):nullptr;
+    }
+    bool requestIdentityRefresh()const{return true;} // Only a receipt port; real producer remains off.
     int steamPresence()const{return 1;} // Explicit owned-fixture observation; never starts the real observer.
 };
 inline OwnedSessionInput g_steamSettingsObserver;
@@ -213,13 +243,24 @@ struct OwnedModeInput {
     std::atomic<unsigned> requests{0};
     Json snapshot(const ymcc::steamsession::Session& session)const{return {{"known",false},{"running",true},{"mode","unknown"},{"pid",session.pid},{"birth",std::to_string(session.created)}};}
     bool requestRefresh(const ymcc::steamsession::Session&){++requests;return false;}
+    // Unexercised external QAM read stays explicitly refused, like requestRefresh.
+    bool requestConnectionRefresh(const ymcc::steamsession::Session&){++requests;return false;}
 };
 inline OwnedModeInput g_steamModeObserver;
 
 enum class PowerLifecycle {Ready};inline std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 inline Json ymSettingsSection(const char* section){if(!std::filesystem::is_regular_file(settingsPath))return Json::object();const auto all=load(settingsPath);return all.value(section,Json::object());}
 inline bool ymSettingsWriteSection(const char* section,const Json& value){++settingsWrites;try{Json all=Json::object();if(std::filesystem::is_regular_file(settingsPath))all=load(settingsPath);all[section]=value;save(settingsPath,all);return true;}catch(...){return false;}}
-inline Json deckySidebarEnvironment(bool){const auto image=std::filesystem::path(detail::executable());return {{"ready",std::filesystem::is_regular_file(image)&&image.parent_path()==scope.parent_path()},{"scope","only source-built owned fixture resource admission"}};}
+// External ports below never admit the unexercised boot-context branch.
+inline std::atomic<bool> g_exitRequested{false};
+inline struct OwnedIsolationInput { bool isolated=false; } g_aiFanMockSession;
+struct SettingsFileGuard { SettingsFileGuard(){throw std::runtime_error("health-fixture-boot-context-not-exercised");} };
+inline Json ymSettingsReadUnlocked(){throw std::runtime_error("health-fixture-boot-context-not-exercised");}
+inline bool ymSettingsBootWriteMatches(const Json&,const Json*,const Json&,bool,bool){throw std::runtime_error("health-fixture-boot-context-not-exercised");}
+// Execute the exact product prepareSection callback against private JSON only.
+// The existing failure injection (settingsPath is a directory) stays effective.
+template<class Update> inline bool ymSettingsWriteSection(const char* section,const Json& initial,Update update){++settingsWrites;try{Json all=Json::object();if(std::filesystem::is_regular_file(settingsPath))all=load(settingsPath);Json value=all.value(section,initial);if(!update(value,all))return false;all[section]=std::move(value);save(settingsPath,all);return true;}catch(...){return false;}}
+inline Json deckySidebarEnvironment(bool,const std::function<bool()>& owner={},bool=false){if(owner&&!owner())return {{"ready",false},{"reason","health-fixture-owner-expired"}};const auto image=std::filesystem::path(detail::executable());return {{"ready",std::filesystem::is_regular_file(image)&&image.parent_path()==scope.parent_path()},{"scope","only source-built owned fixture resource admission"}};}
 inline void deckySidebarDiagnostic(const char* name,const Json& detail,bool=false){std::lock_guard lock(ioMutex);diagnostics.push_back({{"event",name},{"detail",detail}});}
 inline std::string deckySidebarStartMirrorBroker(){return g_deckyMirrorBroker.start({})?std::string{}:std::string("mirror-broker-not-active");}
 #include "typed-legacy-health-close-main-consumers.inc"
@@ -238,7 +279,7 @@ inline void initialize(bool retained=false){settingsPath=scope/L"private-setting
     Config config;config.executable=detail::executable();config.home=(scope/L"home").wstring();config.preflight=[] {return std::string{};};
     config.changed=[](const State& state){if(state.phase!="starting"&&state.phase!="loader-started"&&state.phase!="reconnecting"&&state.phase!="frontend-attached")g_deckyMirrorBroker.stop();if(state.phase=="loader-started")++launched;changed.notify_all();};
     if(retained)config.launchAdmission=[] {return LaunchAdmission{true,"retained-exact-fixture",false,"",true};};
-    config.ownedBinding=client;config.bindingPlan=[](BindingMode mode,std::uint64_t generation){++plans;return deckySidebarOwnedBindingPlan(mode,generation);};config.bindingDiagnostic=deckySidebarOwnedBindingDiagnostic;
+    config.ownedBinding=client;config.bindingPlan=[](BindingMode mode,std::uint64_t generation){++plans;return deckySidebarOwnedBindingPlan(mode,generation);};config.bindingDiagnosticBorrowed=deckySidebarOwnedBindingDiagnostic;
     g_deckySidebarRuntime.initialize(std::move(config));
 }
 inline void finish(){g_deckySidebarRuntime.shutdown();g_deckyMirrorBroker.stop();pump();if(g_hwnd){DestroyWindow(g_hwnd);g_hwnd=nullptr;}UnregisterClassW(L"YMCC-Typed-HealthClose-Owner",GetModuleHandleW(nullptr));}
@@ -381,12 +422,14 @@ int wmain(int argc,wchar_t** argv){
     if(argc==5&&std::wstring_view(argv[1])==L"--typed-legacy-health-close-cdp")return cdp::server(argv[2],argv[3],argv[4]);
     int code=0;if(ownedworker::child(code)||ymcc::deckybinding::fixture::tryRunChild(code))return code;
     if(argc==1){Sleep(15000);return 0;} // Same image, same original inert-child condition.
-    if(argc!=3)return 3;
+    const bool notificationOnly=argc==4&&std::wstring_view(argv[3])==L"--notification-win32";
+    if(argc!=3&&!notificationOnly)return 3;
     using namespace hc;scope=std::filesystem::absolute(argv[1]).lexically_normal();
     Json report={{"schema","ymcc.typed-legacy-health-close.v1"},{"productCallbackMode","typed-only; legacy macro absent"},{"fullPersistentAcceptance",false},
         {"officialLoaderExecuted",false},{"realSteamExecuted",false},{"physicalSleepPerformed",false},{"externalNetwork",false},
         {"identityBoundary","Production worker body and full injectBootstrap/BootstrapWatch are byte-extracted. Task-only real parent PID/birth/session/image lease replaces installed Steam registry input; registry acceptance is not claimed."},
         {"settingsBoundary","Original safety owner consumer uses actual private JSON file writes in this owned scope; no installed settings or registry touched."}};
+    if(notificationOnly){report["selection"]="notification-win32";report["retainedGroup"]="NOT_RUN";report["stressGroup"]="NOT_RUN";}
     const auto start=GetTickCount64();bool okay=false;Json contextExit;
     try{
         std::filesystem::create_directories(scope);
@@ -401,11 +444,11 @@ int wmain(int argc,wchar_t** argv){
         const auto handlesBefore=handles();const auto threadsBefore=threadCount();report["parentHandlesBefore"]=handlesBefore;report["parentThreadsBefore"]=threadsBefore;report["parentHandleSnapshotBefore"]=handleTable();
         {
             ContextServer context(scope/L"cdp");context.resetPeerControl();
-            try{run(context);report["retainedFrontendHealth"]=retainedFrontendHealth(context);if(report["retainedFrontendHealth"].at("passed")!=true)report["error"]="retained-frontend-health-failed";}catch(const std::exception& error){report["error"]=error.what();}
+            try{run(context);if(!notificationOnly){report["retainedFrontendHealth"]=retainedFrontendHealth(context);if(report["retainedFrontendHealth"].at("passed")!=true)report["error"]="retained-frontend-health-failed";}}catch(const std::exception& error){report["error"]=error.what();}
             // Repeated real Bootstrap/Watch/typed Client rebinds must retire the old
             // worker without restarting the owned Loader or retaining parent resources.
             // The independent direct AsyncRequest gate remains mandatory and separate.
-            if(!report.contains("error")){
+            if(!notificationOnly&&!report.contains("error")){
                 const auto stressStart=GetTickCount64();const auto stressHandlesBefore=handles();const auto stressThreadsBefore=threadCount();Json stressRows=Json::array();bool stressOkay=true;
                 context.setStep("idle");deckySidebarSetEnabled(true);need(await([&]{return g_deckySidebarRuntime.snapshot().phase=="loader-started";},3000),"stress-initial-owned-loader");
                 for(unsigned iteration=0;iteration<20;++iteration){

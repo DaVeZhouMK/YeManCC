@@ -90,6 +90,94 @@ struct Mutation {
 };
 } // namespace
 
+#if defined(YMCC_STEAM_GAME_LINK_STATE_GROUP_ONLY)
+// Symbolic state projections only; no opaque role proof is constructed here.
+// This explicit entry selects only the four added cases, never the old matrix.
+int main() {
+    try {
+        run("verified-original-group-healthy-keeps-ten-second-cadence", [] {
+            auto state = capture(100);
+            for (std::uint64_t i = 0; i < 2; ++i) {
+                auto e = healthy(i + 1, 100 + i * 10000);
+                e.primary = PrimaryStatus::VerifiedOriginalGroup;
+                accept(state, e);
+                openAs(state, "linked", "exact-original-linked", e.tick + 10000);
+                const auto s = state.snapshot();
+                expect(s.linked && s.contactConnected && s.transportConnected,
+                    "verified original group preserves healthy association and contact");
+                expect(s.readFailures == 0, "healthy group does not create transport failures");
+            }
+        });
+        run("verified-original-group-contact-requires-same-candidate", [] {
+            auto state = capture(100);
+            auto e = healthy(1, 100);
+            e.primary = PrimaryStatus::VerifiedOriginalGroup;
+            e.sharedCandidate = CandidateStatus::Different;
+            accept(state, e);
+            openAs(state, "linked", "exact-original-linked", 10100);
+            expect(!state.snapshot().contactConnected && state.snapshot().transportConnected,
+                "group association alone cannot claim same-original contact");
+            e.sequence = 2;
+            e.tick = 200;
+            e.sharedCandidate = CandidateStatus::Same;
+            accept(state, e);
+            openAs(state, "linked", "exact-original-linked", 10200);
+            expect(state.snapshot().contactConnected,
+                "same original candidate completes group contact without changing cadence");
+        });
+        run("verified-original-group-ui-loss-preserves-contact", [] {
+            for (auto ui : {UiStatus::RunningMissingList, UiStatus::NotRunning}) {
+                auto state = capture(100);
+                auto e = healthy(1, 100);
+                e.primary = PrimaryStatus::VerifiedOriginalGroup;
+                accept(state, e);
+                e.sequence = 2;
+                e.tick = 200;
+                e.ui = ui;
+                accept(state, e);
+                openAs(state, "contact-degraded",
+                    ui == UiStatus::NotRunning ? "same-original-contact-steam-not-running" :
+                        "same-original-contact-running-list-missing", 2200);
+                const auto degraded = state.snapshot();
+                expect(!degraded.linked && degraded.contactConnected && degraded.transportConnected,
+                    "group UI loss retains contact while refusing a current Running link");
+                e.sequence = 3;
+                e.tick = 300;
+                e.ui = UiStatus::RunningAndListed;
+                accept(state, e);
+                openAs(state, "linked", "exact-original-linked", 10300);
+                expect(state.snapshot().contactConnected,
+                    "fresh healthy group returns to the unchanged ten-second cadence");
+            }
+        });
+        run("unrecognized-primary-values-remain-unqualified", [] {
+            for (auto primary : {static_cast<PrimaryStatus>(4), static_cast<PrimaryStatus>(99)}) {
+                for (auto ui : {UiStatus::RunningAndListed, UiStatus::NotRunning}) {
+                    auto state = capture(100);
+                    auto e = healthy(1, 100);
+                    e.primary = primary;
+                    e.ui = ui;
+                    accept(state, e);
+                    openAs(state, "waiting", "native-primary-unknown", 2100);
+                    const auto s = state.snapshot();
+                    expect(!s.linked && !s.contactConnected && s.transportConnected,
+                        "unrecognized primary never inherits verified group contact");
+                }
+            }
+        });
+        expect(tests == 4 && combinations == 0, "group-only entry must never run the old matrix");
+        std::cout << "STEAM_GAME_LINK_STATE_GROUP_ONLY_OK tests=" << tests << " assertions=" << assertions
+            << " statusCombinations=" << combinations
+            << " originalMatrixExecuted=false opaqueProofConstructed=false"
+            << " steamWrites=0 gameWrites=0 inputWrites=0 deviceWrites=0 actionWrites=0\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "STEAM_GAME_LINK_STATE_GROUP_ONLY_FAILED tests=" << tests << " assertions=" << assertions
+            << " error=" << error.what() << '\n';
+        return 1;
+    }
+}
+#else
 int main() {
     try {
         run("plain-defaults-and-no-capture", [] {
@@ -571,3 +659,5 @@ int main() {
         return 1;
     }
 }
+
+#endif // YMCC_STEAM_GAME_LINK_STATE_GROUP_ONLY

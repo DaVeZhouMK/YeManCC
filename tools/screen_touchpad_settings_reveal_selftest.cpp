@@ -9,6 +9,8 @@
 #include <mutex>
 #include <deque>
 #include <functional>
+#include <memory>
+#include <string_view>
 #include <vector>
 #include "json.hpp"
 using Json=nlohmann::json;
@@ -22,10 +24,11 @@ constexpr unsigned WS_EX_TOPMOST=1,WS_EX_TOOLWINDOW=2,WS_EX_NOACTIVATE=4,WS_EX_N
 inline std::deque<Window> createdWindows;
 inline HWND CreateWindowExW(unsigned,const wchar_t*,const wchar_t*,unsigned,int x,int y,int w,int h,HWND,void*,void*,void*){createdWindows.push_back({false,{x,y,x+w,y+h}});return &createdWindows.back();}
 inline bool SetWindowPos(HWND h,HWND,int x,int y,int w,int height,unsigned){if(!h)return false;h->rect={x,y,x+w,y+height};return true;}
+inline bool GetWindowRect(HWND h,RECT* r){if(!h)return false;*r=h->rect;return true;}
 
 #define CALLBACK
 constexpr int SW_HIDE=0,SW_SHOWNOACTIVATE=4,USER_TIMER_MINIMUM=10;
-constexpr DWORD ERROR_GEN_FAILURE=31,ERROR_NOT_ENOUGH_MEMORY=8,ERROR_NOT_READY=21;
+constexpr DWORD ERROR_GEN_FAILURE=31,ERROR_NOT_ENOUGH_MEMORY=8,ERROR_NOT_READY=21,ERROR_TIMEOUT=1460;
 inline ULONGLONG clockNow=1000;inline unsigned timerArms=0,timerStops=0,draws=0,refreshes=0,releases=0,contactSyncs=0;
 inline UINT_PTR lastTimer=0;inline HWND lastTimerWindow=nullptr;inline ULONGLONG lastDelay=0;
 inline bool IsWindow(HWND h){return h!=nullptr;}
@@ -37,11 +40,18 @@ inline void KillTimer(HWND,UINT_PTR){++timerStops;}
 inline UINT_PTR SetTimer(HWND h,UINT_PTR id,UINT delay,void(*)(HWND,UINT,UINT_PTR,DWORD)){++timerArms;lastTimer=id;lastTimerWindow=h;lastDelay=delay;return id;}
 namespace ymcc::screeninput {
 inline bool ensureDisplay(HWND h){return h!=nullptr;}
-struct Event{};using Sink=void(*)(HWND,const Event&,void*);struct Runtime{};
+struct Event{};using Sink=void(*)(HWND,const Event&,void*);
+// Channel start/retirement is exercised by the native recovery fixture.
+struct Channel {
+ bool closedForSettings()const{return false;}bool sourceSyncFailedForSettings()const{return false;}
+ bool attachmentFailed()const{return false;}bool shutdown(){return true;}
+};
+struct Runtime {std::shared_ptr<Channel> inputChannel;};
 struct Surface {
  HWND root_=nullptr;HRESULT error=S_OK;bool ready=true;unsigned calls=0,attaches=0,closes=0,cancels=0;
  std::deque<HRESULT> failures;std::function<void()> duringSync,duringClose;
  HWND root()const{return root_;}bool active()const{return root_&&ready;}
+ bool terminalReleased()const{return !root_;}
  bool invoke(){++calls;const auto code=failures.empty()?S_OK:failures.front();if(!failures.empty())failures.pop_front();auto callback=std::move(duringSync);duringSync={};if(callback)callback();error=code;ready=code==S_OK;return ready;}
  bool sync(bool){return invoke();}
  bool attach(Runtime&,HWND h,int,Sink,void*){++attaches;root_=h;return invoke();}
@@ -49,13 +59,25 @@ struct Surface {
  void close(){++closes;root_=nullptr;ready=false;auto callback=std::move(duringClose);duringClose={};if(callback)callback();}
 };
 }
+namespace ymcc::customtouch {
+// No custom overlay is installed in these built-in controls scenarios.
+inline std::atomic<bool> editing{false},inheritedMasterEnabled{true};
+inline bool contactHeld(){return false;}inline bool visible(){return false;}
+inline bool wantsInput(){return false;}inline bool needsRefresh(){return false;}
+inline bool detachInputs(){return true;}inline unsigned openSources(){return 0;}
+inline bool heldKeys(){return false;}
+inline void syncVisibility(bool){}inline void repaint(){}
+}
 namespace sp {
 #include "types.inc"
 #include "config.inc"
 #include "auto_hide_validation.inc"
 #include "auto_hide_state.inc"
+#include "display_transition_fence.inc"
 inline AutoHideState autoHide;
+inline DisplayTransitionFence displayTransitionFence;
 inline bool initialized=true,inputTeardown=false;
+inline std::atomic<bool> presentationSuspended{false};
 inline DWORD windowError=0;
 inline std::mutex mutex;
 struct Core {Config config;struct Pad{bool down=false;};std::array<Pad,2> pads;};inline Core core;
@@ -68,53 +90,78 @@ inline std::array<Window,7> buttonInputStorage{},buttonOutlineStorage{};
 inline std::array<HWND,2> windows{},outlines{};
 inline std::array<HWND,7> buttonWindows{},buttonOutlines{};
 inline bool nativeInputCandidateRequested=true;
-inline ymcc::screeninput::Runtime nativeInputRuntime;
+inline ymcc::screeninput::Runtime nativePadInputRuntime;
+inline std::array<ymcc::screeninput::Surface,2> nativeInputSurfaces;
 inline std::array<ymcc::screeninput::Surface,7> nativeButtonSurfaces;
-inline UINT64 buttonRefreshEpoch=0;
+inline UINT64 padRefreshEpoch=0,buttonRefreshEpoch=0;
 #include "recovery_state.inc"
 inline ButtonInputRecovery buttonInputRecovery;
 inline void nativeButtonSink(HWND,const ymcc::screeninput::Event&,void*){}
+inline void recordNativeInputFailure(bool,int,const ymcc::screeninput::Surface&){}
+inline void nativeInputClose(int side){nativeInputSurfaces[side].close();}
+template<class Current> inline bool buttonsNativeInputDisableCurrent(Current&& current){return current();}
+inline unsigned buttonsOpenInputSources(){return 0;}
+inline unsigned sentKeys=0;inline bool sentClick=false;inline std::atomic<unsigned> screenButtonMask{0};
 
 inline std::array<UINT32,7> buttonContacts{};
 inline std::atomic<bool> summonWindowOnLeft{false};
 inline void (*quickAccessContextObserver)()=nullptr;
+inline void (*visibilityRefreshObserver)()=nullptr;
 inline Config getConfig(){std::lock_guard<std::mutex> lock(mutex);return core.config;}
 inline bool nativePad(Mode mode){return mode==Mode::Deck||mode==Mode::DualSense;}
 inline bool permitted(Mode mode){return mode!=Mode::Off&&(mode!=Mode::Deck||available.load())&&(mode!=Mode::DualSense||psAvailable.load());}
 inline Mode surfaceMode(const Config& cfg,int side){return cfg.layout==Layout::Single?cfg.single:(side?cfg.right:cfg.left);}
 #include "selectors.inc"
 #include "button_permitted.inc"
-inline bool renderOutline(int,int){++draws;return true;}
-inline bool renderButton(int,int,bool=false){++draws;return true;}
+inline bool renderOutline(int,int,bool=false,DWORD* =nullptr){++draws;return true;}
+struct ButtonUpload {bool ready=false;int width=0,height=0,padding=0;};
+inline std::array<ButtonUpload,7> buttonUploads;
+inline bool renderButton(int i,int,bool=false,DWORD* =nullptr){
+ ++draws;RECT r{};if(!GetWindowRect(buttonWindows[i],&r)||!buttonOutlines[i])return false;
+ constexpr int padding=3;buttonUploads[i]={true,r.right-r.left,r.bottom-r.top,padding};
+ buttonOutlines[i]->rect={r.left-padding,r.top-padding,r.right+padding,r.bottom+padding};return true;
+}
 inline void buttonsRepaint(int){++draws;}
 inline void syncContactVisuals(){++contactSyncs;}
-inline std::array<RECT,7> buttonRects(const RECT&,int,const RECT*,SummonPosition,unsigned){return {};}
+inline std::array<RECT,7> buttonRects(const RECT&,int,const RECT*,SummonPosition,unsigned){
+ std::array<RECT,7> r{};for(int i=0;i<7;++i)r[i]={10+i*50,40,42+i*50,72};return r;
+}
 #include "button_sync.inc"
 #include "buttons_refresh.inc"
 #include "buttons_need_refresh.inc"
 inline void autoHideSync(bool reset=false);
+inline void autoHideTouch(bool freshDown=false);
+inline bool sharedInputAllowed(){return !presentationSuspended.load();}
 #include "screen_touchpad_auto_hide.h"
 inline void release(){++releases;core.pads={};buttonContacts={};autoHide.specialContacts={};}
 // A layout collaborator only: real configuration, visibility-mask computation,
 // wake-up rendering, timeout calculation and timer callbacks run from production.
-inline void refresh(){
- ++refreshes;windowError=0;const auto cfg=getConfig();
+inline bool padsNeedRefresh(const Config&){return false;} // Pad refresh is outside this fixture.
+inline void refresh(bool force=false){
+ ++refreshes;++padRefreshEpoch;windowError=0;const auto cfg=getConfig();
  for(int i=0;i<2;++i){const bool show=cfg.masterEnabled&&cfg.enabled&&(cfg.layout!=Layout::Single||i==0)&&permitted(surfaceMode(cfg,i));ShowWindow(windows[i],show?SW_SHOWNOACTIVATE:SW_HIDE);ShowWindow(outlines[i],show&&!autoHide.hidden?SW_SHOWNOACTIVATE:SW_HIDE);}
- if(!buttonsRefresh(cfg,{}, {},false))return;
+ if(!buttonsRefresh(cfg,{}, {},force))return;
  autoHideSync();
 }
 #include "configure.inc"
 #include "button_visibility.inc"
+// Distinct values make an accidental leak from the current owner observable.
+inline Json state(){return {{"nativeInputFailure",{{"hresult",901}}},{"nativeInputChannelFailure",{{"hresult",902}}},
+ {"buttonVisibility",{{"inputVisibleMask",3}}},{"autoHidden",true},{"autoHideTimerArmed",true},{"visible",true},
+ {"error",903},{"ok",false},{"reason","active fault"},{"standaloneSpecialStatus","pending"}};}
+inline Json configJson(const Config& cfg){return {{"scale",cfg.scale}};}
+inline const char* profileName(int profile){return profile==1?"deck fixture":"other fixture";}
+#include "profile_state.inc"
 }
 using namespace sp;
 inline Json cases=Json::array();inline bool passed=true;
 void check(const char* name,bool ok){cases.push_back({{"name",name},{"ok",ok}});passed=passed&&ok;}
 void setup(int profile=1,bool pads=false,StandaloneSpecialMode standalone=StandaloneSpecialMode::Off){
  initialized=true;inputTeardown=false;windowError=0;clockNow=1000;timerArms=timerStops=draws=refreshes=releases=contactSyncs=0;lastTimer=0;
- autoHide={};core={};core.config.summonPosition=SummonPosition::Off;core.config.summonEnabled=false;core.config.enabled=pads;core.config.specialMask=profile==3?1:3;core.config.specialEnabled=profile!=0;core.config.standaloneSpecialMode=standalone;
+ autoHide={};displayTransitionFence={};presentationSuspended=false;core={};core.config.summonPosition=SummonPosition::Off;core.config.summonEnabled=false;core.config.enabled=pads;core.config.specialMask=profile==3?1:3;core.config.specialEnabled=profile!=0;core.config.standaloneSpecialMode=standalone;
  if(profile==0)core.config.specialMask=0;
  activeProfile=profile;appliedProfile=profile;controlTargetEnabled=profile!=0;controlEdgeEnabled=profile==2;available=profile==1;psAvailable=profile==2;
- buttonContacts={};buttonRefreshEpoch=0;buttonInputRecovery={};nativeInputCandidateRequested=true;createdWindows.clear();
+ buttonContacts={};padRefreshEpoch=buttonRefreshEpoch=0;buttonInputRecovery={};buttonUploads={};nativeInputCandidateRequested=true;createdWindows.clear();
  for(int i=0;i<2;++i){inputStorage[i]={};outlineStorage[i]={};windows[i]=&inputStorage[i];outlines[i]=&outlineStorage[i];}
  for(int i=0;i<7;++i){buttonInputStorage[i]={};buttonOutlineStorage[i]={};buttonWindows[i]=&buttonInputStorage[i];buttonOutlines[i]=&buttonOutlineStorage[i];}
  for(int i=0;i<7;++i){nativeButtonSurfaces[i]={};nativeButtonSurfaces[i].root_=buttonWindows[i];}
@@ -122,8 +169,21 @@ void setup(int profile=1,bool pads=false,StandaloneSpecialMode standalone=Standa
 }
 void expire(){clockNow=autoHide.lastTouch+(ULONGLONG)autoHide.seconds*1000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);}
 int main(int argc,char** argv){
- if(argc!=2)return 2;
+ if(argc!=2&&argc!=3)return 2;
+ const std::string_view mode=argc==2?"normal":argv[2];
+ const bool normal=mode=="normal",reveal=mode=="reveal",abort=mode=="abort",missing=mode=="missing";
+ if(!normal&&!reveal&&!abort&&!missing)return 2;
+ if(normal){
  check("new-config-and-timer-default-to-15-seconds",Config{}.autoHideSeconds==15&&AutoHideState{}.seconds==15);
+ setup(1,false);auto savedProfile=getConfig();savedProfile.scale=135;
+ auto isInactive=[](const Json& j){return !j.contains("nativeInputFailure")&&!j.contains("nativeInputChannelFailure")&&
+  j.at("buttonVisibility").is_null()&&j.at("autoHidden")==false&&j.at("autoHideTimerArmed")==false&&j.at("visible")==false&&
+  j.at("error")==0&&j.at("ok")==true&&j.at("reason")==""&&j.at("standaloneSpecialStatus")=="idle"&&j.at("scale")==135;};
+ const auto currentProfile=profileState(savedProfile,1);const auto inactiveProfile=profileState(savedProfile,2);
+ activeProfile=2;const auto appliedOnly=profileState(savedProfile,1),activeOnly=profileState(savedProfile,2);activeProfile=1;
+ auto expectedCurrent=state();expectedCurrent.update(Json{{"scale",135},{"persona","deck fixture"},{"steamDeckAvailable",true},{"ps5Available",false}});
+ check("inactive-profile-clears-runtime-visibility-and-faults",currentProfile==expectedCurrent&&
+  isInactive(inactiveProfile)&&isInactive(appliedOnly)&&isInactive(activeOnly));
  for(const int seconds:{1,3,5,10,15,30,45,60,120}) {
   setup(1,true);auto cfg=getConfig();cfg.autoHideSeconds=seconds;cfg.summonPosition=SummonPosition::Right;configure(cfg,1,true);
   const auto timeout=(ULONGLONG)seconds*1000;
@@ -144,7 +204,9 @@ int main(int argc,char** argv){
  buttonContacts[0]=0;autoHideTouch();check("summon-release-restarts-configured-deadline",autoHide.timer&&lastDelay==1000);
  expire();summon.autoHideSeconds=0;configure(summon,0,true);
  check("disable-auto-hide-restores-summon-without-timer",!autoHide.hidden&&!autoHide.timer&&buttonVisibilityState(summon)["artworkVisibleMask"]==1);
+ }
 
+ if(normal||reveal){
  const std::array<int,5> profiles={0,0,1,2,3};
  const std::array<const char*,5> names={"standalone-Steam","standalone-PS5","Steam-Deck","PS5","Xbox"};
  for(int i=0;i<5;++i){
@@ -161,7 +223,10 @@ int main(int argc,char** argv){
   const auto timer=autoHide.timer;clockNow+=30000;autoHideTimerProc(staleWindow,0,stale,0);
   check((std::string(names[i])+"-old-queued-timer-cannot-hide-new-preview").c_str(),autoHide.timer==timer&&!autoHide.hidden);
  }
- setup(1,true);expire();auto saved=getConfig();configure(saved,1);refresh();
+ }
+ Config saved;
+ if(normal){
+ setup(1,true);expire();saved=getConfig();configure(saved,1);refresh();
  check("ordinary-refresh-preserves-auto-hidden-state",autoHide.hidden&&autoHide.timer==0&&buttonVisibilityState(saved)["artworkVisibleMask"]==0);
  setup(1,true);expire();saved=getConfig();configure(saved,1,true);const auto deadline=autoHide.lastTouch;clockNow=deadline+60000;autoHideTimerProc(autoHide.timerWindow,0,autoHide.timer,0);
  check("explicit-preview-still-expires-after-full-timeout",autoHide.hidden&&autoHide.timer==0);
@@ -185,21 +250,30 @@ int main(int argc,char** argv){
  check("release-resumes-single-deadline",autoHide.timer&&lastDelay==15000);
  setup(1,false);saved=getConfig();activeProfile=2;
  check("visibility-diagnostics-separate-permission-from-old-windows",buttonVisibilityState(saved)["permittedMask"]==0&&buttonVisibilityState(saved)["inputVisibleMask"]==6);
+ }
+ if(normal||missing){
  // Field failure: left key missing, right key visible, selected mask unchanged.
  setup(1,false);saved=getConfig();buttonInputStorage[1].visible=buttonOutlineStorage[1].visible=false;nativeButtonSurfaces[1].ready=false;
  check("same-settings-repair-hidden-missing-button",configure(saved,1,true)&&buttonVisibilityState(saved)["artworkVisibleMask"]==6&&nativeButtonSurfaces[1].active());
  setup(1,false);saved=getConfig();buttonOutlineStorage[1].visible=false;
  check("same-settings-repair-unexpected-hidden-artwork",configure(saved,1,true)&&buttonVisibilityState(saved)["artworkVisibleMask"]==6);
+ }
+ if(normal||abort){
  setup(1,false);nativeButtonSurfaces[1].failures={E_ABORT,S_OK};const auto beforeCalls=nativeButtonSurfaces[1].calls;refresh();
  check("sync-E_ABORT-single-rebind-restores-both-keys",!windowError&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==6&&nativeButtonSurfaces[1].calls==beforeCalls+2&&buttonInputRecovery.recovered==1);
  setup(1,false);nativeButtonSurfaces[1].root_=nullptr;nativeButtonSurfaces[1].failures={E_ABORT,S_OK};refresh();
  check("attach-E_ABORT-single-rebind-restores-both-keys",!windowError&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==6&&nativeButtonSurfaces[1].attaches==2&&buttonInputRecovery.recovered==1);
+ }
+ if(normal||abort||missing){
  setup(1,false);nativeButtonSurfaces[1].failures={E_ABORT,E_ABORT,S_OK};refresh();const auto permanentCalls=nativeButtonSurfaces[1].calls;
  check("repeated-E_ABORT-stops-after-two-attempts",windowError==static_cast<DWORD>(E_ABORT)&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==4&&buttonInputRecovery.failed==1&&nativeButtonSurfaces[1].failures.size()==1);
- // Keep the manual-repair assertion independent from the retry negative.
- buttonInputStorage[1].visible=buttonOutlineStorage[1].visible=false;nativeButtonSurfaces[1].ready=false;
- nativeButtonSurfaces[1].failures={S_OK};configure(getConfig(),1,true);
- check("same-settings-recover-after-bounded-retry-exhaustion",!windowError&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==6&&nativeButtonSurfaces[1].calls>permanentCalls);
+ if(normal||missing){
+  // Consume the old error here so a missing button is the only refresh reason.
+  windowError=0;nativeButtonSurfaces[1].failures={S_OK};configure(getConfig(),1,true);
+  check("same-settings-recover-after-bounded-retry-exhaustion",!windowError&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==6&&nativeButtonSurfaces[1].calls>permanentCalls);
+ }
+ }
+ if(normal){
  setup(1,false);nativeButtonSurfaces[1].failures={E_FAIL,S_OK};refresh();
  check("other-errors-keep-error-without-automatic-retry",windowError==static_cast<DWORD>(E_FAIL)&&buttonVisibilityState(getConfig())["artworkVisibleMask"]==4&&buttonInputRecovery.retries==0&&nativeButtonSurfaces[1].failures.size()==1);
  setup(1,false);nativeButtonSurfaces[1].failures={E_ABORT};nativeButtonSurfaces[1].duringSync=[](){inputTeardown=true;initialized=false;for(auto h:buttonWindows)ShowWindow(h,SW_HIDE);for(auto h:buttonOutlines)ShowWindow(h,SW_HIDE);};refresh();
@@ -218,7 +292,8 @@ int main(int argc,char** argv){
  check("terminal-before-sync-makes-no-native-call",nativeButtonSurfaces[1].calls==terminalCalls);
  setup(1,false);const auto unchangedCalls=nativeButtonSurfaces[1].calls;configure(getConfig(),1,true);
  check("healthy-same-selection-adds-no-source-sync",nativeButtonSurfaces[1].calls==unchangedCalls);
+ }
  const auto failed=std::count_if(cases.begin(),cases.end(),[](const Json& c){return !c["ok"].get<bool>();});
- std::ofstream out(argv[1]);out<<Json{{"ok",passed},{"checks",cases.size()},{"failed",failed},{"cases",cases},{"realWindowsCreated",false},{"inputInjected",false}}.dump(2);
+ std::ofstream out(argv[1]);out<<Json{{"ok",passed},{"selection",mode},{"checks",cases.size()},{"failed",failed},{"cases",cases},{"realWindowsCreated",false},{"inputInjected",false}}.dump(2);
  std::cout<<"checks="<<cases.size()<<" failed="<<failed<<"\n";return passed?0:1;
 }

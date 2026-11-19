@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const toolDir=path.dirname(fileURLToPath(import.meta.url));
 const root=path.dirname(toolDir);
 const args=process.argv.slice(2),options={};
@@ -17,18 +18,22 @@ const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 const pieces=[];
 function slice(s,start,end,file=sourcePath){const a=s.indexOf(start);if(a<0)throw Error('Missing source anchor: '+start);const b=s.indexOf(end,a+start.length);if(b<0)throw Error('Missing source end: '+end);const text=s.slice(a,b);pieces.push({file,startLine:s.slice(0,a).split('\n').length,endLine:s.slice(0,b).split('\n').length-1,sha256:sha(text)});return text;}
 function line(s,start,file=sourcePath){const a=s.indexOf(start);if(a<0)throw Error('Missing line: '+start);const b=s.indexOf('\n',a);const text=s.slice(a,b);pieces.push({file,startLine:s.slice(0,a).split('\n').length,sha256:sha(text)});return text+'\n';}
-let generated='// Generated from source anchors without rewriting function bodies. No Windows SDK/API imports.\nnamespace ymcc::screenpads {\n';
+let generated='// Generated from source anchors without rewriting function bodies. No Windows SDK/API imports.\n';
+// The extension is inactive in this original touchpad-only suite. Its real
+// shared-key/lifecycle implementation is exercised by the native consumer.
+generated+='namespace ymcc::customtouch {struct Editing {bool load()const{return false;}};inline Editing editing;inline bool ownsKey(WORD)noexcept{return false;}inline void release(){} inline void releaseMapped(){} inline bool finish(bool,bool){return false;}}\nnamespace ymcc::screenpads {\n';
 for(const name of ['enum class Mode','enum class SummonPosition','enum class StandaloneSpecialMode','enum class Layout','enum class TouchFeedbackMode','struct Config','inline bool nativePad','inline Mode surfaceMode','struct Action'])generated+=line(source,name);
 generated+='inline int touchFeedbackStrength(TouchFeedbackMode){return 0;}\n';
 generated+=slice(source,'struct Pad {','// Fixed-size pure state machine');
 generated+=slice(source,'class Core {','    struct Projection')+'};\n';
-generated+=slice(source,'inline unsigned sentKeys=0;','inline bool initialized=false;');
+generated+=slice(source,'inline unsigned sentKeys=0;','inline bool initialized=');
 generated+='inline Core core;inline std::mutex mutex;inline constexpr ULONG_PTR kInjectedTag=0x594d5450;inline HWND windows[2]{};\n';
 generated+='struct FeedbackOnly {void cancel(){}};inline FeedbackOnly feedbackOnlyContacts;struct AutoHide {std::array<UINT32,2> specialContacts{};};inline AutoHide autoHide;\n';
 generated+='inline void outputHaptic(const Action&){} inline void buttonsReleaseMapped(){} inline void cursorStop(){} inline void syncOutlineFeedback(){} inline void syncContactVisuals(){} inline void nativeInputCancel(){} inline void buttonsRelease(){} inline void autoHideSync(){}\n';
-generated+=slice(source,'inline void output(const Action& a) {','// Dual PS surfaces share');
+generated+='inline bool inputTeardown=false;inline bool sharedInputAllowed(){return true;}\n';
+generated+=slice(source,'inline void output(const Action& requested) {','// Dual PS surfaces share');
 const ownerPath=path.join(root,'native/screen_touchpad_owner.h'),owner=fs.readFileSync(ownerPath,'utf8');
-generated+='inline UINT_PTR ownerLifecycleEpoch=1;inline bool ownerRebindQueued=false;\n'+line(owner,'inline void ownerOnSuspend()',ownerPath)+'}\n';
+generated+='struct OwnerResume {bool observed=false;};inline OwnerResume ownerResumeRecovery;inline void cancelOwnerDisplayRefresh(){}inline void cancelOwnerResumeRecovery(const char*){}inline void cancelOwnerVisibilityWork(){}inline UINT_PTR ownerLifecycleEpoch=1;inline bool ownerRebindQueued=false;\n'+line(owner,'inline void ownerOnSuspend()',ownerPath)+'}\n';
 let baselineSha256=null;
 if(options['--baseline']){const file=options['--baseline'],old=fs.readFileSync(file,'utf8');baselineSha256=sha(old);generated+='#define PARTIAL_SEND_HAS_BASELINE 1\nnamespace baseline {using ymcc::screenpads::Action;inline unsigned sentKeys=0;inline bool sentClick=false,dryRun=false;inline unsigned long long injectedCount=0;inline DWORD inputError=0;inline constexpr ULONG_PTR kInjectedTag=0x594d5450;using ymcc::screenpads::outputHaptic;\n'+slice(old,'inline void output(const Action& a) {','inline void releaseMappedState() {',file)+'}\n';}
 const include=path.join(out,'screen_touchpad_partial_send_extracted.inc');fs.writeFileSync(include,generated);
@@ -47,7 +52,7 @@ if(process.platform==='win32'){
  const script=path.join(out,'compile-memory-fixture.cmd');
  fs.writeFileSync(script,[
  '@echo off','setlocal',`set "TEMP=${out}"`,`set "TMP=${out}"`,
- `call "${vcvars}" > "${out}\\compiler-environment.log" 2>&1`,'if errorlevel 1 exit /b 1',
+ calibrationToolchainPreamble(vcvars),
  `cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /O2 /MT /I"${out}" "${fixture}" /Fe:"${executable}" /Fo:"${out}\\screen_touchpad_partial_send_selftest.obj" /Fd:"${out}\\screen_touchpad_partial_send_selftest.pdb" /link /INCREMENTAL:NO > "${out}\\compile.log" 2>&1`,
  'if errorlevel 1 exit /b 1',`dumpbin /imports "${executable}" > "${out}\\binary-imports.txt"`,'if errorlevel 1 exit /b 1','exit /b 0',''].join('\r\n'));
  run(process.env.ComSpec||'cmd.exe',['/d','/c',script],'compile-driver.log');

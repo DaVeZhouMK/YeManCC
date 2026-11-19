@@ -14,7 +14,7 @@ static void msiNativeForegroundFieldPolicyChecks(Check&& fieldCheck,unsigned fie
     if(fieldProduct==0x1b4c)fieldCheck("field ROGX known unsafe HID leaf policy remains quarantined",
         !ymcc::nativeForeground::gameNodeRefreshMutationAllowed(Profile::Rog,familyRoot,familyHid));
 }
-static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationProbesOnly=false) {
+static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationProbesOnly=false,bool priorityProbesOnly=false,bool nativeOffProbesOnly=false,const char* preHostWriterCase=nullptr) {
     unsigned cases=0,failures=0,discoveries=0,inventories=0,xusbInventories=0,reads=0,polls=0,cloakWrites=0;
     bool ui=true,cloak=true,exempt=true,inverseOff=true,readOk=true,hideOk=true,unhideOk=true,cloakOk=true;
     bool mainPresent=true,rootPresent=true,loseFocus=false,stalePower=false,staleEdge=false,cloakReadbackMismatch=false;
@@ -60,13 +60,18 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         g_physicalReleaseWindowStage=0;g_physicalReleaseWindowTransition=0;g_physicalReleaseWindowNeutral=false;
         g_msiNativeForegroundLease=MsiNativeForegroundLease{};g_msiNativeForegroundEdge=1;
         g_msiNativeForegroundRetry={};retryTick=1000;
+        g_msiNativeForegroundVirtualYieldPending=false;
         g_msiNativeForegroundSourceRetryNeeded=false;g_msiNativeForegroundSourceRetryGeneration=0;
         g_msiNativeForegroundWatchGameSources=false;
         thirdGamePresent=currentInventoryComplete=true;thirdGameUsage=5;gameRefreshResult=0;gameRefreshes.clear();
         gameRefreshTerminalDiagnostic=nullptr;gameRefreshTerminalDiagnosticWrites=0;
         g_msiNativeForegroundTestIo.arrivalSource={};
         g_msiNativeForegroundDesiredUi=false;g_msiNativeForegroundCyclePending=false;g_msiNativeForegroundResumePending=false;
-        g_msiNativeForegroundPowerHold=false;g_msiNativeForegroundSuspendedGeneration=0;g_msiNativeForegroundLastResumeGeneration=0;
+        g_msiNativeForegroundWorkPowerDeferred=false;g_msiNativeForegroundTestIo.beforeCycleDispatch={};
+        g_msiNativeForegroundPowerHold=false;g_msiNativeForegroundSuspendedGeneration=0;g_msiNativeForegroundLastResumeGeneration=currentPowerGeneration();
+        g_sharedPowerSuspendSerial=0;g_msiNativeForegroundLastReadySuspendSerial=0;
+        g_msiNativeForegroundPowerTransitionObserved=false;
+        g_msiNativeForegroundPowerHoldCommitTick=g_lastPowerResumeCommitTick.load(std::memory_order_acquire);
         g_msiNativeForegroundObserver=nullptr;g_msiNativeForegroundObserverActive=true;g_msiNativeForegroundObserverRequested=false;
         discoveries=inventories=xusbInventories=reads=polls=cloakWrites=0;sourceCount=1;candidateRoot=root;peer1902=0;
         xusbInventory=MsiNativeForegroundXusbInventory{};xusbInventory.complete=true;loseXusbLocation=failXusbHide=false;duringHideCycle={};
@@ -131,6 +136,219 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
     g_msiNativeForegroundTestIo.clock=[&](){return retryTick;};
     g_msiNativeForegroundTestIo.readerExemption=[&](){exempt=true;return true;};
     g_msiNativeForegroundTestIo.readerInverseOff=[&](){return inverseOff;};
+    if(!nativeOffProbesOnly && !preHostWriterCase){
+    if(!mutationProbesOnly){
+        for(const std::string persona:{"disabled","steamdeck"})for(const bool verifying:{false,true}){
+            reset();
+            const auto ticket=g_virtualStartProtection.admit(persona,inputHostStartProtectionNow()).requestId;
+            if(verifying)(void)g_virtualStartProtection.beginVerification(ticket,"success",inputHostStartProtectionNow());
+            enter();
+            check("priority admitted player ON or OFF prevents new native isolation before settings converge",
+                ticket&&!g_msiNativeForegroundLease.active&&discoveries==0&&writes.empty()&&cycles.empty());
+            msiNativeForegroundObserveSource(source(),12);msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+            check("priority source callbacks and maintenance cannot hide during player execution or inspection",
+                discoveries==0&&writes.empty()&&cycles.empty()&&!g_msiNativeForegroundLease.active);
+        }
+        reset();
+        {
+            const InputHostVirtualIntentMutation mutation;
+            enter();
+            check("priority partial virtual settings update prevents native acquisition",
+                discoveries==0&&writes.empty()&&cycles.empty()&&!g_msiNativeForegroundLease.active);
+        }
+        msiNativeForegroundUiEvent(true);msiNativeForegroundHandleWork();
+        check("priority completed settings update permits ordinary native summon again",
+            g_msiNativeForegroundLease.active&&cycles==std::vector<bool>{false});
+        leave();
+        for(const bool pending:{false,true}){
+            reset();hidden={L"HID\\FOREIGN-PRIORITY"};cycleResult=pending?1:0;enter();
+            const auto ticket=g_virtualStartProtection.admit("disabled",inputHostStartProtectionNow()).requestId;
+            const bool admitted=msiNativeForegroundBeforeVirtualWork("virtual-target-disabled");
+            check("priority OFF returns only native-owned configuration before completing",
+                ticket&&hidden==std::vector<std::wstring>{L"HID\\FOREIGN-PRIORITY"}&&
+                (pending?!admitted:admitted)&&
+                (pending?g_msiNativeForegroundLease.configurationReturned:!g_msiNativeForegroundLease.active));
+            check("priority OFF cannot replace a still-live helper",
+                g_msiNativeForegroundCyclePending==pending&&cycles.size()==(pending?1U:2U));
+            if(pending){
+                cycleResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+                check("priority original OFF resumes once after serialized native return",
+                    !g_msiNativeForegroundLease.active&&!g_msiNativeForegroundCyclePending&&
+                    virtualJobs==std::vector<std::string>{"virtual-target-disabled"}&&cycles.size()==2);
+            }
+            msiNativeForegroundUiEvent(true);msiNativeForegroundHandleWork();
+            check("priority OFF inspection cannot reacquire the just-returned physical controller",
+                !g_msiNativeForegroundLease.active&&hidden==std::vector<std::wstring>{L"HID\\FOREIGN-PRIORITY"}&&cycles.size()==2);
+        }
+        reset();cycleResult=1;enter();
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+        (void)msiNativeForegroundBeforeVirtualWork("persona-transition");
+        const bool faultAdmitted=msiNativeForegroundBeforeVirtualWork("fault-stop:priority-probe");
+        check("priority mandatory fault replaces parked Start without racing the live helper",
+            !faultAdmitted&&g_msiNativeForegroundLease.configurationReturned&&hidden.empty()&&
+            g_msiNativeForegroundCyclePending&&cycles.size()==1&&
+            g_msiNativeForegroundLease.deferredVirtualWork==std::vector<std::string>{"fault-stop:priority-probe"});
+        cycleResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("priority late helper completion resumes fault cleanup without resurrecting parked Start",
+            !g_msiNativeForegroundLease.active&&!g_msiNativeForegroundCyclePending&&
+            virtualJobs==std::vector<std::string>{"fault-stop:priority-probe"}&&hidden.empty());
+        reset();enter();unhideOk=false;
+        (void)g_virtualStartProtection.admit("disabled",inputHostStartProtectionNow());
+        const auto owned=g_msiNativeForegroundLease.owned;
+        check("priority request cannot erase failed native configuration return",
+            !msiNativeForegroundBeforeVirtualWork("virtual-target-disabled")&&g_msiNativeForegroundLease.active&&
+            !g_msiNativeForegroundLease.configurationReturned&&g_msiNativeForegroundLease.owned==owned&&
+            !hidden.empty()&&virtualJobs.empty());
+        unhideOk=true;msiNativeForegroundHandleWork();
+        check("priority recovered readback finishes original OFF without a new hide",
+            !g_msiNativeForegroundLease.active&&hidden.empty()&&
+            virtualJobs==std::vector<std::string>{"virtual-target-disabled"});
+        reset();cycleResult=1;enter();
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+        const auto originalRequest=g_virtualStartProtection.admit("steamdeck",inputHostStartProtectionNow());
+        const auto originalWire=ymcc::inputHost::queuedPlayerStart::bind("persona-transition");
+        check("priority original player wire remains bound while native return is pending",
+            originalRequest.accepted&&originalWire.starts_with(ymcc::inputHost::queuedPlayerStart::prefix)&&
+            !msiNativeForegroundBeforeVirtualWork(originalWire)&&
+            g_msiNativeForegroundLease.deferredVirtualWork==std::vector<std::string>{originalWire});
+        cycleResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("priority helper completion requeues the exact original player wire",
+            virtualJobs==std::vector<std::string>{originalWire}&&!g_msiNativeForegroundLease.active);
+        const auto nextRequestTick=inputHostStartProtectionNow()+ymcc::VirtualStartProtection::maxMs;
+        (void)g_virtualStartProtection.view(nextRequestTick);
+        const auto nextRequest=g_virtualStartProtection.admit("steamdeck",nextRequestTick);
+        ymcc::inputHost::queuedPlayerStart::Work oldWork;
+        check("priority old parked player wire is rejected after a newer request without rebinding",
+            nextRequest.accepted&&nextRequest.requestId!=originalRequest.requestId&&
+            ymcc::inputHost::queuedPlayerStart::decode(originalWire,oldWork)&&oldWork.bound&&
+            ymcc::inputHost::queuedPlayerStart::stale(oldWork)!=nullptr&&
+            !g_inputHostProcess&&!g_hidHideVisibilityJournal.active);
+        reset();enter();
+        check("priority ordinary native maintenance preserves an active summon without a virtual request",
+            msiNativeForegroundBeforeVirtualWork("source-reconcile")&&g_msiNativeForegroundLease.active&&
+            !hidden.empty()&&cycles==std::vector<bool>{false});
+        leave();
+        auto pendingPower=[&]{return g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);};
+        reset();
+        auto receipt=pendingPower();enter();
+        check("priority public suspend ingress prevents discovery and hide before local suspend",
+            receipt && g_powerLifecycle==PowerLifecycle::Ready && !g_msiNativeForegroundPowerHold &&
+            !discoveries && writes.empty() && cycles.empty() && !g_msiNativeForegroundLease.active);
+        g_sleepPowerDispatch.complete(receipt);msiNativeForegroundHandleWork();
+        check("priority cancelled query still allows the same currently visible summon",cycles==std::vector<bool>{false});
+        leave();
+        reset();enter();
+        const auto oldAttempt=g_msiNativeForegroundLease.refreshAttemptEdge;
+        const auto newWritesBeforeReturn=writes.size();
+        g_msiNativeForegroundTestIo.beforeCycleDispatch=[&]{receipt=pendingPower();};
+        leave();
+        check("priority suspend during inverse dispatch returns exact visibility but does not consume a cycle",
+            receipt && hidden.empty() && writes.size()==2*newWritesBeforeReturn && cycles==std::vector<bool>{false} &&
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.configurationReturned &&
+            !g_msiNativeForegroundLease.cycleForRestore && g_msiNativeForegroundLease.refreshAttemptEdge==oldAttempt &&
+            !g_msiNativeForegroundLease.refreshFailed && g_msiNativeForegroundWorkPowerDeferred);
+        g_msiNativeForegroundTestIo.beforeCycleDispatch={};
+        g_sleepPowerDispatch.complete(receipt);
+        ymcc::sleeppower::SharedPowerV1 ready;
+        const bool readyKnown=captureSharedPowerLifecycle(ready);
+        const auto oldQueue=jobs.size();
+        g_inputReady=false;
+        msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundMaintenance();
+        check("priority duplicate public Ready preserves original inverse debt until the reader is ready",
+            readyKnown && jobs.size()==oldQueue && g_msiNativeForegroundWorkPowerDeferred &&
+            g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.configurationReturned &&
+            hidden.empty() && cycles==std::vector<bool>{false});
+        g_inputReady=true;
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();msiNativeForegroundHandleWork();
+        msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);
+        check("priority duplicate public Ready resumes only the original inverse cycle once",
+            readyKnown && jobs.size()==oldQueue+1 && !g_msiNativeForegroundLease.active &&
+            !g_msiNativeForegroundWorkPowerDeferred && cycles==std::vector<bool>({false,true}));
+        reset();enter();
+        const auto coalescedQueue=jobs.size();
+        const auto coalescedEdge=g_msiNativeForegroundEdge.load();
+        const auto coalescedGeneration=currentPowerGeneration();
+        const bool oldReadyKnown=captureSharedPowerLifecycle(ready);
+        ++g_sharedPowerSuspendSerial;
+        check("priority same-generation suspend serial invalidates native lease before Ready projection",
+            oldReadyKnown && !msiNativeForegroundLeaseCurrent() && currentPowerGeneration()==coalescedGeneration &&
+            !g_msiNativeForegroundPowerHold && hardwareWriteAllowed() && !hidden.empty());
+        msiNativeForegroundSharedPowerReady(ready);
+        check("priority stale Ready cannot consume or enqueue coalesced native return",
+            jobs.size()==coalescedQueue && g_msiNativeForegroundEdge==coalescedEdge);
+        const bool coalescedReadyKnown=captureSharedPowerLifecycle(ready);
+        msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);
+        check("priority same-generation new Ready queues reconciliation once without a raw suspend",
+            coalescedReadyKnown && jobs.size()==coalescedQueue+1 && g_msiNativeForegroundEdge==coalescedEdge+1);
+        ui=false;msiNativeForegroundHandleWork();
+        check("priority coalesced Ready returns owned paths without refreshing the retired period",
+            hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>{false});
+        reset();hidden={L"HID\\FOREIGN-PRIORITY"};enter();
+        ymcc::sleeppower::SharedPowerV1 beforeResumeOnly;
+        const bool beforeResumeOnlyKnown=captureSharedPowerLifecycle(beforeResumeOnly);
+        g_msiNativeForegroundLastResumeGeneration=beforeResumeOnly.generation;
+        g_msiNativeForegroundLastReadySuspendSerial=beforeResumeOnly.suspendSerial;
+        const auto resumeOnlyQueue=jobs.size();
+        const auto resumeOnlyEdge=g_msiNativeForegroundEdge.load();
+        msiNativeForegroundSharedPowerReady(beforeResumeOnly);
+        ++g_powerGeneration;
+        ui=false;msiNativeForegroundSharedPowerReady(beforeResumeOnly);
+        check("priority unchanged and retired Ready do not queue resume-only reconciliation",
+            beforeResumeOnlyKnown && !msiNativeForegroundLeaseCurrent() && jobs.size()==resumeOnlyQueue &&
+            g_msiNativeForegroundEdge==resumeOnlyEdge && g_msiNativeForegroundLease.active);
+        const bool resumeOnlyKnown=captureSharedPowerLifecycle(ready);
+        msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);
+        check("priority resume-only new generation queues one return even without a suspend serial change",
+            resumeOnlyKnown && ready.suspendSerial==beforeResumeOnly.suspendSerial && !g_msiNativeForegroundPowerHold &&
+            jobs.size()==resumeOnlyQueue+1 && g_msiNativeForegroundEdge==resumeOnlyEdge+1);
+        msiNativeForegroundHandleWork();
+        check("priority resume-only retirement returns exact paths without an old inverse refresh",
+            !g_msiNativeForegroundLease.active && hidden==std::vector<std::wstring>{L"HID\\FOREIGN-PRIORITY"} &&
+            cycles==std::vector<bool>{false});
+        reset();enter();
+        msiNativeForegroundPowerEvent(PBT_APMSUSPEND);msiNativeForegroundHandleWork();
+        ++g_powerGeneration;++g_sharedPowerSuspendSerial;
+        msiNativeForegroundPowerEvent(PBT_APMRESUMEAUTOMATIC);
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        const bool maintenanceReadyKnown=captureSharedPowerLifecycle(ready);
+        const auto maintenanceEdge=g_msiNativeForegroundEdge.load();
+        const auto maintenanceQueue=jobs.size(),maintenanceWrites=writes.size();
+        check("priority maintenance-first current Ready has one fresh active isolation lease",
+            maintenanceReadyKnown && !g_msiNativeForegroundPowerHold && msiNativeForegroundLeaseCurrent() &&
+            g_msiNativeForegroundLease.active && !hidden.empty() && cycles==std::vector<bool>({false,false}));
+        msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);
+        msiNativeForegroundHandleWork();
+        check("priority late current Ready cannot retire the fresh maintenance-first lease",
+            jobs.size()==maintenanceQueue && g_msiNativeForegroundEdge==maintenanceEdge && writes.size()==maintenanceWrites &&
+            msiNativeForegroundLeaseCurrent() && g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,false}));
+        reset();cycleResult=1;enter();receipt=pendingPower();
+        const auto request=g_virtualStartProtection.admit("disabled",inputHostStartProtectionNow());
+        check("priority public suspend permits exact unhide but never replaces a live helper for OFF",
+            receipt && request.accepted && !msiNativeForegroundBeforeVirtualWork("virtual-target-disabled") &&
+            hidden.empty() && g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundCyclePending &&
+            virtualJobs.empty() && cycles==std::vector<bool>{false});
+        cycleResult=0;pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("priority late helper completion during pending is processed without launching its inverse",
+            g_msiNativeForegroundLease.active && !g_msiNativeForegroundCyclePending &&
+            g_msiNativeForegroundWorkPowerDeferred && virtualJobs.empty() && cycles==std::vector<bool>{false});
+        g_sleepPowerDispatch.complete(receipt);++g_powerGeneration;
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("priority fresh power generation cannot launch old inverse and requeues only original OFF",
+            !g_msiNativeForegroundLease.active && cycles==std::vector<bool>{false} &&
+            virtualJobs==std::vector<std::string>{"virtual-target-disabled"});
+        reset();
+        g_msiNativeForegroundTestIo.beforeCycleDispatch=[&]{receipt=pendingPower();};
+        enter();
+        check("priority pending immediately before initial helper dispatch rolls back the exact hide",
+            receipt && !writes.empty() && hidden.empty() && cycles.empty() &&
+            g_msiNativeForegroundLease.configurationReturned && !g_msiNativeForegroundLease.cycleIssued);
+        g_sleepPowerDispatch.complete(receipt);
+        if(priorityProbesOnly){
+            reset();g_msiNativeForegroundTestIo={};g_msiForegroundTestIo={};
+            std::cout<<"MSI_NATIVE_ONLY cases="<<cases<<" failures="<<failures<<" scope=shield-priority-probes realHardwareAccess=false\n";
+            return {cases,failures};
+        }
+    }
     if(!mutationProbesOnly){
     reset();sourceCount=0;enter();
     const auto missingSourceDiscoveries=discoveries;
@@ -501,13 +719,16 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
     leave();check("MSI original return remains available after partial entry inventory",hidden.empty() && !g_msiNativeForegroundLease.active && cycles==std::vector<bool>({false,true}));
 
     } // Full normal suite remains the default; mutation probes avoid unrelated waits.
+    }
     using ymcc::nativeForeground::Profile;
+    if(!preHostWriterCase){
     check("ROG family policy binds known model and ASUS manufacturer",ymcc::nativeForeground::machineProfile("ASUSTEK COMPUTER INC.","RC73XA")==Profile::Rog);
     check("GPD family policy binds Win5 model and GPD manufacturer",ymcc::nativeForeground::machineProfile("GPD","G1618-05")==Profile::Gpd);
     check("model aliases and manufacturer-only evidence cannot authorize native shielding",
         ymcc::nativeForeground::machineProfile("ASUSTEK COMPUTER INC.","RC73XA-UNKNOWN")==Profile::Unsupported &&
         ymcc::nativeForeground::machineProfile("GPD","UNKNOWN")==Profile::Unsupported &&
         ymcc::nativeForeground::machineProfile("OTHER","G1618-05")==Profile::Unsupported);
+    }
     std::string familyRoot,familyHid,familyLateHid,familyXusb;
     unsigned familyVendor=0,familyProduct=0;
     bool familyLatePresent=false,familySameRootSources=false;
@@ -561,6 +782,598 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         auto endpoint=ymcc::msi::NativeForegroundXusbInterface{};endpoint.activeInterface=endpoint.ancestorMatched=true;
         endpoint.instanceId=familyXusb;endpoint.ancestorRoot=familyRoot;xusbInventory.interfaces={endpoint};
     };
+    auto seedReturnedGameFacts=[&](unsigned terminal){
+        auto& lease=g_msiNativeForegroundLease;
+        lease.helperDiagnostic=nullptr;
+        if(terminal==1 || terminal==2)return; // acknowledged success / unknown failure
+        json facts={{"Schema",1},{"Kind","ymcc.gameRefresh.failure"},{"Result",6},
+            {"Stage",terminal==3?"enable":"disable"},{"Xusb",lease.helperXusbTarget},
+            {"PrepareLocateResult",0U},{"CurrentLocateResult",0U},{"SameNode",true},
+            {"DisableCallEntered",true},{"DisableResult",terminal==3?0U:23U},
+            {"EnableCallEntered",terminal==3},{"EnableResult",terminal==3?json(23U):json(nullptr)},
+            {"CompensationChecked",terminal==3},{"CompensationIdentityMatched",terminal==3?json(true):json(nullptr)},
+            {"CompensationLocateResult",terminal==3?json(0U):json(nullptr)},
+            {"CompensationSameNode",terminal==3?json(true):json(nullptr)},
+            {"CompensationAttempted",terminal==3},{"CompensationEnableResult",terminal==3?json(23U):json(nullptr)},
+            {"CompensationExceptionType",nullptr},{"CompensationExceptionHResult",nullptr},
+            {"ExceptionType","System.InvalidOperationException"},{"ExceptionHResult",-2146233079}};
+        lease.helperDiagnostic={{"transport","delete-on-close-stdout"},{"state","record-accepted"},
+            {"scope","helper-self-reported-existing-call-facts"},{"hardwareSuccessProven",false},
+            {"reportedFacts",std::move(facts)}};
+    };
+    // Private directed extension of this existing GPD fixture. These are the
+    // same configureFamily/enter/gameRefresh/xusbRefresh IO ports as R11 below.
+    // No replacement returned(), lease model, predicate or recovery executor.
+    if(preHostWriterCase){
+        namespace runtime=ymcc::inputHost::runtimeRecovery;
+        const std::string selected=preHostWriterCase;
+        const std::vector<std::string> allowed={"terminal-owner","off","unknown","enable-debt",
+            "wrong-attempt","cross-power","successor-owner","live","prior-leaf-failed"};
+        if(std::find(allowed.begin(),allowed.end(),selected)==allowed.end())
+            throw std::runtime_error("unknown GPD preHost writer selection");
+        auto need=[&](bool ok,const char* name){check(name,ok);if(!ok)throw std::runtime_error(name);};
+        // The central executor must put the documented invalid module manifest
+        // beside its OWN regression exe. Check the real Start resource gate;
+        // do not replace Start or permit it to reach observers/Host/device IO.
+        need(!inputModulePayloadCurrent(),"GPD prehost private resource gate blocks actual Start before IO");
+        g_gpdPreHostFixtureTick=1000000;
+        configureFamily(false);hidden={L"HID\\FOREIGN-PREHIDDEN\\OTHER-PORT"};cloak=false;
+        g_inputHostEpoch=0;g_inputHostRunId.clear();g_inputHostHostInstanceId.clear();g_inputHostBoundPersona.clear();
+        g_inputHostProcess=g_inputHostPrimaryThread=g_inputHostServerPipe=nullptr;
+        g_inputHostHello=g_inputHostPrepared=g_inputHostPrepareMayHaveReachedHost=false;
+        g_inputHostNeutralized=g_inputHostActive=false;g_inputHostStartBlocked=false;
+        g_inputHostPowerAdmissionRevoked=false;g_inputHostVirtualIntentWriters=0;
+        g_inputHostTransportFault=false;g_inputHostFaultHoldsStart=false;
+        g_exitRequested=false;g_inputCaptureStop=false;g_externalPriorityVirtualSuspended=false;
+        g_inputHostRuntimeRecoveryPending=false;g_inputHostRecoveryTerminalLogged=false;
+        g_inputHostRecoveryEpisodeAttempts=0;g_inputHostRecoveryFallbackState=0;
+        g_inputHostRecoveryLastStartTick=0;g_inputHostRecoveryPending=false;g_inputHostTupleHealPending=false;
+        runtime::state={};
+        {std::lock_guard queueLock(g_inputHostLifecycleWorkMx);g_inputHostLifecycleWorkQueue.clear();}
+        g_inputHostLifecycleWorkRequested=false;
+        // First HID leaf is acknowledged by the original IO seam. The final
+        // exact XUSB leaf waits in a REAL LaunchScope, not a fake NativeLease.
+        gameRefreshResult=0;familyXusbResult=1;enter();
+        need(g_msiNativeForegroundLease.active&&g_msiNativeForegroundCyclePending&&
+            gameRefreshes==std::vector<std::string>{familyHid}&&xusbRefreshes==std::vector<std::string>{familyXusb},
+            "GPD prehost original native entry acknowledges prior HID and parks final XUSB");
+        auto& lease=g_msiNativeForegroundLease;
+        const auto path=nativeRefreshWriterRecordPath();
+        auto scope=std::make_unique<ymcc::nativeRefreshWriter::LaunchScope>(path,
+            "windows-machine-guid:private-gpd-prehost",familyRoot,familyXusb,std::vector<std::string>{W2U(location)});
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);
+        need(scope->ready()&&scope->job().prepareTracked(startup,scope->jobName(),{scope->inheritedLease()})&&scope->reserve(),
+            "GPD prehost actual writer reserves exact tracked Job and inherited owner lease");
+        const auto attempt=scope->attempt()->attemptId;
+        const auto jobName=scope->jobName();
+        wchar_t self[32768]{};need(GetModuleFileNameW(nullptr,self,32768)!=0,"GPD prehost inert helper uses current regression image");
+        std::wstring command=L"\""+std::wstring(self)+L"\" --gpd-terminal-inert-leaf";
+        PROCESS_INFORMATION child{};
+        need(CreateProcessW(self,command.data(),nullptr,nullptr,TRUE,
+            CREATE_SUSPENDED|CREATE_NO_WINDOW|scope->job().flags(),nullptr,nullptr,scope->job().startup(),&child)!=FALSE,
+            "GPD prehost exact inert helper is created suspended in original tracked Job");
+        GpdPreHostChildCleanup childCleanup(child.hProcess,child.hThread,jobName);
+        need(childCleanup.observer&&childCleanup.job,"GPD prehost exact child and Job query handles are retained");
+        BOOL inJob=FALSE;
+        need(IsProcessInJob(child.hProcess,childCleanup.job,&inJob)&&inJob,
+            "GPD prehost suspended child membership is actually proven before any Job zero claim");
+        need(scope->creationReturned(child.hProcess),"GPD prehost actual creationReturned records exact child identity");
+        lease.cycleProcess=child.hProcess;lease.nativeRefreshWriter=std::move(scope);
+        lease.syntheticCycle=false; // use production HANDLE/LaunchScope Poll, not synthetic pollResult
+        childCleanup.transferred=true;
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+        g_inputHostRecoveryIntent.configure({{"outputTarget",{{"persona","steamdeck"},{"buttonMappingEnabled",true},
+            {"gyroEnabled",false}}},{"gyroMotion",{{"enabled",false}}}},"private-gpd-prehost",true,true,"steamdeck");
+        const auto origin=g_virtualStartProtection.admit("steamdeck",inputHostStartProtectionNow());
+        // R2 first-queue qualification, BEFORE bind/BeforeVirtualWork. This is
+        // the actual production helper, not a copied BUS boolean or stub.
+        // Old product control predates this symbol: only that build explicitly
+        // defines YMCC_GPD_OLD_PRODUCT_CONTROL and retains R1's actual FAIL.
+#ifndef YMCC_GPD_OLD_PRODUCT_CONTROL
+        const auto retainedScope=lease.nativeRefreshWriter.get();
+        const auto retainedRoot=lease.cycleProcess;
+        const auto retainedPower=currentPowerGeneration();
+        const auto retainedDemand=g_inputHostRecoveryIntent.revision();
+        const auto retainedHidden=hidden;
+        const auto beforeQueueGame=gameRefreshes.size(),beforeQueueXusb=xusbRefreshes.size(),beforeQueueWrites=writes.size();
+        g_wakeHoldPhysicalUnhide=true;
+        auto sameQueueOwner=[&](){
+            return g_wakeHoldPhysicalUnhide.load()&&!g_inputHostProcess&&g_inputHostEpoch==0&&
+                lease.nativeRefreshWriter.get()==retainedScope&&lease.cycleProcess==retainedRoot&&
+                lease.nativeRefreshWriter->attempt()->attemptId==attempt&&g_msiNativeForegroundCyclePending&&
+                currentPowerGeneration()==retainedPower&&lease.power==retainedPower&&
+                g_inputHostRecoveryIntent.revision()==retainedDemand&&hidden==retainedHidden&&
+                gameRefreshes.size()==beforeQueueGame&&xusbRefreshes.size()==beforeQueueXusb&&
+                writes.size()==beforeQueueWrites&&g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId==origin.requestId;
+        };
+        need(inputHostMayQueueGpdNativeWriterWait()&&sameQueueOwner(),
+            "GPD firstqueue actual R2 helper permits same live owner without clearing wakeHold or creating Host/writer");
+        for(unsigned edge=0;edge<5;++edge){
+            const auto previousFamily=g_machineIdentity.family;
+            std::unique_ptr<ymcc::nativeRefreshWriter::LaunchScope> retainedUnknownScope;
+            if(edge==0)g_realStickTest.virtualTargetEnabled=false;
+            if(edge==1)g_powerGeneration.fetch_add(1);
+            if(edge==2)g_inputHostEpoch=91;
+            if(edge==3)g_machineIdentity.family=YmccFamily::OneXPlayer;
+            if(edge==4){retainedUnknownScope=std::move(lease.nativeRefreshWriter);lease.cycleProcess=nullptr;}
+            const bool qualified=inputHostMayQueueGpdNativeWriterWait();
+            // Restore fault-injected facts before checking/throwing. No child,
+            // Scope or durable owner is destroyed by the unknown-scope probe.
+            if(edge==0)g_realStickTest.virtualTargetEnabled=true;
+            if(edge==1)g_powerGeneration.store(retainedPower);
+            if(edge==2)g_inputHostEpoch=0;
+            if(edge==3)g_machineIdentity.family=previousFamily;
+            if(edge==4){lease.nativeRefreshWriter=std::move(retainedUnknownScope);lease.cycleProcess=retainedRoot;}
+            const char* labels[]={"GPD firstqueue actual R2 helper rejects OFF without clearing hold",
+                "GPD firstqueue actual R2 helper rejects cross-power without borrowing owner",
+                "GPD firstqueue actual R2 helper rejects existing Host epoch",
+                "GPD firstqueue actual R2 helper rejects different family",
+                "GPD firstqueue actual R2 helper rejects unknown handle and Scope despite pending bit"};
+            need(!qualified&&sameQueueOwner(),labels[edge]);
+        }
+        need(inputHostMayQueueGpdNativeWriterWait()&&sameQueueOwner(),
+            "GPD firstqueue same original intent power and helper remain eligible after rejected probes");
+#endif
+        const auto wire=ymcc::inputHost::queuedPlayerStart::bind("initial-target-admission");
+        ymcc::inputHost::queuedPlayerStart::Work work;
+        need(origin.accepted&&origin.created&&ymcc::inputHost::queuedPlayerStart::decode(wire,work)&&work.bound,
+            "GPD prehost actual queued work binds original thirty-second player request");
+        const bool deferred=!msiNativeForegroundBeforeVirtualWork(wire);
+        if(deferred)inputHostRuntimeRecoveryObserveNativeWait(work); // actual dispatch branch order
+        const auto observed=runtime::state;
+        need(deferred&&observed.pending&&observed.preHostWriterWait&&observed.requestId==origin.requestId&&
+            observed.nativeWriterAttempt==attempt&&observed.power==lease.power&&
+            lease.configurationReturned&&hidden==std::vector<std::wstring>{L"HID\\FOREIGN-PREHIDDEN\\OTHER-PORT"},
+            "GPD prehost real ObserveNativeWait binds this lease attempt after actual config return");
+#ifndef YMCC_GPD_OLD_PRODUCT_CONTROL
+        need(g_wakeHoldPhysicalUnhide.load()&&!g_inputHostProcess&&g_inputHostEpoch==0,
+            "GPD firstqueue actual worker defer bootstraps runtime while wakeHold stays owned");
+#endif
+        const auto beforeGame=gameRefreshes.size(),beforeXusb=xusbRefreshes.size();
+        {
+            auto blocked=ymcc::nativeRefreshWriter::Session::open(path,"windows-machine-guid:private-gpd-prehost");
+            need(!blocked.ready(),"GPD prehost ownership live writer retains the actual exclusive Session lock");
+        }
+        g_gpdPreHostFixtureTick+=30000;
+        const auto expired=g_virtualStartProtection.view(inputHostStartProtectionNow());
+        msiNativeForegroundMaintenance();
+        {std::lock_guard host(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+        need(expired.requestId==origin.requestId&&expired.phase=="expired"&&!expired.locked&&
+            lease.active&&lease.nativeRefreshWriter&&g_msiNativeForegroundCyclePending&&
+            runtime::state.nativeWriterAttempt==attempt&&!runtime::state.recoveryRequestId,
+            "GPD prehost thirty-second expiry leaves same live writer and no recovery ticket");
+        if(selected=="off"){
+            g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
+            (void)msiNativeForegroundBeforeVirtualWork("virtual-target-disabled");
+            {std::lock_guard host(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+            need(WaitForSingleObject(childCleanup.observer,0)==WAIT_TIMEOUT&&lease.active&&
+                lease.nativeRefreshWriter&&lease.nativeRefreshWriter->attempt()->attemptId==attempt&&
+                lease.cycleProcess==child.hProcess&&g_msiNativeForegroundCyclePending&&
+                !runtime::state.pending&&!runtime::state.recoveryRequestId&&!g_inputHostProcess&&
+                gameRefreshes.size()==beforeGame&&xusbRefreshes.size()==beforeXusb,
+                "GPD prehost live-off revokes observation without releasing the live exact writer or issuing IO");
+        }
+        if(selected=="live"){
+            // A fresh explicit player request may own the SAME still-live writer.
+            // Its cancellation is actual VirtualStartProtection, not a fake port.
+            const auto next=g_virtualStartProtection.admit("steamdeck",inputHostStartProtectionNow());
+            const auto nextWire=ymcc::inputHost::queuedPlayerStart::bind("initial-target-admission");
+            ymcc::inputHost::queuedPlayerStart::Work nextWork;
+            need(next.accepted&&next.created&&next.requestId!=origin.requestId&&
+                ymcc::inputHost::queuedPlayerStart::decode(nextWire,nextWork)&&nextWork.bound&&
+                !msiNativeForegroundBeforeVirtualWork(nextWire),
+                "GPD prehost live-cancel binds a distinct current player request behind the same live writer");
+            inputHostRuntimeRecoveryObserveNativeWait(nextWork);
+            const auto newSerial=runtime::state.serial,newUntil=runtime::state.observationUntil;
+            need(runtime::state.pending&&runtime::state.requestId==next.requestId&&
+                runtime::state.nativeWriterAttempt==attempt&&newSerial!=observed.serial,
+                "GPD prehost live-cancel observation belongs to the new request and exact original writer");
+            inputHostRuntimeRecoveryObserveNativeWait(nextWork);
+            need(runtime::state.serial==newSerial&&runtime::state.observationUntil==newUntil&&
+                !runtime::state.recoveryRequestId,
+                "GPD prehost live-cancel duplicate observation cannot renew its180second ceiling or mint a ticket");
+            need(g_virtualStartProtection.cancel(inputHostStartProtectionNow()),
+                "GPD prehost live-cancel actual explicit cancel accepts only its pending current request");
+            {std::lock_guard host(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+            need(!runtime::state.pending&&runtime::state.spent&&!runtime::state.recoveryRequestId&&
+                g_virtualStartProtection.view(inputHostStartProtectionNow()).phase=="cancelled"&&
+                WaitForSingleObject(childCleanup.observer,0)==WAIT_TIMEOUT&&lease.nativeRefreshWriter&&
+                lease.cycleProcess==child.hProcess&&g_msiNativeForegroundCyclePending,
+                "GPD prehost live-cancel stops recovery while the real process Job and exclusive lease remain owned");
+        }
+        const auto lateMs=selected=="off"?35378ULL:selected=="live"?35370ULL:35000ULL;
+        g_gpdPreHostFixtureTick+=lateMs; // explicit clock; no65second OS wait
+        json exactRetirementEvidence;
+        if(selected=="live"){
+            msiNativeForegroundHandleWork();
+            check("GPD prehost live writer refuses settle and inverse and new ticket",lease.active&&
+                lease.nativeRefreshWriter&&g_msiNativeForegroundCyclePending&&
+                gameRefreshes.size()==beforeGame&&xusbRefreshes.size()==beforeXusb&&!runtime::state.recoveryRequestId);
+        }else{
+            need(childCleanup.complete(),"GPD prehost exact child exits6 and owned Job reaches zero before retirement");
+            msiNativeForegroundMaintenance(); // actual Scope.retire, durable settle, handle close, retiredId
+            seedReturnedGameFacts(selected=="unknown"?2U:selected=="enable-debt"?3U:0U);
+            need(!g_msiNativeForegroundCyclePending&&!lease.nativeRefreshWriter&&!lease.cycleProcess&&
+                lease.nativeRefreshWriterDiagnostic.value("phase",std::string{})=="durably-settled"&&
+                lease.nativeRefreshWriterDiagnostic.value("attemptId",std::string{})==attempt&&
+                lease.nativeRefreshWriterDiagnostic.value("settled",false)&&lease.helperExitCode==6,
+                "GPD prehost production Poll actually retires exact Scope and retains durable attempt evidence");
+            exactRetirementEvidence=lease.nativeRefreshWriterDiagnostic; // preserve actual receipt before successful ClearLease
+            if(selected=="wrong-attempt")runtime::state.nativeWriterAttempt+="-other";
+            if(selected=="cross-power")g_powerGeneration.fetch_add(1);
+            if(selected=="successor-owner")g_inputHostRecoveryIntent.invalidate();
+            if(selected=="prior-leaf-failed")lease.refreshFailed=true;
+            gameRefreshResult=familyXusbResult=1; // detect any inverse; never silently accept it
+            msiNativeForegroundHandleWork();
+            if(selected=="terminal-owner"){
+                check("GPD prehost expired Disable23 settled owner clears without inverse",!lease.active&&
+                    !g_msiNativeForegroundCyclePending&&gameRefreshes.size()==beforeGame&&xusbRefreshes.size()==beforeXusb);
+                check("GPD prehost old ticket is still expired and no old Start is made current",
+                    g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId==origin.requestId&&
+                    g_virtualStartProtection.view(inputHostStartProtectionNow()).phase=="expired"&&
+                    ymcc::inputHost::queuedPlayerStart::stale(work)!=nullptr&&!g_inputHostProcess);
+                if(lease.active){
+                    // SAME failing behavior assertion on old source. Preserve
+                    // its second65s inverse interval, never call that a PASS.
+                    g_gpdPreHostFixtureTick+=65000;
+                    check("GPD prehost old inverse still blocks at130s",g_msiNativeForegroundCyclePending&&
+                        gameRefreshes.size()==beforeGame+1&&!runtime::state.recoveryRequestId);
+                }else{
+                    // Target/pipe/source gates below are actual production
+                    // consumers. Cached source input is seeded explicitly.
+                    GpdPreHostPrepareReturnedInputs();
+                    {std::lock_guard host(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+                    need(runtime::state.queued,"GPD prehost original runtime queues only after actual native owner clears");
+                    const auto serial=runtime::state.serial;
+                    inputHostPerformRuntimeRecovery(serial); // actual admission; actual Start rejects private manifest
+                    const auto recovery=g_virtualStartProtection.view(inputHostStartProtectionNow());
+                    check("GPD prehost actual runtime mints one distinct bounded ticket without Host IO",
+                        runtime::state.requestId==origin.requestId&&runtime::state.nativeWriterAttempt==attempt&&
+                        runtime::state.recoveryRequestId&&runtime::state.recoveryRequestId!=origin.requestId&&
+                        recovery.requestId==runtime::state.recoveryRequestId&&recovery.persona=="steamdeck"&&
+                        g_inputHostRecoveryEpisodeAttempts.load()==1&&!g_inputHostProcess&&g_inputHostEpoch==0);
+                }
+            }else{
+                check(("GPD prehost rejection retains original return for "+selected).c_str(),lease.active&&
+                    g_msiNativeForegroundCyclePending&&!runtime::state.recoveryRequestId);
+            }
+        }
+        need(childCleanup.complete(),"GPD prehost selected case returns real child primary handle and exact Job");
+        if(lease.nativeRefreshWriter){
+            msiNativeForegroundMaintenance();
+            exactRetirementEvidence=lease.nativeRefreshWriterDiagnostic;
+        }
+        need(!lease.nativeRefreshWriter&&!lease.cycleProcess&&exactRetirementEvidence.is_object()&&
+            exactRetirementEvidence.value("settled",false)&&
+            exactRetirementEvidence.value("attemptId",std::string{})==attempt,
+            "GPD prehost ownership exact late terminal is durably settled before Session reacquisition");
+        {
+            auto returned=ymcc::nativeRefreshWriter::Session::open(path,"windows-machine-guid:private-gpd-prehost");
+            need(returned.ready(),"GPD prehost ownership actual Session lock can be independently reacquired after retirement");
+        }
+        if(selected=="off"||selected=="live"){
+            {std::lock_guard host(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+            inputHostPerformRuntimeRecovery(observed.serial); // deliberately stale original token
+            need(!runtime::state.pending&&!runtime::state.recoveryRequestId&&!g_inputHostProcess&&
+                !g_inputHostEpoch&&g_inputHostRecoveryEpisodeAttempts.load()==0&&
+                gameRefreshes.size()==beforeGame+(selected=="off"?1U:0U),
+                "GPD prehost late-cancel retired observation and old serial cannot open Host or refund actions");
+        }
+        need(childCleanup.releaseObservers()&&!childCleanup.observer&&!childCleanup.job&&!childCleanup.primary,
+            "GPD prehost ownership original child thread process observer and exact Job handles close successfully");
+        std::cout<<"GPD_PREHOST_TERMINAL_OWNER selection="<<selected<<" checks="<<cases<<" failures="<<failures
+            <<" simulatedClock=true actualRuntimeHeader=true actualWriterRetirement=true firstRequestBusCoverage=false"
+#ifndef YMCC_GPD_OLD_PRODUCT_CONTROL
+            <<" firstRequestEligibilityHelperExecuted=true"
+#else
+            <<" firstRequestEligibilityHelperExecuted=false oldProductControl=true"
+#endif
+            <<" hardwareIo=false\n";
+        g_gpdPreHostFixtureTick=0;
+        return {cases,failures};
+    }
+
+    if(!mutationProbesOnly && !priorityProbesOnly){
+        const bool previousGameOpen=g_focusIsolationGameOpen.load(std::memory_order_acquire);
+        const bool previousPrepared=g_focusIsolationPrepared.load(std::memory_order_acquire);
+        g_focusIsolationGameOpen=true;g_focusIsolationPrepared=true;
+        for(const bool rog:{false,true}){
+            configureFamily(rog);hidden={L"HID\\FOREIGN-NATIVE-OFF"};
+            const auto now=inputHostStartProtectionNow();
+            const auto ticket=g_virtualStartProtection.admit("disabled",now).requestId;
+            (void)g_virtualStartProtection.beginVerification(ticket,"success",now);
+            enter();
+            check("native OFF game summon yields while original OFF inspection is active",
+                ticket&&!g_msiNativeForegroundLease.active&&writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+            const auto before=jobs.size();
+            (void)g_virtualStartProtection.finishVerification(ticket,"success",now+ymcc::VirtualStartProtection::settleMs);
+            msiNativeForegroundMaintenance();
+            check("native OFF game summon requeues once when the original OFF inspection ends",
+                jobs.size()==before+1&&writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+            msiNativeForegroundHandleWork();
+            check("native OFF game summon reaches original exact-source hide without another foreground change",
+                g_msiNativeForegroundLease.active&&hidHideContainsPath(hidden,familyHid)&&hidHideContainsPath(hidden,familyXusb)&&
+                hidden.size()==3&&!g_realStickTest.virtualTargetEnabled&&inputHostConfiguredPersona()=="disabled"&&!g_inputHostProcess);
+            const auto afterJobs=jobs.size(),afterWrites=writes.size(),afterGames=gameRefreshes.size(),afterXusb=xusbRefreshes.size(),afterCycles=cycles.size();
+            for(unsigned pass=0;pass<20;++pass)msiNativeForegroundMaintenance();
+            check("native OFF resumed game lease adds no repeated job scan or refresh",
+                jobs.size()==afterJobs&&writes.size()==afterWrites&&gameRefreshes.size()==afterGames&&xusbRefreshes.size()==afterXusb&&cycles.size()==afterCycles);
+            leave();
+            check("native OFF resumed game lease returns only its selected paths on hide",
+                !g_msiNativeForegroundLease.active&&hidden==std::vector<std::wstring>{L"HID\\FOREIGN-NATIVE-OFF"});
+        }
+        for(unsigned boundary=0;boundary<7;++boundary){
+            configureFamily(false);const auto now=inputHostStartProtectionNow();
+            const auto ticket=g_virtualStartProtection.admit("disabled",now).requestId;
+            (void)g_virtualStartProtection.beginVerification(ticket,"success",now);enter();
+            if(boundary==0){ui=false;msiNativeForegroundUiEvent();}
+            if(boundary==1)g_powerGeneration.fetch_add(1);
+            if(boundary==2)g_inputHostExitFence=true;
+            if(boundary==3){g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";}
+            if(boundary==4){g_controllerFrontendIsolationEnabled=false;}
+            if(boundary==5){g_msiNativeForegroundEdge.fetch_add(1);}
+            const auto before=jobs.size();
+            (void)g_virtualStartProtection.finishVerification(ticket,"success",now+ymcc::VirtualStartProtection::settleMs);
+            if(boundary==6)(void)g_virtualStartProtection.admit("disabled",now+ymcc::VirtualStartProtection::settleMs);
+            msiNativeForegroundMaintenance();
+            check("native OFF yielded work cannot outlive UI power exit persona setting edge or original request",
+                jobs.size()==before&&writes.empty()&&cycles.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&!g_msiNativeForegroundLease.active);
+            g_controllerFrontendIsolationEnabled=true;
+        }
+        for(const bool serialAdvanced:{false,true}){
+            configureFamily(false);g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";
+            const auto now=inputHostStartProtectionNow();
+            const auto request=g_virtualStartProtection.admit("disabled",now);
+            (void)g_virtualStartProtection.beginVerification(request.requestId,"success",now);
+            const auto generation=currentPowerGeneration();
+            enter();
+            const auto edge=g_msiNativeForegroundEdge.load();
+            const auto parkedJobs=jobs.size();
+            check("Win5 native OFF waits for the original virtual OFF inspection",
+                request.accepted && g_msiNativeForegroundVirtualYieldPending && !g_msiNativeForegroundLease.active && writes.empty());
+            if(!serialAdvanced){
+                const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);
+                msiNativeForegroundMaintenance();
+                check("Win5 unclassified query parks the original OFF yield without queuing work",
+                    pending && g_sleepPowerDispatch.pendingSuspend() && g_msiNativeForegroundVirtualYieldPending &&
+                    jobs.size()==parkedJobs && writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
+                g_sleepPowerDispatch.complete(pending);
+                const auto cancelled=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPENDFAILED,retryTick+1);
+                g_sleepPowerDispatch.complete(cancelled);
+            }
+            (void)g_virtualStartProtection.finishVerification(request.requestId,"success",now+ymcc::VirtualStartProtection::settleMs);
+            if(serialAdvanced)++g_sharedPowerSuspendSerial;
+            msiNativeForegroundMaintenance();msiNativeForegroundMaintenance();
+            check(serialAdvanced?"Win5 old virtual yield must not queue before the new same-generation Ready projection":
+                "Win5 current virtual yield queues once when its original OFF inspection settles",
+                currentPowerGeneration()==generation && g_msiNativeForegroundEdge==edge && !g_msiNativeForegroundVirtualYieldPending &&
+                jobs.size()==parkedJobs+(serialAdvanced?0:1) && writes.empty() && gameRefreshes.empty() && xusbRefreshes.empty());
+            if(serialAdvanced){
+                ymcc::sleeppower::SharedPowerV1 ready;
+                const bool known=captureSharedPowerLifecycle(ready);
+                msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundSharedPowerReady(ready);
+                check("Win5 current Ready independently queues native isolation once after the old yield retires",
+                    known && g_msiNativeForegroundEdge==edge+1 && jobs.size()==parkedJobs+1 && writes.empty());
+            }
+            msiNativeForegroundHandleWork();
+            check("Win5 current native OFF acquires only the current physical controller after virtual return",
+                g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.suspendSerial==g_sharedPowerSuspendSerial &&
+                !g_inputHostProcess && hidHideContainsPath(hidden,familyHid) && hidHideContainsPath(hidden,familyXusb));
+            leave();
+        }
+        configureFamily(false);const auto now=inputHostStartProtectionNow();
+        const auto ticket=g_virtualStartProtection.admit("disabled",now).requestId;
+        (void)g_virtualStartProtection.beginVerification(ticket,"success",now);enter();
+        const auto waitingJobs=jobs.size();
+        for(unsigned pass=0;pass<20;++pass)msiNativeForegroundMaintenance();
+        check("native OFF pending inspection never queues or hides ahead of virtual completion",
+            jobs.size()==waitingJobs&&writes.empty()&&gameRefreshes.empty()&&xusbRefreshes.empty()&&cycles.empty());
+        (void)g_virtualStartProtection.finishVerification(ticket,"success",now+ymcc::VirtualStartProtection::settleMs);
+        g_inputHostReleaseQuarantined=true;msiNativeForegroundMaintenance();
+        check("native OFF completed inspection retains the existing unresolved return fence",
+            jobs.size()==waitingJobs&&writes.empty()&&!g_msiNativeForegroundLease.active);
+        g_inputHostReleaseQuarantined=false;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("native OFF original current summon continues once quarantine owner proves return",
+            g_msiNativeForegroundLease.active&&hidHideContainsPath(hidden,familyHid)&&hidHideContainsPath(hidden,familyXusb));
+        leave();
+        configureFamily(false);
+        {
+            const InputHostVirtualIntentMutation mutation;enter();
+            check("native OFF game summon waits for an unfinished settings publication without creating a Host",
+                !g_msiNativeForegroundLease.active&&writes.empty()&&!g_inputHostProcess&&gameRefreshes.empty()&&xusbRefreshes.empty());
+        }
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+        check("native OFF game summon resumes after settings publication without a fake player ticket",
+            g_msiNativeForegroundLease.active&&hidHideContainsPath(hidden,familyHid)&&hidHideContainsPath(hidden,familyXusb)&&
+            !g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId&&!g_inputHostProcess);
+        leave();
+        for(const bool userDismissed:{false,true}){
+            configureFamily(false);g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";
+            const std::vector<std::wstring> foreignHidden{L"HID\\FOREIGN-NATIVE-OFF"};
+            hidden=foreignHidden;enter();
+            const auto permit=g_controllerIsolationHidPermit.load();
+            const auto owned=g_msiNativeForegroundLease.owned;
+            const auto beforeHidden=hidden;
+            const auto beforeWrites=writes.size(),beforeGames=gameRefreshes.size(),beforeXusb=xusbRefreshes.size();
+            const auto edge=g_msiNativeForegroundEdge.load();
+            const auto committed=g_msiNativeForegroundLease.active && g_msiNativeForegroundLease.cycleAccepted &&
+                !g_msiNativeForegroundLease.refreshSeriesActive && !g_msiNativeForegroundCyclePending;
+            ymcc::sleeppower::SharedPowerV1 oldReady;
+            const bool oldReadyKnown=captureSharedPowerLifecycle(oldReady);
+            const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);
+            msiNativeForegroundSharedPowerReady(oldReady);
+            msiNativeForegroundHandleWork();
+            check("Win5 unclassified suspend does not dismantle unchanged committed native isolation",
+                committed && oldReadyKnown && pending && !hardwareWriteAllowed() && permit && owned.size()==2 &&
+                g_msiNativeForegroundLease.active && !g_msiNativeForegroundLease.restorePending && hidden==beforeHidden &&
+                g_controllerIsolationHidPermit.load()==permit && g_msiNativeForegroundEdge==edge &&
+                writes.size()==beforeWrites && gameRefreshes.size()==beforeGames && xusbRefreshes.size()==beforeXusb);
+            if(userDismissed){
+                leave();
+                check("Win5 explicit dismiss still returns own config during an unclassified suspend",
+                    !ui && g_msiNativeForegroundLease.configurationReturned && !g_controllerIsolationHidPermit.load() &&
+                    hidden==foreignHidden && writes.size()==beforeWrites+owned.size() &&
+                    gameRefreshes.size()==beforeGames && xusbRefreshes.size()==beforeXusb);
+            }
+            g_sleepPowerDispatch.complete(pending);
+            const auto cancelled=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPENDFAILED,retryTick+1);
+            g_sleepPowerDispatch.complete(cancelled);
+            ymcc::sleeppower::SharedPowerV1 ready;
+            const bool readyKnown=captureSharedPowerLifecycle(ready);
+            msiNativeForegroundSharedPowerReady(ready);msiNativeForegroundHandleWork();
+            if(!userDismissed){
+                check("Win5 cancelled query leaves the same completed native isolation and issues no refresh",
+                    cancelled && readyKnown && ready.generation==oldReady.generation && ready.suspendSerial==oldReady.suspendSerial &&
+                    g_msiNativeForegroundLease.active && !g_msiNativeForegroundLease.restorePending &&
+                    g_controllerIsolationHidPermit.load()==permit && hidden==beforeHidden && g_msiNativeForegroundEdge==edge &&
+                    writes.size()==beforeWrites && gameRefreshes.size()==beforeGames && xusbRefreshes.size()==beforeXusb);
+                ++g_sharedPowerSuspendSerial;
+                msiNativeForegroundPowerEvent(PBT_APMSUSPEND);msiNativeForegroundHandleWork();
+                check("Win5 admitted suspend still retires the former isolation and returns only its entries",
+                    hidden==foreignHidden && writes.size()==beforeWrites+owned.size() &&
+                    !g_msiNativeForegroundLease.active && !g_controllerIsolationHidPermit.load() &&
+                    gameRefreshes.size()==beforeGames && xusbRefreshes.size()==beforeXusb);
+            }else{
+                check("Win5 cancelled query does not rehide after explicit dismiss",
+                    cancelled && readyKnown && hidden==foreignHidden && !g_msiNativeForegroundLease.active && !g_controllerIsolationHidPermit.load());
+            }
+        }
+        configureFamily(false);g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";enter();
+        const auto deferredSourceEdge=g_msiNativeForegroundEdge.load();
+        const auto deferredSourceReceipt=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);
+        familyLatePresent=true;auto deferredSource=familySource();deferredSource.deviceInstanceId=familyLateHid;
+        msiNativeForegroundObserveSource(deferredSource,62);msiNativeForegroundHandleWork();
+        const auto jobsWhilePending=jobs.size();
+        check("Win5 ingress holds same-root IG_03 work without another hide or refresh",
+            deferredSourceReceipt && g_msiNativeForegroundLease.active && g_msiNativeForegroundWorkPowerDeferred &&
+            g_msiNativeForegroundLease.pendingGameSources.size()==1 && gameRefreshes.size()==1 && xusbRefreshes.size()==1 &&
+            !hidHideContainsPath(hidden,familyLateHid));
+        g_sleepPowerDispatch.complete(deferredSourceReceipt);
+        ymcc::sleeppower::SharedPowerV1 sourceReady;
+        const bool sourceReadyKnown=captureSharedPowerLifecycle(sourceReady);
+        msiNativeForegroundSharedPowerReady(sourceReady);msiNativeForegroundSharedPowerReady(sourceReady);
+        msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();msiNativeForegroundHandleWork();
+        check("Win5 same Ready reschedules deferred IG_03 once on the existing IG_02 lease",
+            sourceReadyKnown && jobs.size()==jobsWhilePending+1 && g_msiNativeForegroundEdge==deferredSourceEdge &&
+            g_msiNativeForegroundLease.active && !g_msiNativeForegroundWorkPowerDeferred &&
+            g_msiNativeForegroundLease.pendingGameSources.empty() &&
+            hidHideContainsPath(hidden,familyLateHid) && gameRefreshes.size()==2 && xusbRefreshes.size()==1);
+        leave();
+        for(const bool heldBeforeSuspend:{false,true}){
+            configureFamily(false);
+            const std::vector<std::wstring> foreignHidden{L"HID\\FOREIGN-NATIVE-OFF"};
+            hidden=foreignHidden;familyXusbResult=1;enter();
+            const auto donor=g_msiNativeForegroundLease.owned;
+            g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
+            const auto request=g_virtualStartProtection.admit("elite",inputHostStartProtectionNow());
+            const bool parkedBeforeSuspend=heldBeforeSuspend && !msiNativeForegroundBeforeVirtualWork("persona-transition");
+            check("Win5 sleep handoff fixture reaches live helper with exact donor and original request",
+                request.accepted && donor.size()==2 && g_msiNativeForegroundCyclePending &&
+                parkedBeforeSuspend==heldBeforeSuspend &&
+                msiNativeForegroundVirtualHandoffRequired(request.requestId)==heldBeforeSuspend);
+            const auto writesBefore=writes.size(),gamesBefore=gameRefreshes.size(),xusbBefore=xusbRefreshes.size();
+            const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);
+            const bool admittedWhilePending=msiNativeForegroundBeforeVirtualWork("persona-transition");
+            check("Win5 pending public suspend returns only native donor without handing off or replacing live helper",
+                pending && g_powerLifecycle==PowerLifecycle::Ready && !g_msiNativeForegroundPowerHold &&
+                !admittedWhilePending && hidden==foreignHidden && g_msiNativeForegroundLease.configurationReturned &&
+                g_msiNativeForegroundCyclePending && virtualJobs.empty() && writes.size()==writesBefore+donor.size() &&
+                std::all_of(writes.begin()+writesBefore,writes.end(),[&](const auto& write){
+                    return !write.second&&hidHideContainsPath(donor,W2U(write.first));}) &&
+                gameRefreshes.size()==gamesBefore && xusbRefreshes.size()==xusbBefore && cycles.empty());
+            pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+            check("Win5 late helper exit during suspend neither launches another helper nor replays Start",
+                !g_msiNativeForegroundCyclePending && g_msiNativeForegroundWorkPowerDeferred && virtualJobs.empty() &&
+                gameRefreshes.size()==gamesBefore && xusbRefreshes.size()==xusbBefore && hidden==foreignHidden);
+            g_sleepPowerDispatch.complete(pending);++g_powerGeneration;
+            msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();msiNativeForegroundHandleWork();
+            check("Win5 new generation retires old donor and releases only the original virtual work",
+                !g_msiNativeForegroundLease.active && !g_msiNativeForegroundCyclePending &&
+                !msiNativeForegroundVirtualHandoffTicket() && !g_inputHostProcess && !g_hidHideVisibilityJournal.active &&
+                hidden==foreignHidden && writes.size()==writesBefore+donor.size() &&
+                gameRefreshes.size()==gamesBefore && xusbRefreshes.size()==xusbBefore && cycles.empty() &&
+                virtualJobs==std::vector<std::string>{"persona-transition"});
+        }
+        for(const bool helperBeforeReady:{false,true}){
+            configureFamily(false);
+            const std::vector<std::wstring> foreignHidden{L"HID\\FOREIGN-NATIVE-OFF"};
+            hidden=foreignHidden;familyXusbResult=1;enter();
+            const auto donor=g_msiNativeForegroundLease.owned;
+            ymcc::sleeppower::SharedPowerV1 oldReady,newReady;
+            const bool oldReadyKnown=captureSharedPowerLifecycle(oldReady);
+            g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+            const auto oldRequest=g_virtualStartProtection.admit("steamdeck",inputHostStartProtectionNow());
+            const auto oldWire=ymcc::inputHost::queuedPlayerStart::bind("persona-transition");
+            const bool oldParked=!msiNativeForegroundBeforeVirtualWork(oldWire);
+            const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,retryTick);
+            const bool stillParked=!msiNativeForegroundBeforeVirtualWork(oldWire);
+            const auto writesBefore=writes.size(),gamesBefore=gameRefreshes.size(),xusbBefore=xusbRefreshes.size();
+            auto keptReturnedConfiguration=[&]{return hidden==foreignHidden && writes.size()==writesBefore &&
+                gameRefreshes.size()==gamesBefore && xusbRefreshes.size()==xusbBefore && cycles.empty();};
+            auto retireHelper=[&]{pollResult=0;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();};
+            check("Win5 ordered handoff starts with returned config and original live helper",
+                oldReadyKnown && oldRequest.accepted && oldWire.starts_with(ymcc::inputHost::queuedPlayerStart::prefix) &&
+                oldParked && pending && stillParked && donor.size()==2 && hidden==foreignHidden && virtualJobs.empty() &&
+                g_msiNativeForegroundLease.configurationReturned && g_msiNativeForegroundCyclePending);
+            g_inputReady=false;
+            if(helperBeforeReady)retireHelper();
+            check("Win5 pending suspend never refreshes returned config before Ready",
+                keptReturnedConfiguration() && virtualJobs.empty() && g_msiNativeForegroundLease.active &&
+                g_msiNativeForegroundCyclePending!=helperBeforeReady);
+            const auto nextTick=inputHostStartProtectionNow()+ymcc::VirtualStartProtection::maxMs;
+            (void)g_virtualStartProtection.view(nextTick);
+            g_realStickTest.virtualTargetPersona="elite";
+            const auto nextRequest=g_virtualStartProtection.admit("elite",nextTick);
+            g_sleepPowerDispatch.complete(pending);++g_sharedPowerSuspendSerial;
+            const auto nextWire=ymcc::inputHost::queuedPlayerStart::bind("persona-transition");
+            const auto readyEdge=g_msiNativeForegroundEdge.load();
+            msiNativeForegroundSharedPowerReady(oldReady);
+            check("Win5 retired Ready cannot bump the edge while reader and new owner are pending",
+                g_msiNativeForegroundEdge==readyEdge && keptReturnedConfiguration() && virtualJobs.empty());
+            const bool newReadyKnown=captureSharedPowerLifecycle(newReady);
+            msiNativeForegroundSharedPowerReady(newReady);msiNativeForegroundSharedPowerReady(newReady);
+            msiNativeForegroundHandleWork();
+            check("Win5 current Ready is applied once and cannot hand off the old donor",
+                newReadyKnown && newReady.generation==oldReady.generation && newReady.suspendSerial!=oldReady.suspendSerial &&
+                g_msiNativeForegroundEdge==readyEdge+1 && !msiNativeForegroundVirtualHandoffRequired(nextRequest.requestId) &&
+                keptReturnedConfiguration() && !g_inputHostProcess && !g_hidHideVisibilityJournal.active &&
+                (helperBeforeReady || (g_msiNativeForegroundCyclePending && virtualJobs.empty())));
+            if(!helperBeforeReady)retireHelper();
+            g_inputReady=true;
+            msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();msiNativeForegroundSharedPowerReady(newReady);
+            ymcc::inputHost::queuedPlayerStart::Work oldWork,nextWork;
+            check("Win5 late helper retirement releases only the original wire and rejects its use by newer Start",
+                !g_msiNativeForegroundLease.active && !g_msiNativeForegroundCyclePending && !msiNativeForegroundVirtualHandoffTicket() &&
+                keptReturnedConfiguration() && virtualJobs==std::vector<std::string>{oldWire} &&
+                ymcc::inputHost::queuedPlayerStart::decode(oldWire,oldWork) && oldWork.bound &&
+                ymcc::inputHost::queuedPlayerStart::stale(oldWork)!=nullptr && nextRequest.accepted && nextRequest.requestId!=oldRequest.requestId &&
+                ymcc::inputHost::queuedPlayerStart::decode(nextWire,nextWork) && nextWork.bound && nextWork.request==nextRequest.requestId &&
+                !ymcc::inputHost::queuedPlayerStart::stale(nextWork) && !g_inputHostProcess && !g_hidHideVisibilityJournal.active);
+        }
+        configureFamily(false);g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";enter();
+        const auto readerPermit=g_controllerIsolationHidPermit.load();
+        ymcc::isolationhid::Scene readerScene;
+        readerScene.xboxFse=readerScene.originalIsolation=readerScene.physicalSource=readerScene.virtualOff=readerScene.powerReady=true;
+        readerScene.power=currentPowerGeneration();readerScene.edge=g_msiNativeForegroundEdge.load();
+        check("Win5 reader admits the original current suspend serial",
+            readerPermit && ymcc::isolationhid::admitted(*readerPermit,readerScene));
+        readerScene.suspendSerial=++g_sharedPowerSuspendSerial;
+        check("Win5 coalesced Ready cannot reuse an Xbox reader permit from the old period",
+            readerPermit && !ymcc::isolationhid::admitted(*readerPermit,readerScene));
+        g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
+        const auto afterPowerRequest=g_virtualStartProtection.admit("elite",inputHostStartProtectionNow());
+        const auto beforePowerGameRefreshes=gameRefreshes.size(),beforePowerXusbRefreshes=xusbRefreshes.size();
+        check("Win5 new virtual request cannot inherit a donor from the retired suspend serial",
+            afterPowerRequest.accepted && !msiNativeForegroundGpdVirtualIntentCurrentLocked() &&
+            msiNativeForegroundBeforeVirtualWork("persona-transition") && !g_msiNativeForegroundLease.active && hidden.empty() &&
+            !g_controllerIsolationHidPermit.load() && gameRefreshes.size()==beforePowerGameRefreshes && xusbRefreshes.size()==beforePowerXusbRefreshes);
+        g_focusIsolationGameOpen=previousGameOpen;g_focusIsolationPrepared=previousPrepared;
+        if(nativeOffProbesOnly){
+            reset();g_msiNativeForegroundTestIo={};g_msiForegroundTestIo={};
+            std::cout<<"MSI_NATIVE_ONLY cases="<<cases<<" failures="<<failures<<" scope=shield-native-off-probes realHardwareAccess=false\n";
+            return {cases,failures};
+        }
+    }
     if(!mutationProbesOnly){
         configureFamily(true);sourceCount=0;readOk=false;enter();
         retryTick=30000;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
@@ -1145,25 +1958,65 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
         return g_virtualStartProtection.admit("steamdeck",inputHostStartProtectionNow()).requestId;
     };
-    auto seedReturnedGameFacts=[&](unsigned terminal){
-        auto& lease=g_msiNativeForegroundLease;
-        lease.helperDiagnostic=nullptr;
-        if(terminal==1 || terminal==2)return; // acknowledged success / unknown failure
-        json facts={{"Schema",1},{"Kind","ymcc.gameRefresh.failure"},{"Result",6},
-            {"Stage",terminal==3?"enable":"disable"},{"Xusb",lease.helperXusbTarget},
-            {"PrepareLocateResult",0U},{"CurrentLocateResult",0U},{"SameNode",true},
-            {"DisableCallEntered",true},{"DisableResult",terminal==3?0U:23U},
-            {"EnableCallEntered",terminal==3},{"EnableResult",terminal==3?json(23U):json(nullptr)},
-            {"CompensationChecked",terminal==3},{"CompensationIdentityMatched",terminal==3?json(true):json(nullptr)},
-            {"CompensationLocateResult",terminal==3?json(0U):json(nullptr)},
-            {"CompensationSameNode",terminal==3?json(true):json(nullptr)},
-            {"CompensationAttempted",terminal==3},{"CompensationEnableResult",terminal==3?json(23U):json(nullptr)},
-            {"CompensationExceptionType",nullptr},{"CompensationExceptionHResult",nullptr},
-            {"ExceptionType","System.InvalidOperationException"},{"ExceptionHResult",-2146233079}};
-        lease.helperDiagnostic={{"transport","delete-on-close-stdout"},{"state","record-accepted"},
-            {"scope","helper-self-reported-existing-call-facts"},{"hardwareSuccessProven",false},
-            {"reportedFacts",std::move(facts)}};
-    };
+
+    // Field 234938 / 002235: a new valid ON period does not inherit the old
+    // donor's hiding, but may proceed after the exact writer and configuration
+    // have REALLY returned. Advance only the coordinator's explicit test clock;
+    // no 65s OS call, real process, device or elapsed-time claim is synthesized.
+    for(const std::string nextPersona:{"steamdeck","dualsense-edge"})
+    for(const unsigned terminal:{0U,1U,2U,3U}){
+        configureFamily(false);hidden={handoffForeign};cloak=true;
+        gameRefreshResult=0;familyXusbResult=1;enter();
+        const auto oldTicket=admitReturnedVirtual();
+        const auto oldView=g_virtualStartProtection.view(inputHostStartProtectionNow());
+        const bool donorHeld=holdHandoff();
+        const bool originalDeferred=!msiNativeForegroundBeforeVirtualWork("field-original-player-start");
+        const auto advancedClock=inputHostStartProtectionNow()+oldView.remainingMs+1;
+        const auto expired=g_virtualStartProtection.view(advancedClock);
+        g_realStickTest.virtualTargetPersona=nextPersona;
+        const auto next=g_virtualStartProtection.admit(nextPersona,advancedClock);
+        const bool newDonorDenied=!holdHandoff();
+        const bool nextDeferred=!msiNativeForegroundBeforeVirtualWork("field-current-player-start");
+        const auto beforeGames=gameRefreshes.size(),beforeXusb=xusbRefreshes.size();
+        const auto prefix=std::string("GPD returned old-donor/new-")+nextPersona+" terminal-"+std::to_string(terminal)+": ";
+        check((prefix+"expired old ticket stays distinct; newer request cannot inherit donor").c_str(),
+            oldTicket&&donorHeld&&originalDeferred&&expired.requestId==oldTicket&&expired.phase=="expired"&&
+            !expired.locked&&next.accepted&&next.created&&next.requestId!=oldTicket&&newDonorDenied&&
+            g_msiNativeForegroundLease.virtualHandoffHeld&&g_msiNativeForegroundLease.virtualHandoffRequest==oldTicket);
+        check((prefix+"configuration returns but same live XUSB still blocks both requests").c_str(),
+            nextDeferred&&g_msiNativeForegroundLease.active&&g_msiNativeForegroundLease.configurationReturned&&
+            g_msiNativeForegroundCyclePending&&g_msiNativeForegroundLease.helperXusbTarget&&
+            hidden==std::vector<std::wstring>{handoffForeign}&&virtualJobs.empty()&&
+            beforeGames==1&&beforeXusb==1&&cycles.empty());
+        for(unsigned repeat=0;repeat<4;++repeat)(void)msiNativeForegroundBeforeVirtualWork("field-current-player-start");
+        check((prefix+"repeated current work neither replaces writer nor extends its ownership").c_str(),
+            gameRefreshes.size()==beforeGames&&xusbRefreshes.size()==beforeXusb&&virtualJobs.empty()&&
+            g_msiNativeForegroundCyclePending&&g_msiNativeForegroundLease.deferredVirtualWork==
+                std::vector<std::string>{"field-original-player-start","field-current-player-start"});
+        gameRefreshResult=1;familyXusbResult=1;pollResult=terminal==1?0:2;
+        msiNativeForegroundMaintenance();seedReturnedGameFacts(terminal);
+        check((prefix+"exact original writer reaches terminal boundary before continuation").c_str(),
+            !g_msiNativeForegroundCyclePending&&!g_msiNativeForegroundLease.cycleProcess&&
+            !g_msiNativeForegroundLease.nativeRefreshWriter&&g_msiNativeForegroundLease.active&&
+            g_msiNativeForegroundLease.configurationReturned&&g_msiNativeForegroundLease.helperGameTarget==familyXusb);
+        msiNativeForegroundHandleWork();
+        if(terminal<2){
+            check((prefix+"current ON releases already-returned lease without inverse refresh").c_str(),
+                !g_msiNativeForegroundLease.active&&!g_msiNativeForegroundCyclePending&&
+                gameRefreshes.size()==beforeGames&&xusbRefreshes.size()==beforeXusb&&cycles.empty()&&
+                virtualJobs==std::vector<std::string>{"field-original-player-start","field-current-player-start"});
+        }else{
+            check((prefix+"unknown or Enable debt still retains original return owner").c_str(),
+                g_msiNativeForegroundLease.active&&g_msiNativeForegroundCyclePending&&virtualJobs.empty()&&
+                gameRefreshes.size()==beforeGames+1&&xusbRefreshes.size()==beforeXusb&&cycles.empty());
+        }
+        const auto finalView=g_virtualStartProtection.view(inputHostStartProtectionNow());
+        check((prefix+"return does not change current ticket/persona/fallback or invent Host").c_str(),
+            finalView.requestId==next.requestId&&finalView.persona==nextPersona&&finalView.phase=="pending"&&
+            finalView.fallbackAttempts==0&&!g_inputHostProcess&&!g_hidHideVisibilityJournal.active&&
+            noCarried()&&hidden==std::vector<std::wstring>{handoffForeign});
+    }
+
     for(const bool originalXusb:{false,true})for(const unsigned terminal:{0U,1U}){
         configureFamily(false);hidden={handoffForeign};cloak=false;
         gameRefreshResult=originalXusb?0:1;familyXusbResult=originalXusb?1:0;enter();

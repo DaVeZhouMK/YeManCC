@@ -108,13 +108,39 @@ struct CounterAtomic {
 };
 static CounterAtomic g_c17aOwnedEvents{"owned"},g_c17aParityChecks{"parity"},g_c17aParityFailures{"failures"};
 static std::atomic<std::uint64_t> wireSink{0};
+#ifdef YMCC_GYRO_PARITY_TYPED
+// Inert API seam. Production conversion still executes the real Windows API.
+static json conversionWitness=json::array(), postWitness=json::array();
+static int conversionFault=0, conversionCalls=0;
+static bool captureConversions=false;
+static int parityMultiByteToWideChar(UINT cp,DWORD flags,LPCCH bytes,int length,LPWSTR output,int capacity) {
+    ++conversionCalls;
+    const int call=conversionCalls;
+    int result=::MultiByteToWideChar(cp,flags,bytes,length,output,capacity);
+    if(conversionFault==1&&call<=2)result=0;
+    if(conversionFault==2&&call==2)result=result>0?result-1:0;
+    if(captureConversions)conversionWitness.push_back({{"call",call},{"write",output!=nullptr},{"result",result},
+        {"length",length},{"tracePosition",activeTrace?activeTrace->size():0}});
+    return result;
+}
+static void parityPostWitness(int id,const wchar_t* wire) {
+    if(captureConversions)postWitness.push_back({id,std::string(reinterpret_cast<const char*>(wire),std::wcslen(wire)*sizeof(wchar_t)),conversionCalls});
+}
+#endif // YMCC_GYRO_PARITY_TYPED
 struct MockView {
     int id=0; bool failResult=false;
     long PostWebMessageAsJson(const wchar_t* message) {
+#ifdef YMCC_GYRO_PARITY_TYPED
+        parityPostWitness(id,message);
+#endif // YMCC_GYRO_PARITY_TYPED
         // Consume the actual production U2W result. No real renderer is invoked.
         if(activeTrace)record({"PostWebMessageAsJson",id,std::string(reinterpret_cast<const char*>(message),std::wcslen(message)*sizeof(wchar_t)),failResult?-1:0});
         wireSink.fetch_xor(static_cast<std::uint64_t>(message[0])+
+#ifdef YMCC_GYRO_PARITY_TYPED
+            static_cast<std::uint64_t>(message[0]?message[1]:0)+static_cast<std::uint64_t>(id+19),std::memory_order_relaxed);
+#else // YMCC_GYRO_PARITY_TYPED
             static_cast<std::uint64_t>(message[1])+static_cast<std::uint64_t>(id+19),std::memory_order_relaxed);
+#endif // YMCC_GYRO_PARITY_TYPED
         return failResult?-1:0;
     }
 };
@@ -183,6 +209,46 @@ static void observeLocals(const std::string& ev,const json& data,const json& env
     collectNodes(envelope.at("data"),localObserver->envelopeNodes);
     if(trackIdentity)for(auto* p:localObserver->envelopeNodes)localObserver->envelopeGenerations.push_back(generationOf(p));
 }
+#ifdef YMCC_GYRO_PARITY_TYPED
+#include <optional>
+#include "gyro_telemetry_record.h"
+using GyroRecord=ymcc::gyro_telemetry::Record;
+using RecordMember=json GyroRecord::*;
+static const std::array<RecordMember,10> recordJsonMembers={
+    &GyroRecord::gamepadMotionPlane,&GyroRecord::output,&GyroRecord::leftStick,&GyroRecord::rightStick,
+    &GyroRecord::motionContribution,&GyroRecord::layoutContribution,&GyroRecord::motionManager,
+    &GyroRecord::layoutManager,&GyroRecord::latency,&GyroRecord::hostFrame};
+static void collectRecordNodes(const GyroRecord& value,std::vector<const void*>& nodes) {
+    for(auto member:recordJsonMembers)if(member)collectNodes(value.*member,nodes);
+}
+static bool recordJsonMoved(const GyroRecord& value) {
+    for(auto member:recordJsonMembers)if(member&&!(value.*member).is_null())return false;
+    return true;
+}
+struct RecordObservation {
+    bool called=false;
+    json tree,envelope;
+    std::vector<const void*> nodes;
+    std::vector<std::uint64_t> generations;
+    std::array<const char*,3> stringStorage{};
+};
+static RecordObservation* recordObserver=nullptr;
+static bool injectTypedMismatch=false;
+static void observeRecordOracle(std::string& ev,json& data,json& envelope) {
+    if(injectTypedMismatch)envelope["data"]["hostFrame"]["typed-test-only-mismatch"]=true;
+    observeLocals(ev,data,envelope);
+}
+static void observeRecord(GyroRecord& data) {
+    if(injectTypedMismatch)data.hostFrame["typed-test-only-mismatch"]=true;
+    if(!recordObserver)return;
+    auto& out=*recordObserver;out.called=true;
+    // Capture physical owning storage before materializing the independent oracle.
+    collectRecordNodes(data,out.nodes);
+    if(trackIdentity)for(auto* node:out.nodes)out.generations.push_back(generationOf(node));
+    out.stringStorage={data.timestampUtc.data(),data.targetStick.data(),data.motionAdmission.data()};
+    out.tree=data.tree();out.envelope={{"event","gyro.telemetry"},{"data",out.tree}};
+}
+#endif // YMCC_GYRO_PARITY_TYPED
 #include "production-extracted.h"
 using Emitter=void(*)(std::string,json);
 struct Outcome {
@@ -447,9 +513,17 @@ static json runCorrectness() {
         auto a=invoke(baseline_emit,input.event,input.payload,script);
         auto b=invoke(candidate_emit,input.event,input.payload,script);
         compareDiagnosticFix(a,b);assertTraceOracle(a,script,topology,expected,input.event,input.payload,7,false);
+#ifdef YMCC_GYRO_PARITY_TYPED
+        auto suppliedBaseline=invoke(baseline_json_emit,input.event,input.payload,script);
+        compareDiagnosticFix(a,suppliedBaseline);compareOutcomes(suppliedBaseline,b);
+#endif // YMCC_GYRO_PARITY_TYPED
         auto observedA=invoke(baseline_observed,input.event,input.payload,script,7,false,true);
         auto observedB=invoke(candidate_observed,input.event,input.payload,script,7,false,true);
         compareDiagnosticFix(observedA,observedB);
+#ifdef YMCC_GYRO_PARITY_TYPED
+        auto suppliedObserved=invoke(baseline_json_observed,input.event,input.payload,script,7,false,true);
+        compareDiagnosticFix(observedA,suppliedObserved);compareOutcomes(suppliedObserved,observedB);
+#endif // YMCC_GYRO_PARITY_TYPED
         check(sameRepresentation(a.trace,observedA.trace)&&sameRepresentation(b.trace,observedB.trace),"observation hook altered external trace");
         ++correctnessCases;strictExceptions+=(a.exceptionId==316);mismatchLogs+=countTrace(a,"log");
         json delivered=json::array();for(const auto& row:a.trace)if(row[0]=="PostWebMessageAsJson")delivered.push_back(row[1]);
@@ -466,6 +540,10 @@ static json runCorrectness() {
         auto a=invoke(baseline_emit,"gyro.telemetry",unicodePayload(),script,slot,failAcquire);
         auto b=invoke(candidate_emit,"gyro.telemetry",unicodePayload(),script,slot,failAcquire);
         compareDiagnosticFix(a,b);assertTraceOracle(a,script,topology,order,"gyro.telemetry",unicodePayload(),slot,failAcquire);++correctnessCases;
+#ifdef YMCC_GYRO_PARITY_TYPED
+        auto suppliedBaseline=invoke(baseline_json_emit,"gyro.telemetry",unicodePayload(),script,slot,failAcquire);
+        compareDiagnosticFix(a,suppliedBaseline);compareOutcomes(suppliedBaseline,b);
+#endif // YMCC_GYRO_PARITY_TYPED
     }
     configureTopology(5);injectEnvelopeMismatch=true;
     const std::vector<bool> allOn={true,true,true,true};
@@ -473,6 +551,11 @@ static json runCorrectness() {
     auto realMismatchAfter=invoke(candidate_observed,"gyro.telemetry",unicodePayload(),allOn,7,false,true);
     injectEnvelopeMismatch=false;
     compareOutcomes(realMismatchBefore,realMismatchAfter);
+#ifdef YMCC_GYRO_PARITY_TYPED
+    injectEnvelopeMismatch=true;
+    auto suppliedMismatch=invoke(baseline_json_observed,"gyro.telemetry",unicodePayload(),allOn,7,false,true);
+    injectEnvelopeMismatch=false;compareOutcomes(realMismatchBefore,suppliedMismatch);
+#endif // YMCC_GYRO_PARITY_TYPED
     check(realMismatchAfter.counters[1]==1&&realMismatchAfter.counters[2]==1,
         "available-reference real mismatch must still increment check and failure");
     check(countTrace(realMismatchAfter,"log")==1,"real mismatch log was suppressed");
@@ -557,7 +640,34 @@ static json runBenchmarks(int batches) {
         {"realAtomicCounters",true},{"originalDumpAndUtf16ConversionPerTarget",true},
         {"includesPayloadAndEnvelopeDestruction",true},{"setupIncluded",false}};
 }
+#ifdef YMCC_GYRO_PARITY_TYPED
+static Outcome diagnosticExpected(const Outcome& before,const Outcome& after) {
+    Outcome expected=before;
+    std::array<bool,4> gate{};std::size_t reads=0;
+    for(const auto& row:before.trace)if(row[0]=="gate.load") {
+        if(reads<gate.size())gate[reads]=row[2].get<bool>();
+        ++reads;
+    }
+    const bool noReferenceCheck=reads==4&&!gate[2]&&gate[3];
+    if(noReferenceCheck) {
+        expected.counters[1]=0;expected.counters[2]=0;
+        json filtered=json::array();
+        for(const auto& row:before.trace) {
+            const bool omittedCounter=row[0]=="counter.fetch_add"&&(row[1]=="parity"||row[1]=="failures");
+            const bool omittedFalseLog=row[0]=="log"&&row[1]=="c17a-gyro-wire-parity-mismatch";
+            if(!omittedCounter&&!omittedFalseLog)filtered.push_back(row);
+        }
+        expected.trace=std::move(filtered);
+        check(after.counters[1]==0&&after.counters[2]==0,"missing-reference comparisons must not count or fail");
+        check(countTrace(after,"log")==0,"missing-reference parity emitted a false mismatch log");
+    }
+    return expected;
+}
+
+int historical_unused_main(int argc,char** argv) {
+#else // YMCC_GYRO_PARITY_TYPED
 int main(int argc,char** argv) {
+#endif // YMCC_GYRO_PARITY_TYPED
     try {
         if(argc>1&&std::string(argv[1])=="--inputs") { std::cout<<inputCorpus().dump(2)<<'\n';return 0; }
         const int batches=argc>1?std::stoi(argv[1]):12;
@@ -568,3 +678,249 @@ int main(int argc,char** argv) {
         std::cout<<result.dump(2)<<'\n';return 0;
     } catch(const std::exception& e) { activeTrace=nullptr;countAllocations=false;std::cerr<<e.what()<<'\n';return 2; }
 }
+#ifdef YMCC_GYRO_PARITY_TYPED
+
+// Additive typed consumers; the original JSON fixture and all its checks remain.
+using TypedEmitter=void(*)(GyroRecord);
+struct TypedOutcome {
+    Outcome external;
+    RecordObservation local;
+    bool callerSubtreesMoved=false, retainedExactStorage=false;
+};
+static TypedOutcome invokeTyped(TypedEmitter emit,const GyroRecord& input,const std::vector<bool>& script,
+                                int slot=7,bool failAcquire=false,bool observe=false) {
+    TypedOutcome result;GyroRecord argument=input;
+    std::vector<const void*> originalNodes;collectRecordNodes(argument,originalNodes);
+    resetObservations(script,slot,failAcquire);
+    activeTrace=&result.external.trace;recordObserver=observe?&result.local:nullptr;
+    try{emit(std::move(argument));}
+    catch(const json::exception& e){result.external.exception="json::exception";result.external.exceptionId=e.id;result.external.message=e.what();}
+    catch(const std::exception& e){result.external.exception=typeid(e).name();result.external.message=e.what();}
+    activeTrace=nullptr;recordObserver=nullptr;
+    result.external.counters={g_c17aOwnedEvents.value.load(std::memory_order_relaxed),
+        g_c17aParityChecks.value.load(std::memory_order_relaxed),g_c17aParityFailures.value.load(std::memory_order_relaxed)};
+    result.external.gateReads=g_domainLogEnabled[1].position;
+    result.callerSubtreesMoved=recordJsonMoved(argument);
+    result.retainedExactStorage=!result.local.called||result.local.nodes==originalNodes;
+    return result;
+}
+static void compareTypedExternal(const Outcome& before,const TypedOutcome& after,bool diagnostic=true) {
+    const auto expected=diagnostic?diagnosticExpected(before,after.external):before;
+    const auto& b=after.external;
+    check(sameRepresentation(expected.trace,b.trace),"typed gate/counter/cost/log/target trace changed");
+    check(expected.exception==b.exception&&expected.exceptionId==b.exceptionId&&expected.message==b.message,"typed exception identity or diagnostic changed");
+    check(expected.counters==b.counters&&expected.gateReads==b.gateReads,"typed counter totals/gate count changed");
+    check(after.callerSubtreesMoved,"typed by-value call retained caller JSON ownership");
+    check(after.retainedExactStorage,"typed by-value emitter copied or replaced owning subtree allocations");
+}
+static GyroRecord recordForInput(const TestInput& input) {
+    GyroRecord out;
+    out.sequence=30556ULL;out.sensorPresent=true;
+    out.timestampUtc=input.event;out.targetStick="right";out.motionAdmission="hc-motion-admitted";
+    out.gyro={1.25,-2.5,3.75};out.accel={0.0,0.0,9.8};out.rawAccel={0.25,-0.5,0.75};
+    out.gravity={0.0,0.0,1.0};out.processedAcceleration={-0.0,0.5,-0.5};
+    out.playerSpace={0.125,-0.25};out.worldSpace={0.5,-0.75};out.orientation={1.0,-0.0,0.0,0.0};
+    out.gamepadMotionPlane=json::object();out.output={{"x",-0.0},{"y",0.0}};
+    out.leftStick={{"x",0.0},{"y",0.0}};out.rightStick=out.output;
+    out.motionContribution=out.output;out.layoutContribution=out.output;
+    out.motionManager={{"mapped",true}};out.layoutManager={{"mergeOrder","physical-stick-plus-motion-contribution"}};
+    out.latency={{"sample",0ULL}};out.hostFrame=input.payload;
+    return out;
+}
+static json runTypedMatrix() {
+    json matrix=json::array();std::uint64_t cases=0;
+    for(const auto& input:correctnessInputs()) {
+        const auto data=recordForInput(input);const auto payload=data.tree();
+        for(int topology=0;topology<8;++topology)for(int mask=0;mask<16;++mask) {
+            configureTopology(topology);const auto order=deliveryOrder();
+            std::vector<bool> script;for(int i=0;i<4;++i)script.push_back((mask&(1<<i))!=0);
+            const auto a=invoke(baseline_emit,"gyro.telemetry",payload,script);
+            const auto b=invokeTyped(ipc_emit_owned_gyro_record,data,script);
+            compareTypedExternal(a,b);assertTraceOracle(a,script,topology,order,"gyro.telemetry",payload,7,false);
+            const auto observedA=invoke(typed_oracle_observed,"gyro.telemetry",payload,script,7,false,true);
+            const auto observedB=invokeTyped(typed_record_observed,data,script,7,false,true);
+            compareTypedExternal(observedA,observedB);
+            check(sameRepresentation(a.trace,observedA.trace)&&sameRepresentation(b.external.trace,observedB.external.trace),"typed observation altered real emitter trace");
+            check(observedA.local.called==observedB.local.called,"typed local observation availability changed");
+            if(observedB.local.called) {
+                check(observedA.local.parameter.is_null(),"JSON oracle local parameter failed to move");
+                check(sameRepresentation(observedA.local.envelope,observedB.local.envelope),"typed local complete JSON types/float bits changed");
+                for(auto handler:{json::error_handler_t::strict,json::error_handler_t::replace,json::error_handler_t::ignore})
+                    check(dumpOutcome(observedA.local.envelope,handler)==dumpOutcome(observedB.local.envelope,handler),"typed observed exact oracle dump/error changed");
+            }
+            matrix.push_back({{"input",input.name},{"topology",topology},{"scriptMask",mask},
+                {"gateReads",b.external.gateReads},{"counters",b.external.counters},{"exception",b.external.exception},
+                {"exceptionId",b.external.exceptionId},{"message",b.external.message},
+                {"callerOwnedSubtreesMoved",b.callerSubtreesMoved},{"observedRecordOwnershipPreserved",observedB.retainedExactStorage}});
+            ++cases;
+        }
+    }
+    for(int topology:{0,1,5})for(bool failAcquire:{false,true})for(int slot:{-1,7}) {
+        const auto data=recordForInput({"cost","gyro.telemetry",unicodePayload()});
+        configureTopology(topology,true);const auto order=deliveryOrder();const std::vector<bool> script={true,false,true,true};
+        const auto a=invoke(baseline_emit,"gyro.telemetry",data.tree(),script,slot,failAcquire);
+        const auto b=invokeTyped(ipc_emit_owned_gyro_record,data,script,slot,failAcquire);
+        compareTypedExternal(a,b);assertTraceOracle(a,script,topology,order,"gyro.telemetry",data.tree(),slot,failAcquire);++cases;
+    }
+    configureTopology(5);injectTypedMismatch=true;
+    const auto data=recordForInput({"mismatch","gyro.telemetry",unicodePayload()});
+    const std::vector<bool> allOn={true,true,true,true};
+    const auto a=invoke(typed_oracle_observed,"gyro.telemetry",data.tree(),allOn,7,false,true);
+    const auto b=invokeTyped(typed_record_observed,data,allOn,7,false,true);
+    injectTypedMismatch=false;
+    compareTypedExternal(a,b,false);
+    check(b.external.counters[1]==1&&b.external.counters[2]==1&&countTrace(b.external,"log")==1,"typed available-reference real mismatch suppressed");
+    ++cases;
+    check(cases==2829&&matrix.size()==2816,"typed full original gate matrix was reduced");
+    return {{"pass",true},{"cases",cases},{"caseMatrix",std::move(matrix)},
+        {"fixedEvent","gyro.telemetry"},{"legacyEventBytesTestedIn","timestampUtc"},
+        {"legacyPayloadValuesTestedIn","hostFrame"},{"productionTypedEmitterActuallyCalled",true}};
+}
+static json recordEnvelopeOutcome(const GyroRecord& data,json::error_handler_t handler) {
+    try{return {{"bytes",data.envelope(handler)}};}
+    catch(const json::exception& e){return {{"id",e.id},{"message",e.what()}};}
+}
+static json proveFormatterBoundaries() {
+    std::uint64_t cases=0;
+    const auto verify=[&](const GyroRecord& data) {
+        const json envelope={{"event","gyro.telemetry"},{"data",data.tree()}};
+        for(auto handler:{json::error_handler_t::strict,json::error_handler_t::replace,json::error_handler_t::ignore})
+            check(dumpOutcome(envelope,handler)==recordEnvelopeOutcome(data,handler),"actual typed formatter wire/exception differs from independent JSON serializer");
+        ++cases;
+    };
+    const auto base=recordForInput({"base","gyro.telemetry",unicodePayload()});verify(base);
+    for(auto member:recordJsonMembers)for(const auto& input:correctnessInputs()) {auto data=base;data.*member=input.payload;verify(data);}
+    for(auto member:{&GyroRecord::timestampUtc,&GyroRecord::targetStick,&GyroRecord::motionAdmission})
+        for(const auto& value:std::vector<std::string>{"",std::string(256,'s'),"陀螺仪🕹️e\u0301",std::string("a\0b",3),"\n\r\t\b\f\"\\",std::string("\xc3\x28",2),std::string("\xed\xa0\x80",3),std::string("\xf0\x28\x8c\xbc",4)}) {
+            auto data=base;data.*member=value;verify(data);
+        }
+    const std::vector<double> numbers={-0.0,0.0,std::numeric_limits<double>::denorm_min(),std::numeric_limits<double>::min(),
+        std::numeric_limits<double>::lowest(),std::numeric_limits<double>::max(),std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN(),std::bit_cast<double>(0x7ff8000000000055ULL)};
+    for(double value:numbers) {
+        auto data=base;
+        for(auto member:{&GyroRecord::gyro,&GyroRecord::accel,&GyroRecord::rawAccel,&GyroRecord::gravity,&GyroRecord::processedAcceleration})(data.*member).fill(value);
+        data.playerSpace.fill(value);data.worldSpace.fill(value);data.orientation.fill(value);verify(data);
+    }
+    for(auto sequence:{std::uint64_t(0),std::uint64_t(1),std::numeric_limits<std::uint64_t>::max()})
+        for(int mask=0;mask<8;++mask){auto data=base;data.sequence=sequence;data.sensorPresent=mask&1;data.motionTriggerResolved=mask&2;data.aimingSightsTriggerResolved=mask&4;verify(data);}
+    // Each quaternion component must retain its distinct captured value and JSON float bits.
+    {auto data=base;data.orientation={-0.0,1.25,-2.5,3.75};verify(data);const auto tree=data.tree();
+        check(std::bit_cast<std::uint64_t>(tree["orientation"]["w"].get<double>())==std::bit_cast<std::uint64_t>(-0.0),"quaternion w capture was substituted");}
+    // Exercise exact compact-wire lengths around local-buffer boundaries and
+    // a larger dynamic fallback, using the independent JSON serializer size.
+    for(const std::size_t target:{2047u,2048u,2049u,4095u,4096u,4097u,65536u}) {
+        auto data=base;data.timestampUtc.clear();data.hostFrame=json::object();
+        const json emptyStamp={{"event","gyro.telemetry"},{"data",data.tree()}};
+        const auto prefixBytes=emptyStamp.dump().size();
+        check(prefixBytes<=target,"formatter boundary fixture must fit its target");
+        data.timestampUtc.assign(target-prefixBytes,'s');
+        const json expected={{"event","gyro.telemetry"},{"data",data.tree()}};
+        check(expected.dump().size()==target,"independent formatter boundary length changed");
+        verify(data);
+    }
+    {auto data=base;data.hostFrame=std::string(4096,'h');data.timestampUtc=std::string("\xc3\x28",2);verify(data);}
+    {auto data=base;data.hostFrame=json::object();data.timestampUtc=std::string(4096,'s')+std::string("\xed\xa0\x80",3);verify(data);}
+    return {{"pass",true},{"cases",cases},{"handlers",3},{"allTenOwnedJsonFields",true},{"allThreeOwnedStrings",true},{"actualRecordEnvelopeCalled",true}};
+}
+static json proveTypedOwnership() {
+    static_assert(!std::is_reference_v<decltype(GyroRecord::hostFrame)>);
+    static_assert(std::is_same_v<decltype(GyroRecord::timestampUtc),std::string>);
+    trackIdentity=true;identityCount=0;
+    auto data=recordForInput({"ownership","gyro.telemetry",unicodePayload()});
+    data.timestampUtc=std::string(160,'t');data.targetStick=std::string(160,'s');data.motionAdmission=std::string(160,'m');
+    std::vector<const void*> nodes;collectRecordNodes(data,nodes);
+    std::vector<std::uint64_t> generations;for(auto* node:nodes)generations.push_back(generationOf(node));
+    const std::array<const char*,3> strings={data.timestampUtc.data(),data.targetStick.data(),data.motionAdmission.data()};
+    std::array<std::uint64_t,3> stringGenerations{};for(int i=0;i<3;++i)stringGenerations[i]=generationOf(strings[i]);
+    const auto expected=data.tree();
+    GyroRecord copy=data;std::vector<const void*> copyNodes;collectRecordNodes(copy,copyNodes);
+    for(auto* node:copyNodes)check(std::find(nodes.begin(),nodes.end(),node)==nodes.end(),"typed copied record aliases an original owned subtree");
+    check(copy.timestampUtc.data()!=strings[0]&&copy.targetStick.data()!=strings[1]&&copy.motionAdmission.data()!=strings[2],"typed record copies share long string allocations");
+    copy.hostFrame["independent-copy"]=true;copy.timestampUtc[0]='x';
+    check(sameRepresentation(data.tree(),expected),"mutating independent record changed source ownership");
+    configureTopology(1);resetObservations({false,false,false,false},7,false);
+    RecordObservation observed;recordObserver=&observed;
+    typed_record_observed(std::move(data));recordObserver=nullptr;
+    check(observed.called&&observed.nodes==nodes&&observed.generations==generations,"typed emitter did not preserve every owning JSON allocation and generation");
+    check(observed.stringStorage==strings,"typed emitter copied or borrowed owned long strings");
+    for(int i=0;i<3;++i)check(generationOf(observed.stringStorage[i])==stringGenerations[i],"typed owning string allocation generation changed");
+    check(recordJsonMoved(data),"typed caller retained owning JSON after by-value move");
+    check(sameRepresentation(observed.tree,expected),"typed ownership proof changed exact representation");
+    // Oracle materialization must be an independent tree; its addresses cannot prove typed ownership.
+    std::vector<const void*> oracleNodes;collectNodes(observed.tree,oracleNodes);
+    for(auto* node:oracleNodes)check(std::find(nodes.begin(),nodes.end(),node)==nodes.end(),"typed observation tree aliases record storage");
+    trackIdentity=false;
+    return {{"pass",true},{"owningJsonNodes",nodes.size()},{"owningLongStrings",3},{"allocationGenerationsCompared",true},{"oracleTreeAddressesUsedAsOwnershipProof",false}};
+}
+static json proveLazyBroadcastBoundaries() {
+    json witnesses=json::array();std::uint64_t cases=0;
+    const json envelope={{"data",unicodePayload()},{"event","gyro.telemetry"}};
+    const auto bytes=envelope.dump();const auto wide=U2W(bytes);
+    const auto wideBytes=std::string(reinterpret_cast<const char*>(wide.data()),wide.size()*sizeof(wchar_t));
+    for(int topology=0;topology<8;++topology)for(int fault=0;fault<3;++fault)for(bool validated:{false,true}) {
+        configureTopology(topology,true);const auto expected=deliveryOrder();
+        conversionWitness=json::array();postWitness=json::array();conversionCalls=0;conversionFault=fault;captureConversions=true;
+        int generated=0;
+        ipc_broadcast_controller_snapshot_generated([&] {++generated;return bytes;},validated?&bytes:nullptr);
+        captureConversions=false;conversionFault=0;
+        const int attempts=expected.empty()?0:((fault!=0&&expected.size()>1)?2:1);
+        check(generated==(validated?0:attempts),"lazy wire generated early, duplicated after success, or failed to retry");
+        check(conversionCalls==attempts*2,"conversion failure cached or successful conversion repeated");
+        std::vector<int> got;
+        for(std::size_t i=0;i<postWitness.size();++i){
+            const auto& row=postWitness[i];got.push_back(row[0].get<int>());
+            check(row[1].get<std::string>()==((fault==1&&i==0)?std::string():wideBytes),"conversion failure/retry UTF16 delivery differs");
+            check(row[2]==(i==0?2:attempts*2),"successful UTF16 cache was not reused at later renderer");
+        }
+        check(got==expected,"lazy first live renderer/order/null target filtering changed");
+        witnesses.push_back({{"topology",topology},{"fault",fault},{"validated",validated},{"generated",generated},
+            {"conversions",conversionWitness},{"deliveries",describeValue(postWitness)}});++cases;
+    }
+    for(int topology:{0,3,4,5}){
+        configureTopology(topology);const auto expected=deliveryOrder();int generated=0;
+        conversionCalls=0;conversionWitness=json::array();postWitness=json::array();captureConversions=true;
+        ipc_broadcast_controller_snapshot_generated([&]{++generated;return std::string();});captureConversions=false;
+        check(generated==static_cast<int>(!expected.empty())&&conversionCalls==0,"empty successful wire must cache without conversion");
+        check(postWitness.size()==expected.size(),"empty successful wire dropped renderer");++cases;
+    }
+    // A callable exception remains uncaught and precedes the first delivery.
+    configureTopology(5);int generated=0;bool caught=false;captureConversions=true;conversionCalls=0;postWitness=json::array();
+    try{ipc_broadcast_controller_snapshot_generated([&]() -> std::string{++generated;throw std::runtime_error("generator-failure");});}
+    catch(const std::runtime_error& e){caught=std::string(e.what())=="generator-failure";}
+    captureConversions=false;
+    check(caught&&generated==1&&conversionCalls==0&&postWitness.empty(),"lazy generation exception was swallowed or delivery continued");++cases;
+    // New records may not reuse any prior record's UTF16 bytes.
+    configureTopology(1);postWitness=json::array();conversionCalls=0;captureConversions=true;
+    ipc_broadcast_controller_snapshot_generated([&]{return bytes;});
+    const std::string next="{\"data\":{},\"event\":\"next\"}";
+    ipc_broadcast_controller_snapshot_generated([&]{return next;});captureConversions=false;
+    const auto nextWide=U2W(next);const auto nextBytes=std::string(reinterpret_cast<const char*>(nextWide.data()),nextWide.size()*sizeof(wchar_t));
+    check(postWitness.size()==2&&postWitness[0][1]==wideBytes&&postWitness[1][1]==nextBytes&&conversionCalls>=4,"wire cache escaped one immutable broadcast");++cases;
+    // Real typed emitter: strict validation still runs when parity opens without a reference, even with no live renderer.
+    const auto bad=recordForInput({"invalid","gyro.telemetry",{{"bad",std::string("\xc3\x28",2)}}});
+    for(int topology:{0,3,4,5})for(int mask:{0,8}){
+        configureTopology(topology);const std::vector<bool> script={false,false,false,(mask&8)!=0};
+        const auto actual=invokeTyped(ipc_emit_owned_gyro_record,bad,script);
+        const bool strictExpected=topology!=0&&((mask&8)!=0||!deliveryOrder().empty());
+        check((actual.external.exceptionId==316)==strictExpected,"typed no-reference strict dump boundary was skipped");
+        check(actual.external.counters[1]==0&&actual.external.counters[2]==0&&countTrace(actual.external,"log")==0,"typed missing reference counted parity or emitted log");
+        check(countTrace(actual.external,"PostWebMessageAsJson")==0,"bad typed UTF8 delivered before strict validation");++cases;
+    }
+    return {{"pass",true},{"cases",cases},{"witnesses",std::move(witnesses)},
+        {"conversionFaults",json::array({"none","probe-and-write-return-zero-once","short-write-return-once"})}};
+}
+int main(int argc,char** argv) {
+    try{
+        if(argc==2&&std::string(argv[1])=="--inputs"){std::cout<<inputCorpus().dump(2)<<'\n';return 0;}
+        if(argc!=2||(std::string(argv[1])!="0"&&std::string(argv[1])!="--correctness"))throw std::runtime_error("Correctness only: pass 0 or --correctness; timing entrypoints are disabled");
+        json result={{"correctness",runCorrectness()},{"ownership",proveCopyAndMove()}};
+        check(correctnessCases==2829,"original complete JSON gate matrix was reduced");
+        result["typedCorrectness"]=runTypedMatrix();result["typedOwnership"]=proveTypedOwnership();
+        result["formatterBoundaries"]=proveFormatterBoundaries();result["lazyBroadcastBoundaries"]=proveLazyBroadcastBoundaries();
+        result["caseMatrix"]=std::move(correctnessMatrix);result["traceWitnesses"]=std::move(traceWitnesses);
+        result["assertions"]=assertionCount;result["performance"]=nullptr;result["compiledSourceIsPrivate"]=true;
+        std::cout<<result.dump(2)<<'\n';return 0;
+    }catch(const std::exception& e){activeTrace=nullptr;localObserver=nullptr;recordObserver=nullptr;trackIdentity=false;captureConversions=false;countAllocations=false;std::cerr<<e.what()<<'\n';return 2;}
+}
+#endif // YMCC_GYRO_PARITY_TYPED

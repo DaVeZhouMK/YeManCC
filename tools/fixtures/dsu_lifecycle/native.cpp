@@ -52,6 +52,71 @@ void transport(){
     require(::closesocket(client)==0,"own client closed before DSU WSA cleanup");
     std::cout<<"{\"port\":"<<port<<",\"loopback\":true}\n";
 }
+void subscribedTransport(){
+    namespace p=ymcc::dsu::protocol;
+    using namespace std::chrono_literals;
+    begin("data-subscription-gates-current-production-frame");
+    require(dsu_start_test(),"start data server");
+    SOCKET client=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+    require(client!=INVALID_SOCKET,"own data UDP client");
+    try {
+        sockaddr_in peer{};peer.sin_family=AF_INET;peer.sin_addr.s_addr=htonl(INADDR_LOOPBACK);peer.sin_port=htons(dsu_test_port());
+        require(connect(client,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer))==0,"connect own UDP peer");
+        const auto request=[&](std::uint32_t message,std::initializer_list<std::uint8_t> payload){
+            std::array<std::uint8_t,40> buffer{};
+            const auto bytes=std::span(buffer).first(20+payload.size());
+            p::header(bytes,21,message);bytes[3]='C';std::copy(payload.begin(),payload.end(),bytes.begin()+20);p::finish(bytes);
+            require(send(client,reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0)==int(bytes.size()),"send discovery or data registration");
+        };
+        std::array<std::uint8_t,128> reply{};
+        const auto receive=[&](DWORD timeout){
+            require(setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&timeout),sizeof(timeout))==0,"set data receive timeout");
+            const int size=recv(client,reinterpret_cast<char*>(reply.data()),int(reply.size()),0);
+            if(size==SOCKET_ERROR)require(WSAGetLastError()==WSAETIMEDOUT,"expected receive timeout");
+            return size;
+        };
+        const auto registerSlot=[&](std::uint8_t slot){request(p::dataMessage,{1,slot,0,0,0,0,0,0});};
+        const auto waitTicket=[](){
+            const auto deadline=std::chrono::steady_clock::now()+2s;
+            while(std::chrono::steady_clock::now()<deadline){if(const auto ticket=dsu_frame_demand())return ticket;std::this_thread::sleep_for(2ms);}
+            return std::uint64_t(0);
+        };
+        require(!dsu_frame_demand(),"idle has no ticket");
+        registerSlot(3);
+        request(p::portsMessage,{1,0,0,0,0});
+        require(receive(1000)==32&&p::u32(reply.data()+16)==p::portsMessage&&!dsu_frame_demand(),"port discovery or nonstreaming slot created demand");
+        registerSlot(0);
+        const auto first=waitTicket();require(first!=0,"real registration opens current demand");
+        require(receive(80)==SOCKET_ERROR,"no old or synthetic frame before first producer tick");
+        const auto activeFrame=[](){
+            ymcc::dsu::Frame frame;frame.live=true;frame.buttons=0x1000;
+            frame.validate=[](const ymcc::dsu::Frame&,std::uint64_t) noexcept {return ymcc::dsu::Admission{true,false};};
+            return frame;
+        };
+        require(dsu_publish_for_demand(first,activeFrame()),"publish first admitted frame");
+        require(receive(1000)==100&&reply[37]==64,"first wire frame contains current input");
+        registerSlot(0);
+        require(receive(1000)==100&&reply[37]==64&&dsu_frame_demand()==first,"renewal retains current subscription and reply");
+        const auto expiry=std::chrono::steady_clock::now()+6s;
+        while(dsu_frame_demand()&&std::chrono::steady_clock::now()<expiry)std::this_thread::sleep_for(10ms);
+        require(!dsu_frame_demand()&&!dsu_publish_for_demand(first,activeFrame()),"expired demand rejects a late frame");
+        registerSlot(0);
+        const auto second=waitTicket();require(second&&second!=first,"resubscription opens new demand");
+        require(!dsu_publish_for_demand(first,activeFrame()),"old ticket cannot publish into a new subscription");
+        require(receive(80)==SOCKET_ERROR,"resubscription did not replay an expired held button");
+        auto neutral=activeFrame();neutral.semanticNeutral=true;
+        require(dsu_publish_for_demand(second,std::move(neutral)),"publish fresh neutral after focus takeover");
+        require(receive(1000)==100&&reply[37]==0&&reply[40]==128&&reply[41]==127,"fresh semantic neutral wins on wire");
+    }catch(...){::closesocket(client);throw;}
+    require(::closesocket(client)==0,"close subscribed peer");
+    const auto stoppedBy=std::chrono::steady_clock::now()+2s;
+    do {
+        dsu_stop();
+        if(dsu_stopped())break;
+        std::this_thread::sleep_for(2ms);
+    }while(std::chrono::steady_clock::now()<stoppedBy);
+    require(dsu_stopped()&&!dsu_frame_demand(),"stop retires demand and owners");pass();
+}
 void publicCases(){
     begin("never-started-and-repeat-stop");require(dsu_stopped(),"never started complete");dsu_stop();dsu_stop();require(dsu_stopped(),"empty stop complete");pass();
     for(unsigned round=0;round<6;++round){
@@ -68,6 +133,7 @@ void publicCases(){
     gate.count_down();gate.wait();reader.join();stopper.join();
     require(dsu_stopped(),"joined concurrent callers and complete stop");
     (void)observed;pass();
+    subscribedTransport();
 }
 }
 
@@ -230,8 +296,12 @@ bool rescue() noexcept {
 }
 #endif
 
-int main(){
+int main(int argc,char** argv){
     try{
+        if(argc==2&&std::string(argv[1])=="--subscription-only"){
+            test::subscribedTransport();
+            std::cout<<"{\"status\":\"PASS\",\"cases\":"<<test::cases<<",\"checks\":"<<test::checks<<"}\n";return 0;
+        }
         test::publicCases();
 #ifndef YMCC_DSU_PUBLIC_CONSUMER
         test::privateCases();

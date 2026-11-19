@@ -1,0 +1,13 @@
+# 无游戏轻度隔离恢复（2026-11-13后继）
+
+用户在Win5 225328日志分析后明确选择“恢复无游戏时的轻度隔离”，随后要求咨询此前退役是否与虚拟手柄有关。虚拟主责及自愈侧只确认退役原件记录“用户要求”，没有找到证明虚拟冲突必须永久禁用的因果；这不构成原实现所有组合均安全的证明。
+
+本后继恢复原GameLocker前台交接及Steam导航租约，限定唯一游戏观察为新鲜Complete/noPID、虚拟persona实际关闭且旧Host/pipe/目标/隐藏归还状态已完成。Unknown、有游戏或欠账不取得轻度资格。实际代码见main.cpp的focusLightNoGameQualified、focusLightVirtualIdle、focusLightIsolationBegin/Current，以及steam_light_gamepad_runtime.h。
+
+票据除原power/rules/Host/source/topology外绑定已存在的虚拟意图revision和公共SharedPowerV1 capture/current；已接受的非disabled pending/verifying请求及意图writer会撤销旧资格。公共publicationRevision单独推进不算新睡眠，也不复活旧票据。检查只读现有owner和缓存，无设备枚举/写入、清账、第二游戏识别或新电源订阅。
+
+原3秒初始尝试、750ms续租及失败转普通隔离保持。设备隔离仍由原owner负责，轻度仅撤还自己的Steam导航lease；虚拟开启/关闭、自愈和资源归还优先，不添加等待Steam页面释放的Host硬门。新请求不能延续旧票据；迟到ACK/释放不得盖过新owner。
+
+本记录取代LightIsolationRetired-20261113在当前策略上的适用性；旧退役实现、验证、FAIL/UNKNOWN和历史费用仍保留。恢复不代表普通XUSB首调用65秒移除否决已修复，不证明现场每帧Steam/游戏手柄输入。验证及完整包的实际状态以Testing/YMCC/Evidence/Isolation-Recent-20261111/Field-Win5-20261113-225328/Restore-Light为准；不得拿旧轻度或旧退役PASS替代本后继。
+
+本任务不部署、不启停现场YMCC/Steam/游戏、不操作设备或真实睡眠，不更改虚拟输出类型、恢复次数及30秒/10秒原预算。

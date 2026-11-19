@@ -5,11 +5,12 @@
       "id": "game-library.account-discovery-consumer",
       "title": "Actual library account discovery preserves current results across stale snapshots and concurrent refresh",
       "producer": "tools/custom_steam_library_account_status_selftest.mjs",
-      "producerSha256": "842dde6ecc2f37328c6ee2943c0d9bc490c2f27c56bb698999212371570022fc",
+      "producerSha256": "878d3f97c57de8f19bca873ad81c1608c213e52fc38ae19c8a8dcdf0d8c48f27",
       "productSources": [
         "CustomSteamLibrary/workspace-ui/app.js"
       ],
       "caseNames": [
+        "readonly-library-root-is-not-a-steam-account-result-error",
         "startup-does-not-publish-cached-installed-no-account",
         "startup-does-not-publish-cached-not-installed",
         "startup-does-not-publish-cached-error",
@@ -61,7 +62,7 @@
             "name": "older-game-snapshot-cannot-restore-false-negative",
             "message": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /已发现 1 个/. Input:\n\n'正在检测 Steam 账户'\n",
             "producerFrame": {
-              "line": 154,
+              "line": 164,
               "column": 10
             }
           }
@@ -72,7 +73,7 @@
       "id": "game-library.snapshot-consumer",
       "title": "Actual library snapshot and artwork consumers preserve good state when incoming rows are malformed",
       "producer": "tools/custom_steam_library_ui_datachain_selftest.mjs",
-      "producerSha256": "f1cae9d463d41e77fbdd8c9b3f5004520e1515dc6198ce8765e57bcf3d2f739e",
+      "producerSha256": "91e17f51d344199d00f4ca08fc89248147b4d6e6f69a2846dbaa030e63a95a33",
       "productSources": [
         "CustomSteamLibrary/workspace-ui/app.js",
         "CustomSteamLibrary/workspace-ui/index.html"
@@ -160,7 +161,31 @@
           "changed-primary-does-not-inherit-old-directory-plan-or-media",
           "directory-plan-without-an-executable-retains-legacy-display-fallback"
         ],
-        "reason": "Retain all original assertions and precise semantic faults; append changed-primary identity/media isolation and legitimate legacy display fallback."
+        "reason": "Retain all original assertions and precise semantic faults; append changed-primary identity/media isolation and legitimate legacy display fallback.",
+        "followups": [
+          {
+            "date": "2026-11-10",
+            "previousSha256": "f1cae9d463d41e77fbdd8c9b3f5004520e1515dc6198ce8765e57bcf3d2f739e",
+            "retainedCaseCount": 53,
+            "addedCaseNames": [],
+            "expandedCaseNames": [
+              "unmatched-media-records-stay-distinct-and-cleared-id-stays-cleared"
+            ],
+            "reason": "Native Steam media grouping, builtin/deleted cache exclusions, Zelda helper display and legitimate PE title control; restore actual normalization/media helper dependencies, preserving original guards and semantic fault."
+          },
+          {
+            "date": "2026-11-10",
+            "previousSha256": "e3bb79e7eaae5113f4543f8bb336a014a74c6512c6bf8f89bb11dfc35d92bc68",
+            "retainedCaseCount": 53,
+            "addedCaseNames": [],
+            "expandedCaseNames": [
+              "unconfirmed-id-never-becomes-a-wallpaper-alias",
+              "unmatched-media-records-stay-distinct-and-cleared-id-stays-cleared",
+              "changed-primary-does-not-inherit-old-directory-plan-or-media"
+            ],
+            "reason": "User reports name-only ghost cards. Replace former cache-to-card expectations with inventory-only projection; retain cleared-ID and changed-primary isolation, native scanned inventory and cache preservation. No original ID, minimum, fault or default coverage expansion."
+          }
+        ]
       }
     }
   }

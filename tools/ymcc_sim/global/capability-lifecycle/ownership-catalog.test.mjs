@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {simulationCorePath} from '../release-host-environment.mjs';
 import {
   inspectOwnershipBinding, validateOwnershipCatalog, queryOwnershipCatalog,
   getOwnershipInventory, getOwnershipPlan,
@@ -14,9 +15,34 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(HERE, '../../../..');
-const workspace = path.resolve(repoRoot, '../../../Testing/YMCC/Workspace/OwnershipCatalog-20261023');
-fs.mkdirSync(workspace, {recursive: true});
-const scratch = fs.mkdtempSync(path.join(workspace, 'refusal-'));
+const prefix = 'ymcc-ownership-catalog-';
+let scratch;
+function directoryIdentity(dir) {
+  const stat = fs.lstatSync(dir, {bigint: true});
+  assert(stat.isDirectory() && !stat.isSymbolicLink() && path.relative(dir, fs.realpathSync.native(dir)) === '',
+    'Redirected ownership catalog fixture directory: ' + dir);
+  return stat;
+}
+function scratchRoot() {
+  if (!scratch) {
+    const parent = simulationCorePath('Workspace');
+    const parentIdentity = directoryIdentity(parent);
+    const root = fs.mkdtempSync(path.join(parent, prefix));
+    scratch = {parent, parentIdentity, root, rootIdentity: directoryIdentity(root)};
+  }
+  return scratch.root;
+}
+test.after(() => {
+  if (!scratch) return;
+  const {parent, parentIdentity, root, rootIdentity} = scratch;
+  assert.equal(path.relative(parent, path.dirname(root)), '');
+  assert(path.basename(root).startsWith(prefix));
+  for (const [dir, expected] of [[parent, parentIdentity], [root, rootIdentity]]) {
+    const current = directoryIdentity(dir);
+    assert(current.dev === expected.dev && current.ino === expected.ino, 'Fixture directory identity changed: ' + dir);
+  }
+  fs.rmSync(root, {recursive: true});
+});
 const hash = text => createHash('sha256').update(text).digest('hex');
 const body = `void retire() {
   const auto marker = R"tag(} {)tag";
@@ -27,7 +53,7 @@ const body = `void retire() {
   revoke();
 }`;
 function fixture(name) {
-  const root = path.join(scratch, name);
+  const root = path.join(scratchRoot(), name);
   fs.mkdirSync(path.join(root, 'native'), {recursive: true});
   const file = path.join(root, 'native/owner.h');
   fs.writeFileSync(file, '// unrelated prefix\n' + body + '\nvoid other() {}\n');

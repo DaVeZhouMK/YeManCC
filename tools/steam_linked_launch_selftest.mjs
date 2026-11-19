@@ -1,3 +1,4 @@
+import * as vue from 'vue';
 import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {transformSync} from 'esbuild';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -37,7 +38,7 @@ if(process.argv.includes('--rtss-process-native-only')) {
   await rtssProcessNativeCli(process.argv.slice(2));
   process.exit(process.exitCode??0);
 }
-if(process.argv.includes('--process-status-native-only')) {
+if(process.argv.includes('--exact-path-contention-native-only')||process.argv.includes('--exact-path-native-only')||process.argv.includes('--process-status-native-only')) {
   const {processStatusNativeCli}=await import('./fixtures/steam_process_status_native.mjs');
   await processStatusNativeCli(process.argv.slice(2));
   process.exit(process.exitCode??0);
@@ -79,7 +80,8 @@ function selectedInput(file) {
 }
 const privateFamilyExport='\nmodule.exports.__processStatusRtssFamilyAlive = rtssFamilyAlive;\n';
 const privateRtssIoExport='\nmodule.exports.__rtssProcessIoResolveRtssDir = resolveRtssDir;\nmodule.exports.__rtssProcessIoRestartRtss = restartRtss;\n';
-const cases=[];async function check(name,fn){await fn();cases.push(name)}
+const fixtureCleanups=new Set();
+const cases=[];async function check(name,fn){try{await fn();cases.push(name)}finally{for(let n=0;n<32;n++)await Promise.resolve();const owned=[...fixtureCleanups];fixtureCleanups.clear();for(const dispose of owned)dispose();}}
 function evaluate(file,imports={},rtssIoState=null) {
   const isProcessBridge=(options.processStatusOnly||options.rtssProcessIoOnly)&&path.resolve(file)===repoBridgeFile;
   let code;
@@ -91,7 +93,17 @@ function evaluate(file,imports={},rtssIoState=null) {
     code=selectedCode.get(key);
   } else code=transformSync(fs.readFileSync(file,'utf8'),{loader:'ts',format:'cjs'}).code;
   const module={exports:{}};
-  vm.runInNewContext(code,{module,exports:module.exports,console,setTimeout:options.rtssProcessIoOnly&&rtssIoState?((fn,ms)=>{(rtssIoState.waits??=[]).push(ms);fn();return 0;}):setTimeout,clearTimeout,performance:{now:()=>Date.now()},window:{addEventListener(){},removeEventListener(){}},require(name){if(Object.hasOwn(imports,name))return imports[name];throw Error('Unexpected import '+name)}});
+  const eventTarget=()=>{const listeners=new Map();return {addEventListener(name,fn){let set=listeners.get(name);if(!set)listeners.set(name,set=new Set());set.add(fn);},removeEventListener(name,fn){listeners.get(name)?.delete(fn);},dispatchEvent(event){for(const fn of [...(listeners.get(event.type)||[])])fn(event);return true;}};};
+  // This bridge fixture has no presented page. Run the real lifecycle module
+  // against a hidden event target, so unrelated TDP presentation recovery stays paused.
+  const windowPort=eventTarget(),documentPort={...eventTarget(),visibilityState:'hidden'};
+  const customEvent=class {constructor(type,options={}){this.type=type;this.detail=options.detail;}};
+  const globals={console,setTimeout:options.rtssProcessIoOnly&&rtssIoState?((fn,ms)=>{(rtssIoState.waits??=[]).push(ms);fn();return 0;}):setTimeout,clearTimeout,performance:{now:()=>Date.now()},window:windowPort,document:documentPort,CustomEvent:customEvent};
+  Object.assign(windowPort,{setTimeout:globals.setTimeout,clearTimeout:globals.clearTimeout});
+  const actualModules=new Map(),actualPaths={'./uiLifecycle':'src/bridge/uiLifecycle.ts','./bridge/uiLifecycle':'src/bridge/uiLifecycle.ts','../scheduler':'src/scheduler.ts','../robust/repairModel':'src/robust/repairModel.ts','@/robust/repairModel':'src/robust/repairModel.ts','./tdpCircuitBreaker':'src/bridge/tdpCircuitBreaker.ts','./powerSource':'src/bridge/powerSource.ts'};
+  const loadActual=relative=>{if(actualModules.has(relative))return actualModules.get(relative);const input=selectedInput(path.join(repoRoot,relative)),key=input.file+'#production-pure-dependency';if(!selectedCode.has(key))selectedCode.set(key,transformSync(input.text,{loader:'ts',format:'cjs'}).code);const loaded={exports:{}};actualModules.set(relative,loaded.exports);vm.runInNewContext(selectedCode.get(key),{...globals,module:loaded,exports:loaded.exports,require:requireActual});actualModules.set(relative,loaded.exports);if(relative==='src/scheduler.ts')fixtureCleanups.add(()=>{for(const name of loaded.exports.getScheduledTaskNames())loaded.exports.unregisterScheduledTask(name);});return loaded.exports;};
+  function requireActual(name){if(Object.hasOwn(actualPaths,name))return loadActual(actualPaths[name]);if(Object.hasOwn(imports,name))return imports[name];if(name==='vue')return vue;throw Error('Unexpected import '+name);}
+  vm.runInNewContext(code,{...globals,module,exports:module.exports,require:requireActual});
   return module.exports;
 }
 function rtssProcessIoPort(state,cmd,args) {
@@ -340,7 +352,7 @@ if(options.rtssProcessIoOnly) {
   await runProcessStatusCases();
 } else {
 await check('actual bridge initialization is observation-free',()=>assert.equal(fixture().state.calls.length,0));
-await check('actual power lifecycle subscriptions do not launch or observe Steam',async()=>{const {state}=fixture();assert.deepEqual([...state.subscriptions.keys()],['power.suspending','power.resuming','power.resumed']);for(const set of state.subscriptions.values())for(const listener of set)listener({generation:1});await Promise.resolve();assert.deepEqual(state.calls.map(call=>call.cmd),['power.lifecycle']);});
+await check('actual power lifecycle subscriptions do not launch or observe Steam',async()=>{const {state}=fixture();assert.deepEqual([...state.subscriptions.keys()],['window.focus','power.suspending','power.resuming','power.resumed']);for(const [event,set]of state.subscriptions)if(event.startsWith('power.'))for(const listener of set)listener({generation:1});await Promise.resolve();assert.deepEqual(state.calls.map(call=>call.cmd),['power.lifecycle']);});
 await check('actual bridge rejects implicit startup',async()=>{const {state,bridge}=fixture();await assert.rejects(bridge.launchSteam(),/手动启动/);assert.equal(state.calls.length,0)});
 await check('actual bridge uses native launch exclusively without VBS dependency',async()=>{const {state,bridge}=fixture();await bridge.launchSteam({userInitiated:true});assert.deepEqual(state.calls.map(x=>x.cmd),['steam.ui.launch']);assert.deepEqual(state.calls[0].args,{userInitiated:true});});
 await check('existing Steam cannot get startup flags or mode switch',async()=>{const {state,bridge}=fixture();state.running=true;await bridge.launchSteam({userInitiated:true});assert.deepEqual(state.calls,[{cmd:'steam.ui.launch',args:{userInitiated:true}}])});

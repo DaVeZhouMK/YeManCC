@@ -15,9 +15,10 @@ export function prepareNative(repo,dir,modulePath,{negative=false,rollback=false
  for(let i=0;i<queue.length;i++){const rel=queue[i];if(sources.has(rel))continue;const file=path.join(repo,rel);const bytes=fs.readFileSync(file);sources.set(rel,bytes);for(const m of bytes.toString('utf8').matchAll(/^\s*#include\s+"([^"]+)"/gm)){const candidates=[path.resolve(repo,path.dirname(rel),m[1]),...includeRoots.map(r=>path.join(repo,r,m[1]))],found=candidates.find(f=>fs.existsSync(f));if(!found){if(systemIncludes.some(r=>fs.existsSync(path.join(r,m[1]))))continue;throw Error('SOURCE_INCLUDE_UNBOUND:'+rel+':'+m[1]);}const relative=path.relative(repo,found).replaceAll('\\','/');if(relative.startsWith('../'))throw Error('SOURCE_INCLUDE_ESCAPE');queue.push(relative);}}
  fs.mkdirSync(dir,{recursive:true});const transforms=[];
  function transform(rel,name,body){const original=sources.get(rel).toString('utf8'),range=functionBody(original,name),after=original.slice(0,range.start)+body+original.slice(range.end);transforms.push({path:rel,function:name,originalBody:range.body,replacementBody:body,originalBodySHA256:sha(range.body),replacementBodySHA256:sha(body),role:'test-only-terminal-isolation'});sources.set(rel,Buffer.from(after));}
- transform('native/custom-steam-library/workspace_host.cpp','hostProcessRunningByName','{if(firstPath)firstPath->clear();return wsfixture::steamRunning.load();}');
- transform('native/custom-steam-library/workspace_host.cpp','closeSteamForShortcutCommit','{wsfixture::fail("CLOSE_REAL_STEAM");}');
- transform('native/custom-steam-library/steam_artwork_lab.cpp','processRunningByName','{return wsfixture::steamRunning.load();}');
+
+ transform('native/steam_information_client.h','read','{Facts facts;facts.available=true;facts.requested=mask;facts.presence=wsfixture::steamRunning.load()?1:0;return facts;}');
+ transform('native/custom-steam-library/workspace_host.cpp','closeSteamForShortcutCommit','{if(hostSteamRunning())wsfixture::fail("CLOSE_REAL_STEAM");if(initialRunning)*initialRunning=false;if(initialPath)initialPath->clear();}');
+
  transform('native/custom-steam-library/steam_artwork_lab.cpp','steamInstallPath','{return std::nullopt;}');
  transform('native/custom-steam-library/workspace_host.cpp','postWebMessage','{wsfixture::emit(message);}');
  transform('native/custom-steam-library/workspace_host.cpp','enqueueWorkspaceResult','{if(!result)return false;wsfixture::emit(result->message);return true;}');

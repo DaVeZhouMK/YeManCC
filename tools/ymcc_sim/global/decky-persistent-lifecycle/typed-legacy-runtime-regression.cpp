@@ -235,6 +235,11 @@ inline void negativeControls() {
         });
     }
 }
+inline void deferredCleanup() {
+    observation={{"source","exact original deferred cleanup test body; real Runtime worker wait and cancellation"}};
+#include "typed-legacy-runtime-deferred-cleanup.inc"
+    scenarios.push_back({{"id","current.original-deferred-cleanup-wait-and-off"},{"passed",true}});
+}
 } // namespace migration
 int main(int argc,char** argv) {
     int childExit=0;if(rtfixture::tryStalledChild(childExit)||ymcc::deckybinding::fixture::tryRunChild(childExit))return childExit;
@@ -269,9 +274,10 @@ int main(int argc,char** argv) {
     run("current.no-launch-environment-and-state",environmentAndNoLaunch);
     run("current.resource-and-real-owned-binding-cancellation",cancellation);
     run("current.real-owned-generation-token-handoff",handoff);
+    run("current.original-deferred-cleanup-wait-and-off",deferredCleanup);
     run("current.original-identity-negative-controls",negativeControls);
     const auto handlesAfter=handles();const auto threadsAfter=threadCount();report["parentHandleSnapshotAfter"]=handleTable();
-    bool okay=assertions.size()==38&&negatives.size()==4&&handlesBefore==handlesAfter&&threadsBefore==threadsAfter;
+    bool okay=assertions.size()==41&&negatives.size()==4&&handlesBefore==handlesAfter&&threadsBefore==threadsAfter;
     for(const auto& row:assertions)if(!row.at("passed").get<bool>())okay=false;
     for(const auto& row:negatives)if(!row.at("passed").get<bool>())okay=false;
     for(const auto& row:scenarios)if(row.contains("passed")&&!row.at("passed").get<bool>())okay=false;

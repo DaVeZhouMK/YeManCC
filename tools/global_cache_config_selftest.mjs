@@ -5,7 +5,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
-const chartsOnly=process.argv.includes('--charts-storm-only');
+const chartsOnly=process.argv.includes('--charts-storm-only'),gameCustomOnly=process.argv.includes('--game-custom-only');
+assert(!(chartsOnly&&gameCustomOnly),'Choose one existing config scope');
 const root=process.cwd(),require=createRequire(path.join(root,'package.json'));
 const {build}=require('esbuild');
 const chartSource=chartsOnly&&process.env.YMCC_CHARTS_SOURCE?path.resolve(process.env.YMCC_CHARTS_SOURCE):path.join(root,'src/bridge/steamCharts.ts');
@@ -52,23 +53,25 @@ export const settingsStore={read:async(p,known)=>{
 `;
 async function fixture(imports){
  const result=await build({stdin:{contents:imports,resolveDir:root,loader:'ts'},bundle:true,external:['vue'],format:'cjs',platform:'node',write:false,metafile:true,alias:{'@':path.join(root,'src')},plugins:[{name:'strict-memory-api',setup(b){b.onLoad({filter:/steamCharts\.ts$/},()=>({contents:fs.readFileSync(chartSource,'utf8'),loader:'ts',resolveDir:path.join(root,'src/bridge')}));b.onLoad({filter:/api\.ts$/},()=>({contents:fakeApi,loader:'ts'}));b.onLoad({filter:/ipc\.ts$/},()=>({contents:`export const isNativeRuntime=false;export const invoke=async(c,a)=>{const f=globalThis.__fixture.ipc[c];if(!f)throw Error('Forbidden fixture IPC '+c);return f(a)};export const on=()=>()=>{};export const notify=()=>{};`,loader:'ts'}));}}]});
- const data={charts:chartsOnly,existsHook:null,dirs:new Set(),fileTimes:new Map(),statReads:[],statHook:null,mkdirHook:null,renameHook:null,stats:0,commitHook:null,atomicHook:null,ipc:{},files:new Map(),reads:[],writes:[],renames:[],failWrite:false,readHook:null,services:{}};
+ const data={charts:chartsOnly,existsHook:null,dirs:new Set(),fileTimes:new Map(),statReads:[],statHook:null,mkdirHook:null,renameHook:null,stats:0,commitHook:null,atomicHook:null,ipc:gameCustomOnly?{'power.lifecycle':async()=>({phase:'suspended',known:true,generation:1,publicationRevision:1,observedNotificationSequence:1,notificationPending:false,hardwareWritesAllowed:false,inputReady:false})}:{},files:new Map(),reads:[],writes:[],renames:[],failWrite:false,readHook:null,services:{}};
  const local=new Map(),events=[];const module={exports:{}};
  const clock={now:Date.now(),next:0,timers:new Map()};
  const timer=(fn,ms=0)=>{const id=++clock.next;clock.timers.set(id,{at:clock.now+ms,fn});return id};
  class ClockDate extends Date {constructor(...args){super(...(args.length?args:[clock.now]))}static now(){return clock.now}}
  const advance=async ms=>{const until=clock.now+ms;for(let i=0;i<512;++i){await ticks();const due=[...clock.timers].filter(([,v])=>v.at<=until).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;clock.now=Math.max(clock.now,due[1].at);clock.timers.delete(due[0]);due[1].fn();}clock.now=until;await ticks()};
- const context={btoa,Audio:class{addEventListener(){}removeAttribute(){}load(){}pause(){}play(){return Promise.resolve()}},module,exports:module.exports,require,console,process:{env:{NODE_ENV:'production'},platform:'win32',version:process.version},structuredClone,TextEncoder,TextDecoder,URL,performance,setTimeout,clearTimeout,setInterval,clearInterval,__fixture:data,
+ const context={btoa,Audio:class{addEventListener(){}removeAttribute(){}load(){}pause(){}play(){return Promise.resolve()}},module,exports:module.exports,require,console,process:{env:{NODE_ENV:'production'},platform:'win32',version:process.version},structuredClone,TextEncoder,TextDecoder,URL,performance,queueMicrotask,setTimeout,clearTimeout,setInterval,clearInterval,__fixture:data,
  document:{visibilityState:'visible',addEventListener(){},removeEventListener(){},querySelector(){return null}},
  window:{location:{hash:'#/schedule'},addEventListener(){},removeEventListener(){},dispatchEvent(e){events.push(e);return true},setTimeout,clearTimeout},
  CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},
  localStorage:{getItem:k=>local.get(k)??null,setItem:(k,v)=>local.set(k,String(v)),removeItem:k=>local.delete(k)},
  };
+ if(gameCustomOnly){delete context.window;delete context.document;} // Data-only original config scope has no mounted UI/TDP startup owner.
  if(chartsOnly)Object.assign(context,{Date:ClockDate,setTimeout:timer,clearTimeout:id=>clock.timers.delete(id)});
  vm.runInNewContext(result.outputFiles[0].text,context,{filename:'memory-only-global-config.cjs'});
  const bundle=result.outputFiles[0].text;
  fixtureRecords.push({inputs:Object.keys(result.metafile.inputs),bundleSha256:createHash('sha256').update(bundle).digest('hex'),data});
  if(chartsOnly&&process.env.YMCC_GLOBAL_CONFIG_REPORT){const dir=path.join(path.dirname(process.env.YMCC_GLOBAL_CONFIG_REPORT),'bundles');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,String(fixtureRecords.length)+'.cjs'),bundle);}
+ if(gameCustomOnly&&process.env.YMCC_GLOBAL_CONFIG_REPORT){const dir=path.join(path.dirname(process.env.YMCC_GLOBAL_CONFIG_REPORT),'bundles');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,String(fixtureRecords.length)+'.cjs'),bundle,{flag:'wx'});fs.writeFileSync(path.join(dir,String(fixtureRecords.length)+'.metafile.json'),JSON.stringify(result.metafile,null,2),{flag:'wx'});}
  const repo=module.exports.repo;
  const initial=repo?.normalizeSettings({tdp:{tdpMax:37,fpsLimit:75,float:{target:120,profile:'none',tdpStrategy:'none'}}});
  if(repo)data.files.set(repo.SETTINGS_FILE,JSON.stringify(initial));
@@ -76,7 +79,7 @@ async function fixture(imports){
 }
 const base=`export * as repo from './src/bridge/settingsRepository';`;
 const cases=[];
-async function check(name,run){if(chartsOnly&&!/chart/i.test(name))return;try{await run();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
+async function check(name,run){if(gameCustomOnly&&!/game-custom/i.test(name))return;if(chartsOnly&&!/chart/i.test(name))return;try{await run();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
 const ticks=async()=>{for(let i=0;i<12;i++)await Promise.resolve()};
 await check('coalesced initial settings readers own different snapshots',async()=>{
  const f=await fixture(base);const [a,b]=await Promise.all([f.repo.loadSettings(),f.repo.loadSettings()]);
@@ -135,7 +138,7 @@ await check('a temporarily unreadable game-custom main file is not treated as an
  const f=await fixture(base+`export * as schedule from './src/bridge/performanceSchedule';`);
  const main=path.win32.dirname(f.repo.SETTINGS_FILE)+'\\game-custom.json';f.data.files.set(main,JSON.stringify({version:1,entries:{'fixture.exe':{enabled:true}}}));
  f.data.readHook=async p=>{if(p===main)throw Error('simulated sharing violation');if(!f.data.files.has(p))throw Error('missing fixture');return f.data.files.get(p)};
- await assert.rejects(f.schedule.loadGameCustomConfig(),/read|读取|sharing/i);
+ await assert.rejects(f.schedule.loadGameCustomConfig('ensure',{requireReady:true}),/read|读取|sharing/i);
 });
 await check('a rejected LOCALAPPDATA lookup is retried instead of permanently cached',async()=>{
  const f=await fixture(base+`export * as quick from './src/bridge/quickapp';`);let attempts=0;const localData=path.win32.normalize('Q:/LocalData');
@@ -310,7 +313,7 @@ await check('charts storm oversize HTTP and cache timestamp retain trusted old o
 
 await check('charts storm malformed HTTP status cannot become persisted ranking',async()=>{for(const status of [undefined,'200',NaN]){const f=await chartFixture();f.data.services.http={request:async()=>({...online(),status})};const r=await settled(f,f.charts.loadSteamCharts('steam',true));assert.equal(r.items[0].name,'cached-0');assert.equal(r.fromCache,true);assert.ok(r.error);assert.equal(f.data.writes.length,0)}});
 
-const report={selection:chartsOnly?'charts-storm-only':'all-original',scope:chartsOnly?'SteamCharts original consumer only; memory VM APIs and fake HTTP':'global config/cache only; no fan/input feature changes; memory-only IPC',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases};
+const report={selection:gameCustomOnly?'game-custom-only':chartsOnly?'charts-storm-only':'all-original',scope:chartsOnly?'SteamCharts original consumer only; memory VM APIs and fake HTTP':'global config/cache only; no fan/input feature changes; memory-only IPC',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases};
 if(chartsOnly){const pin=p=>({path:p,sha256:createHash('sha256').update(fs.readFileSync(p)).digest('hex')});report.sourceIdentity={chart:pin(chartSource),harness:pin(path.join(root,'tools/global_cache_config_selftest.mjs')),http:pin(path.join(root,'src/bridge/steamHttp.ts')),apiDeclaration:pin(path.join(root,'src/bridge/api.ts')),fakeApiSha256:createHash('sha256').update(fakeApi).digest('hex'),tools:[process.execPath,require.resolve('esbuild'),path.join(root,'node_modules/@esbuild/win32-x64/esbuild.exe')].map(pin)};report.fixtures=fixtureRecords.map((x,i)=>({ordinal:i+1,bundleSha256:x.bundleSha256,inputs:x.inputs,reads:x.data.reads,statReads:x.data.statReads,writes:x.data.writes.map(w=>({path:w.path,sha256:createHash('sha256').update(w.content).digest('hex')})),renames:x.data.renames,files:[...x.data.files].map(([p,v])=>({path:p,sha256:createHash('sha256').update(v).digest('hex')}))}));report.forbiddenOperations={realFs:0,network:0,native:0,steam:0,processActions:0,settingsAssertions:0};}
 console.log(JSON.stringify(report,null,2));if(process.env.YMCC_GLOBAL_CONFIG_REPORT)fs.writeFileSync(process.env.YMCC_GLOBAL_CONFIG_REPORT,JSON.stringify(report,null,2)+'\n');
 if(report.failed)process.exitCode=1;

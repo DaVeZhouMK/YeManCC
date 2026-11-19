@@ -3,7 +3,7 @@
   "caseId": "sleep.directory-resume-consumer",
   "fixture": {
     "path": "tools/ymcc_sim/global/sleep-directory-resume-consumer/fixture.cpp.in",
-    "sha256": "f953c7de36b60aa5871e780a34d11b941c37529b66f158f648303dab2c32f5d5",
+    "sha256": "3ac73bdaea97e71080b5ab95eb4bc62acc29dd3065bebacd7943981a381e5bac",
     "nativeGroups": 70,
     "liveGroups": 26,
     "liveMain": {
@@ -19,7 +19,15 @@
     "native/main.cpp",
     "deps/json/json.hpp",
     "src/bridge/gameproc.ts",
-    "src/components/GameQuickActions.vue"
+    "src/components/GameQuickActions.vue",
+    "native/game_process_control.h",
+    "native/sleep_power_observation.h",
+    "native/sleep_power_state.h",
+    "native/sleep_legacy_resume_journal.h",
+    "native/sleep_recovery_record_name.h",
+    "native/startup_resume_delivery.h",
+    "native/startup_resume_file_identity.h",
+    "native/startup_resume_scope.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -139,7 +147,7 @@
     },
     {
       "name": "sgReadResumeMarkerChecked",
-      "sha256": "36e675d81e7d1eb3910fca31e591f814cd580a9308fc6f71b8ca78814c8ff2e3"
+      "sha256": "4e93bfc133c8eda4e774f68361a120c24d550f6b3fbbd59b00046eb9b739c1ec"
     },
     {
       "name": "sgResumeMarkerDefinitelyStale",
@@ -155,31 +163,31 @@
     },
     {
       "name": "sgDrainProcessSuspendCount",
-      "sha256": "32884d89ddaea916b04c836121d95824e11614f3dcd5c597b28314e776d1c880"
+      "sha256": "cff554583c25e87ed38e4050b63a5138f64ff6f978bcd4b1dcbf227ca8355784"
     },
     {
       "name": "sgResumeMarkedDirectoryUnlocked",
-      "sha256": "d0a625a00c7a20a0eabb211676fa71539fcbb7476ff398fc2248f24c9808053f"
+      "sha256": "0364279593f36a0b46f1aac915a95a6be7cae04d78d1193474619e073499ea2c"
     },
     {
       "name": "sgResumeGameByPids",
-      "sha256": "c817c554245db12a884ac1100a87297f2f0910a5636b9d71dec726223623f82e"
+      "sha256": "ad866eb80764605e855cd747bbd1d2c8185f17d12515bffe068007c6d31d3549"
     },
     {
       "name": "sgHasPauseMarkerForOtherPid",
-      "sha256": "57d77a735df3bd7e81220ba02d15582962591265260fbe58d3bfa980b370d15c"
+      "sha256": "c6ab4fccad28811a926ad4a72a9c6955f68f65969637ceac75009c3baebc5dc9"
     },
     {
       "name": "sgReleaseConflictingPauseLeaseUnlocked",
-      "sha256": "5e148ded64041c844d5465c92962429d0c68f91f02abc23bff9491a95d21fd11"
+      "sha256": "9618173621b49f1793c8fa22c0a91c87fe5b6d024038ec1f4ad03b1e33b7b539"
     },
     {
       "name": "sgResumeTrackedAllUnlocked",
-      "sha256": "1b6a9be8665f0c88b193da2cd6c6a05d92f6031ef9b655a0683192fc6e3e5ec0"
+      "sha256": "68812d467881b3d4c9f16d237fab456ae1d42b9e0e73253997d84b4419085dd1"
     },
     {
       "name": "sgResumeSleepTargetUnlocked",
-      "sha256": "c5bdfbd39bdffc335b09446cf8552ebb03ca9c23e4b35355a10492612e890a25"
+      "sha256": "46f3b534393316d699beb63a3351841c01f6a151b1545640a5097d24899e42a0"
     }
   ],
   "bridgeReviewedFunctions": [
@@ -189,12 +197,12 @@
     },
     {
       "name": "hasSuspendedState",
-      "sha256": "9693dda5eb72afddecd6a824af23c57522aaa3c81c9add3ad968b0a8fa9c181b"
+      "sha256": "538bfc68b89b56e1a0f08ddcba2f90bdd507239b65e3983f37ae855a3065f96d"
     }
   ],
   "uiReviewedFunction": {
     "name": "togglePause",
-    "sha256": "0dd6fb168f27d3362d0fa90ac78e66a19edebac041ae0c852fae536fd799127d"
+    "sha256": "6c8fdda290f80494bec0b7c361dacfede94754ca0ba4861692e30b68dd23e7d7"
   },
   "nativeTargets": 8,
   "markerParsers": 3,
@@ -217,8 +225,8 @@
     {
       "label": "fault-list-opened-birth-gate",
       "targetFunction": "sgResumeGameByPids",
-      "before": "const bool resumed = h && nativeProcessCreatedFromHandle(h) == expectedCreated &&\n                sgDrainProcessSuspendCount(h);",
-      "after": "const bool resumed = h && sgDrainProcessSuspendCount(h);",
+      "before": "const bool resumed = h && nativeProcessCreatedFromHandle(h) == expectedCreated &&\n                sgDrainProcessSuspendCountIfCurrent(h, resumeCurrent);",
+      "after": "const bool resumed = h && sgDrainProcessSuspendCountIfCurrent(h, resumeCurrent);",
       "expectedFailedCases": [
         "list-opened-handle-pid-reused"
       ],
@@ -247,8 +255,8 @@
     {
       "label": "fault-directory-denied-handle-discard",
       "targetFunction": "sgResumeMarkedDirectoryUnlocked",
-      "before": "if (!h) {\n                if (sgResumeMarkerDefinitelyStale(dir, pid)) fspath::remove(e.path());\n                continue;\n            }",
-      "after": "if (!h) { fspath::remove(e.path()); continue; }",
+      "before": "if (!h) {\n                if (sgResumeMarkerDefinitelyStale(dir, pid) && resumeCurrent()) fspath::remove(marker);\n                continue;\n            }",
+      "after": "if (!h) {\n                if (resumeCurrent()) fspath::remove(marker);\n                continue;\n            }",
       "expectedFailedCases": [
         "directory-live-open-denied-retains-lease",
         "manual-live-denial-blocks-new-pause",
@@ -327,8 +335,8 @@
     {
       "label": "fault-directory-query-error-releases",
       "targetFunction": "sgHasPauseMarkerForOtherPid",
-      "before": "if (ec) return true;",
-      "after": "if (ec) return false;",
+      "before": "const bool directoryExists = fspath::exists(dir, ec);\n    if (ec) return true;",
+      "after": "const bool directoryExists = fspath::exists(dir, ec);\n    if (ec) return false;",
       "expectedFailedCases": [
         "sleep-dir-exists-error-false-blocks-release",
         "manual-dir-exists-error-false-blocks-release",
@@ -336,7 +344,8 @@
         "manual-dir-exists-error-true-blocks-release"
       ],
       "path": "native/main.cpp",
-      "expectedNativeExit": 23
+      "expectedNativeExit": 23,
+      "fixturePeerUncertaintyFault": true
     },
     {
       "label": "fault-exact-marker-query-error-clears-owner",
@@ -365,8 +374,8 @@
     {
       "label": "fault-empty-fallback-pid-feedback-removed",
       "targetFunction": "sgResumeGameByPids",
-      "before": "if (pid && pid != 4 && pid != GetCurrentProcessId())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
-      "after": "if (pid && pid != 4 && pid != GetCurrentProcessId()) (void)pid;",
+      "before": "if (pid && pid != GetCurrentProcessId() &&\n                        std::find(failed.begin(), failed.end(), json(pid)) == failed.end())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
+      "after": "if (pid && pid != GetCurrentProcessId() &&\n                        std::find(failed.begin(), failed.end(), json(pid)) == failed.end())\n                        (void)pid;",
       "expectedFailedCases": [
         "ipc-empty-list-unknown-reports-retryable-failure",
         "ipc-empty-list-denied-reports-retryable-failure",
@@ -380,8 +389,8 @@
     {
       "label": "fault-empty-fallback-directory-unknown-discarded",
       "targetFunction": "sgResumeGameByPids",
-      "before": "out[\"recoveryPending\"] = static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
-      "after": "out[\"recoveryPending\"] = !out[\"failedPids\"].empty();",
+      "before": "out[\"recoveryPending\"] = !current() || static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
+      "after": "out[\"recoveryPending\"] = !current() || !out[\"failedPids\"].empty();",
       "expectedFailedCases": [
         "ipc-empty-list-exists-error-false-reports-unknown-pending",
         "ipc-empty-list-exists-error-true-reports-unknown-pending",
@@ -397,8 +406,8 @@
       "nativeFault": {
         "label": "fault-empty-fallback-pid-feedback-removed",
         "targetFunction": "sgResumeGameByPids",
-        "before": "if (pid && pid != 4 && pid != GetCurrentProcessId())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
-        "after": "if (pid && pid != 4 && pid != GetCurrentProcessId()) (void)pid;",
+        "before": "if (pid && pid != GetCurrentProcessId() &&\n                        std::find(failed.begin(), failed.end(), json(pid)) == failed.end())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
+        "after": "if (pid && pid != GetCurrentProcessId() &&\n                        std::find(failed.begin(), failed.end(), json(pid)) == failed.end())\n                        (void)pid;",
         "expectedFailedCases": [
           "ipc-empty-list-unknown-reports-retryable-failure",
           "ipc-empty-list-denied-reports-retryable-failure",
@@ -427,8 +436,8 @@
       "nativeFault": {
         "label": "fault-empty-fallback-directory-unknown-discarded",
         "targetFunction": "sgResumeGameByPids",
-        "before": "out[\"recoveryPending\"] = static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
-        "after": "out[\"recoveryPending\"] = !out[\"failedPids\"].empty();",
+        "before": "out[\"recoveryPending\"] = !current() || static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
+        "after": "out[\"recoveryPending\"] = !current() || !out[\"failedPids\"].empty();",
         "expectedFailedCases": [
           "ipc-empty-list-exists-error-false-reports-unknown-pending",
           "ipc-empty-list-exists-error-true-reports-unknown-pending",
@@ -1615,5 +1624,31 @@
       }
     ],
     "originalGroupsAndNegativesPreserved": true
-  }
+  },
+  "reviewedConsumerHelpers": [
+    {
+      "path": "native/main.cpp",
+      "name": "nativeJsonProcessCreated",
+      "sha256": "21b36ccc9846f4cb1c75be6fc8f98ab08347f130b250db48cef0a09d4e0b3166",
+      "templateCurrent": false
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "sgDrainProcessSuspendCountIfCurrent",
+      "sha256": "736eb498809e9578b57c8e087b8aac9bc719f9ee42f23aee55f1951ecdffc614",
+      "templateCurrent": true
+    },
+    {
+      "path": "native/game_process_control.h",
+      "name": "identityArguments",
+      "sha256": "77eaaf7ffd78b55703c669e0775348d8cf1fda0581c930de581d314d3be027a7",
+      "templateCurrent": false
+    },
+    {
+      "path": "native/game_process_control.h",
+      "name": "focusResumed",
+      "sha256": "21359bee0e292a5934ea7ac2461280c13aa868f6befea116281e9761f78050ca",
+      "templateCurrent": false
+    }
+  ]
 }

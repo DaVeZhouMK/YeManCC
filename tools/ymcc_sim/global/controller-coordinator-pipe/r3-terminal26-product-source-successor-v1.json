@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "kind": "TERMINAL26_EXACT_REVIEWED_PRODUCT_SUCCESSOR_V1",
+  "id": "terminal-cleanup-handoff-20261115",
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "baseSourceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105T26-20261114162102\\Mainline\\YeManCC-source\\YeManCC",
+  "baseCompileProfile": {
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-compile-source-profile-v2.json",
+    "bytes": 15915,
+    "sha256": "69d5eac31101aafe95126f1ba53f152560341d39ac0865a13e99f87ad96c4b2d"
+  },
+  "ownerSourceReady": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ROG-CommonSelfHeal-20261108-194834\\field-193736-terminal-fallback\\tuple-cleanup-handoff-20261115\\SOURCE_READY.json",
+    "bytes": 6190,
+    "sha256": "30f5ac514547ce6bc3ef53bea841fb33e0144924c707189966bef9869de57eee"
+  },
+  "ownerPatch": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ROG-CommonSelfHeal-20261108-194834\\field-193736-terminal-fallback\\tuple-cleanup-handoff-20261115\\PATCH.json",
+    "bytes": 6393,
+    "sha256": "f7fa750a0ee005acb907a4c59c7905a5cee1a433c52aabfa668090b8a952d89d"
+  },
+  "products": [
+    {
+      "relative": "native/virtual_recovery_fallback_runtime.h",
+      "before": {
+        "bytes": 7755,
+        "sha256": "6df9075520be0c8d82526294612c6724dada18028369b622ba3b9bc92cb08604"
+      },
+      "after": {
+        "bytes": 8665,
+        "sha256": "73de0b0bb88922bdcd51e0d5601a4e0465ff7e8a95b68e0ff9ff05c4587652bf"
+      },
+      "beforeBase64": "c3RhdGljIHZvaWQgcmV0aXJlKGNvbnN0IGNoYXIqIHdoeSkgbm9leGNlcHQgew==",
+      "afterBase64": "Ly8gQSB0ZXJtaW5hbCBoYW5kb2ZmIG93bnMgdGhlIHNhbWUgZmF1bHQgdG9rZW4gYmVmb3JlIGl0cyBvbmUgU3RvcCBydW5zLgovLyBBIHNwZW50IFN0b3AgcmVtYWlucyBhIG5vLXJlcGxheSBmYWN0IGV2ZW4gYWZ0ZXIgY2FuY2VsbGF0aW9uL2V4cGlyeTsgaXQKLy8gZ3JhbnRzIG5vIG5ldyBhY3Rpb24gb3IgcHJvb2Ygb2YgcmV0dXJuLiBOZXZlciBib3Jyb3cgYW5vdGhlciBIb3N0J3MgY2xhaW0uCnN0YXRpYyBib29sIG93bnNGYXVsdENsZWFudXAoc3RkOjp1aW50NjRfdCBlcG9jaCkgewogICAgaWYoIWdfaW5wdXRIb3N0TXgub3duZWRCeUN1cnJlbnRUaHJlYWQoKSB8fCAhZXBvY2ggfHwgIXJlcXVlc3Quc2VyaWFsIHx8CiAgICAgICByZXF1ZXN0LmVwb2NoIT1lcG9jaCB8fCBnX2lucHV0SG9zdEVwb2NoIT1lcG9jaCB8fAogICAgICAgcmVxdWVzdC5lcG9jaENvdW50ZXIhPWdfaW5wdXRIb3N0RXBvY2hDb3VudGVyLmxvYWQoKSB8fAogICAgICAgcmVxdWVzdC5ydW4uZW1wdHkoKSB8fCByZXF1ZXN0Lmluc3RhbmNlLmVtcHR5KCkgfHwKICAgICAgIHJlcXVlc3QucnVuIT1nX2lucHV0SG9zdFJ1bklkIHx8IHJlcXVlc3QuaW5zdGFuY2UhPWdfaW5wdXRIb3N0SG9zdEluc3RhbmNlSWQpcmV0dXJuIGZhbHNlOwogICAgaWYocmVxdWVzdC5zdG9wSW52b2tlZClyZXR1cm4gdHJ1ZTsKICAgIC8vIE9ubHkgdGhlIG9yaWdpbmFsIGxpdmUgcHVibGljIHNjb3BlIGFuZCBjb250aW51ZWQgZGVtYW5kIGNhbiBvd24gYW4KICAgIC8vIHVuZXhlY3V0ZWQgU3RvcC4gTWlzc2luZy9yZXRpcmVkIGNhcHR1cmUgbGVhdmVzIG9yZGluYXJ5IGNsZWFudXAgaW50YWN0LgogICAgcmV0dXJuIHJlcXVlc3QucGVuZGluZyAmJiBHZXRUaWNrQ291bnQ2NCgpPHJlcXVlc3QuZGVhZGxpbmUgJiYgIXN0YWxlKCk7Cn0KCnN0YXRpYyB2b2lkIHJldGlyZShjb25zdCBjaGFyKiB3aHkpIG5vZXhjZXB0IHs="
+    },
+    {
+      "relative": "native/virtual_runtime_recovery_runtime.h",
+      "before": {
+        "bytes": 36554,
+        "sha256": "ee508bc2d16f3f85b47fda09b9f0b16e37916c4d3edf60cd1f5e45f1f4344d30"
+      },
+      "after": {
+        "bytes": 36628,
+        "sha256": "94812c1a9de853a1ddfa8459e8b83e10a35d632d52dd0767ae4c3c43ad0e02fa"
+      },
+      "beforeBase64": "c3RhdGljIGJvb2wgaW5wdXRIb3N0Q29uc3VtZVJ1bnRpbWVGYXVsdENsZWFudXAoc3RkOjp1aW50NjRfdCBvbGRFcG9jaCkgew0KICAgIG5hbWVzcGFjZSBydW50aW1lPXltY2M6OmlucHV0SG9zdDo6cnVudGltZVJlY292ZXJ5Ow0KICAgIHN0ZDo6bG9ja19ndWFyZDxJbnB1dEhvc3RNdXRleD4gbG9jayhnX2lucHV0SG9zdE14KTsNCiAgICAvLyBBIG1hdGNoaW5nIHBlbmRpbmcgaW5jaWRlbnQgb3ducyBtYW5kYXRvcnkgU3RvcCwgb3IgaGFzIGFscmVhZHkgaW52b2tlZA0KICAgIC8vIGl0LiBMYXRlIGR1cGxpY2F0ZSBmcmFtZS1mYXVsdCB0b2tlbnMgY2Fubm90IFN0b3AgaXRzIHN1Y2Nlc3NvciBIb3N0Lg0KICAgIC8vIEEgbGF0ZSBleGFjdC1lcG9jaCBmYXVsdCB0b2tlbiBjYW4gb25seSBjbGVhbiB0aGF0IGVwb2NoLiBJdCBuZXZlcg0KICAgIC8vIGFjcXVpcmVzIGF1dGhvcml0eSBvdmVyIGEgc3VjY2Vzc29yLCBpbmNsdWRpbmcgYWZ0ZXIgYXR0ZW1wdCByb3RhdGlvbi4NCiAgICByZXR1cm4gb2xkRXBvY2ggJiYgKG9sZEVwb2NoIT1nX2lucHV0SG9zdEVwb2NoIHx8DQogICAgICAgIChydW50aW1lOjpzdGF0ZS5ob3N0RXBvY2g9PW9sZEVwb2NoICYmDQogICAgICAgICAocnVudGltZTo6c3RhdGUucGVuZGluZyB8fCBydW50aW1lOjpzdGF0ZS5zdG9wSW52b2tlZCkpKTsNCn0=",
+      "afterBase64": "c3RhdGljIGJvb2wgaW5wdXRIb3N0Q29uc3VtZVJ1bnRpbWVGYXVsdENsZWFudXAoc3RkOjp1aW50NjRfdCBvbGRFcG9jaCkgew0KICAgIG5hbWVzcGFjZSBydW50aW1lPXltY2M6OmlucHV0SG9zdDo6cnVudGltZVJlY292ZXJ5Ow0KICAgIHN0ZDo6bG9ja19ndWFyZDxJbnB1dEhvc3RNdXRleD4gbG9jayhnX2lucHV0SG9zdE14KTsNCiAgICAvLyBBIG1hdGNoaW5nIHBlbmRpbmcgaW5jaWRlbnQgb3ducyBtYW5kYXRvcnkgU3RvcCwgb3IgaGFzIGFscmVhZHkgaW52b2tlZA0KICAgIC8vIGl0LiBMYXRlIGR1cGxpY2F0ZSBmcmFtZS1mYXVsdCB0b2tlbnMgY2Fubm90IFN0b3AgaXRzIHN1Y2Nlc3NvciBIb3N0Lg0KICAgIC8vIEEgbGF0ZSBleGFjdC1lcG9jaCBmYXVsdCB0b2tlbiBjYW4gb25seSBjbGVhbiB0aGF0IGVwb2NoLiBJdCBuZXZlcg0KICAgIC8vIGFjcXVpcmVzIGF1dGhvcml0eSBvdmVyIGEgc3VjY2Vzc29yLCBpbmNsdWRpbmcgYWZ0ZXIgYXR0ZW1wdCByb3RhdGlvbi4NCiAgICByZXR1cm4gb2xkRXBvY2ggJiYgKG9sZEVwb2NoIT1nX2lucHV0SG9zdEVwb2NoIHx8DQogICAgICAgIChydW50aW1lOjpzdGF0ZS5ob3N0RXBvY2g9PW9sZEVwb2NoICYmDQogICAgICAgICAocnVudGltZTo6c3RhdGUucGVuZGluZyB8fCBydW50aW1lOjpzdGF0ZS5zdG9wSW52b2tlZCkpIHx8DQogICAgICAgIHltY2M6OmlucHV0SG9zdDo6cmVjb3ZlcnlGYWxsYmFjazo6b3duc0ZhdWx0Q2xlYW51cChvbGRFcG9jaCkpOw0KfQ=="
+    }
+  ],
+  "expandedBeforeSha256": "ac3affac861fe8752cc25d7ec3b81380b06dd0811c11f2478b8eb29c10747d4b",
+  "expandedAfterSha256": "731bd410a86edfb8abce6bbc10bedcd55fd988298e6aeae0a07073243268ee5f",
+  "actualFallbackWorkerMatchesOwnerValidatedBody": true,
+  "sourceCaptureModified": false,
+  "productSourceSemanticChange": true,
+  "sourceApprovalGranted": false,
+  "publicRuntimeAccepted": false,
+  "physicalAccepted": false,
+  "meaning": "Only the reviewed exact2-header product fix is applied as a declared private native source successor. Base capture, raw product originals, prior FAILs and managed26 stay intact."
+}

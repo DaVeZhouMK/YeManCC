@@ -1,8 +1,43 @@
 [CmdletBinding(DefaultParameterSetName='Candidate')]
-param([Parameter(Mandatory=$true)][string]$ProjectRoot,[Parameter(Mandatory=$true)][string]$WorkspaceRoot,[Parameter(Mandatory=$true,ParameterSetName='Candidate')][string]$PayloadRoot,[Parameter(Mandatory=$true)][string]$EvidenceDir,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowCandidateReceiptPath,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowOldContractPath,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowMainSnapshotPath,[Parameter(Mandatory=$true,ParameterSetName='Acl')][switch]$PromotionAcl)
+param([Parameter(Mandatory=$true)][string]$ProjectRoot,[Parameter(Mandatory=$true)][string]$WorkspaceRoot,[Parameter(Mandatory=$true,ParameterSetName='Candidate')][string]$PayloadRoot,[Parameter(Mandatory=$true)][string]$EvidenceDir,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowCandidateReceiptPath,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowOldContractPath,[Parameter(Mandatory=$true,ParameterSetName='Shadow')][string]$ShadowMainSnapshotPath,[Parameter(Mandatory=$true,ParameterSetName='Acl')][switch]$PromotionAcl,[Parameter(Mandatory=$true,ParameterSetName='HcPin')][switch]$HcRuntimePin)
 $ErrorActionPreference='Stop'
 if(Test-Path -LiteralPath $EvidenceDir){throw 'Fresh lighting build-candidate evidence required'}
 New-Item -ItemType Directory -Path $EvidenceDir|Out-Null
+if($PSCmdlet.ParameterSetName -ceq 'HcPin'){
+ . (Join-Path $PSScriptRoot 'lighting-build-contract.ps1')
+ $checks=[Collections.Generic.List[object]]::new()
+ $current=Assert-YmccLightingHcRuntimePin -ProjectRoot $ProjectRoot
+ $checks.Add([pscustomobject]@{name='actual-current-source-profile-binary-pin';passed=$true;pin=$current.runtimePinSha256})
+ $shadow=Join-Path $EvidenceDir 'memory-source-root'
+ foreach($rel in @('FanLab/LightSetter','deps/ymcc-device-core-runtime/bin')){New-Item -ItemType Directory -Path (Join-Path $shadow $rel) -Force|Out-Null}
+ $shadowProgram=Join-Path $shadow 'FanLab/LightSetter/Program.cs';$shadowProfile=Join-Path $shadow 'deps/ymcc-device-core-runtime/profile.json';$shadowBinary=Join-Path $shadow 'deps/ymcc-device-core-runtime/bin/HandheldCompanion.dll'
+ $profileOriginal=Get-Content -LiteralPath (Join-Path $ProjectRoot 'deps/ymcc-device-core-runtime/profile.json') -Raw -Encoding UTF8
+ $pin=$current.runtimePinSha256
+ function Reset-PinCase {
+  [IO.File]::WriteAllText($shadowProgram,('private const string ExpectedYmccHcCoreSha256 = "'+$pin+'";'),[Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($shadowProfile,$profileOriginal,[Text.UTF8Encoding]::new($false))
+  Copy-Item -LiteralPath (Join-Path $ProjectRoot $current.runtimePath) -Destination $shadowBinary -Force
+ }
+ function Expect-PinRefusal([string]$name,[string]$reason,[scriptblock]$mutate){
+  Reset-PinCase;& $mutate
+  $refused=$false
+  try{$null=Assert-YmccLightingHcRuntimePin -ProjectRoot $shadow}catch{if(-not $_.Exception.Message.StartsWith($reason)){throw};$refused=$true}
+  $checks.Add([pscustomobject]@{name=$name;passed=$refused;reason=$reason})
+  if(-not $refused){throw ('HC_PIN_NEGATIVE_ACCEPTED: '+$name)}
+ }
+ Reset-PinCase;$accepted=Assert-YmccLightingHcRuntimePin -ProjectRoot $shadow
+ if($accepted.runtimePinSha256 -cne $pin){throw 'HC_PIN_VALID_PAIR_REJECTED'}
+ $checks.Add([pscustomobject]@{name='matching-source-profile-binary';passed=$true})
+ Expect-PinRefusal 'original-packaged-stale-pin' 'LIGHTING_HC_RUNTIME_PIN_MISMATCH' { [IO.File]::WriteAllText($shadowProgram,'private const string ExpectedYmccHcCoreSha256 = "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583";') }
+ Expect-PinRefusal 'missing-source-pin' 'LIGHTING_HC_RUNTIME_PIN_SOURCE_INVALID' { [IO.File]::WriteAllText($shadowProgram,'private const string Unrelated = "'+$pin+'";') }
+ Expect-PinRefusal 'ambiguous-source-pins' 'LIGHTING_HC_RUNTIME_PIN_SOURCE_INVALID' { Add-Content -LiteralPath $shadowProgram -Value (' ExpectedYmccHcCoreSha256 = "'+$pin+'";') }
+ Expect-PinRefusal 'duplicate-profile-hc-row' 'LIGHTING_HC_RUNTIME_PIN_PROFILE_INVALID' { $profile=$profileOriginal|ConvertFrom-Json;$profile.replacements+=@($profile.replacements|Where-Object path -CEQ 'HandheldCompanion.dll');[IO.File]::WriteAllText($shadowProfile,($profile|ConvertTo-Json -Depth 60)) }
+ Expect-PinRefusal 'matching-source-but-wrong-binary' 'LIGHTING_HC_RUNTIME_PIN_BINARY_MISMATCH' { [IO.File]::WriteAllBytes($shadowBinary,[byte[]](1,2,3,4)) }
+ $result=[ordered]@{status='PASS';selected='hc-runtime-pin';checks=@($checks);hardwareIo=$false;actualCurrent=$current;buildOrPublishExecuted=$false}
+ [IO.File]::WriteAllText((Join-Path $EvidenceDir 'hc-pin-result.json'),($result|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
+ Write-Output ('LIGHTING_HC_RUNTIME_PIN_OK checks='+$checks.Count);return
+}
+
 if($PSCmdlet.ParameterSetName -ceq 'Acl'){
  & {
   $issuer=Join-Path $PSScriptRoot 'build-lightsetter-payload.ps1';$parseErrors=$null;$parseTokens=$null

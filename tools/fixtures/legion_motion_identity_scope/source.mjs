@@ -13,7 +13,7 @@ function endBrace(text, start) {
     if(c==='{')++depth;if(c==='}'&&!--depth)return i+1;
   }throw Error('Unbalanced source braces');
 }
-export function extractSources(mainPath) {
+export function extractSources(mainPath, options={}) {
   const bytes=fs.readFileSync(mainPath),text=bytes.toString('utf8').replace(/\r\n/g,'\n'),fragments=[];
   const record=(name,start,end,execution)=>{const body=text.slice(start,end);fragments.push({name,startLine:text.slice(0,start).split('\n').length,sha256:sha(body),execution,body});return body;};
   const fn=(name,execution='complete-function-executed')=>{
@@ -21,21 +21,23 @@ export function extractSources(mainPath) {
     while((m=pattern.exec(text))){const open=text.indexOf('{',m.index),semicolon=text.indexOf(';',m.index);if(semicolon>=0&&semicolon<open)continue;return record(name,m.index,endBrace(text,open),execution);}
     throw Error('Function unavailable: '+name);
   };
-  const type=name=>{const pattern=new RegExp('^(?:struct|enum class) '+name+'\\b[^\\n]*','m'),m=pattern.exec(text);if(!m)throw Error('Type unavailable: '+name);const end=endBrace(text,text.indexOf('{',m.index));return record(name,m.index,text.indexOf(';',end)+1,'actual-type');};
+  const type=name=>{const pattern=new RegExp('^(?:struct|enum class) '+name+"\\b[^;{]*\\{",'m'),m=pattern.exec(text);if(!m)throw Error('Type unavailable: '+name);const end=endBrace(text,text.indexOf('{',m.index));return record(name,m.index,text.indexOf(';',end)+1,'actual-type');};
   const decl=name=>{const pattern=new RegExp('^static[^\\n]*\\b'+name+'\\b[^\\n]*','m'),m=pattern.exec(text);if(!m)throw Error('Declaration unavailable: '+name);return record(name,m.index,text.indexOf(';',m.index)+1,'actual-declaration');};
-  const base=[decl('kLegionBackPids'),decl('kLegionSPids'),fn('legionBackIsPid'),fn('legionSBackIsPid'),fn('inputCaptureLegionControllerMotionRoute'),type('HidHidePhysicalIdentity'),
+  const base=[decl('kLegionBackPids'),decl('kLegionSPids'),fn('legionBackIsPid'),fn('legionSBackIsPid'),...(text.includes('static ymcc::capabilities::controller_motion::Binding legionMotionModelBinding(')?[fn('legionMotionModelBinding')]:[]),fn('inputCaptureLegionControllerMotionRoute'),type('HidHidePhysicalIdentity'),
     fn('legionMotionHardwareAdmitted'),fn('legionMotionCollectionAdmitted'),fn('hidHideUpper'),fn('hidHideDeviceInstanceId'),type('HidBaseWalk'),fn('hidHideNearestBaseInstance'),fn('hidHideIsVirtualIdentity'),type('HidResolveReject'),fn('hidHideResolveInterfaceIdentity')].join('\n\n');
   const cache=[type('HidResolveKind'),type('HidResolveCacheEntry'),...['g_hidResolveCacheMx','g_hidResolveCache','g_legionMotionResolveCache','g_hidResolveCacheGeneration','kHidResolveStableTtlMs','kHidResolveTransientTtlMs','kHidResolveAbsentTtlMs','kHidResolveRouteRefreshMs','kHidResolveCacheMaxEntries','g_hidResolveDiagMx','g_hidResolveDiagKeys'].map(decl),fn('hidHideResolvedGenerationStillCurrent'),fn('hidResolveTtlForKind'),fn('hidHideInvalidateRawInputIdentityCache'),fn('hidHideEvictOldestResolveEntryLocked')].join('\n\n');
-  const raw=fn('hidHideResolveRawInputIdentity','partial-prefix-and-fill-executed;full-miss-enumeration-source-only');
+  const raw=fn('hidHideResolveRawInputIdentity',options.fullRawResolver?'complete-function-executed':'partial-prefix-and-fill-executed;full-miss-enumeration-source-only');
   const miss=raw.indexOf('// ── 未命中');if(miss<0)throw Error('Raw cache prefix seam unavailable');
-  const prefix=raw.slice(0,miss)+'// Fixture boundary: full miss enumeration NOT executed.\n    return false;\n}\n';
+  const prefix=options.fullRawResolver ? raw : raw.slice(0,miss)+'// Fixture boundary: full miss enumeration NOT executed.\n    return false;\n}\n';
   const fillStart=raw.indexOf('    bool generationStable = false;'),fillEnd=raw.indexOf('    gpResolveCost.noteFillKind',fillStart);
   const cacheSelect=raw.match(/    auto& cache=allowLegionMotionCollection[^\n]+/)[0];
   if(fillStart<0||fillEnd<0)throw Error('Raw fill block seam unavailable');
   const fill=`static bool executeProductionCacheFill(bool allowLegionMotionCollection,std::uintptr_t cacheKey,HidResolveKind kind,const HidHidePhysicalIdentity& resolved,const std::string& wanted,ULONGLONG now,std::uint64_t genAtStart) {\n${cacheSelect}\n    const bool physical=kind==HidResolveKind::Physical;\n    const std::string route=physical?resolved.baseContainerDevicePath:std::string{};\n${raw.slice(fillStart,fillEnd)}\n    return generationStable;\n}\n`;
   const enumeration=fn('hidHideResolvePhysicalIdentities');
   const observe=fn('hidHideObserveRawInputDevice');
-  const header=base+'\n\n'+cache+'\n\n'+prefix+'\n'+fill+'\n'+enumeration+'\nstatic std::mutex g_hidHidePhysicalIdentityMx;\nstatic HidHidePhysicalIdentity g_hidHidePhysicalIdentity;\n'+observe+'\n';
-  return {mainPath,mainSha256AtRead:sha(bytes),fragments,header,raw,prefix,fill,scope:{fullInterface:true,fullAncestorWalk:true,fullEvictAndInvalidate:true,rawCacheHitPrefix:true,rawFillBlock:true,fullRawMissEnumeration:false,fullRawResolver:false,
+  const dependencies=text.includes('static ymcc::capabilities::controller_motion::Binding legionMotionModelBinding(')?['HcControllerMotionCapabilityCatalog.h','HcControllerMotionCapabilityCatalog.generated.h','hc-device-catalog.generated.h'].map(name=>path.join(options.catalogRoot||path.resolve(path.dirname(mainPath),'../capabilities'),name)):[];
+  const fullDependencies=options.fullRawResolver ? [type('HidResolveDiag'),fn('legionMotionIdentityAdmitted'),fn('legionMotionStableIdentity'),'static void hidHideLogResolveClassificationOnce(const std::string&,HidResolveKind,HidResolveReject,const HidResolveDiag&) {}'].join('\n\n') : '';
+  const header=(dependencies.length?'#include "HcControllerMotionCapabilityCatalog.h"\n':'')+base+'\n\n'+cache+'\n\n'+fullDependencies+'\n\n'+prefix+'\n'+fill+'\n'+enumeration+'\nstatic std::mutex g_hidHidePhysicalIdentityMx;\nstatic HidHidePhysicalIdentity g_hidHidePhysicalIdentity;\n'+observe+'\n';
+  return {mainPath,dependencies,mainSha256AtRead:sha(bytes),fragments,header,raw,prefix,fill,scope:{fullInterface:true,fullAncestorWalk:true,fullEvictAndInvalidate:true,rawCacheHitPrefix:true,rawFillBlock:true,fullRawMissEnumeration:!!options.fullRawResolver,fullRawResolver:!!options.fullRawResolver,
     defaultCandidateEnumeration:true,defaultSelectedObserve:true,realHideTransaction:false,win32Boundaries:'memory stubs only',performanceAndLogging:'effect sinks, not production telemetry'}};
 }

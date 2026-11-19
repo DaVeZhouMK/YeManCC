@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';import {createPerformancePreviewServer} from './lib/continuousPerformancePreview.mjs';
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_continuous_ui.cjs')('playwright');
 const out=process.argv[2]||JSON.parse(fs.readFileSync('G:/YeManCC-Work/Build/Tasks/ContinuousPerformance-20261017/SPLIT-CURRENT.json')).taskRoot,report={pass:false,layouts:[],cases:[],errors:[]};
-const server=await createPerformancePreviewServer();let browser;
+const server=await createPerformancePreviewServer();report.preview=server.previewEvidence;let browser;
 try{
  browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage({viewport:{width:1280,height:720}});page.on('pageerror',e=>report.errors.push(e.message));
  for(const dedicated of [false,true]){
@@ -32,15 +32,16 @@ try{
 
  // CCD uses the actual bridge/runtime/cards with only native IO replaced.
  const ccdServer=await createPerformancePreviewServer(0,{realNavigation:true,ccdRuntime:true,ccdSettings:true});
- report.ccd={gates:[],layouts:[],sharedNativeEntry:false};
+ report.ccd={gates:[],layouts:[],sharedNativeEntry:false,visibilityDiagnostics:[],preview:ccdServer.previewEvidence};
  try{
   const ccdPage=await browser.newPage({viewport:{width:1280,height:720}});ccdPage.setDefaultTimeout(5000);ccdPage.on('pageerror',e=>report.errors.push(e.message));
   const base='http://127.0.0.1:'+ccdServer.address().port+'/?';
-  for(const query of ['ccd=2','uniform=1&ccd=1','uniform=1&ccd=2&arch=unknown','uniform=1&ccd=2&cross=1','uniform=1&ccd=2&die=single','uniform=1&ccd=2&dedicated=1']){
+  for(const query of ['ccd=2','uniform=1&ccd=1','uniform=1&ccd=2&arch=unknown','uniform=1&ccd=2&cross=1','uniform=1&ccd=2&die=single','uniform=1&ccd=2&die=missing','uniform=1&ccd=2&die=missing&cpuid=ccx','uniform=1&ccd=1&die=missing&cpuid=ccd&cpu=388','ccd=2&die=missing&cpuid=ccd&cpu=388','uniform=1&ccd=2&dedicated=1']){
    await ccdPage.goto(base+query);await ccdPage.locator('.limits-bubble').waitFor();
    // A hidden entry is checked after the actual capability read has settled.
    if(!query.includes('dedicated=1'))await ccdPage.waitForFunction(()=>window.__ccdPorts.probes===1);
    await ccdPage.waitForTimeout(50);assert.equal(await ccdPage.locator('.ccd-control').count(),0,query);
+   if(!query.includes('dedicated=1')){const rows=await ccdPage.evaluate(()=>window.__ccdPorts.traces.filter(r=>r.where==='cpu-ccd-visibility').map(r=>JSON.parse(r.message)));assert(rows.length>0,query+' missing hidden reason');assert.equal(rows.at(-1).visible,false);assert(rows.at(-1).reason);report.ccd.visibilityDiagnostics.push({query,trace:rows.at(-1)});}
    assert.equal(await ccdPage.evaluate(()=>window.__ccdPorts.writes.length),0);
    report.ccd.gates.push({query,visible:false,zeroWrites:true});
   }
@@ -56,6 +57,25 @@ try{
     report.ccd.layouts.push({count,height,mode,row});
    }
    await ccdPage.screenshot({path:path.join(out,`ccd-${count}-${height}.png`)});
+  }
+  // Native geometry fallback is exercised separately with actual CPUID code.
+  // These ports replay its verified contract through the real bridge and UI.
+  report.ccd.hardwareFallback=[];
+  for(const cpu of ['388','395'])for(const die of ['missing','single'])for(const height of [720,800]){
+   await ccdPage.setViewportSize({width:1280,height});await ccdPage.goto(base+'uniform=1&ccd=2&die='+die+'&cpuid=ccd&cpu='+cpu);await ccdPage.locator('.ccd-control').waitFor();
+   assert.equal(await ccdPage.evaluate(()=>window.__ccdPorts.writes.length),0,'opening page cannot apply CCD');
+   await ccdPage.waitForFunction(()=>window.__ccdPorts.traces.some(r=>r.where==='cpu-ccd-visibility'&&JSON.parse(r.message).visible===true));
+   const stableCount=await ccdPage.evaluate(()=>window.__ccdPorts.traces.length);await ccdPage.evaluate(()=>window.__refresh());await ccdPage.waitForTimeout(20);assert.equal(await ccdPage.evaluate(()=>window.__ccdPorts.traces.length),stableCount,'unchanged reads must not repeat visibility logs');
+   for(const mode of ['auto','manual']){
+    await ccdPage.locator('.control-modes button').nth(mode==='auto'?0:1).click();await ccdPage.locator('.ccd-control').waitFor();
+    const trigger=ccdPage.locator('.ccd-control .dd-trigger');assert(await trigger.isVisible());assert(await trigger.isEnabled());
+    await trigger.focus();await ccdPage.evaluate(()=>window.__press('confirm'));await ccdPage.getByRole('option',{name:/CCD · 2/}).waitFor();
+    assert.equal(await ccdPage.getByRole('option').count(),3);assert.equal(await ccdPage.evaluate(()=>window.__ccdPorts.writes.length),0,'opening choices must not write');
+    await ccdPage.evaluate(()=>window.__press('back'));await ccdPage.waitForFunction(()=>document.querySelectorAll('[role=option]').length===0);
+    await trigger.focus();await ccdPage.evaluate(()=>window.__move(1,0));assert.equal(await ccdPage.evaluate(()=>document.activeElement.getAttribute('aria-label')),'超线程');
+    assert.equal(await ccdPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    report.ccd.hardwareFallback.push({cpu,die,height,mode,visible:true,enabled:true,cancelZeroWrites:true,controllerReachable:true});
+   }
   }
   await ccdPage.goto(base+'uniform=1&ccd=2');await ccdPage.locator('.ccd-control').waitFor();
   const choose=async label=>{await ccdPage.locator('.ccd-control .dd-trigger').click();await ccdPage.getByRole('option',{name:new RegExp(label)}).click();await ccdPage.waitForFunction(()=>document.querySelectorAll('[role=option]').length===0);};

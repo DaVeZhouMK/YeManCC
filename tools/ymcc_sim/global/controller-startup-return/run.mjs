@@ -1,12 +1,12 @@
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
-import {runProcess} from '../runner.mjs';import {calibrationToolchainPreamble} from '../../../fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {runProcess} from '../runner.mjs';import {startupToolchainPreamble,startupToolchainEnvironment} from './toolchain.mjs';
 import {REPO,MODULE,CASE_ID,PRODUCT_INPUTS} from './adapter.mjs';import {extendFixture,extractFunction} from './extend-fixture.mjs';
 import {need,hash,bytesHash,read,write,inside,evidencePath,walk,capture,freeze,stable,verifyRuntime,verifyLedger,verifyOwnerLiveness,verifyRecordIo,evaluated} from './provenance.mjs';
 export function parseArgs(args){need(args.length===2&&args[0]==='--evidence-dir','STARTUP_ARGUMENTS');return {root:evidencePath(args[1])};}
 export async function runStartupReturn(value){
  const root=evidencePath(value);fs.mkdirSync(root,{recursive:true});const before=capture(root),project=freeze(root,before),spec=read(path.join(root,'input-sources',MODULE,'spec.json')),steps=[];
- const localModule=path.join(root,'input-sources',MODULE),env={...process.env};for(const key of Object.keys(env))if(/^(?:CL|_CL_|LINK|_LINK_|NODE_OPTIONS|NODE_PATH|YMCC_VCVARS64)$/i.test(key))delete env[key];
- const vcvars=path.join(root,'sdk-env.cmd');fs.writeFileSync(vcvars,calibrationToolchainPreamble(before.toolchain.vcvars64)+'exit /b 0\r\n');
+ const localModule=path.join(root,'input-sources',MODULE),env=startupToolchainEnvironment(before.toolchain,process.env);for(const key of Object.keys(env))if(/^(?:CL|_CL_|LINK|_LINK_|NODE_OPTIONS|NODE_PATH|YMCC_VCVARS64)$/i.test(key))delete env[key];
+ const vcvars=path.join(root,'sdk-env.cmd');fs.writeFileSync(vcvars,startupToolchainPreamble(before.toolchain)+'exit /b 0\r\n');
  Object.assign(env,{YMCC_VCVARS64:vcvars,CL:'/showIncludes /sourceDependencies .',LINK:'/verbose:lib',TEMP:path.join(root,'t'),TMP:path.join(root,'t'),VSCMD_SKIP_SENDTELEMETRY:'1'});fs.mkdirSync(env.TEMP,{recursive:true});
  need(path.join(root,'l','standalone-'+('x'.repeat(32)),'external_controller_priority_ledger_selftest.cpp.json').length<260,'STARTUP_ORIGINAL_LEDGER_REQUIRES_SHORTER_EVIDENCE_PATH');
  write(path.join(root,'compiler-options.json'),{MSVC:before.toolchain.msvc,WindowsSDK:before.toolchain.windowsSdk,YMCC_VCVARS64:vcvars,CL:env.CL,LINK:env.LINK,ambientCompilerFlagsCleared:true});
@@ -35,7 +35,7 @@ export async function runStartupReturn(value){
   const retryProject=freeze(root,before,'retry-fault-project'),retryFile=path.join(retryProject,spec.retryNegative.file),retryOriginal=fs.readFileSync(retryFile,'utf8');need(retryOriginal.split(spec.retryNegative.before).length===2,'STARTUP_RETRY_MUTATION_ANCHOR');fs.writeFileSync(retryFile,retryOriginal.replace(spec.retryNegative.before,spec.retryNegative.after));
   const retryNegative=await runtime('retry-negative',retryProject,{startup:true,negative:true,negativeSpec:spec.retryNegative});
   const pwsh=before.artifacts.find(r=>r.roles.includes('powershell'));need(pwsh,'STARTUP_POWERSHELL_NOT_PINNED');const ledgerTerm=await processStep('ledger',pwsh.path,['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(project,'tools/external_controller_priority_ledger_selftest.ps1'),'-OutputRoot',path.join(root,'l'),'-VcVarsPath',vcvars],{timeoutMs:120000});
-  const ledger=verifyLedger(ledgerTerm.stdout+'\n'+ledgerTerm.stderr,{exitCode:ledgerTerm.exitCode});ledger.originalStdout={path:path.join(root,'ledger/stdout.log'),sha256:hash(path.join(root,'ledger/stdout.log'))};
+  const ledger=verifyLedger(ledgerTerm.stdout,ledgerTerm.stderr,{exitCode:ledgerTerm.exitCode,outputRoot:path.join(root,'l'),sourceRoot:project});ledger.originalStdout={path:path.join(root,'ledger/stdout.log'),sha256:hash(path.join(root,'ledger/stdout.log'))};
   await processStep('owner-liveness',process.execPath,[path.join(project,spec.ownerLiveness.runner),'--out',path.join(root,'o'),'--repo',project,'--toolchain',path.join(localModule,'toolchain-inputs.json')],{timeoutMs:120000});
   const ownerLiveness=verifyOwnerLiveness(root,before,spec.ownerLiveness);
   await processStep('record-io',process.execPath,[path.join(project,spec.recordIo.runner),'--out',path.join(root,'i'),'--repo',project,'--toolchain',path.join(localModule,'toolchain-inputs.json')],{timeoutMs:150000});

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {getControllerCoordinatorPipeAdapters,CASE_SPECS} from './controller-coordinator-pipe/adapter.mjs';
@@ -31,10 +31,25 @@ test('lightweight/unrelated selections do not require GPU workflow inputs, while
  assert.deepEqual(getGpuMemoryAdapters(repo,{selectedIds:['performance.gpu-dedicated-memory-workflow'],readTools:()=>structuredClone(declared)}),full);
 });
 test('native radial tools are scoped, both selected runtime guards and the development action host remain original',()=>{
- let calls=0;const read=()=>{calls++;return structuredClone(declared);};const full=getSignalAdapters(repo,{readRadialTools:read});assert.equal(calls,2);
- const unrelated=getSignalAdapters(repo,{selectedIds:['radial.action-host-development'],readRadialTools:()=>{throw Error('UNREQUESTED_NATIVE_UI_TOOLS');}});assert.deepEqual(unrelated.find(r=>r.id==='radial.action-host-development'),full.find(r=>r.id==='radial.action-host-development'));
- for(const id of ['radial.native-controls','radial.monitor-handoff']){assert(unrelated.find(r=>r.id===id).inputRegistrationDeferred);calls=0;const rows=getSignalAdapters(repo,{selectedIds:[id],readRadialTools:read});assert.equal(calls,1);assert.deepEqual(rows.find(r=>r.id===id),full.find(r=>r.id===id));}
+ const guarded=['radial.native-controls','radial.monitor-handoff'];
+ const hosts=['radial.action-host-development','radial.action-host'];
+ let calls=0,tools={artifactInputs:[path.join(repo,evidence)]};
+ let hostCalls=0,hostTools={artifactInputs:[path.join(repo,evidence)]};
+ const register=options=>getSignalAdapters(repo,{...options,readRadialHostTools:()=>{hostCalls++;return hostTools;}});
+ const read=()=>{calls++;return tools;};const full=register({readRadialTools:read});assert.equal(calls,1);assert.equal(hostCalls,1);
+ const artifactLists=guarded.map(id=>full.find(r=>r.id===id).artifactInputs);
+ assert.deepEqual(artifactLists,[tools.artifactInputs,tools.artifactInputs]);
+ assert.notEqual(artifactLists[0],artifactLists[1]);assert.notEqual(artifactLists[0],tools.artifactInputs);assert.notEqual(artifactLists[1],tools.artifactInputs);
+ const hostLists=hosts.map(id=>full.find(r=>r.id===id).artifactInputs);
+ assert.deepEqual(hostLists,[hostTools.artifactInputs,hostTools.artifactInputs]);
+ assert.notEqual(hostLists[0],hostLists[1]);assert.notEqual(hostLists[0],hostTools.artifactInputs);assert.notEqual(hostLists[1],hostTools.artifactInputs);
+ const unrelated=register({selectedIds:['radial.action-host-development'],readRadialTools:()=>{throw Error('UNREQUESTED_NATIVE_UI_TOOLS');}});assert.equal(hostCalls,2);assert.deepEqual(unrelated.find(r=>r.id==='radial.action-host-development'),full.find(r=>r.id==='radial.action-host-development'));
+ for(const id of guarded){assert(unrelated.find(r=>r.id===id).inputRegistrationDeferred);calls=0;const rows=register({selectedIds:[id],readRadialTools:read});assert.equal(calls,1);assert.deepEqual(rows.find(r=>r.id===id),full.find(r=>r.id===id));}
  assert.deepEqual(unrelated.map(r=>r.id),full.map(r=>r.id));
+ tools=declared;hostTools={artifactInputs:[],blockedReason:'ORIGINAL_HOST_AUTHORITY_REJECTION'};
+ calls=0;hostCalls=0;const blocked=register({selectedIds:guarded,readRadialTools:read});assert.equal(calls,1);assert.equal(hostCalls,1);
+ for(const id of guarded){const row=blocked.find(r=>r.id===id);assert.equal(row.blockedReason,declared.blockedReason);assert.deepEqual(row.artifactInputs,[]);assert(!row.inputRegistrationDeferred);}
+ for(const id of hosts){const row=blocked.find(r=>r.id===id);assert.equal(row.blockedReason,hostTools.blockedReason);assert.deepEqual(row.artifactInputs,[]);assert(!row.inputRegistrationDeferred);}
 });
 test('malformed scope selectors cannot silently bypass registration input gates',()=>{
  for(const selectedIds of [null,'name',[1],['']]){
@@ -54,19 +69,46 @@ test('unrelated writer registration defers inputs while default and selected wri
 });
 
 import {registrationIndexCurrent} from './extra-adapter-assembly.mjs';
+import {simulationCorePath} from './release-host-environment.mjs';
 import fsIndex from 'node:fs';import {createHash as indexHash} from 'node:crypto';
-const indexFixtureRoot='G:/YeManCC-Work/Testing/YMCC/Evidence/Formal037-20261030/RegistrationIndex';
-fsIndex.mkdirSync(indexFixtureRoot,{recursive:true});
-const indexFixture=fsIndex.mkdtempSync(path.join(indexFixtureRoot,'case-')),indexFile=path.join(indexFixture,'source.txt');
+const indexPrefix='scoped-registration-index-';
+const samePhysicalPath=(actual,expected)=>process.platform==='win32'?actual.toLowerCase()===expected.toLowerCase():actual===expected;
+let indexOwned,indexFailed=false;
+function indexTest(name,run){
+ test(name,t=>{
+  let passed=false;
+  try{
+   if(!indexOwned){
+    const workspace=simulationCorePath('Workspace'),parent=fsIndex.lstatSync(workspace);
+    assert(parent.isDirectory()&&!parent.isSymbolicLink()&&samePhysicalPath(fsIndex.realpathSync.native(workspace),workspace));
+    const root=fsIndex.mkdtempSync(path.join(workspace,indexPrefix));
+    indexOwned={workspace,root,created:fsIndex.lstatSync(root,{bigint:true})};
+   }
+   run(indexOwned.root,path.join(indexOwned.root,'source.txt'));
+   passed=true;
+  }finally{if(!passed||t.signal.aborted)indexFailed=true;}
+ });
+}
+after(()=>{
+ if(!indexOwned)return;
+ const {workspace,root,created}=indexOwned;
+ if(indexFailed){console.error('Retained failed registration index controls: '+root);return;}
+ assert.equal(path.dirname(path.resolve(root)),workspace);assert(path.basename(root).startsWith(indexPrefix));
+ const current=fsIndex.lstatSync(root,{bigint:true});
+ assert(current.isDirectory()&&!current.isSymbolicLink()&&current.dev===created.dev&&current.ino===created.ino);
+ assert(samePhysicalPath(fsIndex.realpathSync.native(root),root));
+ fsIndex.unlinkSync(path.join(root,'source.txt'));
+ fsIndex.rmdirSync(root);
+});
 const indexDigest=text=>indexHash('sha256').update(text).digest('hex');
-test('registration identity accepts only declared LF/CRLF equivalence and rejects changed source bytes',()=>{
+indexTest('registration identity accepts only declared LF/CRLF equivalence and rejects changed source bytes',(indexFixture,indexFile)=>{
  fsIndex.writeFileSync(indexFile,'alpha\r\nbeta\r\n');
  const index={sources:[{path:'source.txt',sha256:indexDigest('alpha\nbeta\n'),contentNormalization:'utf8-lf'}]};
  assert(registrationIndexCurrent(index,indexFixture));
  fsIndex.writeFileSync(indexFile,'alpha\nbeta\n');assert(registrationIndexCurrent(index,indexFixture));
  fsIndex.writeFileSync(indexFile,'alpha\nzeta\n');assert.equal(registrationIndexCurrent(index,indexFixture),false);
 });
-test('legacy raw registration pins remain byte-exact and unknown normalizations fail closed',()=>{
+indexTest('legacy raw registration pins remain byte-exact and unknown normalizations fail closed',(indexFixture,indexFile)=>{
  fsIndex.writeFileSync(indexFile,'alpha\r\nbeta\r\n');
  const legacy={sources:[{path:'source.txt',sha256:indexDigest('alpha\nbeta\n')}]};
  assert.equal(registrationIndexCurrent(legacy,indexFixture),false);

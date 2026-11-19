@@ -80,10 +80,16 @@ export function installWallpaperRouteFallback({host,react:React,reactDom,ui,rout
     },[]);
     return React.createElement('span',{ref:anchor,style:{display:'contents'}},portal);
   }
-  routerHook.addGlobalComponent(name,Global);note('fallback-installed');
-  return()=>{
+  function dispose(){
     if(stopped)return;stopped=true;
-    for(const clear of [...cleanups])clear();
-    routerHook.removeGlobalComponent(name);
-  };
+    let failed=false,firstError:unknown;
+    for(const release of [...[...cleanups].map(clear=>()=>clear()),()=>routerHook.removeGlobalComponent(name)]){
+      try{release();}catch(error){if(!failed){failed=true;firstError=error;}}
+    }
+    if(failed)throw firstError;
+  }
+  // addGlobalComponent can throw after committing the root. Retire that root
+  // and its local observations even when installation cannot return a disposer.
+  try{routerHook.addGlobalComponent(name,Global);note('fallback-installed');return dispose;}
+  catch(error){try{dispose();}catch{}throw error;}
 }

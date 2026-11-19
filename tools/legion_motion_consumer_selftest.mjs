@@ -14,6 +14,10 @@ const roots = {
   families: path.join(workspace, 'Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/LegionFamilies/ConsumerTests'),
   consumer: path.join(workspace, 'Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/LegionConsumer/Tests'),
 };
+if(process.argv.includes('--raw-packet-only')) {
+  const {runRawPacket}=await import('./fixtures/legion_motion_consumer/raw_packet.mjs');
+  runRawPacket(repo);process.exit(0);
+}
 const options = {};
 for (let i=2; i<process.argv.length; ++i) {
   const arg=process.argv[i];

@@ -14,6 +14,216 @@
 #include <vector>
 #include "json.hpp"
 using json=nlohmann::json;
+#ifdef YMCC_NATIVE_FOREGROUND_POWER_ORDER
+#include <chrono>
+#include <future>
+#include <mutex>
+#include <thread>
+#include "sleep_power_state.h"
+// Only the power consumers below are extracted from production. These atomic
+// facts and lazy UI terminals cannot reach a device, application or writer.
+using WPARAM=std::uintptr_t;
+constexpr WPARAM PBT_APMSUSPEND=4,PBT_APMRESUMECRITICAL=6,PBT_APMRESUMESUSPEND=7,PBT_APMRESUMEAUTOMATIC=18;
+enum class PowerLifecycle : uint8_t {Ready,Suspending,Suspended,Resuming};
+namespace ymcc::nativeForeground {enum class Profile {Msi,Rog,Gpd,Unsupported};}
+static ymcc::nativeForeground::Profile selectedProfile=ymcc::nativeForeground::Profile::Msi;
+static auto nativeForegroundProfile(){return selectedProfile;}
+@@POWER_FAMILY@@
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<uint64_t> g_powerGeneration{20},g_msiNativeForegroundSuspendedGeneration{0},g_msiNativeForegroundLastResumeGeneration{0};
+static uint64_t currentPowerGeneration(){return g_powerGeneration.load(std::memory_order_acquire);}
+static std::atomic<unsigned long long> g_lastPowerResumeCommitTick{100},g_resumeReadyGeneration{20};
+static std::atomic<uint64_t> g_msiNativeForegroundPowerHoldCommitTick{0};
+static std::atomic<uint64_t> g_msiNativeForegroundEdge{1},g_msiNativeForegroundSourceRetryGeneration{0};
+static std::atomic<bool> g_inputReady{true},g_msiNativeForegroundPowerHold{false},g_msiNativeForegroundResumePending{false};
+static std::atomic<bool> g_msiNativeForegroundPowerTransitionObserved{false},g_msiNativeForegroundDesiredUi{false};
+static std::mutex g_msiNativeForegroundPowerMx;
+static std::atomic<bool> g_exitRequested{false};
+static uint64_t g_msiNativeForegroundLastReadySuspendSerial=0;
+static int __cdecl readFixturePower(ymcc::sleeppower::SharedPowerV1* output,uint32_t bytes) noexcept {
+    if(!output||bytes<sizeof(*output)||g_exitRequested.load())return 0;
+    *output={};output->generation=currentPowerGeneration();
+    output->phase=static_cast<uint32_t>(g_powerLifecycle.load());
+    output->flags=ymcc::sleeppower::kKnown|(output->phase==0?ymcc::sleeppower::kHardwareAllowed:0u);
+    return 1;
+}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output) noexcept {
+    return ymcc::sleeppower::capturePower(&readFixturePower,output);
+}
+static unsigned queued=0,identityReady=0,eligibilityReads=0;
+static void msiNativeForegroundIdentityReady(){++identityReady;}
+static bool msiNativeForegroundUiEligible(){++eligibilityReads;return true;}
+static void msiNativeForegroundQueue(){++queued;} // lazy lifecycle terminal; never drains into business IO
+@@POWER_UI@@
+@@POWER_EVENT@@
+@@POWER_RELEASE@@
+struct PowerFieldObservation { WPARAM event; uint64_t generation; PowerLifecycle phase; unsigned sourceLine; };
+@@POWER_FIELD@@
+int main(int argc,char** argv){
+    unsigned cases=0;std::vector<std::string> failures,caseNames,scenarios;
+    json fieldTrace=json::array();
+    std::string prefix;
+    const auto check=[&](const char* name,bool ok){++cases;caseNames.push_back(prefix+name);if(!ok)failures.push_back(prefix+name);};
+    const auto begin=[&](const std::string& family,const char* scenario){
+        prefix=family+":"+scenario+":";scenarios.push_back(family+":"+scenario);
+        g_powerLifecycle=PowerLifecycle::Ready;g_powerGeneration=20;g_inputReady=true;
+        g_lastPowerResumeCommitTick=100;g_resumeReadyGeneration=20;g_msiNativeForegroundPowerHoldCommitTick=0;
+        g_msiNativeForegroundPowerHold=false;g_msiNativeForegroundResumePending=false;
+        g_msiNativeForegroundPowerTransitionObserved=false;g_msiNativeForegroundSuspendedGeneration=0;
+        g_msiNativeForegroundLastResumeGeneration=0;g_msiNativeForegroundDesiredUi=false;
+        g_msiNativeForegroundEdge=1;g_msiNativeForegroundSourceRetryGeneration=0;
+        queued=identityReady=eligibilityReads=0;
+    };
+    const auto suspend=[] {msiNativeForegroundPowerEvent(PBT_APMSUSPEND);};
+    const auto resume=[] {msiNativeForegroundPowerEvent(PBT_APMRESUMEAUTOMATIC);};
+    const bool mutationOnly=argc>2&&std::string(argv[2])=="old-generation-only";
+    const bool fieldOnly=argc>2&&std::string(argv[2])=="field-replay-only";
+    const auto replayField=[&](const std::string& family){
+        begin(family,"field-win5-111926-notification-order");
+        for(std::size_t index=0;index<kWin5PowerObservations.size();++index){
+            const auto& observation=kWin5PowerObservations[index];
+            g_powerGeneration=observation.generation;g_powerLifecycle=observation.phase;
+            const auto beforeQueues=queued;const auto beforeEdge=g_msiNativeForegroundEdge.load();
+            msiNativeForegroundPowerEvent(observation.event);
+            const bool didRelease=msiNativeForegroundTryReleasePowerHold();
+            fieldTrace.push_back({{"family",family},{"sourceLine",observation.sourceLine},{"event",observation.event},
+                {"generation",observation.generation},{"released",didRelease},
+                {"powerHold",g_msiNativeForegroundPowerHold.load()},{"resumePending",g_msiNativeForegroundResumePending.load()},
+                {"transitionObserved",g_msiNativeForegroundPowerTransitionObserved.load()}});
+            if(index<4)check(("step-"+std::to_string(index)+"-held").c_str(),!didRelease&&g_msiNativeForegroundPowerHold);
+            else if(index==4)check("step-4-ready-releases",didRelease&&!g_msiNativeForegroundPowerHold&&
+                !g_msiNativeForegroundResumePending&&!g_msiNativeForegroundPowerTransitionObserved&&g_msiNativeForegroundLastResumeGeneration==9893);
+            else check("step-5-duplicate-is-inert",!didRelease&&!g_msiNativeForegroundPowerHold&&queued==beforeQueues&&g_msiNativeForegroundEdge==beforeEdge);
+        }
+    };
+    for(const auto& family:std::vector<std::pair<std::string,ymcc::nativeForeground::Profile>>{
+            {"msi",ymcc::nativeForeground::Profile::Msi},{"rog",ymcc::nativeForeground::Profile::Rog},{"gpd",ymcc::nativeForeground::Profile::Gpd}}){
+        if(mutationOnly&&family.first!="msi")continue;
+        if(fieldOnly&&family.first!="gpd")continue;
+        selectedProfile=family.second;
+        if(fieldOnly){replayField(family.first);continue;}
+        if(!mutationOnly){
+            begin(family.first,"ready-same-generation");suspend();resume();
+            check("held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&g_msiNativeForegroundResumePending&&!g_msiNativeForegroundPowerTransitionObserved);
+            begin(family.first,"cross-generation");suspend();g_powerGeneration=21;resume();
+            check("released",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending);
+            check("recorded-and-cleared",g_msiNativeForegroundLastResumeGeneration==21&&!g_msiNativeForegroundPowerTransitionObserved);
+        }
+        begin(family.first,"late-suspend-same-generation");g_powerLifecycle=PowerLifecycle::Resuming;suspend();resume();
+        check("nonready-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&g_msiNativeForegroundPowerTransitionObserved);
+        g_powerLifecycle=PowerLifecycle::Ready;
+        check("released",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending&&!g_msiNativeForegroundPowerTransitionObserved&&g_msiNativeForegroundLastResumeGeneration==20);
+        if(mutationOnly)continue;
+        begin(family.first,"resume-without-suspended-owner");
+        resume();msiNativeForegroundPowerEvent(PBT_APMRESUMESUSPEND);msiNativeForegroundPowerEvent(PBT_APMRESUMECRITICAL);
+        check("no-new-hold",!msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&
+            !g_msiNativeForegroundResumePending&&queued==0&&g_msiNativeForegroundEdge==1);
+        begin(family.first,"duplicate-notifications");suspend();g_powerGeneration=21;resume();
+        const auto firstResumeQueued=queued;
+        msiNativeForegroundPowerEvent(PBT_APMRESUMESUSPEND);msiNativeForegroundPowerEvent(PBT_APMRESUMECRITICAL);
+        check("one-release",queued==firstResumeQueued&&msiNativeForegroundTryReleasePowerHold());
+        const auto priorQueues=queued;const auto priorEdge=g_msiNativeForegroundEdge.load();
+        resume();msiNativeForegroundPowerEvent(PBT_APMRESUMESUSPEND);msiNativeForegroundPowerEvent(PBT_APMRESUMECRITICAL);
+        check("no-additional-work",!msiNativeForegroundTryReleasePowerHold()&&queued==priorQueues&&g_msiNativeForegroundEdge==priorEdge);
+        begin(family.first,"input-not-ready");suspend();g_powerGeneration=21;resume();g_inputReady=false;
+        check("held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold);
+        g_inputReady=true;check("released-after-input",msiNativeForegroundTryReleasePowerHold());
+        begin(family.first,"power-not-ready");suspend();g_powerGeneration=21;resume();
+        for(auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Resuming}){
+            g_powerLifecycle=phase;check("held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&g_msiNativeForegroundPowerTransitionObserved);
+        }
+        g_powerLifecycle=PowerLifecycle::Ready;check("released-after-ready",msiNativeForegroundTryReleasePowerHold());
+        begin(family.first,"maintenance-observes-transition");suspend();resume();g_powerLifecycle=PowerLifecycle::Resuming;
+        check("observed",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerTransitionObserved);
+        g_powerLifecycle=PowerLifecycle::Ready;check("same-generation-release",msiNativeForegroundTryReleasePowerHold());
+        begin(family.first,"two-rounds-no-transition-credit");g_powerLifecycle=PowerLifecycle::Resuming;suspend();resume();g_powerLifecycle=PowerLifecycle::Ready;
+        check("first-release",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerTransitionObserved);
+        suspend();resume();check("second-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundPowerTransitionObserved);
+        // Another suspend resets a transition observed in an unfinished round.
+        g_powerLifecycle=PowerLifecycle::Resuming;(void)msiNativeForegroundTryReleasePowerHold();
+        g_powerLifecycle=PowerLifecycle::Ready;suspend();resume();
+        check("unfinished-round-credit-reset",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundPowerTransitionObserved);
+        begin(family.first,"resume-required");g_powerLifecycle=PowerLifecycle::Resuming;suspend();g_powerLifecycle=PowerLifecycle::Ready;
+        check("no-resume-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending);
+        begin(family.first,"power-mutex-defers-new-suspend");suspend();g_powerGeneration=21;resume();
+        g_lastPowerResumeCommitTick=101;g_resumeReadyGeneration=21; // both real admission paths are eligible while busy
+        std::promise<void> locked,release;auto held=locked.get_future();auto released=release.get_future();
+        std::atomic<bool> ownerTimedOut{false};
+        std::thread owner([&]{
+            std::unique_lock lock(g_msiNativeForegroundPowerMx);locked.set_value();
+            if(released.wait_for(std::chrono::seconds(1))!=std::future_status::ready)ownerTimedOut=true;
+        });
+        held.wait();const auto queuedBeforeBusy=queued;
+        const auto busyStart=std::chrono::steady_clock::now();
+        const bool busyReleased=msiNativeForegroundTryReleasePowerHold();
+        const auto busyMs=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-busyStart).count();
+        check("busy-defers",!busyReleased&&busyMs<250);
+        check("busy-preserves-scalars",g_msiNativeForegroundPowerHold&&g_msiNativeForegroundResumePending&&
+            !g_msiNativeForegroundPowerTransitionObserved&&g_msiNativeForegroundSuspendedGeneration==20&&
+            g_msiNativeForegroundLastResumeGeneration==0&&queued==queuedBeforeBusy);
+        release.set_value();owner.join();check("owner-released",!ownerTimedOut);
+        suspend();
+        check("new-suspend-remains-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&
+            !g_msiNativeForegroundResumePending&&g_msiNativeForegroundSuspendedGeneration==21);
+        resume();check("new-suspend-needs-transition",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold);
+        g_powerLifecycle=PowerLifecycle::Resuming;(void)msiNativeForegroundTryReleasePowerHold();g_powerLifecycle=PowerLifecycle::Ready;
+        check("current-resumes-after-transition",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&
+            !g_msiNativeForegroundResumePending&&!g_msiNativeForegroundPowerTransitionObserved&&g_msiNativeForegroundLastResumeGeneration==21);
+        begin(family.first,"missing-resume-new-commit");suspend();
+        check("baseline-captured",g_msiNativeForegroundPowerHoldCommitTick==100&&!g_msiNativeForegroundResumePending);
+        g_lastPowerResumeCommitTick=101;
+        check("new-commit-releases",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending&&g_msiNativeForegroundLastResumeGeneration==20);
+        begin(family.first,"missing-resume-old-commit");suspend();
+        check("old-commit-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&g_msiNativeForegroundPowerHoldCommitTick==100);
+        begin(family.first,"missing-resume-wrong-generation");suspend();g_lastPowerResumeCommitTick=101;g_resumeReadyGeneration=19;
+        check("foreign-commit-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold);
+        g_resumeReadyGeneration=20;check("current-commit-releases",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold);
+        begin(family.first,"missing-resume-zero-commit");suspend();g_lastPowerResumeCommitTick=0;
+        check("zero-commit-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold);
+        replayField(family.first);
+        begin(family.first,"repeated-sleep-wake-cycles");
+        for(unsigned round=0;round<4;++round){
+            const auto checkRound=[&](const char* name,bool ok){const auto label="round-"+std::to_string(round)+":"+name;check(label.c_str(),ok);};
+            const auto nextGeneration=g_powerGeneration.load()+(round%2==0?1:0);
+            suspend();
+            checkRound("new-suspend-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending);
+            g_powerGeneration=nextGeneration;g_powerLifecycle=PowerLifecycle::Resuming;
+            if(round%2)suspend(); // late suspend within the already resuming generation
+            else (void)msiNativeForegroundTryReleasePowerHold();
+            g_lastPowerResumeCommitTick.fetch_add(1);g_resumeReadyGeneration=nextGeneration;
+            g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=false;
+            checkRound("commit-waits-input",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold);
+            g_inputReady=true;
+            if(round%2)resume(); // other rounds deliberately omit the raw resume callback
+            checkRound("one-current-release",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&
+                !g_msiNativeForegroundResumePending&&g_msiNativeForegroundLastResumeGeneration==nextGeneration);
+            const auto queuesAfterRelease=queued;const auto edgeAfterRelease=g_msiNativeForegroundEdge.load();
+            resume();msiNativeForegroundPowerEvent(PBT_APMRESUMESUSPEND);
+            checkRound("duplicates-do-not-reopen",!msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&
+                queued==queuesAfterRelease&&g_msiNativeForegroundEdge==edgeAfterRelease);
+        }
+        begin(family.first,"shared-commit-waits-input");suspend();g_lastPowerResumeCommitTick=101;g_inputReady=false;
+        check("input-not-ready-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending);
+        g_inputReady=true;check("current-input-releases",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold);
+        begin(family.first,"next-suspend-rebases-commit");suspend();g_lastPowerResumeCommitTick=101;
+        check("first-commit-releases",msiNativeForegroundTryReleasePowerHold());suspend();
+        check("old-commit-cannot-release-next",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&
+            !g_msiNativeForegroundResumePending&&g_msiNativeForegroundPowerHoldCommitTick==101);
+        begin(family.first,"shared-commit-waits-power");suspend();g_lastPowerResumeCommitTick=101;g_powerLifecycle=PowerLifecycle::Resuming;
+        check("nonready-commit-held",!msiNativeForegroundTryReleasePowerHold()&&g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending);
+        g_powerLifecycle=PowerLifecycle::Ready;check("ready-commit-releases",msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold);
+    }
+    if(!mutationOnly&&!fieldOnly){
+        selectedProfile=ymcc::nativeForeground::Profile::Unsupported;begin("unsupported","no-business");suspend();resume();
+        check("inert",!msiNativeForegroundTryReleasePowerHold()&&!g_msiNativeForegroundPowerHold&&!g_msiNativeForegroundResumePending&&queued==0&&identityReady==0&&eligibilityReads==0&&g_msiNativeForegroundEdge==1);
+    }
+    const json report={{"passed",failures.empty()},{"cases",cases},{"caseNames",caseNames},{"scenarios",scenarios},{"failures",failures},{"fieldTrace",fieldTrace},
+        {"mode","power-order"},{"hardwareAccess",false},{"realProcessesLaunched",false},{"businessConsumerExecuted",false},
+        {"boundary","Real power/family/UI consumers; controlled atomic facts and lazy UI terminals. No downstream writer or full MSI proof."}};
+    if(argc>1){std::ofstream file(argv[1]);file<<report.dump(2)<<"\n";}
+    std::cout<<report.dump()<<"\n";return failures.empty()?0:1;
+}
+#else
 using DWORD=unsigned long;
 using HANDLE=void*;
 using BOOL=int;
@@ -85,6 +295,8 @@ struct LaunchScope {
     bool reserve(){return unexercisedDependency<bool>("writer reserve");}
     bool creationReturned(HANDLE){return unexercisedDependency<bool>("writer creation receipt");}
     bool retire(HANDLE){return unexercisedDependency<bool>("writer retirement");}
+    struct Attempt {std::string attemptId;};
+    const Attempt* attempt()const{return unexercisedDependency<const Attempt*>("writer attempt");}
 };
 }
 namespace ymcc::input {
@@ -96,10 +308,22 @@ struct OneShotHelperDiagnostic {
 };
 }
 struct NativeForegroundRefreshTarget {HidHidePhysicalIdentity source;bool xusb=false;};
+struct MsiColdReturnReceipt {};
 @@LEASE@@
 static MsiNativeForegroundLease g_msiNativeForegroundLease;
 static std::atomic<bool> g_msiNativeForegroundCyclePending{false};
 static std::atomic<std::uint64_t> g_msiNativeForegroundEdge{7};
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{0};
+static std::uint64_t fixturePower=3;
+static bool fixturePendingSuspend=false;
+static std::atomic<bool> g_inputReady{true},g_msiNativeForegroundPowerHold{false};
+static uint64_t currentPowerGeneration(){return fixturePower;}
+static bool hardwareWriteAllowed(){return !fixturePendingSuspend;}
+static struct FixturePowerDispatch {
+    std::uint64_t boundary=0;
+    uint64_t observedSleepBoundarySequence()const{return boundary;}
+} g_sleepPowerDispatch;
+static std::function<void()> duringHash;
 static HANDLE childHandle=reinterpret_cast<HANDLE>(11),threadHandle=reinterpret_cast<HANDLE>(12);
 static std::vector<DWORD> waits;
 static std::vector<HANDLE> closed;
@@ -113,7 +337,7 @@ static DWORD WaitForSingleObject(HANDLE handle,DWORD timeout){if(handle!=childHa
 static BOOL GetExitCodeProcess(HANDLE handle,DWORD* code){if(handle!=childHandle)throw std::runtime_error("foreign exit query");*code=childExit;return exitQueryOk?TRUE:FALSE;}
 static BOOL CloseHandle(HANDLE handle){closed.push_back(handle);return TRUE;}
 static std::wstring inputHostExecutablePath(){return L"C:\\YMCC\\input-host\\YeManInputHost.exe";}
-static std::string sha256File(const std::wstring&){return "fixture-image-identity";}
+static std::string sha256File(const std::wstring&){if(duringHash)duringHash();return "fixture-image-identity";}
 namespace ymcc::processEfficiency {
 static bool createProcess(const wchar_t*,wchar_t*,void*,void*,BOOL,DWORD flags,void*,const wchar_t*,STARTUPINFOW*,PROCESS_INFORMATION* process){
     ++launches;launchFlags=flags;if(!launchOk)return false;process->hProcess=childHandle;process->hThread=threadHandle;return true;
@@ -121,8 +345,10 @@ static bool createProcess(const wchar_t*,wchar_t*,void*,void*,BOOL,DWORD flags,v
 }
 static void msiNativeForegroundSettleHelperDiagnosticLocked(DWORD){++settles;}
 static void msiNativeForegroundReceipt(const char*,const char*){++receipts;}
-static bool msiNativeForegroundLeaseCurrent(){return unexercisedDependency<bool>("foreground lease admission");}
+static bool msiNativeForegroundLeaseCurrent(){return true;}
 static bool msiPostHideContextCurrentLocked(){return unexercisedDependency<bool>("post-hide admission");}
+static bool msiPostHideExecutionCurrentLocked(){return unexercisedDependency<bool>("post-hide execution");}
+static bool msiColdReturnContextCurrentLocked(){return unexercisedDependency<bool>("cold return admission");}
 static std::shared_ptr<ymcc::nativeRefreshWriter::Session> g_postHideSharedWriterSession;
 static std::wstring nativeRefreshWriterRecordPath(){return unexercisedDependency<std::wstring>("writer record path");}
 static std::string inputHostTargetReturnMachineBinding(){return unexercisedDependency<std::string>("writer machine binding");}
@@ -160,7 +386,7 @@ int main(int argc,char** argv){
     runExit=5;query("--cloak-on\n--inv-off\n",false);runExit=0;
     commands.clear();seamActive=true;snapshot.valid=true;
     check("start-seam-no-cli",!msiNativeForegroundSnapshot(snapshot)&&commands.empty()&&!snapshot.valid);seamActive=false;
-    const auto reset=[&]{g_msiNativeForegroundLease=MsiNativeForegroundLease{};g_msiNativeForegroundLease.root="USB\\VID_0DB0&PID_1901\\PINNED";g_msiNativeForegroundLease.locations={L"PINNED-LOCATION"};g_msiNativeForegroundCyclePending=false;waits.clear();closed.clear();launches=settles=receipts=launchFlags=0;launchOk=exitQueryOk=true;waitResult=WAIT_TIMEOUT;childExit=0;};
+    const auto reset=[&]{g_msiNativeForegroundLease=MsiNativeForegroundLease{};g_msiNativeForegroundLease.root="USB\\VID_0DB0&PID_1901\\PINNED";g_msiNativeForegroundLease.locations={L"PINNED-LOCATION"};g_msiNativeForegroundLease.power=fixturePower;g_msiNativeForegroundCyclePending=false;waits.clear();closed.clear();launches=settles=receipts=launchFlags=0;launchOk=exitQueryOk=true;waitResult=WAIT_TIMEOUT;childExit=0;fixturePendingSuspend=false;duringHash={};};
     reset();
     check("running-helper-returns-pending",msiNativeForegroundCycleLocked(false)==1);
     check("no-lock-held-wait",waits==std::vector<DWORD>{0});
@@ -190,9 +416,31 @@ int main(int argc,char** argv){
     check("gpd-root-rejected",msiNativeForegroundCycleLocked(false)==2&&launches==0);
     reset();g_msiNativeForegroundLease.profile=ymcc::nativeForeground::Profile::Rog;
     check("game-interface-keeps-same-async-owner",msiNativeForegroundCycleLocked(false,&game)==1&&g_msiNativeForegroundLease.helperGameTarget==game.deviceInstanceId&&waits==std::vector<DWORD>{0});
+    reset();fixturePendingSuspend=true;
+    check("public-suspend-denies-fresh-helper",msiNativeForegroundCycleLocked(false)==MsiNativeForegroundLease::kPowerDeferred&&launches==0&&waits.empty());
+    for(const bool pending:{false,true}){
+        reset();
+        g_msiNativeForegroundLease.helperGameTarget="old-exact-target";
+        g_msiNativeForegroundLease.retiredNativeWriterAttempt="old-attempt";
+        g_msiNativeForegroundLease.helperExitCode=6;
+        g_msiNativeForegroundLease.helperDiagnostic={{"old",true}};
+        duringHash=[&]{fixturePendingSuspend=pending;++g_sleepPowerDispatch.boundary;};
+        check(pending?"pending-during-helper-preparation":"new-sleep-boundary-during-helper-preparation",
+            msiNativeForegroundCycleLocked(true)==MsiNativeForegroundLease::kPowerDeferred&&launches==0&&waits.empty()&&
+            g_msiNativeForegroundLease.helperGameTarget=="old-exact-target"&&g_msiNativeForegroundLease.helperExitCode==6&&
+            g_msiNativeForegroundLease.helperDiagnostic.value("old",false)&&g_msiNativeForegroundLease.retiredNativeWriterAttempt=="old-attempt"&&
+            !g_msiNativeForegroundLease.cycleIssued&&!g_msiNativeForegroundCyclePending);
+        fixturePendingSuspend=false;duringHash={};waitResult=WAIT_OBJECT_0;
+        check("same-owner-can-submit-one-inverse-after-ready",msiNativeForegroundCycleLocked(true)==0&&launches==1&&g_msiNativeForegroundLease.cycleForRestore);
+    }
+    reset();duringHash=[] {++fixturePower;};
+    check("fresh-generation-cannot-submit-old-helper",msiNativeForegroundCycleLocked(true)==MsiNativeForegroundLease::kPowerDeferred&&launches==0);
+    reset();duringHash=[] {++g_sharedPowerSuspendSerial;};
+    check("same-generation-revocation-cannot-submit-old-helper",msiNativeForegroundCycleLocked(true)==MsiNativeForegroundLease::kPowerDeferred&&launches==0);
     check("unexercised-dependencies-remain-inert",unexpectedDependencyCalls==0);
     const json report={{"passed",failures.empty()},{"cases",cases},{"failures",failures},{"hardwareAccess",false},{"realProcessesLaunched",false}};
     if(argc>1){std::ofstream file(argv[1]);file<<report.dump(2)<<"\n";}
     std::cout<<report.dump()<<"\n";
     return failures.empty()?0:1;
 }
+#endif

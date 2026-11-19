@@ -1,20 +1,44 @@
-import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
-import {controllerInputFixtureInputs,snapshotControllerInputFixture} from './lib/hc_controller_input_fixture.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import {extract} from './fixtures/msi_owned_return_retired_io/source-binding.mjs';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 
 // Selected actual native gates/frame/envelope/dispatch blocks, inert transport.
 const started=performance.now();
-const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+let repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let out=path.resolve(repo,'../../../Build/Validation/VirtualInput-Submission-R113-20261016/submission-final');
+let mainFile=null,headerRoot=null,prepareOnly=false,commonHidOnly=false,commonHidRuntimeOnly=false,commonHidRuntimeCase=null;const seenArguments=new Set();
 for(let i=2;i<process.argv.length;i++){
-  assert(process.argv[i]==='--out'&&process.argv[i+1]);out=path.resolve(process.argv[++i]);
+ const arg=process.argv[i];assert(!seenArguments.has(arg),'DUPLICATE_ARGUMENT '+arg);seenArguments.add(arg);
+ if(arg==='--prepare-only'){prepareOnly=true;continue;}
+ if(arg==='--common-hid-only'){commonHidOnly=true;continue;}
+ if(arg==='--common-hid-runtime-only'){commonHidRuntimeOnly=true;continue;}
+ assert(['--out','--repo','--MainFile','--HeaderRoot','--common-hid-runtime-case'].includes(arg),'UNKNOWN_FRAME_ARGUMENT '+arg);
+ const value=process.argv[++i];assert(value&&!value.startsWith('--'),'EMPTY_FRAME_ARGUMENT '+arg);
+ if(arg==='--out')out=path.resolve(value);else if(arg==='--repo')repo=path.resolve(value);
+ else if(arg==='--MainFile')mainFile=path.resolve(value);else if(arg==='--common-hid-runtime-case')commonHidRuntimeCase=value;else headerRoot=path.resolve(value);
 }
+mainFile??=path.join(repo,'native/main.cpp');headerRoot??=path.join(repo,'native');
+assert(!(commonHidOnly&&commonHidRuntimeOnly),'MUTUALLY_EXCLUSIVE_COMMON_HID_PROJECTIONS');
+assert(!commonHidRuntimeCase||commonHidRuntimeOnly,'RUNTIME_CASE_REQUIRES_RUNTIME_PROJECTION');
+if(commonHidRuntimeOnly){
+ const {runCommonHidRuntime,win5KeptWakeCase}=await import(new URL('./lib/common_hid_runtime_fixture.mjs',import.meta.url).href);
+ assert(commonHidRuntimeCase!==win5KeptWakeCase||!seenArguments.has('--MainFile'),'WIN5_KEPT_WAKE_DOES_NOT_CONSUME_MAIN_FILE');
+ const inherited=commonHidRuntimeCase===win5KeptWakeCase&&process.env.YMCC_SIM_GLOBAL_RUN==='1';
+ const inheritedDeadlineEpochMs=inherited?Number(process.env.YMCC_SIM_CASE_DEADLINE_EPOCH_MS):undefined;
+ const result=await runCommonHidRuntime({repo,out,mainFile,headerRoot,prepareOnly,runtimeCase:commonHidRuntimeCase??'all',inheritedDeadlineEpochMs});
+ console.log(JSON.stringify({status:result.status,run:result.run}));process.exit(process.exitCode??0);
+}
+const candidateFixture=path.join(path.dirname(fileURLToPath(import.meta.url)),'fixtures/input_frame_submission_fixture.cpp');
+const sourcePath=name=>name==='tools/input_frame_submission_selftest.mjs'?fileURLToPath(import.meta.url):name==='tools/fixtures/input_frame_submission_fixture.cpp'?path.join(path.dirname(fileURLToPath(import.meta.url)),'fixtures/input_frame_submission_fixture.cpp'):name==='native/main.cpp'?mainFile:
+ name==='tools/input_frame_submission_selftest.mjs'?fileURLToPath(import.meta.url):
+ name==='tools/fixtures/input_frame_submission_fixture.cpp'?candidateFixture:
+ name.startsWith('native/')&&fs.existsSync(path.join(headerRoot,path.basename(name)))?path.join(headerRoot,path.basename(name)):path.join(repo,name);
+const {calibrationToolchainPreamble}=await import(pathToFileURL(path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')).href);
+const {controllerInputFixtureInputs,snapshotControllerInputFixture}=await import(pathToFileURL(path.join(repo,'tools/lib/hc_controller_input_fixture.mjs')).href);
+const {extract}=await import(pathToFileURL(path.join(repo,'tools/fixtures/msi_owned_return_retired_io/source-binding.mjs')).href);
 const run=path.join(out,new Date().toISOString().replace(/[:.]/g,'-'));
 fs.mkdirSync(run,{recursive:true});
 const inc=path.join(run,'source');fs.mkdirSync(inc);
@@ -29,14 +53,14 @@ process.on('uncaughtException',error=>{
 });
 const headerNames=['native/input_frame_submission.h','native/touch_haptic_dispatch.h','native/game_feedback_receipt.h',
   'native/windows_motion_submission.h','native/legion_motion_source.h','native/virtual_output_status.h',
-  'native/controller_persona.h','native/canonical_frame_fingerprint_memo.h','deps/json/json.hpp'];
+  'native/controller_persona.h','native/canonical_frame_fingerprint_memo.h','native/msi_virtual_report_diagnostic.h','native/input_host_shared_power.h','native/input_host_compact_frame_reply.h','native/sleep_power_state.h','native/sleep_power_observation.h','native/sleep_power_revocation.h','deps/json/json.hpp'];
 const names=['tools/fixtures/unified_controller_input/before.json','tools/fixtures/unified_controller_input/fixture.inc',
-  ...controllerInputFixtureInputs,...headerNames,'native/main.cpp','tools/fixtures/input_frame_submission_fixture.cpp',
+  ...controllerInputFixtureInputs,...headerNames,'native/screen_touchpads.h','native/main.cpp','tools/fixtures/input_frame_submission_fixture.cpp',
   'tools/input_frame_submission_selftest.mjs','tools/fixtures/msi_owned_return_retired_io/source-binding.mjs'];
-const bytes=new Map(names.map(n=>[n,fs.readFileSync(path.join(repo,n))]));
+const bytes=new Map(names.map(n=>[n,fs.readFileSync(sourcePath(n))]));
 const main=bytes.get('native/main.cpp').toString('utf8').replace(/\r\n/g,'\n');
 const bindings=[];
-const uiPath='native/virtual_controller_ui_output_runtime.h';bytes.set(uiPath,fs.readFileSync(path.join(repo,uiPath)));
+const uiPath='native/virtual_controller_ui_output_runtime.h';bytes.set(uiPath,fs.readFileSync(sourcePath(uiPath)));
 const uiSource=bytes.get(uiPath).toString('utf8').replace(/\r\n/g,'\n');
 const uiSymbols=new Set(['FocusFrameContent','focusIsolationNeutralContent','focusIsolationAssembleFrame','focusIsolationBuildTypedSubmitText']);
 const fn=n=>extract(uiSymbols.has(n)?uiSource:main,'function',n,uiSymbols.has(n)?uiPath:'native/main.cpp',bindings);
@@ -48,16 +72,28 @@ function block(text,label,a,b){
 const submit=fn('inputHostSubmitPad'),request=fn('inputHostRequestPreparedLocked');
 const readState=fn('gamepadReadStateUnlocked'),evaluate=fn('gamepadEval');
 const context=struct('InputFrameSubmission')+'\nstatic thread_local InputFrameSubmission* t_inputFrameSubmission=nullptr;\n'+
-  struct('InputFrameSubmissionScope')+'\n'+struct('GameFeedbackFrameDispatchScope');
+  struct('InputFrameSubmissionScope')+'\n'+struct('GameFeedbackFrameDispatchScope')+'\n'+struct('InputHostRequestPowerScope');
 const current=fn('inputHostFrameSubmissionCurrent');
 const beforeClassifier=JSON.parse(bytes.get('tools/fixtures/unified_controller_input/before.json').toString('utf8'));
 assert.equal(sha(beforeClassifier.code),beforeClassifier.codeSha256,'fixed before-classifier bytes');
+const screenSource=bytes.get('native/screen_touchpads.h').toString('utf8').split(String.fromCharCode(13)).join('');
+const screenContact=extract(screenSource,'struct','Contact','native/screen_touchpads.h',bindings);
+const screenSnapshot=extract(screenSource,'struct','Snapshot','native/screen_touchpads.h',bindings);
+const screenJson=extract(screenSource.replace('inline Json snapshotJson(', 'static Json snapshotJson('),
+ 'function','snapshotJson','native/screen_touchpads.h',[]).replace('static Json snapshotJson(', 'inline Json snapshotJson(');
+assert(screenSource.includes(screenJson),'EXACT_ACTUAL_SCREEN_JSON');
+bindings.push({symbol:'actual inline snapshotJson',file:'native/screen_touchpads.h',sha256:sha(screenJson),exact:true});
+const compactControlDeclarations=['static std::string g_inputHostFrameReplyBinding;','static bool g_inputHostCompactFrameRequest = false;'];
+assert(compactControlDeclarations.every(value=>main.includes(value)),'ACTUAL_COMPACT_CONTROL_DECLARATIONS');
 const parts={
+  SCREENPAD_TYPES:[screenContact,screenSnapshot,screenJson].join(String.fromCharCode(10)),
+  FAST_RECEIPT:struct('InputHostFastReceipt'),
+  COMPACT_GLOBALS:compactControlDeclarations.join(String.fromCharCode(10)),
   UNIFIED_CONTROLLER_INPUT:bytes.get('tools/fixtures/unified_controller_input/fixture.inc').toString('utf8'),
-  CONTEXT:context,
+  HARDWARE_TLS:main.match(/^static thread_local bool t_inputHostRequestHardwareRequired=false;\r?$/m)?.[0],CONTEXT:context,SNAPSHOT_TYPE:struct('InputCaptureGamepadSnapshot')+'\n'+struct('CommonControllerHidRead'),POWER_WRITER:fn('sgVirtualWriterAllowedNow'),
   COMMON_SOURCE_SCOPE:struct('CommonFrameSourceScope'),
   ADAPTERS:[fn('inputCaptureBindStandardInput'),fn('inputHostPhysicalPublicationSourceAdmitted'),fn('inputHostFrameSubmissionSample'),current,
-    fn('inputHostFrameSubmissionNote'),fn('inputHostWindowsMotionSubmissionCurrent'),fn('inputHostFrameSubmissionRequestCurrent'),
+    fn('inputHostFrameSubmissionNote'),fn('inputHostWindowsMotionSubmissionCurrent'),fn('inputHostFrameSharedPowerCurrent'),fn('inputHostFrameSubmissionMayIssue'),fn('inputHostFrameSubmissionRequestCurrent'),
     beforeClassifier.code.replace('inputHostFrameSubmissionSample(', 'inputHostFrameSubmissionSampleBeforeUnified(')].join('\n'),
   PERSONA:[fn('inputHostConfiguredPersona'),fn('inputHostPersona'),fn('inputHostProfileIdentityOf'),fn('inputHostProfileIdentity'),
     fn('inputHostBoundOrCurrentPersona'),fn('inputHostBoundOrCurrentProfileIdentity'),fn('inputHostProtocolPowerGenerationLocked')].join('\n'),
@@ -75,7 +111,7 @@ const parts={
   FRAME_CONTENT:block(submit,'actual standard frame content assignments','    FocusFrameContent frameContent;','    // 背键屏蔽同样经生产函数'),
   SETUP:block(submit,'normal frame original ticket scope','    // Bind normal BUS input','    // OFF revokes normal BUS'),
   POWER:block(submit,'initial normal-frame power admission','    const bool powerAdmitted =','    if (!powerAdmitted)'),
-  NORMALIZE:block(submit,'stale source normalization and exact source-neutral publication bypass','        if(t_inputFrameSubmission && !semanticNeutral)','        inputHostRecoveryHealthObserveLocked'),
+  NORMALIZE:block(submit,'stale source normalization and exact source-neutral publication bypass','        frameSubmission.powerScope=','        inputHostRecoveryHealthObserveLocked'),
   FRESH_WAIT:block(submit,'opening wait preserves explicit stale-source neutral cleanup','    if (!msiNeutralCleanup && !frameSubmission.sourceNeutralized','        ymcc::screenpads::observeNativeTransport'),
   ACCEPTED_NOTE:block(submit,'log recovery only after accepted current frame','                if(t_inputFrameSubmission && !frameSubmission.sourceNeutralized)','                firstFrame = fastReceipt.used'),
   HOST_READY:block(submit,'final Host readiness','        const bool hostFrameReady =','        const ymcc::screenpads::NativeTransportObservation'),
@@ -86,9 +122,9 @@ const parts={
   DISPATCH:block(submit,'actual prepared/legacy dispatch','            accepted = frameTextReady','\n#ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC'),
   RESULT_NEUTRAL:submit.match(/^    result\["focusIsolationSemanticNeutral"\] = semanticNeutral;$/m)?.[0],
   REPORT_NEUTRAL:main.match(/^    publishedSemanticNeutral=hostFrame\.value\("focusIsolationSemanticNeutral",submitNeutral\);$/m)?.[0],
-  NOFAULT:block(submit,'context retirement response branch','                // Context retirement before a pipe write','            } else {\n                // 跳过原因计数'),
+  NOFAULT:block(submit,'context retirement response branch','                // Context retirement is not a Host fault.','            } else {\n                // 跳过原因计数'),
   PRE_ENVELOPE:request.match(/^    if\(!inputHostFrameSubmissionRequestCurrent\(command,responseOut,"before-envelope"\)\)return false;$/m)?.[0],
-  PRE_PIPE:request.match(/^    if\(!inputHostFrameSubmissionRequestCurrent\(command,responseOut,"before-pipe-write"\)\)return false;$/m)?.[0]
+  PRE_PIPE:request.match(/^    if\(connected&&!inputHostFrameSubmissionRequestCurrent\(command,responseOut,"before-pipe-write"\)\)return false;$/m)?.[0]
 };
 assert(parts.PRE_ENVELOPE&&parts.PRE_PIPE);
 const actualWrite=/const bool written = connected &&(?: \(!ioDeadline\|\|writeBudget\) &&)? inputHostPipeIo\(/.exec(request);
@@ -104,6 +140,14 @@ save('source-binding.json',{repo,sourceHashes:Object.fromEntries([...bytes].map(
   transport:'Inert sink after real pre-envelope/pre-write guards and real dispatch expression; whole inputHostSubmitPad/request and actual pipe IO are not compiled.',
   frame:'Actual binder, frame content assignments, complete focus neutral/assembly/typed serializer and actual legacy envelope merge.',
   boundaryInputs:'Opening-neutral readiness, OS/request-ID input, motion-proof source and frame blend/calibration outputs are fixture inputs; not an entire OnGamepad replay.',noHardware:true});
+if(prepareOnly){
+ save('PREPARED.json',{status:'PREPARED_NOT_COMPILED_NOT_EXECUTED',originalCanonicalId:'controller.unified-standard-input',
+  mainFile,headerRoot,run,compiledParts:Object.entries(parts).map(([symbol,code])=>({symbol,sha256:sha(code)})),
+  resolvedInputs:[...bytes].map(([name,value])=>({name,path:sourcePath(name),bytes:value.length,sha256:sha(value)})),
+  generatedFixture:identity(path.join(run,'fixture.cpp')),actualCompiles:0,actualExecutions:0,originalFourProfilesNotRun:true,
+  actualWindowsEventsPrepared:true,noDeviceIo:true,fullParentExecuted:false,sourceReady:false});
+ console.log(JSON.stringify({status:'PREPARED_NOT_COMPILED_NOT_EXECUTED',run}));process.exit(0);
+}
 const vc=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
 assert(fs.existsSync(vc));const results={};
 const quote=s=>{assert(!/["\r\n%]/.test(s));return '"'+s+'"';};
@@ -117,7 +161,7 @@ for(const profile of ['Release','Checked'])for(const diag of [false,true]){
   const flags=profile==='Release'?'/O2 /MT /DNDEBUG':'/Od /MTd /RTC1 /D_DEBUG';
   fs.writeFileSync(cmd,calibrationToolchainPreamble(vc)+'set VSLANG=1033\r\nwhere cl > '+quote(path.join(dir,'cl-path.txt'))+'\r\n'+
     'cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /permissive- /sdl /showIncludes '+flags+
-    (diag?' /DYMCC_MSI_REPORT_CHAIN_DIAGNOSTIC':'')+' /I'+quote(inc)+' '+quote(path.join(run,'fixture.cpp'))+
+    (diag?' /DYMCC_MSI_REPORT_CHAIN_DIAGNOSTIC':'')+(commonHidOnly?' /DYMCC_COMMON_HID_DIRECTED':'')+' /I'+quote(inc)+' '+quote(path.join(run,'fixture.cpp'))+
     ' /Fo'+quote(path.join(dir,'fixture.obj'))+' /Fe'+quote(exe)+' /link /VERBOSE:LIB advapi32.lib\r\nexit /b %errorlevel%\r\n');
   let r=spawnSync('cmd.exe',['/d','/c',cmd],{cwd:dir,env:childEnv,encoding:'utf8',timeout:60000});
   fs.writeFileSync(path.join(dir,'build.log'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0,'Execution/build failed; see '+dir);
@@ -142,15 +186,15 @@ for(const profile of ['Release','Checked'])for(const diag of [false,true]){
 }
 save('tool-identities.json',[...tools.values()]);
 phase='verify-source';
-const liveMain=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
-const liveUi=fs.readFileSync(path.join(repo,uiPath),'utf8').replace(/\r\n/g,'\n');
+const liveMain=fs.readFileSync(mainFile,'utf8').replace(/\r\n/g,'\n');
+const liveUi=fs.readFileSync(sourcePath(uiPath),'utf8').replace(/\r\n/g,'\n');
 const checkedDefinitions=bindings.filter(b=>b.kind).map(b=>{
-  const code=extract(b.file===uiPath?liveUi:liveMain,b.kind,b.symbol,b.file,[]);
+  const code=extract(b.file===uiPath?liveUi:b.file==='native/main.cpp'?liveMain:fs.readFileSync(sourcePath(b.file),'utf8').replace(/\r\n/g,'\n'),b.kind,b.symbol,b.file,[]);
   return {symbol:b.symbol,file:b.file,compiledSha256:b.sha256,currentSha256:sha(code),same:sha(code)===b.sha256};
 });
 const changedRelated=checkedDefinitions.filter(b=>!b.same),reportNeutralStable=liveMain.includes(parts.REPORT_NEUTRAL);
 save('current-fragments.json',{checkedDefinitions,changedRelated,reportNeutralStable});
-const sourceChanged=[...bytes.keys()].filter(n=>sha(fs.readFileSync(path.join(repo,n)))!==sha(bytes.get(n)));
+const sourceChanged=[...bytes.keys()].filter(n=>sha(fs.readFileSync(sourcePath(n)))!==sha(bytes.get(n)));
 assert.equal(changedRelated.length,0,'Compiled source definitions changed during run');assert(reportNeutralStable,'Published-neutral expression changed');
 assert.equal(sourceChanged.length,0,'Source or fixture dependencies changed during run');
 const issuedSource=results['Release-diagnostic-off'].issued.path;

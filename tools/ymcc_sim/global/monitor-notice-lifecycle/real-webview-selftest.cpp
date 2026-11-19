@@ -2,9 +2,11 @@
 #define YMCC_RADIAL_NATIVE_TEST 1
 #include "monitor_desktop_hud.h"
 #include "WebView2EnvironmentOptions.h"
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <utility>
 using namespace ymcc::desktophud;
 using Microsoft::WRL::RuntimeClass;using Microsoft::WRL::RuntimeClassFlags;using Microsoft::WRL::ClassicCom;using Microsoft::WRL::ChainInterfaces;using Microsoft::WRL::Make;
 namespace ymcc::desktophud {struct CarrierTestAccess {
@@ -96,22 +98,63 @@ public:
 static void releaseHeld(const std::shared_ptr<Completion>& completion){need(completion->heldHandler&&completion->realController&&SUCCEEDED(completion->result),"Actual held controller was not created");need(SUCCEEDED(completion->heldHandler->Invoke(completion->result,completion->heldComposition.Get())),"Actual production completion failed");completion->forwarded=true;ComPtr<ICoreWebView2> view;completion->afterForwardGetCore=completion->controller->get_CoreWebView2(&view);completion->closedAfterForward=completion->actualCloseCalls>0&&SUCCEEDED(completion->actualCloseResult);completion->heldHandler.Reset();completion->heldComposition.Reset();}
 static bool closed(const std::shared_ptr<Completion>& completion){return completion->actualCloseCalls>0&&SUCCEEDED(completion->actualCloseResult);}
 static std::wstring lower(std::wstring value){for(auto& c:value)c=static_cast<wchar_t>(towlower(c));return value;}
-static int worker(const std::filesystem::path& web,const std::filesystem::path& out){
+struct OwnHandle {
+ HANDLE value=nullptr;
+ explicit OwnHandle(HANDLE initial=nullptr):value(initial){}
+ ~OwnHandle(){reset();}
+ OwnHandle(const OwnHandle&)=delete;
+ OwnHandle& operator=(const OwnHandle&)=delete;
+ OwnHandle(OwnHandle&& other)noexcept:value(std::exchange(other.value,nullptr)){}
+ void reset(HANDLE next=nullptr){if(value)CloseHandle(value);value=next;}
+};
+static ULONGLONG processBirth(HANDLE process){FILETIME birth{},end{},kernel{},user{};need(GetProcessTimes(process,&birth,&end,&kernel,&user),"Own process birth unavailable");return (static_cast<ULONGLONG>(birth.dwHighDateTime)<<32)|birth.dwLowDateTime;}
+static bool inJob(HANDLE process,HANDLE job){BOOL member=FALSE;return IsProcessInJob(process,job,&member)&&member;}
+static bool onDesktop(DWORD thread,const std::wstring& expected){
+ const auto desk=GetThreadDesktop(thread);wchar_t name[256]{};DWORD used=0;
+ return desk&&GetUserObjectInformationW(desk,UOI_NAME,name,sizeof(name),&used)&&expected==name;
+}
+static int worker(const std::filesystem::path& web,const std::filesystem::path& out,HANDLE jobHandle,const std::wstring& desktopName){
  Json report={{"status","FAIL"},{"cases",Json::array()},{"actualWebView2Controllers",true},{"controllerTestDouble",false},{"environmentForwardingObserver",true},{"syntheticLocalRendererHandshake",true},{"actualProductRendererVue",false},{"privateDesktop",true},{"desktopSwitched",false},{"normalYmccStarted",false},{"deviceIo",false},{"sleep",false},{"manualSleepAcceptanceReady",false}};
- bool initialized=false;HANDLE browser=nullptr;ComPtr<ICoreWebView2Environment> realEnvironment;ComPtr<ForwardEnvironment> forwarding;auto probe=std::make_shared<Probe>();unsigned checks=0;std::string error;Json events=Json::array();
+ bool initialized=false;OwnHandle job{jobHandle};std::vector<std::pair<UINT32,OwnHandle>> browsers;ComPtr<ICoreWebView2Environment> realEnvironment;ComPtr<ForwardEnvironment> forwarding;auto probe=std::make_shared<Probe>();unsigned checks=0;std::string error,browserAdmissionError;Json events=Json::array();
  auto check=[&](const char* name,bool value){++checks;report["cases"].push_back({{"name",name},{"passed",value}});need(value,name);};
  try{
+  need(job.value&&SetHandleInformation(job.value,HANDLE_FLAG_INHERIT,0)&&inJob(GetCurrentProcess(),job.value),"Worker is not a member of the exact owned Job");
+  need(onDesktop(GetCurrentThreadId(),desktopName),"Worker is not on the private desktop");
+  const auto workerBirth=processBirth(GetCurrentProcess());
+  report["workerOwnership"]={{"pid",GetCurrentProcessId()},{"startFileTimeUtc",std::to_string(workerBirth)},{"desktopName",utf8(desktopName)},{"inOwnedJob",true}};
+  report["browserOwnership"]=Json::array();
   const auto runtime=envValue(L"YMCC_RADIAL_FIXED_RUNTIME"),version=envValue(L"YMCC_RADIAL_FIXED_RUNTIME_VERSION");LPWSTR actual=nullptr;need(SUCCEEDED(GetAvailableCoreWebView2BrowserVersionString(runtime.c_str(),&actual))&&actual,"Explicit runtime version unavailable");const bool exact=version==actual;report["runtimeVersion"]=utf8(actual);CoTaskMemFree(actual);need(exact,"Explicit runtime version mismatch");
   initialized=SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED));need(initialized,"STA COM initialization failed");
   auto options=Make<CoreWebView2EnvironmentOptions>();options->put_AllowSingleSignOnUsingOSPrimaryAccount(FALSE);options->put_AdditionalBrowserArguments(L"--disable-background-networking --disable-component-update --disable-sync --no-first-run --disable-features=msSmartScreenProtection,WebRtcAllowInputVolumeAdjustment --host-resolver-rules=MAP * ~NOTFOUND --autoplay-policy=user-gesture-required");
-  bool complete=false;HRESULT environmentResult=E_PENDING;const auto profile=out/L"owned-webview-profile";const auto requested=CreateCoreWebView2EnvironmentWithOptions(runtime.c_str(),profile.c_str(),options.Get(),Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([&](HRESULT hr,ICoreWebView2Environment* value)->HRESULT{environmentResult=hr;realEnvironment=value;complete=true;return S_OK;}).Get());
+  need(SUCCEEDED(options->put_ExclusiveUserDataFolderAccess(TRUE)),"Exclusive WebView profile unavailable");
+  bool complete=false;HRESULT environmentResult=E_PENDING;const auto profile=out/L"owned-webview-profile";need(std::filesystem::create_directory(profile),"Fresh own browser profile required");const auto requested=CreateCoreWebView2EnvironmentWithOptions(runtime.c_str(),profile.c_str(),options.Get(),Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([&](HRESULT hr,ICoreWebView2Environment* value)->HRESULT{environmentResult=hr;realEnvironment=value;complete=true;return S_OK;}).Get());
   need(SUCCEEDED(requested)&&until([&]{return complete;},20000)&&SUCCEEDED(environmentResult)&&realEnvironment,"Actual explicit WebView2 environment creation failed");forwarding=Make<ForwardEnvironment>(realEnvironment.Get(),probe);
-  auto configure=[&](Carrier& carrier){Config config;config.noticeOnly=true;config.serve=[&](ICoreWebView2* view){ComPtr<ICoreWebView2_3> resource;return SUCCEEDED(view->QueryInterface(IID_PPV_ARGS(&resource)))&&SUCCEEDED(resource->SetVirtualHostNameToFolderMapping(L"app.localhost",web.c_str(),COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS));};config.notify=[&](const std::string& event,const Json& value){events.push_back({{"event",event},{"data",value}});};carrier.initialize(forwarding.Get(),std::move(config));};
+  auto configure=[&](Carrier& carrier){Config config;config.noticeOnly=true;config.serve=[&,owned=&carrier](ICoreWebView2* view){
+   try{
+    const auto parent=CarrierTestAccess::window(*owned);DWORD parentPid=0;
+    const auto thread=parent?GetWindowThreadProcessId(parent,&parentPid):0;
+    need(thread&&parentPid==GetCurrentProcessId()&&onDesktop(thread,desktopName),"Actual controller parent is not on the private desktop");
+    UINT32 pid=0;need(SUCCEEDED(view->get_BrowserProcessId(&pid))&&pid,"Actual browser PID unavailable");
+    const auto existing=std::find_if(browsers.begin(),browsers.end(),[&](const auto& row){return row.first==pid;});
+    if(existing==browsers.end()){
+     OwnHandle browser(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid));
+     need(browser.value&&inJob(browser.value,job.value),"Actual browser is not a member of the exact owned Job");
+     wchar_t image[32768]{};DWORD length=32768;
+     need(QueryFullProcessImageNameW(browser.value,0,image,&length)&&lower(image)==lower((std::filesystem::path(runtime)/L"msedgewebview2.exe").wstring()),"Browser image differs from explicit runtime");
+     const auto birth=processBirth(browser.value);need(birth>=workerBirth,"Browser predates own worker");
+     need(WaitForSingleObject(browser.value,0)==WAIT_TIMEOUT,"Actual browser exited before controller admission");
+     if(browsers.empty()){report["browserPid"]=pid;report["browserObservedImage"]=utf8(image);report["browserBirth"]=birth;}
+     report["browserOwnership"].push_back({{"pid",pid},{"image",utf8(image)},{"inOwnedJob",true},{"startFileTimeUtc",std::to_string(birth)},{"beforePageMapping",true},{"controllerParentDesktop",utf8(desktopName)},{"exclusiveProfile",true}});
+     browsers.emplace_back(pid,std::move(browser));
+    }else need(WaitForSingleObject(existing->second.value,0)==WAIT_TIMEOUT,"Actual browser exited before controller admission");
+    ComPtr<ICoreWebView2_3> resource;return SUCCEEDED(view->QueryInterface(IID_PPV_ARGS(&resource)))&&SUCCEEDED(resource->SetVirtualHostNameToFolderMapping(L"app.localhost",web.c_str(),COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS));
+   }catch(const std::exception& e){browserAdmissionError=e.what();return false;}
+  };config.notify=[&](const std::string& event,const Json& value){events.push_back({{"event",event},{"data",value}});};carrier.initialize(forwarding.Get(),std::move(config));};
   auto create=[&](Carrier& carrier,const std::string& nonce){auto lease=carrier.reserveNotice(nonce)["leaseId"].get<unsigned long long>();auto result=carrier.create(0,0,nonce,true,lease);result["leaseId"]=lease;return result;};
-  auto ready=[&](Carrier& carrier){return until([&]{return carrier.status().value("ready",false);},12000);};
+  auto ready=[&](Carrier& carrier){const bool readyOrError=until([&]{return !browserAdmissionError.empty()||carrier.status().value("ready",false);},12000);need(browserAdmissionError.empty(),browserAdmissionError.c_str());return readyOrError;};
   auto retire=[&](Carrier& carrier,const Json& owner){const auto result=carrier.retireNotice(owner["leaseId"].get<unsigned long long>(),owner["nonce"].get<std::string>());return result.value("leaseRetired",false)&&result.value("resourcesDestroyed",false)&&result.value("ownedOnly",false);};
   {
-   Carrier carrier;configure(carrier);auto owner=create(carrier,"actual-webview-ready-owner-0001");check("actual composition controller and inert local renderer become ready",ready(carrier));auto completion=probe->completions.back();need(completion->realController,"No actual composition controller");UINT32 pid=0;need(SUCCEEDED(CarrierTestAccess::view(carrier)->get_BrowserProcessId(&pid))&&pid,"Actual browser PID unavailable");browser=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);need(browser,"Own browser observation handle unavailable");wchar_t image[32768]{};DWORD length=32768;need(QueryFullProcessImageNameW(browser,0,image,&length)&&lower(image)==lower((std::filesystem::path(runtime)/L"msedgewebview2.exe").wstring()),"Browser image differs from explicit runtime");FILETIME birth{},end{},kernel{},user{},workerBirth{};need(GetProcessTimes(browser,&birth,&end,&kernel,&user)&&GetProcessTimes(GetCurrentProcess(),&workerBirth,&end,&kernel,&user),"Own process birth unavailable");need(CompareFileTime(&birth,&workerBirth)>=0,"Browser predates own worker");report["browserPid"]=pid;report["browserObservedImage"]=utf8(image);report["browserBirth"]=((ULONGLONG)birth.dwHighDateTime<<32)|birth.dwLowDateTime;
+   Carrier carrier;configure(carrier);auto owner=create(carrier,"actual-webview-ready-owner-0001");check("actual composition controller and inert local renderer become ready",ready(carrier));auto completion=probe->completions.back();need(completion->realController,"No actual composition controller");
    HWND window=CarrierTestAccess::window(carrier);auto weak=CarrierTestAccess::state(carrier);check("native exact retirement destroys actual WebView2 parent HWND",retire(carrier,owner)&&!IsWindow(window));check("production retirement invokes actual controller Close and receives success",closed(completion));check("actual renderer callbacks do not retain the retired native State",weak.expired()&&CarrierTestAccess::empty(carrier));carrier.shutdown();completion->controller.Reset();
   }
   {
@@ -128,13 +171,63 @@ static int worker(const std::filesystem::path& web,const std::filesystem::path& 
   }
   for(unsigned i=0;i<3;i++){Carrier carrier;configure(carrier);const auto nonce="actual-webview-repeat-owner-000"+std::to_string(i);auto owner=create(carrier,nonce);need(ready(carrier),"Repeated actual owner not ready");auto completion=probe->completions.back();auto weak=CarrierTestAccess::state(carrier);check(("repeat actual controller lifecycle "+std::to_string(i)).c_str(),retire(carrier,owner)&&weak.expired()&&closed(completion));carrier.shutdown();completion->controller.Reset();}
   check("all nine real completion callbacks forwarded and references released",probe->started==9&&probe->completed==9&&std::all_of(probe->completions.begin(),probe->completions.end(),[](const auto& c){return c->realController&&c->forwarded&&c->actualCloseCalls==1&&SUCCEEDED(c->actualCloseResult)&&c->forwardingControllersDestroyed==1&&!c->controller&&!c->heldComposition&&!c->heldHandler;}));check("all production native event hooks and owners released",CarrierTestAccess::hooks()==0&&CarrierTestAccess::owners()==0);
-  forwarding.Reset();realEnvironment.Reset();check("own explicit browser exits naturally before owned Job cleanup",browser&&until([&]{return WaitForSingleObject(browser,0)==WAIT_OBJECT_0;},15000));report["browserNaturalExitBeforeJobClose"]=true;report["status"]="PASS";
+  forwarding.Reset();realEnvironment.Reset();check("own explicit browser exits naturally before owned Job cleanup",!browsers.empty()&&until([&]{return std::all_of(browsers.begin(),browsers.end(),[](const auto& row){return WaitForSingleObject(row.second.value,0)==WAIT_OBJECT_0;});},15000));report["browserNaturalExitBeforeJobClose"]=true;report["status"]="PASS";
  }catch(const std::exception& failure){error=failure.what();report["error"]=error;report["win32Error"]=GetLastError();}
- for(auto& c:probe->completions){if(c->controller)c->controller->Close();c->heldHandler.Reset();c->heldComposition.Reset();c->controller.Reset();}forwarding.Reset();realEnvironment.Reset();if(browser)CloseHandle(browser);if(initialized)CoUninitialize();report["startedActualCompositionControllers"]=probe->started;report["completedActualCompositionControllers"]=probe->completed;report["actualControllerCloseObservations"]=Json::array();for(const auto& c:probe->completions)report["actualControllerCloseObservations"].push_back({{"realController",c->realController},{"actualCloseCalls",c->actualCloseCalls},{"actualCloseResult",(long)c->actualCloseResult},{"forwardingControllersDestroyed",c->forwardingControllersDestroyed},{"postCloseGetterResult",(long)c->afterForwardGetCore}});report["checks"]=checks;report["events"]=events;report["remainingNativeHooks"]=CarrierTestAccess::hooks();report["remainingNativeOwners"]=CarrierTestAccess::owners();std::ofstream saved(out/L"real-webview-result.json",std::ios::binary);saved<<report.dump(2)<<'\n';std::cout<<Json{{"status",report["status"]},{"checks",checks},{"actualControllers",probe->completed},{"error",error}}.dump()<<'\n';return report["status"]=="PASS"&&saved.good()?0:2;
+ for(auto& c:probe->completions){if(c->controller)c->controller->Close();c->heldHandler.Reset();c->heldComposition.Reset();c->controller.Reset();}forwarding.Reset();realEnvironment.Reset();if(initialized)CoUninitialize();browsers.clear();job.reset();report["startedActualCompositionControllers"]=probe->started;report["completedActualCompositionControllers"]=probe->completed;report["actualControllerCloseObservations"]=Json::array();for(const auto& c:probe->completions)report["actualControllerCloseObservations"].push_back({{"realController",c->realController},{"actualCloseCalls",c->actualCloseCalls},{"actualCloseResult",(long)c->actualCloseResult},{"forwardingControllersDestroyed",c->forwardingControllersDestroyed},{"postCloseGetterResult",(long)c->afterForwardGetCore}});report["checks"]=checks;report["events"]=events;report["remainingNativeHooks"]=CarrierTestAccess::hooks();report["remainingNativeOwners"]=CarrierTestAccess::owners();std::ofstream saved(out/L"real-webview-result.json",std::ios::binary);saved<<report.dump(2)<<'\n';std::cout<<Json{{"status",report["status"]},{"checks",checks},{"actualControllers",probe->completed},{"error",error}}.dump()<<'\n';return report["status"]=="PASS"&&saved.good()?0:2;
 }
-static std::wstring quoted(const std::wstring& value){need(value.find(L'"')==std::wstring::npos,"Quoted path rejected");return L"\""+value+L"\"";}
+static std::wstring quoteWorkerArgument(const std::wstring& value){need(value.find(L'"')==std::wstring::npos,"Quoted path rejected");return L"\""+value+L"\"";}
 int wmain(int argc,wchar_t** argv){
- if(argc==4&&std::wstring(argv[1])==L"--owned-worker")return worker(argv[2],argv[3]);if(argc!=4)return 10;const std::filesystem::path web=argv[1],out=argv[2];HDESK desktop=nullptr;HANDLE job=nullptr;PROCESS_INFORMATION child{};Json report={{"status","FAIL"},{"privateDesktop",true},{"desktopSwitched",false},{"ownedJobOnly",true},{"normalYmccStarted",false},{"forcedTermination",false}};int exit=2;
- try{const auto name=L"YMCC_Notice_Real_WebView_"+std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());desktop=CreateDesktopW(name.c_str(),nullptr,nullptr,0,GENERIC_ALL,nullptr);need(desktop,"Private desktop creation failed");job=CreateJobObjectW(nullptr,nullptr);need(job,"Own Job unavailable");JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;need(SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limits,sizeof(limits)),"Own Job cleanup policy failed");wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto command=quoted(executable)+L" --owned-worker "+quoted(web.wstring())+L" "+quoted(out.wstring());std::wstring desktopName=name;STARTUPINFOW startup{sizeof(startup)};startup.lpDesktop=desktopName.data();need(CreateProcessW(executable,command.data(),nullptr,nullptr,FALSE,CREATE_SUSPENDED,nullptr,nullptr,&startup,&child),"Own private worker creation failed");if(!AssignProcessToJobObject(job,child.hProcess)){TerminateProcess(child.hProcess,3);throw std::runtime_error("Own worker Job binding failed");}ResumeThread(child.hThread);report["workerPid"]=child.dwProcessId;report["desktopName"]=utf8(name);const auto waited=WaitForSingleObject(child.hProcess,120000);if(waited!=WAIT_OBJECT_0){report["forcedTermination"]=true;TerminateJobObject(job,3);throw std::runtime_error("Own worker original120s deadline exceeded");}DWORD code=2;need(GetExitCodeProcess(child.hProcess,&code),"Own worker exit unavailable");report["workerExitCode"]=code;exit=static_cast<int>(code);report["status"]=code==0?"PASS":"FAIL";
- }catch(const std::exception& e){report["error"]=e.what();report["win32Error"]=GetLastError();}if(job)CloseHandle(job);if(child.hThread)CloseHandle(child.hThread);if(child.hProcess)CloseHandle(child.hProcess);if(desktop)report["privateDesktopClosed"]=CloseDesktop(desktop)!=FALSE;std::ofstream saved(out/L"real-webview-private-launch.json",std::ios::binary);saved<<report.dump(2)<<'\n';std::cout<<report.dump()<<'\n';return exit;
+ if(argc==6&&std::wstring(argv[1])==L"--owned-worker"){
+  wchar_t* end=nullptr;const auto handle=std::wcstoull(argv[4],&end,10);
+  if(!handle||!end||*end||handle!=static_cast<ULONG_PTR>(handle))return 10;
+  return worker(argv[2],argv[3],reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(handle)),argv[5]);
+ }
+ if(argc!=4)return 10;
+ const std::filesystem::path web=argv[1],out=argv[2];HDESK desktop=nullptr;OwnHandle job;PROCESS_INFORMATION child{};
+ Json report={{"status","FAIL"},{"privateDesktop",false},{"desktopSwitched",false},{"ownedJobOnly",false},{"normalYmccStarted",false},{"forcedTermination",false},{"jobZeroBeforeClose",false}};int exit=3;bool assigned=false;
+ try{
+  auto name=L"YMCC_Notice_Real_WebView_"+std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
+  desktop=CreateDesktopW(name.c_str(),nullptr,nullptr,0,GENERIC_ALL,nullptr);need(desktop,"Private desktop creation failed");report["privateDesktop"]=true;
+  job.reset(CreateJobObjectW(nullptr,nullptr));need(job.value,"Own Job unavailable");
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  need(SetInformationJobObject(job.value,JobObjectExtendedLimitInformation,&limits,sizeof(limits)),"Own Job cleanup policy failed");
+  need(QueryInformationJobObject(job.value,JobObjectExtendedLimitInformation,&limits,sizeof(limits),nullptr)&&limits.BasicLimitInformation.LimitFlags==JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,"Own Job limits permit unexpected behavior");
+  report["jobBreakawayDisabled"]=true;
+  wchar_t executable[32768]{};const auto length=GetModuleFileNameW(nullptr,executable,32768);need(length&&length<32768,"Own executable unavailable");
+  OwnHandle query;need(DuplicateHandle(GetCurrentProcess(),job.value,GetCurrentProcess(),&query.value,JOB_OBJECT_QUERY,TRUE,0),"Own Job query handle unavailable");
+  auto command=quoteWorkerArgument(executable)+L" --owned-worker "+quoteWorkerArgument(web.wstring())+L" "+quoteWorkerArgument(out.wstring())+L" "+std::to_wstring(reinterpret_cast<ULONG_PTR>(query.value))+L" "+quoteWorkerArgument(name);
+  SIZE_T attributeSize=0;InitializeProcThreadAttributeList(nullptr,1,0,&attributeSize);need(attributeSize>0,"Worker attribute size unavailable");
+  std::vector<unsigned char> attributeStorage(attributeSize);
+  auto attributes=reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
+  need(InitializeProcThreadAttributeList(attributes,1,0,&attributeSize),"Worker attribute list unavailable");
+  STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof(startup);startup.StartupInfo.lpDesktop=name.data();startup.lpAttributeList=attributes;
+  const bool inherited=UpdateProcThreadAttribute(attributes,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,&query.value,sizeof(query.value),nullptr,nullptr)!=FALSE;
+  const bool created=inherited&&CreateProcessW(executable,command.data(),nullptr,nullptr,TRUE,CREATE_SUSPENDED|EXTENDED_STARTUPINFO_PRESENT,nullptr,nullptr,&startup.StartupInfo,&child);
+  const auto createError=GetLastError();DeleteProcThreadAttributeList(attributes);query.reset();SetLastError(createError);
+  need(created,"Own private worker creation or restricted handle binding failed");
+  assigned=AssignProcessToJobObject(job.value,child.hProcess)!=FALSE;
+  need(assigned&&inJob(child.hProcess,job.value),"Own worker Job binding failed");
+  report["ownedJobOnly"]=true;report["workerAssignedBeforeResume"]=true;
+  report["workerPid"]=child.dwProcessId;report["workerStartFileTimeUtc"]=std::to_string(processBirth(child.hProcess));report["desktopName"]=utf8(name);
+  const auto deadline=GetTickCount64()+120000;
+  need(ResumeThread(child.hThread)==1,"Own worker resume failed");
+  const auto remaining=[&](){const auto now=GetTickCount64();return static_cast<DWORD>(now<deadline?deadline-now:0);};
+  need(WaitForSingleObject(child.hProcess,remaining())==WAIT_OBJECT_0,"Own worker original120s deadline exceeded");
+  DWORD code=3;need(GetExitCodeProcess(child.hProcess,&code),"Own worker exit unavailable");report["workerExitCode"]=code;
+  for(;;){
+   JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+   need(QueryInformationJobObject(job.value,JobObjectBasicAccountingInformation,&accounting,sizeof(accounting),nullptr),"Own Job activity unavailable");
+   report["activeProcessesBeforeJobClose"]=accounting.ActiveProcesses;report["totalProcessesInJob"]=accounting.TotalProcesses;
+   const auto left=remaining();need(left>0,"Own Job did not drain before the original120s deadline");
+   if(accounting.ActiveProcesses==0){report["jobZeroBeforeClose"]=true;break;}
+   Sleep(std::min<DWORD>(left,10));
+  }
+  exit=static_cast<int>(code);report["status"]=code==0?"PASS":"FAIL";
+ }catch(const std::exception& e){
+  report["error"]=e.what();report["win32Error"]=GetLastError();
+  if(child.hProcess){report["forcedTermination"]=true;report["terminationRequestedSuccessfully"]=(assigned?TerminateJobObject(job.value,3):TerminateProcess(child.hProcess,3))!=FALSE;}
+ }
+ job.reset();if(child.hThread)CloseHandle(child.hThread);if(child.hProcess)CloseHandle(child.hProcess);
+ if(desktop){const bool closedDesktop=CloseDesktop(desktop)!=FALSE;report["privateDesktopClosed"]=closedDesktop;if(!closedDesktop){report["status"]="FAIL";report["desktopCloseError"]=GetLastError();exit=3;}}
+ std::ofstream saved(out/L"real-webview-private-launch.json",std::ios::binary);saved<<report.dump(2)<<'\n';std::cout<<report.dump()<<'\n';return saved.good()?exit:3;
 }

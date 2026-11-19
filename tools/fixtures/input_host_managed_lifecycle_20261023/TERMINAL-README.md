@@ -53,6 +53,24 @@ node tools/input_host_managed_lifecycle_terminal_selftest.mjs --prepare-owned-ch
 python tools/input_host_native_exit_parent_selftest.py --expected-main-sha256 <reviewed-current-main-SHA256> --profiles Release Checked --scenarios unprotected-uncooperative --managed-retained-child "<fresh-core-evidence>/managed/owned-retained-child.json" --out "<fresh-core-evidence>/native"
 ```
 
+For an explicitly relocated, same-byte toolchain, pass the same absolute root as
+`--toolchain-root` to managed preparation and `--managed-toolchain-root` to the
+native consumer. For example, the existing local SDK root is
+`G:/YeManCC-Work/Environment/Toolchains/dotnet-sdk/10.0.400`. The consumer maps only
+the original declared toolchain paths below the old root; all original hashes,
+exact membership, runtime version, assembly placement and input-byte checks remain.
+There is no automatic root search or fallback, and the override requires the
+actual managed-child descriptor. A path mapping alone is not build or behavior
+acceptance; stale source or missing/different tools still reject the handoff.
+
+The current native local-retirement fixture also compiles the real diagnostic
+`Scope` and the exact current pending-proof getter. Its explicit data port uses
+the source-checked `std::vector<ymcc::targetReturn::Origin>` member, and the same
+original scenario checks that injected pending proof cannot count as cleanup.
+It creates no durable target-return Session or physical history authority. The
+separate runtime-history recovery terminal throws on unexpected entry; it is
+never replaced with a success result or accepted as covered by local Job return.
+
 Preparation only builds Release, with shared compilation/node reuse disabled and
 the pinned runtime version/roll-forward policy. Its descriptor binds the actual
 assembly, runtime files, complete existing toolchain set, source snapshots,

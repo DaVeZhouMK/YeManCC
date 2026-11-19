@@ -6,7 +6,8 @@ import {load,seed} from '../../../fixtures/decky_game_memory_store.mjs';
 const root=path.resolve(import.meta.dirname,'../../../..');
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
 const steam=load(read('decky-plugin/src/steamRunningContext.ts'));
-const {MirrorClient}=load(read('decky-plugin/src/mirrorClient.ts'),{'./steamRunningContext':steam});
+const steamContextModel=load(read('src/bridge/gameSteamContextModel.ts'));
+const {MirrorClient}=load(read('decky-plugin/src/mirrorClient.ts'),{'./steamRunningContext':steam,'../../src/bridge/gameSteamContextModel':steamContextModel});
 const {ReadOnlyMirrorRelay}=load(read('src/bridge/deckyMirrorRelay.ts'),{'../../decky-plugin/src/steamRunningContext':steam});
 const flush=async()=>{for(let i=0;i<240;i++)await Promise.resolve();};
 const resourceTotal=s=>Object.values(s).reduce((n,v)=>n+v,0);
@@ -82,7 +83,11 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
     const requestMark=x.sockets.flatMap(s=>s.sent).filter(r=>r.command==='snapshot').length;
     const deliveredMark=x.delivered.length;
     x.f.state.power={...x.f.state.power,phase:'ready',hardwareWritesAllowed:true};
+     // The legacy notification is a hint. The native owner publishes the committed fact separately.
+     const committedPower={...x.f.state.power,known:true,source:'shared-power-owner-current'};
     for(let storm=0;storm<16;storm++)x.f.emit('power.resumed',{generation});
+     x.f.emit('power.lifecycleChanged',committedPower);
+     x.f.emit('power.lifecycleChanged',committedPower);
     await flush();assert(currentHealth(x.client.snapshot(),x.runId,generation));
     for(const callback of late)callback();
     if(retired){retired.emit('open');retired.emit('message',{type:'snapshot',runId:x.runId,snapshot:old.snapshot});retired.close();}

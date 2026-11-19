@@ -1,0 +1,220 @@
+#define NOMINMAX
+#define _WIN32_WINNT 0x0A00
+#include <windows.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <unordered_map>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;
+namespace fake {
+unsigned checks=0,cases=0,creates=0,destroys=0,pauses=0,desktops=0,desktopCloses=0,handlerCalls=0;
+DWORD lastError=0,thread=77,process=88,windowProcess=88;ULONGLONG now=10000,tick=20000;
+HWND owner=reinterpret_cast<HWND>(17),hit=reinterpret_cast<HWND>(18),parent=owner;
+bool exists=true,visible=true,iconic=false,desktop=true,receiving=true,webVisible=true,boundsOk=true,screenOk=true,clientOk=true,module=true,logThrows=false;
+bool parentOk=true;RECT bounds{20,30,420,230};POINT offset{100,200};std::string missing;
+bool shortWait=false,clockOk=true,createFails=false;LONGLONG counter=100000;
+std::vector<DWORD> errors;std::vector<POINTER_TYPE_INFO> frames;std::vector<json> logs;
+struct WindowFacts {bool exists=true,visible=true,iconic=false,enabled=true;DWORD process=0,thread=0;HWND root=nullptr;RECT client{0,0,800,600};POINT origin{};bool originKnown=false;};
+std::unordered_map<HWND,WindowFacts> windows;
+WindowFacts& facts(HWND h){return windows[h];}
+bool windowExists(HWND h){return exists&&facts(h).exists;}
+bool windowVisible(HWND h){return visible&&facts(h).visible;}
+bool windowIconic(HWND h){return iconic||facts(h).iconic;}
+bool windowEnabled(HWND h){return facts(h).enabled;}
+std::function<void(unsigned)> onInject;std::function<void()> onCreate,onPause;
+void check(bool value,const char* message){++checks;if(!value)throw std::runtime_error(message);}
+DWORD error(){return lastError;}void pause(DWORD ms){check(ms==1,"retry wait changed");++pauses;now+=ms;counter+=shortWait?1:10000;if(onPause)onPause();}
+BOOL frequency(LARGE_INTEGER* value){value->QuadPart=10000000;return clockOk;}
+BOOL performance(LARGE_INTEGER* value){value->QuadPart=counter;return clockOk;}
+HANDLE WINAPI create(POINTER_INPUT_TYPE type,ULONG count,POINTER_FEEDBACK_MODE mode){check(type==PT_TOUCH&&count==1&&mode==POINTER_FEEDBACK_NONE,"device contract changed");++creates;if(onCreate)onCreate();if(createFails){lastError=ERROR_ACCESS_DENIED;return nullptr;}return reinterpret_cast<HANDLE>(42);}
+BOOL WINAPI inject(HANDLE d,const POINTER_TYPE_INFO* frame,UINT32 count){check(d==reinterpret_cast<HANDLE>(42)&&count==1,"wrong device or frame count");frames.push_back(*frame);const auto index=frames.size()-1;const auto error=index<errors.size()?errors[index]:0;lastError=error;if(onInject)onInject(static_cast<unsigned>(index));return error?FALSE:TRUE;}
+void WINAPI destroy(HANDLE d){check(d==reinterpret_cast<HANDLE>(42),"wrong device destroyed");++destroys;}
+HMODULE moduleHandle(LPCWSTR name){check(std::wstring(name)==L"user32.dll","unexpected module");return module?reinterpret_cast<HMODULE>(1):nullptr;}
+FARPROC proc(HMODULE,LPCSTR name){if(missing==name)return nullptr;if(std::strcmp(name,"CreateSyntheticPointerDevice")==0)return reinterpret_cast<FARPROC>(create);if(std::strcmp(name,"InjectSyntheticPointerInput")==0)return reinterpret_cast<FARPROC>(inject);if(std::strcmp(name,"DestroySyntheticPointerDevice")==0)return reinterpret_cast<FARPROC>(destroy);throw std::runtime_error("unexpected dynamic symbol");}
+void systemTime(FILETIME* t){ULARGE_INTEGER v{};v.QuadPart=(now+11644473600000ULL)*10000ULL;t->dwLowDateTime=v.LowPart;t->dwHighDateTime=v.HighPart;}
+ULONGLONG tickCount(){return tick;}
+HDESK openDesktop(DWORD,BOOL,DWORD){++desktops;return desktop?reinterpret_cast<HDESK>(1):nullptr;}
+BOOL closeDesktop(HDESK){++desktopCloses;return TRUE;}
+HDESK threadDesktop(DWORD){return reinterpret_cast<HDESK>(2);}HWINSTA station(){return reinterpret_cast<HWINSTA>(3);}
+BOOL objectInfo(HANDLE h,int index,PVOID buffer,DWORD size,LPDWORD needed){if(index==UOI_IO){*static_cast<BOOL*>(buffer)=receiving;*needed=sizeof(BOOL);return TRUE;}const wchar_t* name=h==reinterpret_cast<HANDLE>(3)?L"WinSta0":L"Default";const auto bytes=static_cast<DWORD>((std::wcslen(name)+1)*sizeof(wchar_t));check(size>=bytes,"desktop-name buffer too short");std::memcpy(buffer,name,bytes);*needed=bytes;return TRUE;}
+DWORD windowThread(HWND h,LPDWORD pid){auto& f=facts(h);if(pid)*pid=f.process?f.process:windowProcess;return f.thread?f.thread:77;}
+HWND ancestor(HWND window,UINT flag){check(flag==GA_ROOT,"wrong root predicate");const auto root=facts(window).root;return root?root:(window==owner||window==reinterpret_cast<HWND>(18)?owner:window);}
+BOOL client(HWND h,LPRECT r){*r=facts(h).client;return clientOk;}
+BOOL inRect(const RECT* r,POINT p){return p.x>=r->left&&p.x<r->right&&p.y>=r->top&&p.y<r->bottom;}
+BOOL toScreen(HWND h,LPPOINT p){const auto& f=facts(h);const auto o=f.originKnown?f.origin:offset;p->x+=o.x;p->y+=o.y;return screenOk;}
+BOOL fromScreen(HWND h,LPPOINT p){const auto& f=facts(h);const auto o=f.originKnown?f.origin:offset;p->x-=o.x;p->y-=o.y;return screenOk;}
+HWND fromPoint(POINT){return hit;}
+}
+#define GetModuleHandleW fake::moduleHandle
+#define GetProcAddress fake::proc
+#define GetSystemTimeAsFileTime fake::systemTime
+#define GetTickCount64 fake::tickCount
+#define GetLastError fake::error
+#define Sleep fake::pause
+#define QueryPerformanceFrequency fake::frequency
+#define QueryPerformanceCounter fake::performance
+#define OpenInputDesktop fake::openDesktop
+#define CloseDesktop fake::closeDesktop
+#define GetUserObjectInformationW fake::objectInfo
+#define GetThreadDesktop fake::threadDesktop
+#define GetCurrentThreadId() fake::thread
+#define GetCurrentProcessId() fake::process
+#define GetProcessWindowStation fake::station
+#define IsWindow fake::windowExists
+#define IsWindowVisible fake::windowVisible
+#define IsIconic fake::windowIconic
+#define IsWindowEnabled fake::windowEnabled
+#define GetWindowThreadProcessId fake::windowThread
+#define GetAncestor fake::ancestor
+#define GetClientRect fake::client
+#define PtInRect fake::inRect
+#define ClientToScreen fake::toScreen
+#define ScreenToClient fake::fromScreen
+#define WindowFromPoint fake::fromPoint
+#include "task_view_touch_activation.h"
+struct Controller {
+ HRESULT get_IsVisible(BOOL* v){*v=fake::webVisible;return S_OK;}
+ HRESULT get_ParentWindow(HWND* v){*v=fake::parent;return fake::parentOk?S_OK:E_FAIL;}
+ HRESULT get_Bounds(RECT* v){*v=fake::bounds;return fake::boundsOk?S_OK:E_FAIL;}
+};
+struct View{};
+template<class T>struct Ptr{T* p=nullptr;T* Get()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p!=nullptr;}};
+static Controller fixtureController;static View fixtureView,otherView;
+static Ptr<Controller> g_ctrl{&fixtureController};static Ptr<View> g_view{&fixtureView};
+static HWND g_hwnd=fake::owner;static bool g_webviewReady=true;
+static std::atomic<unsigned long long> g_webviewGeneration{1};static UINT64 g_webviewNavigationId=2;
+static unsigned long long g_focusSessionSequence=3;
+static std::atomic<std::uint64_t> g_taskViewFocusToken{0};static std::atomic<bool> g_exitRequested{false};
+enum class PowerLifecycle{Ready,Suspended};static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static ULONGLONG fixturePower=1;static ULONGLONG currentPowerGeneration(){return fixturePower;}
+namespace ymcc::gameoverlay {struct Binding {HWND carrier=nullptr;std::uint64_t session=0,power=1;bool pointerInteractive=true,detachedPointer=true,visualProbe=false,observationHold=false;};}
+struct OverlayPort {std::shared_ptr<const ymcc::gameoverlay::Binding> binding;bool active()const{return static_cast<bool>(binding);}auto snapshot()const{return binding;}};
+static OverlayPort g_gameOverlay;
+static HWND g_gameOverlaySurface=nullptr;static bool g_gameOverlaySurfaceAttached=false,fixtureBindingCurrent=true;
+static struct {bool enabled=true;bool active()const{return enabled;}}g_mainWebViewComposition;
+static struct {HWND input=nullptr;bool enabled=false;bool ready()const{return enabled;}HWND window()const{return input;}}g_gameOverlayPanel;
+static bool gameOverlayBindingCurrent(const ymcc::gameoverlay::Binding& b){return fixtureBindingCurrent&&b.power==fixturePower;}
+static void prepareOverlay(){
+ g_gameOverlaySurface=reinterpret_cast<HWND>(27);g_gameOverlaySurfaceAttached=true;
+ g_gameOverlayPanel.input=reinterpret_cast<HWND>(37);g_gameOverlayPanel.enabled=true;
+ auto binding=std::make_shared<ymcc::gameoverlay::Binding>();binding->carrier=g_gameOverlaySurface;binding->session=71;binding->power=fixturePower;g_gameOverlay.binding=binding;
+ fake::facts(g_hwnd).visible=false;fake::facts(g_gameOverlaySurface).enabled=false;
+ fake::parent=g_gameOverlaySurface;fake::hit=g_gameOverlayPanel.input;
+}
+static void appendNativeLifecycleLog(const char* event,json row){fake::check(std::string(event)=="focus-task-view-touch-result","wrong diagnostic event");if(fake::logThrows)throw std::runtime_error("log");fake::logs.push_back(std::move(row));}
+__CONTEXT__
+__ENDPOINT__
+static int g_asyncMode=0;static struct{int family=0;}g_machineIdentity;
+static const char* ymccFamilyName(int){return "fixture";}
+__ASYNC__
+static json guardedResult;
+static void ipc_post_json(int,json row){guardedResult=std::move(row);}
+static void guardSource(View* sourceView){const std::string cmd="window.touchTaskViewButton";json resp;int targetChildId=1;
+__SOURCE_GUARD__
+ ++fake::handlerCalls;
+}
+static std::function<json(const json&)> registered;
+static void ipc_on(const char* command,std::function<json(const json&)> fn){fake::check(std::string(command)=="window.touchTaskViewButton","wrong endpoint registration");registered=std::move(fn);}
+static void registerEndpoint(){__REGISTRATION__}
+static json args(){return json::parse(R"({"diagnosticAction":"game-recognition-switch-program","diagnosticActionId":"switch-program:touch-native","requestedAtUnixMs":10000,"x":50,"y":25,"viewportWidth":100,"viewportHeight":100})");}
+static json prepare(json request){
+ auto p=registered({{"diagnosticAction",request["diagnosticAction"]},{"diagnosticActionId",request["diagnosticActionId"]},{"prepareTouch",true}});
+ fake::check(p["touchTicket"].is_number_unsigned()&&p["requestedAtUnixMs"]==fake::now,"prepare did not issue native evidence");
+ fake::check(fake::creates==0&&fake::frames.empty(),"prepare touched the desktop");
+ request["touchTicket"]=p["touchTicket"];request["touchBudgetMs"]=1000u;return request;
+}
+static void reset(){
+ ++fake::cases;fake::creates=fake::destroys=fake::pauses=fake::desktops=fake::desktopCloses=0;fake::lastError=0;fake::thread=77;fake::process=fake::windowProcess=88;fake::now=10000;fake::tick=20000;
+ fake::hit=reinterpret_cast<HWND>(18);fake::parent=fake::owner;fake::exists=fake::visible=fake::desktop=fake::receiving=fake::webVisible=fake::boundsOk=fake::screenOk=fake::clientOk=fake::module=fake::parentOk=true;
+ fake::iconic=fake::logThrows=false;fake::bounds={20,30,420,230};fake::offset={100,200};fake::missing.clear();fake::errors.clear();fake::frames.clear();fake::logs.clear();fake::onInject={};fake::onCreate={};fake::onPause={};
+ fake::windows.clear();g_gameOverlay.binding.reset();g_gameOverlaySurface=nullptr;g_gameOverlaySurfaceAttached=false;g_gameOverlayPanel.input=nullptr;g_gameOverlayPanel.enabled=false;g_mainWebViewComposition.enabled=fixtureBindingCurrent=true;
+ fake::shortWait=fake::createFails=false;fake::clockOk=true;fake::counter=100000;
+ g_hwnd=fake::owner;g_ctrl.p=&fixtureController;g_view.p=&fixtureView;g_webviewReady=true;g_webviewGeneration=1;g_webviewNavigationId=2;g_focusSessionSequence=3;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;fixturePower=1;
+}
+static void noDelivery(const json& result){using fake::check;check(result["downAccepted"]==false&&result["upAccepted"]==false,"refused request invented delivery");check(fake::frames.empty()&&fake::creates==0&&fake::destroys==0,"refused request created pointer state");}
+static void cancelOnlyAfterDown(const json& result){using fake::check;check(result["downAccepted"]==true&&result["upAccepted"]==false,"partial delivery status lost");check(fake::frames.size()==2&&fake::frames[1].touchInfo.pointerInfo.pointerFlags==(POINTER_FLAG_CANCELED|POINTER_FLAG_UP),"lost owner sent normal UP or omitted cancellation");check(fake::creates==1&&fake::destroys==1,"partial device not returned");}
+#ifdef TASKVIEW_ONLY_OVERLAY_CONTROL
+int main(){try{reset();prepareOverlay();fake::check(nativeTouchTaskViewButton(args())["upAccepted"]==true,"overlay touch must use display+panel instead of hidden main");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+#else
+int main(){try{using fake::check;registerEndpoint();
+ reset();auto result=registered(args());check(result["downAccepted"]==true&&result["upAccepted"]==true&&result["reason"]=="accepted","valid own-WebView touch failed");check(!result.contains("win32Error"),"success invented error");
+ check(fake::frames.size()==2&&fake::creates==1&&fake::destroys==1,"successful contact lifecycle incorrect");
+ const auto down=fake::frames[0];const auto up=fake::frames[1];
+ check(down.type==PT_TOUCH&&down.touchInfo.pointerInfo.pointerType==PT_TOUCH&&down.touchInfo.pointerInfo.pointerId==1,"wrong pointer kind/id");
+ check(down.touchInfo.pointerInfo.pointerFlags==(POINTER_FLAG_DOWN|POINTER_FLAG_INRANGE|POINTER_FLAG_INCONTACT)&&up.touchInfo.pointerInfo.pointerFlags==POINTER_FLAG_UP,"wrong touch frame flags");
+ check(down.touchInfo.pointerInfo.ptPixelLocation.x==320&&down.touchInfo.pointerInfo.ptPixelLocation.y==280&&up.touchInfo.pointerInfo.ptPixelLocation.x==320&&up.touchInfo.pointerInfo.ptPixelLocation.y==280,"viewport/controller/screen mapping changed");
+ check(down.touchInfo.pointerInfo.dwTime==0&&down.touchInfo.pointerInfo.PerformanceCount==0,"caller fabricated pointer timestamps");
+ check(fake::desktops==fake::desktopCloses,"input desktop leaked");check(fake::logs.back()["diagnosticActionId"]=="switch-program:touch-native"&&fake::logs.back()["downAccepted"]==true&&fake::logs.back()["upAccepted"]==true,"action correlation/receipt missing");
+ for(int mode:{-1,0,1,2}){g_asyncMode=mode;check(!ipc_cmd_async("window.touchTaskViewButton"),"touch endpoint moved off UI");}
+ guardSource(g_view.Get());check(fake::handlerCalls==1,"main source rejected");for(auto view:{&otherView,static_cast<View*>(nullptr)}){guardSource(view);check(fake::handlerCalls==1&&guardedResult["result"]["reason"]=="not-main-webview","foreign WebView reached touch endpoint");}
+ for(int invalid=0;invalid<15;++invalid){reset();auto a=args();switch(invalid){case 0:a=nullptr;break;case 1:a["diagnosticAction"]="other";break;case 2:a["diagnosticActionId"]="";break;case 3:a["diagnosticActionId"]=std::string(129,'x');break;case 4:a.erase("requestedAtUnixMs");break;case 5:a["requestedAtUnixMs"]=true;break;case 6:a["x"]="50";break;case 7:a["y"]=true;break;case 8:a["viewportWidth"]=0;break;case 9:a["viewportHeight"]=-1;break;case 10:a["x"]=-1;break;case 11:a["x"]=100;break;case 12:a["y"]=100;break;case 13:a["x"]=std::numeric_limits<double>::quiet_NaN();break;case 14:a["y"]=std::numeric_limits<double>::infinity();break;}noDelivery(registered(a));}
+ for(ULONGLONG stamp:{0ULL,8999ULL,10001ULL}){reset();auto a=args();a["requestedAtUnixMs"]=stamp;noDelivery(registered(a));}
+ reset();auto a=args();a["requestedAtUnixMs"]=ULONGLONG(9000);check(registered(a)["upAccepted"]==true,"age exactly 1000ms rejected");
+ for(ULONGLONG gap:{3505ULL,3506ULL,3507ULL}){
+  reset();prepareOverlay();auto skew=args();skew["requestedAtUnixMs"]=fake::now-gap;noDelivery(registered(skew));
+  auto tap=prepare(skew);fake::now+=60000;fake::tick+=40;check(registered(tap)["upAccepted"]==true,"native ticket ignored by skewed wall-clock replay");
+  check(registered(tap)["reason"]=="touch-not-prepared"&&fake::frames.size()==2,"replayed ticket sent input");
+ }
+ for(int change=0;change<9;++change){reset();prepareOverlay();auto tap=prepare(args());const char* reason="touch-context-changed";
+  switch(change){case 0:++fixturePower;break;case 1:++g_webviewNavigationId;break;case 2:++g_focusSessionSequence;break;case 3:{auto b=*g_gameOverlay.binding;++b.session;g_gameOverlay.binding=std::make_shared<const ymcc::gameoverlay::Binding>(b);break;}case 4:fake::tick+=1001;reason="expired-or-future-request";break;case 5:fake::tick--;reason="expired-or-future-request";break;case 6:tap["touchBudgetMs"]=1001u;reason="invalid-request";break;case 7:tap["touchBudgetMs"]=450u;fake::tick+=451;reason="expired-or-future-request";break;case 8:tap["diagnosticActionId"]="another";reason="touch-not-prepared";break;}
+  auto rejected=registered(tap);noDelivery(rejected);check(rejected["reason"]==reason,"ticket rejection did not preserve boundary");
+ }
+ reset();auto preparedTap=prepare(args());fake::onInject=[](unsigned index){if(!index)fake::tick+=1001;};cancelOnlyAfterDown(registered(preparedTap));
+ for(int invalid=0;invalid<17;++invalid){reset();switch(invalid){case 0:fake::thread=99;break;case 1:fake::windowProcess=99;break;case 2:fake::exists=false;break;case 3:fake::visible=false;break;case 4:fake::iconic=true;break;case 5:fake::desktop=false;break;case 6:fake::receiving=false;break;case 7:fake::webVisible=false;break;case 8:fake::parent=reinterpret_cast<HWND>(99);break;case 9:fake::boundsOk=false;break;case 10:fake::screenOk=false;break;case 11:fake::hit=reinterpret_cast<HWND>(99);break;case 12:g_ctrl.p=nullptr;break;case 13:g_view.p=nullptr;break;case 14:g_webviewReady=false;break;case 15:g_exitRequested=true;break;case 16:g_powerLifecycle=PowerLifecycle::Suspended;break;}noDelivery(registered(args()));}
+ for(const auto* missing:{"CreateSyntheticPointerDevice","InjectSyntheticPointerInput","DestroySyntheticPointerDevice"}){reset();fake::missing=missing;auto r=registered(args());noDelivery(r);check(r["reason"]=="api-unavailable","missing API not identified");}
+ reset();fake::module=false;noDelivery(registered(args()));
+ for(int change=0;change<13;++change){reset();fake::onInject=[change](unsigned index){if(index)return;switch(change){case 0:fake::visible=false;break;case 1:fake::iconic=true;break;case 2:fake::offset.x++;break;case 3:fake::bounds.right++;break;case 4:fake::hit=reinterpret_cast<HWND>(99);break;case 5:fake::desktop=false;break;case 6:++fixturePower;break;case 7:g_exitRequested=true;break;case 8:g_powerLifecycle=PowerLifecycle::Suspended;break;case 9:g_view.p=&otherView;break;case 10:++g_webviewGeneration;break;case 11:++g_webviewNavigationId;break;case 12:++g_focusSessionSequence;break;}};cancelOnlyAfterDown(registered(args()));}
+ reset();fake::onCreate=[]{fake::offset.x++;};result=registered(args());check(result["downAccepted"]==false&&fake::frames.empty()&&fake::creates==1&&fake::destroys==1,"target change before DOWN leaked contact");
+ reset();fake::onCreate=[]{fake::now+=1001;};result=registered(args());check(result["downAccepted"]==false&&fake::frames.empty()&&fake::destroys==1,"age revalidation before DOWN missing");
+ reset();fake::errors={ERROR_ACCESS_DENIED};result=registered(args());check(result["downAccepted"]==false&&fake::frames.size()==1&&fake::destroys==1&&result["win32Error"]==ERROR_ACCESS_DENIED,"rejected DOWN replayed or lost error");
+ reset();fake::errors={0,ERROR_ACCESS_DENIED,0};result=registered(args());check(result["reason"]=="up-not-accepted"&&result["downAccepted"]==true&&result["upAccepted"]==false&&fake::frames.size()==3&&fake::frames.back().touchInfo.pointerInfo.pointerFlags==(POINTER_FLAG_CANCELED|POINTER_FLAG_UP)&&fake::destroys==1,"partial UP failure cleanup wrong");
+ reset();fake::errors={ERROR_NOT_READY,0,0};result=registered(args());check(result["upAccepted"]==true&&fake::pauses==1&&fake::frames.size()==3&&std::memcmp(&fake::frames[0],&fake::frames[1],sizeof(POINTER_TYPE_INFO))==0,"DOWN retry was not identical and bounded");
+ reset();fake::errors={0,ERROR_NOT_READY,0};result=registered(args());check(result["upAccepted"]==true&&fake::pauses==1&&fake::frames.size()==3&&std::memcmp(&fake::frames[1],&fake::frames[2],sizeof(POINTER_TYPE_INFO))==0,"UP retry changed frame or replayed DOWN");
+ reset();fake::errors={ERROR_NOT_READY,ERROR_NOT_READY,0};result=registered(args());check(result["downAccepted"]==false&&fake::frames.size()==2&&fake::pauses==1&&fake::destroys==1,"DOWN retry exceeded one");
+ reset();fake::errors={0,ERROR_NOT_READY,ERROR_NOT_READY,0};result=registered(args());check(result["downAccepted"]==true&&result["upAccepted"]==false&&fake::frames.size()==4&&fake::pauses==1&&fake::destroys==1,"UP retry or cancellation bound changed");
+ reset();fake::errors={0,ERROR_ACCESS_DENIED,ERROR_NOT_READY,0};result=registered(args());check(result["upAccepted"]==false&&fake::frames.size()==4&&fake::pauses==1&&std::memcmp(&fake::frames[2],&fake::frames[3],sizeof(POINTER_TYPE_INFO))==0,"cancellation retry changed its own frame");
+ reset();fake::errors={0,ERROR_ACCESS_DENIED,ERROR_ACCESS_DENIED};result=registered(args());check(result["reason"]=="up-not-accepted-cancel-unconfirmed"&&fake::destroys==1&&fake::frames.size()==3,"cleanup failure was hidden or normal tap replayed");
+ reset();fake::errors={ERROR_NOT_READY,0};fake::onPause=[]{fake::visible=false;};result=registered(args());check(result["downAccepted"]==false&&fake::frames.size()==1&&fake::destroys==1,"DOWN retry ignored lost ownership");
+ reset();fake::errors={0,ERROR_NOT_READY,0};fake::onPause=[]{fake::visible=false;};result=registered(args());check(result["downAccepted"]==true&&result["upAccepted"]==false&&fake::frames.size()==3&&fake::frames.back().touchInfo.pointerInfo.pointerFlags==(POINTER_FLAG_CANCELED|POINTER_FLAG_UP),"UP retry ignored lost ownership");
+ reset();bool nestedBusy=false;fake::onInject=[&](unsigned index){if(!index)nestedBusy=registered(args())["reason"]=="busy";};result=registered(args());check(nestedBusy&&result["upAccepted"]==true&&fake::creates==1&&fake::frames.size()==2,"reentrant endpoint escaped action lease");fake::onInject={};registered(args());check(fake::creates==2&&fake::destroys==2,"action lease not returned");
+ reset();fake::logThrows=true;check(registered(args())["upAccepted"]==true,"diagnostic failure replaced delivery result");
+ reset();fake::createFails=true;result=registered(args());check(result["reason"]=="device-create-failed"&&result["win32Error"]==ERROR_ACCESS_DENIED&&fake::frames.empty()&&fake::creates==1&&fake::destroys==0,"failed creation invented device or delivery");
+ reset();fake::shortWait=true;fake::errors={ERROR_NOT_READY,0};result=registered(args());check(result["downAccepted"]==false&&fake::frames.size()==1&&fake::pauses==1&&fake::destroys==1,"sub-.1ms delay authorized retry");
+ reset();fake::clockOk=false;fake::errors={ERROR_NOT_READY,0};result=registered(args());check(result["downAccepted"]==false&&fake::frames.size()==1&&fake::pauses==0&&fake::destroys==1,"failed timing query authorized retry");
+ reset();prepareOverlay();result=registered(args());check(result["upAccepted"]==true&&result["downAccepted"]==true,"hidden main with current overlay display/panel refused");
+ check(!fake::windowVisible(g_hwnd)&&!fake::windowEnabled(g_gameOverlaySurface)&&fake::windowEnabled(g_gameOverlayPanel.input),"overlay fixture does not model distinct hidden main/disabled display/enabled panel");
+ check(fake::frames.size()==2&&fake::frames[0].touchInfo.pointerInfo.ptPixelLocation.x==320&&fake::frames[0].touchInfo.pointerInfo.ptPixelLocation.y==280,"overlay must map controller bounds relative to display");
+ check(fake::logs.back()["overlaySession"]==71&&fake::logs.back()["displayHwnd"]==27&&fake::logs.back()["receiverHwnd"]==37,"overlay correlation missing");
+ for(int invalid=0;invalid<14;++invalid){reset();prepareOverlay();const char* reason="receiver-unavailable";
+  switch(invalid){case 0:fake::facts(g_gameOverlayPanel.input).enabled=false;break;case 1:fake::facts(g_gameOverlayPanel.input).visible=false;break;case 2:fake::facts(g_gameOverlayPanel.input).process=99;break;case 3:fake::facts(g_gameOverlayPanel.input).thread=99;break;case 4:fake::facts(g_gameOverlaySurface).process=99;reason="display-unavailable";break;case 5:fake::facts(g_gameOverlaySurface).thread=99;reason="display-unavailable";break;case 6:fake::hit=g_hwnd;reason="target-occluded";break;case 7:fake::hit=reinterpret_cast<HWND>(99);reason="target-occluded";break;case 8:fake::parent=g_hwnd;reason="controller-parent-mismatch";break;case 9:g_gameOverlayPanel.enabled=false;break;case 10:fixtureBindingCurrent=false;reason="presentation-unavailable";break;case 11:fake::facts(g_gameOverlaySurface).visible=false;reason="display-unavailable";break;case 12:fake::facts(g_gameOverlayPanel.input).client={0,0,100,40};reason="receiver-point-outside";break;case 13:fake::facts(g_gameOverlayPanel.input).originKnown=true;fake::facts(g_gameOverlayPanel.input).origin={2000,2000};reason="receiver-point-outside";break;}
+  result=registered(args());noDelivery(result);check(result["reason"]==reason&&result["refusalStage"]==reason,"overlay rejection stage lost");
+ }
+ for(int stage=0;stage<3;++stage){reset();const char* reason="context-unavailable";if(stage==0)g_exitRequested=true;if(stage==1){fake::desktop=false;reason="desktop-unavailable";}if(stage==2){fake::bounds.right=fake::bounds.left;reason="geometry-unavailable";}result=registered(args());noDelivery(result);check(result["reason"]==reason,"context/desktop/geometry refusal collapsed");}
+ for(int change=0;change<12;++change){reset();prepareOverlay();fake::onInject=[change](unsigned index){if(index)return;switch(change){
+  case 0:g_gameOverlay.binding=std::make_shared<const ymcc::gameoverlay::Binding>(*g_gameOverlay.binding);break;
+  case 1:{auto b=*g_gameOverlay.binding;++b.session;g_gameOverlay.binding=std::make_shared<const ymcc::gameoverlay::Binding>(b);break;}
+  case 2:g_gameOverlaySurface=reinterpret_cast<HWND>(28);break;case 3:g_gameOverlayPanel.input=reinterpret_cast<HWND>(38);break;
+  case 4:g_gameOverlayPanel.enabled=false;break;case 5:fake::hit=reinterpret_cast<HWND>(99);break;
+  case 6:fake::facts(g_gameOverlayPanel.input).process=99;break;case 7:fake::facts(g_gameOverlaySurface).visible=false;break;
+  case 8:fake::facts(g_gameOverlayPanel.input).enabled=false;break;case 9:fixtureBindingCurrent=false;break;
+  case 10:g_gameOverlaySurfaceAttached=false;break;case 11:fake::parent=g_hwnd;break;}};
+  result=registered(args());cancelOnlyAfterDown(result);check(result.contains("refusalStage")&&result["reason"]=="owner-lost-after-down","mid-DOWN ownership loss not diagnosed");
+ }
+ reset();prepareOverlay();fake::facts(g_hwnd).visible=true;result=registered(args());noDelivery(result);check(result["reason"]=="presentation-unavailable","overlay silently allowed visible old main");
+ reset();prepareOverlay();fake::hit=g_gameOverlaySurface;result=registered(args());noDelivery(result);check(result["reason"]=="target-occluded","disabled display accepted as input receiver");
+ reset();result=registered(args());check(result["upAccepted"]==true&&fake::logs.back()["overlaySession"]==0&&fake::logs.back()["displayHwnd"]==17&&fake::logs.back()["receiverHwnd"]==17,"ordinary main route regressed");
+ std::cout<<json{{"pass",true},{"cases",fake::cases},{"checks",fake::checks},{"actualOSInput",false},{"scope","actual extracted endpoint, source guard, async policy and actual Windows adapter/helper with in-memory Windows/COM/pointer ports"}}.dump()<<'\n';return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+#endif

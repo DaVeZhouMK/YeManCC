@@ -3,6 +3,7 @@
 // serialized lifecycle owner. The BUS only contributes its existing cached read.
 static std::mutex g_msiOwnedReturnMx;
 static ymcc::msi::ownedReturn::Recovery g_msiOwnedReturnRecovery;
+static ymcc::sleeppower::SharedPowerV1 g_msiOwnedReturnMatchPower;
 static msiRecovery::Record g_msiOwnedReturnExpected;
 static bool g_msiOwnedReturnRetrySafe=false;
 // After durable mode return completes, only exact OFF handoff evidence may
@@ -69,21 +70,23 @@ static void msiOwnedReturnPublish() {
     g_msiOwnedReturnFailed.store(g_msiOwnedReturnRecovery.failed(),std::memory_order_release);
 }
 static void msiOwnedReturnNote(const char* action,const char* reason,const MsiClawCommandOutcome* out=nullptr) {
-    const std::string key=std::string(action)+"|"+reason;
-    if(key==g_msiOwnedReturnLastNote)return;
-    g_msiOwnedReturnLastNote=key;
-    json row={{"action",action},{"reason",reason},{"expectedInput","physical-XInput-PID1901"},
-        {"expectedRoot",g_msiOwnedReturnExpected.rootInstance},{"expectedLocations",g_msiOwnedReturnExpected.locationPaths},
-        {"returnDebtEpisodeId",g_msiOwnedReturnRecovery.episode()},
-        {"pending",g_msiOwnedReturnRecovery.pending()},{"working",g_msiOwnedReturnRecovery.working()},
-        {"failed",g_msiOwnedReturnRecovery.failed()},{"retryUsed",g_msiOwnedReturnRecovery.retryUsed()},
-        {"observationCount",g_msiOwnedReturnRecovery.observations()},
-        {"modeReturnOwed",g_msiDinputReturnOwed.load()},{"physicalSignalVerified",false},
-        {"steamConsumptionVerified",false},{"scope","same-owned-board-root-location;existing-read-window;no-Steam-poll"}};
-    if(out){row["sent"]=out->write.ok;row["writeAttempted"]=out->write.attempted;
-        row["writeError"]=out->write.lastError;row["written"]=out->write.written;
-        row["ioState"]=msiClawIoStateName(out->write.state);row["commandProductId"]=out->diag.productId;}
-    appendNativeLifecycleLog("msi-owned-return-recovery",row);
+    try {
+        const std::string key=std::string(action)+"|"+reason;
+        if(key==g_msiOwnedReturnLastNote)return;
+        g_msiOwnedReturnLastNote=key;
+        json row={{"action",action},{"reason",reason},{"expectedInput","physical-XInput-PID1901"},
+            {"expectedRoot",g_msiOwnedReturnExpected.rootInstance},{"expectedLocations",g_msiOwnedReturnExpected.locationPaths},
+            {"returnDebtEpisodeId",g_msiOwnedReturnRecovery.episode()},
+            {"pending",g_msiOwnedReturnRecovery.pending()},{"working",g_msiOwnedReturnRecovery.working()},
+            {"failed",g_msiOwnedReturnRecovery.failed()},{"retryUsed",g_msiOwnedReturnRecovery.retryUsed()},
+            {"observationCount",g_msiOwnedReturnRecovery.observations()},
+            {"modeReturnOwed",g_msiDinputReturnOwed.load()},{"physicalSignalVerified",false},
+            {"steamConsumptionVerified",false},{"scope","same-owned-board-root-location;existing-read-window;no-Steam-poll"}};
+        if(out){row["sent"]=out->write.ok;row["writeAttempted"]=out->write.attempted;
+            row["writeError"]=out->write.lastError;row["written"]=out->write.written;
+            row["ioState"]=msiClawIoStateName(out->write.state);row["commandProductId"]=out->diag.productId;}
+        appendNativeLifecycleLog("msi-owned-return-recovery",row);
+    } catch (...) {}
 }
 static bool msiOwnedReturnRetryable(const MsiClawCommandOutcome& out) {
     if(out.write.handleRetained || out.write.timedOut)return false;
@@ -254,7 +257,9 @@ static bool msiOwnedReturnRecordCurrent(bool expectModePending=true) {
 // after Stop released it. Only THIS owned, freshly resolved PID1902 source can
 // be quiesced for the already eligible single return retry; other sources stay.
 static bool msiOwnedReturnQuiesceReboundDinput(unsigned long long power,unsigned long long mode,
-        unsigned topology,unsigned long long episode,unsigned long long sourceEvent) {
+        unsigned topology,unsigned long long episode,unsigned long long sourceEvent,
+        const std::function<bool()>& observationCurrent=std::function<bool()>()) {
+    if(observationCurrent && !observationCurrent())return false;
     if(msiDinputDeviceTargetAbsent())return true;
     HidHideMsiMainSourceRecord bound;
     if(!msiDinputMainSourceRecordSnapshot(bound) || !bound.valid || !bound.generation ||
@@ -264,14 +269,14 @@ static bool msiOwnedReturnQuiesceReboundDinput(unsigned long long power,unsigned
        hidHideUpper(W2U(root))!=hidHideUpper(bound.usbInstance) ||
        !msiRecovery::sameDeviceRoot(g_msiOwnedReturnExpected,W2U(root),msiCrashLocations(W2U(root))))return false;
     HidHideMsiMainSourceRecord current;
-    if(!msiOwnedReturnContext(power,mode,episode) || g_xinputTopologyEpoch.load()!=topology ||
+    if((observationCurrent && !observationCurrent()) || !msiOwnedReturnContext(power,mode,episode) || g_xinputTopologyEpoch.load()!=topology ||
        g_msiOwnedReturnSourceEvent.load()!=sourceEvent || !msiOwnedReturnRecordCurrent() ||
        !msiDinputMainSourceRecordSnapshot(current) || current.generation!=bound.generation ||
        current.interfacePath!=bound.interfacePath || current.usbInstance!=bound.usbInstance ||
        current.vendorId!=bound.vendorId || current.productId!=bound.productId)return false;
     msiDinputReleasePad("owned-return-retry-quiesce");
     msiDinputClearOwnedState("owned-return-retry-quiesce");
-    const bool released=msiOwnedReturnContext(power,mode,episode) && g_xinputTopologyEpoch.load()==topology &&
+    const bool released=(!observationCurrent || observationCurrent()) && msiOwnedReturnContext(power,mode,episode) && g_xinputTopologyEpoch.load()==topology &&
         g_msiOwnedReturnSourceEvent.load()==sourceEvent && msiOwnedReturnRecordCurrent() && msiDinputDeviceTargetAbsent();
     msiOwnedReturnNote(released?"source-quiesced":"waiting",released?
         "same-owned-rebound-DInput-released-before-single-retry":"owned-source-release-context-unproven");
@@ -287,7 +292,7 @@ static bool msiOwnedReturnSignalCurrent(const MsiOwnedReturnSignal& signal,
         ymcc::virtualOutputSourceCurrent({signal.sequence,signal.readStartedTick,signal.readCompletedTick,
             power,topology,true},now,power,topology);
 }
-static MsiOwnedReturnSignal msiOwnedReturnReadSignal(unsigned long long power,unsigned topology,ULONGLONG now) {
+static MsiOwnedReturnSignal msiOwnedReturnReadSignalFor(const msiRecovery::Record& expected,unsigned long long power,unsigned topology,ULONGLONG now) {
     MsiOwnedReturnSignal signal;
     std::array<std::wstring,4> paths;unsigned mask=0;
     decltype(g_xinputSlotIdentityEpoch.load(std::memory_order_acquire)) identity=0;
@@ -318,7 +323,7 @@ static MsiOwnedReturnSignal msiOwnedReturnReadSignal(unsigned long long power,un
         if(!deviceInterfaceUsbInstance(paths[slot].c_str(),root))continue;
         const auto usb=W2U(root);
         if(hidHideUpper(usb).find("USB\\VID_0DB0&PID_1901\\")!=0)continue;
-        if(msiRecovery::sameDeviceRoot(g_msiOwnedReturnExpected,usb,msiCrashLocations(usb))){
+        if(msiRecovery::sameDeviceRoot(expected,usb,msiCrashLocations(usb))){
             ++matches;signal.mask=1u<<slot;
         }
     }
@@ -330,14 +335,26 @@ static MsiOwnedReturnSignal msiOwnedReturnReadSignal(unsigned long long power,un
     signal.readIdentity=sample.readIdentityGeneration;
     return signal;
 }
+static MsiOwnedReturnSignal msiOwnedReturnReadSignal(unsigned long long power,unsigned topology,ULONGLONG now) {
+    return msiOwnedReturnReadSignalFor(g_msiOwnedReturnExpected,power,topology,now);
+}
 // Called only at the existing Host-owned return/absence checks. This does
 // not admit an XInput source or replace any independent SD/PS PnP duty.
 static bool msiOwnedReturnOffEndpointAbsent() {
     using namespace ymcc::msi::ownedReturnOff;
+    ymcc::sleeppower::SharedPowerV1 observation;
+    const bool observationCaptured=captureSharedPowerLifecycle(observation);
+    const auto inheritedPower=t_inputHostRequestPower;
+    const auto observationCurrent=[observation,observationCaptured,inheritedPower] {
+        return observationCaptured && sharedPowerLifecycleCurrent(observation) &&
+            (!inheritedPower || (inheritedPower->current() && ymcc::sleeppower::powerAdmitted(inheritedPower->power())));
+    };
+    if(!observationCurrent())return false;
     Proof proof;
     if(!msiClawKnownBoardAuthority()||!g_msiOwnedReturnOffEndpoint.snapshot(proof))return false;
     const auto contextCurrent=[&] {
-        return proof.episode && proof.readSequence && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
+        return observationCurrent() && proof.powerScope.generation==proof.power && sharedPowerLifecycleCurrent(proof.powerScope) &&
+            proof.episode && proof.readSequence && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
             !g_realStickTest.virtualTargetEnabled && inputHostConfiguredPersona()=="disabled" &&
             !g_inputHostProcess && !g_inputHostActive && (!g_inputHostPrepared||g_inputHostReleaseQuarantined) &&
             !g_msiDinputRouteDinputArmed.load(std::memory_order_acquire) &&
@@ -365,7 +382,7 @@ static bool msiOwnedReturnOffEndpointAbsent() {
         if(!snapshot.owns_lock())return false;
         rawConnectedMask=g_xinputConnectedMask;sample=g_inputCaptureGamepadSnapshot;}
     const auto now=GetTickCount64();
-    const bool freshSameSource=exactSinglePhysicalMask(proof.mask,rawConnectedMask) && sample.live && sample.readIdentityGeneration==proof.identity &&
+    const bool freshSameSource=sharedPowerLifecycleCurrent(sample.sharedPower) && exactSinglePhysicalMask(proof.mask,rawConnectedMask) && sample.live && sample.readIdentityGeneration==proof.identity &&
         sample.readAttemptSequence>=proof.readSequence && (sample.connectedMask&proof.mask)==proof.mask &&
         (sample.inputSource=="xinput"||sample.inputSource=="xinput-any-connected") &&
         ymcc::virtualOutputSourceCurrent({sample.readAttemptSequence,sample.readStartedTick,sample.readCompletedTick,
@@ -378,6 +395,14 @@ static bool msiOwnedReturnOffEndpointAbsent() {
 static void msiOwnedReturnOffHandoffMaintenance(ULONGLONG now) {
     using namespace ymcc::msi::ownedReturnOff;
     if(!g_msiOwnedReturnOffHandoffPending.load(std::memory_order_acquire))return;
+    ymcc::sleeppower::SharedPowerV1 observation;
+    const bool observationCaptured=captureSharedPowerLifecycle(observation);
+    const auto inheritedPower=t_inputHostRequestPower;
+    const auto observationCurrent=[observation,observationCaptured,inheritedPower] {
+        return observationCaptured && sharedPowerLifecycleCurrent(observation) &&
+            (!inheritedPower || (inheritedPower->current() && ymcc::sleeppower::powerAdmitted(inheritedPower->power())));
+    };
+    if(!observationCurrent())return;
     std::unique_lock<InputHostMutex> host(g_inputHostMx,std::try_to_lock);if(!host.owns_lock())return;
     std::unique_lock<std::mutex> pump(g_msiPersonaPumpMx,std::try_to_lock);if(!pump.owns_lock())return;
     std::unique_lock<std::mutex> state(g_msiOwnedReturnMx,std::try_to_lock);if(!state.owns_lock())return;
@@ -390,9 +415,9 @@ static void msiOwnedReturnOffHandoffMaintenance(ULONGLONG now) {
     Proof context{g_msiOwnedReturnRecovery.episode(),currentPowerGeneration(),g_msiFeedbackModeGeneration.load(),
         g_inputHostVirtualIntentRevision.load(std::memory_order_acquire),inputHostEpochToken(),
         g_msiOwnedReturnSourceEvent.load(std::memory_order_acquire),0,g_xinputTopologyEpoch.load(),
-        g_xinputSlotIdentityEpoch.load(std::memory_order_acquire),0};
+        g_xinputSlotIdentityEpoch.load(std::memory_order_acquire),0,observation};
     const auto current=[&] {
-        return msiClawKnownBoardAuthority() && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
+        return observationCurrent() && msiClawKnownBoardAuthority() && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
             !g_realStickTest.virtualTargetEnabled && inputHostConfiguredPersona()=="disabled" &&
             !g_inputHostProcess && !g_inputHostActive && (!g_inputHostPrepared||g_inputHostReleaseQuarantined) &&
             !g_msiDinputRouteDinputArmed.load() && !g_msiDinputReturnOwed.load() &&
@@ -406,10 +431,12 @@ static void msiOwnedReturnOffHandoffMaintenance(ULONGLONG now) {
     };
     if(!current())return;
     Proof published;
-    if(g_msiOwnedReturnOffEndpoint.snapshot(published) && sameContext(published,context))return;
+    if(g_msiOwnedReturnOffEndpoint.snapshot(published) && sameContext(published,context) && sharedPowerLifecycleCurrent(published.powerScope))return;
     auto& observer=g_msiOwnedReturnOffRequalification;
-    if(!observer.bound || !sameContext(observer.context,context)) {
-        observer.context=context;observer.bound=true;observer.firstSequence=0;observer.stableAt=0;observer.observations=0;
+    const bool sameDuty=observer.bound && sameContext(observer.context,context);
+    if(!sameDuty || !sharedPowerLifecycleCurrent(observer.context.powerScope)) {
+        observer.context=context;observer.bound=true;observer.firstSequence=0;observer.stableAt=0;
+        if(!sameDuty)observer.observations=0;
     }
     if(now<observer.after || observer.observations>=ymcc::msi::ownedReturn::Recovery::maxObservations)return;
     observer.after=now+ymcc::msi::ownedReturn::Recovery::observationIntervalMs;++observer.observations;
@@ -431,10 +458,10 @@ static void msiOwnedReturnOffHandoffMaintenance(ULONGLONG now) {
     g_msiOwnedReturnMatchedTopology.store(context.topology,std::memory_order_release);
     g_msiOwnedReturnMatchedEpisode.store(context.episode,std::memory_order_release);
     g_msiOwnedReturnOffEndpoint.publish(context);
-    appendNativeLifecycleLog("msi-owned-return-recovery",{{"action","off-handoff-proof-requalified"},
+    try {appendNativeLifecycleLog("msi-owned-return-recovery",{{"action","off-handoff-proof-requalified"},
         {"returnDebtEpisodeId",context.episode},{"lastReadSequence",signal.sequence},{"matchedMask",signal.mask},
         {"intentRevision",context.intent},{"physicalSignalVerified",true},{"modeWriteIssued",false},
-        {"steamConsumptionVerified",false},{"scope","same-owned-root-location-two-fresh-windows-OFF-handoff-only"}});
+        {"steamConsumptionVerified",false},{"scope","same-owned-root-location-two-fresh-windows-OFF-handoff-only"}});} catch (...) {}
 }
 static void msiOwnedReturnMaintenance(ULONGLONG now) {
     msiOwnedReturnOffHandoffMaintenance(now);
@@ -444,6 +471,14 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
         g_msiOwnedReturnSeenSourceEvent.load(std::memory_order_acquire)==g_msiOwnedReturnSourceEvent.load(std::memory_order_acquire);
     if(sameEvent && (!g_msiOwnedReturnWorking.load(std::memory_order_acquire) ||
        now<g_msiOwnedReturnObserveAfter.load(std::memory_order_acquire)))return;
+    ymcc::sleeppower::SharedPowerV1 observation;
+    const bool observationCaptured=captureSharedPowerLifecycle(observation);
+    const auto inheritedPower=t_inputHostRequestPower;
+    const auto observationCurrent=[observation,observationCaptured,inheritedPower] {
+        return observationCaptured && sharedPowerLifecycleCurrent(observation) &&
+            (!inheritedPower || (inheritedPower->current() && ymcc::sleeppower::powerAdmitted(inheritedPower->power())));
+    };
+    if(!observationCurrent())return;
     std::unique_lock<InputHostMutex> host(g_inputHostMx,std::try_to_lock);if(!host.owns_lock())return;
     std::unique_lock<std::mutex> pump(g_msiPersonaPumpMx,std::try_to_lock);if(!pump.owns_lock())return;
     std::unique_lock<std::mutex> state(g_msiOwnedReturnMx,std::try_to_lock);if(!state.owns_lock())return;
@@ -456,7 +491,7 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     const auto hostEpoch=inputHostEpochToken();
     const auto intentRevision=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
     if(g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)!=0 ||
-       !msiOwnedReturnContext(power,mode,episode))return; // keep duty during partial settings/Host/power changes
+       !observationCurrent() || !msiOwnedReturnContext(power,mode,episode))return; // keep duty during partial settings/Host/power changes
     const auto sourceEvent=g_msiOwnedReturnSourceEvent.load(std::memory_order_acquire);
     if(!g_msiOwnedReturnRecovery.due(now,topology,power,sourceEvent)){msiOwnedReturnPublish();return;}
     g_msiOwnedReturnSeenTopology.store(topology,std::memory_order_release);
@@ -469,7 +504,7 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     }
     const auto signal=msiOwnedReturnReadSignal(power,topology,GetTickCount64());
     const auto settlementTokensCurrent=[&] {
-        return msiOwnedReturnNonblockingContext(power,mode,episode) && g_xinputTopologyEpoch.load()==topology &&
+        return observationCurrent() && msiOwnedReturnNonblockingContext(power,mode,episode) && g_xinputTopologyEpoch.load()==topology &&
             g_msiOwnedReturnSourceEvent.load()==sourceEvent && inputHostEpochToken()==hostEpoch &&
             g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)==0 &&
             g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)==intentRevision &&
@@ -482,6 +517,8 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
         g_msiOwnedReturnRecovery.miss();msiOwnedReturnNote("waiting","context-changed-during-signal-query");return;
     }
     if(signal.matched){
+        if(!sharedPowerLifecycleCurrent(g_msiOwnedReturnMatchPower))g_msiOwnedReturnRecovery.miss();
+        g_msiOwnedReturnMatchPower=observation;
         if(g_msiOwnedReturnRecovery.observeMatch(GetTickCount64(),signal.sequence,false)){
             if(!settlementCurrent()) {g_msiOwnedReturnRecovery.miss();return;}
             // Runs only after the durable owner obtains its mutex, immediately
@@ -502,14 +539,14 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
             // Preserve the exact same-owned, two-fresh-window qualification for
             // the existing OFF quarantine owner. Never widen source admission.
             g_msiOwnedReturnOffEndpoint.publish({episode,power,mode,intentRevision,hostEpoch,sourceEvent,
-                signal.sequence,topology,signal.readIdentity,signal.mask});
+                signal.sequence,topology,signal.readIdentity,signal.mask,observation});
             msiOwnedReturnPublish();
-            appendNativeLifecycleLog("msi-owned-return-recovery",{{"action","physical-signal-confirmed"},
+            try {appendNativeLifecycleLog("msi-owned-return-recovery",{{"action","physical-signal-confirmed"},
                 {"returnDebtEpisodeId",episode},{"expectedRoot",g_msiOwnedReturnExpected.rootInstance},
                 {"matchedMask",signal.mask},{"lastReadSequence",signal.sequence},{"physicalSignalVerified",true},
                 {"readStartedTick",signal.readStartedTick},{"readCompletedTick",signal.readCompletedTick},
                 {"readIdentityGeneration",signal.readIdentity},{"readFreshnessPolicy","canonical-start-window-1500ms-query-context-rechecked"},
-                {"steamConsumptionVerified",false},{"modeWriteIssued",false}});
+                {"steamConsumptionVerified",false},{"modeWriteIssued",false}});} catch (...) {}
         }else msiOwnedReturnNote("observing","matching-physical-signal-awaits-second-fresh-read-window");
         return;
     }
@@ -533,12 +570,12 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     }
     if(matchingDinput && g_msiOwnedReturnRecovery.retryDue(GetTickCount64()) &&
        !msiDinputDeviceTargetAbsent() &&
-       !msiOwnedReturnQuiesceReboundDinput(power,mode,topology,episode,sourceEvent)) {
+       !msiOwnedReturnQuiesceReboundDinput(power,mode,topology,episode,sourceEvent,observationCurrent)) {
         msiClawCloseModeCommand(handle);msiOwnedReturnPublish();
         msiOwnedReturnNote(g_msiOwnedReturnRecovery.failed()?"unconfirmed":"waiting","rebound-DInput-not-proven-owned-no-retry");return;
     }
     const auto sourceRevision=g_msiMainSourceRevision.load(std::memory_order_acquire);
-    const bool safe=msiOwnedReturnContext(power,mode,episode) && inputHostEpochToken()==hostEpoch && g_xinputTopologyEpoch.load()==topology &&
+    const bool safe=observationCurrent() && msiOwnedReturnContext(power,mode,episode) && inputHostEpochToken()==hostEpoch && g_xinputTopologyEpoch.load()==topology &&
         g_msiOwnedReturnSourceEvent.load()==sourceEvent && msiOwnedReturnRecordCurrent() && msiDinputDeviceTargetAbsent() &&
         g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)==0 &&
         g_inputHostVirtualIntentRevision.load()==intentRevision && g_msiMainSourceRevision.load()==sourceRevision;
@@ -550,8 +587,8 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     // Full persona/source/durable facts were verified above, outside the I/O
     // slot. Host/pump/owned locks remain held; revisions revoke concurrent
     // settings/source mutations. Only atomics and lock-free leaf gates below.
-    const auto contextCurrent=[power,mode,topology,episode,sourceEvent,hostEpoch,intentRevision,sourceRevision] {
-        return msiClawKnownBoardAuthority() && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
+    const auto contextCurrent=[observationCurrent,power,mode,topology,episode,sourceEvent,hostEpoch,intentRevision,sourceRevision] {
+        return observationCurrent() && msiClawKnownBoardAuthority() && hardwareWriteAllowed() && !inputHostExitFenceRaised() &&
             !g_msiNativeForegroundCyclePending.load() && !g_msiNativeForegroundPowerHold.load() &&
             !msiForegroundIsolationBorrowBusy() && !g_inputHostProcess &&
             (!g_inputHostPrepared || g_inputHostReleaseQuarantined) && !g_inputHostActive &&

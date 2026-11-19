@@ -1,5 +1,8 @@
 #pragma once
 #include "sleep_steam_settle.h"
+#include "sleep_steam_command_attempt.h"
+#include "sleep_wake_admission.h"
+#include <functional>
 // Steam-only event-driven automatic owner. No InputHost/fan gates or actions.
 // Protected UI is positively observed before spending a RETURN; no focus override.
 // Only an explicit deduplicated wake arms it; bounded waits reuse sgWorkLoop.
@@ -8,9 +11,11 @@ using namespace ymcc::sleeprecovery;
 struct State {
     unsigned long long generation=0,configEpoch=0,seenGeneration=0,seenBeforeAdmission=0;
     ULONGLONG armed=0,due=0,stageSince=0,wakeCandidateAt=0;
+    ymcc::sleeppower::WakeContinuation wakeContinuation;
     std::string phase="idle",reason;
     json before,last,receipt,steamStatus,inputStatus,wakeAdmission,wakeReadiness,associationHistory,secondaryRejection,timeline=json::array();
     bool listAttempted=false,inputAttempted=false;unsigned inputDispatches=0;json preflightRejections=json::array();
+    bool commandInFlight=false;json commandWait;
     ymcc::sleepsteam::SettleWindow settling;
     unsigned postReturnForegroundSamples=0,initialWindowReadbackSamples=0;bool postReturnForegroundWait=false,postReturnDelayedWindowObserved=false,initialWindowReadbackWait=false;
     json postReturnObservationSummary() const {return {{"foregroundDeferredSamples",postReturnForegroundSamples},
@@ -18,15 +23,81 @@ struct State {
         {"waitingInitialOriginalWindow",initialWindowReadbackWait},{"initialWindowReadbackSamples",initialWindowReadbackSamples},{"returnReplayAllowed",false},
         {"gameInputVerified",false},{"continueButtonVerified",false}};}
 };
-static std::mutex mx,setMx,reportMx;
+static std::mutex& mx=ymcc::sleeppower::nativeWakeFacts.mutex;
+static std::mutex reportMx;
+static std::timed_mutex setMx;
 static State state;
-struct KernelWake {unsigned long long generation=0,configEpoch=0;ULONGLONG boundaryFileTime=0,eventFileTime=0;int eventId=0;bool awaitedCapture=false,uiWakeRequested=false;unsigned long long requestGeneration=0;};
-static KernelWake kernelWake;
-struct KernelSleepEntry {unsigned long long configEpoch=0,generation=0;ULONGLONG eventFileTime=0;};
-static KernelSleepEntry kernelSleepEntry;
+static ymcc::sleeppower::WakeProjection sharedWakeFactsLocked(){
+    const auto generation=currentPowerGeneration(),epoch=g_sleepRecoveryAutoConfigEpoch.load();
+    const auto original=SleepSteamRecovery::capturedFor(generation);
+    return ymcc::sleeppower::nativeWakeFacts.snapshotForLocked(generation,epoch,original.powerBoundaryFileTime,original.boundaryGeneration);
+}
+static bool followsWakeBoundary(unsigned long long observed,unsigned long long gen,unsigned long long boundaryGeneration) {
+    return ymcc::sleeppower::followsWakeBoundary(observed,gen,boundaryGeneration);
+}
+// Diagnostic output only: tags name evaluated branches, never unvisited subconditions.
+// Optional callers retain the same guards, short circuit order, clocks and result.
+struct WakeOperationObservation {
+    const char* rejectedGuard=nullptr;
+    unsigned long long generation=0,configEpoch=0;
+    ULONGLONG proofNowFileTime=0,interactiveFileTime=0,exitFileTime=0,proofLimitMs=0;
+    ULONGLONG nowTick=0,armedTick=0,kernelEventFileTime=0,kernelProofNowFileTime=0;
+    int sharedPhase=0;
+    bool interactiveProofEvaluated=false,kernelProofEvaluated=false,sharedPhaseEvaluated=false;
+};
+static bool completedInteractiveResumeLocked(unsigned long long gen,unsigned long long epoch,ULONGLONG boundary,unsigned long long boundaryGeneration,WakeOperationObservation* observation=nullptr) {
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& interactiveResume=native.interactiveResume;const auto& completedResume=native.completedResume;const auto& readyCommit=native.readyCommit;
+
+    if(observation){observation->generation=gen;observation->configEpoch=epoch;observation->rejectedGuard="interactive-identity-ready-or-retry";}
+    const auto utc=sgNowFileTime();
+    const ymcc::sleeppower::CompletedWake joinedNative{gen,epoch,boundary,boundaryGeneration,
+        readyCommit.generation,readyCommit.configEpoch,readyCommit.boundaryFileTime,
+        interactiveResume.generation,interactiveResume.configEpoch,interactiveResume.boundaryFileTime,interactiveResume.eventFileTime,
+        completedResume.generation,completedResume.configEpoch,completedResume.boundaryFileTime,completedResume.eventFileTime,
+        kernelSleepEntry.configEpoch==epoch?kernelSleepEntry.eventFileTime:0,utc,ymcc::sleepsteam::kWakeObserveLimitMs,completedResume.eventId,
+        sleepSteamRecoveryAllows(gen,epoch),sgSleepRetryActive(),g_powerLifecycle.load()==PowerLifecycle::Ready};
+    const auto result=ymcc::sleeppower::completedWake(joinedNative);
+    if(observation&&result!=ymcc::sleeppower::CompletedWakeResult::Context){
+        observation->interactiveProofEvaluated=true;observation->proofNowFileTime=utc;
+        observation->interactiveFileTime=joinedNative.interactiveAt;observation->exitFileTime=joinedNative.completedAt;
+        observation->proofLimitMs=joinedNative.limitMs;
+        observation->rejectedGuard=result==ymcc::sleeppower::CompletedWakeResult::Window?"interactive-proof-window":
+            result==ymcc::sleeppower::CompletedWakeResult::Kind?"completed-exit-kind-or-window":
+            result==ymcc::sleeppower::CompletedWakeResult::Gap?"interactive-exit-gap":nullptr;
+    }
+    return result==ymcc::sleeppower::CompletedWakeResult::Allowed;
+}
+static void recordInteractiveResume(unsigned long long gen,int code,ULONGLONG receiptTick) {
+    // Native ordered PBT producer owns recording. This consumer only receives
+    // its existing notification; it never grants another sleep interpretation.
+    (void)gen;(void)code;(void)receiptTick;
+}
+static void recordCompletedResume(unsigned long long gen,int eventId,int reason,int targetState,ULONGLONG at) {
+    (void)gen;(void)eventId;(void)reason;(void)targetState;(void)at;
+}
 static bool proofSupersededLocked() {
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& interactiveResume=native.interactiveResume;const auto& completedResume=native.completedResume;const auto& readyCommit=native.readyCommit;
+
     const auto event=state.wakeAdmission.value("eventFileTime",json());std::uint64_t at=0;
-    return flag(state.wakeAdmission,"kernelWakeConfirmed")&&event.is_string()&&ymcc::sleepsteam::unsignedDecimal(event.get<std::string>(),at)&&
+    const bool timed=event.is_string()&&ymcc::sleepsteam::unsignedDecimal(event.get<std::string>(),at);
+    if(timed&&flag(state.wakeAdmission,"interactiveWakeConfirmed")&&
+        state.wakeAdmission.value("source",std::string{})=="interactive-resume-committed-ready"){
+        std::uint64_t completed=0,boundary=0;
+        const auto end=state.wakeAdmission.value("completedEventFileTime",json()),begin=state.wakeAdmission.value("boundaryFileTime",json());
+        // Only the original admitted completion and its current native tuple
+        // can close an entry. JSON, a fresh unrelated exit or Ready alone cannot.
+        if(end.is_string()&&begin.is_string()&&ymcc::sleepsteam::unsignedDecimal(end.get<std::string>(),completed)&&
+            ymcc::sleepsteam::unsignedDecimal(begin.get<std::string>(),boundary)&&completed>at&&
+            completedResume.eventFileTime==completed&&completedResume.configEpoch==state.configEpoch&&
+            completedResume.boundaryFileTime==boundary&&
+            followsWakeBoundary(completedResume.generation,state.generation,number(state.wakeAdmission,"boundaryGeneration"))&&
+            (completedResume.eventId==507||completedResume.eventId==107))at=completed;
+    }
+    return (flag(state.wakeAdmission,"kernelWakeConfirmed")||flag(state.wakeAdmission,"interactiveWakeConfirmed"))&&timed&&
         kernelSleepEntry.configEpoch==state.configEpoch&&kernelSleepEntry.eventFileTime&&at<=kernelSleepEntry.eventFileTime;
 }
 
@@ -35,33 +106,80 @@ static bool proofSupersededLocked() {
 // owns no hardware writes and must not reopen that shared transaction. Allow
 // its existing bounded operation only under its EXACT already-admitted final
 // Kernel witness; no raw/PBT/intermediate/old proof grants this alternative.
-static bool wakeOperationAllowedLocked(unsigned long long gen,unsigned long long epoch) {
-    if(!sleepSteamRecoveryAllows(gen,epoch)||sgSleepRetryActive())return false;
+static bool wakeOperationAllowedLocked(unsigned long long gen,unsigned long long epoch,WakeOperationObservation* observation=nullptr) {
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& interactiveResume=native.interactiveResume;const auto& completedResume=native.completedResume;const auto& readyCommit=native.readyCommit;
+
+    if(observation){*observation=WakeOperationObservation{};observation->generation=gen;observation->configEpoch=epoch;
+        observation->rejectedGuard="wake-classification-consumer-or-retry";}
+    if(!sharedSleepWakeClassified(gen)||!sleepSteamRecoveryAllows(gen,epoch)||sgSleepRetryActive())return false;
+    // A successor proof never extends the retired proof's original UTC limit.
+    if(state.wakeContinuation.retiredEvent()&&!state.wakeContinuation.operationCurrent(sgNowFileTime()))return false;
+    if(state.wakeAdmission.is_object()&&state.wakeAdmission.value("source",std::string())=="interactive-resume-committed-ready"){
+        std::uint64_t boundary=0;const auto value=state.wakeAdmission.value("boundaryFileTime",json());
+        if(observation)observation->rejectedGuard="interactive-admission-identity-or-boundary";
+        if(state.generation!=gen||state.configEpoch!=epoch||proofSupersededLocked()||!value.is_string()||
+            !ymcc::sleepsteam::unsignedDecimal(value.get<std::string>(),boundary)||
+            !completedInteractiveResumeLocked(gen,epoch,boundary,number(state.wakeAdmission,"boundaryGeneration"),observation))return false;
+    }
     const auto phase=g_powerLifecycle.load();
-    if(phase==PowerLifecycle::Ready)return true; // unchanged S3 / direct prechecks
+    if(observation){observation->sharedPhaseEvaluated=true;observation->sharedPhase=static_cast<int>(phase);}
+    if(phase==PowerLifecycle::Ready){
+        // An original 506 can reach the public owner before the window leaves Ready.
+        if(state.generation==gen&&state.configEpoch==epoch&&flag(state.wakeAdmission,"kernelWakeConfirmed")&&proofSupersededLocked()){
+            if(observation)observation->rejectedGuard="ready-kernel-proof-superseded";
+            return false;
+        }
+        if(observation)observation->rejectedGuard=nullptr;
+        return true;
+    }
+    if(observation)observation->rejectedGuard="resuming-admission-or-superseded";
     if(phase!=PowerLifecycle::Resuming||!g_sleepRecoveryAutoPending.load()||state.generation!=gen||state.configEpoch!=epoch||
         !flag(state.wakeAdmission,"kernelWakeConfirmed")||!flag(state.wakeAdmission,"proofFresh")||
         state.wakeAdmission.value("status",std::string())!="admitted"||proofSupersededLocked())return false;
     const auto source=state.wakeAdmission.value("source",std::string());
+    if(observation)observation->rejectedGuard="kernel-source";
     if(source!="kernel-power-507-reason-1"&&source!="kernel-power-107-target-5")return false;
     std::uint64_t event=0,boundary=0;const auto at=state.wakeAdmission.value("eventFileTime",json()),sleep=state.wakeAdmission.value("boundaryFileTime",json());
+    if(observation)observation->rejectedGuard="kernel-admission-boundary";
     if(!at.is_string()||!sleep.is_string()||!ymcc::sleepsteam::unsignedDecimal(at.get<std::string>(),event)||
         !ymcc::sleepsteam::unsignedDecimal(sleep.get<std::string>(),boundary)||!boundary||event<=boundary)return false;
     // Keep the native witness in the join, not only exported admission JSON.
+    if(observation)observation->rejectedGuard="kernel-native-witness";
     if(kernelWake.configEpoch!=epoch||kernelWake.eventFileTime!=event||!kernelWake.uiWakeRequested||kernelWake.requestGeneration!=gen||
         kernelWake.generation!=number(state.wakeAdmission,"proofObservedGeneration")||
         (kernelWake.boundaryFileTime&&kernelWake.boundaryFileTime!=boundary)||
         (source=="kernel-power-507-reason-1"?kernelWake.eventId!=507:kernelWake.eventId!=107))return false;
     const auto now=GetTickCount64(),utc=sgNowFileTime();
-    return now>=state.armed&&now-state.armed<ymcc::sleepsteam::kWakeObserveLimitMs&&event<=utc&&
+    if(observation){observation->kernelProofEvaluated=true;observation->nowTick=now;observation->armedTick=state.armed;
+        observation->kernelProofNowFileTime=utc;observation->kernelEventFileTime=event;observation->proofLimitMs=ymcc::sleepsteam::kWakeObserveLimitMs;}
+    const bool allowed=now>=state.armed&&now-state.armed<ymcc::sleepsteam::kWakeObserveLimitMs&&event<=utc&&
         utc-event<=ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL;
+    if(observation)observation->rejectedGuard=allowed?nullptr:"kernel-operation-or-proof-window";
+    return allowed;
 }
 static bool wakeOperationAllows(unsigned long long gen,unsigned long long epoch) {
     std::lock_guard<std::mutex> lock(mx);return wakeOperationAllowedLocked(gen,epoch);
 }
 static json wakeReadinessLocked(unsigned long long gen,unsigned long long epoch) {
-    const auto phase=g_powerLifecycle.load();const bool allowed=wakeOperationAllowedLocked(gen,epoch),sharedReady=phase==PowerLifecycle::Ready;
-    return {{"operationAllowed",allowed},{"basis",allowed?sharedReady?"shared-ready":"bound-final-kernel-wake-during-resuming":"waiting-valid-steam-wake"},
+    WakeOperationObservation observation;
+    const auto phase=g_powerLifecycle.load();const bool allowed=wakeOperationAllowedLocked(gen,epoch,&observation),sharedReady=phase==PowerLifecycle::Ready;
+    return {{"operationAllowed",allowed},{"rejectedGuard",observation.rejectedGuard?json(observation.rejectedGuard):json()},
+        {"consumerObservation",{{"diagnosticOnly",true},{"authority",false},
+            {"generation",observation.generation},{"configEpoch",observation.configEpoch},
+            {"sharedPhaseEvaluated",observation.sharedPhaseEvaluated},
+            {"sharedPhase",observation.sharedPhaseEvaluated?json(observation.sharedPhase):json()},
+            {"interactiveProofEvaluated",observation.interactiveProofEvaluated},{"kernelProofEvaluated",observation.kernelProofEvaluated},
+            {"proofNowFileTime",observation.interactiveProofEvaluated?json(std::to_string(observation.proofNowFileTime)):observation.kernelProofEvaluated?json(std::to_string(observation.kernelProofNowFileTime)):json()},
+            {"kernelProofNowFileTime",observation.kernelProofEvaluated?json(std::to_string(observation.kernelProofNowFileTime)):json()},
+            {"interactiveFileTime",observation.interactiveProofEvaluated?json(std::to_string(observation.interactiveFileTime)):json()},
+            {"exitFileTime",observation.interactiveProofEvaluated?json(std::to_string(observation.exitFileTime)):json()},
+            {"kernelEventFileTime",observation.kernelProofEvaluated?json(std::to_string(observation.kernelEventFileTime)):json()},
+            {"nowTick",observation.kernelProofEvaluated?json(observation.nowTick):json()},
+            {"armedTick",observation.kernelProofEvaluated?json(observation.armedTick):json()},
+            {"proofLimitMs",observation.interactiveProofEvaluated||observation.kernelProofEvaluated?json(observation.proofLimitMs):json()}}},
+        {"basis",allowed?sharedReady?"shared-ready":"bound-final-kernel-wake-during-resuming":"waiting-valid-steam-wake"},
         {"sharedPowerLifecycle",sharedReady?"ready":phase==PowerLifecycle::Resuming?"resuming":phase==PowerLifecycle::Suspending?"suspending":"suspended"},
         {"sharedReady",sharedReady},{"finalKernelWakeAdmitted",flag(state.wakeAdmission,"kernelWakeConfirmed")},
         {"generation",gen},{"configEpoch",epoch},{"sharedStateModified",false},{"inputDeviceGateUsed",false},
@@ -75,7 +193,7 @@ static std::wstring reportPath(){return SG_DIR+L"\\wake-recovery-last.json";}
 static json get() {
     std::lock_guard<std::mutex> lock(mx);
     return {{"ok",true},{"enabled",g_sleepRecoveryAutoEnabled.load()},{"phase",state.phase},
-        {"generation",state.generation},{"reason",state.reason},{"wakeAdmission",state.wakeAdmission},{"wakeReadiness",state.wakeReadiness},{"scope","steam"},{"steamRecovery",state.steamStatus},{"steamInputRecovery",state.inputStatus},{"healthVerified",false},{"logPath",W2U(reportPath())}};
+        {"generation",state.generation},{"reason",state.reason},{"commandInFlight",state.commandInFlight},{"commandWait",state.commandWait},{"wakeAdmission",state.wakeAdmission},{"wakeReadiness",state.wakeReadiness},{"scope","steam"},{"steamRecovery",state.steamStatus},{"steamInputRecovery",state.inputStatus},{"healthVerified",false},{"logPath",W2U(reportPath())}};
 }
 static std::wstring exportCurrentSnapshot() {
     json evidence;
@@ -112,7 +230,10 @@ static std::wstring exportCurrentSnapshot() {
     const auto path=SG_DIR+L"\\wake-recovery-current.json";
     return sgEnsureMarkerDir(SG_DIR)&&sgWriteFileAtomic(path,bytes)?path:std::wstring();
 }
-static void notify() {sgNotifyWork();ipc_emit("sleep.recovery-auto",get());}
+static void notify(const std::function<void(const std::function<void()>&)>& withOwner = nullptr) {
+    if(!withOwner){sgNotifyWork();postSleepRecoveryAutoStatus();return;}
+    withOwner([]{});sgNotifyWork();withOwner(postSleepRecoveryAutoStatus);
+}
 static bool current(unsigned long long gen,unsigned long long epoch,const char* phase) {
     std::lock_guard<std::mutex> lock(mx);
     return sleepSteamRecoveryAllows(gen,epoch)&&state.generation==gen&&state.configEpoch==epoch&&state.phase==phase&&!proofSupersededLocked()&&wakeOperationAllowedLocked(gen,epoch)&&GetTickCount64()>=state.armed&&GetTickCount64()-state.armed<ymcc::sleepsteam::kWakeObserveLimitMs;
@@ -121,10 +242,13 @@ static void finish(unsigned long long gen,unsigned long long epoch,const std::st
     {
         std::lock_guard<std::mutex> lock(mx);
         if(state.generation!=gen||state.configEpoch!=epoch||!g_sleepRecoveryAutoPending.load())return;
+        // A newer public entry can retire the verification while Ready still matches.
+        // Leave the episode pending for the existing cancellation or continuation path.
+        if(phase=="recorded"&&(proofSupersededLocked()||!wakeOperationAllowedLocked(gen,epoch)))return;
         if(!evidence.contains("before")&&state.before.is_object())evidence["before"]=state.before;
         if(!evidence.contains("after")&&state.last.is_object())evidence["after"]=state.last;
         if(!evidence.contains("receipt")&&state.receipt.is_object())evidence["receipt"]=state.receipt;
-        evidence["postReturnObservation"]=state.postReturnObservationSummary();
+        evidence["postReturnObservation"]=state.postReturnObservationSummary();evidence["commandInFlight"]=state.commandInFlight;evidence["commandWait"]=state.commandWait;
         evidence["settling"]=state.settling.summary();evidence["observations"]=state.timeline;evidence["wakeAdmission"]=state.wakeAdmission;evidence["wakeReadiness"]=state.wakeReadiness;evidence["associationHistory"]=state.associationHistory;evidence["preflightRejections"]=state.preflightRejections;evidence["secondaryRejection"]=state.secondaryRejection;
         evidence["attempts"]={{"list",state.listAttempted?1:0},{"input",state.inputAttempted?1:0},{"inputDispatches",state.inputDispatches},{"pidWindow",pidWindowAttempts(evidence.value("receipt",json::object()))}};
         state.phase=phase;state.reason=reason;
@@ -154,8 +278,8 @@ static void finish(unsigned long long gen,unsigned long long epoch,const std::st
         }
     }
     sgRecordFact("sleep-recovery-automatic-result",{{"generation",gen},{"phase",phase},{"reason",reason},
-        {"feedbackSaved",saved},{"healthVerified",false},{"uploaded",false},{"wakeReadiness",state.wakeReadiness},
-        {"attempts",{{"list",state.listAttempted?1:0},{"input",state.inputAttempted?1:0},{"inputDispatches",state.inputDispatches}}}});
+        {"feedbackSaved",saved},{"healthVerified",false},{"uploaded",false},{"wakeReadiness",evidence["wakeReadiness"]},
+        {"attempts",{{"list",evidence["attempts"]["list"]},{"input",evidence["attempts"]["input"]},{"inputDispatches",evidence["attempts"]["inputDispatches"]}}}});
     {
         std::lock_guard<std::mutex> lock(mx);
         if(state.generation!=gen||state.configEpoch!=epoch)return;
@@ -163,73 +287,65 @@ static void finish(unsigned long long gen,unsigned long long epoch,const std::st
     }
     notify();
 }
-static json set(const json& a) {
+static json set(const json& a, const std::function<bool(bool)>& savePreference = nullptr,
+    const std::function<void(const std::function<void()>&)>& withOwner = nullptr) {
     const auto it=a.find("enabled");if(it==a.end()||!it->is_boolean())throw std::runtime_error("automatic-recovery-enabled-must-be-boolean");
-    const bool enabled=it->get<bool>();std::lock_guard<std::mutex> serial(setMx);
-    if(enabled!=g_sleepRecoveryAutoEnabled.load()) {
-        // Persist before publishing admission. Enabling NEVER schedules a repair.
-        if(!ymSettingsPatchSection("sleep",{{"autoWakeRecovery",enabled}}))
-            return {{"ok",false},{"reason","automatic-recovery-preference-save-failed"}};
-        g_sleepRecoveryAutoConfigEpoch.fetch_add(1,std::memory_order_acq_rel);
-        g_sleepRecoveryAutoEnabled.store(enabled,std::memory_order_release);
+    const auto admitted=[&](const std::function<void()>& action){if(withOwner)withOwner(action);else action();};
+    const auto requireOwner=[&]{if(withOwner)withOwner([]{});};
+    const bool enabled=it->get<bool>();requireOwner();
+    std::unique_lock<std::timed_mutex> serial(setMx,std::defer_lock);
+    if(!serial.try_lock_for(std::chrono::seconds(2)))throw std::runtime_error("Automatic recovery configuration is busy");
+    requireOwner();
+    const bool changed=enabled!=g_sleepRecoveryAutoEnabled.load();
+    // The IPC supplies its original locked settings writer and provenance.
+    // An explicit same-state save can update global intent without rearming.
+    const bool saved=!(changed||savePreference)||(savePreference?savePreference(enabled):ymSettingsPatchSection("sleep",{{"autoWakeRecovery",enabled}}));
+    requireOwner();
+    if(!saved)return {{"ok",false},{"reason","automatic-recovery-preference-save-failed"}};
+    if(changed) {
+        // Revoke the old worker before waiting for its state lock.
+        admitted([&]{
+            steamOriginalRecoveryBusinessCommit(false,[&]{
+                g_sleepRecoveryAutoConfigEpoch.fetch_add(1,std::memory_order_acq_rel);
+                g_sleepRecoveryAutoEnabled.store(enabled,std::memory_order_release);
+            });
+        });
         {
             std::lock_guard<std::mutex> lock(mx);
-            state.phase=enabled?"idle":"off";state.reason.clear();state.steamStatus=json::object();state.inputStatus=json::object();
-            g_sleepRecoveryAutoPending.store(false,std::memory_order_release);
+            admitted([&]{
+                state.phase=enabled?"idle":"off";state.reason.clear();state.steamStatus=json::object();state.inputStatus=json::object();
+                g_sleepRecoveryAutoPending.store(false,std::memory_order_release);
+            });
         }
+        requireOwner();
         sgRecordFact("sleep-recovery-automatic-preference",{{"enabled",enabled},{"trigger","future-explicit-wake-only"}});
-        notify();
+        requireOwner();notify(withOwner);requireOwner();
     }
-    return get();
+    const auto result=get();requireOwner();return result;
 }
 // Kernel subscriber only records a bounded Steam-specific witness. It never
 // arms a worker, touches a game/device or changes shared power classification.
 static void recordKernelWake(unsigned long long gen,int eventId,int reason,int targetState,ULONGLONG eventFileTime) {
-    const auto epochNow=g_sleepRecoveryAutoConfigEpoch.load();
-    if(eventId==506){
-        // A later TRUE entry invalidates an earlier exit even if shared capture
-        // generation has not caught up. Original event time wins over receipt order.
-        if(!sleepSteamRecoveryAllows(gen,epochNow)||!eventFileTime||eventFileTime>sgNowFileTime())return;
-        bool changed=false;
-        {std::lock_guard<std::mutex> lock(mx);if(sleepSteamRecoveryAllows(gen,epochNow)&&
-            (kernelSleepEntry.configEpoch!=epochNow||eventFileTime>kernelSleepEntry.eventFileTime)){
-            kernelSleepEntry={epochNow,gen,eventFileTime};changed=true;}}
-        if(changed)sgNotifyWork();
-        if(changed)sgRecordFact("sleep-steam-kernel-entry-witness",{{"generation",gen},{"eventFileTime",std::to_string(eventFileTime)},
-            {"candidateOnly",true},{"repairTriggered",false},{"healthVerified",false}});
-        return;
-    }
-    if(!((eventId==507&&reason==1)||(eventId==107&&targetState==5)))return;
-    const auto original=SleepSteamRecovery::wakeBoundaryFor(gen);
-    const auto actualCapture=SleepSteamRecovery::capturedFor(gen);
-    const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();
-    if(!sleepSteamRecoveryAllows(gen,epoch))return;
-    const auto nowFileTime=sgNowFileTime();
-    const char* source=eventId==507?"kernel-power-507-reason-1":"kernel-power-107-target-5";
-    const bool captured=actualCapture.generation==gen&&actualCapture.configEpoch==epoch&&original.powerBoundaryFileTime!=0&&actualCapture.powerBoundaryFileTime==original.powerBoundaryFileTime;
-    if(!eventFileTime||eventFileTime>nowFileTime||(original.powerBoundaryFileTime&&eventFileTime<=original.powerBoundaryFileTime)) {
-        sgRecordFact("sleep-steam-wake-proof-rejected",{{"generation",gen},{"source",source},{"reason","kernel-event-outside-original-sleep-boundary"},
-            {"boundaryFileTime",std::to_string(original.powerBoundaryFileTime)},{"eventFileTime",std::to_string(eventFileTime)},{"healthVerified",false}});return;
-    }
-    {
-        std::lock_guard<std::mutex> lock(mx);
-        if(!sleepSteamRecoveryAllows(gen,epoch))return;
-        if(nowFileTime-eventFileTime>ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL||
-            (kernelSleepEntry.configEpoch==epoch&&eventFileTime<=kernelSleepEntry.eventFileTime)){
-            sgRecordFact("sleep-steam-wake-proof-rejected",{{"generation",gen},{"reason","kernel-exit-stale-or-before-new-entry"},
-                {"eventFileTime",std::to_string(eventFileTime)},{"latestEntryFileTime",std::to_string(kernelSleepEntry.eventFileTime)},{"healthVerified",false}});return;
-        }
-        if(kernelWake.generation==gen&&kernelWake.configEpoch==epoch&&kernelWake.eventFileTime>=eventFileTime)return;
-        // A final kernel event may precede the capture worker. Retain ONE raw
-        // candidate, not authority; only arm() can bind it to a real boundary.
-        kernelWake={gen,epoch,original.powerBoundaryFileTime,eventFileTime,eventId,!captured,false,0};
-    }
+    // Public Native subscriber already recorded this original event once.
+    (void)gen;(void)eventId;(void)reason;(void)targetState;(void)eventFileTime;
     sgNotifyWork();
-    sgRecordFact(captured?"sleep-steam-wake-proof-recorded":"sleep-steam-wake-proof-await-capture",{{"generation",gen},{"source",source},
-        {"boundaryFileTime",std::to_string(original.powerBoundaryFileTime)},{"eventFileTime",std::to_string(eventFileTime)},
-        {"captureMatched",captured},{"candidateOnly",!captured},{"repairTriggered",false},{"healthVerified",false}});
 }
-static void arm(unsigned long long gen) {
+// Adapter supplies original consumer ownership; shared policy owns continuation.
+static ymcc::sleeppower::WakeIdentity originalWakeIdentity(const SleepSteamRecovery::Captured& original) {
+    return {original.generation,original.configEpoch,original.request?original.request->serial:0,
+        original.powerBoundaryFileTime,original.game.pid,original.game.created};
+}
+static bool zeroWakeActionsLocked() {
+    return !state.commandInFlight&&!state.listAttempted&&!state.inputAttempted&&state.inputDispatches==0&&
+        (state.receipt.is_null()||(state.receipt.is_object()&&state.receipt.empty()));
+}
+static bool zeroActionOriginalCurrentLocked(const SleepSteamRecovery::Captured& original,ULONGLONG now) {
+    return (state.phase=="wake-proof-wait"||state.phase=="waiting")&&
+        sleepSteamRecoveryAllows(state.generation,state.configEpoch)&&
+        state.wakeContinuation.current(originalWakeIdentity(original),now,sgNowFileTime(),
+            SleepSteamRecovery::originalTargetCurrent(original),zeroWakeActionsLocked());
+}
+static void arm(unsigned long long gen,bool relayOriginal=false) {
     if(!gen||gen!=currentPowerGeneration())return;
     const auto original=SleepSteamRecovery::capturedFor(gen);
     const bool modernStandby=sgModernStandbyRepairSupported();
@@ -241,11 +357,15 @@ static void arm(unsigned long long gen) {
         // Preserve the explicit request even if the previous cycle still owns
         // this pre-increment generation. It cannot replay that cycle, but may
         // accompany the exact prepared boundary into its next capture.
-        if(kernelWake.eventFileTime&&kernelWake.configEpoch==epoch&&
-            (kernelWake.generation==gen||(kernelWake.generation!=ULLONG_MAX&&kernelWake.generation+1==gen&&original.boundaryGeneration==kernelWake.generation))){
-            kernelWake.uiWakeRequested=true;kernelWake.requestGeneration=gen;
-        }
-        if(state.seenGeneration==gen)return;
+        ymcc::sleeppower::nativeWakeFacts.requestedLocked(gen,original.boundaryGeneration);
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& completedResume=native.completedResume;const auto& interactiveResume=native.interactiveResume;
+        const bool continuing=state.wakeContinuation.awaiting();
+        if(state.seenGeneration==gen&&!continuing)return;
+        if(continuing&&(!zeroActionOriginalCurrentLocked(original,GetTickCount64())||
+            !state.wakeContinuation.retiredEvent()||sgNowFileTime()<state.wakeContinuation.retiredEvent()||
+            sgNowFileTime()-state.wakeContinuation.retiredEvent()>=ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL))return;
         const bool sameGeneration=kernelWake.generation==gen;
         // The existing capture contract can transfer a synchronous prepared
         // boundary into ONLY its immediately following power generation.
@@ -260,20 +380,28 @@ static void arm(unsigned long long gen) {
             original.generation==gen&&original.configEpoch==epoch&&original.powerBoundaryFileTime!=0&&
             (kernelWake.boundaryFileTime==0||kernelWake.boundaryFileTime==original.powerBoundaryFileTime)&&
             kernelWake.eventFileTime>original.powerBoundaryFileTime&&kernelWake.eventFileTime<=sgNowFileTime();
-        admission={{"status",modernStandby&&!confirmed?"waiting-confirmed-kernel-wake":"admitted"},
-            {"source",confirmed?(kernelWake.eventId==507?"kernel-power-507-reason-1":"kernel-power-107-target-5"):modernStandby?"pbt-intermediate-resume-not-proof":"pbt-resume-suspend-s3"},
+        const bool interactiveConfirmed=!confirmed&&completedInteractiveResumeLocked(gen,epoch,original.powerBoundaryFileTime,original.boundaryGeneration);
+        if(continuing&&!state.wakeContinuation.canContinue(originalWakeIdentity(original),GetTickCount64(),sgNowFileTime(),
+            SleepSteamRecovery::originalTargetCurrent(original),zeroWakeActionsLocked(),sharedSleepWakeClassified(gen),sgSleepRetryActive(),
+            completedInteractiveResumeLocked(gen,epoch,original.powerBoundaryFileTime,original.boundaryGeneration),
+            completedResume.eventId,completedResume.eventFileTime,confirmed?kernelWake.eventId:0,confirmed?kernelWake.eventFileTime:0))return;
+        admission={{"admissionRevision","completed-interactive-ready-20261111"},{"status",modernStandby&&!confirmed&&!interactiveConfirmed?"waiting-confirmed-kernel-wake":"admitted"},
+            {"source",confirmed?(kernelWake.eventId==507?"kernel-power-507-reason-1":"kernel-power-107-target-5"):interactiveConfirmed?"interactive-resume-committed-ready":modernStandby?"pbt-intermediate-resume-not-proof":"pbt-resume-suspend-s3"},
+            {"interactiveWakeConfirmed",interactiveConfirmed},{"readyCommitMatched",interactiveConfirmed},
+            {"completedEventId",interactiveConfirmed?completedResume.eventId:0},{"completedReason",interactiveConfirmed?completedResume.reason:0},
+            {"completedEventFileTime",interactiveConfirmed?json(std::to_string(completedResume.eventFileTime)):json()},
             {"modernStandby",modernStandby},{"kernelWakeConfirmed",confirmed},{"boundaryFileTime",std::to_string(original.powerBoundaryFileTime)},
             {"boundaryGeneration",original.boundaryGeneration},{"proofObservedGeneration",kernelWake.generation},
             {"proofOriginallyAwaitedCapture",confirmed&&kernelWake.awaitedCapture},{"proofFollowedPreparedBoundary",confirmed&&transferredBoundary},
-            {"eventFileTime",confirmed?json(std::to_string(kernelWake.eventFileTime)):json()},
+            {"eventFileTime",confirmed?json(std::to_string(kernelWake.eventFileTime)):interactiveConfirmed?json(std::to_string(interactiveResume.eventFileTime)):json()},
             {"pbtObservedFileTime",!modernStandby&&!confirmed?json(std::to_string(proofNow)):json()},
-            {"proofFresh",freshProof},{"proofMaximumAgeMs",ymcc::sleepsteam::kWakeObserveLimitMs},
+            {"proofFresh",freshProof||interactiveConfirmed},{"proofMaximumAgeMs",ymcc::sleepsteam::kWakeObserveLimitMs},
             {"latestEntryFileTime",kernelSleepEntry.configEpoch==epoch?json(std::to_string(kernelSleepEntry.eventFileTime)):json()},
             {"gameInputVerified",false},{"continueButtonVerified",false}};
         // S0 emits RESUMESUSPEND even while entering standby. Do not start the
         // 60s budget or consume the generation/RETURN on that intermediate PBT.
         // S3 lacks 506/507; its documented PBT path is intentionally retained.
-        deferred=modernStandby&&!confirmed;
+        deferred=modernStandby&&!confirmed&&!interactiveConfirmed;
         if(deferred){
             if(state.generation!=gen||state.configEpoch!=epoch||state.phase!="wake-proof-wait"){
                 const auto seen=state.seenGeneration;state={};state.seenGeneration=seen;
@@ -286,8 +414,11 @@ static void arm(unsigned long long gen) {
             admission["deferredCandidateObserved"]=state.generation==gen&&state.configEpoch==epoch&&state.phase=="wake-proof-wait";
             admission["candidateWaitMs"]=flag(admission,"deferredCandidateObserved")&&GetTickCount64()>=candidateAt?GetTickCount64()-candidateAt:0;
             const auto previousSeen=state.seenGeneration;
+            const auto firstContinuation=state.wakeContinuation;
             state={};state.seenBeforeAdmission=previousSeen;state.seenGeneration=gen;state.generation=gen;state.configEpoch=epoch;
-            state.armed=state.stageSince=GetTickCount64();state.wakeAdmission=admission;
+            state.armed=continuing?firstContinuation.armed():GetTickCount64();state.stageSince=continuing?firstContinuation.stage():state.armed;state.wakeAdmission=admission;
+            if(continuing){state.wakeContinuation=firstContinuation;state.wakeContinuation.resumed();}
+            else state.wakeContinuation.begin(originalWakeIdentity(original),state.armed,state.stageSince);
             state.phase="waiting";g_sleepRecoveryAutoPending.store(true,std::memory_order_release);changed=true;
         }
     }
@@ -295,6 +426,7 @@ static void arm(unsigned long long gen) {
     sgRecordFact(deferred?"sleep-steam-wake-await-kernel":"sleep-recovery-automatic-armed",
         {{"generation",gen},{"trigger",admission["source"]},{"wakeAdmission",admission},{"repairTriggered",!deferred},{"healthVerified",false}});
     notify();
+    if(relayOriginal&&!deferred)steamOriginalRecoveryWake(gen);
 }
 // Record RELIABLE native overview transitions, including while the original
 // sleep lease or a protected UI delays RETURN. This is historical evidence,
@@ -339,15 +471,31 @@ static void captureReady(unsigned long long gen) {
     bool requested=false;
     {
         std::lock_guard<std::mutex> lock(mx);
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& interactiveResume=native.interactiveResume;const auto& completedResume=native.completedResume;const auto& readyCommit=native.readyCommit;
+
         const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();
         const bool requestedCurrent=state.generation==gen;
         const bool requestedPrepared=state.generation!=0&&state.generation!=ULLONG_MAX&&state.generation+1==gen&&original.boundaryGeneration==state.generation;
         const bool witnessedRequest=kernelWake.uiWakeRequested&&kernelWake.configEpoch==epoch&&
             (kernelWake.requestGeneration==gen||(kernelWake.requestGeneration!=ULLONG_MAX&&kernelWake.requestGeneration+1==gen&&original.boundaryGeneration==kernelWake.requestGeneration));
-        requested=sleepSteamRecoveryAllows(gen,epoch)&&original.generation==gen&&original.configEpoch==epoch&&kernelWake.eventFileTime!=0&&
-            (witnessedRequest||(state.phase=="wake-proof-wait"&&state.configEpoch==epoch&&(requestedCurrent||requestedPrepared)));
+        const bool completedInteractive=completedInteractiveResumeLocked(gen,epoch,original.powerBoundaryFileTime,original.boundaryGeneration);
+        requested=sleepSteamRecoveryAllows(gen,epoch)&&original.generation==gen&&original.configEpoch==epoch&&
+            ((kernelWake.eventFileTime!=0&&(witnessedRequest||(state.phase=="wake-proof-wait"&&state.configEpoch==epoch&&(requestedCurrent||requestedPrepared))))||completedInteractive);
     }
-    if(requested)arm(gen);
+    if(requested)arm(gen,true);
+}
+static void powerReady(unsigned long long gen) {
+    const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();
+    if(!sleepSteamRecoveryAllows(gen,epoch)||g_powerLifecycle.load()!=PowerLifecycle::Ready)return;
+    const auto original=SleepSteamRecovery::wakeBoundaryFor(gen);
+    if(!original.powerBoundaryFileTime)return;
+    {std::lock_guard<std::mutex> lock(mx);
+        if(!sleepSteamRecoveryAllows(gen,epoch)||g_powerLifecycle.load()!=PowerLifecycle::Ready)return;
+        // The current Ready fact is published by the shared projection before this callback.
+    }
+    captureReady(gen); // order-independent join; no timestamp/budget reset.
 }
 // An acknowledged action can miss the window in its immediate postflight,
 // then a NEW native inspection can already see the exact captured window.
@@ -383,6 +531,48 @@ static bool pendingOriginalWindowReadback(const json& inputReceipt,const json& b
         inputReceipt.value("windowReturnObserved",json())==json(false)&&
         !flag(after.value("originalGameRecovery",json::object()),"originalWindowFocused");
 }
+
+// A call owns a tentative slot while its native admission is unresolved. This
+// blocks zero-action handoff. Native BEFORE-send commits the original budget;
+// non-Busy early returns and exceptions conservatively keep the original charge.
+struct CommandReservation {
+    unsigned long long generation,epoch;const char* expected;bool input,charged=false,settled=false;
+    ymcc::sleepsteam::CommandAttempt command;
+    CommandReservation(unsigned long long gen,unsigned long long cfg,const char* phase,bool forInput)
+        :generation(gen),epoch(cfg),expected(phase),input(forInput){
+        command.admit=[this]{std::lock_guard<std::mutex> lock(mx);
+            if(state.generation!=generation||state.configEpoch!=epoch||state.phase!=expected||
+                !g_sleepRecoveryAutoPending.load()||!sleepSteamRecoveryAllows(generation,epoch))return false;
+            if(input&&!charged&&state.inputDispatches>=3)return false;
+            chargeLocked();return true;};
+        std::lock_guard<std::mutex> lock(mx);
+        if(state.generation!=generation||state.configEpoch!=epoch||state.phase!=expected||state.commandInFlight)
+            throw std::runtime_error("automatic-command-slot-not-current");
+        state.commandInFlight=true;
+    }
+    void chargeLocked(){if(charged)return;if(input){state.inputAttempted=true;++state.inputDispatches;}else state.listAttempted=true;charged=true;}
+    ~CommandReservation(){if(settled)return;std::lock_guard<std::mutex> lock(mx);
+        if(state.generation==generation&&state.configEpoch==epoch){chargeLocked();state.commandInFlight=false;}}
+    bool resolve(const json& receipt,const json& before){
+        const bool busy=!charged&&command.disposition==ymcc::steamcommand::Disposition::Busy&&receipt.is_object()&&
+            receipt.value("reason",json())==json("steam-command-busy")&&receipt.value("ok",json())==json(false)&&
+            receipt.value("accepted",json())==json(false)&&receipt.value("mutated",json())==json(false)&&
+            receipt.value("requestDispatched",json())==json(false)&&!flag(receipt,"actionAcknowledged");
+        std::lock_guard<std::mutex> lock(mx);
+        if(state.generation!=generation||state.configEpoch!=epoch){settled=true;return false;}
+        if(!busy)chargeLocked();
+        bool waiting=false;
+        if(busy&&state.phase==expected&&g_sleepRecoveryAutoPending.load()&&sleepSteamRecoveryAllows(generation,epoch)){
+            // Separate observed native rejection from an action receipt. No
+            // counter, proof, nonce, stage/armed clock or deadline is refunded.
+            state.commandWait=receipt;if(!state.before.is_object())state.before=before;state.last=before;
+            state.phase="command-wait";state.reason="steam-command-busy";
+            state.due=GetTickCount64()+ymcc::sleepsteam::kWakePollMs;waiting=true;
+        }
+        state.commandInFlight=false;settled=true;return waiting;
+    }
+};
+
 static void run(unsigned long long gen,unsigned long long epoch,bool verify) {
     const char* expected=verify?"verifying":"inspecting";
     if(!current(gen,epoch,expected))return;
@@ -444,8 +634,9 @@ static void run(unsigned long long gen,unsigned long long epoch,bool verify) {
         const bool nativeOriginalOwner=steamOriginalRecoveryOwnsRunning(static_cast<DWORD>(number(originalGame,"pid")),
             [] (const json& game){try{return std::stoull(game.value("created",std::string("0")));}catch(...){return 0ULL;}}(originalGame));
         if(!nativeOriginalOwner&&!postReturnForegroundWait&&(flag(steamRecovery,"repairable")||flag(steamRecovery,"contactRepairable"))&&!listAttempted){
-            {std::lock_guard<std::mutex> lock(mx);if(state.generation!=gen||state.configEpoch!=epoch||state.phase!=expected)return;state.listAttempted=true;}
-            receipt=SleepSteamRecovery::reconcile(report,gen,epoch,stillCurrent);
+            CommandReservation command(gen,epoch,expected,false);
+            receipt=SleepSteamRecovery::reconcile(report,gen,epoch,stillCurrent,&command.command);
+            if(command.resolve(receipt,before)){notify();return;}
             if(!current(gen,epoch,expected))return;
             // Always retain a NEW post-action snapshot, including rejection.
             // The old report is the pre-action inspection, never an "after".
@@ -472,8 +663,9 @@ static void run(unsigned long long gen,unsigned long long epoch,bool verify) {
             }
         }
         if((flag(report.value("steamInputRecovery",json::object()),"repairable")||flag(report.value("steamInputRecovery",json::object()),"windowPreparationRepairable"))&&!inputAttempted){
-            {std::lock_guard<std::mutex> lock(mx);if(state.generation!=gen||state.configEpoch!=epoch||state.phase!=expected)return;state.inputAttempted=true;++state.inputDispatches;}
-            auto inputReceipt=SleepSteamRecovery::resumeInputContext(report,gen,epoch,stillCurrent);
+            CommandReservation command(gen,epoch,expected,true);
+            auto inputReceipt=SleepSteamRecovery::resumeInputContext(report,gen,epoch,stillCurrent,&command.command);
+            if(command.resolve(inputReceipt,before)){notify();return;}
             if(!current(gen,epoch,expected))return;
             receipt["inputResume"]=inputReceipt;
             report=SleepSteamRecovery::inspect(gen,"input-postflight");
@@ -604,7 +796,7 @@ static ULONGLONG waitMs(ULONGLONG now) {
     if(state.phase=="waiting") {
         if(total>=30000||wakeOperationAllowedLocked(state.generation,state.configEpoch))return 0;
         delay=(std::min)(delay,(std::min)(ULONGLONG{250},ULONGLONG{30000}-total));
-    } else if(state.phase=="game-wait"||state.phase=="confirm-wait"||state.phase=="interaction-wait"||state.phase=="settle-wait"||state.phase=="session-wait") {
+    } else if(state.phase=="game-wait"||state.phase=="command-wait"||state.phase=="confirm-wait"||state.phase=="interaction-wait"||state.phase=="settle-wait"||state.phase=="session-wait") {
         if(state.phase=="game-wait") {
             if(total>=30000)return 0;
             delay=(std::min)(delay,ULONGLONG{30000}-total);
@@ -616,27 +808,65 @@ static ULONGLONG waitMs(ULONGLONG now) {
 }
 static void tick() {
     if(!g_sleepRecoveryAutoPending.load(std::memory_order_acquire))return;
-    unsigned long long gen=0,epoch=0;bool verify=false,submit=false,revokedProofOnly=false;json readinessNotice;std::string failure;
+    const auto original=SleepSteamRecovery::capturedFor(currentPowerGeneration());
+    unsigned long long gen=0,epoch=0;bool verify=false,submit=false,revokedProofOnly=false,continueFromCurrentFacts=false;json readinessNotice;std::string failure;
     {
-        std::lock_guard<std::mutex> lock(mx);gen=state.generation;epoch=state.configEpoch;
+        std::lock_guard<std::mutex> lock(mx);
+        const auto native=sharedWakeFactsLocked();
+        const auto& kernelWake=native.kernelWake;const auto& kernelSleepEntry=native.kernelSleepEntry;
+        const auto& interactiveResume=native.interactiveResume;const auto& completedResume=native.completedResume;const auto& readyCommit=native.readyCommit;
+gen=state.generation;epoch=state.configEpoch;
         const auto now=GetTickCount64();
         const auto readiness=wakeReadinessLocked(gen,epoch);
-        if(flag(readiness,"operationAllowed")&&(!state.wakeReadiness.is_object()||
-            state.wakeReadiness.value("basis",std::string())!=readiness.value("basis",std::string())))readinessNotice=readiness;
+        // Compare decision identity, never moving proofNow/age: repeated timers stay quiet.
+        if(!state.wakeReadiness.is_object()||state.wakeReadiness.value("basis",std::string())!=readiness.value("basis",std::string())||
+            state.wakeReadiness.value("sharedPowerLifecycle",std::string())!=readiness.value("sharedPowerLifecycle",std::string())||
+            state.wakeReadiness.value("operationAllowed",false)!=readiness.value("operationAllowed",false)||
+            state.wakeReadiness.value("rejectedGuard",json())!=readiness.value("rejectedGuard",json())||
+            state.wakeReadiness.value("generation",0ULL)!=gen||state.wakeReadiness.value("configEpoch",0ULL)!=epoch)
+            readinessNotice=readiness;
         state.wakeReadiness=readiness;
         const bool steamWakeUsable=flag(readiness,"operationAllowed");
-        const bool awaitingWakeCommit=state.phase=="waiting"&&flag(state.wakeAdmission,"kernelWakeConfirmed");
-        if(proofSupersededLocked()&&sleepSteamRecoveryAllows(gen,epoch)){
-            // Only a cycle with ZERO reservations/dispatches may surrender its
-            // seen-generation on newer entry proof. Any attempted mutation,
-            // timeout or uncertain receipt can never obtain another RETURN.
-            if(!state.listAttempted&&!state.inputAttempted&&state.inputDispatches==0){
-                state.seenGeneration=state.seenBeforeAdmission;state.phase="wake-proof-wait";
-                state.reason="steam-new-entry-invalidated-wake-proof";state.armed=state.stageSince=state.due=0;
+        const bool awaitingWakeCommit=(state.phase=="waiting"||state.phase=="command-wait")&&flag(state.wakeAdmission,"kernelWakeConfirmed");
+        std::uint64_t retiringEvent=0;
+        const auto retiring=state.wakeAdmission.value("eventFileTime",json());
+        std::uint64_t admittedCompleted=0;
+        const auto completedAtAdmission=state.wakeAdmission.value("completedEventFileTime",json());
+        if((state.phase=="waiting"||state.phase=="command-wait")&&flag(state.wakeAdmission,"interactiveWakeConfirmed")&&
+            state.wakeAdmission.value("source",std::string{})=="interactive-resume-committed-ready"&&
+            retiring.is_string()&&ymcc::sleepsteam::unsignedDecimal(retiring.get<std::string>(),retiringEvent)&&
+            completedAtAdmission.is_string()&&ymcc::sleepsteam::unsignedDecimal(completedAtAdmission.get<std::string>(),admittedCompleted)&&
+            kernelSleepEntry.configEpoch==epoch&&
+            state.wakeContinuation.parkInteractiveEntry(originalWakeIdentity(original),now,sgNowFileTime(),
+                retiringEvent,admittedCompleted,kernelSleepEntry.eventFileTime,
+                SleepSteamRecovery::originalTargetCurrent(original),zeroWakeActionsLocked())){
+            state.phase="wake-proof-wait";state.reason="steam-entry-awaiting-current-interactive-wake";
+            state.wakeAdmission["status"]="waiting-confirmed-kernel-wake";
+            state.wakeAdmission["kernelWakeConfirmed"]=false;state.wakeAdmission["interactiveWakeConfirmed"]=false;
+            g_sleepRecoveryAutoPending.store(false,std::memory_order_release);revokedProofOnly=true;continueFromCurrentFacts=true;
+        }else if(sgSleepRetryActive()&&(state.phase=="waiting"||state.phase=="command-wait")&&flag(state.wakeAdmission,"kernelWakeConfirmed")&&
+            state.wakeAdmission.value("source",std::string{})=="kernel-power-107-target-5"&&
+            retiring.is_string()&&ymcc::sleepsteam::unsignedDecimal(retiring.get<std::string>(),retiringEvent)&&
+            state.wakeContinuation.park(originalWakeIdentity(original),now,sgNowFileTime(),107,retiringEvent,
+                SleepSteamRecovery::originalTargetCurrent(original),zeroWakeActionsLocked())){
+            // Keep seen-generation and the first deadlines while retry settles.
+            state.phase="wake-proof-wait";state.reason="steam-retry-awaiting-new-final-wake";
+            state.wakeAdmission["status"]="waiting-confirmed-kernel-wake";
+            state.wakeAdmission["kernelWakeConfirmed"]=false;state.wakeAdmission["interactiveWakeConfirmed"]=false;
+            g_sleepRecoveryAutoPending.store(false,std::memory_order_release);revokedProofOnly=true;
+        }else if(proofSupersededLocked()&&sleepSteamRecoveryAllows(gen,epoch)){
+            // The public owner retains only this exact unused episode. Neither
+            // a newer entry nor an uncertain receipt refunds its first clocks.
+            if((state.phase=="waiting"||state.phase=="command-wait")&&retiring.is_string()&&
+                ymcc::sleepsteam::unsignedDecimal(retiring.get<std::string>(),retiringEvent)&&
+                state.wakeContinuation.parkSupersededEntry(originalWakeIdentity(original),now,sgNowFileTime(),
+                    retiringEvent,kernelSleepEntry.eventFileTime,
+                    SleepSteamRecovery::originalTargetCurrent(original),zeroWakeActionsLocked())){
+                state.phase="wake-proof-wait";state.reason="steam-new-entry-invalidated-wake-proof";
                 state.wakeAdmission["status"]="waiting-confirmed-kernel-wake";
-                state.wakeAdmission["kernelWakeConfirmed"]=false;
+                state.wakeAdmission["kernelWakeConfirmed"]=false;state.wakeAdmission["interactiveWakeConfirmed"]=false;
                 state.wakeAdmission["supersededByEntryFileTime"]=std::to_string(kernelSleepEntry.eventFileTime);
-                g_sleepRecoveryAutoPending.store(false,std::memory_order_release);revokedProofOnly=true;
+                g_sleepRecoveryAutoPending.store(false,std::memory_order_release);revokedProofOnly=true;continueFromCurrentFacts=true;
             }else failure="steam-new-entry-after-action-no-replay";
         }
         if(revokedProofOnly){}else if(!failure.empty()){}else if(!sleepSteamRecoveryAllows(gen,epoch)||sgSleepRetryActive()||(!awaitingWakeCommit&&(g_powerLifecycle.load()==PowerLifecycle::Suspending||g_powerLifecycle.load()==PowerLifecycle::Suspended)))failure="cancelled-new-sleep-or-disabled";
@@ -659,14 +889,14 @@ static void tick() {
             }
         } else if(state.phase=="settle-wait"&&now-state.armed>=ymcc::sleepsteam::kWakeObserveLimitMs) {
             failure=state.settling.reason.empty()?"steam-wake-stability-not-confirmed":state.settling.reason;
-        } else if((state.phase=="confirm-wait"||state.phase=="interaction-wait"||state.phase=="settle-wait"||state.phase=="session-wait")&&now>=state.due) {
+        } else if((state.phase=="command-wait"||state.phase=="confirm-wait"||state.phase=="interaction-wait"||state.phase=="settle-wait"||state.phase=="session-wait")&&now>=state.due) {
             if(!steamWakeUsable)failure="steam-power-not-ready";
             else {state.phase="verifying";state.stageSince=now;submit=true;verify=true;}
         }
     }
     if(readinessNotice.is_object())sgRecordFact("sleep-steam-wake-readiness",{{"generation",gen},{"readiness",readinessNotice},{"repairTriggered",false},{"healthVerified",false}});
     if(revokedProofOnly){sgRecordFact("sleep-steam-wake-proof-revoked-before-action",{{"generation",gen},
-        {"repairTriggered",false},{"actionReplayAllowed",false},{"awaitingFreshFinalWake",true},{"healthVerified",false}});notify();return;}
+        {"repairTriggered",false},{"actionReplayAllowed",false},{"awaitingFreshFinalWake",true},{"healthVerified",false}});notify();if(continueFromCurrentFacts)captureReady(gen);return;}
     if(!failure.empty()){finish(gen,epoch,"blocked",failure,json::object());return;}
     if(submit) {
         if(!poolSubmit([gen,epoch,verify]{run(gen,epoch,verify);}))finish(gen,epoch,"blocked","automatic-worker-queue-full",json::object());
@@ -680,7 +910,9 @@ static void sleepRecoveryAutoPrepareSuspend(){SleepSteamRecovery::prepareSuspend
 static void sleepRecoveryAutoCancelPreparedSuspend(){SleepSteamRecovery::cancelPreparedSuspend();}
 static void sleepRecoveryAutoCaptureSuspend(unsigned long long generation){SleepSteamRecovery::captureSuspend(generation);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoverySuspend(generation);}
 static void sleepRecoveryAutoArm(unsigned long long generation){SleepSteamRecovery::closeSuspendEpisode();SleepRecoveryAuto::arm(generation);steamOriginalRecoveryWake(generation);}
-static void sleepRecoveryAutoRecordKernelWake(unsigned long long generation,int eventId,int reason,int targetState,ULONGLONG eventFileTime){SleepRecoveryAuto::recordKernelWake(generation,eventId,reason,targetState,eventFileTime);steamOriginalRecoveryPowerReady(generation);}
+static void sleepRecoveryAutoRecordKernelWake(unsigned long long generation,int eventId,int reason,int targetState,ULONGLONG eventFileTime){SleepRecoveryAuto::recordKernelWake(generation,eventId,reason,targetState,eventFileTime);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoveryPowerReady(generation);}
+static void sleepRecoveryAutoInteractiveResume(unsigned long long generation,int code,ULONGLONG receiptTick){SleepRecoveryAuto::recordInteractiveResume(generation,code,receiptTick);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoveryPowerReady(generation);}
+static void sleepRecoveryAutoPowerReady(unsigned long long generation){SleepRecoveryAuto::powerReady(generation);steamOriginalRecoveryPowerReady(generation);}
 static void sleepRecoveryAutoGameReleased(unsigned long long generation){
     std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);
     auto& state=SleepRecoveryAuto::state;

@@ -102,12 +102,15 @@ class NoFocusAutomation {
     Ptr<IUIAutomation> ui_;Ptr<IUIAutomation2> ui2_;
     std::vector<Ptr<IUIAutomationElement>> watched_;Ptr<IUIAutomationPropertyChangedEventHandler> handler_;
     static std::wstring name(IUIAutomationElement* element){BSTR b=nullptr;if(!element||FAILED(element->get_CurrentName(&b)))return {};std::wstring s=b?b:L"";SysFreeString(b);return s;}
-    Ptr<IUIAutomationElement> control(HWND window,const wchar_t* id){
+    Ptr<IUIAutomationElement> control(HWND window,const wchar_t* id,const std::function<bool()>& current={}){
         Ptr<IUIAutomationElement> root,element;Ptr<IUIAutomationCondition> condition;
-        if(FAILED(ui_->ElementFromHandle(window,&root)))return element;
+        if((current&&!current())||FAILED(ui_->ElementFromHandle(window,&root)))return element;
+        if(current&&!current())return element;
         VARIANT value;VariantInit(&value);value.vt=VT_BSTR;value.bstrVal=SysAllocString(id);
         const auto hr=ui_->CreatePropertyCondition(UIA_AutomationIdPropertyId,value,&condition);VariantClear(&value);
+        if(current&&!current())return element;
         if(SUCCEEDED(hr))root->FindFirst(TreeScope_Descendants,condition.Get(),&element);
+        if(current&&!current())element.Reset();
         return element;
     }
 public:
@@ -132,10 +135,15 @@ public:
         return subscribed==2;
     }
     void unlisten(){if(ui_&&handler_)for(const auto& element:watched_)ui_->RemovePropertyChangedEventHandler(element.Get(),handler_.Get());watched_.clear();handler_.Reset();}
-    ScaleSnapshot observe(HWND window,const std::wstring& title){
-        ScaleSnapshot s;auto button=control(window,L"ScaleButton");if(!button)return s;
-        s.button=scaleTrim(name(button.Get()));s.state=scaleButtonState(s.button);s.readable=!s.button.empty();
-        s.status=name(control(window,L"StatusString").Get());s.profileMatches=scaleProfileMatches(s.status,title);s.paused=scalePaused(s.status);return s;
+    ScaleSnapshot observe(HWND window,const std::wstring& title,const std::function<bool()>& current={}){
+        ScaleSnapshot s;auto button=control(window,L"ScaleButton",current);if(!button)return s;
+        if(current&&!current())return s;
+        s.button=scaleTrim(name(button.Get()));
+        if(current&&!current())return {};
+        s.state=scaleButtonState(s.button);s.readable=!s.button.empty();
+        s.status=name(control(window,L"StatusString",current).Get());
+        if(current&&!current())return {};
+        s.profileMatches=scaleProfileMatches(s.status,title);s.paused=scalePaused(s.status);return s;
     }
     ScaleInvoke invoke(HWND window,ScaleButton expected){
         auto button=control(window,L"ScaleButton");if(!button||scaleButtonState(name(button.Get()))!=expected)return {};
@@ -292,10 +300,12 @@ public:
         return h&&automation_.invoke(h,ScaleButton::Countdown).accepted;
     }
 };
-inline ScaleSnapshot observeScaling(const Identity& ls,bool& available){
+inline ScaleSnapshot observeScaling(const Identity& ls,bool& available,const std::function<bool()>& current={}){
     ScaleProcess process;NoFocusAutomation automation;available=false;
-    if(!process.open(ls)||!automation.begin())return {};
-    const auto h=scaleMainWindow(ls.pid);if(!h)return {};
-    const auto snapshot=automation.observe(h,L"");available=process.alive()&&snapshot.readable;return snapshot;
+    if((current&&!current())||!process.open(ls)||(current&&!current())||!automation.begin()||(current&&!current()))return {};
+    const auto h=scaleMainWindow(ls.pid);if((current&&!current())||!h)return {};
+    const auto snapshot=automation.observe(h,L"",current);
+    if(current&&!current())return {};
+    available=process.alive()&&snapshot.readable;return snapshot;
 }
 } // namespace ymcc::lossless

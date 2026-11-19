@@ -14,6 +14,8 @@ node tools/ymcc_sim/global/onex-fan-coexistence/run.mjs --evidence-dir <fresh di
 node --test tools/ymcc_sim/global/onex-fan-coexistence/entry.test.mjs
 ```
 
+Entry controls read HC/Cecil only when a selected case needs those inputs. To verify the historical controls when the current payload is different, set `YMCC_ONEX_TEST_HC_ASSEMBLY` and `YMCC_ONEX_TEST_CECIL_PATH` to the exact approved files for that test invocation. These variables do not change the product runner defaults or expected identities. Each baseline family shares one owned copy for its controls; mutations are restored after each case. Default scratch is returned; an existing physical directory supplied via `YMCC_ONEX_TEST_ROOT` retains its fresh test subdirectory.
+
 All five CLI flags are strict: unknown, duplicate, empty and missing values fail before evidence creation. Existing evidence directories cannot be overwritten. Missing baseline, HC, Cecil, dotnet or explicit candidate inputs are `BLOCKED`, exit 3; incorrect identities or behavior are `FAIL`, exit 2. The pure static `getOneXFanCoexistenceAdapters` descriptor opts into blocked exit 3 and is available for parent registration.
 
 The three pre-fix DLLs and provenance are hard-pinned in the repository. Cecil discovery reuses the approved `fan-open-signals` resolver and existing repository tool hint; no historical paths, installed directory or network downloads are required. The exact baseline DLLs/provenance are source inputs as well as external hash inputs. Explicit candidate files are captured before and after execution. A supplied candidate passing behavior is not proof of installation or of a build from current sources.

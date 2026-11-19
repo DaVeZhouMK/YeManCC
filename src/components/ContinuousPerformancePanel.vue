@@ -10,7 +10,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, onDeactivated, ref, wat
 import Slider from './Slider.vue';
 import {useRouter} from 'vue-router';
 import {undervoltState as uv,undervoltLabel,undervoltAvailable,refreshUndervoltRuntime,toggleUndervolt} from '@/bridge/undervoltRuntime';
-import {ccdState as ccd,ccdAvailable,ccdOptions,refreshCcdRuntime,selectCcdMode} from '@/bridge/ccdRuntime';
+import {ccdState as ccd,ccdAvailable,ccdOptions,refreshCcdRuntime,selectCcdMode,recordCcdVisibility} from '@/bridge/ccdRuntime';
 const uvRouter=useRouter();
 const quickAction=ref<'uv'|'ccd'>('uv');
 async function changeCcd(value:number|string){quickAction.value='ccd';await selectCcdMode(value);nextTick(()=>panelElement.value?.querySelector('.save-note')?.scrollIntoView({block:'nearest'}));}
@@ -30,7 +30,7 @@ import { getContinuousPerformanceSnapshot, updateContinuousPerformanceControls,
   type GameCustomProfileTarget, type ContinuousPerformanceSnapshot, onPerformanceScheduleChanged, onGameCustomConfigChanged } from '@/bridge/performanceSchedule';
 import { onFrameRatesChanged, frameRateSetting, FRAME_RATE_CEILINGS,
   type FrameRatePair, type FrameRateSetting } from '@/bridge/frameRateLimits';
-import { CONTROL_CORE_OPTIONS, CONTROL_POWER_SCHEMES, SAVING_LEVELS, SAVING_RULES, automaticCpuControls, manualCpuMinimum, patchContinuousBank,
+import { CONTROL_CORE_OPTIONS, CONTROL_POWER_SCHEMES, SAVING_LEVELS, SAVING_RULES, automaticCpuControls, manualCpuMinimum, patchContinuousBank, continuousPerformanceSaveNotice, continuousPerformanceDataNotice,
   type ControlSide, type ContinuousSideControls, type ContinuousSidePatch } from '@/bridge/performanceControls';
 const props = withDefaults(defineProps<{ scope?: 'global' | 'dedicated' | 'effective'; summaryOnly?: boolean; showSimulation?: boolean; panelSource?: PerformancePanelSource; readonlyPreview?: boolean }>(), { scope: 'global', summaryOnly: false, showSimulation: false });
 const emit = defineEmits<{ (e: 'simulation'): void; (e: 'changed'): void }>();
@@ -40,6 +40,9 @@ const quickNotice=computed(()=>quickAction.value==='ccd'?(showCcd.value?ccd.noti
 onMounted(()=>{if(showUv.value){void refreshUndervoltRuntime();void refreshCcdRuntime();}});
 const nativeLayout = computed(() => !props.panelSource || props.panelSource.nativeLayout === true);
 const snapshot = ref<ContinuousPerformanceSnapshot | null>(null), draft = ref<ContinuousSideControls | null>(null);
+watch([showCcd, () => snapshot.value?.hybrid, () => ccd.capability], () => {
+  if (showUv.value && snapshot.value) recordCcdVisibility({scope:props.scope,hybrid:snapshot.value.hybrid,visible:showCcd.value});
+}, {flush:'post'});
 const frames = ref<FrameRatePair | null>(null), frame = ref<FrameRateSetting | null>(null);
 watch(draft, value => { if (value && snapshot.value) props.panelSource?.preview?.(JSON.parse(JSON.stringify(value)), {...snapshot.value.identity}); }, {deep:true,flush:'sync'});
 const panelElement=ref<HTMLElement|null>(null);
@@ -93,6 +96,10 @@ const color = computed(() => side.value === 'dc' ? 'dc' : 'accent');
 const minimum = computed(() => snapshot.value?.hardwareMinimum ?? 1);
 const maximum = computed(() => Math.min(150, snapshot.value?.hardwareMaximum ?? 150));
 const runtimeTdp = ref<{mode: string | null; watts: number | null} | null>(null);
+const statusNotice = computed(() => {
+  const data = !props.panelSource && snapshot.value ? continuousPerformanceDataNotice(snapshot.value, runtimeTdp.value) : '';
+  return [note.value, data].filter(Boolean).join('；');
+});
 const coreMaximum = computed(() => Math.max(0, Math.min(draft.value?.tdp ?? 0, maximum.value)));
 // Slider range only; keep saved coreSplit and the high-power interval intact.
 const coreSliderMaximum = computed(() => Math.min(25, coreMaximum.value));
@@ -176,7 +183,7 @@ async function commit(patch: ContinuousSidePatch) {
   if (Object.keys(bankPatch).length) change(bankPatch);
   pending = merge(pending, patch);
   if (saving.value) return;
-  saving.value = true; const ticket = epoch; note.value = '';
+  saving.value = true; const ticket = epoch; note.value = ''; let savedNotice = '';
   try {
     while (pending && alive && ticket === epoch) {
       const submitted: ContinuousSidePatch = pending, revision = draftRevision, identity = snapshot.value!.identity; pending = null;
@@ -184,6 +191,7 @@ async function commit(patch: ContinuousSidePatch) {
       if (!alive || ticket !== epoch) return;
       if (!sameEditContext(identity, next.identity)) { await load(true); return; }
       snapshot.value = next;
+      savedNotice = continuousPerformanceSaveNotice(next);
       // Keep the next edit exactly where the user moved it, while retaining
       // the new saved identity for its eventual compare-and-save.
       if (revision === draftRevision && !editingInput) {
@@ -193,7 +201,7 @@ async function commit(patch: ContinuousSidePatch) {
       }
       emit('changed');
     }
-    note.value = props.panelSource ? '' : '设置已保存';
+    note.value = props.panelSource ? '' : savedNotice || '设置已保存';
   } catch (error) {
     if (alive && ticket === epoch) { note.value = (error as Error).message; await load(true); }
   } finally {
@@ -325,7 +333,7 @@ defineExpose({ reload: () => load(true) });
       </div>
       </template>
     </template>
-    <div v-if="!summaryOnly && (note || quickNotice)" class="save-note uv-click-note" role="status" aria-live="polite"><span>{{quickNotice || note}}</span><button v-if="quickNotice" type="button" @click="openUvSettings">前往设置 ›</button></div>
+    <div v-if="!summaryOnly && (statusNotice || quickNotice)" class="save-note uv-click-note" role="status" aria-live="polite"><span data-performance-status>{{quickNotice || statusNotice}}</span><button v-if="quickNotice" type="button" @click="openUvSettings">前往设置 ›</button></div>
   </section>
   <GameProfileRemoveDialog v-if="!summaryOnly && removal" :game-name="removal.gameName" :busy="removalBusy" :error="removalError" @cancel="cancelRemoval" @confirm="confirmRemoval" />
 </template>

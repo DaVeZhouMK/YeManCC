@@ -1,0 +1,71 @@
+#define NOMINMAX
+#include <windows.h>
+#include <Xinput.h>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <iostream>
+#include <string>
+#include "json.hpp"
+#include "sleep_fact_log_record.h"
+#include "gamepad_ui_gate_evidence.h"
+#include "input_pipe_test_allocation_fault.h"
+using json=nlohmann::json;
+#define IsWindow fixtureIsWindow
+#define IsWindowVisible fixtureIsWindowVisible
+#define IsIconic fixtureIsIconic
+namespace current {
+// CURRENT_BODY
+}
+namespace reference {
+// REFERENCE_BODY
+}
+#undef IsWindow
+#undef IsWindowVisible
+#undef IsIconic
+static json checks=json::array();
+static void check(bool ok,const char* name){checks.push_back({{"name",name},{"pass",ok}});}
+int main(){try{
+    const auto finish=[](){unsigned failures=0;for(const auto& r:checks)failures+=!r["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failures},{"evidence",current::gamepadUiGateEvidenceForExport()},{"realHardwareActions",0},{"realAppActions",0},{"newWorkerThreads",0}}.dump(2)<<std::endl;return failures?2:0;};
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<200000;++i)current::gamepadProcessUiInput(XINPUT_GAMEPAD_A,i);
+    const auto arm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    auto off=current::g_gamepadUiGateEvidence.snapshot();check(arm==0&&off[0].calls==0&&off[1].calls==0&&off[2].calls==0&&current::fixtureQueries==std::array<unsigned long long,8>{400000,200000,200000,0,200000,200000,200000,200000},"200000 OFF complete original UI calls preserve exact predicate calls and consume no C++new fault arm or diagnostic counts");
+    current::g_domainLogEnabled[1]=true;current::gamepadProcessUiInput(XINPUT_GAMEPAD_A,200001);
+    auto first=current::g_gamepadUiGateEvidence.snapshot();check(first[1].calls==1&&first[1].nonzeroButtons==1&&first[1].changedButtons==1,"complete original UI-ineligible early return is observed before semantic emitter without altering the result");
+#ifdef YMCC_UI_GATE_OLD_ONLY
+    return finish();
+#else
+    current::g_domainLogEnabled[1]=false;
+    check(current::fixtureActions.empty()&&current::g_uiShoulderPending==0&&!current::g_uiStartPending&&!current::g_uiStartUsedAsModifier&&current::g_uiNavX==0&&current::g_uiNavY==0&&current::g_uiNavLastEmitTick==0&&current::g_uiSliderTriggerDirection==0&&current::g_uiSliderTriggerLastEmitTick==0,"observed early refusal retains every original pending and cadence reset");
+    current::fixtureQueries={};reference::fixtureQueries={};current::g_domainLogEnabled[1]=true;
+    bool parity=true;unsigned compared=0;
+    for(unsigned i=0;i<2048;++i){
+        const bool radial=i%13==0,child=i%17==0,overlay=i%7==0,overlayEligible=i%11!=0;
+        current::fixtureRadial=reference::fixtureRadial=radial;current::fixtureChild=reference::fixtureChild=child;current::fixtureOverlay=reference::fixtureOverlay=overlay;current::fixtureOverlayEligible=reference::fixtureOverlayEligible=overlayEligible;
+        current::fixtureValid=reference::fixtureValid=i%19!=0;current::fixtureVisible=reference::fixtureVisible=i%23!=0;current::fixtureIconic=reference::fixtureIconic=i%29==0;current::fixtureForeground=reference::fixtureForeground=i%5!=0;current::fixtureChildForeground=reference::fixtureChildForeground=i%3==0;
+        current::g_gamepadAxisNeutralAdmissionRequired=reference::g_gamepadAxisNeutralAdmissionRequired=i%31==0;
+        current::g_uiFanNodeEditActive=reference::g_uiFanNodeEditActive=i%37==0;current::g_uiSliderEditActive=reference::g_uiSliderEditActive=i%41==0;
+        const WORD buttons=static_cast<WORD>((i*977U)^(i>>2));XINPUT_GAMEPAD pad{};pad.sThumbLX=static_cast<SHORT>((i%3==0)?18000:(i%3==1)?-18000:0);pad.sThumbLY=static_cast<SHORT>((i%5==0)?18000:(i%5==1)?-18000:0);pad.bLeftTrigger=static_cast<BYTE>((i%3==0)?255:0);pad.bRightTrigger=static_cast<BYTE>((i%7==0)?255:0);
+        current::g_curPad=reference::g_curPad=pad;current::fixtureActions.clear();reference::fixtureActions.clear();
+        SetLastError(1777);current::gamepadProcessUiInput(buttons,300000ULL+i*71ULL);const auto observedError=GetLastError();
+        SetLastError(1777);reference::gamepadProcessUiInput(buttons,300000ULL+i*71ULL);const auto referenceError=GetLastError();
+        if(current::fixtureState()!=reference::fixtureState()||observedError!=referenceError){parity=false;break;}++compared;current::g_prevW=reference::g_prevW=buttons;
+    }
+    check(parity&&compared==2048,"2048 complete original process scenarios preserve action order repeat timing all pending state API counts and LastError against the unchanged original reference");
+    const auto all=current::g_gamepadUiGateEvidence.snapshot();check(all[0].calls>0&&all[1].calls>1&&all[2].calls>0,"radial ownership original UI rejection and eligibility are fixed independent observed buckets");
+    check(all[0].calls+all[1].calls+all[2].calls==2049,"only each returned original process gate decision contributes one bucket in this nonconcurrent fixture");
+    current::fixtureRadial=false;current::fixtureChild=false;current::fixtureOverlay=false;current::fixtureValid=true;current::fixtureVisible=true;current::fixtureIconic=false;current::fixtureForeground=false;current::g_prevW=XINPUT_GAMEPAD_A;
+    const auto before=current::g_gamepadUiGateEvidence.snapshot();current::gamepadProcessUiInput(XINPUT_GAMEPAD_A,500000);current::gamepadProcessUiInput(0,500001);const auto after=current::g_gamepadUiGateEvidence.snapshot();
+    check(after[1].calls==before[1].calls+2&&after[1].nonzeroButtons==before[1].nonzeroButtons+1&&after[1].changedButtons==before[1].changedButtons+1,"nonzero and changed button observations are separate call marginals including held values and release");
+    current::g_domainLogEnabled[1]=false;const auto beforeOff=current::g_gamepadUiGateEvidence.snapshot();current::gamepadProcessUiInput(XINPUT_GAMEPAD_B,500002);const auto afterOff=current::g_gamepadUiGateEvidence.snapshot();
+    check(afterOff[1].calls==beforeOff[1].calls,"turning detail OFF stops new observations without resetting earlier process lifetime counters");
+    const auto e=current::gamepadUiGateEvidenceForExport();check(e["schema"]==1&&e["detailedEnabledAtExport"]==false&&e["writerPid"]==GetCurrentProcessId()&&e["writerProcessCreation100ns"]==ymcc::sleepfactlog::writerCreation100nsJson(),"actual export helper retains cached writer identity and distinguishes current OFF from retained earlier counts");
+    check(e["counters"].size()==3&&e["snapshotAtomicAcrossCounters"]==false&&e["countersModulo64Bit"]==true&&e["callsArePresses"]==false&&e["uiEligibleIsActionOrDeliveryProof"]==false&&e["zeroIsNoDeviceProof"]==false,"actual export snapshot explicitly preserves observation limits and fixed three by three counters");
+    unsigned failedBuilds=0;
+    for(int i=0;i<40;++i){ymcc::testing::allocationFault::failAfter(i);const auto snapshot=current::gamepadUiGateEvidenceForExport();ymcc::testing::allocationFault::failAfter(-1);if(snapshot.is_null())++failedBuilds;else if(snapshot["counters"]!=e["counters"])throw std::runtime_error("optional snapshot changed counters");}
+    check(failedBuilds>0&&current::gamepadUiGateEvidenceForExport()["counters"]==e["counters"],"actual optional export JSON failure returns null and never drains or changes source counters");
+    ymcc::logging::UiInputGateEvidence isolated;isolated.observe(ymcc::logging::UiInputGate::Count,1,0);auto empty=isolated.snapshot();check(empty[0].calls==0&&empty[1].calls==0&&empty[2].calls==0,"invalid diagnostic gate selector adds no observations");
+    return finish();
+#endif
+}catch(const std::exception& e){ymcc::testing::allocationFault::failAfter(-1);std::cerr<<e.what()<<std::endl;return 4;}}

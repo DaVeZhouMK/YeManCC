@@ -30,6 +30,9 @@ export function retireBootControllerSnapshots(document: RecordValue): void {
     const strip = (snapshot: RecordValue) => {
         for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration']) delete snapshot[key];
         const input = object(snapshot.input);
+        // Global input policies must not be restored by mode/preset snapshots.
+        delete object(input.ownership).externalControllerPriority;
+        delete object(input.ownership).fseWakeReconnect;
         for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration', 'bootModeShortcuts', 'shortcutRules']) delete input[key];
         const target = object(input.outputTarget);
         for (const key of ['controller', 'buttonMapping', 'axisCalibration', 'controllerCalibration', 'calibration', 'shortcutRules']) delete target[key];

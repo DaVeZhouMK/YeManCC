@@ -1,6 +1,8 @@
 # Read only the three user-supplied evidence archives; never extract or execute.
 import sys,json,hashlib,zipfile,math
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from input_capture_recipe import expand_recipe_receipt
 root=Path(sys.argv[1])/'日志'
 targets=[('MSI-G3E','微星G3E','*184736*.zip','HandheldCompanion.Devices.ClawCG3EM'),
          ('ROG-Xbox-2025','ROG-Xbox-2025','*.zip','HandheldCompanion.Devices.XboxROGAllyX'),
@@ -22,7 +24,8 @@ for family,sub,pattern,device in targets:
    raw=imu.get('raw');dt=d.get('dtMs')
    if not isinstance(raw,dict) or not isinstance(dt,(float,int)) or not math.isfinite(dt) or dt<=0:continue
    if not all(isinstance(raw.get(k),(float,int)) and math.isfinite(raw[k]) for k in ['gx','gy','gz','ax','ay','az']):continue
-   candidate=d.get('hcMatrixCandidate',{});receipt=candidate.get('recipeReceipt',{})
+   candidate=d.get('hcMatrixCandidate',{});receipt=expand_recipe_receipt(candidate.get('recipeReceipt',{}))
+   if receipt is None:continue
    if not isinstance(candidate.get('gyro'),dict) or not isinstance(candidate.get('accel'),dict):continue
    ids={sensor:receipt.get(sensor,{}).get('id') for sensor in ['gyro','accel']}
    values=[candidate['gyro'].get(k) for k in ['gx','gy','gz']]+[candidate['accel'].get(k) for k in ['x','y','z']]

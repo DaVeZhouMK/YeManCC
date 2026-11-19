@@ -78,6 +78,31 @@ public static class AsusFanCurveWriter
         return legacyResult;
     }
 
+    // Opt-in software admission; the OEM return below remains unguarded.
+    public static int ApplySoftwareCurveObserved(
+        byte[] asusCurve, out AsusAcpiCallReceipt[] receipts, Func<bool>? currentOperation)
+    {
+        if (currentOperation is null) return ApplySoftwareCurveObserved(asusCurve, out receipts);
+        receipts = Array.Empty<AsusAcpiCallReceipt>();
+        void RequireCurrent()
+        {
+            if (!currentOperation())
+                throw new OperationCanceledException("ASUS software curve operation superseded");
+        }
+        RequireCurrent();
+        // SetFanCurveObserved also checks after waiting for the actual I/O lock.
+        AsusACPI.SetFanCurveObserved(AsusFan.CPU, asusCurve, out var cpu, currentOperation);
+        receipts = new[] { cpu };
+        RequireCurrent();
+        AsusACPI.SetFanCurveObserved(AsusFan.GPU, asusCurve, out var gpu, currentOperation);
+        receipts = new[] { cpu, gpu };
+        RequireCurrent();
+        var legacyResult = AsusACPI.SetFanCurveObserved(AsusFan.Mid, asusCurve, out var mid, currentOperation);
+        receipts = new[] { cpu, gpu, mid };
+        RequireCurrent();
+        return legacyResult;
+    }
+
     /**
      * 镜像 ROGAlly.SetFanControl(false)：交还 ASUS 默认表（CPU=默认CPU表、GPU=默认GPU表、Mid=默认CPU表）。
      * 返回最后一次（Mid）写入的旧返回值；三通道收据逐扇发布。

@@ -380,7 +380,7 @@
           "line": 202
         },
         {
-          "name": "hiding during busy admission cancels an unsent write without relabeling it as send failure",
+          "name": "hiding during busy admission preserves one accepted write until its reply",
           "line": 205
         },
         {
@@ -507,7 +507,8 @@
   "fixtures": [
     "tools/fixtures/decky_game_memory_store.mjs",
     "tools/fixtures/decky_mirror_host_fixture.mjs",
-    "tools/fixtures/decky_task_paths.mjs"
+    "tools/fixtures/decky_task_paths.mjs",
+    "tools/fixtures/performance_memory_fixture.mjs"
   ],
   "productSources": [
     "PowerControl/GameTitlePolicy.json",
@@ -518,6 +519,8 @@
     "native/decky_sidebar_runtime.h",
     "native/main.cpp",
     "src/App.vue",
+    "src/bridge/bootModeModel.ts",
+    "src/bridge/bootModeSharedShortcuts.ts",
     "src/bridge/controllerPersona.ts",
     "src/bridge/deckyFanActions.ts",
     "src/bridge/deckyFrameActions.ts",
@@ -534,6 +537,7 @@
     "src/bridge/deckySpeedActions.ts",
     "src/bridge/deckyTouchpadActions.ts",
     "src/bridge/deckyTrainerActions.ts",
+    "src/bridge/frameRateLimits.ts",
     "src/bridge/frameRateModel.ts",
     "src/bridge/fxSound.ts",
     "src/bridge/gameInputOverride.ts",
@@ -546,8 +550,10 @@
     "src/bridge/monitorHudFpsVisibility.ts",
     "src/bridge/monitorHudFreshness.ts",
     "src/bridge/monitorHudModel.ts",
+    "src/bridge/monitorOutput.ts",
     "src/bridge/monitorNativeDemand.ts",
     "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/inputApplicationReceipt.ts",
     "src/bridge/performanceControls.ts",
     "src/bridge/performanceSchedule.ts",
     "src/bridge/quickActionLock.ts",

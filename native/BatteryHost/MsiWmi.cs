@@ -41,7 +41,7 @@ internal static class MsiPacket
         if(value is bool accepted){if(!accepted)throw new IOException("MSI 接口拒绝请求");}
         else if(value is not null&&Convert.ToUInt32(value)!=0)throw new IOException("MSI 接口拒绝请求");
     }
-    public static byte[] Call(IMsiWmi wmi,string method,byte[] bytes)
+    public static byte[] Call(IMsiWmi wmi,string method,byte[] bytes,Action? requireAvailable=null)
     {
         IMsiWmiObject? parameters=null,data=null;
         string stage="parameters",shape="method";
@@ -59,6 +59,9 @@ internal static class MsiPacket
             }
             if(parameters is null||data is null)throw new IOException("MSI 接口缺少数据结构（Get_WMI）");
             stage="fill-packet";data.Bytes=bytes;parameters.Data=data;
+            // Parameter discovery and Get_WMI can block after the provider's
+            // pre-read. Admit the write at the final edge before InvokeMethod.
+            stage="admission";requireAvailable?.Invoke();
             stage="invoke";
             using var output=wmi.Invoke(method,parameters)??throw new IOException("MSI 接口未返回");
             // Never retry an invoked Get_Data/Set_Data using another shape.

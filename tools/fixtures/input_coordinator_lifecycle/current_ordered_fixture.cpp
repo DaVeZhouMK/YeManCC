@@ -944,7 +944,7 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"switch-recovery"){switchRecoveryCases();ok=failures.empty();}
  else if(mode==L"tuple-protection"){protectedTupleRecoveryCases();ok=failures.empty();}
  else if(mode==L"persona-lifecycle"){personaLifecycleCases140();ok=failures.empty();}
- else if(mode==L"full-pipe"){fullPipeCases();fixtureCurrentOrderedReturn["preTargetReturnBody"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fixtureCurrentOrderedReturn["postTargetReturnTail"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}
+ else if(mode==L"full-pipe"){fullPipeCases(true);fixtureCurrentOrderedReturn["preTargetReturnBody"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fullPipeOffLifecycleCase("MSI-return-unproven");fixtureCurrentOrderedReturn["postTargetReturnTail"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}
  else return 2;
  const auto report=json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"assertionTrace",assertionTrace},{"orderedReturn",fixtureCurrentOrderedReturn},{"cases",cases},{"failures",failures},{"expectedFailure",expectedFailure},{"forbiddenIo",forbiddenIo},{"inertXinputReads",inertXinputReads},{"targetReturnObservations",fixtureTargetReturnObservations},{"targetReturnCaptureModel","full-pipe: real107 parent+managed-child; native-only: event Host has explicit controlled PID/birth"},{"fullTranslationUnit",true},{"normalProductMainExecuted",false},{"realDeviceIo",false}};
  std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);if(mode==L"full-pipe")std::cout<<json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"failures",failures}}.dump()<<'\n';else std::cout<<report.dump(2)<<'\n';return ok&&forbiddenIo==0?0:1;

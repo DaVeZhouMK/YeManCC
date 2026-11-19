@@ -25,12 +25,13 @@ static void observeSource(int family,const std::string& persona){
  } // MSI source eligibility is observed after actual Start arms its canonical DInput route.
 }
 // Fixture display labels: new families must not be reported as GPD.
-static const char* familyName(int family){switch(family){case 0:return "MSI";case 1:return "ROG";case 2:return "GPD";case 3:return "OneXPlayer";case 4:return "Ayanero";case 5:return "Lenovo";default:throw std::logic_error("unknown persona fixture family");}}
+static const char* familyName(int family){switch(family){case 0:return "MSI";case 1:return "ROG";case 2:return "GPD";case 3:return "OneXPlayer";case 4:return "Ayanero";case 5:return "Lenovo";case 6:return "AOKZOE";default:throw std::logic_error("unknown persona fixture family");}}
 struct ControlledDmi {const char* manufacturer;const char* product;const char* declaredDeviceClass;const char* supportPointer;const char* systemProduct=nullptr;const char* declaredDeviceId=nullptr;};
 static void prepare(int family,const std::string& name,const ControlledDmi* dmi=nullptr,bool registerCase=true){
- if(family>=3&&family!=5)require(family<=4&&dmi,"new family variants require declared controlled DMI leaves");
+ if(family>=3&&family!=5)require((family<=4||family==6)&&dmi,"new family variants require declared controlled DMI leaves");
  if(family==5)require(dmi,"Lenovo family requires its declared controlled DMI leaf");
  require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"new independent lifecycle case starts with no residual owned child");
+ fixtureMsiOwnedMetadata=false;fixtureMsiRuntimeProofEdges={};
  seed();fixtureFullPipe=true;fullPipeFault="none";fixtureXinputSourceLive=true;fixturePsSameInstanceNames=false;fixturePsReturnManualTopology=false;
  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_shortcutRecordingActive=false;g_inputCaptureStop=false;
@@ -53,12 +54,14 @@ static void prepare(int family,const std::string& name,const ControlledDmi* dmi=
   require(ymccFamilyInterfacePolicy(g_machineIdentity.family)==YmccInterfacePolicy::None&&!g_msiDinputRouteDinputArmed.load(),"resolved Lenovo starts on the existing standard source without MSI mode authority");
   require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&!g_msiNativeForegroundLease.active,"resolved Lenovo retains unsupported native-OFF foreground isolation and no native write lease");
  }
- if(family==3&&dmi&&dmi->systemProduct){
+ if((family==3||family==6)&&dmi&&dmi->systemProduct){
   g_machineIdentity.systemProduct=dmi->systemProduct;ymccResolveFamily(g_machineIdentity);
-  require(g_machineIdentity.resolved&&g_machineIdentity.family==YmccFamily::OneXPlayer&&g_machineIdentity.deviceClass==dmi->declaredDeviceClass,"actual directed OneX DMI resolves its concrete class");
+  require(g_machineIdentity.resolved&&g_machineIdentity.family==(family==6?YmccFamily::Aokzoe:YmccFamily::OneXPlayer)&&g_machineIdentity.deviceClass==dmi->declaredDeviceClass,"actual directed family DMI resolves its concrete class");
   const auto binding=ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass);
   require(binding.known()&&ymcc::capabilities::onexVirtual::recognized(binding,g_machineIdentity.deviceClass),"directed OneX class binds the actual legacy or reviewed capability");
-  fixtureOneXEnabled=true;fixtureOneXShape="flow";
+  require(inputHostOneXMachineEligible(),"resolved family agrees with its exact immutable capability");
+   require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&!g_msiNativeForegroundLease.active&&!g_msiDinputRouteDinputArmed.load(),"shared ordinary Start grants no OEM native-OFF isolation or MSI mode authority");
+   fixtureOneXEnabled=true;fixtureOneXShape="flow";
   // Independent process-equivalent discovery state, not post-refresh proof.
   // Direct helper cases previously left a completed boundary in this process.
   g_xinputPreTargetSlots=0;g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;
@@ -69,7 +72,7 @@ static void prepare(int family,const std::string& name,const ControlledDmi* dmi=
   {std::lock_guard<std::mutex> identity(g_hidHidePhysicalIdentityMx);g_hidHidePhysicalIdentity=fixtureOneXSource();}
  }
  reg_fs();if(registerCase)cases.push_back({{"name",name},{"controlledFamily",familyName(family)},{"realManagedPipe",true},{"sourceDiscoveries",json::array()},{"periods",json::array()},{"managedReceipts",json::array()}});
- if(fixtureOneXEnabled){cases.back()["familySelection"]="onex";cases.back()["suite"]="family-lifecycle";cases.back()["managedCommandPath"]=true;
+ if(fixtureOneXEnabled){cases.back()["familySelection"]=family==6?"aokzoe":"onex";cases.back()["suite"]="family-lifecycle";cases.back()["managedCommandPath"]=true;
   cases.back()["filterAttached"]="UNKNOWN";cases.back()["externalSuppressionVerified"]=false;
   const auto binding=ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass);
   cases.back()["controlledDmi"]={{"boundary","controlled DMI leaf; actual resolver and capability binding; not hardware acceptance"},
@@ -82,9 +85,13 @@ static void prepare(int family,const std::string& name,const ControlledDmi* dmi=
   cases.back()["nativeForegroundUnsupported"]=true;
  }
 }
-static json receipt(HANDLE child,const std::wstring& file,const std::string& persona,unsigned expectedCreates=1){
+static json receipt(HANDLE child,const std::wstring& file,const std::string& persona,unsigned expectedCreates=1,bool allowClassifiedReadFailure=false){
  const auto result=fullPipeChildOutcome(child,file);
- require(result.value("nativeObservedProcessExit",false)&&result.value("nativeObservedExitCode",999)==0&&result.value("finalCleanupOk",false)&&!result.value("hasController",true)&&!result.value("hasContext",true),"exact old managed child controller and context release naturally before the next create");
+ const auto terminal=result.value("terminalSettlement",json::object());
+ const bool expectedExit=result.value("nativeObservedExitCode",999)==0 ||
+  (allowClassifiedReadFailure && result.value("nativeObservedExitCode",999)==5 &&
+   terminal.value("Reason",std::string{})=="read-failed" && terminal.value("ManagedReleaseComplete",false));
+ require(result.value("nativeObservedProcessExit",false)&&expectedExit&&result.value("finalCleanupOk",false)&&!result.value("hasController",true)&&!result.value("hasContext",true),"exact old managed child controller and context release naturally before the next create");
  require(result.value("creates",0)==expectedCreates&&result.value("actualProductionHostSessionConsumer",false)&&result.value("actualProductionPipeLoop",false),"actual HostSession creates exactly the requested target count through the real private production pipe");
  const auto& final=result["stateAfterFinalCleanup"];require(final["tuple"].value("Persona",std::string{})==persona,"managed final tuple retains this lifecycle's actual requested persona");
  bool prepared=false;for(const auto& row:result["observations"])if(row.value("kind",std::string{})=="command-decoded"&&row.value("command",std::string{})=="PREPARE_TARGET")prepared=true;
@@ -120,42 +127,268 @@ static void startFirst(int family,const std::string& persona){
  }
  success(family,persona,g_virtualStartProtection.view(startProtectionClock).requestId);
 }
-static void close(int family,const std::string& persona,unsigned expectedCreates=1){
+static void close(int family,const std::string& persona,unsigned expectedCreates=1,bool allowClassifiedReadFailure=false){
  const auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE)),off=targetDocument("disabled",current["input"]["revision"].get<int>()+1);const auto spawns=fullPipeSpawnCount;
  const auto child=fullPipeChildObservers.back();const auto file=fullPipeReceipts.back();require(writeTarget(current,off).value("ok",false),"real settings IPC admits OFF only after persona success final");inputCaptureRefreshRealStickSettings(true);const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;
  fullPipeRejectLockedPlayerWrite(off,targetDocument(persona,off["input"]["revision"].get<int>()+1));
  require(!inputHostStart()&&fullPipeSpawnCount==spawns,"unfinished OFF cannot create or reopen a Host");
- inputHostStop("virtual-target-disabled");const auto result=receipt(child,file,persona,expectedCreates);
+ inputHostStop("virtual-target-disabled");const auto result=receipt(child,file,persona,expectedCreates,allowClassifiedReadFailure);
  if(family==0&&g_msiDinputReturnOwed.load())fullPipeMsiObserveReleasedPhysicalReturn(result,"persona140-normal-OFF-released-local-interface");
  fullPipeDrainQueuedLifecycle();
  require(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active,"actual OFF has released the exact old Host target and visibility ownership");
+ if(family==1)fullPipeRogObserveReturnedSource(ticket,true);
  auto candidate=g_virtualStartProtection.view(startProtectionClock);require(candidate.requestId==ticket&&candidate.persona=="disabled"&&candidate.phase=="verifying"&&candidate.locked,"actual OFF reports only its closing candidate before common verification");
  if(candidate.verificationRemainingMs){advance(candidate.verificationRemainingMs-1);fullPipeVerificationStep();require(g_virtualStartProtection.view(startProtectionClock).locked&&finalCount(ticket,"success")==0,"closing result remains protected until its original inspection completes");advance(1);}
+ if(family==1)(void)fresh(1);
  fullPipeVerificationStep();fullPipeVerificationStep();const auto done=g_virtualStartProtection.view(startProtectionClock);
  require(done.phase=="success"&&!done.locked&&done.requestId==ticket&&finalCount(ticket,"success")==1&&finalCount(ticket,"failure")==0,"real OFF inspection publishes exactly one successful closing result");
  fullPipeDrainQueuedLifecycle();require(fullPipeSpawnCount==spawns&&fullPipeChildObservers.empty()&&!g_inputHostProcess,"queued late work cannot resurrect OFF and no fixture child remains");
  cases.back()["periods"].push_back({{"requestId",ticket},{"persona","disabled"},{"outcome",done.phase},{"finalCount",finalCount(ticket,"success")}});
 }
+#ifdef YMCC_FIXTURE_OEM_AFTER_OFF
+static LRESULT CALLBACK oemPrivateWindow(HWND window,UINT message,WPARAM w,LPARAM l){
+ if(message==WM_OEM_SHORTCUT_EDGE){nativeKeyboardShortcutHandleOemEdge(w,l);return 0;}
+ if(message==WM_OEM_HOOK_RECONCILE){oemBackMappingReconcileOnUi();return 0;}
+ return DefWindowProcW(window,message,w,l);
+}
+static void oemAfterOffCases(){
+ struct Input {int family;const char* name;ControlledDmi dmi;const char* key;};
+ const Input inputs[]={
+  {4,"OEM-AFTER-OFF/AYA-AIRPro",{"AYANEO","AIR PRO","HandheldCompanion.Devices.AYANEOAIRPro","/ayaAirProOemField127"},"ckbig"},
+  {2,"OEM-AFTER-OFF/GPD-Win5",{"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"},"l4"}};
+ for(const auto& input:inputs){
+  require(!g_gamepadSerialThread.joinable(),"prior OEM scenario returned its actual serial worker");
+  {std::lock_guard<std::mutex> lock(g_gamepadSerialMx);g_gamepadSerialStopping=false;}
+  prepare(input.family,input.name,&input.dmi);ymccResolveFamily(g_machineIdentity);
+  require(g_machineIdentity.resolved&&g_machineIdentity.deviceClass==input.dmi.declaredDeviceClass,"controlled DMI uses actual total-library identity resolution");
+  cases.back()["resolvedDeviceClass"]=g_machineIdentity.deviceClass;
+  struct ReturnOwner {
+   ~ReturnOwner(){
+    try{if(g_inputHostProcess)inputHostStop("offline-owned-cleanup");}catch(...){}
+    try{gamepadSerialStop(2000);}catch(...){}
+    g_exitRequested=true;try{oemBackMappingReconcileOnUi();}catch(...){}
+    if(g_hwnd){DestroyWindow(g_hwnd);g_hwnd=nullptr;}
+   }
+  } returnOwner;
+  const auto journalRequests=fixtureOemJournalMutexRequests.load();
+  const auto spawns=fullPipeSpawnCount;startFirst(input.family,"elite");close(input.family,"elite");
+  require(fullPipeSpawnCount==spawns+1&&fullPipeChildObservers.empty()&&!g_inputHostProcess&&!g_inputHostPrepared,
+   "real native Start and OFF returned the private managed child before fresh OEM input");
+  fixtureOemKeyboardActions=fixtureOemDesktopActions=fixtureOemActionTid=0;fixtureOemHookInstalls=fixtureOemHookRemoves=0;
+  const auto title=L"YMCC.OemAfterOff."+std::to_wstring(GetCurrentProcessId());
+  WNDCLASSW cls{};cls.lpfnWndProc=oemPrivateWindow;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=title.c_str();
+  const auto atom=RegisterClassW(&cls);require(atom||GetLastError()==ERROR_CLASS_ALREADY_EXISTS,"private message-only OEM class exists");
+  g_hwnd=CreateWindowExW(0,title.c_str(),L"",0,0,0,0,0,HWND_MESSAGE,nullptr,cls.hInstance,nullptr);
+  require(g_hwnd!=nullptr,"fresh OEM events use a private message-only window");
+  // The keyboard source's interface readiness is an explicit transport leaf,
+  // not a hardware/firmware query. Matcher, gate, queue and release remain real.
+  if(input.family==2){g_gpdBackIfaceReady=true;g_gpdBackIfaceGen.fetch_add(1);}
+  const auto& binding=oemUnifiedInputBindingFor(g_machineIdentity.family,g_machineIdentity.deviceClass);
+  const auto& profile=oemChordProfileFor(binding.profileId);uint64_t mask=0;
+  require(nativeKeyboardShortcutMaskBit(input.key,mask),"existing OEM catalog ID resolves without a new mapping");
+  const OemChordRule* chord=nullptr;
+  for(int i=0;i<profile.count;++i)if(profile.rules[i].bit==mask&&!profile.rules[i].mouseChord){chord=&profile.rules[i];break;}
+  require(chord!=nullptr,"source chord comes from the actual model-local profile");
+  const auto settle=[&](){
+   std::promise<void> done;auto ready=done.get_future();
+   require(gamepadSerialSubmit([&]{done.set_value();}),"actual serial observer is admitted after the action");
+   require(ready.wait_for(std::chrono::seconds(2))==std::future_status::ready,"actual serial action and observer return within the existing bound");
+  };
+  const auto pump=[&](){MSG message{};unsigned count=0;
+   while(PeekMessageW(&message,g_hwnd,0,0,PM_REMOVE)){require(++count<=64,"private OEM message queue is bounded");DispatchMessageW(&message);}
+   settle();
+  };
+  const auto bind=[&](const char* action){
+   const auto before=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));auto next=before;
+   next["input"]["revision"]=before["input"]["revision"].get<int>()+1;
+   next["input"]["buttonMapping"]["rules"]["shortcutRules"]=json::array({{{"id","oem-after-off"},{"enabled",true},
+    {"actionId",action},{"params",json::object()},{"inputs",json::array({{{"source","oem"},{"code",input.key}}})},
+    {"trigger","press"},{"holdMs",500},{"doubleWindowMs",500},{"intervalMs",150}}});
+   require(writeTarget(before,next).value("ok",false),"ordinary settings IPC publishes the native OEM action rule after real OFF");
+   inputCaptureRefreshRealStickSettings(true);Sleep(NATIVE_KEYBOARD_SHORTCUT_REFRESH_MS+1);
+   nativeKeyboardShortcutsEvaluate(0,XINPUT_GAMEPAD{},GetTickCount64());pump();
+   require(GamepadSerialEvent::RulesApplied.load()==GamepadSerialEvent::RulesRequired.load(),"actual refresh consumes the published rules generation");
+  };
+  const auto pulse=[&](bool injected){
+   uint32_t remaining=chord->keys;std::vector<DWORD> keys;unsigned consumed=0;
+   for(DWORD vk=1;vk<256;++vk){const auto bit=oemBackHookVkBit(vk);if(bit&&(remaining&bit)){keys.push_back(vk);remaining&=~bit;}}
+   require(!remaining&&!keys.empty(),"OEM source uses current VK decoding");
+   for(const auto vk:keys){KBDLLHOOKSTRUCT key{};key.vkCode=vk;key.flags=injected?LLKHF_INJECTED:0;consumed+=oemBackHookProc(HC_ACTION,WM_KEYDOWN,reinterpret_cast<LPARAM>(&key))!=0;}
+   for(auto it=keys.rbegin();it!=keys.rend();++it){KBDLLHOOKSTRUCT key{};key.vkCode=*it;key.flags=LLKHF_UP|(injected?LLKHF_INJECTED:0);consumed+=oemBackHookProc(HC_ACTION,WM_KEYUP,reinterpret_cast<LPARAM>(&key))!=0;}
+   if(!injected)require(consumed==2*keys.size()&&!g_oemKeyboardConsume.replayCount&&!oemKeyboardConsumeBusy(),"fresh native OEM down/up pair is consumed and released without replay");
+   else require(consumed==0,"injected source is not promoted to physical OEM input");
+  };
+  bind("os.openTouchKeyboard");pulse(false);pump();
+  require(fixtureOemKeyboardActions==1&&fixtureOemActionTid!=GetCurrentThreadId(),"fresh post-OFF OEM input executes the configured action on the real serial worker");
+  pulse(true);pump();require(fixtureOemKeyboardActions==1,"injected post-OFF sequence executes no extra action");
+  pulse(false);g_oemShortcutEdgeEpoch.fetch_add(1);pump();
+  require(fixtureOemKeyboardActions==1,"actual retained delivery rejects a retired source epoch after OFF");
+  nativeKeyboardShortcutsEvaluate(0,XINPUT_GAMEPAD{},GetTickCount64());pulse(false);pump();
+  require(fixtureOemKeyboardActions==2,"next fresh native source remains usable after stale delivery was refused");
+  bind("os.returnDesktop");pulse(false);pump();
+  require(fixtureOemDesktopActions==1,"actual external-injection action route also reaches its controlled OS leaf without Host");
+  require(fullPipeSpawnCount==spawns+1&&!g_inputHostProcess&&!g_inputHostPrepared&&!g_realStickTest.virtualTargetEnabled,
+   "OEM actions create no replacement virtual Host or output intent");
+  require(gamepadSerialStop(2000)&&!g_gamepadSerialThread.joinable(),"actual OEM action worker is joined before fixture completion");
+  g_exitRequested=true;oemBackMappingReconcileOnUi();
+  require(!g_oemBackHook&&!g_oemMouseHook&&fixtureOemHookInstalls==2&&fixtureOemHookRemoves==2&&!oemKeyboardConsumeBusy(),
+   "actual hook owner returns both controlled hook handles and paired-key ledger");
+  DestroyWindow(g_hwnd);g_hwnd=nullptr;
+  require(fixtureOemJournalMutexRequests.load()>journalRequests,"actual model journal uses only its private named mutex boundary");
+  cases.back()["postOffOem"]={{"keyboardActions",fixtureOemKeyboardActions.load()},{"desktopActions",fixtureOemDesktopActions.load()},
+   {"privateModelJournalMutexRequests",fixtureOemJournalMutexRequests.load()-journalRequests},
+   {"realSerialWorkerJoined",true},{"controlledHookHandlesReturned",true},{"realManagedOffBeforeInput",true},
+   {"physicalInputAndOSActionEffectVerified",false},{"gpdInterfaceReadinessControlled",input.family==2}};
+  cases.back()["passed"]=true;fixtureFullPipe=false;
+ }
+}
+#endif
 static void first(int family,const std::string& persona,const ControlledDmi* dmi=nullptr){prepare(family,std::string(familyName(family))+(family==5&&dmi&&dmi->systemProduct?std::string("/")+dmi->systemProduct:std::string{})+"/persona-first/"+persona,dmi);const auto spawns=fullPipeSpawnCount;startFirst(family,persona);close(family,persona);require(fullPipeSpawnCount==spawns+1,"first-ON-to-OFF lifecycle has exactly one Host without fallback replacement");cases.back()["passed"]=true;fixtureFullPipe=false;}
-static void transfer(const std::string& from,const std::string& to){
- prepare(1,"ROG/persona-transfer/"+from+"-to-"+to);const auto caseSpawns=fullPipeSpawnCount;startFirst(1,from);
- auto oldSource=fresh(1);oldSource.pad.wButtons=XINPUT_GAMEPAD_B;oldSource.pad.sThumbLX=29000;
+// Explicit parameters only: the original ROG six directions and family suite
+// retain their existing selections. The JS selector reads this same table.
+static constexpr const char* gpdLiveSdTransferPersonas[]={"dualsense-edge","elite"};
+static void observeGpdLiveSdNativeWork(){
+ require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd &&
+  g_inputHostProcess&&g_inputHostActive&&g_hidHideVisibilityJournal.active&&
+  inputHostBoundPersonaValue()=="steamdeck"&&!g_msiNativeForegroundLease.active&&
+  !g_postHideCycleOwned.load()&&!inputHostNativeVisibilityHistoryPending()&&
+  !ymcc::inputHost::switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending,
+  "GPD live SD observation begins with actual live ownership and no historical native duty");
+ const auto host=g_inputHostProcess;const auto epoch=g_inputHostEpoch;
+ const auto request=g_virtualStartProtection.view(startProtectionClock);
+ unsigned reads=0,writes=0,refreshes=0,queues=0;
+ // Only foreground/physical effect leaves are local. In particular coldReturn
+ // stays EMPTY: the production cold entry/current guard must decide itself.
+ // Restore all effects before the serialized persona worker, including on FAIL.
+ struct Effects {
+  MsiNativeForegroundTestIo saved=g_msiNativeForegroundTestIo;
+  bool observer=g_msiNativeForegroundObserverActive.exchange(true);
+  bool isolation=g_controllerFrontendIsolationEnabled.exchange(true);
+  ~Effects(){g_msiNativeForegroundTestIo=std::move(saved);
+   g_msiNativeForegroundObserverActive=observer;g_controllerFrontendIsolationEnabled=isolation;}
+ };
+ const auto persistenceBefore=g_msiNativeForegroundTestIo.nativeVisibilityPersistence;
+ const bool coldOverrideBefore=static_cast<bool>(g_msiNativeForegroundTestIo.coldReturn);
+ {
+  Effects effects;g_msiNativeForegroundTestIo={};auto& io=g_msiNativeForegroundTestIo;
+  io.nativeVisibilityPersistence=true;io.ui=[](){return true;};
+  io.snapshot=[&](HidHideVisibilitySnapshot&){++reads;return false;};
+  io.candidates=[&](){++reads;return std::vector<HidHidePhysicalIdentity>{};};
+  io.inventory=[&](const HidHidePhysicalIdentity&){++reads;return std::vector<HidHideInterfaceRecord>{};};
+  io.xusbInventory=[&](const HidHidePhysicalIdentity&){++reads;return MsiNativeForegroundXusbInventory{};};
+  io.inventoryComplete=[&](){++reads;return false;};
+  io.visibility=[&](const std::wstring&,bool){++writes;return false;};
+  io.cloak=[&](bool){++writes;return false;};
+  io.durableHide=[&](const auto&,const auto&,const auto&){++writes;return false;};
+  io.durableReturn=[&](const auto&){++writes;};
+  io.readerExemption=[&](){++writes;return false;};
+  io.readerInverseOff=[&](){++reads;return false;};
+  io.cycle=[&](const auto&,const auto&,bool){++refreshes;return 2;};
+  io.gameRefresh=[&](const auto&,const auto&){++refreshes;return 2;};
+  io.xusbRefresh=[&](const auto&,const auto&){++refreshes;return 2;};
+  io.poll=[&](){++refreshes;return -1;};
+  io.queue=[&](){++queues;};io.virtualQueue=[&](const auto&){++queues;};
+  {
+   std::lock_guard<InputHostMutex> lock(g_inputHostMx);const auto facts=msiNativeForegroundFacts();
+   require(facts.knownBoard&&facts.virtualEnabled&&!facts.nativeChoice&&facts.uiOwned&&
+    facts.powerReady&&!facts.hostAbsent&&!facts.exitFence&&io.nativeVisibilityPersistence&&!io.coldReturn,
+    "GPD live SD reaches actual foreground facts with persistence enabled and no cold override");
+  }
+  msiNativeForegroundHandleWork();
+  const bool nativePending=inputHostNativeVisibilityHistoryPending();
+  const bool coldPending=ymcc::inputHost::switchExecutionReturnRuntime::state.pending||g_inputHostSwitchExecutionReturnPending;
+  cases.back()["nativeUiObservation"]={{"handleWorkCalls",1},{"nativeVisibilityPersistence",true},
+   {"coldReturnOverride",false},{"deviceReads",reads},{"deviceWrites",writes},{"refreshes",refreshes},{"queues",queues},
+   {"nativePending",nativePending},{"coldPending",coldPending},
+   {"boundary","actual HandleWork/cold admission; only UI fact and fail-closed physical effect leaves; no SDK/device or cold cleanup acceptance"}};
+  require(reads+writes+refreshes+queues==0,"GPD live SD foreground work performs zero device IO or replacement queue effects");
+  require(!nativePending&&!coldPending&&g_inputHostProcess==host&&g_inputHostEpoch==epoch&&g_inputHostActive&&
+   g_hidHideVisibilityJournal.active&&g_virtualStartProtection.view(startProtectionClock).requestId==request.requestId&&
+   g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,
+   "GPD live SD foreground work cannot manufacture native pending or cold continuation");
+ }
+ require(g_msiNativeForegroundTestIo.nativeVisibilityPersistence==persistenceBefore&&
+  static_cast<bool>(g_msiNativeForegroundTestIo.coldReturn)==coldOverrideBefore,
+  "GPD live SD local effects are restored before serialized persona reconciliation");
+ cases.back()["nativeUiObservation"]["effectsRestoredBeforeDispatch"]=true;
+}
+static void transfer(const std::string& from,const std::string& to,int family=1,const ControlledDmi* dmi=nullptr){
+ const bool serialNativeUi=family==2;
+ if(family!=1)require(serialNativeUi&&dmi&&from=="steamdeck"&&
+  std::any_of(std::begin(gpdLiveSdTransferPersonas),std::end(gpdLiveSdTransferPersonas),[&](const auto* value){return to==value;}),
+  "directed native UI transfer uses only the two declared GPD SD successors");
+ prepare(family,std::string(familyName(family))+"/persona-transfer/"+from+"-to-"+to,dmi);
+ if(serialNativeUi){
+  ymccResolveFamily(g_machineIdentity);
+  require(g_machineIdentity.resolved&&g_machineIdentity.family==YmccFamily::Gpd&&
+   g_machineIdentity.deviceClass==dmi->declaredDeviceClass&&nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd,
+   "directed GPD transfer resolves its actual DMI class and native foreground admission");
+  cases.back()["controlledDmi"]["runtimeDeviceClass"]=g_machineIdentity.deviceClass;
+  cases.back()["controlledDmi"]["boundary"]="controlled DMI leaf; actual resolver/native profile; no hardware acceptance";
+ }
+ const auto caseSpawns=fullPipeSpawnCount;startFirst(family,from);
+ if(serialNativeUi)observeGpdLiveSdNativeWork();
+ auto oldSource=fresh(family);oldSource.pad.wButtons=XINPUT_GAMEPAD_B;oldSource.pad.sThumbLX=29000;
  const auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE)),next=targetDocument(to,current["input"]["revision"].get<int>()+1);const auto oldChild=fullPipeChildObservers.back();const auto oldReceipt=fullPipeReceipts.back();const auto oldPid=GetProcessId(oldChild);const auto oldEpoch=g_inputHostEpoch;
  require(writeTarget(current,next).value("ok",false),"real settings IPC admits a different persona only after original success");
  // The BUS can complete an old Host report after settings admission but before
  // the new runtime intent is reconciled. That receipt belongs to the OLD persona.
  const auto admitted=g_virtualStartProtection.view(startProtectionClock);
- auto gapSource=fresh(1);const auto gapFrame=fullPipeSubmitSource(gapSource,true,false);
+ auto gapSource=fresh(family);const auto gapFrame=fullPipeSubmitSource(gapSource,true,false);
  require(g_virtualStartProtection.view(startProtectionClock).requestId==admitted.requestId && g_virtualStartProtection.view(startProtectionClock).phase=="pending",
      "old persona ACK in the settings-to-runtime gap cannot start new persona inspection");
  cases.back()["admissionGap"]={{"requestId",admitted.requestId},{"boundBeforeReconcile",inputHostBoundPersonaValue()},{"frame",gapFrame}};
  inputCaptureRefreshRealStickSettings(true);const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;
  const auto late=fullPipeSubmitSource(oldSource,true,false);require(late.value("hostSubmission",std::string{})!="frame-accepted"||late.value("focusIsolationSemanticNeutral",false),"changed intent cannot replay cached old buttons through the retiring persona");
- inputHostStop("persona-transition");const auto released=receipt(oldChild,oldReceipt,from);require(!g_inputHostProcess&&fullPipeSpawnCount==caseSpawns+1,"old managed child naturally releases before any new persona Host creation");
- observeSource(1,to);const auto spawns=fullPipeSpawnCount;require(inputHostStart()&&fullPipeSpawnCount==spawns+1&&GetProcessId(g_inputHostProcess)!=oldPid&&g_inputHostEpoch!=oldEpoch,"new persona creates exactly one new Host after old child/controller/context exit proof");
+ json released;
+ if(serialNativeUi){
+  const auto eventBegin=fixtureEvents.size();
+  bool reread=false;
+  if(to=="elite")fixtureGpdTransferSourceAtEnsure=[&](){
+   require(!g_inputHostProcess&&!g_inputHostPrepared,"Elite controlled source read starts only after old Host retirement");
+   cases.back()["sourceDiscoveries"].push_back({{"persona",to},{"afterOldHostRetired",true},
+    {"discovery",fullPipeReadPhysicalSourceForElite(false,true)}});reread=true;
+  };
+  require(inputHostQueueLifecycleWork("persona-transition"),"GPD transfer admits its original request to the actual serialized worker");
+  fullPipeDrainQueuedLifecycle();
+  require(to!="elite"||reread,"Elite consumes an actual controlled physical read before source-required creation");
+  require(g_inputHostProcess&&g_inputHostProcess!=oldChild&&inputHostBoundPersonaValue()==to&&
+   fullPipeSpawnCount==caseSpawns+2&&WaitForSingleObject(oldChild,0)==WAIT_OBJECT_0,
+   "GPD serialized transfer observes the old child exited and exactly one replacement Host");
+  released=receipt(oldChild,oldReceipt,from);
+  bool dispatched=false;auto stopEvent=fixtureEvents.size(),createEvent=fixtureEvents.size();
+  for(auto i=eventBegin;i<fixtureEvents.size();++i){const auto& event=fixtureEvents[i];
+   if(event.value("event","")=="input-host-lifecycle-work"&&event["detail"].value("action","")=="start-or-persona-reconcile"&&
+    event["detail"].value("reason","")=="persona-transition")dispatched=true;
+   if(event.value("event","")=="input-host-stop-result"&&event["detail"].value("epoch",uint64_t{})==oldEpoch&&
+    event["detail"].value("hostPid",DWORD{})==oldPid&&event["detail"].value("hostExitConfirmed",false))stopEvent=i;
+   if(event.value("event","")=="input-host-primary-thread-retirement"&&event["detail"].value("phase","")=="created"&&
+    event["detail"].value("epoch",uint64_t{})==g_inputHostEpoch)createEvent=i;
+  }
+  // The real-process port returns before the old synthetic create-process
+  // trace. Observe actual Stop/creation receipts for the exact old/new tuples.
+  require(dispatched&&stopEvent<createEvent&&createEvent<fixtureEvents.size(),
+   "GPD transfer uses production BeforeVirtualWork dispatcher with Stop ordered before new creation");
+  require(GetProcessId(g_inputHostProcess)!=oldPid&&g_inputHostEpoch!=oldEpoch&&
+   !inputHostNativeVisibilityHistoryPending()&&!ymcc::inputHost::switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending,
+   "new persona creates exactly one new Host after old child/controller/context exit proof");
+  cases.back()["serializedTransfer"]={{"queueReason","persona-transition"},{"actualDispatcher",true},
+   {"beforeVirtualWorkOnProductionPath",true},{"stopBeforeCreate",true},{"oldExited",true},{"replacementHosts",1},
+   {"stopEventIndex",stopEvent},{"creationEventIndex",createEvent},{"observation","actual-native-tuples-not-synthetic-create-trace"}};
+ }else{
+  inputHostStop("persona-transition");released=receipt(oldChild,oldReceipt,from);require(!g_inputHostProcess&&fullPipeSpawnCount==caseSpawns+1,"old managed child naturally releases before any new persona Host creation");
+  observeSource(family,to);const auto spawns=fullPipeSpawnCount;require(inputHostStart()&&fullPipeSpawnCount==spawns+1&&GetProcessId(g_inputHostProcess)!=oldPid&&g_inputHostEpoch!=oldEpoch,"new persona creates exactly one new Host after old child/controller/context exit proof");
+ }
  const auto stale=fullPipeSubmitSource(oldSource,true,false);require((stale.value("hostSubmission",std::string{})!="frame-accepted"||stale.value("focusIsolationSemanticNeutral",false))&&g_virtualStartProtection.view(startProtectionClock).phase=="pending","old sample cannot become a live frame or successful candidate on the newly bound persona");
  cases.back()["transferProof"]={{"from",from},{"to",to},{"oldPid",oldPid},{"oldEpoch",oldEpoch},{"oldNaturalExit",released.value("nativeObservedProcessExit",false)},{"newPid",GetProcessId(g_inputHostProcess)},{"newEpoch",g_inputHostEpoch},{"oldFrameAfterIntent",late},{"oldFrameAfterNewHost",stale}};
- success(1,to,ticket);close(1,to);require(fullPipeSpawnCount==caseSpawns+2,"directed persona transfer owns only one Host per requested persona");cases.back()["passed"]=true;fixtureFullPipe=false;
+ success(family,to,ticket);close(family,to);require(fullPipeSpawnCount==caseSpawns+2,"directed persona transfer owns only one Host per requested persona");cases.back()["passed"]=true;fixtureFullPipe=false;
+}
+static void gpdLiveSdTransferCases(){
+ const ControlledDmi dmi={"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"};
+ const auto begin=cases.size();
+ for(const auto* persona:gpdLiveSdTransferPersonas)transfer("steamdeck",persona,2,&dmi);
+ require(cases.size()==begin+std::size(gpdLiveSdTransferPersonas)&&fullPipeChildObservers.empty()&&!g_inputHostProcess,
+  "explicit GPD live SD selection executes exactly two canonical transfers and returns all owned children");
 }
 static void recreateDurability(){
  prepare(0,"MSI/steamdeck/same-Host-twenty-recreates-durable-current-only");fullPipeFault="recreate-owned-ids-rotate";startFirst(0,"steamdeck");
@@ -214,6 +447,816 @@ static void msiLateExplicitReturnCase(bool beforeReturn,bool returnBeforeQueue=f
  fixturePsReturnManualTopology=false;success(0,"steamdeck",ticket);close(0,"steamdeck");cases.back()["passed"]=true;fixtureFullPipe=false;
 }
 
+// Exact original worker path: a current protected tuple classification, then a
+// one-shot transport OS error queues the real frame-fault cleanup token. The
+// runtime consumer must decline it before switch cleanup can inspect it.
+static const char* classifiedFaultCleanupPersonas[]={"dualsense-edge","elite"};
+static void classifiedFaultCleanupCases140(const std::string& onlyPersona={}){
+ using namespace personaLifecycle140;
+ const auto faultReceipt=[&](HANDLE child,const std::wstring& file,const std::string& persona){
+  const auto result=fullPipeChildOutcome(child,file);const auto code=result.value("nativeObservedExitCode",999);
+  const auto terminal=result.value("terminalSettlement",json::object());
+  const bool expectedExit=code==0||(code==5&&terminal.value("Reason",std::string{})=="read-failed"&&terminal.value("ManagedReleaseComplete",false));
+  require(result.value("nativeObservedProcessExit",false)&&expectedExit&&result.value("finalCleanupOk",false)&&!result.value("hasController",true)&&!result.value("hasContext",true),
+   "faulted exact managed child exits naturally and fully releases; controlled transport EOF may retain exit5");
+  require(result.value("creates",0)==1&&result.value("actualProductionHostSessionConsumer",false)&&result.value("actualProductionPipeLoop",false)&&result["stateAfterFinalCleanup"]["tuple"].value("Persona",std::string{})==persona,
+   "fault receipt preserves exact persona and actual production loop with one released old target");
+  cases.back()["managedReceipts"].push_back({{"path",W2U(file)},{"processId",result.value("processId",0u)},{"persona",persona},{"creates",result.value("creates",0)},
+   {"controllerReleased",!result.value("hasController",true)},{"contextReleased",!result.value("hasContext",true)},{"naturalExit",result.value("nativeObservedProcessExit",false)},
+   {"nativeExitCode",code},{"terminalReason",terminal.value("Reason",std::string{})},{"tuple",result["stateAfterFinalCleanup"]["tuple"]},{"faultScope","one controlled transport OS failure; not normal OFF exit-code exemption"}});
+  return result;
+ };
+ const auto stops=[](){return std::count_if(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),[](const auto& s){return s.rfind("stop:",0)==0;});};
+ for(const char* rawPersona:classifiedFaultCleanupPersonas){
+  const std::string persona=rawPersona;
+  if(!onlyPersona.empty()&&persona!=onlyPersona)continue;
+  require(!g_inputHostReleaseQuarantined&&!g_inputHostEpoch&&!g_psEndpointOwnership.retirementRequired()&&!g_hidHideVisibilityJournal.active,
+   "independent fault case begins only after the preceding actual return owner fully closed");
+  prepare(1,"classified-fault-cleanup/"+persona);
+  fixtureClassifiedReturnReleasedEpoch=0;fixtureRuntimeRecoveryOsEnabled=true;
+  const auto doc=targetDocument(persona,0);
+  require(sgWriteFileAtomic(YM_SETTINGS_FILE,doc.dump()),"classified cleanup seeds only its explicit private persona");
+  inputCaptureRefreshRealStickSettings(true);observeSource(1,persona);
+  const auto creates=fullPipeSpawnCount;
+  require(inputHostStart()&&fullPipeSpawnCount==creates+1,"classified cleanup starts one actual managed Host through production Start");
+  const auto oldChild=fullPipeChildObservers.back();const auto oldFile=fullPipeReceipts.back();
+  const auto oldEpoch=g_inputHostEpoch;const auto oldRun=g_inputHostRunId;
+  const auto oldInstance=g_inputHostHostInstanceId;const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;
+  HANDLE oldObservation=nullptr;
+  require(DuplicateHandle(GetCurrentProcess(),oldChild,GetCurrentProcess(),&oldObservation,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,
+   "fault return owns an independent exact old process observer until native settlement completes");
+  ymcc::targetReturn::fileDetail::Handle oldObserver(oldObservation);
+  fixtureRuntimeRecoveryOldHost=oldObservation;fixtureRuntimeRecoveryOldOwner=inputHostTargetReturnCaptureOwner(g_inputHostProcess);
+  require(fixtureRuntimeRecoveryOldOwner.has_value(),"real fullPipe old Host supplies its actual PID and birth for writer proof");
+  unsigned reads=0;
+  for(;reads<32;++reads){advance(8);auto sample=fresh(1);fullPipeSubmitSource(sample,true,false);const auto v=g_virtualStartProtection.view(startProtectionClock);if(v.phase=="verifying"&&v.candidateOutcome=="success")break;}
+  require(reads<32&&g_inputHostActive,"classified cleanup has an actual current-source accepted candidate");
+  const auto candidate=g_virtualStartProtection.view(startProtectionClock);
+  require(candidate.requestId==ticket&&candidate.locked&&candidate.verificationRemainingMs==10000&&candidate.fallbackAttempts==0,
+   "classified cleanup retains original ten-second inspection before any fallback");
+  const auto originalDeadline=startProtectionClock+candidate.remainingMs;
+  std::string tupleToken;
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   inputHostSwitchRecoveryOfferLocked(ticket,currentPowerGeneration(),ERROR_SEM_TIMEOUT);
+   check(!g_inputHostSwitchRecovery.pending&&!g_inputHostSwitchRecoveryPending.load()&&!g_inputHostSwitchRecovery.requestId,
+    "ordinary unclassified non-SD transport cannot acquire broader classified recovery permission");
+   tupleToken=inputHostTupleRecoveryReason(inputHostTupleRecoveryTokenLocked(oldEpoch,g_inputHostSequence));}
+  advance(500);(void)fresh(1);
+  require(inputHostQueueLifecycleWork(tupleToken.c_str()),"classified cleanup queues its exact original current tuple token");
+  fullPipeDrainQueuedLifecycle();
+  require(g_inputHostSwitchRecovery.pending&&g_inputHostSwitchRecovery.tupleFault&&!g_inputHostSwitchRecovery.spent&&!g_inputHostSwitchRecovery.stopInvoked,
+   "actual tuple worker offers a current unspent classified request without early Stop");
+  advance(g_virtualStartProtection.view(startProtectionClock).verificationRemainingMs);
+  auto faultSource=fresh(1);
+  require(ymcc::inputHost::switchRecoveryRuntime::executionInspectionCompleteLocked(startProtectionClock)&&
+   g_virtualStartProtection.view(startProtectionClock).locked&&finalCount(ticket,"success")==0,
+   "fault token arrives at completed inspection while the original period remains protected");
+  const auto runtimeBefore=ymcc::inputHost::runtimeRecovery::state;
+  require(runtimeBefore.hostEpoch!=oldEpoch&&!runtimeBefore.pending&&!runtimeBefore.stopInvoked,
+   "runtime-consumer OR branch has no matching old epoch authority before actual dispatch");
+  const auto stopBefore=stops();const auto budgetBefore=g_inputHostRecoveryEpisodeAttempts.load();
+  if(persona=="dualsense-edge"){
+   fixturePsReturnManualTopology=true;
+   fixturePsReadConfig({L"HID#VID_054C&PID_0DF2#HIDMAESTRO-OWN"},ERROR_ACCESS_DENIED);
+  }
+  fixtureRuntimeRecoveryCensus="unknown";
+  fixtureRuntimeRecoveryFaultEnabled=true;fixtureRuntimeRecoveryFaultConsumed=false;fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+  const auto failedFrame=fullPipeSubmitSource(faultSource,true,false);
+  require(fixtureRuntimeRecoveryFaultConsumed&&fixtureRuntimeRecoveryFaultCalls==1&&g_inputHostTransportFault,
+   "actual request classifier consumes exactly one transport OS failure in the real managed pipe path");
+  fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;
+  const auto faultToken="fault-stop:frame-receipt-fault:"+std::to_string(oldEpoch);
+  json work;
+  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);work=g_inputHostLifecycleWorkQueue;}
+  require(std::count(work.begin(),work.end(),json(faultToken))==1&&
+    std::none_of(work.begin(),work.end(),[](const auto& row){return row.template get<std::string>().rfind("switch-recovery:",0)==0;}),
+   "real frame producer queues exactly its fault token without an alternative recovery dispatcher");
+  require(!ymcc::inputHost::runtimeRecovery::state.pending&&ymcc::inputHost::runtimeRecovery::state.hostEpoch!=oldEpoch,
+   "protected failure is not adopted by the post-final runtime consumer");
+  cases.back()["faultInput"]={{"tupleToken",tupleToken},{"faultToken",faultToken},{"queuedWork",work},{"frame",failedFrame},
+   {"runtimeHostEpoch",runtimeBefore.hostEpoch},{"runtimePending",runtimeBefore.pending},{"runtimeStopInvoked",runtimeBefore.stopInvoked},
+   {"ticket",ticket},{"oldEpoch",oldEpoch},{"oldRun",oldRun},{"oldInstance",oldInstance}};
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   namespace recovery=ymcc::inputHost::switchRecoveryRuntime;
+   const auto& request=g_inputHostSwitchRecovery;
+   const bool held=recovery::stopHeldLocked(GetTickCount64()),budget=recovery::budgetBlockedLocked(GetTickCount64());
+   const bool ordinary=recovery::recoverableOwnedStateLocked(request.power);
+   const bool classified=recovery::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None);
+   cases.back()["cleanupGateInputs"]={{"held",held},{"budgetBlocked",budget},{"ordinaryOwnedPredicate",ordinary},{"classifiedOwnedPredicate",classified}};
+   require(!held&&!budget&&!ordinary&&classified,"only lost fault classification distinguishes cleanup admission at the actual worker boundary");
+  }
+  fullPipeDrainQueuedLifecycle();
+  const auto repaired=g_virtualStartProtection.view(startProtectionClock);
+  const bool owned=g_inputHostSwitchRecovery.requestId==ticket&&g_inputHostSwitchRecovery.stopInvoked&&g_inputHostSwitchRecovery.spent&&
+   g_inputHostSwitchRecovery.awaitingCleanup&&g_inputHostSwitchRecovery.pending&&g_inputHostSwitchRecovery.deadline==originalDeadline&&
+   repaired.requestId==ticket&&repaired.fallbackAttempts==1&&stops()==stopBefore+1&&
+   g_inputHostRecoveryEpisodeAttempts.load()==budgetBefore+1&&fullPipeSpawnCount==creates+1&&!g_inputHostProcess&&
+   g_inputHostEpoch==oldEpoch&&g_inputHostRunId==oldRun&&g_inputHostReleaseQuarantined;
+  require(owned,"classified current non-SD fault token owns one cleanup and waits for the actual old return proof");
+  cases.back()["afterFault"]={{"owned",owned},{"requestId",g_inputHostSwitchRecovery.requestId},{"stopInvoked",g_inputHostSwitchRecovery.stopInvoked},
+   {"spent",g_inputHostSwitchRecovery.spent},{"fallbackAttempts",repaired.fallbackAttempts},{"stopDelta",stops()-stopBefore},
+   {"budgetDelta",g_inputHostRecoveryEpisodeAttempts.load()-budgetBefore},{"createDelta",fullPipeSpawnCount-creates},{"state",state()},{"events",fixtureEvents}};
+  const auto released=faultReceipt(oldChild,oldFile,persona);
+  require(released.value("nativeObservedProcessExit",false)&&released["terminalSettlement"].value("ManagedReleaseComplete",false),
+   "classified fallback observes exact old managed child natural exit before continuing");
+  require(WaitForSingleObject(oldObservation,0)==WAIT_OBJECT_0&&fullPipeSpawnCount==creates+1,
+   "exact old process and SDK resources are returned before any replacement create");
+  fixtureClassifiedReturnReleasedEpoch=oldEpoch;
+  fixtureRuntimeRecoveryCensus="absent";
+  if(persona=="dualsense-edge")fixturePsReadConfig({},ERROR_NO_MORE_ITEMS);
+  // Feed a new controlled OS slot observation through the original canonical
+  // discovery loop. No connected/physical/admitted mask is assigned here.
+  {const ULONGLONG probeNow=GetTickCount64();const int probeSrc=kGpReadBus;const bool probeCostOn=false;
+   const auto diagnosticReadPower=currentPowerGeneration();const auto diagnosticReadTopology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+   #include "xinput_discovery.inc"
+  }
+  (void)fresh(1);
+  if(persona=="dualsense-edge"){FixturePsReadScope scope;fullPipeQuarantineProbe();}
+  else fullPipeQuarantineProbe();
+  bool settled=false;
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);settled=inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);}
+  cases.back()["beforeRestart"]={{"settled",settled},{"state",state()},{"creates",fullPipeSpawnCount-creates},
+   {"writerProofCalls",fixtureRuntimeRecoveryWriterCalls},{"censusCalls",fixtureRuntimeRecoveryCensusCalls},
+   {"oldProcessWait",WaitForSingleObject(oldObservation,0)},{"deadline",g_inputHostSwitchRecovery.deadline},{"originalDeadline",originalDeadline}};
+  require(settled&&!g_inputHostEpoch&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active&&
+   !g_psEndpointOwnership.retirementRequired()&&fullPipeSpawnCount==creates+1,
+   "original quarantine owner settles exact target physical and durable duty before any replacement");
+  // Production Clear retires old source admission. Re-run the original
+  // discovery+admission consumer, never seed masks/guards or reuse old proof.
+  cases.back()["postReturnSourceAdmission"]=fullPipeReadPhysicalSourceForElite(false);
+  (void)fresh(1);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&g_inputHostEpoch!=oldEpoch&&
+   g_inputHostRunId!=oldRun&&g_inputHostBoundPersona==persona&&fullPipeSpawnCount==creates+2&&
+   stops()==stopBefore+1&&g_inputHostRecoveryEpisodeAttempts.load()==budgetBefore+1,
+   "only original proven-return continuation creates exactly one same-persona replacement without a second charge");
+  const auto newEpoch=g_inputHostEpoch;const auto newRun=g_inputHostRunId;const auto replacement=g_inputHostProcess;
+  for(unsigned n=0;n<8;++n)require(inputHostQueueLifecycleWork(faultToken.c_str()),"late old fault token is queued through original worker");
+  fullPipeDrainQueuedLifecycle();
+  require(g_inputHostProcess==replacement&&g_inputHostEpoch==newEpoch&&g_inputHostRunId==newRun&&stops()==stopBefore+1&&
+   fullPipeSpawnCount==creates+2&&g_inputHostRecoveryEpisodeAttempts.load()==budgetBefore+1,
+   "old fault token cannot Stop successor or reserve another fallback charge");
+  reads=0;
+  for(;reads<32;++reads){advance(8);auto sample=fresh(1);const auto accepted=fullPipeSubmitSource(sample,true,false);const auto v=g_virtualStartProtection.view(startProtectionClock);if(accepted.value("hostSubmission",std::string{})=="frame-accepted"&&!accepted.value("focusIsolationSemanticNeutral",true)&&g_inputHostActive&&v.phase=="verifying"&&v.candidateOutcome=="success"){cases.back()["replacementAcceptedFrame"]=accepted;break;}}
+  require(reads<32,"same-persona replacement reaches actual accepted-source inspection");
+  const auto inspected=g_virtualStartProtection.view(startProtectionClock);
+  require(inspected.requestId==ticket&&inspected.fallbackAttempts==1&&inspected.remainingMs<=ymcc::VirtualStartProtection::maxMs&&startProtectionClock+inspected.remainingMs==originalDeadline,
+   "fallback retains the original request and thirty-second hard ceiling");
+  advance(inspected.verificationRemainingMs);(void)fresh(1);fullPipeVerificationStep();fullPipeVerificationStep();
+  const auto done=g_virtualStartProtection.view(startProtectionClock);
+  require(done.requestId==ticket&&done.phase=="success"&&!done.locked&&done.fallbackAttempts==1&&
+   finalCount(ticket,"success")==1&&finalCount(ticket,"failure")==0&&done.elapsedMs==startProtectionClock-(originalDeadline-ymcc::VirtualStartProtection::maxMs),
+   "classified fallback publishes exactly one success and no contradictory failure");
+  cases.back()["periods"].push_back({{"requestId",ticket},{"persona",persona},{"outcome","success"},{"fallbackAttempts",done.fallbackAttempts},{"elapsedMs",done.elapsedMs}});
+  close(1,persona);
+  require(fullPipeSpawnCount==creates+2&&fullPipeChildObservers.empty()&&!g_inputHostProcess,
+   "classified fallback and actual OFF leave no owned child or target");
+  require(!g_inputHostEpoch&&!g_inputHostReleaseQuarantined&&!g_psEndpointOwnership.retirementRequired()&&!g_hidHideVisibilityJournal.active,
+   "successful final OFF fully closes ownership before next independent fault case");
+  require(oldObserver.close(),"extra exact old-process observation handle is checked closed");
+  fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;
+  fixtureClassifiedReturnReleasedEpoch=0;
+  cases.back()["passed"]=true;fixtureFullPipe=false;
+ }
+}
+
+
+static const char* runtimeFamilyTokens140[]={"msi","rog","gpd","onex","aya","lenovo"};
+static const char* runtimePersonaTokens140[]={"steamdeck","dualsense-edge","elite"};
+static const char* runtimeCancellationEdges140[]={"off-before-stop","off-after-stop","power-before-stop","power-after-stop","exit-before-stop","exit-after-stop"};
+static void runtimeFamilyTransportCase140(const std::string& familyToken,const std::string& persona,const std::string& boundary={}){
+ using namespace personaLifecycle140;
+ const auto familyIt=std::find(std::begin(runtimeFamilyTokens140),std::end(runtimeFamilyTokens140),familyToken);
+ require(familyIt!=std::end(runtimeFamilyTokens140)&&std::find(std::begin(runtimePersonaTokens140),std::end(runtimePersonaTokens140),persona)!=std::end(runtimePersonaTokens140),"post-final request matches source-declared family and persona");
+ const int family=static_cast<int>(familyIt-std::begin(runtimeFamilyTokens140));
+ const ControlledDmi gpd={"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"};
+ const ControlledDmi onex={"ONE-NETBOOK TECHNOLOGY CO., LTD.","ONEXPLAYER X2","HandheldCompanion.Devices.OneXPlayerX2","/physicalModels/2"};
+ const ControlledDmi aya={"AYADEVICE","AYANEO 3","HandheldCompanion.Devices.AYANEO3","/physicalModels/5"};
+ const ControlledDmi lenovo={"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoTablet",nullptr,"83E1","hc.device.LegionGoTablet"};
+ const ControlledDmi* dmi=family==2?&gpd:family==3?&onex:family==4?&aya:family==5?&lenovo:nullptr;
+ const bool terminalFallback=boundary=="terminal-exhausted-physical-return";
+ const bool delayedSuccessor=boundary=="delayed-same-period-successor"||terminalFallback;
+ const unsigned wallGapMs=boundary=="wall-gap-5s"?5000u:boundary=="wall-gap-10s"?10000u:0u;
+ const bool failedRestart=boundary=="persistent-start-failure"||boundary=="persistent-prepared-failure";
+ const bool repeatIncident=boundary=="persistent-repeat-before-observer"||boundary=="persistent-repeat-after-observer";
+ const bool persistent=boundary=="persistent-budget"||boundary=="persistent-off"||failedRestart||repeatIncident;
+ const unsigned replacementCount=(failedRestart||delayedSuccessor)?2u:1u;
+ if(persistent)require(familyToken=="gpd"&&persona=="elite","persistent cases use exact existing GPD Elite managed consumer");
+ if(!boundary.empty()&&!persistent&&!delayedSuccessor&&!wallGapMs)require(((familyToken=="rog"&&persona=="steamdeck")||(familyToken=="gpd"&&persona=="elite"))&&
+  std::find(std::begin(runtimeCancellationEdges140),std::end(runtimeCancellationEdges140),boundary)!=std::end(runtimeCancellationEdges140),"runtime cancellation uses one source-declared parameter of two actual route representatives");
+ prepare(family,"runtime-after-final/"+familyToken+"/"+persona+(boundary.empty()?"":"/"+boundary),dmi);
+ struct RestoreControlledPhysicalIdentity {
+  std::wstring original=fixturePhysicalPath;
+  ~RestoreControlledPhysicalIdentity(){fixturePhysicalPath=std::move(original);}
+ } restoreControlledPhysicalIdentity;
+ fixtureRuntimeRecoveryOsEnabled=true;fixtureClassifiedReturnReleasedEpoch=0;
+ if(family==0){
+  // Supply the actual retained MODE2 owner's corresponding returned HID leaf.
+  // Other families keep the original generic path; no product proof is forged.
+  fixturePhysicalPath=L"\\\\?\\HID#VID_0DB0&PID_1901#OFFLINE_MSI_RETURN";
+  // Complete controlled DMI leaf; the original seed omits two fields and
+  // cannot satisfy the unchanged four-field durable board-key schema.
+  g_machineIdentity.systemProduct="CLAW A8"; // Same controlled DMI as original t91 resolver case.
+  ymccResolveFamily(g_machineIdentity);
+  require(g_machineIdentity.resolved&&g_machineIdentity.family==YmccFamily::MsiClaw&&
+   g_machineIdentity.deviceClass=="HandheldCompanion.Devices.ClawCG3EM"&&msiRecovery::validBoardKey(msiCrashBoardKey()),
+   "actual MSI board resolver supplies canonical class and complete durable board identity before metadata consumer");
+  fixtureMsiOwnedMetadata=true;
+  g_msiForegroundTestIo.locations=[](const std::string& root){
+   if(root=="USB\\VID_0DB0&PID_1902\\7&OWNED&0&3"||root=="USB\\VID_0DB0&PID_1901\\7&OWNED&0&3")
+    return std::vector<std::wstring>{L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(3)"};
+   return std::vector<std::wstring>{};
+  };
+  require(!g_msiCrashLoaded&&!g_msiCrashStoreInvalid&&!g_msiDinputReturnOwed.load(),"MSI metadata setup starts without preexisting durable loader or in-memory mode obligation");
+  {struct RestoreSeam{bool prior;~RestoreSeam(){g_startEntrySeam.active=prior;}} restore{g_startEntrySeam.active};
+   g_startEntrySeam.active=false;msiCrashRecoveryInitialize();
+   MsiClawHidDiag command;command.interfacePath="\\\\?\\HID#VID_0DB0&PID_1902#OFFLINE_MSI_COMMAND";command.productId=0x1902;
+   require(msiCrashRecoveryBeforeModeWrite(2,command),"actual pre-MODE2 durable consumer commits same-Native root and location before simulated mode request");
+  }
+  require(ymStartSeamActive()&&g_msiCrashLoaded&&!g_msiCrashStoreInvalid&&g_msiCrashRecord.modeReturnPending&&
+   g_msiCrashRecord.ownerPid==GetCurrentProcessId()&&g_msiCrashRecord.ownerCreationTime==msiCrashProcessCreation(GetCurrentProcess()),
+   "MSI private metadata scope restores hardware seam and retains actual process-bound persistent ownership");
+  cases.back()["msiOwnedMode2Input"]={{"root",g_msiCrashRecord.rootInstance},{"locations",g_msiCrashRecord.locationPaths},
+   {"ownerPid",g_msiCrashRecord.ownerPid},{"ownerBirth",g_msiCrashRecord.ownerCreationTime},{"modeReturnPending",g_msiCrashRecord.modeReturnPending},
+   {"inputKind","actual-before-mode2-write-ahead-consumer;not-a-return-proof"}};
+ }
+ if(terminalFallback&&family!=0){
+  // Existing enumeration leaf only. The original consumer, not the fixture,
+  // publishes selected identity from one complete same-family candidate.
+  fixtureRogInitialIdentityEnabled=true;fixtureRogInitialDiscoveryComplete=true;
+  std::vector<HidHidePhysicalIdentity> expected;
+  if(family==2)expected={fixtureGpdPostHideSource()};
+  else {bool complete=false;require(fixtureRogInitialDiscovery(expected,&complete)&&complete,"terminal fixture enumeration is complete");}
+  std::vector<HidHidePhysicalIdentity> consumed;
+  require(expected.size()==1&&hidHideGetPhysicalIdentities(consumed)&&consumed.size()==1,
+    "original selected identity consumer accepts one complete same-family enumeration before Start");
+  std::lock_guard<std::mutex> selected(g_hidHidePhysicalIdentityMx);
+  require(g_hidHidePhysicalIdentity.resolved&&g_hidHidePhysicalIdentity.deviceInstanceId==expected.front().deviceInstanceId&&
+    g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId==expected.front().baseContainerDeviceInstanceId&&
+    g_hidHidePhysicalIdentity.physicalIdentity==expected.front().physicalIdentity,
+    "selected identity is published by actual consumer and exactly matches unique same-family source");
+  cases.back()["terminalSelectedBeforeStart"]={{"consumer","hidHideGetPhysicalIdentities"},{"directGlobalAssignment",false},
+    {"key",g_hidHidePhysicalIdentity.physicalIdentity},{"root",g_hidHidePhysicalIdentity.baseContainerDeviceInstanceId}};
+ }
+ startFirst(family,persona);
+ const auto oldTicket=g_virtualStartProtection.view(startProtectionClock).requestId,oldEpoch=g_inputHostEpoch;
+ const auto oldRun=g_inputHostRunId,oldInstance=g_inputHostHostInstanceId;
+ const auto oldChild=fullPipeChildObservers.back();const auto oldFile=fullPipeReceipts.back();
+ const auto creates=fullPipeSpawnCount;const auto oldSuccesses=finalCount(oldTicket,"success");
+ require(oldSuccesses==1&&!g_virtualStartProtection.view(startProtectionClock).locked,"runtime incident starts after an actual unique successful player final");
+ advance(480001);(void)fresh(family);
+ HANDLE observed=nullptr;require(DuplicateHandle(GetCurrentProcess(),oldChild,GetCurrentProcess(),&observed,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"runtime retains an independent exact real old process observer");
+ ymcc::targetReturn::fileDetail::Handle oldObserver(observed);
+ fixtureRuntimeRecoveryOldHost=observed;fixtureRuntimeRecoveryOldOwner=inputHostTargetReturnCaptureOwner(g_inputHostProcess);
+ require(fixtureRuntimeRecoveryOldOwner.has_value(),"runtime captures actual old PID and creation birth");
+ if(persona=="dualsense-edge"){fixturePsReturnManualTopology=true;fixturePsReadConfig({L"HID#VID_054C&PID_0DF2#HIDMAESTRO-OWN"},ERROR_ACCESS_DENIED);}
+ fixtureRuntimeRecoveryCensus="unknown";fixtureRuntimeRecoveryFaultEnabled=true;fixtureRuntimeRecoveryFaultConsumed=false;fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+ auto faulty=fresh(family);const auto faultReply=fullPipeSubmitSource(faulty,true,false);
+ fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;
+ auto& incident=ymcc::inputHost::runtimeRecovery::state;
+ require(fixtureRuntimeRecoveryFaultConsumed&&fixtureRuntimeRecoveryFaultCalls==1&&incident.pending&&incident.hostEpoch==oldEpoch&&incident.runId==oldRun&&incident.hostInstanceId==oldInstance&&incident.requestId==oldTicket&&incident.persona==persona,"real post-final transport classifier offers exactly the faulted old owner");
+ const auto serial=incident.serial;const auto beforeBudget=g_inputHostRecoveryEpisodeAttempts.load();
+ if(wallGapMs)g_shortcutRecordingActive=true; // Explicit existing expected-pause leaf keeps Start unissued while exact old return completes.
+
+ if(delayedSuccessor){
+  require(terminalFallback?((familyToken=="rog"&&persona=="steamdeck")||(familyToken=="gpd"&&persona=="elite")||(familyToken=="msi"&&persona=="steamdeck")):(familyToken=="rog"&&persona=="steamdeck"),"manual successor/terminal route is one exact source-declared family representative");
+  fixtureRuntimeRecoveryFirstHelloOnly=true;fixtureRuntimeRecoveryFaultEnabled=true;
+  fixtureRuntimeRecoveryFaultConsumed=false;fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+ }
+
+ if(!boundary.empty()&&!persistent&&!delayedSuccessor&&!wallGapMs){
+  const bool afterStop=boundary.ends_with("after-stop"),isOff=boundary.starts_with("off-"),isPower=boundary.starts_with("power-");
+  if(afterStop){
+   inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+   require(incident.pending&&incident.stopInvoked&&!incident.recoveryRequestId&&g_inputHostReleaseQuarantined,
+    "late cancellation actually reaches the original safety Stop and unproven return quarantine");
+  }else require(!incident.stopInvoked,"early cancellation changes authority before original runtime safety Stop");
+  const auto oldPower=currentPowerGeneration();std::uint64_t offTicket=0;
+  const auto actualOff=[&](){
+   const auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));const auto off=targetDocument("disabled",current["input"]["revision"].get<int>()+1);
+   require(writeTarget(current,off).value("ok",false),"post-final cancellation OFF is admitted through the real settings IPC");
+   inputCaptureRefreshRealStickSettings(true);offTicket=g_virtualStartProtection.view(startProtectionClock).requestId;
+   require(offTicket!=oldTicket&&g_virtualStartProtection.view(startProtectionClock).persona=="disabled",
+    "cancelled old incident does not own the distinct explicit OFF period");
+  };
+  if(isOff)actualOff();
+  else if(isPower){g_powerGeneration=oldPower+1;g_powerLifecycle=PowerLifecycle::Suspending;g_inputHostPowerAdmissionRevoked=true;}
+  else g_exitRequested=true;
+  inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(!incident.pending&&incident.spent&&!incident.recoveryRequestId&&!g_inputHostRuntimeRecoveryPending.load()&&
+   fullPipeSpawnCount==creates&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget,
+   "persistent authority cancellation retires the actual queued runtime incident without a restart ticket charge or Host");
+  const auto retirement=fixtureEvents.size();
+  fixtureClassifiedReturnReleasedEpoch=oldEpoch;fixtureRuntimeRecoveryCensus="absent";
+  inputHostStop(isOff?"virtual-target-disabled":isPower?"suspend":"app-exit");
+  const auto child=fullPipeChildOutcome(oldChild,oldFile);const auto terminal=child.value("terminalSettlement",json::object());
+  require(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==5&&
+   terminal.value("Reason",std::string{})=="read-failed"&&terminal.value("ManagedReleaseComplete",false)&&
+   child.value("finalCleanupOk",false)&&!child.value("hasController",true)&&!child.value("hasContext",true),
+   "cancelled incident still naturally releases its exact old managed fault Host controller and context");
+  cases.back()["managedReceipts"].push_back({{"path",W2U(oldFile)},{"processId",child.value("processId",0u)},
+   {"persona",persona},{"creates",child.value("creates",0)},{"naturalExit",true},{"nativeExitCode",5},
+   {"controllerReleased",true},{"contextReleased",true},{"faultScope","cancelled actual post-final transport incident"}});
+  if(isPower){g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;}
+  for(unsigned pass=0;pass<3;++pass){advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  if(!isOff&&!g_exitRequested.load())actualOff();
+  if(offTicket){
+   inputHostStop("virtual-target-disabled");fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
+   if(family==1)fullPipeRogObserveReturnedSource(offTicket,true);
+   const auto view=g_virtualStartProtection.view(startProtectionClock);if(view.locked&&view.verificationRemainingMs)advance(view.verificationRemainingMs);
+   if(family==1)(void)fresh(family);fullPipeVerificationStep();fullPipeVerificationStep();
+   require(finalCount(offTicket,"success")==1&&finalCount(offTicket,"failure")==0,
+    "explicit cancellation OFF reaches one successful closing final after actual return");
+  }
+  for(unsigned late=0;late<8;++late){inputHostPerformRuntimeRecovery(serial);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  bool settled=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);settled=inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);}
+  require(!incident.pending&&incident.spent&&!incident.recoveryRequestId&&fullPipeSpawnCount==creates&&
+   g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget&&finalCount(oldTicket,"success")==1&&finalCount(oldTicket,"failure")==0,
+   "eight late old worker dispatches after real cancellation cannot resurrect output spend quota or contradict the original success");
+  require(!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined&&
+   !g_hidHideVisibilityJournal.active&&fullPipeChildObservers.empty()&&settled,
+   "cancelled post-final lifecycle releases actual old target Host visibility and return obligations");
+  require(oldObserver.close(),"cancelled incident closes its extra exact old-process observer");
+  cases.back()["runtimeCancellation"]={{"boundary",boundary},{"phaseAtCancellation",afterStop?"old-stop-return-pending":"offered-before-stop"},
+   {"oldPower",oldPower},{"newPower",currentPowerGeneration()},{"powerAdvanced",isPower},{"exitRemainsRequested",g_exitRequested.load()},
+   {"originalRequest",oldTicket},{"offRequest",offTicket},{"restartTicket",incident.recoveryRequestId},{"budgetDelta",g_inputHostRecoveryEpisodeAttempts.load()-beforeBudget},
+   {"oldFinalSuccess",finalCount(oldTicket,"success")},{"oldFinalFailure",finalCount(oldTicket,"failure")},{"settled",settled},{"lateDispatches",8},
+   {"retirementEventCount",retirement},{"authorityRestoredBeforeRetirement",false}};
+  fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;fixtureClassifiedReturnReleasedEpoch=0;
+  cases.back()["passed"]=true;fixtureFullPipe=false;return;
+ }
+
+ if(family==0)fixtureMsiRuntimeProofEdges=[&](){
+  json edges=json::array();
+  for(const std::string edge:{"mode","intent","snapshot-publication","source-event","identity","topology","power","exit","hardware"}){
+   const auto mode=g_msiFeedbackModeGeneration.load(),intent=g_inputHostVirtualIntentRevision.load(),sourceEvent=g_msiOwnedReturnSourceEvent.load();
+   const auto identity=g_xinputSlotIdentityEpoch.load(),topology=g_xinputTopologyEpoch.load();const auto power=currentPowerGeneration();
+   const auto exit=g_exitRequested.load(),hardware=g_hardwareWriteGate.load();const bool targetIntent=g_realStickTest.virtualTargetEnabled;unsigned clockReads=0;
+   fixtureMonotonicInterleave=[&](){if(++clockReads!=2)return;
+    if(edge=="mode")g_msiFeedbackModeGeneration=mode+1;
+    else if(edge=="intent")g_realStickTest.virtualTargetEnabled=false;
+    else if(edge=="snapshot-publication")g_inputHostVirtualIntentRevision=intent+1;
+    else if(edge=="source-event")g_msiOwnedReturnSourceEvent=sourceEvent+1;
+    else if(edge=="identity")g_xinputSlotIdentityEpoch=identity+1;
+    else if(edge=="topology")g_xinputTopologyEpoch=topology+1;
+    else if(edge=="power")g_powerGeneration=power+1;
+    else if(edge=="exit")g_exitRequested=true;
+    else if(edge=="hardware")g_hardwareWriteGate=false;
+   };
+   const bool accepted=inputHostRuntimeMsiReturnProofCurrentLocked();fixtureMonotonicInterleave={};
+   // Independent controlled read-only interleavings, not a player lifecycle:
+   // restore the input after the predicate returns, before the positive flow.
+   g_msiFeedbackModeGeneration=mode;g_inputHostVirtualIntentRevision=intent;g_msiOwnedReturnSourceEvent=sourceEvent;
+   g_xinputSlotIdentityEpoch=identity;g_xinputTopologyEpoch=topology;g_powerGeneration=power;g_exitRequested=exit;g_hardwareWriteGate=hardware;g_realStickTest.virtualTargetEnabled=targetIntent;
+   const bool expectedAcceptance=edge=="snapshot-publication";
+   require(clockReads>=2&&accepted==expectedAcceptance,expectedAcceptance?
+    "unchanged effective intent publication retains the exact cached runtime return proof":
+    "actual cached runtime proof rejects a late effective intent cancellation or generation edge after sample copy");
+   require(incident.pending&&!incident.spent&&!incident.recoveryRequestId&&fullPipeSpawnCount==creates&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget,
+    "read-only rejected proof edge cannot mint a recovery ticket charge or replacement");
+   edges.push_back({{"edge",edge},{"actualClockReads",clockReads},{"accepted",accepted},{"expectedAcceptance",expectedAcceptance},{"oldTicket",oldTicket},{"newTicket",incident.recoveryRequestId}});
+  }
+  cases.back()["runtimeProofLateRejectEdges"]=edges;
+ };
+
+ inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+ require(incident.pending&&incident.stopInvoked&&!incident.recoveryRequestId&&fullPipeSpawnCount==creates&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget,"post-final safety Stop waits for real old return without spending a restart or changing old final");
+ const auto child=fullPipeChildOutcome(oldChild,oldFile);const auto terminal=child.value("terminalSettlement",json::object());
+ require(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==5&&terminal.value("Reason",std::string{})=="read-failed"&&terminal.value("ManagedReleaseComplete",false)&&child.value("finalCleanupOk",false)&&!child.value("hasController",true)&&!child.value("hasContext",true),"actual faulted old child naturally exits and releases before any replacement");
+ cases.back()["managedReceipts"].push_back({{"path",W2U(oldFile)},{"processId",child.value("processId",0u)},{"persona",persona},{"creates",child.value("creates",0)},{"naturalExit",true},{"nativeExitCode",5},{"controllerReleased",true},{"contextReleased",true},{"faultScope","controlled transport EOF"}});
+ fixtureClassifiedReturnReleasedEpoch=oldEpoch;fixtureRuntimeRecoveryCensus="absent";
+ if(persona=="dualsense-edge")fixturePsReadConfig({},ERROR_NO_MORE_ITEMS);
+ if(family==0)g_msiSdOwnedPnpSnapshotForTest=[](){return std::pair{true,std::set<std::string>{}};}; // Controlled PnP only; original runtime Start owns MSI route admission, never normal-OFF debt helper.
+ {const ULONGLONG probeNow=GetTickCount64();const int probeSrc=kGpReadBus;const bool probeCostOn=false;
+  const auto diagnosticReadPower=currentPowerGeneration();const auto diagnosticReadTopology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+  #include "xinput_discovery.inc"
+ }
+ if(family==0){
+  auto observeMsiReturn=[&](const char* stage){
+   InputCaptureGamepadSnapshot sample;{std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);sample=g_inputCaptureGamepadSnapshot;}
+   json slots=json::array();for(unsigned slot=0;slot<4;++slot)slots.push_back({{"slot",slot},{"resolvedEpoch",g_xinputSlotIdentityResolvedEpoch[slot]},
+     {"path",W2U(g_msiOwnedReturnSlotPaths[slot])},{"feedbackValid",g_xinputFeedbackIdentity[slot].capture(g_xinputSlotIdentityEpoch.load(),currentPowerGeneration()).valid}});
+   if(!cases.back().contains("msiCanonicalReturn"))cases.back()["msiCanonicalReturn"]=json::array();
+   cases.back()["msiCanonicalReturn"].push_back({{"stage",stage},{"tick",GetTickCount64()},{"rawConnected",g_xinputConnectedMask},
+    {"virtualMask",g_xinputVirtualEndpointMask},{"unknownMask",g_xinputSlotUnknownMask},{"physicalMask",xinputPhysicalConnectedMask()},
+    {"selectedMask",g_xinputPhysicalSourceMask},{"locked",static_cast<bool>(g_xinputPhysicalSourceLocked)},
+    {"preTargetSlots",g_xinputPreTargetSlots},{"fullScanRequested",g_xinputSlotFullScanOnce.load()},
+    {"faultHold",g_inputHostFaultHoldsStart.load()},{"runtimePending",incident.pending},{"runtimeStopInvoked",incident.stopInvoked},
+    {"runtimeNewTicket",incident.recoveryRequestId},{"runtimeSpent",incident.spent},
+    {"identityEpoch",g_xinputSlotIdentityEpoch.load()},{"topology",g_xinputTopologyEpoch.load()},
+    {"boundaryScanned",g_xinputPreTargetBoundaryScanned.load()},{"boundaryEpoch",g_xinputBoundaryScanEpoch.load()},
+    {"modeDebt",g_msiDinputReturnOwed.load()},{"modeEpisode",g_msiDinputReturnDebtEpisode.load()},
+    {"repairScope",msiControllerRepairScope()},{"dinputEligible",msiDinputMainSourceEligible()},
+    {"sample",{{"live",sample.live},{"source",sample.inputSource},{"connected",sample.connectedMask},{"sequence",sample.readAttemptSequence},
+      {"power",sample.readPowerGeneration},{"topology",sample.readTopologyGeneration},{"identity",sample.readIdentityGeneration},
+      {"started",sample.readStartedTick},{"completed",sample.readCompletedTick},{"stable",sample.readContextStable}}},{"slots",slots}});
+  };
+  {
+   std::lock_guard<std::mutex> durable(g_msiCrashMx);
+   cases.back()["msiDurableOwnerBeforeReturn"]={{"loaded",g_msiCrashLoaded},{"invalid",g_msiCrashStoreInvalid},
+    {"root",g_msiCrashRecord.rootInstance},{"locations",g_msiCrashRecord.locationPaths},
+    {"modeReturnPending",g_msiCrashRecord.modeReturnPending},{"ownerPid",g_msiCrashRecord.ownerPid},
+    {"ownerBirth",g_msiCrashRecord.ownerCreationTime},{"hardwareSeamActive",ymStartSeamActive()},
+    {"scope","cached private durable ownership only; no device operation or proof mutation"}};
+  }
+  {
+   std::wstring returnedRoot;const bool resolved=deviceInterfaceUsbInstance(fixturePhysicalPath.c_str(),returnedRoot);
+   const auto locations=resolved?msiCrashLocations(W2U(returnedRoot)):std::vector<std::string>{};
+   const bool sameRoot=resolved&&msiRecovery::sameDeviceRoot(g_msiCrashRecord,W2U(returnedRoot),locations);
+   require(sameRoot,"controlled PID1901 metadata matches the actual retained MODE2 same-root/location identity");
+   cases.back()["msiReturnedSourceIdentity"]={{"resolved",resolved},{"root",W2U(returnedRoot)},{"locations",locations},{"sameOriginalRootLocation",sameRoot},
+    {"scope","read-only original root matcher; no matched token, operational proof or discharge publication"}};
+  }
+  observeMsiReturn("after-existing-partial-discovery");
+  for(unsigned pass=0;pass<3;++pass){advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();observeMsiReturn(("after-actual-canonical-read-"+std::to_string(pass)).c_str());}
+ }
+ if(persona=="dualsense-edge"){FixturePsReadScope scope;fullPipeQuarantineProbe();}else fullPipeQuarantineProbe();
+ bool settled=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);settled=inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);}
+ const bool resumedDuringDrain=g_inputHostEpoch&&g_inputHostEpoch!=oldEpoch&&incident.recoveryRequestId&&g_inputHostBoundPersona==persona;
+ require(settled&&!g_inputHostReleaseQuarantined&&(resumedDuringDrain?fullPipeSpawnCount==creates+1:(!g_inputHostEpoch&&!g_hidHideVisibilityJournal.active&&fullPipeSpawnCount==creates)),"original runtime return owner settles exact old duties before any directly continued replacement");
+ if(resumedDuringDrain){
+  size_t settledAt=fixtureEvents.size(),createdAt=fixtureEvents.size();
+  for(size_t n=0;n<fixtureEvents.size();++n){const auto& event=fixtureEvents[n];const auto& detail=event["detail"];
+   if(event.value("event",std::string{})=="input-host-target-return-record"&&detail.value("phase",std::string{})=="target-settled"&&detail.value("runId",std::string{})==oldRun&&detail.value("epoch",0ULL)==oldEpoch)settledAt=(std::min)(settledAt,n);
+   if(event.value("event",std::string{})=="input-host-primary-thread-retirement"&&detail.value("phase",std::string{})=="created"&&detail.value("epoch",0ULL)==g_inputHostEpoch)createdAt=(std::min)(createdAt,n);
+  }
+  require(settledAt<createdAt&&createdAt<fixtureEvents.size(),"exact old run epoch settlement event precedes actual successor process creation");
+  cases.back()["directReturnContinuation"]={{"oldSettlementEvent",settledAt},{"successorCreateEvent",createdAt},{"newEpoch",g_inputHostEpoch}};
+ }
+ if(persona=="elite"&&family!=0&&!resumedDuringDrain){
+  require(incident.pending&&!incident.spent&&!incident.recoveryRequestId&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget&&g_virtualStartProtection.view(startProtectionClock).requestId==oldTicket&&finalCount(oldTicket,"success")==oldSuccesses,
+   "source-pending runtime return keeps original successful period and spends no replacement ticket or retry budget");
+  cases.back()["sourcePendingBeforeRestart"]={{"pending",incident.pending},{"spent",incident.spent},{"newRequest",incident.recoveryRequestId},{"budget",g_inputHostRecoveryEpisodeAttempts.load()},{"oldTicket",oldTicket}};
+ }
+ if(persistent){
+  g_inputHostRecoveryEpisodeAttempts=2;
+  // Exhausted episode with an already empty rolling window: isolate the 30s wave.
+  g_inputHostRecoveryRolling[0]=0;g_inputHostRecoveryRolling[1]=0;
+  g_inputHostRecoveryTerminalLogged=true;
+  for(unsigned n=0;n<25;++n){advance(100);(void)fresh(family);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  require(incident.pending&&!incident.spent&&incident.retryAt&&fullPipeSpawnCount==creates&&g_inputHostRecoveryEpisodeAttempts.load()==2,
+   "exhausted episode retains demand without ticket, refund or 100ms hot queue");
+  const auto retryAt=incident.retryAt;const auto eventCount=fixtureEvents.size();
+  for(unsigned n=0;n<25;++n){advance(100);(void)fresh(family);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  require(incident.retryAt==retryAt&&fullPipeSpawnCount==creates&&fixtureEvents.size()<eventCount+100,
+   "maintenance does not renew wave deadline or repeatedly enqueue a cooled-down action");
+  if(boundary=="persistent-off"){
+   const auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));
+   require(writeTarget(current,targetDocument("disabled",current["input"]["revision"].get<int>()+1)).value("ok",false),"real OFF supersedes deferred runtime demand");
+   inputCaptureRefreshRealStickSettings(true);
+   const auto offTicket=g_virtualStartProtection.view(startProtectionClock).requestId;
+   require(offTicket!=oldTicket&&g_virtualStartProtection.view(startProtectionClock).persona=="disabled","persistent OFF owns its distinct real closing request");
+   inputHostStop("virtual-target-disabled");fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
+   const auto offView=g_virtualStartProtection.view(startProtectionClock);
+   if(offView.locked&&offView.verificationRemainingMs)advance(offView.verificationRemainingMs);
+   fullPipeVerificationStep();fullPipeVerificationStep();
+   require(finalCount(offTicket,"success")==1&&finalCount(offTicket,"failure")==0&&!g_virtualStartProtection.view(startProtectionClock).locked,"persistent real OFF publishes exactly one successful closing final");
+   cases.back()["periods"].push_back({{"requestId",offTicket},{"persona","disabled"},{"outcome","success"},{"finalCount",finalCount(offTicket,"success")}});
+   advance(130001);inputHostRecoveryMaintenanceTick();
+   inputHostPerformRuntimeRecovery(serial);fullPipeDrainQueuedLifecycle();
+   require(!incident.pending&&!incident.monitoring&&fullPipeSpawnCount==creates&&!g_inputHostProcess,
+    "OFF then elapsed backoff and old token cannot resurrect a Host");
+   require(finalCount(oldTicket,"success")==1&&finalCount(oldTicket,"failure")==0,"cancelled persistence never rewrites old successful final");
+   require(oldObserver.close(),"cancelled persistence closes exact old observer");
+   fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;
+   cases.back()["passed"]=true;fixtureFullPipe=false;return;
+  }
+  // Time alone does not invent source freshness or refund the old episode.
+  const auto now=GetTickCount64();require(retryAt>now,"persistent first wave is still inside its 30s backoff");
+  advance(retryAt-now-1);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(fullPipeSpawnCount==creates&&incident.pending&&g_inputHostRecoveryEpisodeAttempts.load()==2,"persistent wave cannot restart at backoff deadline minus one millisecond");
+  advance(1);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(fullPipeSpawnCount==creates&&incident.pending&&g_inputHostRecoveryEpisodeAttempts.load()==2,
+   "elapsed cooldown with stale source does not create Host or refund attempts");
+  cases.back()["persistentWave"]={{"retryAt",retryAt},{"attemptsBeforeNewWave",2},{"oldFinalImmutable",true}};
+  for(const unsigned fallback:{1u,3u}){
+   const auto saved=g_inputHostRecoveryFallbackState.load();g_inputHostRecoveryFallbackState=fallback;
+   bool ready=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);ready=ymcc::inputHost::runtimeRecovery::waveReady(GetTickCount64());}
+   g_inputHostRecoveryFallbackState=saved;
+   require(!ready,"persistent wave never exempts fallback 1 or unproven-return fallback 3");
+  }
+ }
+ cases.back()["oldRuntimeReturn"]={{"settled",settled},{"oldTicket",oldTicket},{"oldEpoch",oldEpoch},{"oldRun",oldRun},{"oldInstance",oldInstance},{"oldProcessWait",WaitForSingleObject(observed,0)},{"createsBeforeRestart",fullPipeSpawnCount-creates}};
+ const auto admitReturnedSource=[&](){
+ if(family!=0){
+  bool admitted=false;json reads=json::array();
+  for(unsigned pass=0;pass<3&&!admitted;++pass){
+   {const ULONGLONG probeNow=GetTickCount64();const int probeSrc=kGpReadBus;const bool probeCostOn=false;
+    const auto diagnosticReadPower=currentPowerGeneration();const auto diagnosticReadTopology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    #include "xinput_discovery.inc"
+   }
+   admitted=inputHostAdmitSelectedPhysicalSource();reads.push_back({{"pass",pass},{"admitted",admitted},{"pendingFullGuard",g_xinputSlotFullScanOnce.load()},{"completedBoundary",g_xinputPreTargetBoundaryScanned.load()},{"physicalMask",xinputPhysicalConnectedMask()},{"selectedSourceMask",g_xinputPhysicalSourceMask}});
+  }
+  require(admitted&&g_xinputPhysicalSourceLocked&&g_xinputPhysicalSourceMask==1&&xinputPhysicalConnectedMask()==1,"runtime continuation receives fresh canonical physical source admission without forced masks");
+  cases.back()["postReturnSourceAdmission"]={{"actualDiscoveryLoop",true},{"actualPhysicalAdmissionConsumer",true},{"passes",reads}};
+ }
+ else cases.back()["postReturnSourceAdmission"]={{"scope","original MSI Start arms and admits DInput; no forced XInput source masks"},{"sourceModeBeforeStart",msiDinputMainSourceEligible()?"msi-dinput":"physical-xinput"}};
+
+ };
+ if(wallGapMs){
+  bool gapPipeReturned=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);gapPipeReturned=inputHostPipeRetirementProvenLocked();}
+  require(!g_inputHostProcess&&!g_inputHostEpoch&&g_inputHostRunId.empty()&&!g_inputHostServerPipe&&
+    gapPipeReturned&&settled&&incident.pending&&!incident.recoveryRequestId,
+    "real old managed Host pipe and target have returned before actual no-Host interval");
+  const auto gapPower=currentPowerGeneration(),gapDemand=g_inputHostRecoveryIntent.revision();
+  const auto gapPeriod=g_virtualStartProtection.view(startProtectionClock);const auto gapAttempts=g_inputHostRecoveryEpisodeAttempts.load();
+  const auto wallBegin=std::chrono::steady_clock::now();
+  ::SleepEx(wallGapMs,FALSE); // Actual Windows wait; no whole-machine CPU load.
+  const auto actualGap=static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-wallBegin).count());
+  startProtectionClock+=actualGap; // Guard clock consumes real elapsed; uptime already advanced, no offset refund/double charge.
+  require(actualGap>=wallGapMs&&actualGap<wallGapMs+5000,"actual5or10second no-Host window is measured and bounded");
+  inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(!g_inputHostProcess&&!g_inputHostEpoch&&fullPipeSpawnCount==creates&&incident.pending&&
+    g_inputHostRecoveryEpisodeAttempts.load()==gapAttempts&&currentPowerGeneration()==gapPower&&
+    g_inputHostRecoveryIntent.revision()==gapDemand&&g_virtualStartProtection.view(startProtectionClock).requestId==gapPeriod.requestId&&
+    g_realStickTest.virtualTargetEnabled&&inputHostConfiguredPersona()==persona,
+    "actual wait retains same ON demand public power original request and unchanged recovery quota");
+  cases.back()["actualNoHostGap"]={{"requestedMs",wallGapMs},{"actualElapsedMs",actualGap},
+    {"guardClockChargedMs",actualGap},{"realOsWait",true},{"oldProcessAndPipeAlreadyReturned",true},
+    {"expectedPauseLeaf","original shortcut recording pause; no product settings"},
+    {"episodeAttemptsBefore",gapAttempts},{"episodeAttemptsAfter",g_inputHostRecoveryEpisodeAttempts.load()},
+    {"periodAtGap",gapPeriod.requestId},{"powerAtGap",gapPower},{"notWholeMachineCpuLoad",true}};
+  g_shortcutRecordingActive=false;
+ }
+ admitReturnedSource();
+ // All runtime cases consume the same production one-second observation tick.
+ advance(1001);
+ (void)fresh(family==0&&!msiDinputMainSourceEligible()?1:family);
+ if(failedRestart){
+  // One existing OS pipe error or one existing real PREPARE ACK-loss port.
+  // The actual managed process, Start failure, cleanup and verifier run intact.
+  fixtureRuntimeRecoveryFaultConsumed=false;
+  fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+  fixtureRuntimeRecoveryFaultEnabled=boundary=="persistent-start-failure";
+  fixturePrepareAckLoss=boundary=="persistent-prepared-failure";
+  fixturePrepareAckLossConsumed=false;
+ }
+ inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+
+ if(delayedSuccessor){
+  fixtureRuntimeRecoveryFirstHelloOnly=false;fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;
+  auto failedRequest=incident.recoveryRequestId;const auto failedEpoch=incident.hostEpoch;
+  require(fixtureRuntimeRecoveryFaultConsumed&&failedRequest&&failedRequest!=oldTicket&&incident.monitoring&&
+    fullPipeSpawnCount==creates+1&&failedEpoch!=oldEpoch,
+    "actual recovery Start creates exact tuple before first HELLO connect failure");
+  const auto failedHost=fullPipeChildObservers.back();const auto failedReceipt=fullPipeReceipts.back();
+  const auto failedChild=fullPipeChildOutcome(failedHost,failedReceipt);
+  require(failedChild.value("nativeObservedProcessExit",false)&&failedChild.value("finalCleanupOk",false)&&
+    !failedChild.value("hasController",true)&&!failedChild.value("hasContext",true),
+    "failed first HELLO child naturally returns before same-request switch fallback");
+  cases.back()["managedReceipts"].push_back({{"path",W2U(failedReceipt)},{"processId",failedChild.value("processId",0u)},
+    {"naturalExit",true},{"controllerReleased",true},{"contextReleased",true},{"faultScope","first-recovery-HELLO-connect-error"}});
+  const auto canonicalMsiReturn=[&](const char* stage){
+   if(family!=0)return;
+   // Existing fake physical HID/slot leaves, real complete reader and original
+   // return/reconcile owners. No debt/mask/selected identity is seeded here.
+   for(unsigned pass=0;pass<3;++pass){
+    advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();
+   }
+   cases.back()["terminalMsiReturnObservations"].push_back({{"stage",stage},
+     {"owed",g_msiDinputReturnOwed.load()},{"episode",g_msiDinputReturnDebtEpisode.load()},
+     {"request",g_virtualStartProtection.view(startProtectionClock).requestId},
+     {"switchPending",g_inputHostSwitchRecovery.pending},{"hostPresent",g_inputHostProcess!=nullptr},
+     {"scope","original-canonical-reader-and-return-owner;not-forced-proof"}});
+  };
+  if(terminalFallback&&family==0)canonicalMsiReturn("first-failed-HELLO-return");
+  const auto inspection=g_virtualStartProtection.view(startProtectionClock);
+  const bool samePeriodSwitch=terminalFallback&&g_inputHostSwitchRecovery.pending&&
+    g_inputHostSwitchRecovery.requestId==failedRequest;
+  if(terminalFallback)cases.back()["terminalRecoveryRoute"]={{"samePeriodSwitch",samePeriodSwitch},
+    {"request",failedRequest},{"family",familyToken},{"source","actual-pending-request-not-family-label"}};
+  require(inspection.requestId==failedRequest&&inspection.locked&&inspection.candidateOutcome=="failure"&&
+    ((terminalFallback&&family!=1)||(g_inputHostSwitchRecovery.pending&&g_inputHostSwitchRecovery.requestId==failedRequest)),
+    "current failed recovery inspection retains its request; only ROG requires its original switch fallback");
+  if(inspection.verificationRemainingMs)advance(inspection.verificationRemainingMs);
+  admitReturnedSource();
+  if(terminalFallback&&family==0)gamepadReadState(false);else (void)fresh(family);
+  if(terminalFallback&&!samePeriodSwitch){
+   fullPipeVerificationStep();fullPipeVerificationStep();
+   require(finalCount(failedRequest,"failure")==1&&finalCount(failedRequest,"success")==0,
+     "non-ROG failed recovery keeps its actual failure before a distinct runtime wave");
+   inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+   const auto retryAt=incident.retryAt,now=GetTickCount64();
+   require(retryAt>now,"non-ROG second attempt retains original runtime backoff deadline");
+   advance(retryAt-now+1001);admitReturnedSource();(void)fresh(family);
+  }
+  if(terminalFallback){
+   fixtureRuntimeRecoveryFirstHelloOnly=true;fixtureRuntimeRecoveryFaultEnabled=true;
+   fixtureRuntimeRecoveryFaultConsumed=false;fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+  }
+  for(unsigned pass=0;pass<5&&fullPipeSpawnCount<creates+2;++pass){
+   inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+   if(fullPipeSpawnCount<creates+2){advance(1001);admitReturnedSource();
+    if(terminalFallback&&family==0)gamepadReadState(false);else (void)fresh(family);fullPipeQuarantineProbe();}
+  }
+
+  if(terminalFallback){
+   if(!samePeriodSwitch){require(incident.recoveryRequestId&&incident.recoveryRequestId!=failedRequest,
+     "non-ROG second actual runtime wave owns a distinct bounded request");failedRequest=incident.recoveryRequestId;}
+   fixtureRuntimeRecoveryFirstHelloOnly=false;fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;
+   require(fixtureRuntimeRecoveryFaultConsumed&&fullPipeSpawnCount==creates+2&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget+2,
+     "two actual failed HELLO Starts exhaust exactly the shared runtime and switch fallback attempts");
+   const auto secondHost=fullPipeChildObservers.back();const auto secondReceipt=fullPipeReceipts.back();
+   const auto second=fullPipeChildOutcome(secondHost,secondReceipt);
+   require(second.value("nativeObservedProcessExit",false)&&second.value("finalCleanupOk",false)&&
+     !second.value("hasController",true)&&!second.value("hasContext",true),
+     "actual second failed recovery child returns its own process controller and context");
+   cases.back()["managedReceipts"].push_back({{"path",W2U(secondReceipt)},{"processId",second.value("processId",0u)},
+     {"naturalExit",true},{"controllerReleased",true},{"contextReleased",true},{"faultScope","second-failed-HELLO-shared-budget"}});
+   if(family==0)canonicalMsiReturn("second-failed-HELLO-return");
+   if(!samePeriodSwitch){
+    const auto secondInspection=g_virtualStartProtection.view(startProtectionClock);
+    require(secondInspection.requestId==failedRequest&&secondInspection.candidateOutcome=="failure",
+      "second failed actual runtime Start retains its own normal inspection");
+    if(secondInspection.verificationRemainingMs)advance(secondInspection.verificationRemainingMs);
+   }
+   for(unsigned pass=0;pass<6&&!g_inputHostRecoveryTerminalLogged.load();++pass){
+    if(terminalFallback&&family==0)gamepadReadState(false);else (void)fresh(family);
+    fullPipeVerificationStep();inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+    if(!g_inputHostRecoveryTerminalLogged.load()){advance(1001);fullPipeQuarantineProbe();}
+   }
+   require(finalCount(failedRequest,"failure")==1&&finalCount(failedRequest,"success")==0&&
+     g_inputHostRecoveryTerminalLogged.load()&&!incident.pending&&!incident.monitoring&&incident.spent,
+     "failed current recovery final hands once to actual shared terminal and retires old runtime waves");
+   namespace physicalFallback=ymcc::inputHost::recoveryFallback;
+   const auto fallbackSerial=physicalFallback::request.serial;
+   require(fallbackSerial&&physicalFallback::request.request==failedRequest&&physicalFallback::request.persona==persona,
+     "actual shared fallback captures exact failed player request and selected persona");
+   for(unsigned pass=0;pass<6;++pass){
+    advance(1001);
+    // Original discovery/classification and canonical read follow the actual
+    // Stop. Never seed a mask, clear a debt, or claim a different physical root.
+    if(physicalFallback::request.stopInvoked){
+     admitReturnedSource();
+     // The original SDK-free snapshot OS leaf must supply a readable
+     // configuration after the real Stop has returned. A foreign hidden
+     // path is deliberately retained; no product journal/debt is cleared.
+     require(!g_hidHideVisibilityJournal.active,"post-Stop CLI observation follows actual journal release");
+     fixtureOwnedCliBoundary=true;
+     fixtureOwnedCliHidden={L"HID\\VID_F00D&PID_0001\\FOREIGN_UNRELATED"};
+     if(family!=0)gamepadReadState(false); // Original complete canonical reader.
+     else {gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();}
+    }else (void)fresh(family);
+    inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();fullPipeQuarantineProbe();
+    if(g_inputHostRecoveryFallbackState.load()==2)break;
+   }
+   const auto stopCount=std::count(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"stop:recovery-exhausted-physical-fallback");
+   unsigned terminalEvents=0;for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-recovery-exhausted")++terminalEvents;
+   require(stopCount==1&&terminalEvents==1&&physicalFallback::request.stopInvoked,
+     "one shared terminal produces one actual serialized fallback Stop");
+   require(!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostHello&&!g_inputHostPrepared&&
+     g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget+2&&fullPipeSpawnCount==creates+2,
+     "final physical fallback stops virtual output and does not create a replacement or refund attempts");
+   const auto outcome=g_inputHostRecoveryFallbackState.load();
+   require(outcome==2||outcome==3,"physical result is proven native source or explicitly unknown, never inferred from empty hidden list");
+   if(family!=0)require(outcome==2,"ROG and GPD actual Stop must complete owned return and post-Stop canonical same-selected physical read");
+   if(outcome==2){
+    bool proven=false;for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-recovery-fallback"){
+     const auto& detail=event["detail"];
+     if(detail.value("state","")=="owned-return-proven")proven=detail.value("ownedCleanupProven",false)&&detail.value("ownedVisibilityRestored",false)&&detail.value("freshPhysicalRead",false);
+    }
+    require(proven,"physical success requires actual cleanup visibility and fresh same-selected source receipt");
+   }
+   const auto selectedBefore=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));
+   require(g_realStickTest.virtualTargetEnabled&&inputHostConfiguredPersona()==persona&&selectedBefore["input"]["outputTarget"]["persona"]==persona,
+     "physical fallback preserves player selection and configured ON intent");
+   for(unsigned stale=0;stale<8;++stale){inputHostPerformRuntimeRecovery(serial);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+   require(fullPipeSpawnCount==creates+2&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget+2,
+     "eight old runtime tokens cannot restart after shared final handoff");
+   inputHostRecoveryPhysicalFallback();inputHostRecoveryPhysicalFallback(fallbackSerial+1);inputHostRecoveryPhysicalFallback(fallbackSerial);
+   require(std::count(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"stop:recovery-exhausted-physical-fallback")==1&&
+     fullPipeSpawnCount==creates+2&&!g_inputHostProcess,
+     "bare wrong and completed fallback tokens cannot repeat Stop or create a new Host");
+   cases.back()["terminalFallback"]={{"request",failedRequest},{"serial",fallbackSerial},{"persona",persona},
+     {"resultState",outcome},{"terminalEvents",terminalEvents},{"fallbackStopCount",stopCount},{"episodeAttempts",g_inputHostRecoveryEpisodeAttempts.load()},
+     {"nativeSourceProven",outcome==2},{"externalGameInputProven",false},{"sourceUnknownIsNotSuccess",true}};
+   const auto off=targetDocument("disabled",selectedBefore["input"]["revision"].get<int>()+1);
+   require(writeTarget(selectedBefore,off).value("ok",false),"explicit new OFF can follow failed terminal fallback without rewriting its result");
+   fixtureOwnedCliBoundary=false;
+   inputCaptureRefreshRealStickSettings(true);inputHostStop("virtual-target-disabled");fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
+   require(!g_inputHostProcess&&fullPipeChildObservers.empty(),"terminal case returns all actual owned child observers");
+   require(oldObserver.close(),"terminal case closes its exact extra old Host observer");
+   fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;fixtureClassifiedReturnReleasedEpoch=0;
+   fixtureRogInitialIdentityEnabled=false;
+   cases.back()["passed"]=true;fixtureFullPipe=false;return;
+  }
+  require(fullPipeSpawnCount==creates+2&&g_inputHostProcess&&g_inputHostHello&&g_inputHostPrepared&&
+    incident.recoveryRequestId==failedRequest&&incident.monitoring&&incident.hostEpoch==g_inputHostEpoch&&
+    incident.hostEpoch!=failedEpoch&&incident.runId==g_inputHostRunId&&incident.hostInstanceId==g_inputHostHostInstanceId,
+    "real switch fallback Start and authenticated HELLO bind their actual same-request successor to runtime");
+  require(g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget+2,
+    "runtime and original switch fallback charge exactly their existing attempts without refund");
+  cases.back()["delayedSuccessor"]={{"request",failedRequest},{"firstFailedEpoch",failedEpoch},
+    {"successorEpoch",g_inputHostEpoch},{"successorRun",g_inputHostRunId},{"successorInstance",g_inputHostHostInstanceId},
+    {"actualOriginalStart",true},{"actualSwitchFallback",true},{"realManagedProcessAndPipe",true},
+    {"connectFailureLeafControlled",true},{"sdkAndPhysicalLeavesFake",true}};
+ }
+ if(failedRestart){
+  fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;fixturePrepareAckLoss=false;
+  const auto rejectedTicket=incident.recoveryRequestId;
+  require(rejectedTicket&&rejectedTicket!=oldTicket&&incident.monitoring&&fullPipeSpawnCount==creates+1,
+   "failed recovery Start owns a distinct real period and exactly one real managed child");
+  require(boundary=="persistent-start-failure"?fixtureRuntimeRecoveryFaultConsumed:fixturePrepareAckLossConsumed,
+   "requested existing OS failure or actual prepared ACK-loss port really fired");
+  const auto failedChild=fullPipeChildObservers.back();const auto failedFile=fullPipeReceipts.back();
+  const auto rejection=g_virtualStartProtection.view(startProtectionClock);
+  require(rejection.candidateOutcome=="failure"||rejection.phase=="failure"||rejection.phase=="expired",
+   "failed recovery uses its actual normal failure result instead of an invented final");
+  if(rejection.locked&&rejection.verificationRemainingMs)advance(rejection.verificationRemainingMs);
+  fullPipeVerificationStep();fullPipeVerificationStep();
+  // Let the same native return owner consume all possible failed-target duties.
+  for(unsigned pass=0;pass<4;++pass){advance(1001);(void)fresh(family);fullPipeQuarantineProbe();inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  const auto rejected=fullPipeChildOutcome(failedChild,failedFile);
+  require(rejected.value("nativeObservedProcessExit",false)&&rejected.value("finalCleanupOk",false)&&
+   !rejected.value("hasController",true)&&!rejected.value("hasContext",true),
+   "failed successor naturally releases its actual managed controller and context before another attempt");
+  cases.back()["managedReceipts"].push_back({{"path",W2U(failedFile)},{"processId",rejected.value("processId",0u)},
+   {"persona",persona},{"naturalExit",true},{"controllerReleased",true},{"contextReleased",true},{"faultScope",boundary}});
+  require(finalCount(rejectedTicket,"failure")==1&&finalCount(rejectedTicket,"success")==0&&
+   incident.pending&&!incident.monitoring&&incident.retryAt&&incident.serial!=serial&&fullPipeSpawnCount==creates+1,
+   "one failed recovery final retains ON demand with a fresh dispatch identity and a deferred next attempt");
+  const auto nextRetry=incident.retryAt;
+  for(unsigned staleToken=0;staleToken<8;++staleToken)inputHostPerformRuntimeRecovery(serial);
+  require(incident.retryAt==nextRetry&&fullPipeSpawnCount==creates+1,
+   "eight stale prior-attempt tokens cannot trigger or renew the failed successor's next wave");
+  const auto now=GetTickCount64();require(nextRetry>now,"failed successor keeps its original slow retry deadline");
+  advance(nextRetry-now-1);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(fullPipeSpawnCount==creates+1,"failed successor does not retry before the next wave deadline");
+  advance(1002);admitReturnedSource();(void)fresh(family);
+  inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  require(incident.recoveryRequestId!=rejectedTicket&&incident.recoveryRequestId!=oldTicket,
+   "failed successor continues only under a third distinct original bounded period");
+  cases.back()["failedRecovery"]={{"requestId",rejectedTicket},{"failureFinals",1},{"successFinals",0},{"retryAt",nextRetry},
+    {"nextRequest",incident.recoveryRequestId},{"oldSerial",serial},{"newSerial",incident.serial},{"preparedAckLoss",fixturePrepareAckLossConsumed}};
+ }
+ const auto newTicket=incident.recoveryRequestId;const auto newEpoch=g_inputHostEpoch;const auto newRun=g_inputHostRunId;const auto newProcess=g_inputHostProcess;
+ require(newTicket&&newTicket!=oldTicket&&incident.spent&&!incident.pending&&fullPipeSpawnCount==creates+replacementCount&&newProcess&&newEpoch!=oldEpoch&&newRun!=oldRun&&g_inputHostBoundPersona==persona&&g_inputHostRecoveryEpisodeAttempts.load()==(persistent?2+replacementCount:beforeBudget+(delayedSuccessor?2:1)),"proven post-final return creates exactly one charged same-persona recovery period with a distinct ticket");
+ const auto runtimeStops=[](){return std::count_if(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),[](const auto& s){return s.rfind("stop:",0)==0;});};
+ const auto oldSerialStops=runtimeStops();
+ for(unsigned n=0;n<8;++n)require(inputHostQueueLifecycleWork(("runtime-transport-recovery:"+std::to_string(serial)).c_str()),"old runtime serial can reach the actual serialized worker after its replacement");
+ fullPipeDrainQueuedLifecycle();
+ require(g_inputHostProcess==newProcess&&g_inputHostEpoch==newEpoch&&g_inputHostRunId==newRun&&fullPipeSpawnCount==creates+replacementCount&&g_inputHostRecoveryEpisodeAttempts.load()==(persistent?2+replacementCount:beforeBudget+(delayedSuccessor?2:1)),"spent runtime token cannot Stop successor or create another charged replacement");
+ require(runtimeStops()==oldSerialStops,"duplicate old serial emits no second actual Stop");
+
+ if(family==0){
+  require(cases.back().contains("runtimeProofLateRejectEdges")&&cases.back()["runtimeProofLateRejectEdges"].size()==9,
+   "all nine declared late proof edges distinguish real cancellation from harmless snapshot publication");
+  json settlements=json::array(),proofs=json::array();
+  for(const auto& event:fixtureEvents){const auto& detail=event["detail"];
+   if(event.value("event","")=="msi-claw-return-debt"&&detail.value("action","")=="discharged"&&detail.value("where","")=="runtime-same-owned-MSI-two-fresh-windows")settlements.push_back(detail);
+   if(event.value("event","")=="input-host-runtime-recovery"&&detail.value("stage","")=="msi-return-proven")proofs.push_back(detail);
+  }
+  require(settlements.size()==1&&proofs.size()==1,"exact old MSI mode obligation commits once before its unique runtime return proof");
+  cases.back()["runtimeMsiModeSettlement"]=settlements;cases.back()["runtimeMsiReturnProof"]=proofs;
+ }
+
+ if(delayedSuccessor){
+  // Original fixture.cpp failed-start healthy-final consumer: a failure
+  // candidate stays provisional after the original inspection is complete.
+  // Actual accepted source + the unchanged verifier decide the only final.
+  fixtureFrameFirstAck=true;json last;
+  for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){advance(8);auto sample=fresh(family);last=fullPipeSubmitSource(sample,true,false);}
+  require(last.value("hostSubmission",std::string{})=="frame-accepted"&&g_inputHostActive,
+    "actual recovered successor consumes current source over its real managed pipe");
+  fullPipeVerificationStep();fullPipeVerificationStep();
+  const auto final=g_virtualStartProtection.view(startProtectionClock);
+  require(final.requestId==newTicket&&final.phase=="success"&&!final.locked&&final.fallbackAttempts==1&&
+    finalCount(newTicket,"success")==1&&finalCount(newTicket,"failure")==0,
+    "original verifier resolves provisional failure to exactly one actual same-period fallback success");
+  cases.back()["periods"].push_back({{"requestId",newTicket},{"persona",persona},{"outcome","success"},{"fallbackAttempts",1},{"finalCount",1}});
+ }else success(family,persona,newTicket);
+
+ require(finalCount(oldTicket,"success")==oldSuccesses&&finalCount(oldTicket,"failure")==0&&finalCount(newTicket,"success")==1&&finalCount(newTicket,"failure")==0,"runtime recovery keeps original player final immutable and publishes exactly one separate recovery success");
+ if(delayedSuccessor){inputHostRecoveryMaintenanceTick();require(!incident.pending&&!incident.monitoring&&!g_inputHostRuntimeRecoveryPending.load()&&incident.recoveryRequestId==newTicket,"runtime observes one actual successful same-period fallback terminal without retirement");}
+
+ cases.back()["runtimeRecovery"]={{"serial",serial},{"oldRequest",oldTicket},{"newRequest",newTicket},{"oldEpoch",oldEpoch},{"newEpoch",newEpoch},{"newRun",newRun},{"budgetDelta",g_inputHostRecoveryEpisodeAttempts.load()-beforeBudget},{"oldFinalCount",oldSuccesses},{"faultReply",faultReply}};
+ if(repeatIncident){
+  if(boundary=="persistent-repeat-after-observer")inputHostRecoveryMaintenanceTick();
+  require(incident.monitoring==(boundary=="persistent-repeat-before-observer")&&
+   !incident.pending&&incident.recoveryRequestId==newTicket&&g_inputHostEpoch==newEpoch,
+   "repeat fault starts on the real successful replacement at its selected observer boundary");
+  const auto priorSerial=incident.serial;const auto faultCalls=fixtureRuntimeRecoveryFaultCalls;
+  fixtureRuntimeRecoveryFaultEnabled=true;fixtureRuntimeRecoveryFaultConsumed=false;fixtureStartupTransportError=ERROR_SEM_TIMEOUT;
+  auto repeatSource=fresh(family);const auto repeatReply=fullPipeSubmitSource(repeatSource,true,false);
+  fixtureRuntimeRecoveryFaultEnabled=false;fixtureStartupTransportError=ERROR_SUCCESS;
+  require(fixtureRuntimeRecoveryFaultConsumed&&fixtureRuntimeRecoveryFaultCalls==faultCalls+1&&
+   incident.pending&&incident.serial!=priorSerial&&!incident.recoveryRequestId&&
+   incident.requestId==newTicket&&incident.hostEpoch==newEpoch&&incident.runId==newRun,
+   "actual second post-final pipe failure offers a new incident instead of deduplicating the recovered Host forever");
+  inputHostPerformRuntimeRecovery(priorSerial);
+  require(g_inputHostEpoch==newEpoch&&fullPipeSpawnCount==creates+replacementCount&&!incident.stopInvoked,
+   "the prior recovery token cannot stop the newly faulted successor incident");
+  cases.back()["repeatedIncident"]={{"boundary",boundary},{"newSerial",incident.serial},{"priorSerial",priorSerial},
+   {"request",newTicket},{"hostEpoch",newEpoch},{"reply",repeatReply},{"newAttemptStarted",false}};
+  fixtureClassifiedReturnReleasedEpoch=newEpoch;
+ }
+ close(family,persona,1,repeatIncident);
+ if(repeatIncident)inputHostRecoveryMaintenanceTick();
+ require(fullPipeSpawnCount==creates+replacementCount&&fullPipeChildObservers.empty()&&!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostReleaseQuarantined,"runtime recovery complete OFF leaves no owned child epoch or quarantine");
+ require(oldObserver.close(),"runtime closes its extra exact old-process observation handle");
+ fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;fixtureClassifiedReturnReleasedEpoch=0;
+ cases.back()["passed"]=true;fixtureFullPipe=false;
+}
+
 static void personaLifecycleCases140(){
  if(!fspath::is_regular_file(fixtureManagedDll))throw std::runtime_error("explicit managed fixture missing");
  for(const std::string persona:{"elite","steamdeck","dualsense-edge"})personaLifecycle140::first(1,persona);
@@ -268,8 +1311,9 @@ static constexpr OneXHelperCase oneXHelperCases[]={
 static bool oneXFamilyRequested(){
  const auto* family=std::getenv("YMCC_FIXTURE_FAMILY");
  if(!family || !*family)return false;
- require(std::strcmp(family,"onex")==0,"family-lifecycle rejects an unknown directed family");return true;
+ require(std::strcmp(family,"onex")==0||std::strcmp(family,"aokzoe")==0,"family-lifecycle rejects an unknown directed family");return true;
 }
+static bool aokzoeFamilyRequested(){const auto* family=std::getenv("YMCC_FIXTURE_FAMILY");return family&&std::strcmp(family,"aokzoe")==0;}
 static void oneXCatalogCase(){
  using namespace ymcc::capabilities;using namespace ymcc::capabilities::onexVirtual;
  cases.back()["catalogBindings"]=json::array();unsigned concrete=0;
@@ -306,6 +1350,25 @@ static void oneXCatalogCase(){
  require(!ymcc::capabilities::onexVirtual::bind("unknown-onex-class").known()&&!gameSource({},0x045e,0x028e,1,5),"unknown classes and empty bindings remain unsupported");
  require(recognized(ymcc::capabilities::onexVirtual::bind("HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex"),"HandheldCompanion.Devices.OneXPlayerApex"),"Apex catalog namespace alias keeps the exact canonical identity");
  cases.back()["concreteCatalogModels"]=concrete;
+  const auto savedIdentity=g_machineIdentity;
+  unsigned aokzoeCount=0;
+  for(const auto& row:devices){
+   if(!ymcc::capabilities::onexVirtual::detail::aokzoeClass(row.consumerClass))continue;
+   const auto binding=ymcc::capabilities::onexVirtual::bind(row.consumerClass);
+   require(row.factoryInstantiable&&binding.model==&row&&!binding.source&&isAokzoe(binding),"AOKZOE exact factory binding preserves its catalog identity");
+   verify(binding,row.consumerClass,row.deviceId,"aokzoe-model-only");++aokzoeCount;
+   const auto copied=*binding.model;require(!Binding{&copied,nullptr}.known(),"copied AOKZOE row cannot forge catalog membership");
+   g_machineIdentity.resolved=true;g_machineIdentity.deviceClass=std::string(row.consumerClass);g_machineIdentity.family=YmccFamily::Aokzoe;
+   require(inputHostOneXMachineEligible(),"AOKZOE family and exact concrete class admit shared ordinary Start");
+   g_machineIdentity.family=YmccFamily::OneXPlayer;require(!inputHostOneXMachineEligible(),"AOKZOE class cannot borrow OneX family identity");
+  }
+  require(aokzoeCount==4,"exactly four existing concrete AOKZOE factories are admitted");
+  g_machineIdentity.family=YmccFamily::Aokzoe;g_machineIdentity.deviceClass="HandheldCompanion.Devices.OneXPlayerApex";
+  require(!inputHostOneXMachineEligible(),"OneX class cannot borrow AOKZOE identity");
+  for(const char* cls:{"HandheldCompanion.Devices.OneXAOKZOE","HandheldCompanion.Devices.AOKZOEA9","HandheldCompanion.Devices.AOKZOEA1Unknown"}){
+   g_machineIdentity.deviceClass=cls;require(!inputHostOneXMachineEligible(),"abstract, unknown and prefix-only AOKZOE classes remain unsupported");
+  }
+  g_machineIdentity=savedIdentity;cases.back()["aokzoeConcreteModels"]=aokzoeCount;
 }
 // Canonical DMI/persona parameters consumed by both the real cases and the
 // existing runner's exact selection. No new runner or test identity is added.
@@ -314,6 +1377,12 @@ static constexpr OneXLifecycleModel oneXLifecycleModels[]={
  {"Apex","ONEXPLAYER APEX","HandheldCompanion.Devices.OneXPlayerApex"},
  {"X2","ONEXPLAYER X2","HandheldCompanion.Devices.OneXPlayerX2"},
  {"OneX3","ONEXPLAYER 3","HandheldCompanion.Devices.OneXPlayer3"}
+};
+static constexpr OneXLifecycleModel aokzoeLifecycleModels[]={
+ {"A1","AOKZOE A1 AR07","HandheldCompanion.Devices.AOKZOEA1"},
+ {"A1Pro","AOKZOE A1 PRO","HandheldCompanion.Devices.AOKZOEA1Pro"},
+ {"A1X","AOKZOE A1X","HandheldCompanion.Devices.AOKZOEA1X"},
+ {"A2","AOKZOE A2 PRO","HandheldCompanion.Devices.AOKZOEA2"}
 };
 static constexpr const char* oneXLifecyclePersonas[]={"steamdeck","dualsense-edge","elite"};
 // These names drive the original deadline case's subvariant loop directly.
@@ -410,7 +1479,7 @@ static void oneXBoundaryEvidence140(json& observation,bool consumed){
   "only the controlled OS dirty event advances topology and leaves the old completed boundary stale");
  require(arrival.value("freshSampleBeforeArrival",false),"late arrival follows the unchanged production FreshSample predicate on an actual owner sample");
  const auto& boundary=request["boundaryScan"];
- require(request.value("repairRevision","")=="VC-ONEX-FAMILY-BOUNDARY-20261105-R1"&&boundary.is_object()&&
+ require(request.value("repairRevision","")=="VC-ONEX-SELECTED-CHILD-20261105-R1"&&boundary.is_object()&&
   boundary.value("requests",0u)==1&&boundary["observedEpoch"]==arrival["oldBoundaryEpoch"]&&
   boundary["requestedTopologyEpoch"]==arrival["currentEpoch"]&&boundary.value("requestOnly",false)&&!boundary.value("newUsbCycle",true)&&
   request["requestId"]==arrival["requestId"]&&arrival.value("deadline",0ULL)==fixtureOneXDeadline,
@@ -444,19 +1513,25 @@ static void oneXBoundaryEvidence140(json& observation,bool consumed){
  observation["lateArrival"]=arrival;observation["boundaryRequest"]=request;observation["boundaryOwnerScan"]=scan;
  observation["sameEpochDeferredWaits"]=deferrals;observation["boundaryActuallyConsumed"]=consumed;
 }
-static void oneXManagedLifecycleCases140(){
+static void oneXManagedLifecycleCases140(bool aokzoe=false,bool parameterizedOnly=false){
+  const int family=aokzoe?6:3;const std::string prefix=aokzoe?"aokzoe":"onex";
+  const auto* models=aokzoe?aokzoeLifecycleModels:oneXLifecycleModels;
+  const auto modelCount=aokzoe?std::size(aokzoeLifecycleModels):std::size(oneXLifecycleModels);
+  const char* manufacturer=aokzoe?"AOKZOE":"ONE-NETBOOK TECHNOLOGY CO., LTD.";
  require(fspath::is_regular_file(fixtureManagedDll),"directed OneX requires the current owned SDK-free managed fixture");
- for(const bool initialPending:{false,true})for(const auto& model:oneXLifecycleModels)for(const auto* persona:oneXLifecyclePersonas){
+ for(const bool initialPending:{false,true})for(size_t modelIndex=0;modelIndex<modelCount;++modelIndex)for(const auto* persona:oneXLifecyclePersonas){
+   const auto& model=models[modelIndex];
   if(initialPending && std::strcmp(persona,"elite")==0)continue; // Existing Elite requires an admitted physical source before Host creation.
-  const ControlledDmi dmi={"ONE-NETBOOK TECHNOLOGY CO., LTD.",model.product,model.deviceClass,nullptr,model.product,nullptr};
-  const bool apex=!initialPending&&std::strcmp(model.name,"Apex")==0;
+  const ControlledDmi dmi={manufacturer,model.product,model.deviceClass,nullptr,model.product,nullptr};
+  const bool apex=!initialPending&&modelIndex==0;
   const bool freshParameterized=apex&&std::strcmp(persona,"steamdeck")==0;
   const bool selectedParameterized=apex&&std::strcmp(persona,"elite")==0;
   const bool parameterized=freshParameterized||selectedParameterized;
+  if(parameterizedOnly&&!parameterized)continue;
   const auto variantCount=freshParameterized?sizeof(oneXFreshVariants)/sizeof(oneXFreshVariants[0]):
    selectedParameterized?sizeof(oneXSelectedVariants)/sizeof(oneXSelectedVariants[0]):1u;
   for(unsigned variant=0;variant<variantCount;++variant){
-  prepare(3,std::string("onex/lifecycle/")+(initialPending?"pending/":"")+model.name+"/"+persona,&dmi,variant==0);
+  prepare(family,prefix+"/lifecycle/"+(initialPending?"pending/":"")+model.name+"/"+persona,&dmi,variant==0);
   if(parameterized){
    if(!variant)cases.back()["subvariants"]=json::array();
    const auto* name=freshParameterized?oneXFreshVariants[variant]:oneXSelectedVariants[variant];
@@ -467,7 +1542,7 @@ static void oneXManagedLifecycleCases140(){
   auto& observation=parameterized?cases.back()["subvariants"].back():cases.back();
   if(initialPending){fixtureOneXShape="initial-pending";fixtureOneXInitialPending=true;fixtureXinputSourceLive=false;}
   const auto spawns=fullPipeSpawnCount;
-  try{startFirst(3,persona);}catch(...){
+  try{startFirst(family,persona);}catch(...){
    // In particular, old R2 must retain its original-deadline timeout evidence.
    observation["helperIo"]=fixtureOneXIo;observation["originalDeadline"]=fixtureOneXDeadline;
    observation["clockAfterStart"]=startProtectionClock;observation["hostSpawnDelta"]=fullPipeSpawnCount-spawns;
@@ -497,7 +1572,7 @@ static void oneXManagedLifecycleCases140(){
   if(freshParameterized&&variant)oneXBoundaryEvidence140(observation,true);
   if(freshParameterized&&!variant)require(!fixtureOneXLateArrivalApplied&&fixtureOneXBoundaryDeferrals==0,
    "original fresh parameter retains its undisturbed canonical path");
-  close(3,persona);
+  close(family,persona);
   require(fullPipeSpawnCount==spawns+1,"OneX persona and OFF keep exactly one actual managed Host without fallback creation");
   std::ifstream raw{fspath::path(fullPipeReceipts.back())};json child;raw>>child;
   unsigned cycle=0,prepareTarget=0,position=0,cyclePosition=0,preparePosition=0;
@@ -520,13 +1595,13 @@ static void oneXManagedLifecycleCases140(){
  }
  // One actual Start uses the original player deadline through HELLO connect,
  // cycle write and cycle read. Time is supplied only after real kernel returns.
- const auto& model=oneXLifecycleModels[0];
- const ControlledDmi dmi={"ONE-NETBOOK TECHNOLOGY CO., LTD.",model.product,model.deviceClass,nullptr,model.product,nullptr};
+ const auto& model=models[0];
+ const ControlledDmi dmi={manufacturer,model.product,model.deviceClass,nullptr,model.product,nullptr};
  for(const auto* variant:oneXDeadlineVariants){
  const bool returnedStale=std::strcmp(variant,"returned-child-stale")==0;
  const bool boundaryUnconsumed=std::strcmp(variant,"boundary-scan-not-consumed")==0;
  const bool readDeadline=!returnedStale&&!boundaryUnconsumed;
- prepare(3,"onex/lifecycle/deadline-read-stage",&dmi,readDeadline);
+ prepare(family,prefix+"/lifecycle/deadline-read-stage",&dmi,readDeadline);
  fixtureOneXShape=returnedStale?"returned-stale":boundaryUnconsumed?"flow":"deadline-read-stage";
  if(boundaryUnconsumed)fixtureOneXBoundaryVariant=variant;
  if(readDeadline)cases.back()["subvariants"]=json::array();
@@ -535,7 +1610,7 @@ static void oneXManagedLifecycleCases140(){
  const auto originalSource=fixtureOneXSource();
  observation["sourceBefore"]={{"root",originalSource.baseContainerDeviceInstanceId},{"hid",originalSource.deviceInstanceId},{"identity",originalSource.physicalIdentity}};
  const auto doc=targetDocument("steamdeck",0);require(sgWriteFileAtomic(YM_SETTINGS_FILE,doc.dump()),"deadline case seeds its private persona request");
- inputCaptureRefreshRealStickSettings(true);observeSource(3,"steamdeck");
+ inputCaptureRefreshRealStickSettings(true);observeSource(family,"steamdeck");
  const auto admission=g_virtualStartProtection.admit("steamdeck",startProtectionClock);
  require(admission.accepted&&admission.requestId,"deadline case actually admits its initial player ticket before consuming time");
  const auto request=g_virtualStartProtection.view(startProtectionClock);
@@ -674,13 +1749,19 @@ static json oneXHelperResources140(){
   {"active",g_inputHostActive},{"cycleInFlight",g_hidHideCycleInFlight.load()},{"forbiddenIo",forbiddenIo},
   {"ownerReads",fixtureOneXOwnerReads},{"rehideSelections",fixtureOneXRehideSelections}};
 }
-static void oneXFamilyHelperCases140(){
+static void oneXFamilyHelperCases140(bool aokzoe=false,bool parameterizedOnly=false){
+ const char* family=aokzoe?"aokzoe":"onex";
  const auto begin=cases.size();
+ const auto selected=[parameterizedOnly](const OneXHelperCase& test){
+  return !parameterizedOnly||std::strcmp(test.name,"onex/helper/unbound-slot")==0||std::strcmp(test.name,"onex/helper/fresh-positive")==0;
+ };
+ const auto expected=std::count_if(std::begin(oneXHelperCases),std::end(oneXHelperCases),selected);
  for(const auto& test:oneXHelperCases){
+  if(!selected(test))continue;
   require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"OneX independent helper case starts without an owned Host");
   seed();fixtureFullPipe=false;fixtureOneXEnabled=true;
   fixtureOneXShape=std::string(test.name).substr(std::strlen("onex/helper/"));
-  cases.push_back({{"name",test.name},{"suite","family-lifecycle"},{"familySelection","onex"},
+  cases.push_back({{"name",std::string(family)+std::string(test.name).substr(4)},{"suite","family-lifecycle"},{"familySelection",family},
    {"scope","production-helper/native-event-host"},{"realManagedPipe",false},{"managedCommandPath",false},
    {"filterAttached","UNKNOWN"},{"externalSuppressionVerified",false},{"freshSourceReturnProven",false}});
   if(fixtureOneXShape=="catalog"){cases.back()["scope"]="immutable-capability/catalog";oneXCatalogCase();cases.back()["passed"]=true;fixtureOneXEnabled=false;continue;}
@@ -704,11 +1785,11 @@ static void oneXFamilyHelperCases140(){
   // Actual DMI resolver for Apex (the user's OP3). This context is explicitly
   // a native event-Host producer, never a forged managed owner or final success.
   g_machineIdentity={};g_machineIdentity.attempted=true;
-  g_machineIdentity.manufacturer="ONE-NETBOOK TECHNOLOGY CO., LTD.";
-  g_machineIdentity.product="ONEXPLAYER APEX";g_machineIdentity.systemProduct="ONEXPLAYER APEX";
+  g_machineIdentity.manufacturer=aokzoe?"AOKZOE":"ONE-NETBOOK TECHNOLOGY CO., LTD.";
+  g_machineIdentity.product=aokzoe?"AOKZOE A1 AR07":"ONEXPLAYER APEX";g_machineIdentity.systemProduct=g_machineIdentity.product;
   ymccResolveFamily(g_machineIdentity);
-  require(g_machineIdentity.resolved&&g_machineIdentity.family==YmccFamily::OneXPlayer&&
-   g_machineIdentity.deviceClass=="HandheldCompanion.Devices.OneXPlayerApex","actual OneX Apex DMI resolver supplies the directed helper class");
+  require(g_machineIdentity.resolved&&g_machineIdentity.family==(aokzoe?YmccFamily::Aokzoe:YmccFamily::OneXPlayer)&&
+   g_machineIdentity.deviceClass==(aokzoe?"HandheldCompanion.Devices.AOKZOEA1":"HandheldCompanion.Devices.OneXPlayerApex"),"actual family DMI resolver supplies the directed helper class");
   const auto binding=ymcc::capabilities::onexVirtual::bind(g_machineIdentity.deviceClass);
   require(binding.known()&&ymcc::capabilities::onexVirtual::recognized(binding,g_machineIdentity.deviceClass),"Apex helper uses its real registered capability facade");
   g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;
@@ -920,12 +2001,13 @@ static void oneXFamilyHelperCases140(){
   cases.back()["passed"]=true;
  }
  fixtureOneXEnabled=false;
- require(cases.size()-begin==sizeof(oneXHelperCases)/sizeof(oneXHelperCases[0]),"direct OneX selection executes exactly its declared canonical scope");
+ require(cases.size()-begin==static_cast<size_t>(expected),"direct OneX selection executes exactly its declared canonical scope");
 }
 } // namespace personaLifecycle140
 
-static void familyLifecycleCases140(){
- if(personaLifecycle140::oneXFamilyRequested()){personaLifecycle140::oneXFamilyHelperCases140();personaLifecycle140::oneXManagedLifecycleCases140();return;}
+static void familyLifecycleCases140(bool oneXParameterizedOnly=false){
+ if(oneXParameterizedOnly){const auto* family=std::getenv("YMCC_FIXTURE_FAMILY");if(!family||std::strcmp(family,"onex")!=0)throw std::invalid_argument("onex-parameterized requires exact onex family");}
+ if(personaLifecycle140::oneXFamilyRequested()){const bool aokzoe=personaLifecycle140::aokzoeFamilyRequested();personaLifecycle140::oneXFamilyHelperCases140(aokzoe,oneXParameterizedOnly);personaLifecycle140::oneXManagedLifecycleCases140(aokzoe,oneXParameterizedOnly);return;}
  using namespace personaLifecycle140;
  if(!fspath::is_regular_file(fixtureManagedDll))throw std::runtime_error("explicit managed fixture missing");
  // Original support-declaration leaves remain unbound; Lenovo below resolves DMI.

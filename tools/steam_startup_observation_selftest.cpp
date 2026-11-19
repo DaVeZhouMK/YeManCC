@@ -12,6 +12,7 @@
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
+#include <thread>
 using json=nlohmann::json;
 using Session=ymcc::steamsession::Session;
 static std::atomic<bool> g_exitRequested{false};
@@ -19,18 +20,46 @@ static struct {bool isolated=false;} g_aiFanMockSession;
 static ymcc::steamlink::Admission g_steamLinkAdmission{100};
 static ymcc::deckyupdate::Recovery g_deckyUpdateRecovery;
 static std::wstring POWER_CONTROL_DIR=L"C:\\inert-fixture";
-namespace ymcc::deckymirror {inline std::string frontendBuildId(const std::wstring&){return std::string(64,'b');}}
+struct DeckyReadGate {
+ HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr), release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ ~DeckyReadGate(){if(entered)CloseHandle(entered);if(release)CloseHandle(release);}
+};
+static DeckyReadGate* deckyReadGate=nullptr;
+namespace ymcc::deckymirror {
+inline std::string frontendBuildId(const std::wstring&){
+ if(deckyReadGate){SetEvent(deckyReadGate->entered);WaitForSingleObject(deckyReadGate->release,10000);}
+ return std::string(64,'b');
+}}
 namespace ymcc::deckyidentity {inline const char* version="v3.3.0";}
 static struct {Session session;Session sessionSnapshot(){return session;}} g_steamSettingsObserver;
 enum class PowerLifecycle{Suspending,Suspended,Resuming,Ready};
 static std::atomic<PowerLifecycle>g_powerLifecycle{PowerLifecycle::Ready};
 static unsigned long long fixturePowerGeneration=1;static unsigned long long currentPowerGeneration(){return fixturePowerGeneration;}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){
+ out={};out.generation=fixturePowerGeneration;out.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;
+ return g_powerLifecycle==PowerLifecycle::Ready;
+}
 static std::atomic<unsigned> probes{0},helpers{0},modeReads{0};
 static unsigned failures=0,checks=0,consumerWakes=0;
 static HANDLE helperLease=nullptr;
-static struct { HANDLE confirmAndIdle(const Session&,bool,bool){++helpers;HANDLE duplicate=nullptr;DuplicateHandle(GetCurrentProcess(),helperLease,GetCurrentProcess(),&duplicate,0,FALSE,DUPLICATE_SAME_ACCESS);return duplicate;} } g_steamCssUse;
-static struct {std::mutex mutex;json state;void requestRefresh(const Session&,bool=true){} void set(json value){std::lock_guard lock(mutex);state=std::move(value);}json current(){std::lock_guard lock(mutex);return state;}json snapshot(const Session&){++modeReads;return current();}} g_steamModeObserver;
-static struct {ymcc::deckysidebar::State state;ymcc::deckysidebar::State snapshot(){return state;}bool requestLaunchAdmissionRefresh(){++consumerWakes;return true;}} g_deckySidebarRuntime;
+static struct { HANDLE confirmAndIdle(const Session&,bool,bool,std::nullptr_t = nullptr,const ymcc::sleeppower::SharedPowerV1* = nullptr){++helpers;HANDLE duplicate=nullptr;DuplicateHandle(GetCurrentProcess(),helperLease,GetCurrentProcess(),&duplicate,0,FALSE,DUPLICATE_SAME_ACCESS);return duplicate;} } g_steamCssUse;
+static struct {
+ std::mutex mutex;json state;
+ bool requestRefresh(const Session&,bool=true){return true;}
+ bool requestAdmissionRefresh(const Session& session,bool (*satisfied)(const Session&,const json&,bool)){return satisfied(session,current(),false)||requestRefresh(session);}
+ void set(json value){std::lock_guard lock(mutex);state=std::move(value);}
+ json current(){std::lock_guard lock(mutex);return state;}
+ json snapshot(const Session&,ymcc::steamui::ModeCacheMiss* miss=nullptr){if(miss)*miss={};++modeReads;return current();}
+ json snapshot(const Session& session,const ymcc::sleeppower::SharedPowerV1&){return snapshot(session);}
+} g_steamModeObserver;
+static struct {
+ ymcc::deckysidebar::State state;
+ ymcc::deckysidebar::State snapshot(){return state;}
+ bool exitFenced()const{return false;}
+ unsigned long long connectionEvidenceEpoch()const{return 1;}
+ bool requestConnectionCheck(){return true;}
+ bool requestLaunchAdmissionRefresh(){++consumerWakes;return true;}
+} g_deckySidebarRuntime;
 static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m){if(actual)actual->observeMode(s,m);}} g_steamCssGuard;
 static void deckySidebarDiagnostic(const char*,const json&,bool=false){}
 static struct {bool connected=false;json status(){return {{"active",true},{"connected",connected}};}} g_deckyMirrorBroker;
@@ -73,7 +102,8 @@ int main(int argc,char** argv){try{
  check(probes==beforeStableProbes,"global admission storm adds no backend probe or helper work");
  auto health=productionConnectionHealth();check(health.required&&!health.connected,"global health detects missing authenticated peer");
  g_deckyMirrorBroker.connected=true;health=productionConnectionHealth();check(health.required&&!health.connected,"mirror alone does not certify official backend");
- {auto mode=g_steamModeObserver.current();mode["deckyBackendConnected"]=true;mode["deckyHooksInstalled"]=true;g_steamModeObserver.set(mode);health=productionConnectionHealth();check(health.required&&health.connected,"all three channels certify structural health");
+ {auto mode=g_steamModeObserver.current();mode["deckyBackendConnected"]=true;mode["deckyHooksInstalled"]=true;g_steamModeObserver.set(mode);check(!productionConnectionHealth().connected,"backend and hooks do not certify an unobserved browser client");
+ mode["deckyClientConnected"]=true;g_steamModeObserver.set(mode);health=productionConnectionHealth();check(health.required&&health.connected,"all three channels certify structural health");
  mode["deckyBackendConnected"]=false;g_steamModeObserver.set(mode);check(!productionConnectionHealth().connected,"official backend loss survives connected mirror");
  mode["deckyBackendConnected"]=true;mode["deckyHooksInstalled"]=false;g_steamModeObserver.set(mode);check(!productionConnectionHealth().connected,"missing official hooks survive connected backend");}
  g_deckyMirrorBroker.connected=false;
@@ -113,7 +143,18 @@ int main(int argc,char** argv){try{
  for(unsigned i=0;i<1000;++i)signal(existing,"bigpicture");Sleep(60);
  check(helpers==baselineHelpers+1&&probes==baselineProbes+1,"1000 repeated mode/window observations do not repeat CSS helpers or discovery");
  check(runtime.snapshot().steamRunning&&runtime.snapshot().linked,"appearance state retains truthful existing Steam and enabled selections");
- signal(existing,"bigpicture","document-b:1");check(until([&]{return helpers==baselineHelpers+2;}),"a replaced document gets one CSS reapply while Steam PID and Big Picture mode remain unchanged");
+ {
+  DeckyReadGate gate;
+  if(!gate.entered||!gate.release)throw std::runtime_error("Decky read gate unavailable");
+  deckyReadGate=&gate;
+  std::jthread delivery([&]{signal(existing,"bigpicture","document-b:1",true,true);});
+  const bool entered=WaitForSingleObject(gate.entered,2500)==WAIT_OBJECT_0;
+  const bool notified=entered&&until([&]{return helpers==baselineHelpers+2;});
+  SetEvent(gate.release);delivery.join();deckyReadGate=nullptr;
+  check(entered,"Decky update version read reached the fixture barrier");
+  check(notified,"verified new document reaches CSS while Decky version read is still pending");
+ }
+ check(until([&]{return helpers==baselineHelpers+2;}),"a replaced document gets one CSS reapply while Steam PID and Big Picture mode remain unchanged");
  for(unsigned i=0;i<100;++i)signal(existing,"bigpicture","document-b:1");Sleep(40);check(helpers==baselineHelpers+2,"duplicate new-document notifications cannot repeat the CSS reapply");
  signal(existing,"desktop","document-b:1");Sleep(15);signal(existing,"bigpicture","document-b:2");
  check(until([&]{return helpers==baselineHelpers+3;}),"a real desktop-to-Big-Picture entry still reapplies enabled appearance once");
@@ -128,6 +169,30 @@ int main(int argc,char** argv){try{
  check(until([&]{return helpers==beforeManual+1;}),"first confirmed BPM resumes a parked manual request instead of losing appearance application");
  for(unsigned i=0;i<100;++i)signal(existing,"bigpicture","manual-document:2");Sleep(40);
  check(helpers==beforeManual+1,"a completed manual transition does not schedule a second CSS use");
+ runtime.shutdown();
+ // Hold the guard's own cached-mode read outside this sequence. The shared
+ // owner may reaffirm the old document without sending a changed callback.
+ auto replacementConfig=cssGuard;
+ replacementConfig.modeDelays={10,5000,30000};
+ replacementConfig.isIdle=[](const Session&){return true;};
+ signal(existing,"bigpicture","before-replacement:1");
+ check(runtime.initialize(replacementConfig),"document replacement fixture starts with existing Big Picture");
+ const auto beforeReplacement=helpers.load();
+ runtime.observeSteam(existing);
+ check(until([&]{return helpers==beforeReplacement+1;}),"first document establishes a known Big Picture baseline");
+ SetEvent(helperLease);
+ check(until([&]{return runtime.snapshot().phase=="idle";}),"first document helper completes before the manual request");
+ ResetEvent(helperLease);
+ runtime.requestManualRecovery();
+ check(until([&]{return helpers==beforeReplacement+2;}),"manual request uses the still-current old document proof");
+ SetEvent(helperLease);
+ check(until([&]{return runtime.snapshot().phase=="idle";}),"manual helper completes on old document before new proof");
+ ResetEvent(helperLease);
+ signal(existing,"bigpicture","after-replacement:1");
+ check(until([&]{return helpers==beforeReplacement+3;}),"first verified replacement after manual use gets its own CSS application");
+ for(unsigned i=0;i<100;++i)signal(existing,"bigpicture","after-replacement:1");
+ Sleep(40);
+ check(helpers==beforeReplacement+3,"repeated proof of the replacement does not start another helper");
  g_steamCssGuard.actual=nullptr;runtime.shutdown();
  ymcc::steamlink::Admission restarted(120);restarted.observeMode(old,"bigpicture");check(!restarted.allows(old),"YMCC restart does not turn a CSS reconciliation into a Decky startup grant");
  signal(newer,"bigpicture","new-steam:1",true);g_steamSettingsObserver.session=newer;g_steamLinkAdmission.observe(newer);

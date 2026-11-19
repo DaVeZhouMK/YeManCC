@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {extract} from './fixtures/legion_motion_consumer/extract_main.mjs';
+const writeFresh=(file,data)=>fs.writeFileSync(file,data,{flag:'wx'});
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2);
 const prepareOnly=args.includes('--prepare-only');
@@ -13,7 +14,8 @@ const positional=args.filter(x=>x!=='--prepare-only');
 assert(positional.length<=1&&!positional.some(x=>x.startsWith('--')),'Use [output] [--prepare-only]');
 const root=path.resolve(positional[0]??path.join(repo,'../../../Build/Validation/VirtualTypedSubmit',new Date().toISOString().replace(/[:.]/g,'-')));
 assert(!fs.existsSync(root),'Use a fresh evidence directory');
-fs.mkdirSync(root,{recursive:true});
+fs.mkdirSync(path.dirname(root),{recursive:true});
+fs.mkdirSync(root); // Exclusive evidence ownership; never reuse a receipt directory.
 const bytes=fs.readFileSync(repo+'/native/main.cpp'),text=bytes.toString('utf8');
 const runtimePath=repo+'/native/virtual_controller_ui_output_runtime.h';
 const runtimeBytes=fs.readFileSync(runtimePath),runtime=runtimeBytes.toString('utf8');
@@ -21,8 +23,10 @@ const runtimeSymbols=new Set(['focusIsolationBuildTypedSubmitText','focusIsolati
 const sourceOf=name=>runtimeSymbols.has(name)?runtime:text;
 const extractBound=(name,kind)=>({...extract(sourceOf(name),name,kind),sourcePath:runtimeSymbols.has(name)?runtimePath:repo+'/native/main.cpp'});
 fs.copyFileSync(path.join(repo,'tools/virtual_typed_submit_selftest.cpp'),root+'/fixture.cpp');
-fs.writeFileSync(root+'/typed_submit_candidate.inc',extractBound('focusIsolationBuildTypedSubmitText').code);
-fs.writeFileSync(root+'/compiler-environment.cmd','@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\nif errorlevel 1 exit /b %errorlevel%\r\nset\r\n');
+fs.copyFileSync(repo+'/native/input_host_frame_request_id.h',root+'/input_host_frame_request_id.h');
+fs.copyFileSync(repo+'/native/input_host_compact_frame_reply.h',root+'/input_host_compact_frame_reply.h');
+writeFresh(root+'/typed_submit_candidate.inc',extractBound('focusIsolationBuildTypedSubmitText').code+'\n'+extractBound('inputHostVerifySubmitFrameParity').code);
+writeFresh(root+'/compiler-environment.cmd','@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\nif errorlevel 1 exit /b %errorlevel%\r\nset\r\n');
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const names=['c6aNumberTextCache','c6aAppendUInt','c6aAppendInt','c6aAppendJsonValue','inputHostBuildSubmitFrameText','focusIsolationAssembleFrame','inputHostNormalizeAxis'];
 const pieces=names.map(name=>extractBound(name));
@@ -33,23 +37,23 @@ assert(e0>c1&&e1>e0);
 const pad=fs.readFileSync(repo+'/native/screen_touchpads.h','utf8');
 const p0=pad.indexOf('inline Json snapshotJson('),p1=pad.indexOf('\n}',p0)+2;
 assert(p0>0&&p1>p0);
-const prelude=`#define NOMINMAX\n#include <windows.h>\n#include <algorithm>\n#include <array>\n#include <bit>\n#include <charconv>\n#include <chrono>\n#include <cmath>\n#include <cstdint>\n#include <cstdlib>\n#include <cstring>\n#include <fstream>\n#include <iostream>\n#include <limits>\n#include <random>\n#include <string>\n#include <thread>\n#include <type_traits>\n#include <vector>\n#include "json.hpp"\nusing json=nlohmann::json;\nnamespace ymcc::screenpads{using Json=json;struct Contact{bool down=false,click=false;short x=0,y=0;unsigned short pressure=0;};struct Snapshot{bool present=false;Contact left{},right{};};\n${pad.slice(p0,p1)}\n}\nstatic const char* kInputHostProtocolConfigHash="hash-synthetic-fixed";\nstatic const char* kInputHostOwnerIdentity="owner-synthetic-fixed";\nstatic const char* kInputHostTargetId="target-synthetic-fixed";\nstatic unsigned long long g_inputHostConfigRevision=17,g_inputHostEpoch=29;\nstatic std::string g_inputHostRunId="run-synthetic-abc",g_inputHostStartupNonce="nonce-synthetic-abc";\nstatic std::string fixturePersona="steamdeck",fixtureProfile="steam-deck-composite";\nstatic const std::string& inputHostBoundOrCurrentPersona(){return fixturePersona;}\nstatic const std::string& inputHostBoundOrCurrentProfileIdentity(){return fixtureProfile;}\nstatic unsigned long long inputHostProtocolPowerGenerationLocked(){return 37;}\nstatic constexpr char kC6aHexDigits[]="0123456789abcdef";\n`;
+const prelude=`#define NOMINMAX\n#include <windows.h>\n#include <algorithm>\n#include <atomic>\n#include <array>\n#include <bit>\n#include <charconv>\n#include <chrono>\n#include <cmath>\n#include <cstdint>\n#include <cstdlib>\n#include <cstring>\n#include <fstream>\n#include <iostream>\n#include <limits>\n#include <random>\n#include <string>\n#include <thread>\n#include <type_traits>\n#include <vector>\n#include "json.hpp"\nusing json=nlohmann::json;\nnamespace ymcc::screenpads{using Json=json;struct Contact{bool down=false,click=false;short x=0,y=0;unsigned short pressure=0;};struct Snapshot{bool present=false;Contact left{},right{};};\n${pad.slice(p0,p1)}\n}\nstatic const char* kInputHostProtocolConfigHash="hash-synthetic-fixed";\nstatic const char* kInputHostOwnerIdentity="owner-synthetic-fixed";\nstatic const char* kInputHostTargetId="target-synthetic-fixed";\nstatic unsigned long long g_inputHostConfigRevision=17,g_inputHostEpoch=29;\nstatic std::string g_inputHostRunId="run-synthetic-abc",g_inputHostStartupNonce="nonce-synthetic-abc";\nstatic std::string fixturePersona="steamdeck",fixtureProfile="steam-deck-composite";\nstatic unsigned fixtureTupleGetterCalls=0;\nstatic const std::string& inputHostBoundOrCurrentPersona(){++fixtureTupleGetterCalls;return fixturePersona;}\nstatic const std::string& inputHostBoundOrCurrentProfileIdentity(){++fixtureTupleGetterCalls;return fixtureProfile;}\nstatic unsigned long long inputHostProtocolPowerGenerationLocked(){++fixtureTupleGetterCalls;return 37;}\nstatic std::atomic<bool> g_c6aParityChecked{false},g_c6aParityFailed{false};\nstatic json fixtureParityLogs=json::array();\nstatic void appendNativeLifecycleLog(const char* event,const json& data){fixtureParityLogs.push_back({{"event",event},{"data",data}});}\nstatic constexpr char kC6aHexDigits[]="0123456789abcdef";\n`;
 const source=prelude+'\n'+text.slice(c0,c1)+'\n'+text.slice(e0,e1)+'\n'+pieces.filter(x=>x.symbol!=='inputHostBuildSubmitFrameText'&&x.symbol!=='focusIsolationAssembleFrame'&&x.symbol!=='inputHostNormalizeAxis').map(x=>x.code).join('\n')+'\n'+extractBound('FocusFrameContent','struct').code+'\n'+pieces.find(x=>x.symbol==='inputHostNormalizeAxis').code+'\n'+pieces.find(x=>x.symbol==='focusIsolationAssembleFrame').code+'\n'+pieces.find(x=>x.symbol==='inputHostBuildSubmitFrameText').code;
 fs.mkdirSync(root+'/Frozen',{recursive:true});
-fs.writeFileSync(root+'/Frozen/main.cpp',bytes);fs.writeFileSync(root+'/Frozen/virtual_controller_ui_output_runtime.h',runtimeBytes);fs.copyFileSync(repo+'/native/screen_touchpads.h',root+'/Frozen/screen_touchpads.h');fs.copyFileSync(repo+'/deps/json/json.hpp',root+'/Frozen/json.hpp');
-fs.writeFileSync(root+'/production.inc',source);
-fs.writeFileSync(root+'/SOURCE-BINDING.json',JSON.stringify({at:new Date().toISOString(),inputs:[{path:repo+'/native/main.cpp',sha256:sha(bytes)},{path:runtimePath,sha256:sha(runtimeBytes)},{path:fileURLToPath(import.meta.url),sha256:sha(fs.readFileSync(fileURLToPath(import.meta.url)))},{path:repo+'/tools/virtual_typed_submit_selftest.cpp',sha256:sha(fs.readFileSync(repo+'/tools/virtual_typed_submit_selftest.cpp'))},{path:repo+'/native/screen_touchpads.h',sha256:sha(fs.readFileSync(repo+'/native/screen_touchpads.h'))},{path:repo+'/deps/json/json.hpp',sha256:sha(fs.readFileSync(repo+'/deps/json/json.hpp'))}],methods:[...pieces,extractBound('focusIsolationBuildTypedSubmitText'),extractBound('FocusFrameContent','struct')].map(({code,...row})=>row),scope:'Exact production pure assembly/serialization and number cache; fixture tuple/identity getters and touchpad types only; no product or hardware'},null,2)+'\n');
+writeFresh(root+'/Frozen/main.cpp',bytes);writeFresh(root+'/Frozen/virtual_controller_ui_output_runtime.h',runtimeBytes);fs.copyFileSync(repo+'/native/screen_touchpads.h',root+'/Frozen/screen_touchpads.h');fs.copyFileSync(repo+'/deps/json/json.hpp',root+'/Frozen/json.hpp');
+writeFresh(root+'/production.inc',source);
+writeFresh(root+'/SOURCE-BINDING.json',JSON.stringify({at:new Date().toISOString(),inputs:[{path:repo+'/native/input_host_compact_frame_reply.h',sha256:sha(fs.readFileSync(repo+'/native/input_host_compact_frame_reply.h'))},{path:repo+'/native/input_host_frame_request_id.h',sha256:sha(fs.readFileSync(repo+'/native/input_host_frame_request_id.h'))},{path:repo+'/native/main.cpp',sha256:sha(bytes)},{path:runtimePath,sha256:sha(runtimeBytes)},{path:fileURLToPath(import.meta.url),sha256:sha(fs.readFileSync(fileURLToPath(import.meta.url)))},{path:repo+'/tools/virtual_typed_submit_selftest.cpp',sha256:sha(fs.readFileSync(repo+'/tools/virtual_typed_submit_selftest.cpp'))},{path:repo+'/native/screen_touchpads.h',sha256:sha(fs.readFileSync(repo+'/native/screen_touchpads.h'))},{path:repo+'/deps/json/json.hpp',sha256:sha(fs.readFileSync(repo+'/deps/json/json.hpp'))}],methods:[...pieces,extractBound('focusIsolationBuildTypedSubmitText'),extractBound('inputHostVerifySubmitFrameParity'),extractBound('FocusFrameContent','struct')].map(({code,...row})=>row),scope:'Exact production pure assembly/serialization and number cache; fixture tuple/identity getters and touchpad types only; no product or hardware'},null,2)+'\n');
 if(prepareOnly){
  const bound=JSON.parse(fs.readFileSync(root+'/SOURCE-BINDING.json','utf8')).inputs;
  assert(bound.every(row=>sha(fs.readFileSync(row.path))===row.sha256),'Preparation source drift');
- fs.writeFileSync(root+'/PREPARED.json',JSON.stringify({status:'PREPARED_NOT_EXECUTED',sourceStable:true,compiled:false,fixtureExecuted:false,performanceExecuted:false},null,2)+'\n');
+ writeFresh(root+'/PREPARED.json',JSON.stringify({status:'PREPARED_NOT_EXECUTED',sourceStable:true,compiled:false,fixtureExecuted:false,performanceExecuted:false},null,2)+'\n');
  console.log(JSON.stringify({status:'PREPARED_NOT_EXECUTED',root}));
  process.exit(0);
 }
-const r=spawnSync('cmd.exe',['/d','/c',root+'/compiler-environment.cmd'],{encoding:'utf8',windowsHide:true});
+const r=spawnSync(path.join(process.env.SystemRoot||'C:/Windows','System32/cmd.exe'),['/d','/c',root+'/compiler-environment.cmd'],{encoding:'utf8',windowsHide:true});
 assert.equal(r.status,0,'Compiler environment setup');
 const env={...process.env};for(const line of r.stdout.split(/\r?\n/)){const i=line.indexOf('=');if(i>0){const key=line.slice(0,i),prior=Object.keys(env).find(x=>x.toLowerCase()===key.toLowerCase());env[prior||key]=line.slice(i+1)}}
-fs.writeFileSync(root+'/compiler-environment.log',JSON.stringify({VCToolsInstallDir:env.VCToolsInstallDir,VCToolsVersion:env.VCToolsVersion,WindowsSDKVersion:env.WindowsSDKVersion},null,2)+'\n');
+writeFresh(root+'/compiler-environment.log',JSON.stringify({VCToolsInstallDir:env.VCToolsInstallDir,VCToolsVersion:env.VCToolsVersion,WindowsSDKVersion:env.WindowsSDKVersion},null,2)+'\n');
 const key=n=>Object.keys(env).find(x=>x.toLowerCase()===n.toLowerCase())||n;
 const sdk='C:/Program Files (x86)/Windows Kits/10',version='10.0.26100.0';
 env[key('INCLUDE')]=['ucrt','shared','um','winrt','cppwinrt'].map(p=>path.join(sdk,'Include',version,p)).concat(env[key('INCLUDE')]||'').join(';');
@@ -59,10 +63,10 @@ const cl=path.join(env.VCToolsInstallDir,'bin/Hostx64/x64/cl.exe');
 const results=[];
 for(const [mode,flags] of [['release',['/O2','/DNDEBUG','/MT']],['checked',['/Od','/RTC1','/MTd']]]){
 const build=spawnSync(cl,['/nologo','/std:c++20','/EHsc','/utf-8',...flags,'/I'+root,'/I'+root+'/Frozen',root+'/fixture.cpp','/Fo'+root+'/'+mode+'.obj','/Fe'+root+'/'+mode+'.exe'],{env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4*1024*1024});
-fs.writeFileSync(root+'/'+mode+'-build.log',(build.stdout??'')+(build.stderr??''));assert.equal(build.status,0,'compile '+mode);
-const run=spawnSync(root+'/'+mode+'.exe',['correctness'],{env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4*1024*1024});fs.writeFileSync(root+'/'+mode+'-correctness.json',(run.stdout??'')+(run.stderr??''));assert.equal(run.status,0,'correctness '+mode);results.push({mode,...JSON.parse(run.stdout)});
+writeFresh(root+'/'+mode+'-build.log',(build.stdout??'')+(build.stderr??''));assert.equal(build.status,0,'compile '+mode);
+const run=spawnSync(root+'/'+mode+'.exe',['correctness'],{env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4*1024*1024});writeFresh(root+'/'+mode+'-correctness.json',(run.stdout??'')+(run.stderr??''));assert.equal(run.status,0,'correctness '+mode);results.push({mode,...JSON.parse(run.stdout)});
 }
 const bound=JSON.parse(fs.readFileSync(root+'/SOURCE-BINDING.json','utf8')).inputs;
 assert.ok(bound.every(row=>sha(fs.readFileSync(row.path))===row.sha256),'Production inputs stable during selftest');
 const final={pass:true,results,sourceStableDuringRun:true,productionModified:false,compiler:{path:cl,sha256:sha(fs.readFileSync(cl))}};
-fs.writeFileSync(root+'/CORRECTNESS.json',JSON.stringify(final,null,2)+'\n');console.log(JSON.stringify(final));
+writeFresh(root+'/CORRECTNESS.json',JSON.stringify(final,null,2)+'\n');console.log(JSON.stringify(final));

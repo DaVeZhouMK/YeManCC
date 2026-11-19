@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-10-23T11:34:21.244712+08:00",
+  "reviewedAt": "2026-11-08T22:30:52.802996+00:00",
   "normalization": "none; all reviewed complete blocks/globals and dependencies use raw bytes",
   "scopeRawHashes": {
-    "readyCase": "27919d627f4f927e7fb75e0003b20c2e3f611fe5072892518b7fdabd7134254b",
-    "messageLoop": "2cc7d1e013bd149e942dbd04a3e3230615c25b96adae546000477ce6c58daf8f",
+    "readyCase": "7b7b6fa59b7d5ba8ec0bcc8de174979b636d3237b68bb032b65e105aab8d2857",
+    "messageLoop": "26e55133fbbd849e40dc7f10a170d84e9bd36d4ed4761ca9c8f292cc3bb84681",
     "hostLocalPredicate": "7d466cbe784dc2cc6ac3c32196e8f7094b4ba8dda19b768e2d9fea007cafd7d4",
     "capturePredicate": "90c754a95bc5b4ddada8501c2e615213db25e356b92defd12a252ea7b19cc4ea",
     "global:g_exitRequested": "81db3e1a6cbae8f8f1a070be9da7831aa6a3c8767d5e5e6086d2296c26d7f14d",
@@ -19,12 +19,19 @@
     "global:g_inputHostExitLocalReturned": "aab81e16141905c9a361e8546f425599dd03b9f464b1d7628a3ea585396f6616"
   },
   "dependencyHashes": {
-    "native/input_host_exit_owner_runtime.h": "8ad4d83c7d26fe83d193e92629fc18c1138ce3d97e09f284b6c2878c8b969338",
+    "native/input_host_exit_owner_runtime.h": "5242074b2228469bdecd61925ad0d4f76aeb79b5c1ebe47889f6474810c76d44",
     "native/exit_cleanup_wait.h": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
     "native/input_host_exit_retirement.h": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
     "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
-    "tools/input_timer_evidence_adapter_selftest.py": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
-    "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "4f452caa9eab95ab7d03d34af4862fe1e1966ddf9c5b9bb2a892b42e2f0a37d6"
+    "tools/input_timer_evidence_adapter_selftest.py": "cc4f9a148304ac084f8b11afc969211d71ce00cd9c9fa647a1f243ae12775097",
+    "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "aa9cfbf1174bcfa747e7bf655f90d62083e22ef311337e5895a4b0ed5c6fe2c3"
+  },
+  "dependencyReview20261118": {
+    "scope": "Exact successor dependency pins. Consumed helper definitions, complete tested source blocks and observed Native include/tool identities remain unchanged; not a new runtime result.",
+    "previousRawHashes": {
+      "tools/input_timer_evidence_adapter_selftest.py": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
+      "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "b419bba0941315f07033e56714975546e6c484a7da294219a8d34914c2c40857"
+    }
   },
   "historicalMain": {
     "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\before\\native\\main.cpp",
@@ -61,6 +68,164 @@
     "recoveryStopped": "memory fact; actual recovery worker is outside this scope",
     "loopObservation": "Actual cleanup wait result followed by scripted queued-message wake. Memory PeekMessageW ends the observation via fixture exception outside the real noexcept wait helper. Actual branch/break/continue/WAIT_FAILED bodies remain unchanged.",
     "localRetirementHeader": "raw source context pin only; resource retirement/worker belongs to parent/Gauss, not executed",
-    "fixtureActor": "later explicit return facts are supplied by harness; no product self-healing or main fallback claim"
+    "fixtureActor": "later explicit return facts are supplied by harness; no product self-healing or main fallback claim",
+    "serialOwnership": "Explicit bool memory port for gamepadSerialExitOwnershipReleased; actual serial getter/std::thread/Wait/join are not executed or proven. Separate full-TU producer owns real serial-return proof.",
+    "fastCompletedInjection": "First fast break has completed=true and no cleanup HANDLE. Second fast break gets a designated memory completed flag after the real private cleanup HANDLE signals; this adversarial flag is reset explicitly before retry. Neither injection proves real serial completion."
+  },
+  "previousReviewedAt": "2026-10-23T11:34:21.244712+08:00",
+  "previousScopeRawHashes": {
+    "readyCase": "27919d627f4f927e7fb75e0003b20c2e3f611fe5072892518b7fdabd7134254b",
+    "messageLoop": "2cc7d1e013bd149e942dbd04a3e3230615c25b96adae546000477ce6c58daf8f",
+    "hostLocalPredicate": "7d466cbe784dc2cc6ac3c32196e8f7094b4ba8dda19b768e2d9fea007cafd7d4",
+    "capturePredicate": "90c754a95bc5b4ddada8501c2e615213db25e356b92defd12a252ea7b19cc4ea",
+    "global:g_exitRequested": "81db3e1a6cbae8f8f1a070be9da7831aa6a3c8767d5e5e6086d2296c26d7f14d",
+    "global:g_exitReadyPosted": "fb9be4449cd35b1652823fe4a42535d84a683e5bf8b1e0d80cb20a15f771d7b9",
+    "global:g_exitCode": "457fe91fe7dd07de68cafb1074a8540c642c89fba4054133e5aab26978eaa12d",
+    "global:g_exitCleanupThread": "5d24b8c36fa248ec5235ca273465d4738395768052afdcb8e0c9cbebf8e7a071",
+    "global:g_exitCleanupCompleted": "5839c3f1bc834a36cb5869a542182b0a6a749a792baa099943d2d361dac96c53",
+    "global:g_exitCleanupStage": "6e3569c61e69bcbf45ecaef28547c56612bf6127bb8e87e0f9c78b23375875a1",
+    "global:g_exitBeginTick": "c03ea2e0feb69b8dadc2bd44052eee50ee9e05fbba255b07f8bc9859972a3240",
+    "global:g_exitLastWaitingStage": "645a754d2aeffeae060c90f8dcbc52e8a493bc6433d9da2c86b3506d46dfc3d0",
+    "global:g_captureExitReleased": "050a356dffbf8b9ef0963ef6acb5406eff606bd5b4bd88db92ea6de884fd93bb",
+    "global:g_inputHostExitLocalReturned": "aab81e16141905c9a361e8546f425599dd03b9f464b1d7628a3ea585396f6616"
+  },
+  "serialUiCandidate": {
+    "status": "PREPARED_NOT_RUN_DEPENDENCY_IDENTITY_MISMATCH",
+    "scopeSourceMain": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\serial-exit-owner-r1\\after-source\\native\\main.cpp",
+      "bytes": 5877629,
+      "sha256": "4036df161294c423d26fda9ead385e22f7011f215c192037977476dfa7565ded"
+    },
+    "sourceMainCopied": false,
+    "originalConsumerRawHashes": {
+      "tools/input_host_exit_completion_gates_selftest.py": "e9b464d8940b36941ac02c35f07fb598524039f190640ff81b153255fe006d35",
+      "tools/fixtures/input_host_exit_completion_gates/fixture.cpp.in": "e7652de4c2476f067c26fb27c567dcea6aeb6a22e2afea0f1aecea3dbedcd497",
+      "tools/fixtures/input_host_exit_completion_gates/source-contract.json": "f27177516abd0f1775d9beb1a0331d576676d0a63a4e0d9dbbd126e5e86bf750"
+    },
+    "originalScopeMatchesSyntaxR2Only": true,
+    "currentScopeSyntaxR2Acceptance": false,
+    "originalDependencyAndHistoricalPinsPreserved": true,
+    "serialPortIsMemoryOnly": true,
+    "realSerialWorkerExecuted": false,
+    "realSerialWaitOrJoinProven": false,
+    "testsExecutedThisPreparation": 0,
+    "producerCompilesStartedThisPreparation": 0,
+    "defaultPlan": {
+      "profiles": 2,
+      "routesPerProfile": 4,
+      "compileStarts": 8,
+      "caseInstances": 240,
+      "originalHostAndHistoricalControls": "preserved"
+    },
+    "explicitSerialOnlyPlan": {
+      "flag": "--serial-only",
+      "profiles": 2,
+      "routesPerProfile": 5,
+      "compileStarts": 10,
+      "caseInstances": 20,
+      "originalHostAndHistoricalControls": "NOT_RUN in this explicit selection; preserved in default"
+    },
+    "runtimeSecondsEstimate": "UNKNOWN; no compile or runtime measurement authorized",
+    "deadlineUtc": "2026-11-08T22:39:50Z",
+    "dependencyObservations": {
+      "native/input_host_exit_owner_runtime.h": {
+        "expectedSha256": "8ad4d83c7d26fe83d193e92629fc18c1138ce3d97e09f284b6c2878c8b969338",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\input_host_exit_owner_runtime.h",
+          "bytes": 7981,
+          "sha256": "5242074b2228469bdecd61925ad0d4f76aeb79b5c1ebe47889f6474810c76d44",
+          "matchesOriginalPin": false
+        },
+        "private": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\serial-exit-owner-r1\\after-source\\native\\input_host_exit_owner_runtime.h",
+          "bytes": 7981,
+          "sha256": "5242074b2228469bdecd61925ad0d4f76aeb79b5c1ebe47889f6474810c76d44",
+          "matchesOriginalPin": false
+        }
+      },
+      "native/exit_cleanup_wait.h": {
+        "expectedSha256": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\exit_cleanup_wait.h",
+          "bytes": 625,
+          "sha256": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
+          "matchesOriginalPin": true
+        },
+        "private": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\serial-exit-owner-r1\\after-source\\native\\exit_cleanup_wait.h",
+          "bytes": 625,
+          "sha256": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
+          "matchesOriginalPin": true
+        }
+      },
+      "native/input_host_exit_retirement.h": {
+        "expectedSha256": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\input_host_exit_retirement.h",
+          "bytes": 4318,
+          "sha256": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
+          "matchesOriginalPin": true
+        },
+        "private": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\serial-exit-owner-r1\\after-source\\native\\input_host_exit_retirement.h",
+          "bytes": 4318,
+          "sha256": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
+          "matchesOriginalPin": true
+        }
+      },
+      "deps/json/json.hpp": {
+        "expectedSha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\json\\json.hpp",
+          "bytes": 944740,
+          "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+          "matchesOriginalPin": true
+        },
+        "private": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\serial-exit-owner-r1\\after-source\\deps\\json\\json.hpp",
+          "bytes": 944740,
+          "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+          "matchesOriginalPin": true
+        }
+      },
+      "tools/input_timer_evidence_adapter_selftest.py": {
+        "expectedSha256": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_timer_evidence_adapter_selftest.py",
+          "bytes": 32234,
+          "sha256": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
+          "matchesOriginalPin": true
+        }
+      },
+      "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": {
+        "expectedSha256": "4f452caa9eab95ab7d03d34af4862fe1e1966ddf9c5b9bb2a892b42e2f0a37d6",
+        "shared": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\decky-update-recovery\\native-launch-noio\\native-tools.json",
+          "bytes": 158077,
+          "sha256": "b419bba0941315f07033e56714975546e6c484a7da294219a8d34914c2c40857",
+          "matchesOriginalPin": false
+        }
+      }
+    },
+    "dependencyStatus": "ORIGINAL_PINS_PRESERVED; two shared dependency identities differ; execution must retain exact dependency gate",
+    "candidateScope": "Only these three private candidate files; product main is read only and not copied. Default original Host/history controls preserved; explicit serial-only selection covers necessary memory gate and original assertions."
+  },
+  "dependencyPinReconciliation": {
+    "hostPredicateRawUnchangedFromOriginalContract": true,
+    "rows": [
+      {
+        "path": "native/input_host_exit_owner_runtime.h",
+        "before": "8ad4d83c7d26fe83d193e92629fc18c1138ce3d97e09f284b6c2878c8b969338",
+        "current": "5242074b2228469bdecd61925ad0d4f76aeb79b5c1ebe47889f6474810c76d44",
+        "scope": "same actual extracted Host predicate; unrelated header text not compiled"
+      },
+      {
+        "path": "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json",
+        "before": "4f452caa9eab95ab7d03d34af4862fe1e1966ddf9c5b9bb2a892b42e2f0a37d6",
+        "current": "b419bba0941315f07033e56714975546e6c484a7da294219a8d34914c2c40857",
+        "scope": "current independently pinned local tool authority; compiler/linker/dumpbin still verified by actual consumer"
+      }
+    ],
+    "actualToolAcceptance": "pending actual unchanged consumer verification; not bypassed"
   }
 }

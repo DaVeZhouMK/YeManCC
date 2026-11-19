@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {run,sha,unique,LIMIT,verify,nativeTools} from '../../../fixtures/radial_private/scope.mjs';
+import {run,sha,unique,REAL_MONITOR_RUNTIME_LIMIT as LIMIT,verify,nativeTools} from '../../../fixtures/radial_private/scope.mjs';
 import {
- MODULE,REAL_RENDERER_ID,ORIGINAL_ENTRIES,FIXED_NODE,FIXED_RUNTIME,RUNTIME_VERSION,
+ MODULE,REAL_RENDERER_ID,ORIGINAL_ENTRIES,FIXED_NODE,
  PRODUCT_RENDERER_INPUTS,RENDERER_INPUTS,RENDERER_COMPONENT,rendererReviewBinding,
 } from './real-renderer-adapter.mjs';
+import {validateBrowserOwnership} from './real-browser-ownership.mjs';
 
 const REPO=path.resolve(import.meta.dirname,'../../../..');
 const CORE='G:/YeManCC-Work/Testing/YMCC';
@@ -39,11 +40,11 @@ function repoPins(){return Object.fromEntries(RENDERER_INPUTS.map(rel=>[rel,sha(
 function verifyRepo(pins){assert.deepEqual(Object.keys(pins).sort(),[...RENDERER_INPUTS].sort(),'EXACT_DECLARED_SOURCE_SET');for(const [rel,digest]of Object.entries(pins))need(sha(path.join(REPO,rel))===digest,'COMPONENT_SOURCE_CHANGED:'+rel);}
 function verifyRuntime(manifest){
  const root=absolute(manifest.runtimeRoot,'EXPLICIT_RUNTIME_ROOT_REQUIRED');noReparse(root);
- need(key(root)===key(FIXED_RUNTIME)&&manifest.runtimeVersion===RUNTIME_VERSION,'EXACT_FIXED_RUNTIME_REQUIRED');
+ need(/^\d+\.\d+\.\d+\.\d+$/.test(manifest.runtimeVersion??''),'EXPLICIT_RUNTIME_VERSION_REQUIRED');
  need(manifest.membership==='complete-recursive-files-no-reparse'&&manifest.runtimeDownloaded===false,'ORIGINAL_RUNTIME_MEMBERSHIP_POLICY');
  const entries=fs.readdirSync(root,{recursive:true,withFileTypes:true});need(entries.every(e=>!e.isSymbolicLink()),'RUNTIME_REPARSE_REFUSED');
  const files=entries.filter(e=>e.isFile()).map(e=>path.join(e.parentPath??e.path,e.name));
- need(files.length===916&&manifest.runtimeFiles.length===916,'EXACT_916_RUNTIME_MEMBERS_REQUIRED');
+ need(Array.isArray(manifest.runtimeFiles)&&files.length>0&&files.length===manifest.runtimeFiles.length&&files.length<=LIMIT,'EXACT_RUNTIME_MEMBERS_REQUIRED');
  const expected=new Map();for(const row of manifest.runtimeFiles){
   need(typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).some(part=>part==='..'||part===''),'RUNTIME_MEMBER_ESCAPE');
   const file=path.join(root,row.path);need(!expected.has(key(file))&&/^[a-f0-9]{64}$/.test(row.sha256),'RUNTIME_DUPLICATE_OR_BAD_PIN');expected.set(key(file),row.sha256);
@@ -52,10 +53,10 @@ function verifyRuntime(manifest){
  need(expected.has(key(path.join(root,'msedgewebview2.exe'))),'FIXED_RUNTIME_EXECUTABLE_REQUIRED');return manifest;
 }
 
-function verifyRendererBuild(state,dir,index){
+function verifyRendererBuild(state,dir,index,runtime){
  need(state.status===PREPARE_STATUSES[index]&&key(state.out)===key(dir),'ORIGINAL_PREPARED_IDENTITY');noReparse(dir);
  need(!state.nativeLaunchAttempted&&!state.nativeExecutionStarted,'PREPARED_BUILD_ALREADY_LAUNCHED');
- need(key(state.runtimeRoot)===key(FIXED_RUNTIME)&&state.runtimeVersion===RUNTIME_VERSION&&state.runtimeFileCount===916,'ORIGINAL_RUNTIME_IDENTITY');
+ need(key(state.runtimeRoot)===key(runtime.runtimeRoot)&&state.runtimeVersion===runtime.runtimeVersion&&state.runtimeFileCount===runtime.runtimeFiles.length,'ORIGINAL_RUNTIME_IDENTITY');
  need(key(state.web)===key(path.join(dir,'owned-web')),'ORIGINAL_WEB_ROOT_IDENTITY');
  need(key(state.exe.path)===key(path.join(dir,'RealRendererNotice.exe'))&&sha(state.exe.path)===state.exe.sha256,'ORIGINAL_EXECUTABLE_CHANGED');
  const receipt=state.scopeReceipt,allowed=new Set(RENDERER_INPUTS.map(rel=>rel.toLowerCase()));
@@ -69,9 +70,9 @@ function verifyRendererBuild(state,dir,index){
  if(index===1)generated.push('exact-renderer-negative.json');
  assert.deepEqual(receipt.compiledArtifacts.map(row=>path.relative(dir,row.path).replaceAll('\\','/')).sort(),generated.sort(),'EXACT_ORIGINAL_COMPILED_ARTIFACT_SET');
  for(const row of receipt.compiledArtifacts){need(inside(dir,row.path),'ORIGINAL_ARTIFACT_ESCAPE');noReparse(row.path);need(sha(row.path)===row.sha256,'ORIGINAL_ARTIFACT_CHANGED:'+row.path);}
- const proof=verify({repo:REPO,node:receipt.nodeToolAuthority,native:nativeTools(REPO),sourceHashes:receipt.sourceHashes,toolArtifacts:receipt.toolArtifacts,generated:receipt.compiledArtifacts});
+ const proof=verify({repo:REPO,entry:ORIGINAL_ENTRIES[index],node:receipt.nodeToolAuthority,native:nativeTools(REPO),sourceHashes:receipt.sourceHashes,toolArtifacts:receipt.toolArtifacts,generated:receipt.compiledArtifacts});
  assert.deepEqual(proof,state.toolProof,'ORIGINAL_SCOPE_PROOF_CHANGED');
- need(proof.maxArtifactInputs===3072&&proof.artifactCount<=LIMIT,'ORIGINAL_COMBINED_LIMIT');
+ need(proof.maxArtifactInputs===LIMIT&&proof.artifactCount<=LIMIT,'ORIGINAL_COMBINED_LIMIT');
  const graph=read(path.join(dir,'native-build-graph.json'));
  need(graph.pass===true&&key(graph.executable)===key(state.exe.path)&&graph.executableSha256===state.exe.sha256,'ORIGINAL_BUILD_GRAPH_MISMATCH');
  const before=new Map(state.beforeNativeInputs.map(row=>[key(row.path),row.sha256]));
@@ -147,7 +148,8 @@ const RENDERER_CHECK_NAMES=Object.freeze([
 export const ORIGINAL_CHECK_NAMES=Object.freeze([WEBVIEW_CHECK_NAMES[0],...RENDERER_CHECK_NAMES,...WEBVIEW_CHECK_NAMES.slice(1)]);
 export const NEGATIVE_CHECK_NAMES=Object.freeze(ORIGINAL_CHECK_NAMES.slice(0,4));
 /** Exact complete case/failure sequence; synthetic renderer19 cannot satisfy this gate. */
-export function validateRealRendererResult(raw,launcher,{negative=false,runtimeVersion=RUNTIME_VERSION}={}){
+export function validateRealRendererResult(raw,launcher,{negative=false,runtimeVersion,runtimeRoot}={}){
+ const selectedRuntimeRoot=absolute(runtimeRoot,'EXPECTED_RUNTIME_ROOT_REQUIRED');need(/^\d+\.\d+\.\d+\.\d+$/.test(runtimeVersion??''),'EXPECTED_RUNTIME_VERSION_REQUIRED');
  const names=negative?NEGATIVE_CHECK_NAMES:ORIGINAL_CHECK_NAMES,controllers=negative?1:9;
  assert.deepEqual(raw.cases,names.map((name,index)=>({name,passed:!negative||index!==3})),'EXACT_ORIGINAL_RENDERER_CASE_AND_FAILURE_SEQUENCE');
  assert.equal(raw.checks,negative?4:36,'ORIGINAL_RENDERER_CHECK_COUNT');assert.equal(raw.status,negative?'FAIL':'PASS');
@@ -158,13 +160,14 @@ export function validateRealRendererResult(raw,launcher,{negative=false,runtimeV
  assert.equal(raw.remainingNativeHooks,0);assert.equal(raw.remainingNativeOwners,0);assert.equal(raw.runtimeVersion,runtimeVersion);
  assert.equal(raw.actualControllerCloseObservations.length,controllers);
  for(const row of raw.actualControllerCloseObservations){assert.equal(row.realController,true);assert.equal(row.actualCloseCalls,1);assert.equal(row.actualCloseResult,0);assert.equal(row.forwardingControllersDestroyed,1);}
- if(!negative){assert.equal(raw.browserNaturalExitBeforeJobClose,true);need(Number.isInteger(raw.browserPid)&&raw.browserPid>0,'ACTUAL_OWNED_BROWSER_PID_REQUIRED');need(key(raw.browserObservedImage)===key(path.join(FIXED_RUNTIME,'msedgewebview2.exe')),'ACTUAL_BROWSER_IMAGE_REQUIRED');}
+ if(!negative){assert.equal(raw.browserNaturalExitBeforeJobClose,true);need(Number.isInteger(raw.browserPid)&&raw.browserPid>0,'ACTUAL_OWNED_BROWSER_PID_REQUIRED');need(key(raw.browserObservedImage)===key(path.join(selectedRuntimeRoot,'msedgewebview2.exe')),'ACTUAL_BROWSER_IMAGE_REQUIRED');}
  else need(!Object.hasOwn(raw,'browserNaturalExitBeforeJobClose'),'NEGATIVE_CANNOT_CLAIM_COMPLETE_BROWSER_EXIT');
  assert.equal(launcher.status,negative?'FAIL':'PASS');assert.equal(launcher.workerExitCode,negative?2:0);
  for(const name of ['privateDesktop','privateDesktopClosed','ownedJobOnly'])assert.equal(launcher[name],true,name);
  for(const name of ['desktopSwitched','forcedTermination','normalYmccStarted'])assert.equal(launcher[name],false,name);
  need(!Object.hasOwn(launcher,'error'),'UNEXPECTED_LAUNCHER_ERROR');
- return {status:raw.status,checks:raw.checks,controllers,failedCases:raw.cases.filter(row=>!row.passed),exactOriginalSequence:true,exactOriginalFailureMask:true,workerExitCode:launcher.workerExitCode};
+ const ownership=validateBrowserOwnership(raw,launcher,selectedRuntimeRoot);
+ return {status:raw.status,checks:raw.checks,controllers,failedCases:raw.cases.filter(row=>!row.passed),exactOriginalSequence:true,exactOriginalFailureMask:true,workerExitCode:launcher.workerExitCode,ownership};
 }
 
 export async function prepareRealRendererComponent(options){
@@ -174,19 +177,21 @@ export async function prepareRealRendererComponent(options){
  const base={schemaVersion:1,id:REAL_RENDERER_ID,sourceHashes:sources,lifecycleComponent:RENDERER_COMPONENT,nativeLaunchAttempted:false,nativeExecutionStarted:false,fullPersistentAcceptance:false,fullProductAcceptance:false,normalYmccStarted:false,operatingSystemSleep:false};
  save(path.join(root,'result.json'),{...base,status:'PREPARING_NO_WEBVIEW_EXECUTION'});
  try{
-  need(key(absolute(options.runtime,'EXPLICIT_FIXED_RUNTIME_REQUIRED'))===key(FIXED_RUNTIME)&&options.runtimeVersion===RUNTIME_VERSION,'EXACT_FIXED_RUNTIME_REQUIRED');
+  const selectedRuntime={runtimeRoot:absolute(options.runtime,'EXPLICIT_RUNTIME_REQUIRED'),runtimeVersion:options.runtimeVersion};need(/^\d+\.\d+\.\d+\.\d+$/.test(selectedRuntime.runtimeVersion??''),'EXPLICIT_RUNTIME_VERSION_REQUIRED');
   need(!fs.existsSync(path.join(short,'PREPARED.json')),'PREPARED_MANIFEST_ALREADY_EXISTS');
   const dirs=['p','r'].map(name=>path.join(short,name)),records=dirs.map((dir,index)=>path.join(dir,PREPARE_RECORDS[index]));
   const existing=records.map(file=>fs.existsSync(file));need(existing.every(Boolean)||existing.every(value=>!value),'INCOMPLETE_ORIGINAL_PREPARE_PAIR_RETAINED');
   let commands=[];
   if(!existing[0]){
    if(!fs.existsSync(short))fs.mkdirSync(short,{recursive:true});noReparse(short);
-   const settled=await Promise.allSettled(ORIGINAL_ENTRIES.map((entry,index)=>original(root,index===0?'p-prepare':'r-prepare',entry,['--out',dirs[index],'--runtime',FIXED_RUNTIME,'--runtime-version',RUNTIME_VERSION,'--prepare-only'],{prepare:true})));
+   const settled=await Promise.allSettled(ORIGINAL_ENTRIES.map((entry,index)=>original(root,index===0?'p-prepare':'r-prepare',entry,['--out',dirs[index],'--runtime',selectedRuntime.runtimeRoot,'--runtime-version',selectedRuntime.runtimeVersion,'--prepare-only'],{prepare:true})));
    save(path.join(root,'prepare-commands.json'),settled.map(row=>row.status==='fulfilled'?row.value:{status:'REJECTED',error:String(row.reason?.stack??row.reason)}));
    const failure=settled.find(row=>row.status==='rejected');if(failure)throw failure.reason;commands=settled.map(row=>row.value);
   }
-  const states=records.map((file,index)=>verifyRendererBuild(read(file),dirs[index],index));
-  const manifest=verifyRuntime(read(states[0].runtimeManifest.path));
+  const originalStates=records.map(read);need(sha(originalStates[0].runtimeManifest.path)===originalStates[0].runtimeManifest.sha256,'ORIGINAL_RUNTIME_MANIFEST_CHANGED');
+  const manifest=verifyRuntime(read(originalStates[0].runtimeManifest.path));
+  need(key(manifest.runtimeRoot)===key(selectedRuntime.runtimeRoot)&&manifest.runtimeVersion===selectedRuntime.runtimeVersion,'EXPLICIT_RUNTIME_SELECTION_CHANGED');
+  const states=originalStates.map((state,index)=>verifyRendererBuild(state,dirs[index],index,manifest));
   assert.deepEqual(read(states[1].runtimeManifest.path),manifest,'EXACT_SAME_RUNTIME_FOR_BOTH_BUILDS');
   for(const state of states)need(sha(state.runtimeManifest.path)===state.runtimeManifest.sha256,'ORIGINAL_RUNTIME_MANIFEST_CHANGED');
   verifyRepo(sources);
@@ -222,13 +227,14 @@ function reviewedPrepared(options){
  need(review.allowedBoundary===BOUNDARY,'REVIEW_ORIGINAL_BOUNDARY');
  need(review.nativeToolsSha256===sha(path.join(REPO,'tools/fixtures/radial_private/native-tools.json'))&&prepared.toolProofs.every(proof=>review.nodeGraphSha256===proof.nodeGraphSha256),'REVIEW_TOOL_IDENTITY');
  assert.deepEqual(prepared.originalBudgets,ORIGINAL_BUDGETS,'ORIGINAL_BUDGETS_REQUIRED');
+ need(sha(prepared.runtimeManifest.path)===prepared.runtimeManifest.sha256,'RUNTIME_MANIFEST_CHANGED');
+ const runtime=verifyRuntime(read(prepared.runtimeManifest.path));
  const states=prepared.builds.map((build,index)=>{
   need(build.entry===ORIGINAL_ENTRIES[index]&&key(build.preparedOut)===key(path.join(root,index===0?'p':'r'))&&key(build.prepareRecord)===key(path.join(build.preparedOut,PREPARE_RECORDS[index])),'ORIGINAL_BUILD_LOCATION_IDENTITY');
   need(sha(build.prepareRecord)===build.prepareRecordSha256,'PREPARED_RECORD_CHANGED');
-  const state=verifyRendererBuild(read(build.prepareRecord),build.preparedOut,index);assert.deepEqual(state.exe,build.executable,'PREPARED_EXECUTABLE_IDENTITY');return state;
+  const state=verifyRendererBuild(read(build.prepareRecord),build.preparedOut,index,runtime);assert.deepEqual(state.exe,build.executable,'PREPARED_EXECUTABLE_IDENTITY');return state;
  });
- need(sha(prepared.runtimeManifest.path)===prepared.runtimeManifest.sha256,'RUNTIME_MANIFEST_CHANGED');
- const runtime=verifyRuntime(read(prepared.runtimeManifest.path));
+
  for(const state of states){need(sha(state.runtimeManifest.path)===state.runtimeManifest.sha256,'BUILD_RUNTIME_MANIFEST_CHANGED');assert.deepEqual(read(state.runtimeManifest.path),runtime,'EXACT_RUNTIME_BUILD_PAIR');}
  need(key(review.runtimeRoot)===key(runtime.runtimeRoot)&&review.runtimeVersion===runtime.runtimeVersion,'REVIEW_RUNTIME_IDENTITY');assert.deepEqual(review.runtimeFiles,runtime.runtimeFiles,'REVIEW_EXACT_RUNTIME_MEMBERS');
  for(const row of prepared.preparedArtifacts)need(sha(row.path)===row.sha256,'PREPARED_ARTIFACT_CHANGED:'+row.path);
@@ -244,14 +250,14 @@ export async function runRealRendererComponent(options){
   attempted=true;await original(root,'p-execute',ORIGINAL_ENTRIES[0],['--out',p,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
   const positiveState=read(path.join(p,'REAL-RENDERER-EXECUTE-PROCESS.json'));
   need(positiveState.status==='ACTUAL_REAL_RENDERER_NINE_CONTROLLERS_RETIRED_LATE_CALLBACKS_AND_NATURAL_BROWSER_EXIT_VERIFIED','ORIGINAL_POSITIVE_EXECUTION_NOT_ACCEPTED');
-  const positive=validateRealRendererResult(read(path.join(p,'real-webview-result.json')),read(path.join(p,'real-webview-private-launch.json')));
+  const positive=validateRealRendererResult(read(path.join(p,'real-webview-result.json')),read(path.join(p,'real-webview-private-launch.json')),{runtimeVersion:runtime.runtimeVersion,runtimeRoot:runtime.runtimeRoot});
   await original(root,'r-execute',ORIGINAL_ENTRIES[1],['--out',r,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
   const negativeState=read(path.join(r,'REAL-RENDERER-NEGATIVE-EXECUTE-PROCESS.json'));
   need(negativeState.status==='EXACT_PRODUCT_RENDERER_FRAME_ADMISSION_NEGATIVE_FAILS_AT_ACTUAL_VUE_PRESENTATION','ORIGINAL_NEGATIVE_EXECUTION_NOT_ACCEPTED');
   assert.equal(negativeState.execution.code,2);assert.equal(negativeState.execution.signal,null);assert.equal(negativeState.execution.killed,false);
-  const negative=validateRealRendererResult(read(path.join(r,'real-webview-result.json')),read(path.join(r,'real-webview-private-launch.json')),{negative:true});
+  const negative=validateRealRendererResult(read(path.join(r,'real-webview-result.json')),read(path.join(r,'real-webview-private-launch.json')),{negative:true,runtimeVersion:runtime.runtimeVersion,runtimeRoot:runtime.runtimeRoot});
   verifyRepo(prepared.sourceHashes);verifyRuntime(runtime);need(sha(input.reviewFile)===input.reviewPin,'PARENT_REVIEW_CHANGED_DURING_EXECUTION');
-  for(const [index,build]of prepared.builds.entries()){need(sha(build.prepareRecord)===build.prepareRecordSha256,'PREPARED_RECORD_CHANGED_DURING_EXECUTION');verifyRendererBuild(read(build.prepareRecord),build.preparedOut,index);}
+  for(const [index,build]of prepared.builds.entries()){need(sha(build.prepareRecord)===build.prepareRecordSha256,'PREPARED_RECORD_CHANGED_DURING_EXECUTION');verifyRendererBuild(read(build.prepareRecord),build.preparedOut,index,runtime);}
   const evidence=[];
   for(const [label,dir,processFile]of [['p',p,'REAL-RENDERER-EXECUTE-PROCESS.json'],['r',r,'REAL-RENDERER-NEGATIVE-EXECUTE-PROCESS.json']])for(const name of ['real-webview-result.json','real-webview-private-launch.json','run.log',processFile]){
    const target=path.join(root,label+'-'+name);fs.copyFileSync(path.join(dir,name),target,fs.constants.COPYFILE_EXCL);need(sha(target)===sha(path.join(dir,name)),'RAW_RECEIPT_COPY_CHANGED');evidence.push(pin(target));

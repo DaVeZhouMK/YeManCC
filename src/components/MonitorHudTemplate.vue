@@ -6,7 +6,7 @@ import { honeycombOutline } from '@/bridge/monitorHoneycombStyle';
 import { createHudFpsVisibilityGate } from '@/bridge/monitorHudFpsVisibility';
 import { packedBarWidth } from '@/bridge/monitorBarPacking';
 import { coreTileLayout, coreTileUsage } from '@/bridge/monitorCoreTiles';
-import { HUD_METRICS, HUD_PERCENT_GRAPHS, hudBaseLayout, isHorizontalHudLayout, isVerticalHudLayout, hudFontFamily, hudPercentValue, hudTemperatureWarning, hudMetricDigitSlots, hudTextScale, HUD_VALUE_SCALE_MAX, hudValue, hudMetricAvailable, hudVisibleFields, sameHudFields, percentBar, type HudMetricId, type HudAppearance, type HudMetricToggles, type HudData } from '@/bridge/monitorHudModel';
+import { HUD_METRICS, HUD_PERCENT_GRAPHS, hudBaseLayout, isHorizontalHudLayout, isVerticalHudLayout, hudFontFamily, hudPercentValue, hudTemperatureWarning, hudMetricDigitSlots, hudTextScale, HUD_VALUE_SCALE_MAX, hudValue, hudMetricAvailable, hudVisibleFields, sameHudFields, sameHudRenderData, percentBar, type HudMetricId, type HudAppearance, type HudMetricToggles, type HudData } from '@/bridge/monitorHudModel';
 import { createFrameTimeCurveCache } from '@/bridge/monitorFrameTime';
 import { HUD_TIFA_UNDERLAY } from '@/bridge/monitorHudUnderlayDemo';
 import { HUD_AC8_UNDERLAY } from '@/bridge/monitorHudUnderlayAc8';
@@ -27,8 +27,16 @@ const visibleFields = computed<HudMetricToggles>((previous) => {
   return previous && sameHudFields(previous, next) ? previous : next;
 });
 const fpsValid = computed(() => fpsReady.value && hudMetricAvailable(props.data, 'fps'));
+// Keep proof admission above live; only the render-read immutable view may stay stable.
+// Full signatures keep direct reactive previews and all appearance switches live.
+const renderAppearance = computed(() => JSON.stringify(props.appearance));
+const renderFields = computed(() => JSON.stringify(props.fields));
+const renderData = computed<HudData>((previous) => {
+  const next = props.data;
+  return previous && sameHudRenderData(previous, next, props.fields) ? previous : next;
+});
 const cachedFrameCurve = createFrameTimeCurveCache();
-const framePaths = computed(() => !visibleFields.value.frametimeGraph || !fpsValid.value || !(Number(props.data.values.fps) > 0) ? [] : cachedFrameCurve(props.data.frameTimes));
+const framePaths = computed(() => !visibleFields.value.frametimeGraph || !fpsValid.value || !(Number(renderData.value.values.fps) > 0) ? [] : cachedFrameCurve(renderData.value.frameTimes));
 const graphVisible = computed(() => framePaths.value.length > 0);
 const emptyHidden = computed(() => props.appearance.hideUnavailable === true && !groups.value.length);
 const groupNames = ['帧率', 'CPU', 'GPU', '内存', '读写', '电池', '附加'];
@@ -76,7 +84,7 @@ const summary = computed(() => compact.value && selectedCount.value > 0 &&
 const horizontal = computed(() => isHorizontalHudLayout(props.appearance.layout));
 const full = computed(() => selectedCount.value > 30);
 const dense = computed(() => groups.value.length > 4 && !horizontal.value && !vertical.value && (full.value || baseLayout.value === 'capsule'));
-const underlaySource = computed(() => props.appearance.underlay === 'tifa' ? HUD_TIFA_UNDERLAY : props.appearance.underlay === 'ac8-pink' ? HUD_AC8_UNDERLAY : props.appearance.underlay === 'custom' ? props.appearance.underlayImage || '' : props.appearance.underlay === 'game-logo' ? props.data.gameLogo || '' : '');
+const underlaySource = computed(() => props.appearance.underlay === 'tifa' ? HUD_TIFA_UNDERLAY : props.appearance.underlay === 'ac8-pink' ? HUD_AC8_UNDERLAY : props.appearance.underlay === 'custom' ? props.appearance.underlayImage || '' : props.appearance.underlay === 'game-logo' ? renderData.value.gameLogo || '' : '');
 const fpsEmphasis = computed(() => props.appearance.fpsEmphasis !== false);
 const duetSummary = computed(() => summary.value && baseLayout.value === 'capsule' && !honeycomb.value);
 // Reserve three tabular digit slots. Numeric updates never change the font
@@ -112,7 +120,7 @@ const percentValues = computed<Record<string, number | null>>(() => {
   const values: Record<string, number | null> = {};
   for (const graph of HUD_PERCENT_GRAPHS) {
     if (visibleFields.value[graph.id] || (graph.value === 'batteryPercent' && visibleFields.value.batteryPercent)) {
-      values[graph.value] = hudPercentValue(props.data, graph.value);
+      values[graph.value] = hudPercentValue(renderData.value, graph.value);
     }
   }
   return values;
@@ -220,8 +228,8 @@ onUnmounted(() => { disposed = true; observer?.disconnect(); if (frame !== null)
 const textScale = computed(()=>hudTextScale(props.appearance.textScale,1.2));
 function metricScale(id: string) { return hudTextScale(props.appearance.valueScales?.[id as HudMetricId],1,HUD_VALUE_SCALE_MAX); }
 function groupLabel(group: {name:string;label:string}) {
-  if(group.name==='CPU' && props.appearance.showCpuName && props.data.cpuName)return props.data.cpuName;
-  if(group.name==='GPU' && props.appearance.showGpuName && props.data.gpuName)return props.data.gpuName;
+  if(group.name==='CPU' && props.appearance.showCpuName && renderData.value.cpuName)return renderData.value.cpuName;
+  if(group.name==='GPU' && props.appearance.showGpuName && renderData.value.gpuName)return renderData.value.gpuName;
   return group.label;
 }
 const boardStyle = computed(() => ({
@@ -236,18 +244,18 @@ const boardStyle = computed(() => ({
   '--hud-gap': props.appearance.gap + 'px', '--hud-honeycomb-text':textScale.value/1.2, '--hud-honeycomb-fps-height':114*(textScale.value/1.2)*metricScale('fps')*(fpsEmphasis.value?1:.55)+'px', '--hud-accent': honeycomb.value ? `hsl(7 ${Math.round(100 * props.appearance.saturation)}% 60%)` : `hsl(195 ${Math.round(62 * props.appearance.saturation)}% 72%)`,
   '--hud-secondary': honeycomb.value ? `hsl(10 ${Math.round(40 * props.appearance.saturation)}% 65%)` : `rgba(225,233,242,${.55 + .35 * props.appearance.saturation})`,
 }));
-const coreValues = computed(() => !visibleFields.value.cpuCores ? [] : coreTileUsage(props.data.coreUsage, props.data.stale));
+const coreValues = computed(() => !visibleFields.value.cpuCores ? [] : coreTileUsage(renderData.value.coreUsage, renderData.value.stale));
 const coreLayout = computed(() => coreTileLayout(coreValues.value.length));
 // # means array position only, not an invented physical-core identity.
-const coreLabel = (i: number) => props.data.coreLabels?.[i] || '#' + (i + 1);
+const coreLabel = (i: number) => renderData.value.coreLabels?.[i] || '#' + (i + 1);
 
 // Approved minimal B composition. Geometry changes are coalesced, event driven
 // and bounded; this consumes the same admitted YMCC snapshot as the full HUD.
 const duetHero=ref<HTMLElement|null>(null),duetReadouts=ref<HTMLElement|null>(null),duetLine=ref<HTMLElement|null>(null),duetNumber=ref<HTMLElement|null>(null);
 const duetMetrics=computed(()=>HUD_METRICS.filter(metric=>(metric.id==='cpuPower'||metric.id==='cpuTemp')&&visibleFields.value[metric.id]));
 function duetValue(id: HudMetricId): string {
-  const value=props.data.values[id];
-  if(hudValue(props.data,id)==='—'||typeof value!=='number'||!Number.isFinite(value))return '—';
+  const value=renderData.value.values[id];
+  if(hudValue(renderData.value,id)==='—'||typeof value!=='number'||!Number.isFinite(value))return '—';
   // Presentation bounds only. The sole YMCC snapshot retains the real value.
   return id==='cpuPower'?Math.min(999.9,Math.max(0,value)).toFixed(1):String(Math.min(999,Math.max(0,Math.round(value))));
 }
@@ -306,7 +314,7 @@ function scheduleDuet(){if(duetEnded||!duetSummary.value||duetFrame!==null)retur
 function connectDuet(){duetObserver?.disconnect();duetObserver=null;if(duetEnded||!duetSummary.value)return;const win=board.value?.ownerDocument.defaultView;if(win?.ResizeObserver&&duetReadouts.value){duetObserver=new win.ResizeObserver(scheduleDuet);duetObserver.observe(duetReadouts.value);}scheduleDuet();}
 onMounted(()=>{connectDuet();board.value?.ownerDocument.fonts?.ready.then(scheduleDuet);});
 watch(()=>duetSummary.value,()=>{void nextTick(connectDuet);});
-watch(()=>[props.appearance.font,props.appearance.fpsFont,props.appearance.scale,props.appearance.textScale,JSON.stringify(props.appearance.valueScales),props.appearance.fpsEmphasis,fpsValid.value,hudValue(props.data,'fps'),hudValue(props.data,'cpuPower'),hudValue(props.data,'cpuTemp'),props.appearance.showCpuName,props.data.cpuName],()=>{void nextTick(scheduleDuet);});
+watch([()=>props.appearance.font,()=>props.appearance.fpsFont,()=>props.appearance.scale,()=>props.appearance.textScale,()=>JSON.stringify(props.appearance.valueScales),()=>props.appearance.fpsEmphasis,()=>fpsValid.value,()=>hudValue(props.data,'fps'),()=>hudValue(props.data,'cpuPower'),()=>hudValue(props.data,'cpuTemp'),()=>props.appearance.showCpuName,()=>props.data.cpuName],()=>{void nextTick(scheduleDuet);});
 onUnmounted(()=>{duetEnded=true;duetObserver?.disconnect();if(duetFrame!==null)duetWin?.cancelAnimationFrame(duetFrame);duetContext=null;});
 
 // Reserve the last genuine frame section footprint while its dependent values
@@ -328,19 +336,19 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 
 </script>
 <template>
-  <div ref="board" class="ymcc-hud" :class="['ymcc-hud--' + baseLayout, { 'ymcc-hud--honeycomb':honeycomb, 'ymcc-hud--honeycomb-summary':honeycomb && summary, 'ymcc-hud--image-underlay': !!underlaySource && !emptyHidden, 'ymcc-hud--fps-emphasis': fpsEmphasis, 'ymcc-hud--fps-regular': !fpsEmphasis, 'ymcc-hud--dense': dense, 'ymcc-hud--horizontal': horizontal, 'ymcc-hud--vertical': vertical, 'ymcc-hud--full': full, 'ymcc-hud--compact': compact, 'ymcc-hud--summary': summary, 'ymcc-hud--duet-summary': duetSummary, 'ymcc-hud--summary-split': summary && visibleFields.fps && (visibleFields.cpuPower || visibleFields.cpuTemp) }]" :style="boardStyle" data-monitor-hud="ymcc" :data-hud-layout="honeycomb ? 'honeycomb' : baseLayout">
+  <div v-memo="[sameHudRenderData(renderData,renderData,fields)?renderData:{},renderAppearance,renderFields,fpsValid,visibleFields,framePaths,boardStyle,duetAlignment,fpsShell,underlayBounds]" ref="board" class="ymcc-hud" :class="['ymcc-hud--' + baseLayout, { 'ymcc-hud--honeycomb':honeycomb, 'ymcc-hud--honeycomb-summary':honeycomb && summary, 'ymcc-hud--image-underlay': !!underlaySource && !emptyHidden, 'ymcc-hud--fps-emphasis': fpsEmphasis, 'ymcc-hud--fps-regular': !fpsEmphasis, 'ymcc-hud--dense': dense, 'ymcc-hud--horizontal': horizontal, 'ymcc-hud--vertical': vertical, 'ymcc-hud--full': full, 'ymcc-hud--compact': compact, 'ymcc-hud--summary': summary, 'ymcc-hud--duet-summary': duetSummary, 'ymcc-hud--summary-split': summary && visibleFields.fps && (visibleFields.cpuPower || visibleFields.cpuTemp) }]" :style="boardStyle" data-monitor-hud="ymcc" :data-hud-layout="honeycomb ? 'honeycomb' : baseLayout">
     <MonitorHoneycombFrame v-if="honeycomb && !emptyHidden" :width="underlayBounds?.width ?? 560" :height="underlayBounds?.height ?? 267" :opacity="appearance.opacity" />
     <header v-if="honeycomb && !emptyHidden" class="hud-honeycomb-topline"><span class="hud-honeycomb-identity"><i aria-hidden="true"></i><b>运行监控</b><span>HEXA / 01</span></span><span class="hud-honeycomb-status">▪ YMCC</span></header>
     <img v-if="underlaySource && !emptyHidden" class="hud-image-underlay" :src="underlaySource" :style="underlayStyle" @load="refreshUnderlayBounds" alt="" aria-hidden="true" draggable="false" decoding="async" />
     <div v-if="!groups.length && !emptyHidden" class="hud-empty">所有数据项已关闭</div>
     <div v-if="honeycomb && summary" class="hud-honeycomb-primary">
       <section v-if="visibleFields.fps" class="hud-honeycomb-fps" data-hud-group="帧率" data-hud-metric="fps" :data-fps-state="fpsValid ? 'live' : 'unknown'">
-        <strong class="hud-honeycomb-fps-value" :class="{'hud-honeycomb-fps-value--missing':!fpsValid}"><template v-if="fpsValid"><span :class="{'hud-honeycomb-accessible-value':honeycombSegments}">{{hudValue(data,'fps')}}</span><MonitorHoneycombDigits v-if="honeycombSegments" :value="hudValue(data,'fps')" /></template><span v-else class="hud-honeycomb-placeholder">FPS</span></strong>
+        <strong class="hud-honeycomb-fps-value" :class="{'hud-honeycomb-fps-value--missing':!fpsValid}"><template v-if="fpsValid"><span :class="{'hud-honeycomb-accessible-value':honeycombSegments}">{{hudValue(renderData,'fps')}}</span><MonitorHoneycombDigits v-if="honeycombSegments" :value="hudValue(renderData,'fps')" /></template><span v-else class="hud-honeycomb-placeholder">FPS</span></strong>
         <span class="hud-honeycomb-fps-caption">FPS帧数</span>
       </section>
       <section v-if="duetMetrics.length" class="hud-honeycomb-readouts" data-hud-group="CPU">
         <div v-for="metric in duetMetrics" :key="metric.id" class="hud-honeycomb-reading" :data-hud-metric="metric.id">
-          <p class="hud-duet-value" :style="{'--duet-reading-size':29 * textScale / 1.2 * metricScale(metric.id)+'px'}"><span class="hud-duet-reserve" aria-hidden="true"><b>{{metric.id==='cpuPower'?'999.9':'999'}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning">!</span></span><span class="hud-duet-live"><b class="hud-duet-number">{{duetValue(metric.id)}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning" :class="{'hud-duet-warning--quiet':!hudTemperatureWarning(data,metric.id)}" :aria-hidden="!hudTemperatureWarning(data,metric.id)" :aria-label="hudTemperatureWarning(data,metric.id)?'温度超过90摄氏度':undefined">!</span></span></p>
+          <p class="hud-duet-value" :style="{'--duet-reading-size':29 * textScale / 1.2 * metricScale(metric.id)+'px'}"><span class="hud-duet-reserve" aria-hidden="true"><b>{{metric.id==='cpuPower'?'999.9':'999'}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning">!</span></span><span class="hud-duet-live"><b class="hud-duet-number">{{duetValue(metric.id)}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning" :class="{'hud-duet-warning--quiet':!hudTemperatureWarning(renderData,metric.id)}" :aria-hidden="!hudTemperatureWarning(renderData,metric.id)" :aria-label="hudTemperatureWarning(renderData,metric.id)?'温度超过90摄氏度':undefined">!</span></span></p>
           <span class="hud-honeycomb-reading-caption">{{groupLabel({name:'CPU',label:'CPU'})}} {{metric.label}}</span>
         </div>
       </section>
@@ -349,7 +357,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
       <section v-if="visibleFields.fps" ref="duetHero" class="hud-duet-hero" data-hud-group="帧率">
         <div class="hud-duet-fps" data-hud-metric="fps" :data-fps-state="fpsValid ? 'live' : 'unknown'">
           <span class="hud-fps-label hud-duet-caption">FPS帧数</span>
-          <div ref="duetLine" class="hud-duet-line"><strong ref="duetNumber" :class="{'hud-duet-number--missing': !fpsValid}"><template v-if="fpsValid"><span v-for="(digit,index) in hudValue(data,'fps')" :key="index" class="hud-duet-digit">{{digit}}</span></template><span v-else class="hud-duet-placeholder">FPS</span></strong><i class="hud-duet-baseline" aria-hidden="true"></i></div>
+          <div ref="duetLine" class="hud-duet-line"><strong ref="duetNumber" :class="{'hud-duet-number--missing': !fpsValid}"><template v-if="fpsValid"><span v-for="(digit,index) in hudValue(renderData,'fps')" :key="index" class="hud-duet-digit">{{digit}}</span></template><span v-else class="hud-duet-placeholder">FPS</span></strong><i class="hud-duet-baseline" aria-hidden="true"></i></div>
         </div>
       </section>
       <section ref="duetReadouts" class="hud-duet-readouts" data-hud-group="CPU">
@@ -357,7 +365,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
           <span class="hud-metric-label">{{ groupLabel({name:'CPU',label:'CPU'}) }} {{metric.label}}</span>
           <p class="hud-duet-value" :style="{'--duet-reading-size':27 * textScale * metricScale(metric.id)+'px'}">
             <span class="hud-duet-reserve" aria-hidden="true"><b>{{metric.id==='cpuPower'?'999.9':'999'}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning">!</span></span>
-            <span class="hud-duet-live"><b class="hud-duet-number">{{duetValue(metric.id)}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning" :class="{'hud-duet-warning--quiet':!hudTemperatureWarning(data,metric.id)}" :aria-label="hudTemperatureWarning(data,metric.id)?'温度超过90摄氏度':undefined" :aria-hidden="!hudTemperatureWarning(data,metric.id)">!</span></span>
+            <span class="hud-duet-live"><b class="hud-duet-number">{{duetValue(metric.id)}}</b><small>{{metric.unit}}</small><span v-if="metric.id==='cpuTemp'" class="hud-duet-warning" :class="{'hud-duet-warning--quiet':!hudTemperatureWarning(renderData,metric.id)}" :aria-label="hudTemperatureWarning(renderData,metric.id)?'温度超过90摄氏度':undefined" :aria-hidden="!hudTemperatureWarning(renderData,metric.id)">!</span></span>
             <i class="hud-duet-baseline" aria-hidden="true"></i>
           </p>
         </div>
@@ -367,7 +375,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
     <div v-for="(column, index) in groupColumns" :key="index" class="hud-column">
     <section v-for="group in column" :key="group.key" class="hud-group" :data-hud-group="group.name" :data-hud-section="group.key" :style="[groupStyle(group), group.name === '帧率' ? fpsShellStyle : undefined]">
       <div v-if="group.name === '帧率' && (visibleFields.fps || graphVisible)" class="hud-fps-stack" :class="{ 'hud-fps-stack--graph-only': !visibleFields.fps }">
-      <div v-if="visibleFields.fps" class="hud-fps" :class="{ 'hud-fps--missing': !fpsValid }" data-hud-metric="fps" :data-fps-state="fpsValid ? 'live' : 'unknown'"><span class="hud-fps-label">FPS帧数</span><strong :class="{'hud-honeycomb-fps-value':honeycombSegments}"><template v-if="fpsValid"><span :class="{'hud-honeycomb-accessible-value':honeycombSegments}">{{ hudValue(data, 'fps') }}</span><MonitorHoneycombDigits v-if="honeycombSegments" :value="hudValue(data,'fps')" /></template><span v-else class="hud-fps-placeholder">FPS</span></strong></div>
+      <div v-if="visibleFields.fps" class="hud-fps" :class="{ 'hud-fps--missing': !fpsValid }" data-hud-metric="fps" :data-fps-state="fpsValid ? 'live' : 'unknown'"><span class="hud-fps-label">FPS帧数</span><strong :class="{'hud-honeycomb-fps-value':honeycombSegments}"><template v-if="fpsValid"><span :class="{'hud-honeycomb-accessible-value':honeycombSegments}">{{ hudValue(renderData, 'fps') }}</span><MonitorHoneycombDigits v-if="honeycombSegments" :value="hudValue(renderData,'fps')" /></template><span v-else class="hud-fps-placeholder">FPS</span></strong></div>
         <div v-if="graphVisible" class="hud-chart hud-chart--fps" data-hud-metric="frametimeGraph">
           <svg viewBox="0 0 240 40" preserveAspectRatio="none" role="img" aria-label="帧时间曲线，单位毫秒" data-curve-state="live"><polyline v-for="(path, i) in framePaths" :key="i" :points="path" fill="none" stroke="var(--hud-accent)" stroke-width="1.5" /></svg>
         </div>
@@ -385,7 +393,11 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
               </div>
             </template>
             <template v-else>
-              <span class="hud-number"><span class="hud-value-digits" :class="{ 'hud-fps-low-value': metric.id === 'fps1' }" :style="{ minWidth: hudMetricDigitSlots(metric.id) + 'ch', fontSize:metricScale(metric.id)+'em' }">{{ hudValue(data, metric.id) }}</span><small v-if="metric.unit" :class="{ 'hud-unit--hidden': metric.id === 'fpsLimit' && data.values.fpsLimit === 0 }">{{ metric.unit }}</small><span v-if="metric.id === 'cpuTemp' || metric.id === 'gpuTemp'" class="hud-temp-warning" :class="{ 'hud-temp-warning--inactive': !hudTemperatureWarning(data,metric.id) }" role="img" :aria-hidden="!hudTemperatureWarning(data,metric.id)" :aria-label="hudTemperatureWarning(data,metric.id) ? metric.group + ' 温度超过 90°C' : undefined" :title="hudTemperatureWarning(data,metric.id) ? '温度超过 90°C' : undefined">!</span></span>
+              <span v-if="metric.id === 'batteryPower' || metric.id === 'batteryTime'" class="hud-number hud-number--attached-unit">
+                <span class="hud-number-reserve" aria-hidden="true"><span class="hud-value-digits" :style="{ fontSize:metricScale(metric.id)+'em' }">{{ metric.id === 'batteryTime' ? '999' : '999.9' }}</span><small>{{ metric.unit }}</small></span>
+                <span class="hud-number-live"><span class="hud-value-digits" :style="{ fontSize:metricScale(metric.id)+'em' }">{{ hudValue(renderData, metric.id) }}</span><small>{{ metric.unit }}</small></span>
+              </span>
+              <span v-else class="hud-number"><span class="hud-value-digits" :class="{ 'hud-fps-low-value': metric.id === 'fps1' }" :style="{ minWidth: hudMetricDigitSlots(metric.id) + 'ch', fontSize:metricScale(metric.id)+'em' }">{{ hudValue(renderData, metric.id) }}</span><small v-if="metric.unit" :class="{ 'hud-unit--hidden': metric.id === 'fpsLimit' && renderData.values.fpsLimit === 0 }">{{ metric.unit }}</small><span v-if="metric.id === 'cpuTemp' || metric.id === 'gpuTemp'" class="hud-temp-warning" :class="{ 'hud-temp-warning--inactive': !hudTemperatureWarning(renderData,metric.id) }" role="img" :aria-hidden="!hudTemperatureWarning(renderData,metric.id)" :aria-label="hudTemperatureWarning(renderData,metric.id) ? metric.group + ' 温度超过 90°C' : undefined" :title="hudTemperatureWarning(renderData,metric.id) ? '温度超过 90°C' : undefined">!</span></span>
               <div v-if="inlineGraph(metric.id)" class="hud-percent-graph hud-percent-graph--inline" :class="{ 'hud-percent-graph--battery': inlineGraph(metric.id)!.id === 'batteryBar' }" :data-percent-alert="percentGraphAlert(metric.id)" :data-hud-metric="inlineGraph(metric.id)!.id" :data-percent-state="percentValues[metric.id] === null ? 'unknown' : 'live'">
                 <div :class="inlineGraph(metric.id)!.id === 'batteryBar' ? 'hud-battery-track' : 'hud-percent-track'" role="meter" :aria-label="metric.id === 'fanSpeed' ? 'YMCC 风扇期望转速' : metric.label" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="percentValues[metric.id] ?? undefined" :aria-valuetext="percentValues[metric.id] === null ? '未知' : undefined">
                   <i v-if="percentValues[metric.id] !== null" :style="{ width: percentValues[metric.id] + '%' }"></i>
@@ -425,6 +437,11 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .hud-values { display:grid;grid-template-columns:repeat(var(--hud-value-cols),minmax(4em,max-content));gap:.5em .8em; }
 .hud-metric { display:flex;flex-direction:column;min-width:0; }.hud-metric-label { font-size:calc(.85em * var(--hud-text-scale,1));color:var(--hud-secondary);white-space:nowrap; }.hud-number { font-size:calc(1em * var(--hud-text-scale,1));white-space:nowrap; }.hud-number small { font-size:.8em;margin-left:.25em;color:var(--hud-secondary); }
 .hud-value-digits { display:inline-block;text-align:left;font-variant-numeric:tabular-nums; }
+/* Reserve 999.9 W / 999 min as a group; attach the unit to the live digits, not padded digits. */
+.hud-number--attached-unit { display:inline-grid;align-items:baseline; }
+.hud-number-reserve,.hud-number-live { grid-area:1/1;justify-self:center;display:flex;align-items:baseline;gap:.16em;white-space:nowrap; }
+.hud-number-reserve { visibility:hidden;pointer-events:none; }
+.hud-number--attached-unit small { margin-left:0; }
 .hud-unit--hidden,.hud-temp-warning--inactive { visibility:hidden; }
 .hud-fps-low-value { display:inline-block;min-width:3ch;text-align:left;font-variant-numeric:tabular-nums; }
 .hud-fps { display:flex;flex-direction:column;min-width:0;flex:none; }.hud-fps-label { font-size:calc(.8em * var(--hud-text-scale,1));color:var(--hud-accent); }.hud-fps strong { font-size:calc(3.8em * var(--hud-text-scale,1) * var(--hud-fps-value-scale,1));line-height:1.04;font-weight:600;letter-spacing:-.03em;min-width:2ch; }
@@ -536,7 +553,7 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .ymcc-hud--fps-emphasis .hud-fps strong { font-size:calc(var(--hud-fps-size) * var(--hud-text-scale,1) * var(--hud-fps-value-scale,1));font-weight:700;line-height:.94;letter-spacing:-.055em;min-width:0; }
 .ymcc-hud--fps-regular .hud-fps strong { font-size:calc(var(--hud-fps-size) * var(--hud-text-scale,1) * var(--hud-fps-value-scale,1));font-weight:600;line-height:1.05;letter-spacing:-.02em;min-width:0; }
 /* Same three-digit footprint for 0 / 1 / 99 / 999, with no leading zeroes. */
-.ymcc-hud .hud-fps strong { display:block;width:3ch;min-width:3ch;max-width:3ch;flex:none;font-variant-numeric:tabular-nums;text-align:left; }
+.ymcc-hud .hud-fps strong { display:block;width:3ch;min-width:3ch;max-width:3ch;flex:none;font-variant-numeric:tabular-nums;text-align:center; }
 /* Missing FPS occupies a normal value line at every board scale/template. */
 .ymcc-hud .hud-fps strong { height:1.05em; }
 .hud-fps-placeholder { display:inline-block;font-size:.42em;letter-spacing:.03em;line-height:1;vertical-align:middle; }
@@ -706,4 +723,5 @@ onUnmounted(()=>{fpsShellObserver?.disconnect();fpsShellObserver=null;});
 .hud-honeycomb-stripes i:nth-last-child(-n+3) { opacity:.35; }
 .ymcc-hud--honeycomb .hud-image-underlay { border-radius:0; }
 
+.ymcc-hud :is([data-hud-metric="batteryPower"],[data-hud-metric="batteryTime"]) .hud-number--attached-unit small { margin-left:0; }
 </style>

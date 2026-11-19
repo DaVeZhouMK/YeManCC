@@ -1,5 +1,6 @@
 #pragma once
 #include "virtual_controller_runtime_contract.h"
+#include "radial_input_isolation.h"
 
 // VC-LIFECYCLE-20261020-R3 — production definition module.
 // YMCC foreground virtual-output ownership. Read the actual bound Host, retain source sampling and UI routing, and neutralize only the final virtual report. Expected UI neutral is never a lifecycle failure.
@@ -420,37 +421,48 @@ static json focusIsolationAssembleFrame(const FocusFrameContent& c) {
 static std::string focusIsolationBuildTypedSubmitText(const FocusFrameContent& c,
     const std::string& requestId, unsigned long long sequence,
     unsigned long long sampleSequence, unsigned long long monotonicTick,
-    const std::string& normalizedInputHash, const char* motionPairProofId) {
+    const std::string& normalizedInputHash, const char* motionPairProofId, bool compactRequest = false) {
     std::string out;
     out.reserve(2048);
     const auto number = [&](double v) { out += c6aNumberTextCache().text(v); };
     out += "{\"backButtons\":"; c6aAppendInt(out, c.backButtons);
     out += ",\"buttons\":"; c6aAppendInt(out, c.buttons);
-    out += ",\"command\":\"SUBMIT_FRAME\",\"configHash\":"; c6aAppendEscaped(out, kInputHostProtocolConfigHash);
-    out += ",\"configRevision\":"; c6aAppendUInt(out, g_inputHostConfigRevision);
-    out += ",\"epoch\":"; c6aAppendUInt(out, g_inputHostEpoch);
-    out += ",\"imu\":{\"accelG\":{\"x\":"; number(c.imuAdmitted ? c.accelX : 0.0);
-    out += ",\"y\":"; number(c.imuAdmitted ? c.accelY : 0.0);
-    out += ",\"z\":"; number(c.imuAdmitted ? c.accelZ : 0.0);
-    out += "},\"admitted\":"; out += c.imuAdmitted ? "true" : "false";
-    out += ",\"gyroDps\":{\"x\":"; number(c.imuAdmitted ? c.gyroX : 0.0);
-    out += ",\"y\":"; number(c.imuAdmitted ? c.gyroY : 0.0);
-    out += ",\"z\":"; number(c.imuAdmitted ? c.gyroZ : 0.0);
-    out += "},\"quaternion\":{\"w\":"; number(c.imuAdmitted ? c.qw : 1.0);
-    out += ",\"x\":"; number(c.imuAdmitted ? c.qx : 0.0);
-    out += ",\"y\":"; number(c.imuAdmitted ? c.qy : 0.0);
-    out += ",\"z\":"; number(c.imuAdmitted ? c.qz : 0.0);
-    out += "}},\"lt\":"; number(c.lt);
+    out += ",\"command\":\"SUBMIT_FRAME\"";
+    if (compactRequest) out += ",\"compactFrameRequestVersion\":1";
+    else {
+        out += ",\"configHash\":"; c6aAppendEscaped(out, kInputHostProtocolConfigHash);
+        out += ",\"configRevision\":"; c6aAppendUInt(out, g_inputHostConfigRevision);
+        out += ",\"epoch\":"; c6aAppendUInt(out, g_inputHostEpoch);
+    }
+    if (!c.imuAdmitted) {
+        // Exact inactive wire values and key order; no numeric formatting is needed.
+        out += ",\"imu\":{\"accelG\":{\"x\":0.0,\"y\":0.0,\"z\":0.0},\"admitted\":false,\"gyroDps\":{\"x\":0.0,\"y\":0.0,\"z\":0.0},\"quaternion\":{\"w\":1.0,\"x\":0.0,\"y\":0.0,\"z\":0.0}},\"lt\":";
+    } else {
+        out += ",\"imu\":{\"accelG\":{\"x\":"; number(c.imuAdmitted ? c.accelX : 0.0);
+        out += ",\"y\":"; number(c.imuAdmitted ? c.accelY : 0.0);
+        out += ",\"z\":"; number(c.imuAdmitted ? c.accelZ : 0.0);
+        out += "},\"admitted\":"; out += c.imuAdmitted ? "true" : "false";
+        out += ",\"gyroDps\":{\"x\":"; number(c.imuAdmitted ? c.gyroX : 0.0);
+        out += ",\"y\":"; number(c.imuAdmitted ? c.gyroY : 0.0);
+        out += ",\"z\":"; number(c.imuAdmitted ? c.gyroZ : 0.0);
+        out += "},\"quaternion\":{\"w\":"; number(c.imuAdmitted ? c.qw : 1.0);
+        out += ",\"x\":"; number(c.imuAdmitted ? c.qx : 0.0);
+        out += ",\"y\":"; number(c.imuAdmitted ? c.qy : 0.0);
+        out += ",\"z\":"; number(c.imuAdmitted ? c.qz : 0.0);
+        out += "}},\"lt\":";
+    } number(c.lt);
     out += ",\"ltRaw\":"; number(c.ltRaw);
     out += ",\"lx\":"; number(inputHostNormalizeAxis(c.lxShort));
     out += ",\"ly\":"; number(inputHostNormalizeAxis(c.lyShort));
     out += ",\"monotonicTick\":"; c6aAppendUInt(out, monotonicTick);
     out += ",\"motionPairProofId\":"; c6aAppendEscaped(out, motionPairProofId);
     out += ",\"normalizedInputHash\":"; c6aAppendEscaped(out, normalizedInputHash);
-    out += ",\"ownerIdentity\":"; c6aAppendEscaped(out, kInputHostOwnerIdentity);
-    out += ",\"persona\":"; c6aAppendEscaped(out, inputHostBoundOrCurrentPersona());
-    out += ",\"powerGeneration\":"; c6aAppendUInt(out, inputHostProtocolPowerGenerationLocked());
-    out += ",\"profileIdentity\":"; c6aAppendEscaped(out, inputHostBoundOrCurrentProfileIdentity());
+    if (!compactRequest) {
+        out += ",\"ownerIdentity\":"; c6aAppendEscaped(out, kInputHostOwnerIdentity);
+        out += ",\"persona\":"; c6aAppendEscaped(out, inputHostBoundOrCurrentPersona());
+        out += ",\"powerGeneration\":"; c6aAppendUInt(out, inputHostProtocolPowerGenerationLocked());
+        out += ",\"profileIdentity\":"; c6aAppendEscaped(out, inputHostBoundOrCurrentProfileIdentity());
+    }
     out += ",\"protocolVersion\":1,\"raw\":{\"bLeftTrigger\":"; c6aAppendUInt(out, c.rawLtByte);
     out += ",\"bRightTrigger\":"; c6aAppendUInt(out, c.rawRtByte);
     out += ",\"buttons\":"; c6aAppendInt(out, c.buttons);
@@ -461,17 +473,27 @@ static std::string focusIsolationBuildTypedSubmitText(const FocusFrameContent& c
     out += "},\"requestId\":"; c6aAppendEscaped(out, requestId);
     out += ",\"rt\":"; number(c.rt);
     out += ",\"rtRaw\":"; number(c.rtRaw);
-    out += ",\"runId\":"; c6aAppendEscaped(out, g_inputHostRunId);
+    if (!compactRequest) { out += ",\"runId\":"; c6aAppendEscaped(out, g_inputHostRunId); }
     out += ",\"rx\":"; number(inputHostNormalizeAxis(c.rxShort));
     out += ",\"ry\":"; number(inputHostNormalizeAxis(c.ryShort));
     out += ",\"sampleSequence\":"; c6aAppendUInt(out, sampleSequence);
     if(c.screenButtons) {out += ",\"screenButtons\":"; c6aAppendUInt(out, c.screenButtons);}
     out += ",\"sequence\":"; c6aAppendUInt(out, sequence);
     out += ",\"startupNonce\":"; c6aAppendEscaped(out, g_inputHostStartupNonce);
-    out += ",\"targetId\":"; c6aAppendEscaped(out, kInputHostTargetId);
+    if (!compactRequest) { out += ",\"targetId\":"; c6aAppendEscaped(out, kInputHostTargetId); }
     if(c.touchpads.present) {
-        out += ",\"touchpads\":";
-        c6aAppendJsonValue(out, ymcc::screenpads::snapshotJson(c.touchpads));
+        // Same snapshotJson values and sorted key order without temporary JSON objects.
+        const auto pad = [&](const ymcc::screenpads::Contact& p) {
+            out += "{\"active\":"; out += p.down ? "true" : "false";
+            out += ",\"click\":"; out += p.click ? "true" : "false";
+            out += ",\"pressure\":"; c6aAppendInt(out, p.down ? p.pressure : 0);
+            out += ",\"x\":"; c6aAppendInt(out, p.down ? p.x : 0);
+            out += ",\"y\":"; c6aAppendInt(out, p.down ? p.y : 0);
+            out.push_back('}');
+        };
+        out += ",\"touchpads\":{\"left\":"; pad(c.touchpads.left);
+        out += ",\"right\":"; pad(c.touchpads.right);
+        out.push_back('}');
     }
     out.push_back('}');
     return out;
@@ -788,21 +810,82 @@ static bool gamepadUiInputEligible();
 
 static std::atomic<bool> g_radialUiOwnsInput{false};
 static std::atomic<bool> g_radialReturning{false};
+static ymcc::radial::ReleaseGate g_radialInputIsolation;
+static std::atomic<unsigned long long> g_radialInputIsolationSourceRevision{0};
+static std::atomic<unsigned long long> g_radialInputIsolationHostEpoch{0};
+static bool radialInputIsolationBindingCurrent() {
+    return g_radialInputIsolationSourceRevision.load(std::memory_order_acquire) ==
+               g_msiMainSourceRevision.load(std::memory_order_acquire) &&
+           g_radialInputIsolationHostEpoch.load(std::memory_order_acquire) == inputHostEpochToken();
+}
+static void radialInputIsolationInvalidate() {
+    g_radialInputIsolation.invalidate();
+    g_radialUiOwnsInput.store(false, std::memory_order_release);
+    g_radialReturning.store(false, std::memory_order_release);
+}
+static void radialInputIsolationOwnership(bool active) {
+    const auto power = currentPowerGeneration();
+    const auto now = GetTickCount64();
+    if (active) {
+        radialInputIsolationInvalidate();
+        g_radialInputIsolationSourceRevision.store(g_msiMainSourceRevision.load(std::memory_order_acquire), std::memory_order_release);
+        g_radialInputIsolationHostEpoch.store(inputHostEpochToken(), std::memory_order_release);
+        g_radialInputIsolation.begin(power, now);
+    } else {
+        if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
+        g_radialInputIsolation.end(power, now);
+    }
+    if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
+    const bool owns = g_radialInputIsolation.owns(power, now);
+    g_radialUiOwnsInput.store(active && owns, std::memory_order_release);
+    g_radialReturning.store(!active && owns, std::memory_order_release);
+}
+static void radialInputIsolationObserve(bool neutral) {
+    if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
+    const auto power = currentPowerGeneration();
+    const auto now = GetTickCount64();
+    g_radialInputIsolation.observe(power, now, neutral);
+    if (!g_radialInputIsolation.owns(power, now)) {
+        g_radialUiOwnsInput.store(false, std::memory_order_release);
+        g_radialReturning.store(false, std::memory_order_release);
+    }
+}
 static void radialProcessUiInput(const XINPUT_GAMEPAD&, ULONGLONG);
 static void radialSummonRequest(const char*,int=0,int=0);
-static bool radialHasInputOwner(){return g_radialUiOwnsInput.load(std::memory_order_acquire)||g_radialReturning.load(std::memory_order_acquire);}
+static bool radialHasInputOwner() {
+    if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return false; }
+    if (g_radialInputIsolation.owns(currentPowerGeneration(), GetTickCount64())) return true;
+    g_radialUiOwnsInput.store(false, std::memory_order_release);
+    g_radialReturning.store(false, std::memory_order_release);
+    return false;
+}
 static bool virtualUiOwnsInput(const FocusPlan& plan) {
     if (!plan.virtualUiPersona[0] || !g_realStickTest.enabled ||
         !g_realStickTest.virtualTargetEnabled) return false;
     return gamepadUiOutputIsolationEligible();
 }
 
+// Diagnostic memory follows the existing caller ownership, just like the
+// transition memos below. A new epoch requires an original successful resident
+// append/flush elsewhere; an unavailable sink never triggers BUS-rate retries.
+struct UiOutputLogRecoveryMemo {
+    unsigned long long deliveryEpoch = 0;
+    bool offered = false;
+    bool reoffer(unsigned long long epoch) const noexcept { return offered && epoch != deliveryEpoch; }
+    void observeOffer(unsigned long long epoch) noexcept { deliveryEpoch = epoch; offered = true; }
+};
+
 static void dsuUiOutputNote(bool uiOwnsInput, bool submitNeutral) {
     static int previousState = -1;
+    static UiOutputLogRecoveryMemo recoveryMemo;
+    const auto deliveryEpoch = ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const bool logRecoveryReoffer = recoveryMemo.reoffer(deliveryEpoch);
     const int state = (uiOwnsInput ? 1 : 0) | (submitNeutral ? 2 : 0);
-    if (state == previousState) return;
+    if (state == previousState && !logRecoveryReoffer) return;
     previousState = state;
+    recoveryMemo.observeOffer(deliveryEpoch);
     appendNativeLifecycleLog("dsu-ui-output", {
+        {"diagnosticRecoveryReoffer", logRecoveryReoffer},
         {"phase", submitNeutral ? "neutral" : "passthrough"},
         {"uiOwnsInput", uiOwnsInput}, {"submitNeutral", submitNeutral},
         {"verificationScope", "dsu-feed-only"}
@@ -815,14 +898,19 @@ static void virtualUiOutputNote(const FocusPlan& plan, bool neutral, bool submit
     static unsigned long long previousHostEpoch = 0;
     static bool previousNeutral = false;
     static bool awaitingNeutralReceipt = false;
+    static UiOutputLogRecoveryMemo recoveryMemo;
+    const auto deliveryEpoch = ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const bool logRecoveryReoffer = recoveryMemo.reoffer(deliveryEpoch);
     const bool changed = neutral != previousNeutral ||
         plan.virtualUiHostEpoch != previousHostEpoch ||
         std::strcmp(plan.virtualUiPersona, previousPersona) != 0;
-    if (!changed && !awaitingNeutralReceipt) return;
+    if (!changed && !awaitingNeutralReceipt && !logRecoveryReoffer) return;
     const bool accepted = hostFrame.value("hostSubmission", std::string()) == "frame-accepted";
     const bool neutralAccepted = accepted && submitNeutral &&
         hostFrame.value("focusIsolationSemanticNeutral", false);
-    if (!changed && !neutralAccepted) return;
+    const bool neutralReceipt = awaitingNeutralReceipt && neutralAccepted;
+    if (!changed && !neutralAccepted && !logRecoveryReoffer) return;
+    recoveryMemo.observeOffer(deliveryEpoch);
     previousPersona = plan.virtualUiPersona;
     previousHostEpoch = plan.virtualUiHostEpoch;
     previousNeutral = neutral;
@@ -830,7 +918,9 @@ static void virtualUiOutputNote(const FocusPlan& plan, bool neutral, bool submit
     appendNativeLifecycleLog("virtual-ui-output", {
         {"persona", plan.virtualUiPersona},
         {"hostEpoch", plan.virtualUiHostEpoch},
-        {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") : "neutral-accepted"},
+        {"diagnosticRecoveryReoffer", logRecoveryReoffer},
+        {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") :
+        (neutralReceipt ? "neutral-accepted" : "current-output-after-log-recovery")},
         {"uiOwnsInput", neutral}, {"submitNeutral", submitNeutral},
         {"frameAccepted", accepted}, {"neutralAccepted", neutralAccepted},
         {"hostSubmission", hostFrame.value("hostSubmission", std::string("no-frame"))},
@@ -852,23 +942,32 @@ static bool steamDeckUiOwnsInput(const FocusPlan& plan) {
 static void steamDeckUiOutputNote(bool neutral, bool submitNeutral, const json& hostFrame) {
     static bool previousNeutral = false;
     static bool awaitingNeutralReceipt = false;
+    static UiOutputLogRecoveryMemo recoveryMemo;
+    const auto deliveryEpoch = ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const bool logRecoveryReoffer = recoveryMemo.reoffer(deliveryEpoch);
     const bool changed = neutral != previousNeutral;
-    if (!changed && !awaitingNeutralReceipt) return;
+    if (!changed && !awaitingNeutralReceipt && !logRecoveryReoffer) return;
     const bool accepted = hostFrame.value("hostSubmission", std::string()) == "frame-accepted";
     const bool neutralAccepted = accepted && submitNeutral &&
         hostFrame.value("focusIsolationSemanticNeutral", false);
-    if (changed) {
+    const bool neutralReceipt = awaitingNeutralReceipt && neutralAccepted;
+    if (changed || logRecoveryReoffer) {
+        recoveryMemo.observeOffer(deliveryEpoch);
         previousNeutral = neutral;
         awaitingNeutralReceipt = neutral && !neutralAccepted;
         appendNativeLifecycleLog("steamdeck-ui-output", {
-            {"phase", neutral ? "neutral-requested" : "passthrough-requested"},
+            {"diagnosticRecoveryReoffer", logRecoveryReoffer},
+            {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") :
+                (neutralReceipt ? "neutral-accepted" : "current-output-after-log-recovery")},
             {"uiOwnsInput", neutral}, {"submitNeutral", submitNeutral},
             {"frameAccepted", accepted}, {"neutralAccepted", neutralAccepted},
             {"hostSubmission", hostFrame.value("hostSubmission", std::string("no-frame"))}
         });
     } else if (awaitingNeutralReceipt && neutralAccepted) {
+        recoveryMemo.observeOffer(deliveryEpoch);
         awaitingNeutralReceipt = false;
         appendNativeLifecycleLog("steamdeck-ui-output", {
+            {"diagnosticRecoveryReoffer", logRecoveryReoffer},
             {"phase", "neutral-accepted"}, {"uiOwnsInput", true},
             {"submitNeutral", true}, {"frameAccepted", true}, {"neutralAccepted", true}
         });
@@ -899,16 +998,23 @@ static void msiUiOutputNote(bool neutral, bool submitNeutral, const json& hostFr
     msiForegroundIsolationSetUiOwned(neutral);
     static bool previousNeutral = false;
     static bool awaitingNeutralReceipt = false;
+    static UiOutputLogRecoveryMemo recoveryMemo;
+    const auto deliveryEpoch = ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const bool logRecoveryReoffer = recoveryMemo.reoffer(deliveryEpoch);
     const bool changed = neutral != previousNeutral;
-    if (!changed && !awaitingNeutralReceipt) return;
+    if (!changed && !awaitingNeutralReceipt && !logRecoveryReoffer) return;
     const bool accepted = hostFrame.value("hostSubmission", std::string()) == "frame-accepted";
     const bool neutralAccepted = accepted && submitNeutral &&
         hostFrame.value("focusIsolationSemanticNeutral", false);
-    if (!changed && !neutralAccepted) return;
+    const bool neutralReceipt = awaitingNeutralReceipt && neutralAccepted;
+    if (!changed && !neutralAccepted && !logRecoveryReoffer) return;
+    recoveryMemo.observeOffer(deliveryEpoch);
     previousNeutral = neutral;
     awaitingNeutralReceipt = neutral && !neutralAccepted;
     appendNativeLifecycleLog("msi-ui-output", {
-        {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") : "neutral-accepted"},
+        {"diagnosticRecoveryReoffer", logRecoveryReoffer},
+        {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") :
+        (neutralReceipt ? "neutral-accepted" : "current-output-after-log-recovery")},
         {"uiOwnsInput", neutral}, {"submitNeutral", submitNeutral},
         {"frameAccepted", accepted}, {"neutralAccepted", neutralAccepted},
         {"sourceLive", sourceLive}, {"inputSource", source},
@@ -924,16 +1030,23 @@ static void ps5UiOutputNote(bool neutral, bool submitNeutral, const json& hostFr
     bool sourceLive, const std::string& source, DWORD slot, DWORD admittedMask, WORD buttons) {
     static bool previousNeutral = false;
     static bool awaitingNeutralReceipt = false;
+    static UiOutputLogRecoveryMemo recoveryMemo;
+    const auto deliveryEpoch = ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const bool logRecoveryReoffer = recoveryMemo.reoffer(deliveryEpoch);
     const bool changed = neutral != previousNeutral;
-    if (!changed && !awaitingNeutralReceipt) return;
+    if (!changed && !awaitingNeutralReceipt && !logRecoveryReoffer) return;
     const bool accepted = hostFrame.value("hostSubmission", std::string()) == "frame-accepted";
     const bool neutralAccepted = accepted && submitNeutral &&
         hostFrame.value("focusIsolationSemanticNeutral", false);
-    if (changed || (awaitingNeutralReceipt && neutralAccepted)) {
+    const bool neutralReceipt = awaitingNeutralReceipt && neutralAccepted;
+    if (changed || neutralReceipt || logRecoveryReoffer) {
+        recoveryMemo.observeOffer(deliveryEpoch);
         previousNeutral = neutral;
         awaitingNeutralReceipt = neutral && !neutralAccepted;
         appendNativeLifecycleLog("ps5-ui-output", {
-            {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") : "neutral-accepted"},
+            {"diagnosticRecoveryReoffer", logRecoveryReoffer},
+            {"phase", changed ? (neutral ? "neutral-requested" : "passthrough-requested") :
+            (neutralReceipt ? "neutral-accepted" : "current-output-after-log-recovery")},
             {"uiOwnsInput", neutral}, {"submitNeutral", submitNeutral},
             {"frameAccepted", accepted}, {"neutralAccepted", neutralAccepted},
             {"hostSubmission", hostFrame.value("hostSubmission", std::string("no-frame"))},
