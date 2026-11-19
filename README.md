@@ -10,6 +10,10 @@ YeManCC（YMCC）是野蛮系统的开源掌机控制台。围绕 Windows 上的
 
 [下载完整运行包](https://github.com/DaVeZhouMK/YeManCC/releases) · [安装与构建说明](docs/getting-started.zh-CN.md) · [反馈问题](https://github.com/DaVeZhouMK/YeManCC/issues)
 
+## Xbox 全屏支持，全屏游戏内呼出 YMCC
+
+支持 Windows 的 **Xbox 全屏体验**，开机可选 Xbox 全屏模式，也可搭配 Steam 大屏。在支持的全屏游戏中，按原有呼出键即可打开 YMCC 查看监控、调整性能和常用设置，不必先退出游戏。实际兼容性因游戏的全屏模式、设备和驱动而异。
+
 ## 01 · Steam 成为掌机主场
 
 ![YMCC 整体体验：ROG 掌机上的 Steam 大屏、游戏库与全手柄操作](docs/images/ymcc-steam-experience.jpg)
