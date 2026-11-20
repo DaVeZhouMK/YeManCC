@@ -1624,6 +1624,10 @@ class FanManualNativeWakePending extends Error {
   constructor(readonly context: FanAdmissionContext) { super('FAN_MANUAL_NATIVE_WAKE_PENDING'); }
 }
 
+class FanAutomaticNativeWakePending extends Error {
+  constructor(reason: string) { super(`FAN_AUTOMATIC_NATIVE_WAKE_PENDING:${reason}`); }
+}
+
 class FanManualUnboundSessionRequired extends Error {
   constructor() { super('FAN_MANUAL_UNBOUND_SESSION_REQUIRED'); }
 }
@@ -3534,6 +3538,16 @@ export class FanHostLifecycle {
       // Native cleanup has not failed and no mutation was submitted. Let the
       // original manual continuation wait; it must not create a fault-heal writer.
       if (error instanceof FanManualNativeWakePending) throw error;
+      if (error instanceof FanAutomaticNativeWakePending) {
+        // HC may finish before Native releases the same wake's write gate.
+        // Hand off once; an existing owner keeps its backoff and receipts.
+        if (this.recoveryIntent === null && sessionGeneration === this.sessionGeneration
+            && this.isAdmissionContextCurrent(failureContext) && this.hasActiveControlIntent()
+            && this.coordinator.isWakeReady(generation)) {
+          this.noteRecoveryIntentPending(reason, generation, false, startup);
+        }
+        throw error;
+      }
       // Keep this invariant in the bridge: direct start/curve callers also
       // retain recovery after a bounded wait. A UI-specific catch is insufficient.
       if (this.isResumeReplayCurrent(generation, intentRevision)
@@ -3658,8 +3672,11 @@ export class FanHostLifecycle {
     // Accepted async native cleanup is a pending admission, not a failed
     // click. Reuse the original absolute deadline outside the control queue;
     // real Suspending, denied Ready and unknown generations still fail closed.
-    if (context.manualRecovery && native?.generation === generation && native.phase === 'resuming')
-      throw new FanManualNativeWakePending(context);
+    if (native?.generation === generation && native.phase === 'resuming') {
+      if (context.manualRecovery) throw new FanManualNativeWakePending(context);
+      if (native.known !== false && this.coordinator.isWakeReady(generation))
+        throw new FanAutomaticNativeWakePending(reason);
+    }
     if (native?.generation !== generation || native.phase !== 'ready' || native.hardwareWritesAllowed !== true) {
       throw new Error(`FAN_MANUAL_WAKE_NOT_READY:${reason}`);
     }

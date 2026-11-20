@@ -229,6 +229,17 @@ runs:
           throw 'Fan release check did not verify recovery after an unconfirmed newer hint.'
         }
       }
+      $wakeIpcEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-wake-ipc'
+      node tools/fan_manual_wake_ipc_selftest.mjs $wakeIpcEvidence '' '' --native-owner-rearm-only
+      if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: Native wake admission.' }
+      $wakeIpc = Get-Content -LiteralPath (Join-Path $wakeIpcEvidence 'result.json') -Raw | ConvertFrom-Json
+      $handoffs = @($wakeIpc.results | Where-Object {
+        $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake retains a curve across delayed native permission: *'
+      })
+      if ($wakeIpc.ok -ne $true -or $wakeIpc.hardwareCalls -ne 0 -or
+          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3) {
+        throw 'Fan release check did not exercise Native permission handoff, OFF and newer sleep.'
+      }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
     shell: pwsh

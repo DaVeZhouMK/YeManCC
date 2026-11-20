@@ -74,6 +74,11 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
    const route=new URL(msg.args.url).pathname;
    if(route==='/api/resume')throw Error('renderer /api/resume must not be posted');
    const body=typeof msg.args.body==='string'?JSON.parse(msg.args.body):{};
+   if(route==='/api/cancel-control-intent'){
+    host.calls.push('cancel-control-intent');
+    queueMicrotask(()=>deliver(msg,{status:200,body:JSON.stringify({ok:true,controlIntentCancelled:true,state:host.snapshot()}),headers:''}));
+    return;
+   }
    const names={'/api/state':'getState','/api/open':'open','/api/open-events':'openEvents','/api/acquire-control':'acquireControl','/api/enable':'enable','/api/preset':'applyPreset','/api/heartbeat':'heartbeat','/api/disable':'disable','/api/release-control':'releaseControl','/api/close':'close','/api/shutdown':'shutdown'};
    const fn=names[route];if(!fn)throw Error('unexpected inert HTTP route '+route);
    void Promise.resolve(host[fn](body)).then(value=>{if(route==='/api/acquire-control'){value.leaseId='safe-'+String(value.generation).padStart(32,'0');host.lease={...value};}return deliver(msg,{status:200,body:JSON.stringify({ok:true,...(route==='/api/acquire-control'||route==='/api/heartbeat'?{lease:value}:{state:value})}),headers:''});});
@@ -304,6 +309,32 @@ await check('native-owner real HTTP committed wake offers observation only and p
   assert.equal(requests().length,2,'automatic receipt cannot swallow a later explicit request');
   assert.notEqual(requests()[1].args.observedWakeOnly,true);
   return {observedWakeCommands:1,explicitCommands:1,rendererResumePosts:0};
+ }finally{await nativeDone(f);}
+});
+for(const boundary of ['ready','off','new-sleep'])await check('native-owner real HTTP committed wake retains a curve across delayed native permission: '+boundary,async()=>{
+ const f=fixture('native-owner','HandheldCompanion.Devices.GPD.GPDWin5');try{
+  await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765','0123456789abcdef'.repeat(4));
+  await f.host.resume({generation:4});f.host.calls=[];
+  f.setNative({phase:'resuming',resumeReady:true,hardwareWritesAllowed:false});
+  const p=f.observe(f.life.resumeAfterCommittedPowerWake(4));await f.advance(100);
+  assert.notEqual(p.status,'pending','original attempt did not hand off');
+  assert(!f.host.calls.some(c=>c==='acquire'||c==='enable'),'Host readiness alone allowed writes');
+  const retained=f.life.recoveryActive;
+  if(boundary==='off'){
+   const off=f.observe(f.life.disable());await f.advance(1000);assert.equal(off.status,'fulfilled',off.error??'OFF pending');
+  }else if(boundary==='new-sleep'){
+   f.setNative({generation:5,phase:'suspending',resumeReady:false});
+   f.life.setPowerGeneration(5);f.life.observePowerBoundary('suspending',5);
+  }
+  if(boundary!=='new-sleep')f.setNative({phase:'ready',hardwareWritesAllowed:true});
+  await f.advance(8000);
+  const enables=f.host.calls.filter(c=>c==='enable').length;
+  assert.equal(enables,boundary==='ready'?1:0,'incorrect replay without a second wake event or a click');
+  assert.equal(f.host.calls.filter(c=>c==='acquire').length,enables);
+  assert(retained,'the same wake must retain its curve while Native is still resuming');
+  assert.equal(f.starts,1);assert.equal(f.manuals,0);
+  if(boundary==='ready')assert.equal(f.life.recoveryActive,false,'successful write did not retire the recovery owner');
+  return {boundary,enables,retained,starts:f.starts,manualRequests:f.manuals,attempt:p.status};
  }finally{await nativeDone(f);}
 });
 await check('native-owner real HTTP explicit zero-work rejection leaves the same wake eligible',async()=>{

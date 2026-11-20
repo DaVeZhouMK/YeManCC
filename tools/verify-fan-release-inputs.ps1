@@ -55,6 +55,7 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   $selector,
   'tools/hc-device-runtime/verify-host-source-bundle.ps1',
   'tools/fan_boot_autostart_sim.ts',
+  'tools/fan_manual_wake_ipc_selftest.mjs',
   'tools/fan_native_manual_wait_selftest.ts',
   'tools/fan_cold_open_admission_selftest.ts',
   'tools/fan_resume_continuous_recovery_selftest.ts',
