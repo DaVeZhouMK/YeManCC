@@ -248,7 +248,8 @@ runs:
       if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: one-shot background wake admission.' }
       $backgroundWake = Get-Content -LiteralPath (Join-Path $backgroundWakeEvidence 'result.json') -Raw | ConvertFrom-Json
       $boundaryFacts = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.facts.boundary })
-      $requiredBoundaries = @('recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation')
+      $requiredBoundaries = @('recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation',
+        'ipc-recovers', 'ipc-off', 'ipc-still-failing')
       $backgroundPassedNames = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
       $requiredProjectedWake = @(
         'background-ready without the private notification: resume',
@@ -261,7 +262,7 @@ runs:
       if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
           @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0 -or
           @($requiredProjectedWake | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
-        throw 'Fan release check did not cover one-shot wake and the coordinator projection without a private notification.'
+        throw 'Fan release check did not cover one-shot wake, coordinator IPC failures and the projection without a private notification.'
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
