@@ -398,6 +398,7 @@ struct LaunchOptions {
     std::wstring protocol;
     DWORD parentPid = 0;
     std::wstring updateHealthHandshakePath;
+    bool updateHealthIsolated = false;
     std::wstring updateHealthHandshakeToken;
     std::wstring updateHealthPackageVersion;
     bool updateHealthOnly = false;
@@ -406,6 +407,7 @@ struct LaunchOptions {
 static LaunchOptions g_launchOptions;
 static bool g_updateHealthOnly = false;
 static bool g_updateHealthDataRootWritable = false;
+static fs::path g_updateHealthLegacyWritableRoot;
 
 static LaunchOptions parseLaunchOptions() {
     LaunchOptions options;
@@ -434,6 +436,8 @@ static LaunchOptions parseLaunchOptions() {
             }
         } else if (argument == L"--update-health-only") {
             options.updateHealthOnly = true;
+        } else if (argument == L"--update-health-isolated") {
+            options.updateHealthIsolated = true;
         } else if (argument.rfind(L"--update-health-handshake=", 0) == 0) {
             options.updateHealthHandshakePath = argument.substr(26);
         } else if (argument == L"--update-health-handshake" && index + 1 < argumentCount) {
@@ -895,7 +899,7 @@ static void requireHostDataRootReady() {
 }
 static void requireHostDataRootWrite(const fs::path& path){if(hostRootOwnsPath(path))requireHostDataRootReady();}
 static json hostReadOnlyDataRootSnapshot() {
-    const auto state=hostDataRootReadiness();
+    const auto state=g_updateHealthOnly ? HostDataRootReadiness{false,"update-health-only"} : hostDataRootReadiness();
     return {{"readOnly",true},{"dataRoot",toUtf8(g_dataRoot.wstring())},{"dataRootReadiness",{{"status","unknown"},{"reason",state.reason},{"retryable",true},{"ownershipConfirmed",false}}},
         {"config",custom_steam_library::config::defaults(true)},{"manualOverrides",custom_steam_library::config::defaults(false)},
         {"library",{{"games",json::array()}}},{"steamAccounts",{{"accounts",json::array()}}},{"steamPlan",{{"items",json::array()},{"ownershipConfirmed",false}}},
@@ -922,6 +926,7 @@ static std::optional<json> admitHostDataRootCommand(const std::string& command) 
 }
 
 static fs::path hostBrowserDataRoot(const fs::path& selectedRoot) {
+    if(g_updateHealthOnly)return custom_steam_library::webviewUserDataRoot(selectedRoot);
     if(hostDataRootReadiness().ready)return custom_steam_library::webviewUserDataRoot(selectedRoot);
     static const fs::path scratch=[] {
         wchar_t temporary[32768]{};const auto size=GetTempPathW(32768,temporary);
@@ -9664,51 +9669,39 @@ static bool updateHealthHandshakeRequested() {
         !g_launchOptions.updateHealthHandshakeToken.empty();
 }
 
-static bool probeUpdateHealthDataRoot(std::string& failure) {
-    const auto readiness=hostDataRootReadiness();if(!readiness.ready){failure="library-data-root-read-only: "+readiness.reason;return false;}
-    if (g_dataRoot.empty()) {
-        failure = "data root is empty";
-        return false;
-    }
-    std::error_code error;
-    fs::create_directories(g_dataRoot / L"state", error);
-    if (error) {
-        failure = "data root cannot be created: " + error.message();
-        return false;
-    }
-    const auto probe = g_dataRoot / L"state" /
-        (L".update-health-" + std::to_wstring(GetCurrentProcessId()) + L".tmp");
-    {
-        std::ofstream output(custom_steam_library::ioPath(probe), std::ios::binary | std::ios::trunc);
-        if (!output) {
-            failure = "data root is not writable";
-            return false;
-        }
-        output << "yemancc-custom-steam-library-health\n";
-        output.flush();
-        if (!output.good()) {
-            error.clear();
-            fs::remove(probe, error);
-            failure = "data root write probe failed";
-            return false;
-        }
-    }
-    error.clear();
-    fs::remove(probe, error);
-    if (error) {
-        failure = "data root write probe cleanup failed: " + error.message();
-        return false;
-    }
-    return true;
+static bool probeUpdateHealthDataRoot(const fs::path& root) {
+    if (!hostRootPathInspectable(root)) return false;
+    GUID id{}; wchar_t token[40]{};
+    if (FAILED(CoCreateGuid(&id)) || !StringFromGUID2(id,token,40)) return false;
+    const auto probe = custom_steam_library::ioPath(root / (std::wstring(L".ymcc-health-") + token));
+    const auto file = CreateFileW(probe.c_str(), GENERIC_WRITE | DELETE, 0, nullptr, CREATE_NEW,
+        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    const char check = '1'; DWORD written = 0;
+    const bool ok = WriteFile(file, &check, sizeof(check), &written, nullptr) && written == sizeof(check);
+    CloseHandle(file);
+    return ok;
 }
 
+struct ScopedUpdateHealthProfile {
+    fs::path path; // Set only after this process creates a fresh directory.
+    ~ScopedUpdateHealthProfile() {
+        try {
+            if (!path.empty() && hostRootPathInspectable(path)) {
+                std::error_code ignored;
+                fs::remove_all(path,ignored);
+            }
+        } catch (...) { } // Browser shutdown can leave a short-lived file lock.
+    }
+};
+
 static bool writeUpdateHealthMarker(const char* phase, const std::string& failure = {}) noexcept {
-    if(std::string_view(phase)=="ready"&&!hostDataRootReadiness().ready)return false;
+    if(std::string_view(phase)=="ready"&&!g_updateHealthDataRootWritable)return false;
     if (!updateHealthHandshakeRequested()) return false;
     try {
         const auto path = fs::absolute(fs::path(g_launchOptions.updateHealthHandshakePath));
         const auto parent = path.parent_path();
-        if(hostRootOwnsPath(path)&&!hostDataRootReadiness().ready)return false;
+        if(!hostRootPathInspectable(path)||hostRootOwnsPath(path))return false;
         if (parent.empty()) return false;
         std::error_code error;
         fs::create_directories(parent, error);
@@ -9733,7 +9726,8 @@ static bool writeUpdateHealthMarker(const char* phase, const std::string& failur
             {"workspaceUi", fs::is_directory(custom_steam_library::workspaceUiPath(g_labRoot))},
             {"webview2", g_controller && g_webview},
             {"dataRootWritable", g_updateHealthDataRootWritable},
-            {"dataRoot", toUtf8(g_dataRoot.wstring())}
+            {"dataRootKind", g_updateHealthLegacyWritableRoot.empty() ? "isolated" : "legacy-write-probe"},
+            {"dataRoot", toUtf8((g_updateHealthLegacyWritableRoot.empty() ? g_dataRoot : g_updateHealthLegacyWritableRoot).wstring())}
         };
         if (!failure.empty()) marker["error"] = failure;
 
@@ -9742,7 +9736,7 @@ static bool writeUpdateHealthMarker(const char* phase, const std::string& failur
         {
             std::ofstream output(custom_steam_library::ioPath(temporary), std::ios::binary | std::ios::trunc);
             if (!output) return false;
-            output << marker.dump() << '\n';
+            output << marker.dump(-1, ' ', true) << '\n'; // WinPS 5.1 legacy readers default to ANSI.
             output.flush();
             if (!output.good()) return false;
         }
@@ -10258,6 +10252,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     g_launchOptions = parseLaunchOptions();
     g_updateHealthOnly = g_launchOptions.updateHealthOnly;
+    ScopedUpdateHealthProfile healthProfile;
     if (g_launchOptions.updateHealthOnly && !updateHealthHandshakeRequested()) {
         reportUpdateHealthFailure(L"独立健康启动缺少握手路径或一次性令牌。", "update-health-failed");
         return 8;
@@ -10266,7 +10261,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         reportUpdateHealthFailure(L"手柄输入所有者参数无效。独立运行请使用 --input-owner=host；YeManCC 接入必须同时提供协议版本和父进程 PID。", "launch-options-invalid");
         return 6;
     }
-    HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"Local\\YeManSteamLibraryWorkspace");
+    HANDLE singleInstance = CreateMutexW(nullptr, TRUE, g_updateHealthOnly ? nullptr : L"Local\\YeManSteamLibraryWorkspace");
     if (!singleInstance) {
         reportUpdateHealthFailure(L"无法创建 Custom Steam Library 单实例互斥体。", "single-instance-failed");
         return 2;
@@ -10294,14 +10289,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     ymcc::powerSource::channel::Host powerSourceChannel;
-    powerSourceChannel.start(parentInputModeEnabled() ? g_launchOptions.parentPid : 0);
+    if (!g_updateHealthOnly) powerSourceChannel.start(parentInputModeEnabled() ? g_launchOptions.parentPid : 0);
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     wchar_t executablePath[32768]{};
     GetModuleFileNameW(nullptr, executablePath, static_cast<DWORD>(std::size(executablePath)));
     g_labRoot = custom_steam_library::applicationRootFromExecutable(fs::path(executablePath));
     g_worker = custom_steam_library::workerPath(g_labRoot);
-    g_dataRoot = custom_steam_library::defaultDataRoot(g_labRoot);
+    if (!g_updateHealthOnly) g_dataRoot = custom_steam_library::defaultDataRoot(g_labRoot);
     // Install process-wide diagnostics only after the portable package root
     // is known, so remote-machine crashes leave a collectable record beside
     // the scrape history even when Windows cannot create a minidump.
@@ -10354,14 +10349,32 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 5;
     }
     if (g_updateHealthOnly) {
-        std::string dataRootFailure;
-        if (!probeUpdateHealthDataRoot(dataRootFailure)) {
-            reportUpdateHealthFailure(toWide(dataRootFailure).c_str(), "data-root-failed");
+        const auto profile = fs::path(fs::absolute(g_launchOptions.updateHealthHandshakePath).wstring() + L".profile");
+        std::error_code scratchError;
+        if (hostRootPathInspectable(profile) && fs::create_directory(profile,scratchError)) healthProfile.path=profile;
+        if (healthProfile.path.empty() || !probeUpdateHealthDataRoot(healthProfile.path)) {
+            reportUpdateHealthFailure(L"无法建立升级健康检查临时目录。", "data-root-failed");
             CloseHandle(singleInstance);
             CoUninitialize();
             return 11;
         }
+        g_dataRoot = profile;
         g_updateHealthDataRootWritable = true;
+        // A 039-style helper only recognizes the install-local root (or its
+        // inherited explicit root). Report it only after a real live write;
+        // no records in that root are parsed and the browser stays isolated.
+        if (!g_launchOptions.updateHealthIsolated) {
+            const auto legacy = g_labRoot / L"data";
+            std::error_code legacyError;
+            if (hostRootPathInspectable(legacy)) {
+                fs::create_directory(legacy,legacyError);
+                if (!legacyError && probeUpdateHealthDataRoot(legacy)) g_updateHealthLegacyWritableRoot=legacy;
+            }
+            if (g_updateHealthLegacyWritableRoot.empty()) {
+                const auto configured=custom_steam_library::configuredDataRoot();
+                if (!configured.empty() && probeUpdateHealthDataRoot(configured)) g_updateHealthLegacyWritableRoot=configured;
+            }
+        }
     }
 
     WNDCLASSEXW windowClass{sizeof(windowClass)};

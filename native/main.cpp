@@ -74433,6 +74433,11 @@ static json updateStateReadWithTransaction() {
         const auto journal = ymcc::updaterecovery::read(currentExe, POWER_CONTROL_DIR);
         if (!journal.empty() && ymcc::updaterecovery::unfinished(journal)) {
             const bool installerActive = ymcc::updaterecovery::live(journal);
+            const bool matchingFailure = !installerActive && progress.value("phase", std::string{}) == "failed" &&
+                progress.value("stage", std::string{}) == "install" &&
+                progressVersion == journal.value("version", std::string{}) &&
+                progress.value("operationId", std::string{}) == journal.value("operationId", std::string{}) &&
+                ymcc::updaterecovery::same(progress.value("sha256", std::string{}), journal.value("sha256", std::string{}));
             progress["operationId"] = journal.value("operationId", std::string{});
             progress["version"] = journal.value("version", std::string{});
             progress["sha256"] = journal.value("sha256", std::string{});
@@ -74441,7 +74446,7 @@ static json updateStateReadWithTransaction() {
             progress["repairAuthorized"] = true;
             progress["installerActive"] = installerActive;
             progress["message"] = installerActive ? "安装助手正在完成更新，请稍候" : "上次安装未完成，可重新安装以修复";
-            progress["error"] = "";
+            if (!matchingFailure) progress["error"] = "";
         } else if (!journal.empty() && journal.value("phase",std::string{})=="committed" &&
             (progressVersion.empty() || journal.value("version",std::string{})==progressVersion) &&
             (progress.value("sha256",std::string{}).empty() || ymcc::updaterecovery::same(journal.value("sha256",std::string{}),progress.value("sha256",std::string{}))) &&
@@ -77613,6 +77618,20 @@ static void reg_fs() {
         };
         const std::wstring dataDir = yemancc_data_dir();
         const std::wstring appDir = app_data_dir();
+        try {
+            json journal = json::object();
+            wchar_t currentExe[32768]{};
+            const auto length = GetModuleFileNameW(nullptr, currentExe, ARRAYSIZE(currentExe));
+            if (length > 0 && length < ARRAYSIZE(currentExe))
+                journal = ymcc::updaterecovery::read(currentExe, POWER_CONTROL_DIR);
+            availability["ymccUpdate"] = ymcc::updateconfig::exportEvidence(
+                updateProgressRead(), updateTransactionStateRead(), journal);
+            availability["ymccUpdate"]["installTrace"] = length > 0 && length < ARRAYSIZE(currentExe)
+                ? ymcc::updateconfig::exportInstallTrace(ymcc::updaterecovery::readInstallTrace(currentExe), journal)
+                : json{{"status", "unavailable"}};
+        } catch (...) {
+            availability["ymccUpdate"] = {{"status", "unavailable"}};
+        }
         // Export observes the already-used media root. No download/startup or root probes.
         const auto mediaExport=ymcc::media::diagnostics::exportMetadata(fspath::path(dataDir));
         availability["sharedGameMedia"]=mediaExport.receipt;
@@ -93004,7 +93023,6 @@ static void reg_updater() {
         // already-installed nested directory without shipping that child.
         const std::wstring customSteamLibraryDir = installRoot + L"\\YeManCC\\CustomSteamLibrary";
         std::wstring supportPath = exedir + L"\\YeMan-Support.html";
-        auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
             std::string s = W2U(value);
             std::string out = "'";
@@ -93037,9 +93055,12 @@ static void reg_updater() {
         std::wstring recoveryJournal;
         try { recoveryJournal = ymcc::updaterecovery::write(exeStr, pcDir, operationId, version, ascii_lower(sha)); }
         catch (const std::exception& e) { failInstall(e.what(), "无法保存受保护的安装恢复记录，安装未开始"); }
+        // A stale LocalAppData/update.ps1 must not block a new attempt. Publish
+        // executable code as a new file beside the protected recovery journal.
+        const auto script = ymcc::updaterecovery::helperPathFor(recoveryJournal);
         bool helperScriptWritten = false;
         {
-            std::ofstream f(script, std::ios::binary);
+            std::ostringstream f; // Update helper PowerShell emission begins here.
             f.put((char)0xEF); f.put((char)0xBB); f.put((char)0xBF);
             // param() 必须是脚本的首条语句，所以放在 BOM 之后、其它语句之前。
             // 升级器需要以管理员权限强制关闭常驻进程；正常路径下主 exe 清单为
@@ -93056,7 +93077,7 @@ static void reg_updater() {
             f << ymcc::updatehooks::script() << "\n";
             f << "$updateHookToolPaths = " << updateHookPathsLiteral << "\n";
             f << "$moduleLease = $null; $moduleTransaction = $null\n";
-            f << "$deckyTransaction = $null\n";
+            f << "$deckyTransaction = $null; $deckyPreparationLease = $null\n";
             f << "$parentPid = " << GetCurrentProcessId() << "\n";
             FILETIME updaterCreated{}, updaterExited{}, updaterKernel{}, updaterUser{};
             if (!GetProcessTimes(GetCurrentProcess(), &updaterCreated, &updaterExited, &updaterKernel, &updaterUser))
@@ -93085,12 +93106,11 @@ static void reg_updater() {
             f << "$customSteamLibraryDir = " << psLiteral(customSteamLibraryDir) << "\n";
             f << "$customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
-            f << "$exeBackupConfirmed=$false; $exeCommitStarted=$false; $exeBeforeSha256=''; $exeAfterSha256=''\n";
             f << "$state = Join-Path (Split-Path -Parent $staging) 'update-state.json'\n";
             f << "$rollbackRoot = Join-Path (Split-Path -Parent $staging) ('rollback-' + [guid]::NewGuid().ToString('N'))\n";
             f << "$rollbackFiles = Join-Path $rollbackRoot 'files'\n";
-            f << "$backup = Join-Path $rollbackRoot 'YeManCC.exe.preimage'\n";
-             f << "$rollbackAddedFiles = New-Object 'System.Collections.Generic.List[string]'\n";
+             f << "$ordinaryFileLedger = [Collections.Generic.List[object]]::new()\n";
+             f << "$script:ymccCoreWriteFailures=0; $script:ymccInstallIssues=[ordered]@{}\n";
              f << "$ordinaryRollbackPrepared = $false\n";
              f << "$fanHostTarget = Join-Path $pcDir 'fan-host-v2'\n";
              f << "$fanHostBackup = Join-Path $rollbackRoot 'FanHostV2Snapshot'\n";
@@ -93099,8 +93119,7 @@ static void reg_updater() {
               f << "$immutableRepairPending = $false\n";
              f << "$fanHostTargetWasPresent = Test-Path -LiteralPath $fanHostTarget -PathType Container\n";
              f << "$playerBlacklistPath = Join-Path $pcDir 'Sleep\\player-blacklist.txt'\n";
-             f << "$playerBlacklistRollback = Join-Path $rollbackFiles 'PowerControl\\Sleep\\player-blacklist.txt'\n";
-             f << "$playerBlacklistExisted = Test-Path -LiteralPath $playerBlacklistPath -PathType Leaf\n";
+             f << "$playerBlacklistExisted = [bool](Get-Item -LiteralPath $playerBlacklistPath -Force -ErrorAction SilentlyContinue)\n";
              f << "$scriptPath = " << psLiteral(script) << "\n";
              f << "$progressPath = " << psLiteral(updateProgressPath()) << "\n";
              f << "$recoveryJournal = " << psLiteral(recoveryJournal) << "\n";
@@ -93143,31 +93162,6 @@ static void reg_updater() {
              f << "    throw ('atomic write failed: ' + $path + ': ' + $lastAtomicError)\n";
              f << "  } finally { if ([IO.File]::Exists($temp)) { try { [IO.File]::Delete($temp) } catch { Write-Warning 'UPDATE_DIAGNOSTIC_TEMP_CLEANUP_PENDING' } } }\n";
              f << "}\n";
-             f << "function Install-YmccUpdateExecutable {\n";
-             f << "  $script:exeBackupConfirmed=$false\n";
-             f << "  if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'UPDATE_EXECUTABLE_PREIMAGE_MISSING' }\n";
-             f << "  $script:exeBeforeSha256=Get-YmccDeckyHash $exePath\n";
-             f << "  Set-YmccDeckyAtomic (Split-Path -Parent $backup) (Split-Path -Leaf $backup) $exePath $null $script:exeBeforeSha256\n";
-             f << "  if ((Get-YmccDeckyHash $backup) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_BACKUP_UNCONFIRMED' }\n";
-             f << "  $script:exeBackupConfirmed=$true\n";
-             f << "  if ((Get-YmccDeckyHash $exePath) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_SOURCE_CHANGED' }\n";
-             f << "  $script:exeAfterSha256=Get-YmccDeckyHash $packageExe\n";
-             f << "  $script:exeCommitStarted=$true\n";
-             f << "  Set-YmccDeckyAtomic $exeDir 'YeManCC.exe' $packageExe $null $script:exeAfterSha256\n";
-             f << "  Assert-FileMatch $packageExe $exePath 'executable commit'\n";
-             f << "}\n";
-             f << "function Restore-YmccUpdateExecutable {\n";
-             f << "  # A stale/failed .old is never permission to overwrite an untouched EXE.\n";
-             f << "  if (!$script:exeCommitStarted) { return }\n";
-             f << "  if (!$script:exeBackupConfirmed -or !$script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_UNCONFIRMED' }\n";
-             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) {\n";
-             f << "    $current=Get-YmccDeckyHash $exePath\n";
-             f << "    if ($current -ceq $script:exeBeforeSha256) { return }\n";
-             f << "    if ($current -cne $script:exeAfterSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_TARGET_CHANGED' }\n";
-             f << "  }\n";
-             f << "  if (!(Test-Path -LiteralPath $backup -PathType Leaf) -or (Get-YmccDeckyHash $backup) -cne $script:exeBeforeSha256) { throw 'UPDATE_EXECUTABLE_ROLLBACK_BACKUP_CHANGED' }\n";
-             f << "  Set-YmccDeckyAtomic $exeDir 'YeManCC.exe' $backup $null $script:exeBeforeSha256\n";
-             f << "}\n";
              f << "function Set-UpdateProgress([string]$phase, [string]$message, [string]$error = '') {\n";
              f << "  $obj = [ordered]@{ operationId = $operationId; version = $version; stage = 'install'; sha256 = $sha256; phase = $phase; percent = 100; message = $message; error = $error; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n";
              f << "  # This writable UI snapshot is not installation authority. An unavailable\n";
@@ -93196,7 +93190,7 @@ static void reg_updater() {
             f << "$recoveryError = $null\n";
             f << "$newProcess = $null\n";
             f << "$rollbackChildExitConfirmed = $true\n";
-            f << "$customHealthHandshakePath = Join-Path (Split-Path -Parent $staging) ('custom-health-' + [guid]::NewGuid().ToString('N') + '.json')\n";
+            f << "$customHealthHandshakePath = Join-Path $staging ('custom-health-' + [guid]::NewGuid().ToString('N') + '.json')\n";
             f << "$customHealthTimeoutSeconds = 60\n";
             f << "$customHealthChildExitTimeoutSeconds = 30\n";
             f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
@@ -93367,18 +93361,10 @@ static void reg_updater() {
              f << "  }\n";
              f << "  return $paths\n";
              f << "}\n";
-             f << "function Register-CustomManagedFilesForRollback([string[]]$paths) {\n";
-             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $customSteamLibrarySource $relative) $customSteamLibrarySource $customSteamLibraryDir 'CustomSteamLibrary' }\n";
-             f << "}\n";
              f << "function Copy-CustomManagedFilesChecked([string[]]$paths) {\n";
-             f << "  if (!(Test-Path -LiteralPath $customSteamLibraryDir -PathType Container)) { New-Item -ItemType Directory -Path $customSteamLibraryDir -Force | Out-Null }\n";
              f << "  foreach ($relative in $paths) {\n";
              f << "    $source = Join-Path $customSteamLibrarySource $relative\n";
-             f << "    $target = Join-Path $customSteamLibraryDir $relative\n";
-             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('CustomSteamLibrary target is a directory but package entry is a file: ' + $relative) }\n";
-             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
-             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
-             f << "    Assert-FileMatch $source $target ('CustomSteamLibrary managed file ' + $relative)\n";
+             f << "    Copy-YmccManagedFile $source $customSteamLibraryDir $relative 'CustomSteamLibrary'\n";
              f << "  }\n";
              f << "}\n";
              f << "function Get-GreenChildManagedPaths([object]$root) {\n";
@@ -93418,28 +93404,17 @@ static void reg_updater() {
              f << "  }\n";
              f << "  return $paths\n";
              f << "}\n";
-             f << "function Register-GreenChildManagedFiles([object]$root, [string[]]$paths) {\n";
-             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
-             f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
-             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $sourceRoot $relative) $sourceRoot $targetRoot ([string]$root.source) }\n";
-             f << "}\n";
              f << "function Copy-GreenChildManagedFilesChecked([object]$root, [string[]]$paths) {\n";
              f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
              f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
-             f << "  if (!(Test-Path -LiteralPath $targetRoot -PathType Container)) { New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null }\n";
              f << "  foreach ($relative in $paths) {\n";
              f << "    $source = Join-Path $sourceRoot $relative\n";
-             f << "    $target = Join-Path $targetRoot $relative\n";
-             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('green-child target is a directory but package entry is a file: ' + $root.source + '/' + $relative) }\n";
-             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
-             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
-             f << "    Assert-FileMatch $source $target (([string]$root.source) + ' managed file ' + $relative)\n";
+             f << "    Copy-YmccManagedFile $source $targetRoot $relative ([string]$root.source)\n";
              f << "  }\n";
              f << "}\n";
-             f << "function Register-AdditionalLayoutRootsForRollback {\n";
+             f << "function Test-AdditionalLayoutRootPayloads {\n";
              f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
-             f << "    if ([string]$root.mode -eq 'green-child') { $root.managedPaths = @(Get-GreenChildManagedPaths $root); Register-GreenChildManagedFiles $root $root.managedPaths }\n";
-             f << "    else { Register-TreeForRollback (Join-Path $staging $root.source) (Join-Path $installRoot $root.target) $root.source @() }\n";
+             f << "    if ([string]$root.mode -eq 'green-child') { $root.managedPaths = @(Get-GreenChildManagedPaths $root) }\n";
              f << "  }\n";
              f << "}\n";
              f << "function Copy-AdditionalLayoutRootsChecked {\n";
@@ -93448,8 +93423,7 @@ static void reg_updater() {
              f << "    else {\n";
              f << "      $source = Join-Path $staging $root.source\n";
              f << "      $target = Join-Path $installRoot $root.target\n";
-             f << "      if (!(Test-Path -LiteralPath $target -PathType Container)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }\n";
-             f << "      Copy-TreeChecked $source $target @()\n";
+             f << "      Copy-YmccManagedTree $source $target ([string]$root.source) @()\n";
              f << "    }\n";
              f << "  }\n";
              f << "}\n";
@@ -93466,7 +93440,7 @@ static void reg_updater() {
              f << "  try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { }\n";
              f << "  $deadline = (Get-Date).AddSeconds($customHealthChildExitTimeoutSeconds)\n";
              f << "  while ($true) { try { if ($process.HasExited) { return } } catch { return }; if ((Get-Date) -ge $deadline) { break }; Start-Sleep -Milliseconds 100 }\n";
-             f << "  try { if (!$process.HasExited) { $null=$process.Handle; $process.Kill(); $process.WaitForExit(15000) } } catch { throw ('CustomSteamLibrary health process did not exit: ' + $_.Exception.Message) }\n";
+             f << "  try { if (!$process.HasExited) { $null=$process.Handle; $process.Kill(); if (!$process.WaitForExit(15000)) { throw 'force-close timed out' } } } catch { throw ('CustomSteamLibrary health process did not exit: ' + $_.Exception.Message) }\n";
              f << "}\n";
              f << "function Invoke-CustomSteamLibraryHealthCheck {\n";
              f << "  if (!$customRootPresent) { return }\n";
@@ -93481,7 +93455,7 @@ static void reg_updater() {
              f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  $healthProcess = $null\n";
              f << "  try {\n";
-             f << "    $healthArguments = @('--input-owner=host', '--update-health-only', '--update-health-handshake', ('\"' + $customHealthHandshakePath + '\"'), '--update-health-handshake-token', $healthToken, '--update-health-package-version', $expectedChildPackageVersion)\n";
+             f << "    $healthArguments = @('--input-owner=host', '--update-health-only', '--update-health-isolated', '--update-health-handshake', ('\"' + $customHealthHandshakePath + '\"'), '--update-health-handshake-token', $healthToken, '--update-health-package-version', $expectedChildPackageVersion)\n";
              f << "    $healthProcess = Start-Process -FilePath $childExe -WorkingDirectory $customSteamLibraryDir -ArgumentList $healthArguments -PassThru -WindowStyle Hidden\n";
              f << "    if (!$healthProcess) { throw 'failed to launch CustomSteamLibrary health process' }\n";
              f << "    $deadline = (Get-Date).AddSeconds($customHealthTimeoutSeconds)\n";
@@ -93489,7 +93463,7 @@ static void reg_updater() {
              f << "    while ((Get-Date) -lt $deadline) {\n";
              f << "      if (Test-Path -LiteralPath $customHealthHandshakePath -PathType Leaf) {\n";
              f << "        try {\n";
-             f << "          $marker = Get-Content -LiteralPath $customHealthHandshakePath -Raw -ErrorAction Stop | ConvertFrom-Json\n";
+             f << "          $marker = Get-Content -LiteralPath $customHealthHandshakePath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json\n";
              f << "          if ([string]$marker.phase -eq 'failed') { throw ('CustomSteamLibrary startup health failed: ' + [string]$marker.error) }\n";
              f << "          if ([string]$marker.phase -eq 'ready') {\n";
              f << "            $markerPid = [int]$marker.pid\n";
@@ -93500,7 +93474,8 @@ static void reg_updater() {
              f << "            if ([string]$marker.packageId -ne 'custom-steam-library' -or [string]$marker.packageType -ne 'green-child' -or [string]$marker.packageVersion -ne $expectedChildPackageVersion) { throw 'CustomSteamLibrary health marker package identity mismatch' }\n";
              f << "            if ([string]$marker.expectedPackageVersion -ne $expectedChildPackageVersion -or [string]$marker.inputOwner -ne 'host' -or [bool]$marker.healthOnly -ne $true -or [int]$marker.protocol -ne 1) { throw 'CustomSteamLibrary health marker startup mode mismatch' }\n";
              f << "            if ([bool]$marker.window -ne $true -or [bool]$marker.worker -ne $true -or [bool]$marker.workspaceUi -ne $true -or [bool]$marker.webview2 -ne $true) { throw 'CustomSteamLibrary health marker runtime readiness is incomplete' }\n";
-             f << "            if ([bool]$marker.dataRootWritable -ne $true -or !(Test-CustomSteamLibraryDataRoot ([string]$marker.dataRoot))) { throw 'CustomSteamLibrary health marker data root is invalid' }\n";
+             f << "            $isolatedRoot = $marker.dataRootKind -ceq 'isolated' -and [string]$marker.dataRoot -ieq ($customHealthHandshakePath + '.profile')\n";
+             f << "            if ([bool]$marker.dataRootWritable -ne $true -or (!$isolatedRoot -and !(Test-CustomSteamLibraryDataRoot ([string]$marker.dataRoot)))) { throw 'CustomSteamLibrary health marker data root is invalid' }\n";
              f << "            $ready = $true\n";
              f << "            break\n";
              f << "          }\n";
@@ -93529,8 +93504,7 @@ static void reg_updater() {
              f << "function Stop-AdditionalLayoutRootProcesses {\n";
              f << "  Stop-ResidentProcesses { @(Get-AdditionalLayoutRootProcesses) } 'declared update root process'\n";
              f << "}\n";
-             // 共享关闭原语：先温和 CloseMainWindow，宽限期内未退出则（升级器
-             // 已提权）Stop-Process -Force 强杀并等待；仍无法关闭才抛错。
+             // Grace and force windows are shared by the entire process group.
              f << "function Stop-ResidentProcesses([scriptblock]$Resolve, [string]$Label) {\n";
              f << "  $gracefulDeadline = (Get-Date).AddSeconds($gracefulStopSeconds)\n";
              f << "  foreach ($process in @(& $Resolve)) { try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { } }\n";
@@ -93540,7 +93514,7 @@ static void reg_updater() {
              f << "    if ((Get-Date) -ge $gracefulDeadline) { break }\n";
              f << "    Start-Sleep -Milliseconds 250\n";
              f << "  }\n";
-             f << "  foreach ($process in @(& $Resolve)) { try { if (!$process.HasExited) { $null=$process.Handle; $process.Kill(); $process.WaitForExit(15000) | Out-Null } } catch { } }\n";
+             f << "  foreach ($process in @(& $Resolve)) { try { if (!$process.HasExited) { $null=$process.Handle; $process.Kill() } } catch { } }\n";
              f << "  $forceDeadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
              f << "  while ($true) {\n";
              f << "    $active = @(& $Resolve)\n";
@@ -93608,76 +93582,31 @@ static void reg_updater() {
             f << "    Assert-FileMatch $item.FullName (Join-Path $destination $relative) ($label + '\\' + $relative)\n";
             f << "  }\n";
             f << "}\n";
-            f << "function Register-FileForRollback([string]$sourceFile, [string]$sourceRoot, [string]$targetRoot, [string]$bucket) {\n";
-            f << "  $relative = $sourceFile.Substring($sourceRoot.Length).TrimStart('\\')\n";
-            f << "  if ([string]::IsNullOrWhiteSpace($relative)) { throw 'rollback relative path is empty' }\n";
-            f << "  $target = Join-Path $targetRoot $relative\n";
-            f << "  if (Test-Path -LiteralPath $target -PathType Container) { throw ('update target is a directory but package entry is a file: ' + $target) }\n";
-            f << "  if (Test-Path -LiteralPath $target -PathType Leaf) {\n";
-            f << "    $backupFile = Join-Path (Join-Path $rollbackFiles $bucket) $relative\n";
-            f << "    $backupParent = Split-Path -Parent $backupFile\n";
-            f << "    if (!(Test-Path -LiteralPath $backupParent -PathType Container)) { New-Item -ItemType Directory -Path $backupParent -Force | Out-Null }\n";
-            f << "    Copy-Item -LiteralPath $target -Destination $backupFile -Force -ErrorAction Stop\n";
-            f << "    Assert-FileMatch $target $backupFile ('rollback backup ' + $bucket + '\\' + $relative)\n";
-            f << "  } else {\n";
-            f << "    $rollbackAddedFiles.Add($target) | Out-Null\n";
-            f << "  }\n";
-            f << "}\n";
-            f << "function Register-TreeForRollback([string]$sourceRoot, [string]$targetRoot, [string]$bucket, [string[]]$excludedTopLevel) {\n";
-            f << "  foreach ($item in Get-ChildItem -LiteralPath $sourceRoot -Recurse -File) {\n";
-            f << "    $relative = $item.FullName.Substring($sourceRoot.Length).TrimStart('\\')\n";
-            f << "    $topLevel = ($relative -split '\\\\', 2)[0]\n";
-            f << "    if ($topLevel -in $excludedTopLevel) { continue }\n";
-            f << "    if ($relative -match '^feature-assets\\\\(?:gyro-motion|virtual-gamepad)(?:\\\\|$)') { continue }\n";
-            f << "    Register-FileForRollback $item.FullName $sourceRoot $targetRoot $bucket\n";
-            f << "  }\n";
-            f << "}\n";
-            f << "function Restore-OrdinaryFiles {\n";
-            f << "  if (!$ordinaryRollbackPrepared) { return }\n";
-            f << "  for ($index = $rollbackAddedFiles.Count - 1; $index -ge 0; $index--) {\n";
-            f << "    $added = $rollbackAddedFiles[$index]\n";
-            f << "    if (Test-Path -LiteralPath $added -PathType Leaf) { Remove-Item -LiteralPath $added -Force -ErrorAction Stop }\n";
-            f << "    elseif (Test-Path -LiteralPath $added) { throw ('rollback expected an added file but found another item: ' + $added) }\n";
-            f << "  }\n";
-            f << "  $programBackup = Join-Path $rollbackFiles 'YeManCC'\n";
-            f << "  if (Test-Path -LiteralPath $programBackup -PathType Container) { Copy-TreeChecked $programBackup $exeDir @() }\n";
-             f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
-             f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
-              f << "  $customSteamLibraryBackup = Join-Path $rollbackFiles 'CustomSteamLibrary'\n";
-              f << "  if (Test-Path -LiteralPath $customSteamLibraryBackup -PathType Container) { Copy-TreeChecked $customSteamLibraryBackup $customSteamLibraryDir @() }\n";
-             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
-             f << "    $rootBackup = Join-Path $rollbackFiles $root.source\n";
-             f << "    $rootTarget = Join-Path $installRoot $root.target\n";
-             f << "    if (Test-Path -LiteralPath $rootBackup -PathType Container) { Copy-TreeChecked $rootBackup $rootTarget @() }\n";
-             f << "  }\n";
-              f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
-            f << "  if (Test-Path -LiteralPath $supportBackup -PathType Leaf) { Copy-Item -LiteralPath $supportBackup -Destination $supportPath -Force -ErrorAction Stop }\n";
-            f << "  foreach ($backupFile in Get-ChildItem -LiteralPath $rollbackFiles -Recurse -File) {\n";
-            f << "    $relative = $backupFile.FullName.Substring($rollbackFiles.Length).TrimStart('\\')\n";
-            f << "    if ($relative -eq 'Support') { $target = $supportPath }\n";
-             f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
-              f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
-              f << "    elseif ($relative.StartsWith('CustomSteamLibrary\\')) { $target = Join-Path $customSteamLibraryDir $relative.Substring('CustomSteamLibrary\\'.Length) }\n";
-             f << "    else {\n";
-             f << "      $bucket = ($relative -split '\\\\', 2)[0]\n";
-             f << "      $root = @($layoutRoots | Where-Object { $_.source -ieq $bucket } | Select-Object -First 1)\n";
-             f << "      if (!$root) { throw ('unknown rollback bucket: ' + $relative) }\n";
-             f << "      $target = Join-Path (Join-Path $installRoot $root.target) $relative.Substring($bucket.Length + 1)\n";
-             f << "    }\n";
-            f << "    Assert-FileMatch $backupFile.FullName $target ('rollback restored ' + $relative)\n";
-            f << "  }\n";
-            f << "}\n";
+              f << "function Undo-YmccTdpUpdate {\n";
+              f << "  if (!$tdpCommitted -and !$tdpOriginalMoved) { return }\n";
+              f << "  $null=Resolve-YmccDeckyPath $pcDir 'pawnio'; $null=Resolve-YmccDeckyPath $tdpStage; $null=Resolve-YmccDeckyPath $tdpBackup\n";
+              f << "  if ($tdpCommitted) { Rename-DirectoryChecked $tdpTarget $tdpStage 'PawnIO unpublish'; $script:tdpCommitted=$false }\n";
+              f << "  if ($tdpOriginalMoved) {\n";
+              f << "    if ([IO.Directory]::Exists($tdpBackup)) { Rename-DirectoryChecked $tdpBackup $tdpTarget 'PawnIO rollback' } else { [IO.File]::Move($tdpBackup,$tdpTarget) }\n";
+              f << "    $script:tdpOriginalMoved=$false\n";
+              f << "  }\n";
+              f << "}\n";
               f << "try {\n";
-            f << "  $moduleLease = Enter-YmccModuleMaintenance\n";
+            f << "  $moduleLease = Enter-YmccModuleMaintenance 15000\n";
+            f << "  Set-YmccInstallCheckpoint 'prepare-journal'\n";
             f << "  Set-YmccInstallJournal 'preparing'\n";
             f << "  Set-UpdateProgress 'installing' '正在退出 OptiscalerClient 与 LosslessScaling 插帧工具'\n";
-            f << "  Stop-YmccUpdateHookTools $updateHookToolPaths\n";
+            f << "  Set-YmccInstallCheckpoint 'stop-hooks'\n";
+            f << "  try { Stop-YmccUpdateHookTools $updateHookToolPaths } catch { Add-YmccInstallIssue 'stop-hooks' $_ }\n";
+            f << "  Set-YmccInstallCheckpoint 'claim-install'\n";
             f << "  Set-YmccInstallJournal 'applying'\n";
-            f << "  $parentExitMode = Stop-YmccUpdaterParent $parentPid $exePath $parentCreationFileTime\n";
+            f << "  Set-YmccInstallCheckpoint 'parent-exit'\n";
+            f << "  try { $parentExitMode = Stop-YmccUpdaterParent $parentPid $exePath $parentCreationFileTime } catch { Add-YmccInstallIssue 'parent-exit' $_ }\n";
+            f << "  Set-YmccInstallCheckpoint 'verify-layout'\n";
               f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
               // Incoming package identity: verify before mutating any installed root.
               f << "  if (Test-Path -LiteralPath $layoutManifestPath -PathType Leaf) { $incomingLayout = Get-Content -LiteralPath $layoutManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json; $deckyManaged = $incomingLayout.deckyManaged } else { $deckyManaged = Get-Content -LiteralPath (Join-Path $programSource 'decky-package.json') -Raw -Encoding UTF8 | ConvertFrom-Json }\n";
-              f << "  $deckyPlan = Get-YmccDeckyPlan (Join-Path $powerControlSource 'decky') (Join-Path $pcDir 'decky') $deckyManaged (Join-Path $exeDir 'decky-package.json')\n";
+              f << "  Set-YmccInstallCheckpoint 'verify-payloads'\n";
              f << "  if (Test-Path -LiteralPath (Join-Path $powerControlSource 'fan-host')) { throw 'Legacy fan-host must not ship in the V2 update lane' }\n";
 
               f << "  if (Test-Path -LiteralPath $fanHostSource -PathType Container) { Assert-FanHostV2Payload }\n";
@@ -93693,86 +93622,87 @@ static void reg_updater() {
               f << "  $customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
               f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
               f << "  $customRootPresent = $nestedCustomPresent -or $legacyCustomPresent\n";
-              f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
-              f << "  Stop-AdditionalLayoutRootProcesses\n";
-              f << "  Stop-ResidentProcesses { @(Get-ResidentUpdaterProcesses) } 'resident YeMan runtime process'\n";
+              f << "  if ($customRootPresent) { try { Stop-CustomSteamLibraryProcesses } catch { Add-YmccInstallIssue 'stop-child' $_ } }\n";
+              f << "  try { Stop-AdditionalLayoutRootProcesses } catch { Add-YmccInstallIssue 'stop-layout' $_ }\n";
+             f << "  Set-YmccInstallCheckpoint 'stop-residents'\n";
+             f << "  try { Stop-ResidentProcesses { @(Get-ResidentUpdaterProcesses) } 'resident YeMan runtime process' } catch { Add-YmccInstallIssue 'stop-residents' $_ }\n";
+             f << "  Set-YmccInstallCheckpoint 'plan-input'\n";
              f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
              f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
              f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
               f << "  $moduleManifestPath = Join-Path $programSource 'module-package.json'\n";
              f << "  if (!(Test-Path -LiteralPath $moduleManifestPath -PathType Leaf) -or (Get-Item -LiteralPath $moduleManifestPath).Length -gt 4194304) { throw 'MODULE_MANIFEST_MISSING_OR_TOO_LARGE' }\n";
              f << "  $moduleManifest = Get-Content -LiteralPath $moduleManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json\n";
-             f << "  $modulePlan = Get-YmccModulePlan $powerControlSource $pcDir $moduleManifest $version\n";
+             f << "  Assert-YmccModuleManifest $moduleManifest $version\n";
+             f << "  Assert-YmccDeckyManifest $deckyManaged\n";
              f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
-              f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
               f << "  if ($customRootPresent) { $customManagedPaths = @(Get-CustomManagedPaths) }\n";
-              f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html','CustomSteamLibrary')\n";
-              f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
-              f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio','fan-host-v2','decky','handheldcompanion-runtime','ymcc-shared-runtime')\n";
-              f << "  if ($playerBlacklistExisted -and !(Test-Path -LiteralPath $playerBlacklistRollback -PathType Leaf)) { New-Item -ItemType Directory -Path (Split-Path -Parent $playerBlacklistRollback) -Force | Out-Null; Copy-Item -LiteralPath $playerBlacklistPath -Destination $playerBlacklistRollback -Force -ErrorAction Stop; Assert-FileMatch $playerBlacklistPath $playerBlacklistRollback 'player blacklist backup' }\n";
-              f << "  if ($customRootPresent) { Register-CustomManagedFilesForRollback $customManagedPaths }\n";
-              f << "  Register-AdditionalLayoutRootsForRollback\n";
-            f << "  if (Test-Path -LiteralPath $supportPath -PathType Leaf) {\n";
-            f << "    Copy-Item -LiteralPath $supportPath -Destination (Join-Path $rollbackFiles 'Support') -Force -ErrorAction Stop\n";
-            f << "    Assert-FileMatch $supportPath (Join-Path $rollbackFiles 'Support') 'rollback backup support page'\n";
-            f << "  } else {\n";
-            f << "    $rollbackAddedFiles.Add($supportPath) | Out-Null\n";
-            f << "  }\n";
+              f << "  Test-AdditionalLayoutRootPayloads\n";
+              f << "  if (!(Test-Path -LiteralPath $systemBlacklistSource -PathType Leaf)) { throw 'system blacklist missing from update package' }\n";
+              f << "  if (!@(Get-ChildItem -LiteralPath (Join-Path $tdpSource '_internal') -Filter 'python*.dll' -File).Count) { throw 'TDP runtime has no Python DLL' }\n";
             f << "  $ordinaryRollbackPrepared = $true\n";
-              f << "  Write-Utf8Atomic $state ('{\"phase\":\"copying\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
+             f << "  Set-YmccInstallCheckpoint 'copy-files'\n";
+              f << "  Write-YmccInstallState 'copying'\n";
              // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
              // committed as one directory transaction below.
               f << "  if ($customRootPresent) { Copy-CustomManagedFilesChecked $customManagedPaths }\n";
               f << "  Copy-AdditionalLayoutRootsChecked\n";
-             f << "  if (!(Test-Path -LiteralPath $pcDir -PathType Container)) { New-Item -ItemType Directory -Path $pcDir -Force | Out-Null }\n";
-             f << "  $gyroMotionSource = Join-Path $powerControlSource 'feature-assets\\gyro-motion'\n";
-              f << "  $virtualGamepadSource = Join-Path $powerControlSource 'feature-assets\\virtual-gamepad'\n";
-              f << "  Copy-TreeChecked $powerControlSource $pcDir @('/XD', $tdpSource, $gyroMotionSource, $virtualGamepadSource, $fanHostSource, (Join-Path $powerControlSource 'fan-host'), (Join-Path $powerControlSource 'decky'), (Join-Path $powerControlSource 'handheldcompanion-runtime'), (Join-Path $powerControlSource 'ymcc-shared-runtime'))\n";
+              f << "  $powerControlExclusions=@('pawnio','fan-host','fan-host-v2','decky','handheldcompanion-runtime','ymcc-shared-runtime','feature-assets\\gyro-motion','feature-assets\\virtual-gamepad')\n";
+              f << "  if ($playerBlacklistExisted) { $powerControlExclusions += 'Sleep\\player-blacklist.txt' }\n";
+              f << "  Copy-YmccManagedTree $powerControlSource $pcDir 'PowerControl' $powerControlExclusions\n";
               // HC uses only the incoming immutable tree. Never restore an old
               // runtime over a newer derivative after another module fails.
               f << "  if ($fanHostPackagePresent) {\n";
+               f << "    Set-YmccInstallCheckpoint 'apply-fan-hc'\n";
               f << "    $immutablePayloadStarted=$true\n";
-              f << "    $immutablePayload=Sync-YmccImmutableFanPayload $fanHostRuntimeSource $fanHostSource $pcDir\n";
-              f << "    $immutablePayloadComplete=$true\n";
-              f << "    Remove-YmccSupersededHcRuntimes $pcDir $immutablePayload.runtimeId\n";
+              f << "    try { $immutablePayload=Sync-YmccImmutableFanPayload $fanHostRuntimeSource $fanHostSource $pcDir; $immutablePayloadComplete=$true } catch { $immutableRepairPending=$true; Add-YmccInstallIssue 'apply-fan-hc' $_ }\n";
+              f << "    if ($immutablePayloadComplete) { try { Remove-YmccSupersededHcRuntimes $pcDir $immutablePayload.runtimeId } catch { Add-YmccInstallIssue 'cleanup-old-hc' $_ } }\n";
               f << "  }\n";
-              f << "  $moduleTransaction = Install-YmccModulePackage $modulePlan (Join-Path $rollbackRoot 'InputModuleSnapshot')\n";
-              f << "  $deckyTransaction = Install-YmccDeckyPackage $deckyPlan (Join-Path $rollbackRoot 'DeckySnapshot')\n";
-             // system-blacklist.txt is a shipped rule and is updated with the
-             // package. player-blacklist.txt is user-owned and must survive a
-             // successful upgrade byte-for-byte when it already exists.
-             f << "  if (!(Test-Path -LiteralPath $systemBlacklistSource -PathType Leaf)) { throw 'system blacklist missing from update package' }\n";
-             f << "  Copy-Item -LiteralPath $systemBlacklistSource -Destination $systemBlacklistPath -Force -ErrorAction Stop\n";
-             f << "  Assert-FileMatch $systemBlacklistSource $systemBlacklistPath 'system blacklist update'\n";
-             f << "  if ($playerBlacklistExisted) {\n";
-             f << "    if (!(Test-Path -LiteralPath $playerBlacklistRollback -PathType Leaf)) { throw 'player blacklist preservation backup missing' }\n";
-             f << "    Copy-Item -LiteralPath $playerBlacklistRollback -Destination $playerBlacklistPath -Force -ErrorAction Stop\n";
-             f << "    Assert-FileMatch $playerBlacklistRollback $playerBlacklistPath 'player blacklist preservation'\n";
-             f << "  }\n";
-             f << "  $sourcePython = @(Get-ChildItem -LiteralPath (Join-Path $tdpSource '_internal') -Filter 'python*.dll' -File | ForEach-Object Name)\n";
-            f << "  if ($sourcePython.Count -eq 0) { throw 'TDP runtime has no Python DLL' }\n";
+               f << "  Set-YmccInstallCheckpoint 'apply-input'\n";
+               f << "  try { $modulePlan = Get-YmccModulePlan $powerControlSource $pcDir $moduleManifest $version; $moduleTransaction = Install-YmccModulePackage $modulePlan (Join-Path $rollbackRoot 'InputModuleSnapshot') } catch { Add-YmccInstallIssue 'apply-input' $_ }\n";
+               f << "  Set-YmccInstallCheckpoint 'plan-decky'\n";
+              f << "  try {\n";
+              f << "    $deckyPlan = Get-YmccDeckyPlan (Join-Path $powerControlSource 'decky') (Join-Path $pcDir 'decky') $deckyManaged (Join-Path $exeDir 'decky-package.json') -PreparationLease ([ref]$deckyPreparationLease)\n";
+              f << "    Set-YmccInstallCheckpoint 'apply-decky'\n";
+              f << "    $deckyTransaction = Install-YmccDeckyPackage $deckyPlan (Join-Path $rollbackRoot 'DeckySnapshot') -PreparationLease $deckyPreparationLease\n";
+              f << "  } catch { $deckyResumeArgs=@(); Add-YmccInstallIssue $script:ymccInstallStep $_ } finally { if ($deckyPreparationLease) { try { $deckyPreparationLease.Stop() } catch { Add-YmccInstallIssue 'decky-lease' $_ }; $deckyPreparationLease = $null } }\n";
+             f << "  Set-YmccInstallCheckpoint 'apply-tdp'\n";
+            f << "  try {\n";
+            f << "  $null=Resolve-YmccDeckyPath $pcDir 'pawnio'; $null=Resolve-YmccDeckyPath $tdpStage; $null=Resolve-YmccDeckyPath $tdpBackup\n";
             f << "  Copy-TreeChecked $tdpSource $tdpStage @('/PURGE')\n";
             f << "  Assert-TreeMatch $tdpSource $tdpStage 'YeManTdpCtl.runtime.stage'\n";
-            f << "  if (Test-Path -LiteralPath $tdpTarget -PathType Container) { Rename-DirectoryChecked $tdpTarget $tdpBackup 'PawnIO backup'; $tdpOriginalMoved = $true }\n";
+            f << "  if ([IO.Directory]::Exists($tdpTarget)) { Rename-DirectoryChecked $tdpTarget $tdpBackup 'PawnIO backup'; $tdpOriginalMoved=$true }\n";
+            f << "  elseif ([IO.File]::Exists($tdpTarget)) { [IO.File]::Move($tdpTarget,$tdpBackup); $tdpOriginalMoved=$true }\n";
             f << "  Rename-DirectoryChecked $tdpStage $tdpTarget 'PawnIO commit'\n";
             f << "  $tdpCommitted = $true\n";
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
-            f << "  Write-Utf8Atomic $state ('{\"phase\":\"tdp-verified\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
-            f << "  Install-YmccUpdateExecutable\n";
-            f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html','/XD',(Join-Path $programSource 'CustomSteamLibrary'))\n";
-            f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
-            f << "  if ($customRootPresent) { Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; Invoke-CustomSteamLibraryHealthCheck }\n";
+            f << "  Write-YmccInstallState 'tdp-verified'\n";
+            f << "  } catch { Add-YmccInstallIssue 'apply-tdp' $_; try { Undo-YmccTdpUpdate } catch { Add-YmccInstallIssue 'rollback-tdp' $_ } }\n";
+             f << "  Set-YmccInstallCheckpoint 'replace-exe'\n";
+             f << "  Copy-YmccManagedFile $packageExe $exeDir 'YeManCC.exe' 'YeManCC' -Core\n";
+             f << "  Set-YmccInstallCheckpoint 'copy-program'\n";
+            f << "  Copy-YmccManagedTree $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html','CustomSteamLibrary') -Core\n";
+            f << "  Copy-YmccManagedFile (Join-Path $programSource 'YeMan-Support.html') (Split-Path -Parent $supportPath) (Split-Path -Leaf $supportPath) 'Support'\n";
+             f << "  if ($customRootPresent -and !$script:ymccInstallIssues['CustomSteamLibrary']) { Set-YmccInstallCheckpoint 'child-health'; Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; try { Invoke-CustomSteamLibraryHealthCheck } catch { Add-YmccInstallIssue 'child-health' $_ } }\n";
+             f << "  Set-YmccInstallCheckpoint 'prepare-launch'\n";
+             f << "  if ($script:ymccCoreWriteFailures) { throw ('UPDATE_CORE_FILES_INCOMPLETE: '+$script:ymccCoreWriteFailures) }\n";
             f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
-              f << "  Write-Utf8Atomic $state ('{\"phase\":\"launching\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
-             f << "  $newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList (@('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) + $deckyResumeArgs) -PassThru\n";
+              f << "  Write-YmccInstallState 'launching'\n";
+              f << "  Set-YmccInstallCheckpoint 'launch-new'\n";
+              f << "  $newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList (@('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) + $deckyResumeArgs) -PassThru\n";
+             f << "  Set-YmccInstallCheckpoint 'await-handshake'\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
             f << "  $handshakeOk = $false\n";
             f << "  while ((Get-Date) -lt $handshakeDeadline) {\n";
-            f << "    if ($newProcess.HasExited) { break }\n";
+             f << "    if ($newProcess.HasExited) {\n";
+             f << "      $script:ymccStartupFailure='startup-exited'\n";
+             f << "      try { $script:ymccStartupExitCode=$newProcess.ExitCode } catch { }\n";
+             f << "      break\n";
+             f << "    }\n";
             f << "    if (Test-Path -LiteralPath $handshakePath -PathType Leaf) {\n";
             f << "      try {\n";
-            f << "        $marker = Get-Content -LiteralPath $handshakePath -Raw -ErrorAction Stop | ConvertFrom-Json\n";
+            f << "        $marker = Get-Content -LiteralPath $handshakePath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json\n";
             f << "        $markerPid = [int]$marker.pid\n";
             f << "        $markerProcess = Get-Process -Id $markerPid -ErrorAction SilentlyContinue\n";
             f << "        if ($marker.phase -eq 'started' -and [string]$marker.token -eq $handshakeToken -and $markerPid -eq $newProcess.Id -and $markerProcess) { $handshakeOk = $true; break }\n";
@@ -93780,13 +93710,21 @@ static void reg_updater() {
             f << "    }\n";
             f << "    Start-Sleep -Milliseconds 250\n";
             f << "  }\n";
-            f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
-             f << "  Write-Utf8Atomic $state ('{\"phase\":\"committed\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"pid\":' + $newProcess.Id + '}')\n";
+             f << "  if (!$handshakeOk) {\n";
+             f << "    if (!$script:ymccStartupFailure) { $script:ymccStartupFailure='handshake-timeout' }\n";
+             f << "    throw 'new YeManCC process did not complete startup handshake'\n";
+             f << "  }\n";
+             f << "  Set-YmccInstallCheckpoint 'commit'\n";
             f << "  Set-YmccInstallJournal 'committed'\n";
             f << "  $updateCommitted = $true\n";
-            f << "  Set-UpdateProgress 'completed' '更新已完成'\n";
+             f << "  Write-YmccInstallState 'committed' $newProcess.Id\n";
+             f << "  Write-YmccInstallTrace 'committed'\n";
+            f << "  if ($script:ymccInstallIssues.Count) { Set-UpdateProgress 'completed' ('主程序已更新，有未完成项：' + ($script:ymccInstallIssues.Keys -join '、')) } else { Set-UpdateProgress 'completed' '更新已完成' }\n";
             f << "} catch {\n";
             f << "  $installError = $_.Exception.Message\n";
+             f << "  $traceFailure=$_\n";
+             f << "  if (!$updateCommitted) { Write-YmccInstallTrace 'failed' $traceFailure 'pending' }\n";
+            f << "  if ($deckyPreparationLease) { $deckyPreparationLease.Stop(); $deckyPreparationLease = $null }\n";
             f << "  $rollbackError = $null\n";
             // Reuse the authenticated, bounded process stop before touching rollback files.
             // A live/unidentified new child keeps the incoming payload and recovery evidence.
@@ -93806,34 +93744,34 @@ static void reg_updater() {
               f << "      catch { $installError += '; old runtime cleanup pending: '+$_.Exception.Message }\n";
               f << "    }\n";
               f << "  }\n";
-            f << "  $rollbackAttempted = $rollbackChildExitConfirmed -and (($null -ne $moduleTransaction) -or ($null -ne $deckyTransaction) -or $ordinaryRollbackPrepared -or $tdpCommitted -or $tdpOriginalMoved -or (Test-Path -LiteralPath $backup))\n";
+            f << "  $rollbackAttempted = $rollbackChildExitConfirmed -and (($null -ne $moduleTransaction) -or ($null -ne $deckyTransaction) -or $ordinaryRollbackPrepared -or $tdpCommitted -or $tdpOriginalMoved)\n";
 
             f << "  if ($rollbackChildExitConfirmed -and !$updateCommitted -and ($tdpCommitted -or $tdpOriginalMoved)) {\n";
-            f << "    try {\n";
-            f << "      if (Test-Path -LiteralPath $tdpTarget) { Remove-Item -LiteralPath $tdpTarget -Recurse -Force -ErrorAction Stop }\n";
-            f << "      if (Test-Path -LiteralPath $tdpBackup -PathType Container) { Rename-DirectoryChecked $tdpBackup $tdpTarget 'PawnIO rollback' }\n";
-            f << "      elseif ($tdpOriginalMoved) { throw 'PawnIO rollback directory missing' }\n";
-            f << "    } catch { $rollbackError = $_.Exception.Message }\n";
+            f << "    try { Undo-YmccTdpUpdate } catch { $rollbackError = $_.Exception.Message }\n";
             f << "  }\n";
             f << "  if ($rollbackChildExitConfirmed -and !$updateCommitted) {\n";
             f << "    try { Restore-YmccDeckyPackage $deckyTransaction } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; Decky rollback: ' + $_.Exception.Message } }\n";
             f << "    try { if ($moduleTransaction) { Restore-YmccModulePackage $moduleTransaction } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; Input module rollback: ' + $_.Exception.Message } }\n";
             f << "    try { Restore-OrdinaryFiles } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; ordinary rollback: ' + $_.Exception.Message } }\n";
-            f << "    try { Restore-YmccUpdateExecutable } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
              f << "    if (!$rollbackError) { $rollbackSucceeded = $true }\n";
              f << "  }\n";
              f << "  $errorMessage = $installError\n";
+             f << "  $traceRollback = if (!$rollbackChildExitConfirmed) { 'blocked-child' } elseif ($rollbackError) { 'failed' } elseif ($rollbackAttempted -and $rollbackSucceeded) { 'succeeded' } else { 'not-required' }\n";
+             f << "  if (!$updateCommitted) { Write-YmccInstallTrace 'failed' $traceFailure $traceRollback }\n";
              f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
              f << "  try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
              f << "  $failurePhase = if ($rollbackSucceeded) { 'rolled-back' } else { 'failed' }\n";
              f << "  if (!$updateCommitted) { try { Set-YmccInstallJournal 'repair-required' } catch { $errorMessage += '; recovery journal: ' + $_.Exception.Message } }\n";
              f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  if ($rollbackSucceeded -and !(Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) {\n";
+             f << "    Write-YmccInstallTrace 'failed' $traceFailure $traceRollback 'starting'\n";
              f << "    try {\n";
              f << "      if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'rolled-back executable is missing' }\n";
              f << "      $recoveryProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -PassThru\n";
              f << "      if (!$recoveryProcess) { throw 'failed to relaunch rolled-back YeManCC' }\n";
              f << "    } catch { $recoveryError = $_.Exception.Message }\n";
+             f << "    $traceRelaunch = if ($recoveryError) { 'failed' } else { 'started' }\n";
+             f << "    Write-YmccInstallTrace 'failed' $traceFailure $traceRollback $traceRelaunch\n";
              f << "  }\n";
              f << "  if ($recoveryError) {\n";
              f << "    $errorMessage += '; recovery launch: ' + $recoveryError\n";
@@ -93842,24 +93780,26 @@ static void reg_updater() {
              f << "  }\n";
             f << "} finally {\n";
             f << "  try {\n";
-            f << "  Remove-Item -LiteralPath $tdpStage -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "  try { $safeStage=Resolve-YmccDeckyPath $pcDir ([IO.Path]::GetFileName($tdpStage)); Remove-Item -LiteralPath $safeStage -Recurse -Force -ErrorAction SilentlyContinue } catch { }\n";
             f << "  if ($updateCommitted) {\n";
-            f << "    foreach ($cleanupPath in @($backup, $tdpBackup, $rollbackRoot)) {\n";
+            f << "    if ($tdpCommitted -and $tdpOriginalMoved -and !$script:ymccInstallIssues['rollback-tdp']) { try { $safeBackup=Resolve-YmccDeckyPath $pcDir ([IO.Path]::GetFileName($tdpBackup)); Remove-Item -LiteralPath $safeBackup -Recurse -Force -ErrorAction Stop } catch { } }\n";
+            f << "    foreach ($cleanupPath in @($rollbackRoot)) {\n";
             f << "      try { if (Test-Path -LiteralPath $cleanupPath) { Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction Stop } } catch { }\n";
             f << "    }\n";
             f << "  } elseif ($rollbackSucceeded) {\n";
-            f << "    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue\n";
-            f << "    Remove-Item -LiteralPath $tdpBackup -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  }\n";
              f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  if (($updateCommitted -or $rollbackSucceeded) -and !$immutableRepairPending -and $rollbackChildExitConfirmed) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }\n";
              f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
-             f << "  } finally { Exit-YmccModuleMaintenance $moduleLease }\n";
+             f << "  } finally {\n";
+             f << "    try { if ($deckyPreparationLease) { $deckyPreparationLease.Stop() } } finally { Exit-YmccModuleMaintenance $moduleLease }\n";
+             f << "  }\n";
              f << "}\n";
              f.flush();
-             helperScriptWritten = f.good();
+             try { helperScriptWritten = f.good() && ymcc::updaterecovery::writeProtectedFile(script, f.str()); }
+             catch (const std::exception& e) { failInstall(e.what(), "无法写入受保护的安装辅助脚本"); }
         }
         if (!helperScriptWritten || !fspath::is_regular_file(script))
             failInstall("Failed to write update helper script", "无法生成安装辅助脚本");
