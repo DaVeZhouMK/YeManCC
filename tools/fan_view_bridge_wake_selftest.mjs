@@ -10,6 +10,11 @@ const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/code
 const {chromium}=createRequire(path.join(runtime,'_fan-wake-chain.cjs'))('playwright');
 const out=path.resolve(process.env.YMCC_FAN_WAKE_EVIDENCE_DIR||path.join(root,'../../Build/Validation/fan-view-bridge-single-switch-20261006'));fs.mkdirSync(out,{recursive:true});
 const fixture=path.join(root,'tools/fan_view_bridge_wake_fixture.ts');
+const duplicateOnly=process.env.YMCC_FAN_WAKE_DUPLICATE_UI_ONLY==='1';
+const appSuspendObserver=duplicateOnly
+ ? fs.readFileSync(path.join(root,'src/App.vue'),'utf8').match(/function onFanPhysicalSuspending\(e: Event\): void \{[\s\S]*?\n\}/)?.[0]
+ : null;
+if(duplicateOnly)assert(appSuspendObserver,'actual root Fan suspend observer missing');
 const mocks={
   '@/bridge/fanHost':`export {fanHostLifecycle,resolveFanEntryAction} from ${JSON.stringify(fixture)};`,
   '@/bridge/topmon':'export const topMonitorData={value:{tempC:55}};',
@@ -17,7 +22,11 @@ const mocks={
   '@/bridge/settingsRepository':'export async function readSettingsSection(){return {};}export async function saveSettingsSection(){}',
 };
 const styles=[];
-const result=await build({stdin:{resolveDir:root,loader:'ts',contents:"import {createApp} from 'vue';import Page from './src/views/FanView.vue';createApp(Page).mount('#app');"},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'real-fan-chain-with-platform-boundaries',setup(b){
+const appSuspendBinding=appSuspendObserver ? `import {fanHostLifecycle} from '@/bridge/fanHost';
+import {setFanControlActive} from '@/bridge/fanFeature';
+${appSuspendObserver}
+window.addEventListener('ipc:fan.suspending',onFanPhysicalSuspending);` : '';
+const result=await build({stdin:{resolveDir:root,loader:'ts',contents:"import {createApp} from 'vue';import Page from './src/views/FanView.vue';createApp(Page).mount('#app');\n"+appSuspendBinding},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'real-fan-chain-with-platform-boundaries',setup(b){
  if(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE)b.onLoad({filter:/src[\\/]bridge[\\/]fanHost\.ts$/},a=>({contents:fs.readFileSync(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE,'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));
 
   b.onResolve({filter:/.*/},a=>a.path in mocks?{path:a.path,namespace:'ui-boundary'}:undefined);
@@ -41,7 +50,6 @@ try{
   await page.waitForFunction(()=>document.querySelector('.fan-toggle').getAttribute('aria-pressed')==='true',null,{timeout:6500});
  };
  const enabled=()=>page.waitForFunction(()=>!document.querySelector('.fan-toggle').disabled,null,{timeout:18000});
- const duplicateOnly=process.env.YMCC_FAN_WAKE_DUPLICATE_UI_ONLY==='1';
  const crossGenerationOnly=process.env.YMCC_FAN_WAKE_CROSS_GENERATION_ONLY==='1';
  if(crossGenerationOnly){
   const crossCases=[];
@@ -63,16 +71,24 @@ try{
   assert.deepEqual(crossCases.filter(x=>!x.ok).map(x=>({family:x.family,error:x.error})),[]);
  }else if(duplicateOnly){
   const duplicateResults=[];
-  const snapshot=()=>page.evaluate(()=>{const button=document.querySelector('.fan-toggle');return {text:button.textContent,pressed:button.getAttribute('aria-pressed'),busy:button.getAttribute('aria-busy'),disabled:button.disabled,notice:document.querySelector('.fan-status-banner').textContent,active:window.__chain.lastControlActive,writes:window.__chain.boundary.writes,intentRevision:window.__chain.lifecycle.controlIntentRevision,cancellationRevision:window.__chain.lifecycle.controlCancellationRevision,trace:window.__chain.trace};});
+  const snapshot=()=>page.evaluate(()=>{const button=document.querySelector('.fan-toggle');return {text:button.textContent,pressed:button.getAttribute('aria-pressed'),busy:button.getAttribute('aria-busy'),disabled:button.disabled,notice:document.querySelector('.fan-status-banner').textContent,active:window.__chain.lastControlActive,writes:window.__chain.boundary.writes,intentRevision:window.__chain.lifecycle.controlIntentRevision,cancellationRevision:window.__chain.lifecycle.controlCancellationRevision,coordinator:window.__chain.lifecycle.coordinatorSnapshot,trace:window.__chain.trace};});
   for(const family of ['ClawCG3EM','ROGAlly','GPDWin5']){
    await page.goto(url(family));await enabled();await page.locator('.fan-toggle').click();await success();await enabled();
    await page.evaluate(async()=>{await window.__chain.sleep(2);await window.__chain.autoWake();});await success();await enabled();
    const before=await snapshot();assert.equal(before.pressed,'true');assert.equal(before.disabled,false);
    await page.evaluate(()=>{const f=window.__chain,original=f.boundary.getState.bind(f.boundary);let resolve;const held=new Promise(r=>resolve=r);f.duplicateUiReads=0;f.releaseDuplicateUiRead=()=>{f.boundary.getState=original;resolve();};f.boundary.getState=async(...args)=>{f.duplicateUiReads++;await held;return original(...args);};});
-   let error=null,after,reads,clickBoundary;
+   let error=null,after,afterSuspend,reads,clickBoundary,nextSleep,nextWake;
    try{
     await page.evaluate(()=>{for(const name of ['ipc:fan.resume-ready','ipc:power.resume-ready','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:2}}));});
     after=await snapshot();reads=await page.evaluate(()=>window.__chain.duplicateUiReads);
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation:2,scope:'fan-only',resumeCatchup:false}})));
+    afterSuspend=await snapshot();
+    assert.deepEqual({pressed:afterSuspend.pressed,text:afterSuspend.text,busy:afterSuspend.busy,disabled:afterSuspend.disabled,active:afterSuspend.active,
+      phase:afterSuspend.coordinator.phase,ready:afterSuspend.coordinator.wakeReadyGeneration,intent:afterSuspend.intentRevision},
+    {pressed:'true',text:'点击关闭',busy:'false',disabled:false,active:true,phase:before.coordinator.phase,ready:2,intent:before.intentRevision},
+    'a late physical suspend for the confirmed Fan generation must preserve page and Host control');
+    await page.waitForFunction(()=>window.__chain.duplicateUiReads>0,null,{timeout:6500});
+    await page.evaluate(()=>window.__chain.releaseDuplicateUiRead());
     await page.locator('.fan-toggle').click();await page.waitForFunction(previous=>window.__chain.lifecycle.controlCancellationRevision>previous.cancellationRevision||window.__chain.lifecycle.controlIntentRevision>previous.intentRevision,before,{timeout:3000});clickBoundary=await snapshot();
     assert.equal(after.pressed,'true','a late same-generation wake must not revoke confirmed control');assert.equal(after.text,'点击关闭');assert.equal(after.busy,'false');assert.equal(after.disabled,false,'a repeated edge cannot restart button protection');
     assert.equal(after.active,true,'same-generation event cannot revoke navigation control');assert.equal(after.writes,true);assert.equal(after.cancellationRevision,before.cancellationRevision);assert.equal(after.intentRevision,before.intentRevision);
@@ -81,7 +97,21 @@ try{
     assert(clickBoundary.cancellationRevision>before.cancellationRevision,'the first click after a duplicate must cancel control, not restage ON');
    }catch(e){error=String(e);}finally{await page.evaluate(()=>window.__chain.releaseDuplicateUiRead());}
    if(!error){await enabled();assert.equal(await page.evaluate(()=>window.__chain.lifecycle.hasControlIntent),false,'the first following click must turn OFF, not restage ON');assert.equal((await ops()).filter(op=>op==='enable').length,before.trace.filter(t=>t.op==='enable').length,'OFF after duplicate events must not write another curve');}
-   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
+   if(!error&&family==='GPDWin5'){
+    await page.locator('.fan-toggle').click();await success();await enabled();
+    await page.evaluate(()=>{const f=window.__chain;f.setNative(3,'suspended');f.boundary.closed('Suspended');f.boundary.resumeGeneration=3;
+      window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation:3,scope:'fan-only'}}));});
+    nextSleep=await snapshot();
+    assert.equal(nextSleep.pressed,'false');assert.equal(nextSleep.writes,false);
+    assert.equal(nextSleep.coordinator.powerGeneration,3);assert.equal(nextSleep.coordinator.phase,'suspending');
+    await page.evaluate(()=>window.__chain.autoWake());await success();await enabled();
+    nextWake=await snapshot();
+    assert.equal(nextWake.trace.filter(t=>t.op==='enable'&&t.generation===3).length,1,'the real next Fan sleep still resumes the retained curve once');
+    assert.equal(nextWake.trace.filter(t=>t.op==='launch').length,1,'the same Host owner survives the new Fan generation');
+    await page.locator('.fan-toggle').click();await enabled();
+    assert.equal(await page.evaluate(()=>window.__chain.lifecycle.hasControlIntent),false);
+   }
+   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary,afterSuspend,nextSleep,nextWake});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
    cases.push(family+': confirmed wake + late fan/shared aliases retains ON, no new query/replay, next click is OFF');
   }
   assert.deepEqual(duplicateResults.filter(x=>!x.ok).map(x=>({family:x.family,error:x.error})),[]);

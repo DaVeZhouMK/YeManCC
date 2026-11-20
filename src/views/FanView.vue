@@ -715,14 +715,18 @@ function onDocumentVisibilityChange(): void {
 function onFanPowerSuspending(event: Event): void {
   const detail = (event as CustomEvent<{ generation?: number; scope?: string; resumeCatchup?: boolean }>).detail;
   const generation = Number(detail?.generation) || 0;
+  const coordinator = fanHostLifecycle.coordinatorSnapshot;
   if (!Number.isSafeInteger(generation) || generation <= 0
-      || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration
+      || generation < coordinator.powerGeneration
       || generation < fanPowerGeneration) return;
   // Wake-time Close catchup belongs to this ON request. App owns the lease
   // retirement; keep the page commit and its fixed click guard until it settles.
   // Shared/legacy sleep events still retire the page epoch below.
-  if (event.type === 'ipc:fan.suspending' && detail?.scope === 'fan-only'
-      && detail.resumeCatchup === true) return;
+  if (event.type === 'ipc:fan.suspending' && detail?.scope === 'fan-only') {
+    if (detail.resumeCatchup === true) return;
+    // Match App's Fan-only ordering check before retiring the page commit.
+    if (coordinator.phase === 'ready' && generation === coordinator.wakeReadyGeneration) return;
+  }
   fanWakeProtectionDeadline = 0;
   fanControlSwitchProtectionDeadline = 0;
   syncControlSwitchLock();

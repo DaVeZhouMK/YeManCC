@@ -30,8 +30,9 @@ const viewSource=fs.readFileSync(viewPath,'utf8');
 const viewFunction=name=>{const match=viewSource.match(new RegExp('(?:async )?function '+name+'\\([\\s\\S]*?\\n\\}'));assert(match,'actual page function missing: '+name);return match[0];};
 const pageFunctions=['onFanPowerSuspending','ensureSupported','confirmFanHostBeforeWrite','commitControlCurve','publishControlIntent','hostHasLiveControl'].map(viewFunction).join('\n');
 const observerModule=`export function makeFanSuspendObserver(fanHostLifecycle: any, setFanControlActive: (active: boolean) => void) { ${appSuspendObserver}; return onFanPhysicalSuspending; }
-export function makeFanWakeApp(fanHostLifecycle: any, curve: any[], settings: {on:boolean}) {
- const aiFanMockActive=false, latestResumeGeneration=4;
+export function makeFanWakeApp(fanHostLifecycle: any, curve: any[], settings: {on:boolean}, sharedPower: any) {
+ const aiFanMockActive=false, latestResumeGeneration=4, resumeLifecycleActive=true;
+ const {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted}=sharedPower;
  const readSettingsSection=async<T>()=>({fanControl:settings.on}), readBootModeFanIntent=async()=>null;
  const getFanFeatureSettings=()=>({featureEnabled:true,preset:'balanced'}),getFanPresetCurve=()=>curve;
  const fanDiagnosticLog=()=>{};
@@ -53,10 +54,10 @@ export function makeFanPage(fanHostLifecycle:any, curve:any[]) {
  return {onFanPowerSuspending,begin(){fanHostLifecycle.stagePendingControlCurve(curve);return commitControlCurve(controlCommitEpoch,fanHostLifecycle.controlCancellationRevision);},snapshot(){return {controlCommitEpoch,controlActive:controlActive.value,recovering:recovering.value,statusMessage:statusMessage.value,hardwareControlConfirmed:hardwareControlConfirmed.value,fanSuspendBoundary,fanWakeProtectionDeadline,fanControlSwitchProtectionDeadline};}};
 }`;
 const observerBundle=await build({stdin:{contents:observerModule,loader:'ts'},bundle:true,write:false,format:'iife',globalName:'FanRootObserver',platform:'browser',target:'es2022'});
-const files=['src/App.vue','src/views/FanView.vue','src/bridge/api.ts','src/bridge/fanHost.ts','src/bridge/ipc.ts','src/bridge/hardwareCoordinator.ts','tools/fixtures/fan_no_io_host.ts','tools/fan_manual_wake_ipc_selftest.mjs'];
+const files=['src/App.vue','src/views/FanView.vue','src/bridge/api.ts','src/bridge/fanHost.ts','src/bridge/ipc.ts','src/bridge/hardwareCoordinator.ts','src/bridge/powerLifecycleState.ts','tools/fixtures/fan_no_io_host.ts','tools/fan_manual_wake_ipc_selftest.mjs'];
 const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const binding=files.map(p=>({path:p==='src/views/FanView.vue'?viewPath:selected(p),sha256:hash(p==='src/views/FanView.vue'?viewPath:selected(p))}));
-const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/bridge/api';export {HttpFanApiAdapter} from './src/bridge/fanApi';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {rejectAllPending} from './src/bridge/ipc';",resolveDir:project,sourcefile:'fan-manual-wake-ipc-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanTest',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:beforeRoot?[{name:'bound-before-image',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:api|fanHost)\.ts$/},a=>({contents:fs.readFileSync(selected(path.relative(project,a.path)),'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));}}]:[]});
+const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/bridge/api';export {HttpFanApiAdapter} from './src/bridge/fanApi';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {rejectAllPending} from './src/bridge/ipc';export {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';",resolveDir:project,sourcefile:'fan-manual-wake-ipc-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanTest',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:beforeRoot?[{name:'bound-before-image',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:api|fanHost)\.ts$/},a=>({contents:fs.readFileSync(selected(path.relative(project,a.path)),'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));}}]:[]});
 const code=bundle.outputFiles[0].text;
 function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1Mini',qualifiedReceipts=false){
  let now=0,id=0,listener,manuals=0,heldReply,rootObserver,releaseCleanup,appWake,pageApi,pageVisible=false;const settings={on:true};
@@ -132,7 +133,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
   }
   life=new api.FanHostLifecycle({enabled:true,adapter:host,readNativeActivity:async()=>null,
    launcher:{start:async()=>({pid:111501+starts++,executable:'inert.exe'}),stop:async()=>{}},onControlDisplay(){}});
-  rootObserver=context.FanRootObserver.makeFanSuspendObserver(life,()=>{});appWake=context.FanRootObserver.makeFanWakeApp(life,curve,settings);
+  rootObserver=context.FanRootObserver.makeFanSuspendObserver(life,()=>{});appWake=context.FanRootObserver.makeFanWakeApp(life,curve,settings,api);
   life.setPowerGeneration(3);life.observePowerBoundary('resume-ready',3);await life.start();
   if(coldWake){native={...native,generation:4,phase:'resuming',resumeReady:false,hardwareWritesAllowed:false};life.setPowerGeneration(4);life.observePowerBoundary('resuming',4);host.calls=[];pageApi=context.FanRootObserver.makeFanPage(life,curve);return;}
   await life.apply(curve);

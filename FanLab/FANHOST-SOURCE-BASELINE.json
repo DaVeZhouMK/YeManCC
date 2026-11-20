@@ -5,9 +5,9 @@
     "sourceDirectory":  "real-host",
     "sourceFileCount":  53,
     "sourceFilesIndex":  "fanhost-source-files.sha256",
-    "sourceFilesIndexSha256":  "917D74A880F5869AE787E6918ADE574CCB3D8912466C1A6B2FA8BFF8918DA90F",
+    "sourceFilesIndexSha256":  "6522F1B4C15367D504A96332CAFA8854950DE9666361210F6F69446D79E184F7",
     "coreFiles":  {
-                      "Program.cs":  "0F864F9F8F289217DFD9D3ECA54F09BF31A059D95AC850A0F2EE9F697D5F0744",
+                      "Program.cs":  "F975C3422A049CAC04E3CB473AA11652E2B6A7C4426B2DB78AD472A08A156AAB",
                       "YeManFanHost.csproj":  "62DA1B6F23C44C8CCDECAFAF0CA1E0F28DC3DE88723573C8FFC249EB356020C4"
                   },
     "omittedArtifacts":  {

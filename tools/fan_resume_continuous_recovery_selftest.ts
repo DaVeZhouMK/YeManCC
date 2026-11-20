@@ -553,10 +553,12 @@ class CancelHeartbeatAdapter extends FakeAdapter {
 
 type CaseResult = { name: string; ok: boolean; detail?: string };
 const runT4Only = process.argv[2] === '--t4-only';
-if (process.argv.length > (runT4Only ? 3 : 2)) throw new Error('Unknown continuous-recovery fixture selection');
+const runCommittedWakeOnly = process.argv[2] === '--committed-wake-only';
+if (process.argv.length > (runT4Only || runCommittedWakeOnly ? 3 : 2)) throw new Error('Unknown continuous-recovery fixture selection');
 let selectedPasses = 0;
 async function runCase(name: string, fn: () => Promise<void>): Promise<void> {
   if (runT4Only && !/^T4[abc](?: |-|$)/.test(name)) return;
+  if (runCommittedWakeOnly && !name.startsWith('R6.4 ')) return;
   try {
     await fn();
     selectedPasses += 1;
@@ -1447,6 +1449,44 @@ async function main(): Promise<void> {
     },
   );
 
+  for (const boundary of ['new wake', 'OFF then new curve'] as const) {
+    await runCase(`R6.4 a committed wake cannot take over after ${boundary}`, async () => {
+      const adapter = new FakeAdapter();
+      const launcher = new ScriptedLauncher();
+      let generation = 2;
+      const lifecycle = makeLifecycle(adapter, async () => nativeState(generation, 'ready', true, true), 1200, launcher);
+      try {
+        lifecycle.setPowerGeneration(generation);
+        lifecycle.observePowerBoundary('suspending', generation);
+        lifecycle.stagePendingControlCurve(CURVE);
+        lifecycle.observePowerBoundary('resumed', generation);
+        // With no resident Host, rearm yields without doing I/O. Replace the
+        // generation or intent before the old callback enters resume().
+        const stale = lifecycle.resumeAfterCommittedPowerWake(generation);
+        let off: Promise<FanState> | undefined;
+        if (boundary === 'new wake') {
+          generation += 1;
+          lifecycle.setPowerGeneration(generation);
+          lifecycle.observePowerBoundary('suspending', generation);
+          lifecycle.observePowerBoundary('resume-ready', generation);
+        } else {
+          off = lifecycle.disable();
+          lifecycle.stagePendingControlCurve(CURVE);
+        }
+        await stale;
+        await off;
+        assert(launcher.startCalls === 0 && adapter.enableCalls === 0 && !adapter.calls.includes('acquire'),
+          `old public wake took over after ${boundary}: starts=${launcher.startCalls}; calls=${adapter.calls.join(',')}`);
+        assert(lifecycle.hasControlIntent, 'the superseding curve must remain available to its own request');
+        await lifecycle.resumeAfterCommittedPowerWake(generation);
+        assert(launcher.startCalls === 1 && adapter.enableCalls === 1,
+          `the current wake must still use the normal launcher and writer: ${adapter.calls.join(',')}`);
+      } finally {
+        await closeQuietly(lifecycle);
+      }
+    });
+  }
+
   // T4b 独立反例：真实睡眠仍在进行——受理意图可以成功，但设备写入必须为零；实际唤醒才推进。
   await runCase(
     'T4b real sleep in progress: intent admitted, zero device writes until an actual wake edge',
@@ -1835,7 +1875,9 @@ async function main(): Promise<void> {
   );
 
   if (runT4Only) assert(selectedPasses === 5, 'T4-only selection must include all five cases');
-  console.log(`FAN-938 R5 ${runT4Only ? 'T4-only' : 'full suite'}: ${selectedPasses} PASS`);
+  if (runCommittedWakeOnly) assert(selectedPasses === 4, 'committed wake selection must include all four cases');
+  const scope = runT4Only ? 'T4-only' : runCommittedWakeOnly ? 'committed-wake-only' : 'full suite';
+  console.log(`FAN-938 R5 ${scope}: ${selectedPasses} PASS`);
 }
 
 void main().catch((error: unknown) => {

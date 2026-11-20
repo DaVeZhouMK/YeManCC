@@ -1423,11 +1423,22 @@ function isFanResourceObservationFailure(error: unknown): boolean {
     && /^(?:HC_SESSION_ROUTE_LOST|OEM_RESTORE_FAILED|HC_OPEN_EVENTS_SUPERSEDED|HC_OPEN_EVENTS_POWER_SUPERSEDED|FAN_PUBLIC_POWER_SUPERSEDED)$/.test(error.errorCode ?? '');
 }
 
+const WIN4_OPEN_FAILED = 'HC_GPD_WIN4_OPEN_FAILED';
+
+function win4ResumeOpenError(remote: FanState, generation: number): FanApiError | undefined {
+  if (remote.factoryType === 'HandheldCompanion.Devices.GPDWin4' && remote.powerOperationStatus === 'failed'
+      && remote.powerOperationGeneration === generation && remote.resumePhaseGeneration === generation
+      && remote.win4OpenFailure?.generation === generation) {
+    return new FanApiError(`${WIN4_OPEN_FAILED}: GPD Win4 的 HC 设备 Open 返回失败`, 409, WIN4_OPEN_FAILED);
+  }
+}
+
 function isNonRetryableControlError(error: unknown): boolean {
 
   if (!(error instanceof FanApiError)) return false;
   // A server/HC failure can follow a submitted write. Never immediately replay it.
   if (isFanResourceObservationFailure(error)) return true;
+  if (error.errorCode === WIN4_OPEN_FAILED) return true;
   if (error.status === 401 || error.status === 403 || (error.status >= 500 && error.status <= 599)) return true;
   return /^(?:HC_OPERATION_BUSY|FAN_HTTP_RESULT_UNKNOWN|FAN_CURVE_WRITE_FAILED|FAN_MSI_WMI_PREREQUISITE_FAILED|FAN_UNSUPPORTED|FAN_DEVICE_GATE_DENIED|FAN_PROTOCOL_INCOMPATIBLE|FAN_API_RESPONSE_INVALID|FAULT_LOCKED|API_SESSION_REQUIRED|HOST_CLOSING|HC_CLOSE_PENDING|POWER_SUSPENDED|POWER_SUSPENDING|FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER|HC_RESUME_RESULT_EXPIRED|HC_RESUME_SUPERSEDED|HC_RESUME_REBUILD_FAILED)$/.test(error.errorCode ?? '');
 }
@@ -1452,6 +1463,7 @@ interface FanResumeWaitOutcome {
   reason: 'accepted' | 'hc-open-required' | 'cancelled' | 'superseded' | 'deadline' | 'terminal-failed';
   /** Ends only the read wait; the rearm owner must still perform actual HC Open. */
   openRequiredSnapshot?: FanState;
+  openFailure?: FanApiError;
   detail: string;
   probes: number;
   elapsedMs: number;
@@ -2962,6 +2974,8 @@ export class FanHostLifecycle {
     if (readOwnership === 'superseded') throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:admission-read-owner');
     if (readOwnership === 'wake-changed')
       return this.settleResumeWait(action, await this.runBoundedResumeWait(context, deadlineAt));
+    const win4OpenError = win4ResumeOpenError(remote, context.generation);
+    if (win4OpenError) this.rejectResumeAdmission(action, 'terminal-failed', WIN4_OPEN_FAILED, context, win4OpenError);
     if (manualUnboundRestart) {
       if (context.unboundSessionRestartAttempted) throw new Error('FAN_MANUAL_HC_SESSION_RESTART_UNCONFIRMED');
       context.manualRecovery = true;
@@ -3008,6 +3022,7 @@ export class FanHostLifecycle {
     reason: 'superseded' | 'terminal-failed' | 'probe-unavailable',
     detail: string,
     context: FanAdmissionContext,
+    failure?: FanApiError,
   ): never {
     fanLifecycleEvidence('lifecycle.resume-admission-rejected', {
       action,
@@ -3019,13 +3034,14 @@ export class FanHostLifecycle {
       wakeContext: this.hasWakeContext(context.generation),
       state: this.stateValue,
     });
-    throw new Error(`FAN_RESUME_ADMISSION_${reason.toUpperCase().replace(/-/g, '_')}:${action}:${detail}`);
+    throw failure ?? new Error(`FAN_RESUME_ADMISSION_${reason.toUpperCase().replace(/-/g, '_')}:${action}:${detail}`);
   }
 
   /** §4.2/§3.2：等待未成功 ⇒ 以明确、**可重试**的错误终止本请求（不写硬件）。 */
   private settleResumeWait(action: string, outcome: FanResumeWaitOutcome): FanState | undefined {
     if (outcome.reason === 'hc-open-required' && outcome.openRequiredSnapshot) return outcome.openRequiredSnapshot;
     if (outcome.ok) return;
+    if (outcome.openFailure) throw outcome.openFailure;
     if (outcome.detail === 'FAN_UNSUPPORTED') throw new FanApiError('HC 当前设备未声明可用风扇能力', 409, 'FAN_UNSUPPORTED');
     throw new Error(`FAN_RESUME_WAIT_${outcome.reason.toUpperCase().replace(/-/g, '_')}:${outcome.detail}`);
   }
@@ -3088,8 +3104,8 @@ export class FanHostLifecycle {
       state: this.stateValue,
     });
     const done = (outcome: FanResumeWaitOutcome): FanResumeWaitOutcome => this.finishResumeWait(context.action, outcome);
-    const failed = (reason: FanResumeWaitOutcome['reason'], detail: string): FanResumeWaitOutcome =>
-      done({ ok: false, reason, detail, probes, elapsedMs: monotonicNowMs() - startedAt, intervalMs });
+    const failed = (reason: FanResumeWaitOutcome['reason'], detail: string, openFailure?: FanApiError): FanResumeWaitOutcome =>
+      done({ ok: false, reason, detail, openFailure, probes, elapsedMs: monotonicNowMs() - startedAt, intervalMs });
     for (;;) {
       if (task.cancelled) {
         return failed('cancelled', task.cancelled);
@@ -3130,6 +3146,8 @@ export class FanHostLifecycle {
         const readOwnership = this.recoveryReadOwnership(context, probe);
         if (readOwnership === 'superseded') return failed('superseded', 'projection-owner-changed');
         if (readOwnership === 'current') {
+          const win4OpenError = win4ResumeOpenError(remote, context.generation);
+          if (win4OpenError) return failed('terminal-failed', WIN4_OPEN_FAILED, win4OpenError);
           if (context.allowIdleHcOpen
               && (this.idleResumeNeedsHcOpen(remote, context.generation)
                 || this.resumedHalfOpenHcSessionNeedsOpen(remote, context.generation))) {
@@ -4604,8 +4622,10 @@ export class FanHostLifecycle {
     }
   }
 
-  private readManualNativeWaitSnapshot(timeoutMs: number): Promise<PowerLifecycleState | null> {
-    return this.observeAdmissionRead(() => this.readNativePowerState(timeoutMs).catch(() => null), timeoutMs);
+  private async readManualNativeWaitSnapshot(timeoutMs: number): Promise<PowerLifecycleState | null> {
+    const snapshot = await this.observeAdmissionRead(() => this.readNativePowerState(timeoutMs).catch(() => null), timeoutMs);
+    // Native's changing-context reply has no generation to compare.
+    return snapshot?.known === false ? null : snapshot;
   }
 
   private async waitForManualNativeWriteBoundary(context: FanAdmissionContext): Promise<void> {
@@ -4628,7 +4648,7 @@ export class FanHostLifecycle {
         throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
       }
       if (native?.generation === context.generation && native.phase === 'ready' && native.hardwareWritesAllowed === true
-          && native.known !== false && native.notificationPending !== true) return;
+          && native.notificationPending !== true) return;
       if (native && native.phase !== 'resuming') throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
       interval = Math.min(RESUME_WAIT_MAX_INTERVAL_MS, interval * 2);
     }
@@ -5667,6 +5687,21 @@ export class FanHostLifecycle {
             reason: 'remote-terminal-host-probe',
           });
           await this.reopenTerminalHostForControl(context);
+        } else if (remote?.factoryType === 'HandheldCompanion.Devices.GPDWin4' && isColdUnopenedFanHost(remote)
+            && remote.win4OpenFailure?.generation === context.generation && remote.win4OpenFailure.cleanupComplete === true
+            && this.coordinator.isWakeReady(context.generation)) {
+          // A failed cold Open has no Host wake receipt. Only an explicit new ON
+          // may use the existing cold admission, which rereads native permission.
+          await this.enqueue(async () => {
+            if (this.recoveryReadOwnership(context, probe) !== 'current')
+              throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:manual-win4-open-retry');
+            this.opened = false;
+            this.eventsOpened = false;
+            this.explicitOpenBinding = null;
+            this.explicitOpenOrigin = null;
+            this.coldOpenAdmission = { sessionGeneration: this.sessionGeneration,
+              powerGeneration: context.generation, processId: context.hostPid };
+          });
         } else if (remote && this.retiredSourceSessionNeedsOpen(remote, context.generation)) {
           // Same-generation source retirement is not a sleep resume. Serialize
           // with the existing owner and recheck the exact read before reopening.
@@ -6802,7 +6837,9 @@ export class FanHostLifecycle {
       });
       return;
     }
+    const intentRevision = this.controlIntentRevisionValue;
     const intentAvailable = this.hasActiveControlIntent() || await this.adoptRecoverableControlIntent();
+    if (!this.isResumeReplayCurrent(generation, intentRevision)) return;
     if (!intentAvailable) {
       fanLifecycleEvidence('lifecycle.resume-committed-wake-nowork', {
         generation,
@@ -6821,6 +6858,7 @@ export class FanHostLifecycle {
         hcWritesAdmitted: false,
       });
     }
+    if (!this.isResumeReplayCurrent(generation, intentRevision)) return;
     // If the ordinary F5 handler won the race, do not run the compensation's
     // rearm beside it.  Await the shared resume body; after it settles the
     // normal recovery owner remains responsible for any transient failure.
@@ -6830,7 +6868,7 @@ export class FanHostLifecycle {
         await previous;
         return;
       }
-      await this.awaitPreviousResume(previous, generation, this.controlIntentRevisionValue);
+      await this.awaitPreviousResume(previous, generation, intentRevision);
       return this.resumeAfterCommittedPowerWake(generation);
     }
     // The normal F5 path is Host-owned and has already rebuilt HC before the
@@ -6839,6 +6877,9 @@ export class FanHostLifecycle {
     // explicitly run the same Fan rearm admission here before replaying the
     // curve.  This remains the single serialized Host resume path.
     await this.rearmAfterWakeForControlAdmission('committed-power-resume', false);
+    // rearm can yield without a Host. Do not let the old notification call
+    // resume() with a newer generation or a curve staged after OFF.
+    if (!this.isResumeReplayCurrent(generation, intentRevision)) return;
     await this.resume();
   }
 

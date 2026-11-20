@@ -1,6 +1,6 @@
 # GitHub 发布前检查与正式发布
 
-当前入口按2026-11-04流程维护。普通快速发布不跑产品夹具，fixtureValidation=NOT_RUN；旧FullAcceptance结果及历史失败保留。
+普通快速发布不跑完整产品夹具，`fixtureValidation=NOT_RUN`；风扇另有定向发布检查。旧 FullAcceptance 结果及历史失败保留。
 
 准备与正式工作流共用 `.github/actions/release-build/action.yml`，正式仅匹配版本tag触发，prepare没有Release、tag或main写入步骤。
 
@@ -9,11 +9,12 @@
 `release-preparation/**`分支push和手动运行 `release-prepare.yml` 的默认模式均为check-only：
 
 - 校对触发SHA、版本/notes、源资产/TDP清单，不消费本地忽略的编译产物。
+- 校对实际提交里的已批准风扇归档、V2 载荷及共享依赖。未入 Git 的工作目录文件不能补齐发布输入。
 - 用真实GitHub GET核对仓库、绑定main提交的版本、候选tag/可见Release占用和main规则；注解tag解析到commit。
 - 在线核对官方Decky来源，检查runner MSVC/SDK入口及x86环境。需要.NET的MSBuild输出目录求值只在完整模式安装SDK后执行。
 - 不安装Node/pnpm/.NET、不还原依赖、不做类型检查、不编译、不打包、不生成源码ZIP。只保存小型诊断回执。
 
-手动运行勾选 `build_packages=true` 才执行完整FastRelease及附件检查，仍不发布、不跑夹具。正式模式硬性拒绝check-only。只检查成功不代表完整构建或写权限通过，回执保留packageBuild=NOT_RUN；公共action的packages-built输出区分是否实际构建。
+手动运行勾选 `build_packages=true` 才执行完整 FastRelease 及附件检查，仍不发布。准备构建和正式构建都会先跑风扇唤醒接续、首次点击、旧通知失效和跨代恢复检查。跨代检查区分可作废的旧读回包与必须串行结算的已提交写入。正式模式硬性拒绝 check-only。只检查成功不代表完整构建或写权限通过，回执保留 `packageBuild=NOT_RUN`；公共 action 的 `packages-built` 输出区分是否实际构建。
 
 本地使用PowerShell7，在有GitHub CLI身份的进程执行：
 
@@ -22,6 +23,16 @@
 ```
 
 主线仍为已发布0.0.37时，原样检查应报告VERSION_TAG_OCCUPIED/RELEASE_ALREADY_EXISTS；不能把版本已占用写成通过。下一版本和正式说明先在候选确定，本工具不涨版本、不移动旧tag。
+
+### 打标签前核对风扇输入
+
+从当前主线调用下列脚本，`-ProjectRoot` 指向实际待打标签的干净候选目录。即使候选基于旧发布点、里面还没有本检查，也由当前主线脚本核对它。必须看到 `FAN_RELEASE_INPUTS_OK` 对应该提交 SHA；缺失或失败时先补齐候选再打标签。
+
+```powershell
+& tools/verify-fan-release-inputs.ps1 -ProjectRoot <固定候选Git目录> -ExpectedCommit <提交SHA>
+```
+
+已批准配套包含 Win5 原请求的唤醒接续和 Win4 6800U Open 的失败回执。录入后继组件时，用同一提交更新风扇载荷校验、归档和原生恢复绑定，并核对两项修复仍在。出包后仍由 `fan_host_path_gate.ps1` 对最终 ZIP 的 V2 文件与该提交逐项读回；现场故障是否消失另看真机。
 
 ## 提前暴露正式发布阻塞
 

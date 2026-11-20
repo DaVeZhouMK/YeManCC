@@ -1392,6 +1392,7 @@ internal sealed class HostDiagnosticLog
     {
         "oem.power-boundary", "oem.power-boundary-summary", "oem.power-hook-unavailable",
         "power.remote-resource-settlement", // One terminal receipt per exact import; never polling.
+        "open.gpd-win4-refused", // Original virtual Open returned false; only emitted on failure.
         "power.fault-locked",
         "power.awaiting-close-cleanup",
         "recovery.retry-terminal",
@@ -2221,6 +2222,8 @@ internal sealed class HostStateJsonCopy
     }
 }
 
+internal sealed record Win4OpenFailureReceipt(ulong Generation, bool CleanupComplete);
+
 internal sealed class HostState
 {
     public string State { get; set; } = "Stopped";
@@ -2348,6 +2351,7 @@ internal sealed class HostState
     // has moved the device state to Stopped.
     public string ListenerState { get; set; } = "Starting";
     public string? LastError { get; set; }
+    public Win4OpenFailureReceipt? Win4OpenFailure { get; set; }
     public double? LastTemperatureC { get; set; }
     public double? CurrentDutyPercent { get; set; }
     public FanMonitorDisplayReceipt? MonitorFan { get; set; }
@@ -3234,8 +3238,8 @@ internal sealed partial class RealHcBackend : IDisposable
     public bool HasSessionDeviceReference => sessionDeviceReference is not null;
     /**
      * 裁决 H1：HC 自身 IsOpen 标记的**只读**观测。读不到（未加载设备/反射失败）
-     * 返回 null，且**永不作为阻塞判据**——判据 C2 已证明"HC Open 调用从未开始"，
-     * 无所有权交叉时"未知"不影响判定。仅供诊断字段使用。
+     * 返回 null。仅在 Win4 已进入虚拟 Open、返回失败后，要求明确已关才能结算；
+     * 从未进入虚拟 Open 的通用判据仍不因未知而阻塞。
      */
     public bool? HcDeviceIsOpenObserved
     {
@@ -3859,9 +3863,20 @@ internal sealed partial class RealHcBackend : IDisposable
         sessionDeviceReference is null && sessionRouteMarker is null &&
         HcVirtualCloseReturned && HcManagerCleanupConfirmed;
     internal long RetiredControlCycleId => retiredControlCycleId;
+    internal Win4OpenFailureReceipt? LastWin4OpenFailure { get; private set; }
+    internal bool Win4FailedOpenClosePending { get; private set; }
+
+    private void SettleWin4FailedOpenClose(bool? deviceOpen)
+    {
+        if (!Win4FailedOpenClosePending) return;
+        if (deviceOpen is not false || !HcVirtualCloseReturned || !HcManagerCleanupConfirmed || hcOpenEventsInvoked)
+            throw new FanApiException(409, "HC_CLOSE_PENDING", "GPD Win4 设备关闭尚未确认");
+        Win4FailedOpenClosePending = false;
+    }
 
     private void BeginOpenAttemptEvidence()
     {
+        LastWin4OpenFailure = null;
         legacyCallbackNoReturnAtRetirement = false;
         openAttempted = true;
         hcOpenInvocationStarted = false;
@@ -3907,6 +3922,8 @@ internal sealed partial class RealHcBackend : IDisposable
             // OpenLib/ACPI subset is not an equivalent lifecycle.
             if (SourceControlConnected) { OpenPinnedSourceCore(); return; }
             EnsureRealWriteAuthorization();
+            if (Win4FailedOpenClosePending)
+                throw new FanApiException(409, "HC_CLOSE_PENDING", "GPD Win4 设备关闭尚未确认");
             var msiOpenGateEpoch = Volatile.Read(ref suspendGateEpoch);
             msiFanOpenAdmissionEpoch = msiOpenGateEpoch;
             oneXFanOpenAdmissionEpoch = msiOpenGateEpoch;
@@ -3943,6 +3960,10 @@ internal sealed partial class RealHcBackend : IDisposable
             {
                 // E-2（2026-09-24）：Open 失败不得把 Open 期间的相位泄漏给后续操作。
                 SetHcPhase(null);
+                var win4OpenRefused = error is FanApiException { Code: "HC_GPD_WIN4_OPEN_FAILED" };
+                var deviceOpenBeforeCleanup = win4OpenRefused ? HcDeviceIsOpenObserved : null;
+                bool? deviceOpenAfterCleanup = null;
+                if (win4OpenRefused) Win4FailedOpenClosePending = true;
                 var interrupted = CaptureInterruptedResumeOpen(error, priorReleaseSettled);
                 var unwritten = InterruptedResumeOpenOwesNoFanRelease(interrupted);
                 // Never manufacture a Close() call for a failed HC Open().
@@ -3959,6 +3980,11 @@ internal sealed partial class RealHcBackend : IDisposable
                     try
                     {
                         CloseHcDevice();
+                        if (win4OpenRefused)
+                        {
+                            deviceOpenAfterCleanup = HcDeviceIsOpenObserved;
+                            SettleWin4FailedOpenClose(deviceOpenAfterCleanup);
+                        }
                         closeCompleted = true;
                     }
                     catch (Exception ex) { HcCoreWarning = $"HC Open cleanup failed: {ex.Message}"; }
@@ -3991,6 +4017,24 @@ internal sealed partial class RealHcBackend : IDisposable
                 }
                 IsOpen = false;
                 oemBaselineCaptured = false;
+                if (win4OpenRefused)
+                {
+                    var power = SharedPowerContext.Borrowed;
+                    // Retain the unreadable observation if Close returned; do not sample it again.
+                    if (!HcVirtualCloseReturned || !HcManagerCleanupConfirmed)
+                        deviceOpenAfterCleanup = HcDeviceIsOpenObserved;
+                    var cleanupComplete = closeCompleted && !HcCloseIsOwed && deviceOpenAfterCleanup is false &&
+                        HcVirtualCloseReturned && HcManagerCleanupConfirmed && !hcOpenEventsInvoked;
+                    if (power is not null)
+                        LastWin4OpenFailure = new(power.Binding.Captured.Generation, cleanupComplete);
+                    try { Diagnostic?.Invoke("open.gpd-win4-refused", new {
+                        code = "HC_GPD_WIN4_OPEN_FAILED", factoryType = FactoryType,
+                        generation = power?.Binding.Captured.Generation, controlCycle = ControlCycleId,
+                        deviceOpenBeforeCleanup, closeCompleted, deviceOpenAfterCleanup, cleanupComplete,
+                        hcVirtualCloseReturned = HcVirtualCloseReturned, managerCleanupConfirmed = HcManagerCleanupConfirmed,
+                        eventsInvoked = hcOpenEventsInvoked, closeStillOwed = HcCloseIsOwed,
+                    }); } catch { /* Failure evidence must not replace the original Open error. */ }
+                }
                 throw;
             }
         }
@@ -5080,8 +5124,13 @@ internal sealed partial class RealHcBackend : IDisposable
                 throw;
             }
         }
-        else if (Invoke(device, "Open") is not bool opened || !opened)
-            throw new InvalidOperationException("HC device Open returned false");
+        else
+        {
+            var result = Invoke(device, "Open");
+            if (result is false && Route?.RestoreStrategy == FanRestoreStrategy.GpdWin4HcRelease)
+                throw new FanApiException(409, "HC_GPD_WIN4_OPEN_FAILED", "GPD Win4 的 HC 设备 Open 返回失败");
+            if (result is not true) throw new InvalidOperationException("HC device Open returned false");
+        }
         IsOpen = true;
     }
 
@@ -8488,6 +8537,7 @@ internal sealed partial class RealHcBackend : IDisposable
             // ROGAlly.Close() performs AsusACPI.Close, controller restoration,
             // HID disposal and base.Close in HC's original order.
             CloseHcDevice();
+            if (Win4FailedOpenClosePending) SettleWin4FailedOpenClose(HcDeviceIsOpenObserved);
             interruptedResumeOpen = null;
             // A returned virtual Close is a completed HC lifecycle boundary;
             // it is not a generic Hardware-profile callback or a physical
@@ -14747,6 +14797,9 @@ internal sealed partial class FanHostEngine : IDisposable
             RetireResumeBusinessForManualLocked("new-manual-device-owner");
             EnsureNotStopped();
             EnsureControlAvailable();
+            if (state.Win4OpenFailure is not null && SharedPowerContext.Required &&
+                SharedPowerContext.Borrowed?.IsCurrent != true)
+                throw FanRemotePowerContext.Superseded();
             if (state.HardwareWritesEnabled || state.Lease is not null)
                 throw new FanApiException(409, "HC_SESSION_ACTIVE", "当前 HC 风扇会话仍在控制中，禁止重复 Open");
             // FAN-204 Q1-b（2026-09-23 真机 20:26 取证）：**仅沙箱**——真机的 HC 设备打开
@@ -14770,6 +14823,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 // instead of treating the partially-open call as harmless.
                 state.OpenCalled = true;
                 state.OpenEventsCalled = false;
+                state.Win4OpenFailure = null;
                 // Open begins a new HC device session. A prior Hardware
                 // profile acknowledgement belongs to the previous session
                 // and must not let a failed/partial Open skip OEM restore.
@@ -14791,6 +14845,18 @@ internal sealed partial class FanHostEngine : IDisposable
                 }
                 catch (Exception ex)
                 {
+                    if (ex is FanApiException { Code: "HC_GPD_WIN4_OPEN_FAILED" })
+                    {
+                        // Keep the original error. The existing Close/suspend/exit owner
+                        // settles outstanding resources; do not start a second Close here.
+                        state.Win4OpenFailure = realBackend.LastWin4OpenFailure;
+                        state.OpenCalled = false;
+                        state.OpenEventsCalled = false;
+                        state.HcCloseCleanupPending = realBackend.Win4FailedOpenClosePending;
+                        state.State = state.HcCloseCleanupPending ? "AwaitingCloseCleanup" : "AwaitingControl";
+                        state.LastError = ExceptionText(ex);
+                        throw;
+                    }
                     // HC's normal startup treats a failed Open() as a
                     // non-session and does not manufacture a Close/release
                     // callback. The backend clears OpenAttempted when its
@@ -16041,6 +16107,7 @@ internal sealed partial class FanHostEngine : IDisposable
         }
         state.PowerOperationStatus = "executing";
         state.PowerOperationOutcome = null;
+        state.Win4OpenFailure = null;
         state.PowerOperationAttempt = operation.AttemptId;
         // A new HC SystemReady transaction ends the prior F4 retry mode. Any
         // later non-power recovery is governed by its own explicit contract.
@@ -16412,6 +16479,8 @@ internal sealed partial class FanHostEngine : IDisposable
                 state.State = state.UnknownState ? "FaultLocked" : "AwaitingControl";
                 state.PowerState = state.UnknownState ? "Unknown" : "On";
                 state.LastError = $"HC_RESUME_REBUILD_FAILED: {ExceptionText(originalFailure)}";
+                if (originalFailure is FanApiException { Code: "HC_GPD_WIN4_OPEN_FAILED" })
+                    state.Win4OpenFailure = realBackend?.LastWin4OpenFailure;
                 diagnostics.Write("power.resume-auto-rebuild.failure", new
                 {
                     state = state.State,
@@ -17429,6 +17498,7 @@ internal sealed partial class FanHostEngine : IDisposable
         if (realBackend.SourceControlMode) return CloseSourceSessionForLifecycle(stopDeviceManager);
         try
         {
+            var hadWin4FailedOpenClosePending = realBackend.Win4FailedOpenClosePending;
             var alreadyRetiredBeforeClose = !stopDeviceManager && realBackend.HasVerifiedRetiredDeviceWithoutNewOpen;
             diagnostics.Write("restore.close-hc-begin", new
             {
@@ -17510,6 +17580,9 @@ internal sealed partial class FanHostEngine : IDisposable
             var hcCloseComplete = state.HcVirtualCloseReturned && realBackend.HcManagerCleanupConfirmed;
             if (!hcCloseComplete)
                 throw new InvalidOperationException("HC Close 返回但生命周期边界未完整完成");
+            if (hadWin4FailedOpenClosePending && !realBackend.Win4FailedOpenClosePending &&
+                state.Win4OpenFailure is { } win4Failure)
+                state.Win4OpenFailure = win4Failure with { CleanupComplete = true };
             if (alreadyRetiredBeforeClose && realBackend.HasVerifiedRetiredDeviceWithoutNewOpen)
             {
                 ObserveRetiredNoReturnObligation();

@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { FanHostLifecycle } from '@/bridge/fanHost';
 import { NoIoHost } from './fixtures/fan_no_io_host';
 import type { FanApiAdapter, FanHandshake, FanLease, FanNode, FanPreset, FanResumeRequest, FanState } from '@/bridge/fanApi';
+import { isSharedPowerLifecycleAdmitted, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 
 const root = process.cwd();
 const SAVED_CURVE: FanNode[] = [
@@ -48,6 +49,7 @@ assert(wakeStart >= 0 && wakeEnd > wakeStart, 'APP_FAN_WAKE_ENTRY_UNIQUE');
 const wakeLines = appSource.slice(wakeStart, wakeEnd).trimEnd().split('\n');
 wakeLines[0] = 'function onFanResumeReady(resumeGeneration) {';
 const wakeSource = wakeLines.join('\n').replace(/false as const/g, 'false');
+const fanPublicDelivery = appSource.match(/^    if \(admitted\) fanWakeRequest\?\.retryAfterPublicReady\?\.\(state\);$/m)?.[0] ?? '';
 const resumingStart = appSource.indexOf('function onPowerResuming(');
 const resumingEnd = appSource.indexOf('\nfunction onPowerResumeReady(', resumingStart);
 assert(resumingStart >= 0 && resumingEnd > resumingStart, 'APP_FAN_RESUMING_ENTRY_UNIQUE');
@@ -240,6 +242,7 @@ class WakeHostAdapter extends SimAdapter {
 
 interface SimEnv {
   lifecycle: FanHostLifecycle;
+  sharedPower?: SharedPowerLifecycleSnapshot;
   preference: boolean;
   readPreference?: () => Promise<{ fanControl?: boolean }>;
   autoApplyInputs: FanNode[][];
@@ -262,7 +265,7 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     logs,
     aiMockActive: false,
   };
-  const factory = new Function('env', [
+  const factory = new Function('env', 'isPowerAdmitted', [
     'let latestResumeGeneration = 0;',
     'let aiFanMockActive = env.aiMockActive;',
     'let fanAutoStartChain = Promise.resolve();',
@@ -270,6 +273,9 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     'let fanBootAutoStartDone = false;',
     'const fanAutoStartGenerations = new Set();',
     'let fanWakeRequest = null;',
+    'const getSharedPowerLifecycle = () => env.sharedPower ?? null;',
+    'const isSharedPowerLifecycleAdmitted = isPowerAdmitted;',
+    'let resumeLifecycleActive = true;',
     'let resumeVideoTimer = null;',
     'const window = { clearTimeout() {} };',
     'const tdpRuntimeStore = { invalidatePower() {} };',
@@ -296,12 +302,14 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     wakeSource,
     resumingSource,
     committedSource,
-    'return { ensureFanAutoStart, onFanResumeReady, requestFanCommittedResume, onPowerResuming: (g) => onPowerResuming({detail:{generation:g}}), autoStartSettled: () => fanAutoStartChain, setLatestResumeGeneration: (g) => { latestResumeGeneration = g; } };',
+    'function observePublicReady(state) { env.sharedPower = state; const admitted = isSharedPowerLifecycleAdmitted(state); ' + fanPublicDelivery + ' }',
+    'return { ensureFanAutoStart, onFanResumeReady, requestFanCommittedResume, observePublicReady, onPowerResuming: (g) => onPowerResuming({detail:{generation:g}}), autoStartSettled: () => fanAutoStartChain, setLatestResumeGeneration: (g) => { latestResumeGeneration = g; } };',
   ].join('\n'));
-  const api = factory(env) as {
+  const api = factory(env, isSharedPowerLifecycleAdmitted) as {
     ensureFanAutoStart: (reason: 'boot' | 'resume', generation?: number) => Promise<void>;
     onFanResumeReady: (generation: number) => void;
     onPowerResuming: (generation: number) => void;
+    observePublicReady: (state: SharedPowerLifecycleSnapshot) => void;
     requestFanCommittedResume: (generation: number) => void;
     autoStartSettled: () => Promise<void>;
     setLatestResumeGeneration: (g: number) => void;
@@ -311,7 +319,8 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
 
 const testLifecycles = new Set<FanHostLifecycle>();
 
-function newLifecycle(adapter: FanApiAdapter, launcher: SimLauncher, resumeWaitDeadlineMs?: number, initialNativeGeneration = 0): FanHostLifecycle {
+function newLifecycle(adapter: FanApiAdapter, launcher: SimLauncher, resumeWaitDeadlineMs?: number, initialNativeGeneration = 0,
+  readPowerOverride?: () => Promise<import('@/bridge/api').PowerLifecycleState>): FanHostLifecycle {
   let nativeGeneration = initialNativeGeneration;
   let nativePhase: 'ready' | 'suspending' | 'resuming' = 'ready';
   let nativeResumeReady = initialNativeGeneration === 0;
@@ -323,9 +332,9 @@ function newLifecycle(adapter: FanApiAdapter, launcher: SimLauncher, resumeWaitD
     ...(resumeWaitDeadlineMs ? { resumeWaitDeadlineMs } : {}),
     requestManualWake: async () => null,
     readNativeActivity: async () => null, // 无 native 活动记录 ⇒ resume 诚实 no-work
-    readNativePowerState: async () => ({ phase: nativePhase, generation: nativeGeneration,
+    readNativePowerState: readPowerOverride ?? (async () => ({ phase: nativePhase, generation: nativeGeneration,
       hardwareWritesAllowed: nativePhase === 'ready', inputReady: nativePhase === 'ready',
-      resumeReady: nativeResumeReady, hibernateAvailable: false }),
+      resumeReady: nativeResumeReady, hibernateAvailable: false })),
   });
   const setGeneration = lifecycle.setPowerGeneration.bind(lifecycle);
   lifecycle.setPowerGeneration = (generation) => { nativeGeneration = generation; setGeneration(generation); };
@@ -833,6 +842,65 @@ async function main(): Promise<void> {
       api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,variant==='enabled'?1:0,'duplicate notification rewrote or revived the same request');
       if(variant==='enabled'){await lifecycle.disable();api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,1,'explicit OFF after recovery was overwritten');}
       await lifecycle.close();observations.push({reason:'public-ready-auto',variant,enables:adapter.enables,manualClicks:0,fanOnlyEventsBeforeFirstResult:0});
+    }
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'FAN-PUBLIC-RETRY') await test('FAN-PUBLIC-RETRY one newer public admission continues the refused physical wake', async () => {
+    for (const variant of ['public-before-denial', 'redelivery-before-denial', 'public-after-denial', 'off-before-public', 'new-fan-sleep', 'new-public-sleep', 'second-denial'] as const) {
+      const adapter = new AutoOwnerHost(), launcher = new SimLauncher();
+      const pending = { phase: 'ready', generation: 2, hardwareWritesAllowed: false,
+        notificationPending: true, observedNotificationSequence: 9, publicationRevision: 19 } as const;
+      const ready = { ...pending, hardwareWritesAllowed: true, notificationPending: false, publicationRevision: 20 };
+      let native: import('@/bridge/api').PowerLifecycleState = { phase: 'ready', generation: 1,
+        hardwareWritesAllowed: true, resumeReady: true, inputReady: true, hibernateAvailable: false };
+      let reads = 0, hold: Promise<void> | null = null, release!: () => void;
+      const lifecycle = newLifecycle(adapter, launcher, 250, 1, async () => {
+        ++reads;
+        const captured = native, wait = hold;
+        hold = null;
+        if (wait) await wait;
+        return captured;
+      });
+      const { api } = buildOrchestrator(lifecycle, []);
+      const flush = async () => { for (let i = 0; i < 1000; ++i) await Promise.resolve(); await api.autoStartSettled(); };
+      lifecycle.setPowerGeneration(1); lifecycle.observePowerBoundary('resume-ready', 1);
+      await lifecycle.start(); await lifecycle.apply(SAVED_CURVE);
+      lifecycle.setPowerGeneration(3); lifecycle.observePowerBoundary('suspending', 3);
+      await adapter.suspend(); await lifecycle.suspend(); await adapter.resume({ generation: 3 });
+      const initialWrites = adapter.enables;
+      native = { ...native, phase: 'resuming', generation: 3, hardwareWritesAllowed: false, notificationPending: true, resumeReady: false };
+      api.observePublicReady(variant === 'redelivery-before-denial' ? ready : pending);
+      const held = variant === 'public-before-denial' || variant === 'redelivery-before-denial';
+      if (held) hold = new Promise<void>(r => { release = r; });
+      const before = reads;
+      api.onFanResumeReady(3); await flush();
+      assert.equal(reads, before + 1, 'first delivery must perform one real Fan snapshot read');
+      if (held) {
+        for (let duplicate = 0; duplicate < 8; ++duplicate) api.onFanResumeReady(3);
+        await flush();
+        assert.equal(reads, before + 1, 'duplicate private wake opened parallel Native reads');
+      }
+      assert.equal(adapter.enables, initialWrites, 'pending public context must not replay the curve');
+      if (variant === 'off-before-public') await lifecycle.disable();
+      if (variant === 'new-fan-sleep') { lifecycle.setPowerGeneration(4); lifecycle.observePowerBoundary('suspending', 4); }
+      if (variant !== 'second-denial') native = { ...native, phase: 'ready', hardwareWritesAllowed: true, notificationPending: false, resumeReady: true };
+      const beforeReady = reads;
+      if (variant !== 'redelivery-before-denial') api.observePublicReady(variant === 'new-public-sleep' ? { ...ready, generation: 4 } : ready);
+      release?.(); await flush();
+      const cancelled = variant === 'off-before-public' || variant === 'new-fan-sleep' || variant === 'new-public-sleep';
+      const shouldContinue = !cancelled && variant !== 'second-denial';
+      assert.equal(adapter.enables, initialWrites + (shouldContinue ? 1 : 0), 'newer public Ready must continue the same private wake exactly once');
+      if (cancelled) assert.equal(reads, beforeReady, 'a cancelled request must not reread the Fan snapshot');
+      if (variant === 'second-denial') assert.equal(reads, beforeReady + 1, 'a second rejection consumes the one Fan continuation');
+      const settledReads = reads;
+      const published = variant === 'new-public-sleep' ? { ...ready, generation: 4 } : ready;
+      api.observePublicReady(published); api.observePublicReady({ ...published, publicationRevision: 21 }); await flush();
+      if (shouldContinue) {
+        for (let duplicate = 0; duplicate < 8; ++duplicate) api.onFanResumeReady(3);
+        await flush();
+      }
+      assert.equal(reads, settledReads, 'duplicate or later Ready must not allocate a second continuation');
+      await lifecycle.close();
+      observations.push({ reason: 'fan-public-ready-continuation', variant, cancelled, continued: adapter.enables > initialWrites });
     }
   });
   if (process.env.YMCC_FAN_AUTO_CASE === 'AUTO-GENERATION') await test('AUTO-GENERATION new wake does not inherit a retired preflight and old boot never adopts the new wake', async () => {

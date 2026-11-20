@@ -1,5 +1,5 @@
 name: Build and verify immutable YMCC release
-description: One fast build and all pre-publication checks shared by preparation and formal publishing. No release, tag push, manifest write or fixtures.
+description: One fast build and all pre-publication checks shared by preparation and formal publishing. No release, tag push, manifest write or full fixture suite.
 inputs:
   mode:
     description: formal requires an immutable version tag; prepare uses its immutable branch commit
@@ -68,6 +68,10 @@ runs:
       "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "commit=$commit" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "notes-path=$notesPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+  - name: Require the approved Fan Host inputs in the release commit
+    shell: pwsh
+    run: |
+      & tools/verify-fan-release-inputs.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ExpectedCommit $env:YMCC_RELEASE_COMMIT
   - name: Check GitHub publication conditions before build
     shell: pwsh
     env:
@@ -182,6 +186,38 @@ runs:
       pnpm install --frozen-lockfile
       if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed.' }
     shell: pwsh
+  - name: Verify that the Fan wake and first-click fixes carried forward
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    env:
+      YMCC_FAN_AUTO_APP_SOURCE: ${{ github.workspace }}/src/App.vue
+      YMCC_FAN_AUTO_CASE: FAN-PUBLIC-RETRY
+      YMCC_FAN_NATIVE_WAIT_CASE: pending native state disappears temporarily
+    run: |
+      foreach ($name in @('fan_boot_autostart_sim', 'fan_native_manual_wait_selftest', 'fan_resume_continuous_recovery_selftest', 'fan_duplicate_wake_replay_selftest')) {
+        $bundle = Join-Path $env:RUNNER_TEMP "release-$name.mjs"
+        node node_modules/esbuild/bin/esbuild "tools/$name.ts" --bundle --platform=node --format=esm --alias:@=./src "--outfile=$bundle"
+        if ($LASTEXITCODE -ne 0) { throw "Fan release check could not bundle $name" }
+        if ($name -eq 'fan_resume_continuous_recovery_selftest') {
+          node $bundle --committed-wake-only
+          if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: committed wake ownership' }
+          continue
+        }
+        $lines = @(node $bundle)
+        $exitCode = $LASTEXITCODE
+        $lines | Write-Output
+        if ($exitCode -ne 0) { throw "Fan release check failed: $name" }
+        $result = $lines[-1] | ConvertFrom-Json
+        if ($name -eq 'fan_duplicate_wake_replay_selftest') {
+          if ($result.ok -ne $true -or $result.checks -lt 54 -or $result.hardwareCalls -ne 0) {
+            throw 'Fan release check did not exercise the full wake replay matrix.'
+          }
+          continue
+        }
+        if ($result.ok -ne $true -or $result.checks -ne 1 -or $result.hardwareCalls -ne 0 -or @($result.observations).Count -lt 2) {
+          throw "Fan release check did not exercise the expected scenarios: $name"
+        }
+      }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
     shell: pwsh

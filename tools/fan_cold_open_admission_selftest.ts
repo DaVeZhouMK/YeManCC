@@ -124,6 +124,40 @@ async function run(){
    await fx.lifecycle.apply(curve);
    check('next real adjustment retains the lease after stale shared events',a.calls.filter(x=>x==='acquire').length===1);
   }finally{await fx.lifecycle.close().catch(()=>{});}}
+ // Win4 original Open can fail after the base device opened. Use the Host's
+ // post-cleanup snapshot shape, which has no wake receipt of its own.
+ for (const followup of ['ready', 'suspending', 'unconfirmed-close', 'old-generation', 'adjacent-model'] as const) {
+  const a=new ColdAdapter('HandheldCompanion.Devices.GPDWin4'),fx=await make(a);
+  const open=a.open.bind(a);
+  let allowOpen=false;
+  const failure=new FanApiError('HC_GPD_WIN4_OPEN_FAILED: HC device Open returned false',409,'HC_GPD_WIN4_OPEN_FAILED','/api/open');
+  a.open=async()=>{
+   if (allowOpen) {a.overrides={};return open();}
+   a.calls.push('open-refused');a.overrides={factoryType:a.family,restoreStrategy:'GpdWin4HcRelease',state:'AwaitingControl',
+    resumePhase:'AwaitingControl',controlAccepting:true,
+    win4OpenFailure:{generation:followup==='old-generation'?1:2,cleanupComplete:followup!=='unconfirmed-close'},
+    lastError:'FanApiException: '+failure.message};
+   throw failure;
+  };
+  try {
+   await fx.lifecycle.start({manualRecovery:true});
+   const first=await fx.lifecycle.apply(curve).catch(e=>e);
+   check(followup+' original error returns without replay',first===failure&&a.calls.filter(c=>c==='open-refused').length===1);
+   check(followup+' first Open refusal never subscribes or writes', !a.calls.some(c=>['open-events','acquire','enable','resume'].includes(c)));
+   allowOpen=true;
+   if(followup==='adjacent-model')a.overrides.factoryType='HandheldCompanion.Devices.GPDWin4_2023';
+   fx.setNative(native(2,followup==='suspending'?'suspending':'ready'));
+   if (followup==='ready') {
+    const result=await fx.lifecycle.apply(curve).catch(()=>null);
+    check('new manual Win4 apply reaches exactly one fresh Open/Events/acquire/enable',result?.state==='Ready'
+     && ['open','open-events','acquire','enable'].every(c=>a.calls.filter(x=>x===c).length===1)
+     && !a.calls.includes('resume') && fx.starts()===1 && fx.stops()===0);
+   } else {
+    await fx.lifecycle.apply(curve).catch(()=>{});
+    check(followup+' cannot reuse the failed-open cleanup to open or write',!a.calls.includes('open')&&!a.calls.includes('enable'));
+   }
+  } finally {await fx.lifecycle.close().catch(()=>{});}
+ }
  console.log(JSON.stringify({ok:failures.length===0,checks,failures,hardwareCalls:0,scope:'real-production-FanHostLifecycle; exact-cold-Stopped-receipt; native/Host/process-fixtures'}));
  if(failures.length)process.exitCode=1;
 }

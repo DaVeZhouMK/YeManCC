@@ -1,4 +1,4 @@
-﻿candidateOnly: true
+candidateOnly: true
 releaseApproved: false
 installed: false
 sourceBatch: candidate-fan-win5-resume-settlement-20261118
@@ -12,8 +12,8 @@ hardwareWriteAuthorizationGranted: true
 hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
-approvedHostExeSha256: F1163D7AAFACAA376E32D6AB14F10DD1B3C51380FF9BE7B392573F9AEBA77C0E
-approvedHostDllSha256: 52ADB1550FD280E75D1359E7E11048EF0201E4A19612CD0D2565F67A7EEB1934
+approvedHostExeSha256: A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733
+approvedHostDllSha256: 46362F20E3B860BB19AC81D3D8EF54ED55B7D1B0CC6BCB160873C3F0CE078867
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline

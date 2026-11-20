@@ -93132,7 +93132,7 @@ static void reg_updater() {
              // host 二进制 / …）后必须实算重填，禁止手改哈希；build-workspace.ps1
              // Assert-PublishPreGate 会自动对拍，不一致即 halt 并打印实算值，
              // 更新安装 ps1 侧（Assert-FanHostV2Payload）同用此常量。
-             f << "$expectedFanHostV2ManifestSha256 = '74d6c2a4bad511abe53ca9a75918d7b46c8c5f80e01d10eaade6786be77e8ae8'\n";
+             f << "$expectedFanHostV2ManifestSha256 = '1776faaefe9df422dbd38452e46542a3efb183803f30426d6c4bb8677b06f79e'\n";
              f << "$expectedFanHostV2ManifestFileCount = 9\n";
              f << "$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'\n";
              f << "function Write-Utf8Atomic([string]$path, [string]$text, [ValidateRange(1,60)][int]$Attempts=60) {\n";
