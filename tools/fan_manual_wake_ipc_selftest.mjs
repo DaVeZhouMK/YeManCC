@@ -337,6 +337,74 @@ for(const boundary of ['ready','off','new-sleep'])await check('native-owner real
   return {boundary,enables,retained,starts:f.starts,manualRequests:f.manuals,attempt:p.status};
  }finally{await nativeDone(f);}
 });
+await check('native-owner real HTTP delayed native permission preserves the newest explicit curve',async()=>{
+ const f=fixture('native-owner-deferred-close','HandheldCompanion.Devices.GPD.GPDWin5');try{
+  await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765','0123456789abcdef'.repeat(4));
+  await f.host.resume({generation:4});f.host.calls=[];
+  const writes=[],enable=f.host.enable.bind(f.host);
+  f.host.enable=async request=>{writes.push(request.nodes);return enable();};
+  f.setNative({phase:'resuming',resumeReady:true,hardwareWritesAllowed:false});
+  const wake=f.observe(f.life.resumeAfterCommittedPowerWake(4));await f.advance(100);
+  assert.notEqual(wake.status,'pending');assert(f.life.recoveryActive);
+  const latest=f.curve.map((node,i)=>({...node,dutyPercent:i===2?82:node.dutyPercent}));
+  const apply=f.observe(f.life.apply(latest));await f.advance(1000);
+  assert.equal(f.native.hardwareWritesAllowed,false,'fixture released the native gate prematurely');
+  assert.equal(apply.status,'pending',apply.error??'manual request settled without write permission');
+  assert.deepEqual(writes,[],'wrote a curve before native permission');
+  assert(!f.host.calls.includes('acquire'),'acquired a lease before native permission');
+  f.releaseCleanup();await f.advance(8000);
+  assert.equal(apply.status,'fulfilled',apply.error??'the new curve still needs another click');
+  assert.deepEqual(writes,[latest],'old or duplicate curve writes after the gate opens');
+  assert.equal(f.host.calls.filter(c=>c==='acquire').length,1);
+  assert.equal(f.starts,1);assert.equal(f.life.recoveryActive,false);
+  return {writes:writes.length,customDuty:writes[0][2].dutyPercent,starts:f.starts};
+ }finally{await nativeDone(f);}
+});
+for(const boundary of ['ready','off','new-sleep'])await check('native-owner real HTTP committed wake survives an unavailable Native write fact: '+boundary,async()=>{
+ const f=fixture('native-owner','HandheldCompanion.Devices.GPD.GPDWin5');try{
+  await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765','0123456789abcdef'.repeat(4));
+  await f.host.resume({generation:4});f.host.calls=[];
+  f.setNative({known:false,reason:'power-context-changing',generation:undefined,phase:undefined,resumeReady:false,hardwareWritesAllowed:false});
+  const wake=f.observe(f.life.resumeAfterCommittedPowerWake(4));
+  await f.advance(1500);
+  assert.notEqual(wake.status,'pending','the first committed wake attempt must settle');
+  assert(!f.host.calls.some(c=>c==='acquire'||c==='enable'),'changing Native facts must block writes');
+  if(boundary==='off'){
+   const off=f.observe(f.life.disable());await f.advance(1000);assert.equal(off.status,'fulfilled',off.error??'OFF pending');
+  }else if(boundary==='new-sleep'){
+   f.setNative({known:true,generation:5,phase:'suspending',resumeReady:false});
+   f.rootSuspend({generation:5,scope:'fan-only'});
+  }
+  if(boundary!=='new-sleep')f.setNative({known:true,generation:4,phase:'ready',resumeReady:true,hardwareWritesAllowed:true});
+  await f.advance(8000);
+  const writes=f.host.calls.filter(c=>c==='enable').length;
+  assert.equal(writes,boundary==='ready'?1:0,'incorrect replay without a second wake event or a click');
+  assert.equal(f.host.calls.filter(c=>c==='acquire').length,writes);
+  assert.equal(f.starts,1);assert.equal(f.manuals,0);
+  if(boundary==='ready')assert.equal(f.life.recoveryActive,false);
+  return {boundary,writes,starts:f.starts,manualRequests:f.manuals};
+ }finally{await nativeDone(f);}
+});
+await check('native-owner real HTTP first manual curve waits for a changing Native write fact',async()=>{
+ const f=fixture('native-owner','HandheldCompanion.Devices.GPD.GPDWin5');try{
+  await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765','0123456789abcdef'.repeat(4));
+  await f.host.resume({generation:4});f.host.calls=[];
+  const localReady=f.life.observePowerBoundary.bind(f.life);
+  localReady('resume-ready',4);
+  f.setNative({known:false,reason:'power-context-changing',generation:undefined,phase:undefined,resumeReady:false,hardwareWritesAllowed:false});
+  const request=f.observe(f.life.start({manualRecovery:true}).then(()=>f.life.apply(f.curve)));
+  await f.advance(1500);
+  assert.equal(request.status,'pending',request.error??'manual request did not wait for native');
+  assert(!f.host.calls.some(c=>c==='acquire'||c==='enable'));
+  f.setNative({known:true,generation:4,phase:'ready',resumeReady:true,hardwareWritesAllowed:true});
+  await f.advance(8000);
+  assert.equal(request.status,'fulfilled',request.error??'manual request did not continue');
+  assert.equal(f.host.calls.filter(c=>c==='enable').length,1);
+  assert.equal(f.host.calls.filter(c=>c==='acquire').length,1);
+  assert.equal(f.starts,1);assert.equal(f.manuals,0);
+  return {writes:1,manualRequests:f.manuals};
+ }finally{await nativeDone(f);}
+});
 await check('native-owner real HTTP explicit zero-work rejection leaves the same wake eligible',async()=>{
  const f=fixture('native-owner');try{
   await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765');

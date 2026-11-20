@@ -236,9 +236,16 @@ runs:
       $handoffs = @($wakeIpc.results | Where-Object {
         $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake retains a curve across delayed native permission: *'
       })
+      $unavailable = @($wakeIpc.results | Where-Object {
+        $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake survives an unavailable Native write fact: *'
+      })
+      $passedNames = @($wakeIpc.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
       if ($wakeIpc.ok -ne $true -or $wakeIpc.hardwareCalls -ne 0 -or
-          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3) {
-        throw 'Fan release check did not exercise Native permission handoff, OFF and newer sleep.'
+          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          @($unavailable.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          $passedNames -cnotcontains 'native-owner real HTTP delayed native permission preserves the newest explicit curve' -or
+          $passedNames -cnotcontains 'native-owner real HTTP first manual curve waits for a changing Native write fact') {
+        throw 'Fan release check did not exercise Native permission handoff, OFF, newer sleep and explicit control.'
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}

@@ -3672,10 +3672,14 @@ export class FanHostLifecycle {
     // Accepted async native cleanup is a pending admission, not a failed
     // click. Reuse the original absolute deadline outside the control queue;
     // real Suspending, denied Ready and unknown generations still fail closed.
-    if (native?.generation === generation && native.phase === 'resuming') {
+    // Native can return known:false without a generation when it cannot read
+    // a coherent power snapshot. Retain an already admitted wake; this reply
+    // cannot establish a wake or authorize an HC operation.
+    const wakeReady = this.coordinator.isWakeReady(generation);
+    if ((native?.generation === generation && native.phase === 'resuming')
+        || (native?.known === false && wakeReady)) {
       if (context.manualRecovery) throw new FanManualNativeWakePending(context);
-      if (native.known !== false && this.coordinator.isWakeReady(generation))
-        throw new FanAutomaticNativeWakePending(reason);
+      if (wakeReady) throw new FanAutomaticNativeWakePending(reason);
     }
     if (native?.generation !== generation || native.phase !== 'ready' || native.hardwareWritesAllowed !== true) {
       throw new Error(`FAN_MANUAL_WAKE_NOT_READY:${reason}`);
