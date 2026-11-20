@@ -1,3 +1,7 @@
+<!-- GPD-WIN4-FAN-OPEN-FIELD-20261121 -->
+> **Win4 6800U `G1618-04`：新版现场仍无法冷启风扇。** 已从随包 HC 核出 PawnIO 索引口与数据口选槽错配，离线候选已复现并修正。生产 HC 尚未换入，真机未验；与 Win5 唤醒分开。[现场对照与可重复候选](GPD-WIN4-FAN-OPEN-20261121.md)
+<!-- /GPD-WIN4-FAN-OPEN-FIELD-20261121 -->
+
 <!-- AYA-FAMILY-FIELD-RECONCILIATION-HC098 -->
 # AYA家族现场与消费合同（2026-11-07）
 
