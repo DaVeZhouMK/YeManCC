@@ -9,7 +9,7 @@
     {
       "path": "HandheldCompanion.dll",
       "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.dll",
-      "sha256": "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c",
+      "sha256": "f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c",
       "bytes": 2774016,
       "modifiedByYmcc": true
     },

@@ -20,8 +20,8 @@
     }
   },
   "approvedChanges": {
-    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261107-aya-kun-color.json",
-    "sha256": "681c9e11e3cd940a179feab781c8856cc687f355e0da94d703049e2d2c7c934d"
+    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261121-win4-port.json",
+    "sha256": "5499fed8f77693f3ac84df702fc206a0e409b534b77032bfe471f280990193d2"
   },
   "provenance": {
     "parentPromotionReceipt": "tools/hc-winrt-second-pass/PARENT-PROMOTION-RECEIPT.json",

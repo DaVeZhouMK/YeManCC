@@ -43,6 +43,16 @@ $runtimePaths = @("$payload/YeManFanHost.payload.json") + @($runtimeManifest.fil
 $hcManifestPath = 'PowerControl/' + ([string]$runtimeManifest.runtimeManifest).Replace('\','/').Substring(3)
 $hcDirectory = $hcManifestPath.Substring(0, $hcManifestPath.LastIndexOf('/'))
 $hcManifest = Get-Content -LiteralPath (Join-Path $root $hcManifestPath) -Raw -Encoding UTF8 | ConvertFrom-Json
+. (Join-Path $root 'tools/hc-export-source-contract.ps1')
+Assert-YmccMainlineHcExport -ProjectRoot $root -RuntimeRoot (Join-Path $root $hcDirectory) | Out-Null
+# Bind the Win4-corrected runtime separately from the unchanged Fan Host.
+$hcSha = 'f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c'
+$hcRow = @($hcManifest.files | Where-Object { $_.path -ceq 'HandheldCompanion.dll' })
+if ($hcRow.Count -ne 1 -or $hcRow[0].sha256 -cne $hcSha) {
+  throw 'FAN_RELEASE_WIN4_HC_REQUIRED: the selected HC runtime lacks the Win4 port-pair correction.'
+}
+. (Join-Path $root 'tools/lighting-build-contract.ps1')
+Assert-YmccLightingHcRuntimePin -ProjectRoot $root | Out-Null
 $dependencies = @($hcManifestPath) + @($hcManifest.files | ForEach-Object { "$hcDirectory/$(([string]$_.path).Replace('\','/'))" })
 if ($hcManifest.sharedDependencies) {
   $dependencies += @($hcManifest.sharedDependencies.files | ForEach-Object { "PowerControl/ymcc-shared-runtime/$($_.path)" })
@@ -53,6 +63,14 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   '.github/workflows/release.yml',
   'tools/github-release-preflight.ps1',
   'tools/verify-fan-release-inputs.ps1',
+  'tools/hc-export-source-contract.ps1',
+  'tools/hc-export-baseline-guard.ps1',
+  'tools/lighting-build-contract.ps1',
+  'deps/ymcc-device-core-runtime/export-baseline.lock.json',
+  'deps/ymcc-device-core-runtime/export-baseline/approved-20261121-win4-port.json',
+  'deps/ymcc-device-core-runtime/profile.json',
+  'deps/ymcc-device-core-runtime/bin/HandheldCompanion.dll',
+  'FanLab/LightSetter/Program.cs',
   $selector,
   'tools/hc-device-runtime/verify-host-source-bundle.ps1',
   'tools/fan_boot_autostart_sim.ts',

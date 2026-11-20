@@ -1,6 +1,6 @@
 # GPD Win4 6800U: cold fan Open refusal on 0.0.41
 
-Status: reproduced the shipped port selector defect offline. The corrected DLL is a review candidate; the release still selects the original HC DLL. Physical fan operation has not been verified.
+Status: reproduced the shipped port selector defect offline. Mainline now selects the corrected DLL `f79edd9d…` in both the production runtime and its DeviceCore build input. The 00:20 test export predates this runtime correction. Physical fan operation has not been verified.
 
 The 2026-11-21 00:20 (UTC+8) Win4 export is from `G1618-04`, `HandheldCompanion.Devices.GPDWin4`, Native PID 10704, Host PID 3972, generation 7889626. Its manifest records Native `29eae0a6…`, FanHost `46362f20…`, Backend `e3dfcccd…`, payload manifest `1776faae…` and HC `4cd3dea2…`, matching the November 21 `69e43d30` test export. Disk hashes alone do not prove the loaded image; the five matching, newly added structured Host receipts also appeared in this instance's live log.
 
@@ -10,4 +10,6 @@ The 2026-11-21 00:20 (UTC+8) Win4 export is from `G1618-04`, `HandheldCompanion.
 
 [Candidate tool](../tools/hc-device-runtime/New-GpdWin4FanPortCandidate.ps1) reproduces the mismatch using the actual integer selector IL from both pinned methods and a fixture for the pinned module's port pairing. Both original paths reject the data port; both corrected paths accept it. All 131,070 other method/port assignments remain identical and exactly ten bytes changed in two expressions. The candidate is `f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c`; it keeps the same HC API, chip verification, unlock, duty and return methods. No HC assembly or hardware path is executed by the fixture.
 
-Before promotion, bind the candidate through the existing DeviceCore profile, export lock and both FanHost/LightSetter consumers. Verify the composed payload and final ZIP include the new HC hash. Run the existing shared consumer checks. On Win4, verify one enable gives successful Open, lease, curve and a visible RPM change; then verify explicit OFF and OEM return. Do not extrapolate this result to Win4 2023/2024 or the Win5 resume path.
+The production profile, runtime manifest, export lock and LightSetter pin select the new hash. FanHost already validates the split runtime by its deployment manifests, so its existing Program/backend artifacts and wake logic are unchanged. Release preflight checks the corrected HC identity in addition to the existing Host pins. The ordinary export also checks the runtime at source, stage and final ZIP. The previous 00:20 ZIP is rejected by the new export lock.
+
+On Win4, verify one enable gives successful Open, lease, curve and a visible RPM change; then verify explicit OFF and OEM return. Use an export whose HC hash begins `f79edd9d`. Do not extrapolate this result to Win4 2023/2024 or the Win5 resume path.
