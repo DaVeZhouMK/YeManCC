@@ -2302,6 +2302,22 @@ export class FanHostLifecycle {
     }
   }
 
+  private readonly wakeAdmissionListeners = new Set<(generation: number) => void>();
+
+  onWakeAdmitted(listener: (generation: number) => void): () => void {
+    this.wakeAdmissionListeners.add(listener);
+    return () => { this.wakeAdmissionListeners.delete(listener); };
+  }
+
+  private publishWakeAdmission(generation: number): void {
+    if (!this.coordinator.isWakeReady(generation)) return;
+    for (const listener of this.wakeAdmissionListeners) {
+      try { listener(generation); } catch (error) {
+        fanDiagnosticLog('lifecycle.wake-admission-listener-failed', { generation, error: String(error) });
+      }
+    }
+  }
+
   /** Feed the native power transaction into the single fan-domain gate. */
   observePowerBoundary(event: FanCoordinatorPowerEvent, generation: number): void {
     if (!Number.isSafeInteger(generation) || generation < 0) return;
@@ -6800,7 +6816,11 @@ export class FanHostLifecycle {
         || (native.phase !== 'ready' && native.phase !== 'resuming')
         || generation < this.powerGeneration) return false;
     this.setPowerGeneration(generation);
-    this.observePowerBoundary('resume-ready', generation);
+    // A repeated F5 may join the replay owner, but cannot move a live HC
+    // session back to Resuming and make delayed suspend notices current again.
+    if (!this.coordinator.isWakeReady(generation) || this.coordinator.currentPhase !== 'ready')
+      this.observePowerBoundary('resume-ready', generation);
+    this.publishWakeAdmission(generation);
     await this.resume();
     return cancellationRevision === this.controlCancellationRevisionValue;
   }
@@ -6859,6 +6879,7 @@ export class FanHostLifecycle {
       });
     }
     if (!this.isResumeReplayCurrent(generation, intentRevision)) return;
+    this.publishWakeAdmission(generation);
     // If the ordinary F5 handler won the race, do not run the compensation's
     // rearm beside it.  Await the shared resume body; after it settles the
     // normal recovery owner remains responsible for any transient failure.

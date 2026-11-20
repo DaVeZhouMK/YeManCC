@@ -63,6 +63,7 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   'native/main.cpp',
   'native/fan_resume_owner.h',
   'src/App.vue',
+  'src/views/FanView.vue',
   'src/bridge/fanApi.ts',
   'src/bridge/fanHost.ts'
 )

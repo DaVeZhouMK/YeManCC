@@ -101,7 +101,7 @@ export const fanHostLifecycle = new FanHostLifecycle({enabled:true,adapter:bound
     observe?.(active,curve);
   },
   launcher:{async start(){fx.note('launch');await fx.waitAt('launch');return {pid:1234,executable:'fixture-FanHost.exe'};},async stop(){fx.note('stop');if(fx.stopFailures-- > 0)throw new Error('fixture-exact-exit-not-confirmed');}},
-  heartbeatIntervalMs:5000,resumeWaitDeadlineMs:1500,readNativePowerState:async()=>{fx.note('power-read');return {...fx.native};},
+  heartbeatIntervalMs:5000,resumeWaitDeadlineMs:1500,readNativePowerState:async()=>{fx.note('power-read');const snapshot={...fx.native};await fx.waitAt('power-read');return snapshot;},
   readNativeActivity:async()=>null,requestManualWake:async(g)=>{
     fx.note('fanManualWake');
     if(g!==fx.native.generation)return {ok:false,generation:fx.native.generation,phase:fx.native.phase,reason:'stale_generation'};
@@ -118,7 +118,7 @@ Object.assign(fx,{
       window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation}}));await fanHostLifecycle.suspend();}
     setNative(generation,'suspended');
   },
-  async autoWake(){const g=fx.native.generation;setNative(g,'ready');fanHostLifecycle.observePowerBoundary('resuming',g);fanHostLifecycle.observePowerBoundary('resume-ready',g);window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:g}}));await fanHostLifecycle.resume().catch(()=>{fx.note('resume-call-deferred');});},
+  async autoWake(){const g=fx.native.generation;setNative(g,'ready');fanHostLifecycle.observePowerBoundary('resuming',g);window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:g}}));await fanHostLifecycle.resumeAfterNativeReady(g).catch(()=>{fx.note('resume-call-deferred');});},
   sharedGeneration: 2,
   sharedPhase: 'suspended',
   async filteredPhysicalCycle(generation: number) {
@@ -126,9 +126,8 @@ Object.assign(fx,{
     setNative(generation, 'suspended');boundary.closed('Suspended');boundary.resumeGeneration=generation;
     fanHostLifecycle.setPowerGeneration(generation);fanHostLifecycle.observePowerBoundary('suspending',generation);
     window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation}}));
-    setNative(generation,'ready');fanHostLifecycle.observePowerBoundary('resume-ready',generation);
-    window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation}}));
-    try { await fanHostLifecycle.resume(); }
+    setNative(generation,'ready');
+    try { await fanHostLifecycle.resumeAfterNativeReady(generation); }
     catch (error) {
       // Production's Fan-ready handler is non-blocking. Its finite resume wait
       // may hand off to the existing owner while the same curve remains pending.

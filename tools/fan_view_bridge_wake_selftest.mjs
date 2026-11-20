@@ -11,10 +11,13 @@ const {chromium}=createRequire(path.join(runtime,'_fan-wake-chain.cjs'))('playwr
 const out=path.resolve(process.env.YMCC_FAN_WAKE_EVIDENCE_DIR||path.join(root,'../../Build/Validation/fan-view-bridge-single-switch-20261006'));fs.mkdirSync(out,{recursive:true});
 const fixture=path.join(root,'tools/fan_view_bridge_wake_fixture.ts');
 const duplicateOnly=process.env.YMCC_FAN_WAKE_DUPLICATE_UI_ONLY==='1';
-const appSuspendObserver=duplicateOnly
- ? fs.readFileSync(path.join(root,'src/App.vue'),'utf8').match(/function onFanPhysicalSuspending\(e: Event\): void \{[\s\S]*?\n\}/)?.[0]
- : null;
-if(duplicateOnly)assert(appSuspendObserver,'actual root Fan suspend observer missing');
+const appSource=duplicateOnly?fs.readFileSync(path.join(root,'src/App.vue'),'utf8').replaceAll('\r\n','\n'):null;
+const appFanBinding=appSource ? [
+ appSource.match(/type FanWakeRequest = \{[\s\S]*?\n\};\nconst fanWakeRequests = [^\n]+/)?.[0],
+ ...['rememberFanWakeRequest','onFanPhysicalSuspending','requestFanCommittedResume','onFanResumeReady']
+  .map(name=>appSource.match(new RegExp(`function ${name}\\([^\\n]+\\n[\\s\\S]*?\\n\\}`))?.[0]),
+] : [];
+if(duplicateOnly)assert(appFanBinding.every(Boolean),'actual App Fan wake/suspend source missing');
 const mocks={
   '@/bridge/fanHost':`export {fanHostLifecycle,resolveFanEntryAction} from ${JSON.stringify(fixture)};`,
   '@/bridge/topmon':'export const topMonitorData={value:{tempC:55}};',
@@ -22,10 +25,16 @@ const mocks={
   '@/bridge/settingsRepository':'export async function readSettingsSection(){return {};}export async function saveSettingsSection(){}',
 };
 const styles=[];
-const appSuspendBinding=appSuspendObserver ? `import {fanHostLifecycle} from '@/bridge/fanHost';
+const appSuspendBinding=duplicateOnly ? `import {fanHostLifecycle} from '@/bridge/fanHost';
 import {setFanControlActive} from '@/bridge/fanFeature';
-${appSuspendObserver}
-window.addEventListener('ipc:fan.suspending',onFanPhysicalSuspending);` : '';
+import {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from '@/bridge/powerLifecycleState';
+import {on} from '@/bridge/ipc';
+let resumeLifecycleActive=true,latestResumeGeneration=0;
+const fanDiagnosticLog=()=>{},ensureFanAutoStart=()=>{window.__chain.note('app-fan-auto-start');};
+${appFanBinding.join('\n')}
+window.addEventListener('ipc:fan.suspending',onFanPhysicalSuspending);
+on('fan.resume-ready',({generation})=>onFanResumeReady(Number(generation)||0));
+window.__chain.committedWake=(generation)=>{latestResumeGeneration=generation;fanHostLifecycle.observePowerBoundary('resumed',generation);requestFanCommittedResume(generation);};` : '';
 const result=await build({stdin:{resolveDir:root,loader:'ts',contents:"import {createApp} from 'vue';import Page from './src/views/FanView.vue';createApp(Page).mount('#app');\n"+appSuspendBinding},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'real-fan-chain-with-platform-boundaries',setup(b){
  if(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE)b.onLoad({filter:/src[\\/]bridge[\\/]fanHost\.ts$/},a=>({contents:fs.readFileSync(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE,'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));
 
@@ -74,10 +83,11 @@ try{
   const snapshot=()=>page.evaluate(()=>{const button=document.querySelector('.fan-toggle');return {text:button.textContent,pressed:button.getAttribute('aria-pressed'),busy:button.getAttribute('aria-busy'),disabled:button.disabled,notice:document.querySelector('.fan-status-banner').textContent,active:window.__chain.lastControlActive,writes:window.__chain.boundary.writes,intentRevision:window.__chain.lifecycle.controlIntentRevision,cancellationRevision:window.__chain.lifecycle.controlCancellationRevision,coordinator:window.__chain.lifecycle.coordinatorSnapshot,trace:window.__chain.trace};});
   for(const family of ['ClawCG3EM','ROGAlly','GPDWin5']){
    await page.goto(url(family));await enabled();await page.locator('.fan-toggle').click();await success();await enabled();
-   await page.evaluate(async()=>{await window.__chain.sleep(2);await window.__chain.autoWake();});await success();await enabled();
+   await page.evaluate(async()=>{const f=window.__chain;await f.sleep(2);f.setNative(2,'ready');
+     window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:2}}));});await success();await enabled();
    const before=await snapshot();assert.equal(before.pressed,'true');assert.equal(before.disabled,false);
    await page.evaluate(()=>{const f=window.__chain,original=f.boundary.getState.bind(f.boundary);let resolve;const held=new Promise(r=>resolve=r);f.duplicateUiReads=0;f.releaseDuplicateUiRead=()=>{f.boundary.getState=original;resolve();};f.boundary.getState=async(...args)=>{f.duplicateUiReads++;await held;return original(...args);};});
-   let error=null,after,afterSuspend,reads,clickBoundary,nextSleep,nextWake;
+   let error=null,after,afterSuspend,afterUnconfirmedWake,reads,clickBoundary,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead;
    try{
     await page.evaluate(()=>{for(const name of ['ipc:fan.resume-ready','ipc:power.resume-ready','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:2}}));});
     after=await snapshot();reads=await page.evaluate(()=>window.__chain.duplicateUiReads);
@@ -87,6 +97,10 @@ try{
       phase:afterSuspend.coordinator.phase,ready:afterSuspend.coordinator.wakeReadyGeneration,intent:afterSuspend.intentRevision},
     {pressed:'true',text:'点击关闭',busy:'false',disabled:false,active:true,phase:before.coordinator.phase,ready:2,intent:before.intentRevision},
     'a late physical suspend for the confirmed Fan generation must preserve page and Host control');
+    await page.evaluate(()=>{for(const name of ['ipc:power.resume-ready','ipc:fan.resume-ready'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:200}}));});
+    afterUnconfirmedWake=await snapshot();
+    assert.deepEqual({pressed:afterUnconfirmedWake.pressed,disabled:afterUnconfirmedWake.disabled,active:afterUnconfirmedWake.active},
+      {pressed:'true',disabled:false,active:true},'unconfirmed higher wake hints must leave the live switch and navigation control alone');
     await page.waitForFunction(()=>window.__chain.duplicateUiReads>0,null,{timeout:6500});
     await page.evaluate(()=>window.__chain.releaseDuplicateUiRead());
     await page.locator('.fan-toggle').click();await page.waitForFunction(previous=>window.__chain.lifecycle.controlCancellationRevision>previous.cancellationRevision||window.__chain.lifecycle.controlIntentRevision>previous.intentRevision,before,{timeout:3000});clickBoundary=await snapshot();
@@ -104,14 +118,37 @@ try{
     nextSleep=await snapshot();
     assert.equal(nextSleep.pressed,'false');assert.equal(nextSleep.writes,false);
     assert.equal(nextSleep.coordinator.powerGeneration,3);assert.equal(nextSleep.coordinator.phase,'suspending');
-    await page.evaluate(()=>window.__chain.autoWake());await success();await enabled();
+    await page.evaluate(()=>{const f=window.__chain;f.setNative(3,'ready');f.native.notificationPending=true;
+      window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{generation:3,phase:'ready',known:true,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:100}}));
+      window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:3}}));});
+    await page.waitForFunction(()=>window.__chain.trace.some(t=>t.op==='power-read'&&t.generation===3));
+    pendingWake=await snapshot();
+    assert.equal(pendingWake.pressed,'false');assert.equal(pendingWake.writes,false);
+    assert.equal(pendingWake.coordinator.wakeReadyGeneration,null,'public pending and a private hint cannot admit a wake');
+    assert.equal(pendingWake.notice,nextSleep.notice,'pending Ready must leave the sleep message in place');
+    await page.evaluate(()=>{const f=window.__chain;f.native.notificationPending=false;
+      window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:3}}));});
+    await success();await enabled();
     nextWake=await snapshot();
     assert.equal(nextWake.trace.filter(t=>t.op==='enable'&&t.generation===3).length,1,'the real next Fan sleep still resumes the retained curve once');
     assert.equal(nextWake.trace.filter(t=>t.op==='launch').length,1,'the same Host owner survives the new Fan generation');
+    await page.evaluate(()=>{const f=window.__chain;f.setNative(4,'suspended');f.boundary.closed('Suspended');f.boundary.resumeGeneration=4;
+      window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation:4,scope:'fan-only'}}));
+      f.setNative(4,'ready');f.committedWake(4);});
+    await success();await enabled();compensatedWake=await snapshot();
+    assert.equal(compensatedWake.trace.filter(t=>t.op==='enable'&&t.generation===4).length,1,'committed Ready compensates for a missing Fan notification');
     await page.locator('.fan-toggle').click();await enabled();
     assert.equal(await page.evaluate(()=>window.__chain.lifecycle.hasControlIntent),false);
+    await page.locator('.fan-toggle').click();await success();await enabled();
+    await page.evaluate(async()=>{const f=window.__chain;await f.sleep(5);f.setNative(5,'ready');
+      f.holdAt='power-read';window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:5}}));});
+    await page.waitForFunction(()=>window.__chain.gateReached==='power-read');
+    await page.evaluate(async()=>{const f=window.__chain;const off=f.lifecycle.disable();f.releaseGate();await off;
+      window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:5}}));f.committedWake(5);});
+    offDuringRead=await snapshot();
+    assert.equal(offDuringRead.trace.filter(t=>t.generation===5&&['enable','app-fan-auto-start'].includes(t.op)).length,0,'OFF supersedes both wake entries for the same generation');
    }
-   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary,afterSuspend,nextSleep,nextWake});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
+   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary,afterSuspend,afterUnconfirmedWake,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
    cases.push(family+': confirmed wake + late fan/shared aliases retains ON, no new query/replay, next click is OFF');
   }
   assert.deepEqual(duplicateResults.filter(x=>!x.ok).map(x=>({family:x.family,error:x.error})),[]);
