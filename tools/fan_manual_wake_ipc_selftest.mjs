@@ -60,7 +60,8 @@ const binding=files.map(p=>({path:p==='src/views/FanView.vue'?viewPath:selected(
 const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/bridge/api';export {HttpFanApiAdapter} from './src/bridge/fanApi';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {rejectAllPending} from './src/bridge/ipc';export {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';",resolveDir:project,sourcefile:'fan-manual-wake-ipc-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanTest',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:beforeRoot?[{name:'bound-before-image',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:api|fanHost)\.ts$/},a=>({contents:fs.readFileSync(selected(path.relative(project,a.path)),'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));}}]:[]});
 const code=bundle.outputFiles[0].text;
 function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1Mini',qualifiedReceipts=false){
- let now=0,id=0,listener,manuals=0,heldReply,rootObserver,releaseCleanup,appWake,pageApi,pageVisible=false;const settings={on:true};
+ let now=0,id=0,listener,manuals=0,heldReply,rootObserver,releaseCleanup,appWake,pageApi,pageVisible=false;
+ let holdFanRead=false, heldFanRead;const settings={on:true};
  const timers=new Map(),calls=[];
  let native={generation:3,phase:'ready',resumeReady:true,inputReady:true,hardwareWritesAllowed:true,hibernateAvailable:true};
  const timer=(fn,ms,interval=false)=>{const key=++id,delay=Math.max(1,Number(ms)||1);timers.set(key,{fn,due:now+delay,period:interval?delay:0});return key;};
@@ -69,7 +70,11 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
  const deliver=(msg,result,error)=>listener?.({data:error?{id:msg.id,error}:{id:msg.id,result}});
  win.chrome={webview:{addEventListener:(_t,fn)=>listener=fn,postMessage(msg){calls.push(msg);
   if(msg.cmd==='fanLog.write'){queueMicrotask(()=>deliver(msg,{ok:true}));return;}
-  if(msg.cmd==='power.fanLifecycle'){const result={...native};queueMicrotask(()=>deliver(msg,result));return;}
+  if(msg.cmd==='power.fanLifecycle'){
+   const result={...native};
+   if(holdFanRead){holdFanRead=false;heldFanRead=()=>deliver(msg,result);return;}
+   queueMicrotask(()=>deliver(msg,result));return;
+  }
   if(msg.cmd==='http.request'&&mode.startsWith('native-owner')){
    const route=new URL(msg.args.url).pathname;
    if(route==='/api/resume')throw Error('renderer /api/resume must not be posted');
@@ -147,7 +152,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
  }
  async function begin(){const pending=observe(mode.startsWith('wake-cleanup')?life.start({manualRecovery:true}).then(()=>life.apply(curve)):life.apply(curve));for(let n=0;n<20&&!calls.some(c=>c.cmd==='power.fanManualWake')&&pending.status==='pending';n++)await flush();return pending;}
  async function done(){const close=life?.close().catch(()=>{});api.rejectAllPending('fixture cleanup');await flush();if(close)await close;timers.clear();}
- return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();}};
+ return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();},holdNextFanRead(){holdFanRead=true;},releaseFanRead(){assert(heldFanRead,'a real Fan read must be in flight');const reply=heldFanRead;heldFanRead=undefined;reply();}};
 }
 const results=[];
 async function check(name,run){if(nativeOwnerCancelOnly&&!name.startsWith('native-owner cancel '))return;if(nativeOwnerRearmOnly&&!name.startsWith('native-owner real HTTP'))return;if(nativeOwnerOnly&&!name.startsWith('native-owner '))return;if(sharedReadyOnly&&!name.startsWith('shared-ready '))return;if(backgroundReadyOnly&&!name.startsWith('background-ready '))return;try{const facts=await run();results.push({name,ok:true,...(facts?{facts}:{})});console.log('PASS '+name);}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error);}}
@@ -206,6 +211,46 @@ await check('background-ready retained private cycle resumes and renews without 
    virtualElapsedMs:22000,physicalOrWallClockTimingProven:false};
  }finally{await f.done();}
 });
+
+for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation']) {
+ await check('background-ready one unavailable coordinator read: '+boundary,async()=>{
+  const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
+  try{
+   await f.boot();
+   await f.host.resume({generation:4});
+   // Match Native's unavailable reply: it carries no generation or phase.
+   f.setNative({generation:undefined,phase:undefined,known:false,hardwareWritesAllowed:false,resumeReady:false});
+   const readCount=()=>f.calls.filter(v=>v.cmd==='power.fanLifecycle').length;
+   const start=readCount();
+   f.rootReady(4);
+   await f.flush();
+   assert.equal(readCount()-start,1);
+   assert(!f.host.calls.includes('acquire'),'an unavailable fact granted a lease');
+   assert(!f.host.calls.includes('enable'),'an unavailable fact granted a write');
+   if(boundary==='off')await f.life.close();
+   if(boundary==='new-sleep')f.rootSuspend({generation:5,scope:'fan-only'});
+   const beforeRetry=readCount();
+   if(boundary!=='still-unknown')f.setNative({known:true,generation:boundary==='wrong-generation'?5:4,
+    phase:'ready',resumeReady:true,hardwareWritesAllowed:true,inputReady:false,notificationPending:false,sharedGeneration:3});
+   if(boundary==='sleep-during-read'){
+    f.holdNextFanRead();
+    await f.advance(100);
+    f.rootSuspend({generation:5,scope:'fan-only'});
+    f.releaseFanRead();
+   }
+   await f.advance(6000);
+   const writes=f.host.calls.filter(v=>v==='enable').length;
+   const leases=f.host.calls.filter(v=>v==='acquire').length;
+   assert.equal(writes,boundary==='recovers'?1:0,'wrong number of recovery writes');
+   assert.equal(leases,boundary==='recovers'?1:0,'wrong number of recovery leases');
+   if(boundary!=='recovers')assert.equal(readCount()-beforeRetry,
+    boundary==='off'||boundary==='new-sleep'?0:1,'the retained notification escaped its read budget');
+   assert.equal(f.manuals,0);
+   assert.equal(f.starts,1);
+   return {boundary,writes,leases,coordinatorReadsAfterFirst:readCount()-beforeRetry};
+  }finally{await f.done();}
+ });
+}
 
 async function nativeBoot(f){const p=f.observe(f.boot());for(let n=0;n<100&&p.status==='pending';n++)await f.advance(100);if(p.status!=='fulfilled')console.log(JSON.stringify({diagnostic:'boot',status:p.status,error:p.error,state:f.life.state,host:f.host.calls,ipc:f.calls.map(x=>({cmd:x.cmd,url:x.args?.url}))}));assert.equal(p.status,'fulfilled',p.error??'boot pending');}
 async function nativeDone(f){const p=f.observe(f.done());for(let n=0;n<800&&p.status==='pending';n++)await f.advance(100);if(p.status==='pending')console.log(JSON.stringify({diagnostic:'cleanup',state:f.life.state,host:f.host.calls,ipc:f.calls.map(x=>({cmd:x.cmd,url:x.args?.url}))}));assert.equal(p.status,'fulfilled',p.error??'cleanup pending');}

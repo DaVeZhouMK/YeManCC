@@ -243,6 +243,16 @@ runs:
           $passedNames -cnotcontains 'native-owner real HTTP first manual curve waits for a changing Native write fact') {
         throw 'Fan release check did not exercise Native permission handoff, OFF, newer sleep and explicit control.'
       }
+      $backgroundWakeEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-background-wake-ipc'
+      node tools/fan_manual_wake_ipc_selftest.mjs $backgroundWakeEvidence '' '' --background-ready-only
+      if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: one-shot background wake admission.' }
+      $backgroundWake = Get-Content -LiteralPath (Join-Path $backgroundWakeEvidence 'result.json') -Raw | ConvertFrom-Json
+      $boundaryFacts = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.facts.boundary })
+      $requiredBoundaries = @('recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation')
+      if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
+          @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0) {
+        throw 'Fan release check did not cover the one-shot wake and its coordinator read boundaries.'
+      }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
     shell: pwsh

@@ -91,10 +91,11 @@ foreach ($workflow in @('.github/workflows/release-prepare.yml', '.github/workfl
 }
 $action = Get-Content -LiteralPath (Join-Path $root '.github/actions/release-build/action.yml') -Raw -Encoding UTF8
 if ($action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* --native-owner-rearm-only[ \t\r]*$' -or
+    $action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* --background-ready-only[ \t\r]*$' -or
     !$action.Contains('committed wake retains a curve across delayed native permission:', [StringComparison]::Ordinal) -or
     !$action.Contains('committed wake survives an unavailable Native write fact:', [StringComparison]::Ordinal) -or
     !$action.Contains('first manual curve waits for a changing Native write fact', [StringComparison]::Ordinal)) {
-  throw 'FAN_RELEASE_WAKE_REGRESSION_REQUIRED: restore the release checks for delayed permission, unavailable Native state and first manual control.'
+  throw 'FAN_RELEASE_WAKE_REGRESSION_REQUIRED: restore the release checks for delayed permission, unavailable Native state, one-shot background wake and first manual control.'
 }
 $preflight = Get-Content -LiteralPath (Join-Path $root 'tools/github-release-preflight.ps1') -Raw -Encoding UTF8
 if ($action -cnotmatch '(?m)^\s+& tools/github-release-preflight\.ps1 -ProjectRoot \$env:GITHUB_WORKSPACE -Mode \$env:YMCC_GIT_RELEASE_MODE -ExpectedCommit \$env:YMCC_RELEASE_COMMIT -EvidencePath \(Join-Path \$env:RUNNER_TEMP ''release-preflight-early\.json''\)[ \t\r]*$' -or

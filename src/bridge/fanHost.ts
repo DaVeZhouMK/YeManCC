@@ -2185,9 +2185,9 @@ export class FanHostLifecycle {
 
   /** Retry only an IPC read crossed by a newer boundary, at most once.
    * This preserves the user's startup without consuming an obsolete sleep fact. */
-  private async readPowerSnapshotForSynchronization(): Promise<PowerLifecycleState | null> {
+  private async readPowerSnapshotForSynchronization(attempts = 2): Promise<PowerLifecycleState | null> {
     const deadline = monotonicNowMs() + 1000;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const remaining = Math.ceil(deadline - monotonicNowMs());
       if (remaining <= 0) return null;
       const revision = this.powerObservationRevision;
@@ -6830,12 +6830,22 @@ export class FanHostLifecycle {
     if (!this.enabled || this.isDisabledState() || !Number.isSafeInteger(generation)
         || generation <= 0 || generation < this.powerGeneration) return false;
     const cancellationRevision = this.controlCancellationRevisionValue;
-    const native = await this.readPowerSnapshotForSynchronization();
-    if (!this.enabled || this.isDisabledState() || cancellationRevision !== this.controlCancellationRevisionValue
+    const isCurrent = () => this.enabled && !this.isDisabledState()
+      && cancellationRevision === this.controlCancellationRevisionValue && generation >= this.powerGeneration;
+    let native = await this.readPowerSnapshotForSynchronization();
+    if (!isCurrent()) return false;
+    if (native?.known === false) {
+      // Native could not read a coherent fact. A one-shot Fan hint may have no
+      // later public Ready event, so give the same read one bounded retry.
+      const observationRevision = this.powerObservationRevision;
+      await sleepMs(100);
+      if (!isCurrent() || observationRevision !== this.powerObservationRevision) return false;
+      native = await this.readPowerSnapshotForSynchronization(1);
+    }
+    if (!isCurrent()
         || !native || native.known === false || native.notificationPending === true
         || native.generation !== generation || native.resumeReady !== true
-        || (native.phase !== 'ready' && native.phase !== 'resuming')
-        || generation < this.powerGeneration) return false;
+        || (native.phase !== 'ready' && native.phase !== 'resuming')) return false;
     this.setPowerGeneration(generation);
     // A repeated F5 may join the replay owner, but cannot move a live HC
     // session back to Resuming and make delayed suspend notices current again.
