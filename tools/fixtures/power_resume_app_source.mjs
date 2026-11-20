@@ -6,9 +6,13 @@ export function appPowerResumeSource(app, sleepPlans = null) {
  const functions=['powerEventGeneration','notePowerTransitionGeneration','onPowerSuspending','onPowerResuming','onPowerResumeReady','onPowerResumed','scheduleResumeTransaction'];
  const masked=app.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,value=>' '.repeat(value.length));
  const chunks=functions.map(name=>{const anchor='function '+name+'(';const start=app.indexOf(anchor);assert(start>=0&&app.indexOf(anchor,start+1)<0,'APP_RESUME_FUNCTION_UNIQUE '+name);const open=masked.indexOf('{',start);let depth=0,end=-1;for(let i=open;i<masked.length;i++){if(masked[i]==='{')depth++;else if(masked[i]==='}'&&--depth===0){end=i+1;break;}}assert(open>start&&end>open,'APP_RESUME_COMPLETE_FUNCTION '+name);const text=app.slice(start,end);return{name,text,sha256:crypto.createHash('sha256').update(text).digest('hex')};});
- const begin='  stopSharedPowerWatch = onSharedPowerLifecycle(state => {',end="\n  window.addEventListener('fan:guard-state'";
- const at=app.indexOf(begin),until=app.indexOf(end,at);assert(at>=0&&app.indexOf(begin,at+1)<0&&until>at,'APP_RESUME_SHARED_CALLBACK_UNIQUE');
- const callback=app.slice(at+begin.length,until);assert(callback.trimEnd().endsWith('});'));const body=callback.slice(0,callback.lastIndexOf('});'));
+ const begin='  stopSharedPowerWatch = onSharedPowerLifecycle(state => {';
+ const at=app.indexOf(begin);assert(at>=0&&app.indexOf(begin,at+1)<0,'APP_RESUME_SHARED_CALLBACK_UNIQUE');
+ // Keep adjacent mount subscriptions outside the extracted callback.
+ const callbackStart=at+begin.length,closing=/\r?\n  \}\);(?=\r?\n)/.exec(app.slice(callbackStart));
+ assert(closing,'APP_RESUME_SHARED_CALLBACK_END');
+ const until=callbackStart+closing.index+closing[0].length;
+ const body=app.slice(callbackStart,until-3);
  const followupBegin=app.indexOf("// This consumer retains only the exact stages"),followupEnd=app.indexOf("let resumeLifecycleActive",followupBegin);assert(followupBegin>=0&&followupEnd>followupBegin,"APP_RESUME_FOLLOWUP_DECLARATION_UNIQUE");const followupDeclaration=app.slice(followupBegin,followupEnd);
  const observationDeclaration=app.match(/^  let sharedPowerKey = [^\r\n]+;/m)?.[0];assert(observationDeclaration&&app.split(observationDeclaration).length===2,'APP_RESUME_OBSERVATION_DECLARATION_UNIQUE');
  const sleepBegin=app.search(/(?:let|const) sleepPlanOptimizationQueue/),sleepEnd=app.indexOf('let latestResumeGeneration',sleepBegin);
