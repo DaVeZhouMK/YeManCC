@@ -56,7 +56,7 @@ function Stop-YmccUpdaterParent([int]$ProcessId, [string]$ExpectedPath, [string]
         $identity.Creation -cne $CreationFileTime) {
       throw 'UPDATE_PARENT_IDENTITY_CHANGED'
     }
-    $null=$process.CloseMainWindow()
+    try { $null=$process.CloseMainWindow() } catch { }
     if ($process.WaitForExit($GraceMilliseconds)) { return 'graceful' }
     # Only the authenticated outgoing YMCC process is force-stopped, under the
     # module maintenance lease. Driver installers and foreign processes are excluded.

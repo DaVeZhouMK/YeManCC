@@ -1,12 +1,7 @@
-﻿{
-    "version":  "0.0.40",
-    "notes":  "0.0.40：整合当前主线，完善升级时冲突旧配置、深层扩展和容量边界自愈。",
-    "sha256":  "47EB6B4EB50F5A93F43B23A36374AA76E31DEDF91E4F4166F2974364D1F134C8",
-    "publishedAt":  "2026-11-19",
-    "buildId":  "c20384462dac09bf1faaebbf4747c0f7770885f9365fe614a2428b0eda75440a",
-    "nativeSha256":  "2e64785de170462a6d1ef2846b47a6006c19f12f768e919a645af6a1b1ab539e",
-    "pluginSha256":  "2ffb526c847b9cb6f6abbbfb940da7af08f29eefa2bc47a9a0e94f6ccd7c1d5b",
-    "package":  "Packages/YeManCC.zip",
-    "releaseMode":  "fast",
-    "fixtureValidation":  "NOT_RUN"
+{
+  "version": "0.0.41",
+  "notes": "0.0.41：加固更新安装与失败恢复，隔离旧配置影响，补充安装阶段日志。",
+  "package": "Packages/YeManCC.zip",
+  "releaseMode": "fast",
+  "fixtureValidation": "NOT_RUN"
 }

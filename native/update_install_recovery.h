@@ -117,6 +117,9 @@ inline std::wstring pathFor(const std::wstring& root,const std::wstring& exe){
     uint64_t hash=14695981039346656037ULL;for(wchar_t c:normalized(exe)){hash^=static_cast<uint16_t>(c);hash*=1099511628211ULL;}
     std::wostringstream name;name<<std::hex<<hash;return root+L"\\"+name.str()+L".json";
 }
+inline std::wstring helperPathFor(const std::wstring& journal){
+    return journal + L".helper-" + ymcc::updateconfig::suffix() + L".ps1";
+}
 inline Json readAt(const std::wstring& root,const std::wstring& path){
     if(!secureDirectory(root,false))return Json::object();
     HANDLE h=CreateFileW(path.c_str(),GENERIC_READ|READ_CONTROL,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
@@ -131,6 +134,10 @@ inline Json readAt(const std::wstring& root,const std::wstring& path){
     }catch(...){return Json::object();}
 }
 inline Json read(const std::wstring& exe,const std::wstring& pc){try{auto root=directory();auto j=readAt(root,pathFor(root,exe));return matches(j,exe,pc)?j:Json::object();}catch(...){return Json::object();}}
+inline ymcc::updateconfig::Image readInstallTrace(const std::wstring& exe) noexcept {
+    try { return ymcc::updateconfig::read(pathFor(directory(),exe)+L".install-trace.json",4096); }
+    catch (...) { return {}; }
+}
 // New authorizations and phase records always use an explicit protected DACL.
 inline bool writeProtectedFile(const std::wstring& path,const std::string& bytes){
     auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};

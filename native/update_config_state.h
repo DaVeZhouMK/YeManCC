@@ -147,6 +147,113 @@ inline bool diagnosticsValid(const Json& p,bool transaction=false){try{
     if(transaction&&p.contains("phase")&&p["phase"]=="committed"&&(!p.contains("version")||!p.contains("pid")||p["pid"]==0))return false;
     return true;
 }catch(...){return false;}}
+// Project only fixed labels and validated counters; never copy URL, path,
+// handshake token, operation ID, hash or arbitrary exception text to a ZIP.
+inline Json exportEvidence(const Json& progress,const Json& state,const Json& journal){
+    auto label=[](Json& out,const Json& in,const char* key,std::initializer_list<const char*> allowed){
+        const auto it=in.find(key);if(it==in.end()||!it->is_string())return;
+        for(const auto* value:allowed)if(*it==value){out[key]=value;break;}
+    };
+    auto row=[&](const Json& in,bool present){
+        Json out={{"present",present}};if(!present)return out;
+        label(out,in,"phase",{"idle","checking","downloaded","downloading","validating","interrupted","installing","started","copying","tdp-verified","launching","committed","completed","rolled-back","failed","authorized","preparing","applying","repair-required"});
+        label(out,in,"stage",{"download","install"});
+        if(in.contains("version")&&in["version"].is_string()&&version(in["version"].get_ref<const std::string&>()))out["version"]=in["version"];
+        for(const auto* key:{"updatedAt","downloadedBytes","totalBytes","attempt"})
+            if(in.contains(key)&&integer(in[key],(std::numeric_limits<std::int64_t>::max)()))out[key]=in[key];
+        const char* detailKey=in.contains("error")&&in["error"].is_string()&&in["error"]!=""?"error":"lastError";
+        if(in.contains(detailKey)&&text(in[detailKey],16384)&&in[detailKey]!=""){
+            const auto& detail=in[detailKey].get_ref<const std::string&>();
+            out["errorKind"]="other";
+            for(const auto& [prefix,kind]:std::initializer_list<std::pair<const char*,const char*>>{
+                {"UPDATE_INSTALLER_START_FAILED","helper-start"},{"UPDATE_INSTALLER_ACTIVE","installer-active"},
+                {"UPDATE_RECOVERY_","recovery-record"},{"MODULE_MAINTENANCE_BUSY","module-busy"},
+                {"Failed to write update helper script","helper-write"},{"Failed to launch update helper","helper-launch"},
+                {"No update package downloaded","missing-package"},{"Update package checksum mismatch","checksum"},
+                {"Update package archive entries are unsafe","unsafe-archive"},{"Failed to extract update package","extract"},
+                {"new YeManCC process did not complete startup handshake","startup-handshake"}})
+                if(detail.starts_with(prefix)){out["errorKind"]=kind;break;}
+            const auto http=detail.find("HTTP ");
+            if(http!=std::string::npos&&detail.size()-http>=9&&detail[http+8]==':'&&
+                detail[http+5]>='1'&&detail[http+5]<='5'&&detail[http+6]>='0'&&detail[http+6]<='9'&&
+                detail[http+7]>='0'&&detail[http+7]<='9'){
+                out["errorKind"]="http";
+                out["httpStatus"]=(detail[http+5]-'0')*100+(detail[http+6]-'0')*10+(detail[http+7]-'0');
+            }
+        }
+        return out;
+    };
+    return {{"schemaVersion",1},{"scope","retained-ymcc-update-snapshots-not-atomic"},
+        {"progress",row(progress,!progress.empty()&&diagnosticsValid(progress))},
+        {"helperState",row(state,!state.empty()&&diagnosticsValid(state,true))},
+        {"protectedJournal",row(journal,!journal.empty()&&journal.is_object())}};
+}
+// Correlate with the authorization epoch too: a retry can reuse its operation ID.
+// This projection is informational; none of these fields can authorize repair.
+inline Json exportInstallTrace(const Image& image,const Json& journal) {
+    const auto status=[](const char* value){return Json{{"status",value}};};
+    switch (image.kind) {
+        case Kind::missing: return status("missing");
+        case Kind::damaged: return status("damaged");
+        case Kind::unsupported: return status("unsupported");
+        case Kind::unavailable: return status("unavailable");
+        case Kind::ready: break;
+    }
+    const auto& row=image.value;
+    const auto hasText=[&](const char* key,std::size_t size){return row.contains(key)&&text(row[key],size);};
+    if (!row.contains("schemaVersion")||row["schemaVersion"]!=1||!hasText("operationId",128)||row["operationId"]==""||
+        !hasText("version",32)||!version(row["version"].get_ref<const std::string&>())||
+        !hasText("sha256",64)||!sha(row["sha256"].get_ref<const std::string&>())||
+        !row.contains("authorizedAt")||!integer(row["authorizedAt"])||!row.contains("updatedAt")||!integer(row["updatedAt"]))
+        return status("damaged");
+    auto out=status("matched");
+    const auto label=[&](const char* key,std::initializer_list<const char*> allowed){
+        if (!hasText(key,32)) return false;
+        for (const auto* value:allowed) if (row[key]==value) { out[key]=value; return true; }
+        return false;
+    };
+    if (!label("step",{"prepare-journal","stop-hooks","claim-install","parent-exit","verify-layout","plan-decky",
+                       "verify-payloads","stop-residents","plan-input","backup-files","copy-files","apply-fan-hc",
+                       "apply-input","apply-decky","apply-rules","apply-tdp","replace-exe","copy-program","child-health",
+                       "prepare-launch","launch-new","await-handshake","commit"})||
+        !label("outcome",{"running","failed","committed"})||
+        !label("rollback",{"not-attempted","pending","blocked-child","not-required","failed","succeeded"})||
+        !label("relaunch",{"not-attempted","starting","started","failed"})) return status("damaged");
+    if (row.contains("parentExit")&&!label("parentExit",{"already-exited","graceful","forced-owned-parent"})) return status("damaged");
+    if (row.contains("issues")&&row["issues"].is_object()) {
+        Json counts=Json::object();
+        for (const auto* key:{"stop-hooks","parent-exit","stop-child","stop-layout","stop-residents",
+             "old-file-backup","write-state","temp-cleanup","YeManCC","PowerControl","Support","CustomSteamLibrary",
+             "plan-decky","apply-decky","decky-lease","apply-input","apply-fan-hc","cleanup-old-hc",
+             "apply-tdp","rollback-tdp","rollback-file","child-health"}) {
+            const auto& issues=row["issues"];
+            if (issues.contains(key)&&integer(issues[key],1000000)) counts[key]=issues[key];
+        }
+        if (!counts.empty()) out["issues"]=std::move(counts);
+    }
+    if (row["outcome"]=="failed") {
+        if (!label("errorKind",{"step-failed","startup-launch","startup-exited","handshake-timeout","handshake-check"})||
+            !row.contains("immutableRepairPending")||!row["immutableRepairPending"].is_boolean()) return status("damaged");
+        out["immutableRepairPending"]=row["immutableRepairPending"];
+        for (const auto* key:{"exitCode","hresult","win32Code"}) if (row.contains(key)) {
+            const auto& n=row[key];
+            if (!n.is_number_integer()||(n.is_number_unsigned()?n.get<std::uint64_t>()>0x7fffffffULL:
+                n.get<std::int64_t>()<(-2147483647LL-1)||n.get<std::int64_t>()>2147483647LL)) return status("damaged");
+            out[key]=n;
+        }
+    }
+    if (!journal.contains("operationId")||!journal.contains("version")||!journal.contains("authorizedAt")||
+        !journal.contains("sha256")||!journal["sha256"].is_string()) return status("uncorrelated");
+    const auto& a=row["sha256"].get_ref<const std::string&>();
+    const auto& b=journal["sha256"].get_ref<const std::string&>();
+    if (journal["operationId"]!=row["operationId"]||journal["version"]!=row["version"]||
+        journal["authorizedAt"]!=row["authorizedAt"]||
+        !std::equal(a.begin(),a.end(),b.begin(),b.end(),[](unsigned char x,unsigned char y){return std::tolower(x)==std::tolower(y);}))
+        return status("superseded");
+    out["version"]=row["version"];
+    out["updatedAt"]=row["updatedAt"];
+    return out;
+}
 inline bool resumeValid(const Json& p,const std::string& url,const std::string& hash,const std::string& v){try{
     if(!p.is_object()||!p.contains("url")||!text(p["url"],8192)||p["url"]!=url||!p.contains("sha256")||!text(p["sha256"],64)||!sha(p["sha256"].get<std::string>())||
         !p.contains("version")||!text(p["version"],128)||p["version"]!=v)return false;

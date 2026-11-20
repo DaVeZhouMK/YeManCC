@@ -97,6 +97,156 @@ function Write-YmccRecoveryFile([string]$Path,[byte[]]$Bytes) {
         $stream.Write($Bytes,0,$Bytes.Length);$stream.Flush($true)
     }finally{$stream.Dispose()}
 }
+# Diagnostics only. The protected directory scopes this bounded snapshot to
+# the installed executable; it is never read for recovery or authorization.
+function Add-YmccInstallIssue([string]$Step, $Failure, [switch]$Core) {
+    if (!$script:ymccInstallIssues) { $script:ymccInstallIssues=[ordered]@{} }
+    $script:ymccInstallIssues[$Step]=1+[int]$script:ymccInstallIssues[$Step]
+    if ($Core) { $script:ymccCoreWriteFailures++ }
+    Write-Warning ('UPDATE_CONTINUED ['+$Step+']: '+$Failure.Exception.Message) -WarningAction Continue
+}
+function Write-YmccInstallState([string]$Phase, [int]$ProcessId=0) {
+    try {
+        $snapshot=[ordered]@{phase=$Phase;version=$version}
+        if ($ProcessId) { $snapshot.pid=$ProcessId }
+        if ($script:ymccInstallIssues) { $snapshot.issues=$script:ymccInstallIssues }
+        Write-Utf8Atomic $state ($snapshot | ConvertTo-Json -Compress) 2
+    } catch { Add-YmccInstallIssue 'write-state' $_ }
+}
+# Only package-declared destinations reach this function. Keep the old name live
+# until an atomic replace succeeds, except for a directory at an exact file path.
+function Clear-YmccManagedReadOnly([string]$Path) {
+    $flags=[IO.File]::GetAttributes($Path)
+    if ($flags -band [IO.FileAttributes]::ReadOnly) { [IO.File]::SetAttributes($Path,($flags -band (-bnot [IO.FileAttributes]::ReadOnly))) }
+}
+function Copy-YmccManagedFile([string]$Source, [string]$Root, [string]$Relative, [string]$Bucket, [switch]$Core) {
+    $temporary=$null
+    try {
+        $relativePath=$Relative.Replace('\','/')
+        $target=Resolve-YmccDeckyPath $Root $relativePath
+        $parent=[IO.Path]::GetDirectoryName($target)
+        $null=[IO.Directory]::CreateDirectory($parent)
+        $expected=Get-YmccDeckyHash $Source
+        $temporary=Join-Path $parent ('.ymcc-incoming-'+[guid]::NewGuid().ToString('N'))
+        [IO.File]::Copy($Source,$temporary,$false)
+        Clear-YmccManagedReadOnly $temporary
+        if ((Get-YmccDeckyHash $temporary) -cne $expected) { throw 'UPDATE_STAGED_FILE_HASH_MISMATCH' }
+        $target=Resolve-YmccDeckyPath $Root $relativePath
+        $entry=[pscustomobject]@{root=$Root;relative=$relativePath;expected=$expected;backup=$null;retired=$null;lost=$false;written=$false;readOnly=$false}
+        $ordinaryFileLedger.Add($entry)
+        if ([IO.Directory]::Exists($target)) {
+            $entry.retired=Join-Path $parent ('.ymcc-retired-'+[guid]::NewGuid().ToString('N'))
+            [IO.Directory]::Move($target,$entry.retired)
+        } elseif ([IO.File]::Exists($target)) {
+            # A corrupt/unreadable preimage is not an install requirement. Do
+            # not publish a partial backup or claim rollback if it was lost.
+            try {
+                $preimage=Resolve-YmccDeckyPath (Join-Path $rollbackFiles $Bucket) $relativePath
+                $null=[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($preimage))
+                [IO.File]::Copy($target,$preimage,$false)
+                $entry.readOnly=[bool]([IO.File]::GetAttributes($preimage) -band [IO.FileAttributes]::ReadOnly)
+                Clear-YmccManagedReadOnly $preimage
+                $entry.backup=$preimage
+            } catch { $entry.lost=$true; Add-YmccInstallIssue 'old-file-backup' $_ }
+        }
+        for ($attempt=0; $attempt -lt 3; $attempt++) {
+            try {
+                $target=Resolve-YmccDeckyPath $Root $relativePath
+                if ([IO.File]::Exists($target)) {
+                    Clear-YmccManagedReadOnly $target
+                    [IO.File]::Replace($temporary,$target,[NullString]::Value)
+                } else { [IO.File]::Move($temporary,$target) }
+                $entry.written=$true
+                break
+            } catch { if ($attempt -eq 2) { throw }; Start-Sleep -Milliseconds 100 }
+        }
+        if ((Get-YmccDeckyHash $target) -cne $expected) { throw 'UPDATE_INSTALLED_FILE_HASH_MISMATCH' }
+    } catch { Add-YmccInstallIssue $Bucket $_ -Core:$Core }
+    finally { if ($temporary -and [IO.File]::Exists($temporary)) { try { [IO.File]::Delete($temporary) } catch { Add-YmccInstallIssue 'temp-cleanup' $_ } } }
+}
+function Copy-YmccManagedTree([string]$Source, [string]$Root, [string]$Bucket, [string[]]$Excluded, [switch]$Core) {
+    foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File -Force) {
+        $relative=$file.FullName.Substring($Source.Length).TrimStart('\')
+        if ($relative -in $Excluded -or @($Excluded | Where-Object { $relative.StartsWith($_+'\',[StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+        # The executable is installed separately. Optional persisted settings
+        # and feature sidecars in the program tree cannot veto its startup.
+        $required=$Core -and ($relative -in @('index.html','version.json') -or $relative -match '^assets\\.*\.(?:js|css)$' -or $file.Extension -ieq '.dll')
+        Copy-YmccManagedFile $file.FullName $Root $relative $Bucket -Core:$required
+    }
+}
+function Restore-OrdinaryFiles {
+    $failures=0
+    for ($i=$ordinaryFileLedger.Count-1; $i -ge 0; $i--) {
+        $entry=$ordinaryFileLedger[$i]
+        try {
+            if (!$entry.written -and (!$entry.retired -or ![IO.Directory]::Exists($entry.retired))) { continue }
+            $target=Resolve-YmccDeckyPath $entry.root $entry.relative
+            if ($entry.written -and (![IO.File]::Exists($target) -or (Get-YmccDeckyHash $target) -cne $entry.expected)) { throw 'UPDATE_ROLLBACK_TARGET_CHANGED' }
+            if ($entry.written -and $entry.lost) { throw 'UPDATE_ROLLBACK_PREIMAGE_UNAVAILABLE' }
+            if ($entry.backup) {
+                Set-YmccDeckyAtomic $entry.root $entry.relative $entry.backup $null (Get-YmccDeckyHash $entry.backup)
+                if ($entry.readOnly) { [IO.File]::SetAttributes($target,([IO.File]::GetAttributes($target) -bor [IO.FileAttributes]::ReadOnly)) }
+            }
+            elseif ($entry.written) { [IO.File]::Delete($target) }
+            if ($entry.retired) { [IO.Directory]::Move($entry.retired,$target) }
+        } catch { $failures++; Add-YmccInstallIssue 'rollback-file' $_ }
+    }
+    if ($failures) { throw ('UPDATE_ROLLBACK_FILES_INCOMPLETE: '+$failures) }
+}
+function Write-YmccInstallTrace([string]$Outcome='running', $Failure=$null,
+    [string]$Rollback='not-attempted', [string]$Relaunch='not-attempted') {
+    try {
+        if (!$script:ymccInstallStep) { return }
+        if ($null -eq $script:ymccTraceAuthorizedAt) {
+            $j=(Get-YmccRecoverySnapshotOnce $recoveryJournal).Document
+            if ($j.operationId -cne $operationId -or $j.version -cne $version -or $j.sha256 -ine $sha256 -or
+                !(Test-YmccRecoveryInteger $j.authorizedAt)) { return }
+            $script:ymccTraceAuthorizedAt=$j.authorizedAt
+        }
+        $row=[ordered]@{schemaVersion=1; operationId=$operationId; version=$version; sha256=$sha256;
+            authorizedAt=$script:ymccTraceAuthorizedAt;
+            step=$script:ymccInstallStep; outcome=$Outcome; rollback=$Rollback; relaunch=$Relaunch;
+            updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+        if ($parentExitMode -cin @('already-exited','graceful','forced-owned-parent')) { $row.parentExit=$parentExitMode }
+        if ($script:ymccInstallIssues) { $row.issues=$script:ymccInstallIssues }
+        if ($Outcome -eq 'failed') {
+            $row.errorKind=switch ($script:ymccInstallStep) {
+                'launch-new' { 'startup-launch' }
+                'await-handshake' { if ($script:ymccStartupFailure) { $script:ymccStartupFailure } else { 'handshake-check' } }
+                default { 'step-failed' }
+            }
+            if ($script:ymccStartupFailure -ceq 'startup-exited' -and $null -ne $script:ymccStartupExitCode) {
+                $row.exitCode=$script:ymccStartupExitCode
+            }
+            if ($Failure -and $Failure.Exception) {
+                $exception=$Failure.Exception
+                for ($depth=0; $depth -lt 8 -and $exception.InnerException; $depth++) { $exception=$exception.InnerException }
+                $row.hresult=[int]$exception.HResult
+                if ($exception -is [ComponentModel.Win32Exception]) { $row.win32Code=[int]$exception.NativeErrorCode }
+            }
+            $row.immutableRepairPending=[bool]$immutableRepairPending
+        }
+        $bytes=[Text.UTF8Encoding]::new($false,$true).GetBytes(($row | ConvertTo-Json -Compress))
+        if ($bytes.Length -gt 4096) { return }
+        $parent=Split-Path -Parent $recoveryJournal
+        Assert-YmccRecoveryAcl $parent
+        $path=Resolve-YmccDeckyPath $parent ((Split-Path -Leaf $recoveryJournal)+'.install-trace.json')
+        $temporary=$path+'.tmp-'+[guid]::NewGuid().ToString('N')
+        try {
+            Write-YmccRecoveryFile $temporary $bytes
+            if ([IO.File]::Exists($path)) {
+                Assert-YmccRecoveryAcl $path
+                [IO.File]::Replace($temporary,$path,[NullString]::Value)
+            } else { [IO.File]::Move($temporary,$path) }
+        } finally {
+            if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        }
+    } catch { } # No retries, warnings, or failures enter the installation flow.
+}
+function Set-YmccInstallCheckpoint([string]$Step) {
+    $script:ymccInstallStep=$Step
+    Write-YmccInstallTrace
+}
 function Set-YmccInstallJournal([string]$Phase) {
     $before=Get-YmccRecoverySnapshot $recoveryJournal;$j=Get-YmccInstallJournal
     $current=Get-YmccRecoverySnapshot $recoveryJournal
