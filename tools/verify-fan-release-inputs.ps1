@@ -51,6 +51,7 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   '.github/actions/release-build/action.yml',
   '.github/workflows/release-prepare.yml',
   '.github/workflows/release.yml',
+  'tools/github-release-preflight.ps1',
   'tools/verify-fan-release-inputs.ps1',
   $selector,
   'tools/hc-device-runtime/verify-host-source-bundle.ps1',
@@ -66,7 +67,8 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   'src/App.vue',
   'src/views/FanView.vue',
   'src/bridge/fanApi.ts',
-  'src/bridge/fanHost.ts'
+  'src/bridge/fanHost.ts',
+  'src/bridge/powerLifecycleState.ts'
 )
 $tree = @(& git -C $root ls-tree -r '--format=%(objectmode)%x09%(path)' $commit -- $paths)
 if ($LASTEXITCODE -ne 0) { throw 'FAN_RELEASE_TREE_UNREADABLE' }
@@ -88,8 +90,16 @@ foreach ($workflow in @('.github/workflows/release-prepare.yml', '.github/workfl
   }
 }
 $action = Get-Content -LiteralPath (Join-Path $root '.github/actions/release-build/action.yml') -Raw -Encoding UTF8
-if ($action -cnotmatch '(?m)^\s+& tools/verify-fan-release-inputs\.ps1 -ProjectRoot \$env:GITHUB_WORKSPACE -ExpectedCommit \$env:YMCC_RELEASE_COMMIT[ \t\r]*$') {
-  throw 'FAN_RELEASE_WORKFLOW_NOT_WIRED: the shared release action must check the approved fan inputs.'
+if ($action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* --native-owner-rearm-only[ \t\r]*$' -or
+    !$action.Contains('committed wake retains a curve across delayed native permission:', [StringComparison]::Ordinal) -or
+    !$action.Contains('committed wake survives an unavailable Native write fact:', [StringComparison]::Ordinal) -or
+    !$action.Contains('first manual curve waits for a changing Native write fact', [StringComparison]::Ordinal)) {
+  throw 'FAN_RELEASE_WAKE_REGRESSION_REQUIRED: restore the release checks for delayed permission, unavailable Native state and first manual control.'
+}
+$preflight = Get-Content -LiteralPath (Join-Path $root 'tools/github-release-preflight.ps1') -Raw -Encoding UTF8
+if ($action -cnotmatch '(?m)^\s+& tools/github-release-preflight\.ps1 -ProjectRoot \$env:GITHUB_WORKSPACE -Mode \$env:YMCC_GIT_RELEASE_MODE -ExpectedCommit \$env:YMCC_RELEASE_COMMIT -EvidencePath \(Join-Path \$env:RUNNER_TEMP ''release-preflight-early\.json''\)[ \t\r]*$' -or
+    $preflight -cnotmatch '(?m)^\s+\$fanInputs = & \(Join-Path \$PSScriptRoot ''verify-fan-release-inputs\.ps1''\) -ProjectRoot \$root -ExpectedCommit \$commit[ \t\r]*$') {
+  throw 'FAN_RELEASE_WORKFLOW_NOT_WIRED: release preflight must check the approved fan inputs before build.'
 }
 
 # Older callers of the native recovery script use this embedded fallback.

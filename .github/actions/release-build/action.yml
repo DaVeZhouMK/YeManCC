@@ -68,11 +68,7 @@ runs:
       "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "commit=$commit" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "notes-path=$notesPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-  - name: Require the approved Fan Host inputs in the release commit
-    shell: pwsh
-    run: |
-      & tools/verify-fan-release-inputs.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ExpectedCommit $env:YMCC_RELEASE_COMMIT
-  - name: Check GitHub publication conditions before build
+  - name: Verify approved Fan inputs and GitHub publication conditions before build
     shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
@@ -397,4 +393,4 @@ runs:
       GH_TOKEN: ${{ github.token }}
     run: |
       # Re-read current tag/release/main state after a potentially long build.
-      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-final.json')
+      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -PublicationRecheckOnly -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-final.json')

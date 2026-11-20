@@ -4,6 +4,7 @@ param(
   [ValidateSet('prepare','formal')][string]$Mode = 'prepare',
   [string]$Repository = $env:GITHUB_REPOSITORY,
   [string]$ExpectedCommit = $env:GITHUB_SHA,
+  [switch]$PublicationRecheckOnly,
   [Parameter(Mandatory=$true)][string]$EvidencePath
 )
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,7 @@ $receipt = [ordered]@{
   tagCommit = $null; existingRelease = $null
   writePermission = 'NOT_PROVEN_READ_ONLY'; releaseUpload = 'NOT_EXECUTED'
   mainManifestWrite = 'NOT_EXECUTED'; fixtureValidation = 'NOT_RUN'; packageBuild = 'NOT_RUN'
+  fanReleaseInputs = 'NOT_RUN'
 }
 function Add-Blocker([string]$Code, [string]$Message) {
   $blockers.Add([ordered]@{code=$Code;message=$Message})
@@ -66,6 +68,16 @@ try {
   if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[a-f0-9]{40}$') { throw 'Cannot resolve candidate Git commit.' }
   $receipt.commit = $commit
   if ($ExpectedCommit -and $ExpectedCommit -cne $commit) { Add-Blocker 'IMMUTABLE_COMMIT_MISMATCH' 'Checkout differs from the requested commit.' }
+  if (!$blockers.Count -and !$PublicationRecheckOnly) {
+    try {
+      $fanInputs = & (Join-Path $PSScriptRoot 'verify-fan-release-inputs.ps1') -ProjectRoot $root -ExpectedCommit $commit
+      $receipt.fanReleaseInputs = 'PASS'
+      $fanInputs | Write-Output
+    } catch {
+      $receipt.fanReleaseInputs = 'BLOCKED'
+      throw
+    }
+  }
   $repo = (Read-GitHub "repos/$Repository").data
   if ($repo.archived -or $repo.disabled) { Add-Blocker 'REPOSITORY_UNWRITABLE' 'Repository is archived or disabled.' }
   $branch = (Read-GitHub "repos/$Repository/branches/main").data

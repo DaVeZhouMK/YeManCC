@@ -9,14 +9,14 @@
 `release-preparation/**`分支push和手动运行 `release-prepare.yml` 的默认模式均为check-only：
 
 - 校对触发SHA、版本/notes、源资产/TDP清单，不消费本地忽略的编译产物。
-- 校对实际提交里的已批准风扇归档、V2 载荷及共享依赖。未入 Git 的工作目录文件不能补齐发布输入。
+- 校对实际提交里的已批准风扇归档、V2 载荷、共享依赖和唤醒回归接线。未入 Git 的工作目录文件不能补齐发布输入。
 - 用真实GitHub GET核对仓库、绑定main提交的版本、候选tag/可见Release占用和main规则；注解tag解析到commit。
 - 在线核对官方Decky来源，检查runner MSVC/SDK入口及x86环境。需要.NET的MSBuild输出目录求值只在完整模式安装SDK后执行。
 - 不安装Node/pnpm/.NET、不还原依赖、不做类型检查、不编译、不打包、不生成源码ZIP。只保存小型诊断回执。
 
 手动运行勾选 `build_packages=true` 才执行完整 FastRelease 及附件检查，仍不发布。准备构建和正式构建都会先跑风扇唤醒接续、首次点击、旧通知失效和跨代恢复检查。跨代检查区分可作废的旧读回包与必须串行结算的已提交写入。正式模式硬性拒绝 check-only。只检查成功不代表完整构建或写权限通过，回执保留 `packageBuild=NOT_RUN`；公共 action 的 `packages-built` 输出区分是否实际构建。
 
-本地使用PowerShell7，在有GitHub CLI身份的进程执行：
+本地使用 PowerShell 7，在有 GitHub CLI 身份的进程从当前主线执行。预检先核对实际候选的风扇输入，回执中的 `fanReleaseInputs` 需要为 `PASS`，完整构建才会运行风扇回归：
 
 ```powershell
 & tools/github-release-preflight.ps1 -ProjectRoot <固定候选Git目录> -Mode prepare -Repository DaVeZhouMK/YeManCC -ExpectedCommit <提交SHA> -EvidencePath <仓库外回执路径>
@@ -32,7 +32,7 @@
 & tools/verify-fan-release-inputs.ps1 -ProjectRoot <固定候选Git目录> -ExpectedCommit <提交SHA>
 ```
 
-已批准配套包含 Win5 原请求的唤醒接续和 Win4 6800U Open 的失败回执。录入后继组件时，用同一提交更新风扇载荷校验、归档和原生恢复绑定，并核对两项修复仍在。出包后仍由 `fan_host_path_gate.ps1` 对最终 ZIP 的 V2 文件与该提交逐项读回；现场故障是否消失另看真机。
+已批准配套包含 Win5 原请求的唤醒接续和 Win4 6800U Open 的失败回执。即使配套载荷已更新，候选若缺少原生许可延迟、快照不可读和首次手动控制的发布回归，也会被输入检查拒绝。录入后继组件时，用同一提交更新风扇载荷校验、归档和原生恢复绑定，并核对两项修复仍在。出包后仍由 `fan_host_path_gate.ps1` 对最终 ZIP 的 V2 文件与该提交逐项读回；现场故障是否消失另看真机。
 
 ## 提前暴露正式发布阻塞
 
