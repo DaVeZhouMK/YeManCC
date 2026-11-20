@@ -48,6 +48,7 @@ using ULONGLONG=unsigned long long;
 enum class SgWork { WakeHibernate };
 ULONGLONG g_sgAcceptedS4WakeFileTime=0;
 ::std::atomic<ULONGLONG> g_sgLastPowerButtonSleepIntentFileTime{0},g_sgLatestUserSleepEntryFileTime{0};
+::std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{0};
 struct S4SleepBoundary {
  ULONGLONG fileTime100ns=0,sequence=0;
  explicit operator bool() const {return sequence!=0;}
@@ -76,6 +77,7 @@ bool executionRequestsOwned=true;
 unsigned long long sharedGeneration=2;
 ::std::vector<::std::string> events;
 ::std::vector<json> eventDetails;
+::std::vector<json> projectedPowerEvents;
 ::std::vector<unsigned long long> closes,resumes;
 ::std::deque<::std::function<void()>> workers;
 static unsigned long long currentPowerGeneration(){return sharedGeneration;}
@@ -114,6 +116,7 @@ static bool commitPowerResume(unsigned long long g,const char*){
 }
 static void fanLeaseKeepaliveDisarm(const char*){++disarms;}
 static void ipc_emit(const char* event,const json& detail){
+ if(::std::strcmp(event,"power.lifecycleChanged")==0){projectedPowerEvents.push_back(detail);return;}
  if(failSuspendNotification&&::std::strcmp(event,"fan.suspending")==0)throw ::std::runtime_error("fixture-suspend-notification-failed");
  events.emplace_back(event);eventDetails.push_back(detail);
 }
@@ -138,6 +141,7 @@ static void traceLogTry(const char*,...) noexcept {}
 // scheduler. detach retains the real worker body; drain explicitly opens its
 // Close waiting gate. The original concurrent header test uses real std::thread.
 namespace controlled_std {
+using ::std::move;
 using ::std::string;
 using ::std::unique_ptr;
 using ::std::memory_order_acquire;
@@ -154,6 +158,7 @@ public:
 namespace std=controlled_std;
 #include "fan_physical_wake_native_gates.inc"
 #include "fan_physical_wake_native_queue.inc"
+#include "fan_physical_wake_native_shared_snapshot.inc"
 #include "fan_physical_wake_native_publish.inc"
 static long fanKernelPowerFact(LPARAM l){
 #include "fan_physical_wake_native_fact.inc"
@@ -175,7 +180,7 @@ static void reset(){
  g_fanSleepCleanupInFlight.store(false);g_fanSleepCleanupGeneration.store(0);
   disarms=workerStarts=readyPosts=readyLogs=wakeLogs=sharedWakeOffers=0;active=failThread=sleepRetry=throwSuspend=failSuspendNotification=failClosePost=false;sharedGeneration=2;
   executionThread=0;executionStates.assign(1,0);executionRequestsOwned=true;
- events.clear();eventDetails.clear();closes.clear();resumes.clear();
+ events.clear();eventDetails.clear();projectedPowerEvents.clear();closes.clear();resumes.clear();
  g_resumeReadyGeneration.store(sharedGeneration);g_inputReady.store(false);g_resumeReadyTick=0;fakeTick=1000;lastCommitGeneration=0;hardwareGate=true;commitCalls=0;
  g_sgAcceptedS4WakeFileTime=0;g_sleepPowerDispatch.boundary={};g_sgLastPowerButtonSleepIntentFileTime=0;
  g_sgLatestUserSleepEntryFileTime=0;g_sgInternalSleepRequest={};renewS4=true;s4CommonWake=0;
@@ -183,7 +188,33 @@ static void reset(){
 static void drain(){
   while(!workers.empty()){auto work=::std::move(workers.front());workers.pop_front();const auto caller=executionThread;executionThread=static_cast<unsigned>(executionStates.size());executionStates.push_back(0);try{work();}catch(...){executionThread=caller;throw;}executionThread=caller;}
 }
+static void testSharedFanProjection(){
+ reset();active=true;
+ dispatchFact(506,100);dispatchFact(507,110);
+ const auto wake=currentFanPowerGeneration(),parent=currentPowerGeneration();
+ const auto projected=[] {return sharedPowerLifecycleSnapshot().value("fanWakeGeneration",0ULL);};
+ check("shared snapshot hides Fan wake while Close owns it",projected()==0);
+ drain();
+ const auto offers=sharedWakeOffers;
+ fanCloseWake(wake);
+ unsigned projections=0;
+ for(const auto& event:projectedPowerEvents){
+  projections+=event.value("fanWakeOnly",false)&&event.value("fanWakeGeneration",0ULL)==wake&&
+               event.value("generation",0ULL)==parent;
+ }
+ check("closed Fan wake projects once without replaying shared Native consumers",
+       projections==1&&projectedPowerEvents.size()==1&&sharedWakeOffers==offers&&wake!=parent&&projected()==wake);
+ const auto posted=events.size();fanCloseWake(wake);
+ check("duplicate Close completion does not publish another Fan wake",events.size()==posted&&projectedPowerEvents.size()==1);
+ sharedPowerPending=true;
+ check("pending shared ingress hides the previously projected Fan wake",projected()==0);
+ sharedPowerPending=false;++sharedGeneration;
+ check("wrong shared generation hides the old Fan wake",projected()==0);
+ --sharedGeneration;dispatchFact(506,120);drain();
+ check("new physical sleep retires the old projected Fan wake",projected()==0);
+}
 static void testSharedPower(){
+ testSharedFanProjection();
  reset();auto value=fanLifecycleSnapshot({});
  check("shared coherent cold snapshot is known",value.value("known",false)&&value.value("hardwareWritesAllowed",false));
  check("shared current metadata retained",value.value("observedNotificationSequence",0u)==4&&value.value("suspendSerial",0u)==3&&value.value("sharedGeneration",0ULL)==sharedGeneration);
@@ -675,6 +706,7 @@ int main(int argc,char** argv){
  check("metadata-only path retains retry and cutoff rejection",!metadata.recordWake(2,120,false)&&!metadata.recordWake(2,140,true)&&!metadata.physical(mg)&&!metadata.ready(mg));
 #ifdef YMCC_FAN_PHYSICAL_WAKE_NATIVE_CALLERS
  native_fixture::testCallers();
+ native_fixture::testSharedFanProjection();
 #else
  check("production native caller extraction must be supplied by original runner",false);
 #endif

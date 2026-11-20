@@ -4,6 +4,8 @@ export interface SharedPowerLifecycleSnapshot {
   phase:'ready'|'suspending'|'suspended'|'resuming';
   generation:number;
   inputReady?:boolean;
+  /** The current Fan wake projected by Native; the Fan gate still decides writes. */
+  fanWakeGeneration?:number;
   hardwareWritesAllowed?:boolean;
   /** False denies admission even if the retained diagnostic phase is Ready. */
   known?:boolean;
@@ -33,6 +35,7 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
   };
   const listeners=new Set<Listener>();
   const notificationListeners=new Set<Listener>();
+  const fanWakeListeners=new Set<Listener>();
   const confirmations=new Map<Listener,number>();
   const retryDelays=[1000,2000,5000,15000,30000];
   const hints=new Set<string>();
@@ -75,10 +78,11 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     if(value.known!==false&&value.phase==='ready')committedGeneration=Math.max(committedGeneration,value.generation);
     const changed=!same(snapshot,value);
     const scopeChanged=!!snapshot&&snapshot.observedNotificationSequence!==value.observedNotificationSequence;
+    const fanWakeChanged=snapshot?.fanWakeGeneration!==value.fanWakeGeneration;
     // Always retain ordering metadata for the getter/replay, without turning
     // duplicate publications into another round of business callbacks.
     snapshot={...value};
-    if(!changed&&(!scopeChanged||!notificationListeners.size))return;
+    if(!changed&&(!scopeChanged||!notificationListeners.size)&&(!fanWakeChanged||!fanWakeListeners.size))return;
     if(changed){count('published');hints.clear();}
     // A consumer can synchronously deliver a newer native fact or restart the
     // subscription lifetime. Never finish an older Ready fanout afterward.
@@ -86,8 +90,9 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     const delivery=changed?++deliverySerial:deliverySerial,owner=epoch;
     for(const listener of [...listeners]){
       if(owner!==epoch||delivery!==deliverySerial||!active())break;
-      if(!changed&&!notificationListeners.has(listener))continue;
-      if(listeners.has(listener))notify(listener,notificationListeners.has(listener)?snapshot!:value);
+      const scopeListener=notificationListeners.has(listener),fanWakeListener=fanWakeListeners.has(listener);
+      if(!changed&&!(scopeChanged&&scopeListener)&&!(fanWakeChanged&&fanWakeListener))continue;
+      if(listeners.has(listener))notify(listener,scopeListener||fanWakeListener?snapshot!:value);
     }
   }
   function validAuthorityFields(state:Partial<SharedPowerLifecycleSnapshot>):boolean {
@@ -105,6 +110,7 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     if(!Number.isSafeInteger(state.generation)||Number(state.generation)<=0||
       !['ready','suspending','suspended','resuming'].includes(String(state.phase))||!validAuthorityFields(state))return null;
     return {phase:state.phase!,generation:state.generation!,
+      ...(ordinal(state.fanWakeGeneration)&&state.fanWakeGeneration>0?{fanWakeGeneration:state.fanWakeGeneration}:{}),
       ...(typeof state.inputReady==='boolean'?{inputReady:state.inputReady}:{}),
       ...(typeof state.hardwareWritesAllowed==='boolean'?{hardwareWritesAllowed:state.hardwareWritesAllowed}:{}),
       ...(typeof state.known==='boolean'?{known:state.known}:{}),
@@ -245,6 +251,7 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     record('compatibility-event','hint',value);
     const state=decode(value&&typeof value==='object'?{...value,phase}:null);
     if(!state){hintOnce(name+':untagged');return;}
+    delete state.fanWakeGeneration;
     if(state.publicationRevision!==undefined&&state.publicationRevision<publicationRevision){hintOnce(name+':old-publication');return;}
     if(snapshot&&state.generation<snapshot.generation||phase!=='ready'&&state.generation<=committedGeneration){
       hintOnce(name+':stale:'+state.generation);return;
@@ -259,6 +266,20 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     started=true;const owner=epoch;
     stops.push(deps.listen('power.lifecycleChanged',value=>{
       if(owner!==epoch||!active())return;
+      if((value as {fanWakeOnly?:boolean}|null)?.fanWakeOnly===true){
+        const fan=decode(value);
+        if(fan?.known!==true||!fan.fanWakeGeneration||fan.notificationPending!==false||
+          !ordinal(fan.publicationRevision)||fan.publicationRevision<publicationRevision||
+          !ordinal(fan.observedNotificationSequence)||fan.observedNotificationSequence<notificationSequence||
+          (snapshot&&fan.generation<snapshot.generation))return;
+        // Fan rechecks its own gate. Do not advance public authority or replay its consumers.
+        const delivery=deliverySerial;
+        for(const listener of [...fanWakeListeners]){
+          if(owner!==epoch||delivery!==deliverySerial||!active())break;
+          if(fanWakeListeners.has(listener))notify(listener,fan);
+        }
+        return;
+      }
       count('authorityEvents');const outcome=acceptAuthority(value,true);record('authority-event',outcome,value);
       if(outcome==='unknown')hintOnce('native-current-unknown:'+snapshot?.generation+':'+snapshot?.phase);
     }));
@@ -282,18 +303,19 @@ export function createSharedPowerLifecycleSource(deps:SharedPowerLifecycleDepend
     confirmations.clear();inFlight=queued=followup=demand=false;
     record('lifetime','stopped');
   }
-  function onSharedPowerLifecycle(listener:Listener,options:{observeNotificationSequence?:boolean}={}):()=>void {
+  function onSharedPowerLifecycle(listener:Listener,options:{observeNotificationSequence?:boolean;observeFanWakeGeneration?:boolean}={}):()=>void {
     const subscription:Listener=state=>listener(state);
     // Optional scope cancellation shares this same source lifetime and read.
     // Ordinary business subscribers retain publication-metadata deduplication.
     if(options.observeNotificationSequence===true)notificationListeners.add(subscription);
+    if(options.observeFanWakeGeneration===true)fanWakeListeners.add(subscription);
     listeners.add(subscription);
     if(snapshot)notify(subscription,snapshot);
     if(!started){
-      try{start();}catch(error){notificationListeners.delete(subscription);listeners.delete(subscription);if(!listeners.size)stop();throw error;}
+      try{start();}catch(error){fanWakeListeners.delete(subscription);notificationListeners.delete(subscription);listeners.delete(subscription);if(!listeners.size)stop();throw error;}
     }
     let ended=false;
-    return()=>{if(ended)return;ended=true;notificationListeners.delete(subscription);listeners.delete(subscription);if(!listeners.size)stop();};
+    return()=>{if(ended)return;ended=true;fanWakeListeners.delete(subscription);notificationListeners.delete(subscription);listeners.delete(subscription);if(!listeners.size)stop();};
   }
   return {onSharedPowerLifecycle,requestSharedPowerLifecycleReconcile,requestSharedPowerLifecycleReadyConfirmation,getSharedPowerLifecycle:copy,getSharedPowerLifecycleDiagnostics};
 }

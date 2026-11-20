@@ -24,21 +24,27 @@ const autoStartEnd=appSource.indexOf('const router = useRouter();',autoStartStat
 assert(autoStartState>=0&&autoStartEnd>autoStartState,'actual root Fan auto state missing');
 const autoStartSource=appSource.slice(autoStartState,autoStartEnd);
 const appReadyObserver=appSource.match(/function onFanResumeReady\(resumeGeneration: number\): void \{[\s\S]*?\n\}/)?.[0];
+const appSharedFanObserver=appSource.match(/function onSharedFanWake\(state: SharedPowerLifecycleSnapshot\): void \{[\s\S]*?\n\}/)?.[0];
+const appObservesFanWake=appSource.includes('onSharedPowerLifecycle(onSharedFanWake, { observeFanWakeGeneration: true })');
 assert(autoStartSource.includes('fanHostLifecycle.start(')&&appReadyObserver,'actual root auto/ready observer missing');
 const viewPath=process.argv[4]?path.resolve(process.argv[4]):path.join(project,'src/views/FanView.vue');
 const viewSource=fs.readFileSync(viewPath,'utf8');
 const viewFunction=name=>{const match=viewSource.match(new RegExp('(?:async )?function '+name+'\\([\\s\\S]*?\\n\\}'));assert(match,'actual page function missing: '+name);return match[0];};
 const pageFunctions=['onFanPowerSuspending','ensureSupported','confirmFanHostBeforeWrite','commitControlCurve','publishControlIntent','hostHasLiveControl'].map(viewFunction).join('\n');
-const observerModule=`export function makeFanSuspendObserver(fanHostLifecycle: any, setFanControlActive: (active: boolean) => void) { ${appSuspendObserver}; return onFanPhysicalSuspending; }
-export function makeFanWakeApp(fanHostLifecycle: any, curve: any[], settings: {on:boolean}, sharedPower: any) {
+const observerModule=`export function makeFanWakeApp(fanHostLifecycle: any, curve: any[], settings: {on:boolean}, sharedPower: any) {
  const aiFanMockActive=false, latestResumeGeneration=4, resumeLifecycleActive=true;
  const {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted}=sharedPower;
  const readSettingsSection=async<T>()=>({fanControl:settings.on}), readBootModeFanIntent=async()=>null;
  const getFanFeatureSettings=()=>({featureEnabled:true,preset:'balanced'}),getFanPresetCurve=()=>curve;
  const fanDiagnosticLog=()=>{};
+ const setFanControlActive=()=>{};
  ${autoStartSource}
  ${appReadyObserver}
- return {ensureFanAutoStart,onFanResumeReady};
+ ${appSuspendObserver}
+ ${appSharedFanObserver ?? ''}
+ return {ensureFanAutoStart,onFanResumeReady,onFanPhysicalSuspending,watchSharedWake(){
+  return sharedPower.onSharedPowerLifecycle(${appSharedFanObserver ? 'onSharedFanWake' : '()=>{}'},{observeFanWakeGeneration:${appObservesFanWake}});
+ }};
 }
 export function makeFanPage(fanHostLifecycle:any, curve:any[]) {
  const ref=(value:any)=>({value}), FAN_FORCE_PREVIEW=false;
@@ -57,19 +63,22 @@ const observerBundle=await build({stdin:{contents:observerModule,loader:'ts'},bu
 const files=['src/App.vue','src/views/FanView.vue','src/bridge/api.ts','src/bridge/fanHost.ts','src/bridge/ipc.ts','src/bridge/hardwareCoordinator.ts','src/bridge/powerLifecycleState.ts','tools/fixtures/fan_no_io_host.ts','tools/fan_manual_wake_ipc_selftest.mjs'];
 const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const binding=files.map(p=>({path:p==='src/views/FanView.vue'?viewPath:selected(p),sha256:hash(p==='src/views/FanView.vue'?viewPath:selected(p))}));
-const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/bridge/api';export {HttpFanApiAdapter} from './src/bridge/fanApi';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {rejectAllPending} from './src/bridge/ipc';export {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';",resolveDir:project,sourcefile:'fan-manual-wake-ipc-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanTest',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:beforeRoot?[{name:'bound-before-image',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:api|fanHost)\.ts$/},a=>({contents:fs.readFileSync(selected(path.relative(project,a.path)),'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));}}]:[]});
+const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/bridge/api';export {HttpFanApiAdapter} from './src/bridge/fanApi';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {rejectAllPending} from './src/bridge/ipc';export {onSharedPowerLifecycle,getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';",resolveDir:project,sourcefile:'fan-manual-wake-ipc-entry.ts'},bundle:true,write:false,format:'iife',globalName:'FanTest',platform:'browser',target:'es2022',define:{'import.meta.env':'{}'},plugins:beforeRoot?[{name:'bound-before-image',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/](?:api|fanHost)\.ts$/},a=>({contents:fs.readFileSync(selected(path.relative(project,a.path)),'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));}}]:[]});
 const code=bundle.outputFiles[0].text;
 function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1Mini',qualifiedReceipts=false){
  let now=0,id=0,listener,manuals=0,heldReply,rootObserver,releaseCleanup,appWake,pageApi,pageVisible=false;
  let holdFanRead=false, heldFanRead;const settings={on:true};
  const timers=new Map(),calls=[];
  let native={generation:3,phase:'ready',resumeReady:true,inputReady:true,hardwareWritesAllowed:true,hibernateAvailable:true};
+ let shared={generation:3,phase:'ready',known:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:10,notificationPending:false};
  const timer=(fn,ms,interval=false)=>{const key=++id,delay=Math.max(1,Number(ms)||1);timers.set(key,{fn,due:now+delay,period:interval?delay:0});return key;};
  const clear=key=>timers.delete(key),win=new EventTarget();
  win.setTimeout=(fn,ms)=>timer(fn,ms);win.clearTimeout=clear;win.setInterval=(fn,ms)=>timer(fn,ms,true);win.clearInterval=clear;
  const deliver=(msg,result,error)=>listener?.({data:error?{id:msg.id,error}:{id:msg.id,result}});
+ const publishFanWake=patch=>listener?.({data:{event:'power.lifecycleChanged',data:{...shared,...patch,fanWakeOnly:true}}});
  win.chrome={webview:{addEventListener:(_t,fn)=>listener=fn,postMessage(msg){calls.push(msg);
   if(msg.cmd==='fanLog.write'){queueMicrotask(()=>deliver(msg,{ok:true}));return;}
+  if(msg.cmd==='power.lifecycle'){const result={...shared};queueMicrotask(()=>deliver(msg,result));return;}
   if(msg.cmd==='power.fanLifecycle'){
    const result={...native};
    if(holdFanRead){holdFanRead=false;heldFanRead=()=>deliver(msg,result);return;}
@@ -143,7 +152,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
   }
   life=new api.FanHostLifecycle({enabled:true,adapter:host,readNativeActivity:async()=>null,
    launcher:{start:async()=>({pid:111501+starts++,executable:'inert.exe'}),stop:async()=>{}},onControlDisplay(){}});
-  rootObserver=context.FanRootObserver.makeFanSuspendObserver(life,()=>{});appWake=context.FanRootObserver.makeFanWakeApp(life,curve,settings,api);
+  appWake=context.FanRootObserver.makeFanWakeApp(life,curve,settings,api);rootObserver=appWake.onFanPhysicalSuspending;
   life.setPowerGeneration(3);life.observePowerBoundary('resume-ready',3);await life.start();
   if(coldWake){native={...native,generation:4,phase:'resuming',resumeReady:false,hardwareWritesAllowed:false};life.setPowerGeneration(4);life.observePowerBoundary('resuming',4);host.calls=[];pageApi=context.FanRootObserver.makeFanPage(life,curve);return;}
   await life.apply(curve);
@@ -152,7 +161,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
  }
  async function begin(){const pending=observe(mode.startsWith('wake-cleanup')?life.start({manualRecovery:true}).then(()=>life.apply(curve)):life.apply(curve));for(let n=0;n<20&&!calls.some(c=>c.cmd==='power.fanManualWake')&&pending.status==='pending';n++)await flush();return pending;}
  async function done(){const close=life?.close().catch(()=>{});api.rejectAllPending('fixture cleanup');await flush();if(close)await close;timers.clear();}
- return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();},holdNextFanRead(){holdFanRead=true;},releaseFanRead(){assert(heldFanRead,'a real Fan read must be in flight');const reply=heldFanRead;heldFanRead=undefined;reply();}};
+ return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,publishFanWake,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},watchSharedWake(){return appWake.watchSharedWake();},publishShared(patch){shared={...shared,...patch};listener?.({data:{event:'power.lifecycleChanged',data:{...shared}}});},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();},holdNextFanRead(){holdFanRead=true;},releaseFanRead(){assert(heldFanRead,'a real Fan read must be in flight');const reply=heldFanRead;heldFanRead=undefined;reply();}};
 }
 const results=[];
 async function check(name,run){if(nativeOwnerCancelOnly&&!name.startsWith('native-owner cancel '))return;if(nativeOwnerRearmOnly&&!name.startsWith('native-owner real HTTP'))return;if(nativeOwnerOnly&&!name.startsWith('native-owner '))return;if(sharedReadyOnly&&!name.startsWith('shared-ready '))return;if(backgroundReadyOnly&&!name.startsWith('background-ready '))return;try{const facts=await run();results.push({name,ok:true,...(facts?{facts}:{})});console.log('PASS '+name);}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error);}}
@@ -253,6 +262,53 @@ for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'st
 }
 
 async function nativeBoot(f){const p=f.observe(f.boot());for(let n=0;n<100&&p.status==='pending';n++)await f.advance(100);if(p.status!=='fulfilled')console.log(JSON.stringify({diagnostic:'boot',status:p.status,error:p.error,state:f.life.state,host:f.host.calls,ipc:f.calls.map(x=>({cmd:x.cmd,url:x.args?.url}))}));assert.equal(p.status,'fulfilled',p.error??'boot pending');}
+for(const boundary of ['resume','read','off','new-sleep','pending','stale']) {
+ await check('background-ready without the private notification: '+boundary,async()=>{
+  const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
+  let stop,stopOrdinary;
+  try{
+   await f.boot();
+   // The parent stays in public generation 3 throughout. Fan has its own
+   // completed Close and physical wake in generation 4. No page or F5 IPC event.
+   f.rootSuspend({generation:4,scope:'fan-only'});
+   let ordinaryNotices=0;
+   if(boundary!=='read'){
+    stop=f.watchSharedWake();stopOrdinary=f.api.onSharedPowerLifecycle(()=>++ordinaryNotices);await f.flush();
+   }
+   const ordinaryBefore=ordinaryNotices;
+   const readBefore=f.calls.filter(c=>c.cmd==='power.fanLifecycle').length;
+   if(boundary==='off')await f.life.disable();
+   await f.host.resume({generation:4});
+   f.setNative({known:true,generation:4,sharedGeneration:3,phase:'ready',resumeReady:true,hardwareWritesAllowed:true,inputReady:false,notificationPending:false});
+   if(boundary==='new-sleep')f.holdNextFanRead();
+   if(boundary==='read'){
+    f.publishShared({fanWakeGeneration:4,publicationRevision:2});stop=f.watchSharedWake();
+   }else{
+    // Native can capture fresher unrelated fields; only Fan may consume this projection.
+    f.publishFanWake({fanWakeGeneration:4,publicationRevision:1,inputReady:true,
+      observedNotificationSequence:boundary==='stale'?9:10,notificationPending:boundary==='pending'});
+   }
+   if(boundary==='new-sleep'){
+    await f.flush();
+    f.setNative({generation:5,phase:'suspending',resumeReady:false,hardwareWritesAllowed:false});
+    f.rootSuspend({generation:5,scope:'fan-only'});
+    f.releaseFanRead();
+   }
+   await f.advance(2000);
+   const positive=boundary==='resume'||boundary==='read';
+   assert.equal(f.host.calls.filter(c=>c==='acquire').length,positive?1:0,'unsafe or missing lease');
+   assert.equal(f.host.calls.filter(c=>c==='enable').length,positive?1:0,'unsafe or missing curve replay');
+   assert.equal(ordinaryNotices,ordinaryBefore,'Fan projection leaked into ordinary power observers');
+   f.publishShared({publicationRevision:3});await f.advance(2000);
+   assert.equal(f.host.calls.filter(c=>c==='enable').length,positive?1:0,'duplicate shared observation replayed the curve');
+   assert.equal(f.manuals,0);
+   assert.equal(f.starts,1);
+   if(['off','pending','stale'].includes(boundary))assert.equal(f.calls.filter(c=>c.cmd==='power.fanLifecycle').length,readBefore,'cancelled, stale or pending wake read the Fan gate');
+   assert.equal(f.native.sharedGeneration,3);
+   return {boundary,trace:[...f.host.calls],fanGeneration:4,sharedGeneration:3,manualRequests:f.manuals,fanPageCreated:false};
+  }finally{stopOrdinary?.();stop?.();await f.done();}
+ });
+}
 async function nativeDone(f){const p=f.observe(f.done());for(let n=0;n<800&&p.status==='pending';n++)await f.advance(100);if(p.status==='pending')console.log(JSON.stringify({diagnostic:'cleanup',state:f.life.state,host:f.host.calls,ipc:f.calls.map(x=>({cmd:x.cmd,url:x.args?.url}))}));assert.equal(p.status,'fulfilled',p.error??'cleanup pending');}
 await check('native-owner real HTTP rearm uses one original Native command and no renderer resume',async()=>{
  const f=fixture('native-owner');try{

@@ -124,5 +124,9 @@ public:
         std::lock_guard<std::mutex> l(mutex_);if(!boundary_ || !readyLocked(g) || published_==g)return false;
         published_=g;return true;
     }
+    std::uint64_t publishedReadyGeneration(std::uint64_t shared) const {
+        std::lock_guard<std::mutex> l(mutex_);
+        return shared==shared_ && published_==generation_ && readyLocked(generation_) ? generation_ : 0;
+    }
 };
 }

@@ -249,9 +249,19 @@ runs:
       $backgroundWake = Get-Content -LiteralPath (Join-Path $backgroundWakeEvidence 'result.json') -Raw | ConvertFrom-Json
       $boundaryFacts = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.facts.boundary })
       $requiredBoundaries = @('recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation')
+      $backgroundPassedNames = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
+      $requiredProjectedWake = @(
+        'background-ready without the private notification: resume',
+        'background-ready without the private notification: read',
+        'background-ready without the private notification: off',
+        'background-ready without the private notification: new-sleep',
+        'background-ready without the private notification: pending',
+        'background-ready without the private notification: stale'
+      )
       if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
-          @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0) {
-        throw 'Fan release check did not cover the one-shot wake and its coordinator read boundaries.'
+          @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0 -or
+          @($requiredProjectedWake | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
+        throw 'Fan release check did not cover one-shot wake and the coordinator projection without a private notification.'
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}

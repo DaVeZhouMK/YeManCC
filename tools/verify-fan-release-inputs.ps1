@@ -115,6 +115,11 @@ if ($action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* 
     !$action.Contains('first manual curve waits for a changing Native write fact', [StringComparison]::Ordinal)) {
   throw 'FAN_RELEASE_WAKE_REGRESSION_REQUIRED: restore the release checks for delayed permission, unavailable Native state, one-shot background wake and first manual control.'
 }
+foreach ($boundary in @('resume', 'read', 'off', 'new-sleep', 'pending', 'stale')) {
+  if (!$action.Contains("'background-ready without the private notification: $boundary'", [StringComparison]::Ordinal)) {
+    throw "FAN_RELEASE_WAKE_PROJECTION_REGRESSION_REQUIRED: missing projection boundary $boundary."
+  }
+}
 $preflight = Get-Content -LiteralPath (Join-Path $root 'tools/github-release-preflight.ps1') -Raw -Encoding UTF8
 if ($action -cnotmatch '(?m)^\s+& tools/github-release-preflight\.ps1 -ProjectRoot \$env:GITHUB_WORKSPACE -Mode \$env:YMCC_GIT_RELEASE_MODE -ExpectedCommit \$env:YMCC_RELEASE_COMMIT -EvidencePath \(Join-Path \$env:RUNNER_TEMP ''release-preflight-early\.json''\)[ \t\r]*$' -or
     $preflight -cnotmatch '(?m)^\s+\$fanInputs = & \(Join-Path \$PSScriptRoot ''verify-fan-release-inputs\.ps1''\) -ProjectRoot \$root -ExpectedCommit \$commit[ \t\r]*$') {

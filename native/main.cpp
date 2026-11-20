@@ -1562,6 +1562,7 @@ static std::atomic<bool> g_sharedPowerProjectionPending{false};
 static std::atomic<bool> g_sleepPowerRedeliveryArmed{false};
 static std::atomic<unsigned long long> g_powerResumeCommitRedelivery{0},g_powerInputRecoverRedelivery{0};
 static json sharedPowerLifecycleSnapshot();
+static void publishSharedFanWake(unsigned long long generation) noexcept;
 static void fanHttpCapturePowerAdmission(json&);
 static void publishSharedPowerLifecycle(const char* reason);
 static bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPowerV1& power);
@@ -84909,6 +84910,9 @@ static FanReadyDelivery fanHostPublishPhysicalWake(unsigned long long generation
         // A fresh public grant can rebind the request even if the UI was notified already.
         if (fanHostScheduleFanResume(generation).awaitingPower) return FanReadyDelivery::Deferred;
         if (!g_fanPhysicalWake.claimReady(generation)) return FanReadyDelivery::Settled;
+        // Preserve the Fan edge in the coordinator's current snapshot even if
+        // the optional device notification never reaches the renderer.
+        publishSharedFanWake(generation);
         if (g_fanPhysicalWake.sharedHibernateWake(generation)) {
             ipc_emit("fan.resume-ready", {{"generation",generation},
                 {"source","kernel-s4-wake"},{"scope","fan-only"}});
@@ -98219,16 +98223,29 @@ static json sharedPowerLifecycleSnapshot() {
     ymcc::sleeppower::SharedPowerV1 state;
     if(readSharedSystemPower(&state,sizeof(state))!=1)
         return {{"known",false},{"reason","power-context-changing"}};
+    const auto fanWakeGeneration=(state.flags&ymcc::sleeppower::kNotificationPending)==0 ?
+        g_fanPhysicalWake.publishedReadyGeneration(state.generation) : 0;
     return {{"known",true},{"phase",powerLifecycleName(static_cast<PowerLifecycle>(state.phase))},
         {"generation",state.generation},
         {"hardwareWritesAllowed",(state.flags&ymcc::sleeppower::kHardwareAllowed)!=0},
         {"inputReady",g_inputReady.load(std::memory_order_acquire)},
         {"resumeReady",g_resumeReadyGeneration.load(std::memory_order_acquire)==state.generation},
+        {"fanWakeGeneration",fanWakeGeneration},
         {"hibernateAvailable",sgHibernateAvailable()},
         {"publicationRevision",state.publicationRevision},
         {"observedNotificationSequence",state.observedNotificationSequence},
         {"notificationPending",(state.flags&ymcc::sleeppower::kNotificationPending)!=0},
         {"suspendSerial",state.suspendSerial}};
+}
+
+// This refinement shares the public snapshot without replaying its Native consumers.
+static void publishSharedFanWake(unsigned long long generation) noexcept {
+    try {
+        auto state=sharedPowerLifecycleSnapshot();
+        if(!generation || state.value("fanWakeGeneration",0ULL)!=generation)return;
+        state["fanWakeOnly"]=true;
+        ipc_emit("power.lifecycleChanged",std::move(state));
+    } catch (...) { /* The projection remains available through power.lifecycle. */ }
 }
 
 static void sharedPowerProjectionConsumerFailed(const char* consumer,

@@ -112,6 +112,7 @@ applyTheme(
 const uiVisible = ref(isUiVisible());
 let uiPowerReconciliation: ReturnType<typeof startUiPowerReconciliation> | null = null;
 let stopSharedPowerWatch: (() => void) | null = null;
+let stopSharedFanWakeWatch: (() => void) | null = null;
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -971,7 +972,12 @@ function onFanPhysicalSuspending(e: Event): void {
       && generation === coordinator.wakeReadyGeneration) return;
   fanHostLifecycle.setPowerGeneration(generation);
   fanHostLifecycle.observePowerBoundary(resumeCatchup ? 'manual-resume-start' : 'suspending', generation);
+  if (fanOnly && !resumeCatchup) rememberFanWakeRequest(generation);
   setFanControlActive(false);
+}
+function onSharedFanWake(state: SharedPowerLifecycleSnapshot): void {
+  if (state.known === true && state.notificationPending !== true && state.fanWakeGeneration)
+    onFanResumeReady(state.fanWakeGeneration);
 }
 function onPowerResuming(e: Event): void {
   tdpRuntimeStore.invalidatePower();
@@ -1915,6 +1921,7 @@ onMounted(async () => {
     // Cold Ready is not a new wake. Existing mount/device receipts below keep
     // their own recovery; subsequent same-gen Ready corrects any private hold.
   });
+  stopSharedFanWakeWatch = onSharedPowerLifecycle(onSharedFanWake, { observeFanWakeGeneration: true });
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
   stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
     onPowerResumeReady(generation);
@@ -2264,6 +2271,7 @@ onUnmounted(() => {
   uiPowerReconciliation?.stop();
   uiPowerReconciliation = null;
   stopSharedPowerWatch?.(); stopSharedPowerWatch = null;
+  stopSharedFanWakeWatch?.(); stopSharedFanWakeWatch = null;
   updatePredownloadHost?.stop(); updatePredownloadHost = null;
   controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
   window.removeEventListener('game-media:changed',onSharedMediaChanged);
