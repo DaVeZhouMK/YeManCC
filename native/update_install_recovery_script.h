@@ -103,7 +103,8 @@ function Add-YmccInstallIssue([string]$Step, $Failure, [switch]$Core) {
     if (!$script:ymccInstallIssues) { $script:ymccInstallIssues=[ordered]@{} }
     $script:ymccInstallIssues[$Step]=1+[int]$script:ymccInstallIssues[$Step]
     if ($Core) { $script:ymccCoreWriteFailures++ }
-    Write-Warning ('UPDATE_CONTINUED ['+$Step+']: '+$Failure.Exception.Message) -WarningAction Continue
+)YMCCRECOVERY"
+R"YMCCRECOVERY(    Write-Warning ('UPDATE_CONTINUED ['+$Step+']: '+$Failure.Exception.Message) -WarningAction Continue
 }
 function Write-YmccInstallState([string]$Phase, [int]$ProcessId=0) {
     try {
@@ -230,7 +231,8 @@ function Write-YmccInstallTrace([string]$Outcome='running', $Failure=$null,
         if ($bytes.Length -gt 4096) { return }
         $parent=Split-Path -Parent $recoveryJournal
         Assert-YmccRecoveryAcl $parent
-        $path=Resolve-YmccDeckyPath $parent ((Split-Path -Leaf $recoveryJournal)+'.install-trace.json')
+)YMCCRECOVERY"
+R"YMCCRECOVERY(        $path=Resolve-YmccDeckyPath $parent ((Split-Path -Leaf $recoveryJournal)+'.install-trace.json')
         $temporary=$path+'.tmp-'+[guid]::NewGuid().ToString('N')
         try {
             Write-YmccRecoveryFile $temporary $bytes
