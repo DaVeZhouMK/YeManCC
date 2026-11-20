@@ -49,7 +49,12 @@ assert(wakeStart >= 0 && wakeEnd > wakeStart, 'APP_FAN_WAKE_ENTRY_UNIQUE');
 const wakeLines = appSource.slice(wakeStart, wakeEnd).trimEnd().split('\n');
 wakeLines[0] = 'function onFanResumeReady(resumeGeneration) {';
 const wakeSource = wakeLines.join('\n').replace(/false as const/g, 'false');
-const fanPublicDelivery = appSource.match(/^    if \(admitted\) fanWakeRequest\?\.retryAfterPublicReady\?\.\(state\);$/m)?.[0] ?? '';
+const fanPublicDelivery = appSource.match(/^    if \(admitted\).*\.retryAfterPublicReady\?\.\(state\);$/m)?.[0];
+assert(fanPublicDelivery, 'actual public Ready retry delivery missing');
+const requestTrackingSource = appSource.match(/^const fanWakeRequests = .*;\r?\n\s*function rememberFanWakeRequest\([^\n]*\n[\s\S]*?^\}/m)?.[0];
+const requestTrackingJs = requestTrackingSource?.replace('new Map<number, FanWakeRequest>()', 'new Map()')
+  .replace('rememberFanWakeRequest(generation: number): FanWakeRequest', 'rememberFanWakeRequest(generation)')
+  ?? 'let fanWakeRequest = null;'; // Retain the released App as a negative control.
 const resumingStart = appSource.indexOf('function onPowerResuming(');
 const resumingEnd = appSource.indexOf('\nfunction onPowerResumeReady(', resumingStart);
 assert(resumingStart >= 0 && resumingEnd > resumingStart, 'APP_FAN_RESUMING_ENTRY_UNIQUE');
@@ -272,7 +277,7 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     'let fanAutoStartTransitionGeneration = -1;',
     'let fanBootAutoStartDone = false;',
     'const fanAutoStartGenerations = new Set();',
-    'let fanWakeRequest = null;',
+    requestTrackingJs,
     'const getSharedPowerLifecycle = () => env.sharedPower ?? null;',
     'const isSharedPowerLifecycleAdmitted = isPowerAdmitted;',
     'let resumeLifecycleActive = true;',
@@ -845,7 +850,7 @@ async function main(): Promise<void> {
     }
   });
   if (process.env.YMCC_FAN_AUTO_CASE === 'FAN-PUBLIC-RETRY') await test('FAN-PUBLIC-RETRY one newer public admission continues the refused physical wake', async () => {
-    for (const variant of ['public-before-denial', 'redelivery-before-denial', 'public-after-denial', 'off-before-public', 'new-fan-sleep', 'new-public-sleep', 'second-denial'] as const) {
+    for (const variant of ['public-before-denial', 'redelivery-before-denial', 'public-after-denial', 'off-before-public', 'new-fan-sleep', 'new-public-sleep', 'second-denial', 'unconfirmed-newer-hint'] as const) {
       const adapter = new AutoOwnerHost(), launcher = new SimLauncher();
       const pending = { phase: 'ready', generation: 2, hardwareWritesAllowed: false,
         notificationPending: true, observedNotificationSequence: 9, publicationRevision: 19 } as const;
@@ -880,6 +885,11 @@ async function main(): Promise<void> {
         assert.equal(reads, before + 1, 'duplicate private wake opened parallel Native reads');
       }
       assert.equal(adapter.enables, initialWrites, 'pending public context must not replay the curve');
+      if (variant === 'unconfirmed-newer-hint') {
+        api.onFanResumeReady(4); await flush();
+        assert.equal(lifecycle.coordinatorSnapshot.powerGeneration, 3, 'unconfirmed hint must not move the Fan generation');
+        assert.equal(adapter.enables, initialWrites, 'unconfirmed hint must not replay the curve');
+      }
       if (variant === 'off-before-public') await lifecycle.disable();
       if (variant === 'new-fan-sleep') { lifecycle.setPowerGeneration(4); lifecycle.observePowerBoundary('suspending', 4); }
       if (variant !== 'second-denial') native = { ...native, phase: 'ready', hardwareWritesAllowed: true, notificationPending: false, resumeReady: true };

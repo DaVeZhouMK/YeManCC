@@ -223,6 +223,11 @@ runs:
         if ($result.ok -ne $true -or $result.checks -ne 1 -or $result.hardwareCalls -ne 0 -or @($result.observations).Count -lt 2) {
           throw "Fan release check did not exercise the expected scenarios: $name"
         }
+        if ($name -eq 'fan_boot_autostart_sim' -and !($result.observations | Where-Object {
+          $_.variant -ceq 'unconfirmed-newer-hint' -and $_.continued -eq $true
+        })) {
+          throw 'Fan release check did not verify recovery after an unconfirmed newer hint.'
+        }
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
