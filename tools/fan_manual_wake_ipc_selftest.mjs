@@ -67,7 +67,7 @@ const bundle=await build({stdin:{contents:"export {powerLifecycle} from './src/b
 const code=bundle.outputFiles[0].text;
 function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1Mini',qualifiedReceipts=false){
  let now=0,id=0,listener,manuals=0,heldReply,rootObserver,releaseCleanup,appWake,pageApi,pageVisible=false;
- let holdFanRead=false, heldFanRead;const settings={on:true};
+ let holdFanRead=false, heldFanRead, failedFanReads=0;const settings={on:true};
  const timers=new Map(),calls=[];
  let native={generation:3,phase:'ready',resumeReady:true,inputReady:true,hardwareWritesAllowed:true,hibernateAvailable:true};
  let shared={generation:3,phase:'ready',known:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:10,notificationPending:false};
@@ -80,6 +80,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
   if(msg.cmd==='fanLog.write'){queueMicrotask(()=>deliver(msg,{ok:true}));return;}
   if(msg.cmd==='power.lifecycle'){const result={...shared};queueMicrotask(()=>deliver(msg,result));return;}
   if(msg.cmd==='power.fanLifecycle'){
+   if(failedFanReads>0){failedFanReads--;queueMicrotask(()=>deliver(msg,null,'inert Fan IPC read failure'));return;}
    const result={...native};
    if(holdFanRead){holdFanRead=false;heldFanRead=()=>deliver(msg,result);return;}
    queueMicrotask(()=>deliver(msg,result));return;
@@ -161,7 +162,7 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
  }
  async function begin(){const pending=observe(mode.startsWith('wake-cleanup')?life.start({manualRecovery:true}).then(()=>life.apply(curve)):life.apply(curve));for(let n=0;n<20&&!calls.some(c=>c.cmd==='power.fanManualWake')&&pending.status==='pending';n++)await flush();return pending;}
  async function done(){const close=life?.close().catch(()=>{});api.rejectAllPending('fixture cleanup');await flush();if(close)await close;timers.clear();}
- return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,publishFanWake,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},watchSharedWake(){return appWake.watchSharedWake();},publishShared(patch){shared={...shared,...patch};listener?.({data:{event:'power.lifecycleChanged',data:{...shared}}});},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();},holdNextFanRead(){holdFanRead=true;},releaseFanRead(){assert(heldFanRead,'a real Fan read must be in flight');const reply=heldFanRead;heldFanRead=undefined;reply();}};
+ return {api,calls,timers,flush,advance,observe,boot,begin,done,curve,publishFanWake,get host(){return host;},get life(){return life;},get starts(){return starts;},get manuals(){return manuals;},get native(){return native;},auto(reason='boot'){return observe(appWake.ensureFanAutoStart(reason,reason==='resume'?4:0));},rootReady(generation=4){appWake.onFanResumeReady(generation);},watchSharedWake(){return appWake.watchSharedWake();},publishShared(patch){shared={...shared,...patch};listener?.({data:{event:'power.lifecycleChanged',data:{...shared}}});},setPreference(on){settings.on=on;},setNative(v){native={...native,...v};},pageBegin(){pageVisible=true;return observe(pageApi.begin());},get page(){return pageApi.snapshot();},pageSuspend(detail,type='ipc:fan.suspending'){pageApi.onFanPowerSuspending(new context.CustomEvent(type,{detail}));},rootSuspend(detail,type){notifySuspend(detail,type);},releaseCleanup(){releaseCleanup?.();},lateReply(){heldReply?.();},failFanReads(count){failedFanReads=count;},holdNextFanRead(){holdFanRead=true;},releaseFanRead(){assert(heldFanRead,'a real Fan read must be in flight');const reply=heldFanRead;heldFanRead=undefined;reply();}};
 }
 const results=[];
 async function check(name,run){if(nativeOwnerCancelOnly&&!name.startsWith('native-owner cancel '))return;if(nativeOwnerRearmOnly&&!name.startsWith('native-owner real HTTP'))return;if(nativeOwnerOnly&&!name.startsWith('native-owner '))return;if(sharedReadyOnly&&!name.startsWith('shared-ready '))return;if(backgroundReadyOnly&&!name.startsWith('background-ready '))return;try{const facts=await run();results.push({name,ok:true,...(facts?{facts}:{})});console.log('PASS '+name);}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error);}}
@@ -221,7 +222,7 @@ await check('background-ready retained private cycle resumes and renews without 
  }finally{await f.done();}
 });
 
-for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation']) {
+for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation', 'ipc-recovers', 'ipc-off', 'ipc-still-failing']) {
  await check('background-ready one unavailable coordinator read: '+boundary,async()=>{
   const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
   try{
@@ -229,6 +230,7 @@ for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'st
    await f.host.resume({generation:4});
    // Match Native's unavailable reply: it carries no generation or phase.
    f.setNative({generation:undefined,phase:undefined,known:false,hardwareWritesAllowed:false,resumeReady:false});
+   if(boundary.startsWith('ipc-'))f.failFanReads(boundary==='ipc-still-failing'?2:1);
    const readCount=()=>f.calls.filter(v=>v.cmd==='power.fanLifecycle').length;
    const start=readCount();
    f.rootReady(4);
@@ -236,7 +238,7 @@ for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'st
    assert.equal(readCount()-start,1);
    assert(!f.host.calls.includes('acquire'),'an unavailable fact granted a lease');
    assert(!f.host.calls.includes('enable'),'an unavailable fact granted a write');
-   if(boundary==='off')await f.life.close();
+   if(boundary==='off'||boundary==='ipc-off')await f.life.close();
    if(boundary==='new-sleep')f.rootSuspend({generation:5,scope:'fan-only'});
    const beforeRetry=readCount();
    if(boundary!=='still-unknown')f.setNative({known:true,generation:boundary==='wrong-generation'?5:4,
@@ -250,10 +252,11 @@ for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'st
    await f.advance(6000);
    const writes=f.host.calls.filter(v=>v==='enable').length;
    const leases=f.host.calls.filter(v=>v==='acquire').length;
-   assert.equal(writes,boundary==='recovers'?1:0,'wrong number of recovery writes');
-   assert.equal(leases,boundary==='recovers'?1:0,'wrong number of recovery leases');
-   if(boundary!=='recovers')assert.equal(readCount()-beforeRetry,
-    boundary==='off'||boundary==='new-sleep'?0:1,'the retained notification escaped its read budget');
+   const recovers=boundary==='recovers'||boundary==='ipc-recovers';
+   assert.equal(writes,recovers?1:0,'wrong number of recovery writes');
+   assert.equal(leases,recovers?1:0,'wrong number of recovery leases');
+   if(!recovers)assert.equal(readCount()-beforeRetry,
+    boundary==='off'||boundary==='ipc-off'||boundary==='new-sleep'?0:1,'the retained notification escaped its read budget');
    assert.equal(f.manuals,0);
    assert.equal(f.starts,1);
    return {boundary,writes,leases,coordinatorReadsAfterFirst:readCount()-beforeRetry};

@@ -6834,9 +6834,9 @@ export class FanHostLifecycle {
       && cancellationRevision === this.controlCancellationRevisionValue && generation >= this.powerGeneration;
     let native = await this.readPowerSnapshotForSynchronization();
     if (!isCurrent()) return false;
-    if (native?.known === false) {
-      // Native could not read a coherent fact. A one-shot Fan hint may have no
-      // later public Ready event, so give the same read one bounded retry.
+    if (!native || native.known === false) {
+      // An interrupted IPC read and an unavailable Native fact can both lose
+      // the only Fan wake hint. Give the same coordinator read one retry.
       const observationRevision = this.powerObservationRevision;
       await sleepMs(100);
       if (!isCurrent() || observationRevision !== this.powerObservationRevision) return false;
