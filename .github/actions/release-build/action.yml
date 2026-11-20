@@ -194,7 +194,7 @@ runs:
       YMCC_FAN_AUTO_CASE: FAN-PUBLIC-RETRY
       YMCC_FAN_NATIVE_WAIT_CASE: pending native state disappears temporarily
     run: |
-      foreach ($name in @('fan_boot_autostart_sim', 'fan_native_manual_wait_selftest', 'fan_resume_continuous_recovery_selftest', 'fan_duplicate_wake_replay_selftest')) {
+      foreach ($name in @('fan_boot_autostart_sim', 'fan_native_manual_wait_selftest', 'fan_cold_open_admission_selftest', 'fan_resume_continuous_recovery_selftest', 'fan_duplicate_wake_replay_selftest')) {
         $bundle = Join-Path $env:RUNNER_TEMP "release-$name.mjs"
         node node_modules/esbuild/bin/esbuild "tools/$name.ts" --bundle --platform=node --format=esm --alias:@=./src "--outfile=$bundle"
         if ($LASTEXITCODE -ne 0) { throw "Fan release check could not bundle $name" }
@@ -208,6 +208,12 @@ runs:
         $lines | Write-Output
         if ($exitCode -ne 0) { throw "Fan release check failed: $name" }
         $result = $lines[-1] | ConvertFrom-Json
+        if ($name -eq 'fan_cold_open_admission_selftest') {
+          if ($result.ok -ne $true -or $result.checks -lt 15 -or $result.hardwareCalls -ne 0) {
+            throw 'Fan release check did not exercise cold Open and Win4 refusal.'
+          }
+          continue
+        }
         if ($name -eq 'fan_duplicate_wake_replay_selftest') {
           if ($result.ok -ne $true -or $result.checks -lt 54 -or $result.hardwareCalls -ne 0) {
             throw 'Fan release check did not exercise the full wake replay matrix.'

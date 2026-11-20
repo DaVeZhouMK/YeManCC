@@ -56,12 +56,14 @@ $paths = $archivePaths + $runtimePaths + $dependencies + @(
   'tools/hc-device-runtime/verify-host-source-bundle.ps1',
   'tools/fan_boot_autostart_sim.ts',
   'tools/fan_native_manual_wait_selftest.ts',
+  'tools/fan_cold_open_admission_selftest.ts',
   'tools/fan_resume_continuous_recovery_selftest.ts',
   'tools/fan_duplicate_wake_replay_selftest.ts',
   'tools/fixtures/fan_no_io_host.ts',
   'native/main.cpp',
   'native/fan_resume_owner.h',
   'src/App.vue',
+  'src/bridge/fanApi.ts',
   'src/bridge/fanHost.ts'
 )
 $tree = @(& git -C $root ls-tree -r '--format=%(objectmode)%x09%(path)' $commit -- $paths)
