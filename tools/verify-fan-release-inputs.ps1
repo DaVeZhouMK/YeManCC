@@ -15,11 +15,11 @@ if ($LASTEXITCODE -ne 0 -or $commit -ine $ExpectedCommit) {
 
 # Release approval is independent of the payload verifier selected by the checkout.
 # Advance these pins together only when a replacement carries both GPD fixes.
-$component = 'candidate-fan-win4-open-c01-20261119'
+$component = 'candidate-fan-shared-lease-settlement-20261121'
 $archive = "deps/fan-host-source/$component"
-$archiveSha = '1dfb0d6ba86fa436e90573069e42927755343606d178af2927d249d500bac020'
+$archiveSha = '8e839285a2010ef58c7fc658954fcc1a6c1e0bff206d971665ace50ea80c70c4'
 $payload = 'PowerControl/fan-host'
-$payloadSha = '1776faaefe9df422dbd38452e46542a3efb183803f30426d6c4bb8677b06f79e'
+$payloadSha = '848b74e800cf051e6477ce94490c9b8d66ad8353d27b81f41d316b68fc627448'
 $selector = 'tools/verify-r5v9-fan-host-payload.ps1'
 
 function Read-ApprovedManifest([string]$Relative, [string]$Hash) {

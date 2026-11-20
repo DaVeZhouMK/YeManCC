@@ -1,0 +1,729 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-host-component-source-bundle",
+  "componentId": "candidate-fan-shared-lease-settlement-20261121",
+  "selectionStatus": "prepared-not-promoted",
+  "runtimeDeployment": false,
+  "sourceInputs": [
+    {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "archivePath": "source/capabilities/AsusFanCapabilitySession.cs",
+      "sha256": "305b947ba9d2f24748459e2ceba48ab6e762b50f766fac02a457ef267f8bc549",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/FanCapabilityCatalog.cs",
+      "sha256": "025b63ba0fe495ada8709ee8e1f0805d2ca83d53141ae4d3a0a9130f1911dcfd",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.cs",
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/HcLightingCapabilityCatalog.cs",
+      "sha256": "34f8e1acc945d90633d663dfa979851ca846001e145e2bb86d7457d2dc85d978",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "archivePath": "source/capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "f8102e344f6f6106933d4f6de5497ebaf82874133e4d3109d12962a1ae779601",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/PinnedFanSourceCatalog.cs",
+      "archivePath": "source/capabilities/PinnedFanSourceCatalog.cs",
+      "sha256": "e390f8fef9d9a33232bae9ba0bce19cb6f93ef266057cf89e953805d68843ebc",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/DeviceCoreSharedDependencies.cs",
+      "archivePath": "source/FanLab/DeviceCoreSharedDependencies.cs",
+      "sha256": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "sha256": "bd520d0384389604f7be48efc799b32fc64ea4218783437b5a773c54158f2801",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "sha256": "3bbfd4884706b89e4dbeac428ec1fc782b70623df54083d3c234caa76b43b8a0",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/PinnedSourceFanCurve.cs",
+      "archivePath": "source/FanLab/fan-backend/PinnedSourceFanCurve.cs",
+      "sha256": "d8bfdbb2abf64fd7c3fe7ae227b5809dfdfeebfbad8726cb62353c9c0e1b9966",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/PinnedSourceFanSession.cs",
+      "archivePath": "source/FanLab/fan-backend/PinnedSourceFanSession.cs",
+      "sha256": "e6f6ed0b22336cce212b2f32a047d50623aa8751733ee0e9f6bf8cd8acb3c7d0",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+      "archivePath": "source/FanLab/fan-backend/YeManFanBackend.csproj",
+      "sha256": "e473c22939eef91700ee556bacbae0c1b2fbfaf54006b48ef1da6403baa87f30",
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+      "archivePath": "source/FanLab/real-host/DeferredHostSuccessor.cs",
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+      "archivePath": "source/FanLab/real-host/FanCapabilityPolicy.cs",
+      "sha256": "9a97242787f0e9234b0e86d37e282e464655288d3729b8f57680b51299a1416b",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanProfileReturnState.cs",
+      "archivePath": "source/FanLab/real-host/FanProfileReturnState.cs",
+      "sha256": "906d0f2e641b90a5936840959787a54e9da82205cc160bd16588142a57c46145",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanRemoteControlPower.cs",
+      "archivePath": "source/FanLab/real-host/FanRemoteControlPower.cs",
+      "sha256": "6bcf84878eb98618763ecf21503396bcdbbae5a04819364cabb73b3dd154c265",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanRemotePowerContext.cs",
+      "archivePath": "source/FanLab/real-host/FanRemotePowerContext.cs",
+      "sha256": "921416c7163e63de73aa4150516db4a9b08b8beef7b512fb21d741c69103c48b",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanRemotePowerIntake.cs",
+      "archivePath": "source/FanLab/real-host/FanRemotePowerIntake.cs",
+      "sha256": "7c6f234b9a35e26473853df5e70c9ba8a130f65d155b9e389fd90c263fb164f2",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanRemotePowerScope.cs",
+      "archivePath": "source/FanLab/real-host/FanRemotePowerScope.cs",
+      "sha256": "bbfee67bcc884e3ee93434fba9b4d9dbca53b3f3f8dcf05decfc9dced0876286",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanRemotePowerSettlement.cs",
+      "archivePath": "source/FanLab/real-host/FanRemotePowerSettlement.cs",
+      "sha256": "72755d00204baa0e4096d3e06d67cf70338d6efb2f7c77a79fe0370d55b7a6e2",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/G1FanContractAdapter.cs",
+      "archivePath": "source/FanLab/real-host/G1FanContractAdapter.cs",
+      "sha256": "8bfca4361e8f45fc2f3dac6f9265af93a91a7e8641115073d819582b0fe73b59",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/HostProcessLifetime.cs",
+      "archivePath": "source/FanLab/real-host/HostProcessLifetime.cs",
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MiniAmdFanContractAdapter.cs",
+      "archivePath": "source/FanLab/real-host/MiniAmdFanContractAdapter.cs",
+      "sha256": "b36988fe0201f628be43d63585abeaef5dfe210ecda5e233ecf77d968d861eca",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+      "archivePath": "source/FanLab/real-host/MsiFamilyFanCurve.cs",
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "archivePath": "source/FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+      "archivePath": "source/FanLab/real-host/MsiWmiClassRegistration.cs",
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+      "archivePath": "source/FanLab/real-host/MsiWmiPayloadResource.cs",
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "sha256": "5d02b50ab9b704f53eb4c299aaa92bea4b10a3ea4c417ca0f3f4a573bb7cabd0",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/PinnedSourceFanConsumer.cs",
+      "archivePath": "source/FanLab/real-host/PinnedSourceFanConsumer.cs",
+      "sha256": "51400f33b9146865d9e3aba1290094534aa9f17b708a0ba2e3a0aa369ddeb9a7",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/PinnedSourceFanEngine.cs",
+      "archivePath": "source/FanLab/real-host/PinnedSourceFanEngine.cs",
+      "sha256": "b73a50b1c12f427bd8db5a4a207d6cfc031b024a9040f1f6f2cb3da288931adf",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/PinnedSourceFanSelection.cs",
+      "archivePath": "source/FanLab/real-host/PinnedSourceFanSelection.cs",
+      "sha256": "628b0cf4d338cb2ec3b41d4b628c583a7d068aa5a23abc589e6cef7ab1680b8a",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/PinnedSourceFanTransports.cs",
+      "archivePath": "source/FanLab/real-host/PinnedSourceFanTransports.cs",
+      "sha256": "119c09c24493edb32f9f10ff1b672e8f1588a118dce77cd1af9bb460604b5c7a",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/PinnedUmaEcFanTransport.cs",
+      "archivePath": "source/FanLab/real-host/PinnedUmaEcFanTransport.cs",
+      "sha256": "1f2f32091472402ccd97afffcb9541f3b05d9eefcd51e5c39e9494aff7bc81ba",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "archivePath": "source/FanLab/real-host/Program.cs",
+      "sha256": "106bfdafccd7121b1573d2e8ba087c06c0c1e21e171fb3f9c62f99585b622adf",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateFakes.cs",
+      "archivePath": "source/FanLab/real-host/Section18CandidateFakes.cs",
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section18CandidateLifecycle.cs",
+      "sha256": "10d8841234bebe348d5b3d4c7d98a50ea2c869b51828077d9cc287fad7a556ca",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section19CandidateLifecycle.cs",
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section20CandidateLifecycle.cs",
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section21CandidateLifecycle.cs",
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section22CandidateLifecycle.cs",
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section23CandidateLifecycle.cs",
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.csproj",
+      "archivePath": "source/FanLab/real-host/YeManFanHost.csproj",
+      "sha256": "62da1b6f23c44c8ccdecafaf0ca1e0f28dc3de88723573c8ffc249eb356020c4",
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/RuntimeDependencyContract.cs",
+      "archivePath": "source/FanLab/RuntimeDependencyContract.cs",
+      "sha256": "2b4c7769abb6ba97c3ffe2baae474aea27aa92a3b019ee291a98ba14b97af16b",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/ProcessEfficiency.cs",
+      "archivePath": "source/native/ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/SharedSleepPower/RemoteNativePowerClient.cs",
+      "archivePath": "source/native/SharedSleepPower/RemoteNativePowerClient.cs",
+      "sha256": "823d84267bd1f3ca3fed6964040532ae32237e156d088d0a22b69bacdc8415d9",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/SharedSleepPower/RemotePowerContracts.cs",
+      "archivePath": "source/native/SharedSleepPower/RemotePowerContracts.cs",
+      "sha256": "8963b24e17c1b21b1b6ab011be332f07ca765747839cbeef3b8ed384b9cf3110",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.json",
+      "archivePath": "source/FanLab/real-host/YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "roles": [
+        "Content"
+      ]
+    },
+    {
+      "path": "capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+      "archivePath": "source/capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+      "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027",
+      "roles": [
+        "Content"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "YeManFanHost",
+      "dllPath": "artifacts/YeManFanHost.dll",
+      "dllSha256": "75cfbcacbb51d87ef6b20b07d0ff95d6c561d7caf108d38458e028902ad716f0",
+      "pdbPath": "artifacts/YeManFanHost.pdb",
+      "pdbSha256": "d3ea2dada0dcae7595af685ca3325f8239e6fc8952f27fe96bb83200985d1e73",
+      "mvid": "7970e3f6-b45e-4769-96d4-46701f74c73f",
+      "codeViewGuid": "59afea2a-e2ed-4b47-add9-4ead1f0a8ba5",
+      "stamp": 2689819936
+    },
+    {
+      "name": "YeManFanBackend",
+      "dllPath": "artifacts/YeManFanBackend.dll",
+      "dllSha256": "70402bf05e2d92b47873739c8bb152ab7d7b426e6788ef029e47823173e7fe67",
+      "pdbPath": "artifacts/YeManFanBackend.pdb",
+      "pdbSha256": "19c505e80186eff90569d3aecbabeb04b8272e9a8d3c3795628bd22308a34cda",
+      "mvid": "3b594b1c-99a1-4abf-9456-bb4618aa073e",
+      "codeViewGuid": "8deae935-3088-4b2d-88c7-69ac34b15a45",
+      "stamp": 2279960887
+    }
+  ],
+  "files": [
+    {
+      "path": "artifacts/YeManFanBackend.dll",
+      "sha256": "70402bf05e2d92b47873739c8bb152ab7d7b426e6788ef029e47823173e7fe67",
+      "bytes": 129536
+    },
+    {
+      "path": "artifacts/YeManFanBackend.pdb",
+      "sha256": "19c505e80186eff90569d3aecbabeb04b8272e9a8d3c3795628bd22308a34cda",
+      "bytes": 28492
+    },
+    {
+      "path": "artifacts/YeManFanHost.dll",
+      "sha256": "75cfbcacbb51d87ef6b20b07d0ff95d6c561d7caf108d38458e028902ad716f0",
+      "bytes": 1903616
+    },
+    {
+      "path": "artifacts/YeManFanHost.pdb",
+      "sha256": "d3ea2dada0dcae7595af685ca3325f8239e6fc8952f27fe96bb83200985d1e73",
+      "bytes": 301924
+    },
+    {
+      "path": "source/capabilities/AsusFanCapabilitySession.cs",
+      "sha256": "305b947ba9d2f24748459e2ceba48ab6e762b50f766fac02a457ef267f8bc549",
+      "bytes": 5101
+    },
+    {
+      "path": "source/capabilities/FanCapabilityCatalog.cs",
+      "sha256": "025b63ba0fe495ada8709ee8e1f0805d2ca83d53141ae4d3a0a9130f1911dcfd",
+      "bytes": 5893
+    },
+    {
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.cs",
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8",
+      "bytes": 6191
+    },
+    {
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867
+    },
+    {
+      "path": "source/capabilities/HcLightingCapabilityCatalog.cs",
+      "sha256": "34f8e1acc945d90633d663dfa979851ca846001e145e2bb86d7457d2dc85d978",
+      "bytes": 8846
+    },
+    {
+      "path": "source/capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "f8102e344f6f6106933d4f6de5497ebaf82874133e4d3109d12962a1ae779601",
+      "bytes": 15690
+    },
+    {
+      "path": "source/capabilities/PinnedFanSourceCatalog.cs",
+      "sha256": "e390f8fef9d9a33232bae9ba0bce19cb6f93ef266057cf89e953805d68843ebc",
+      "bytes": 8469
+    },
+    {
+      "path": "source/capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json",
+      "sha256": "2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027",
+      "bytes": 2851
+    },
+    {
+      "path": "source/FanLab/DeviceCoreSharedDependencies.cs",
+      "sha256": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66",
+      "bytes": 6645
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "sha256": "bd520d0384389604f7be48efc799b32fc64ea4218783437b5a773c54158f2801",
+      "bytes": 13153
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2",
+      "bytes": 13424
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de",
+      "bytes": 1083
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "sha256": "3bbfd4884706b89e4dbeac428ec1fc782b70623df54083d3c234caa76b43b8a0",
+      "bytes": 5515
+    },
+    {
+      "path": "source/FanLab/fan-backend/PinnedSourceFanCurve.cs",
+      "sha256": "d8bfdbb2abf64fd7c3fe7ae227b5809dfdfeebfbad8726cb62353c9c0e1b9966",
+      "bytes": 6947
+    },
+    {
+      "path": "source/FanLab/fan-backend/PinnedSourceFanSession.cs",
+      "sha256": "e6f6ed0b22336cce212b2f32a047d50623aa8751733ee0e9f6bf8cd8acb3c7d0",
+      "bytes": 11820
+    },
+    {
+      "path": "source/FanLab/fan-backend/YeManFanBackend.csproj",
+      "sha256": "e473c22939eef91700ee556bacbae0c1b2fbfaf54006b48ef1da6403baa87f30",
+      "bytes": 1911
+    },
+    {
+      "path": "source/FanLab/real-host/DeferredHostSuccessor.cs",
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f",
+      "bytes": 5962
+    },
+    {
+      "path": "source/FanLab/real-host/FanCapabilityPolicy.cs",
+      "sha256": "9a97242787f0e9234b0e86d37e282e464655288d3729b8f57680b51299a1416b",
+      "bytes": 9237
+    },
+    {
+      "path": "source/FanLab/real-host/FanProfileReturnState.cs",
+      "sha256": "906d0f2e641b90a5936840959787a54e9da82205cc160bd16588142a57c46145",
+      "bytes": 3451
+    },
+    {
+      "path": "source/FanLab/real-host/FanRemoteControlPower.cs",
+      "sha256": "6bcf84878eb98618763ecf21503396bcdbbae5a04819364cabb73b3dd154c265",
+      "bytes": 3466
+    },
+    {
+      "path": "source/FanLab/real-host/FanRemotePowerContext.cs",
+      "sha256": "921416c7163e63de73aa4150516db4a9b08b8beef7b512fb21d741c69103c48b",
+      "bytes": 4937
+    },
+    {
+      "path": "source/FanLab/real-host/FanRemotePowerIntake.cs",
+      "sha256": "7c6f234b9a35e26473853df5e70c9ba8a130f65d155b9e389fd90c263fb164f2",
+      "bytes": 39637
+    },
+    {
+      "path": "source/FanLab/real-host/FanRemotePowerScope.cs",
+      "sha256": "bbfee67bcc884e3ee93434fba9b4d9dbca53b3f3f8dcf05decfc9dced0876286",
+      "bytes": 12734
+    },
+    {
+      "path": "source/FanLab/real-host/FanRemotePowerSettlement.cs",
+      "sha256": "72755d00204baa0e4096d3e06d67cf70338d6efb2f7c77a79fe0370d55b7a6e2",
+      "bytes": 9286
+    },
+    {
+      "path": "source/FanLab/real-host/G1FanContractAdapter.cs",
+      "sha256": "8bfca4361e8f45fc2f3dac6f9265af93a91a7e8641115073d819582b0fe73b59",
+      "bytes": 11142
+    },
+    {
+      "path": "source/FanLab/real-host/HostProcessLifetime.cs",
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040",
+      "bytes": 5304
+    },
+    {
+      "path": "source/FanLab/real-host/MiniAmdFanContractAdapter.cs",
+      "sha256": "b36988fe0201f628be43d63585abeaef5dfe210ecda5e233ecf77d968d861eca",
+      "bytes": 5783
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFamilyFanCurve.cs",
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83",
+      "bytes": 11724
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+      "bytes": 13878
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13",
+      "bytes": 10420
+    },
+    {
+      "path": "source/FanLab/real-host/MsiWmiClassRegistration.cs",
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605",
+      "bytes": 7944
+    },
+    {
+      "path": "source/FanLab/real-host/MsiWmiPayloadResource.cs",
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883",
+      "bytes": 5277
+    },
+    {
+      "path": "source/FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "sha256": "5d02b50ab9b704f53eb4c299aaa92bea4b10a3ea4c417ca0f3f4a573bb7cabd0",
+      "bytes": 20711
+    },
+    {
+      "path": "source/FanLab/real-host/PinnedSourceFanConsumer.cs",
+      "sha256": "51400f33b9146865d9e3aba1290094534aa9f17b708a0ba2e3a0aa369ddeb9a7",
+      "bytes": 11976
+    },
+    {
+      "path": "source/FanLab/real-host/PinnedSourceFanEngine.cs",
+      "sha256": "b73a50b1c12f427bd8db5a4a207d6cfc031b024a9040f1f6f2cb3da288931adf",
+      "bytes": 7219
+    },
+    {
+      "path": "source/FanLab/real-host/PinnedSourceFanSelection.cs",
+      "sha256": "628b0cf4d338cb2ec3b41d4b628c583a7d068aa5a23abc589e6cef7ab1680b8a",
+      "bytes": 4074
+    },
+    {
+      "path": "source/FanLab/real-host/PinnedSourceFanTransports.cs",
+      "sha256": "119c09c24493edb32f9f10ff1b672e8f1588a118dce77cd1af9bb460604b5c7a",
+      "bytes": 20121
+    },
+    {
+      "path": "source/FanLab/real-host/PinnedUmaEcFanTransport.cs",
+      "sha256": "1f2f32091472402ccd97afffcb9541f3b05d9eefcd51e5c39e9494aff7bc81ba",
+      "bytes": 12288
+    },
+    {
+      "path": "source/FanLab/real-host/Program.cs",
+      "sha256": "106bfdafccd7121b1573d2e8ba087c06c0c1e21e171fb3f9c62f99585b622adf",
+      "bytes": 1568472
+    },
+    {
+      "path": "source/FanLab/real-host/Section18CandidateFakes.cs",
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6",
+      "bytes": 78823
+    },
+    {
+      "path": "source/FanLab/real-host/Section18CandidateLifecycle.cs",
+      "sha256": "10d8841234bebe348d5b3d4c7d98a50ea2c869b51828077d9cc287fad7a556ca",
+      "bytes": 89281
+    },
+    {
+      "path": "source/FanLab/real-host/Section19CandidateLifecycle.cs",
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272",
+      "bytes": 76494
+    },
+    {
+      "path": "source/FanLab/real-host/Section20CandidateLifecycle.cs",
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa",
+      "bytes": 37363
+    },
+    {
+      "path": "source/FanLab/real-host/Section21CandidateLifecycle.cs",
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278",
+      "bytes": 27778
+    },
+    {
+      "path": "source/FanLab/real-host/Section22CandidateLifecycle.cs",
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca",
+      "bytes": 12831
+    },
+    {
+      "path": "source/FanLab/real-host/Section23CandidateLifecycle.cs",
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891",
+      "bytes": 33707
+    },
+    {
+      "path": "source/FanLab/real-host/YeManFanHost.csproj",
+      "sha256": "62da1b6f23c44c8ccdecafaf0ca1e0f28dc3de88723573c8ffc249eb356020c4",
+      "bytes": 2492
+    },
+    {
+      "path": "source/FanLab/real-host/YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "bytes": 343
+    },
+    {
+      "path": "source/FanLab/RuntimeDependencyContract.cs",
+      "sha256": "2b4c7769abb6ba97c3ffe2baae474aea27aa92a3b019ee291a98ba14b97af16b",
+      "bytes": 8715
+    },
+    {
+      "path": "source/native/ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bytes": 2747
+    },
+    {
+      "path": "source/native/SharedSleepPower/RemoteNativePowerClient.cs",
+      "sha256": "823d84267bd1f3ca3fed6964040532ae32237e156d088d0a22b69bacdc8415d9",
+      "bytes": 23610
+    },
+    {
+      "path": "source/native/SharedSleepPower/RemotePowerContracts.cs",
+      "sha256": "8963b24e17c1b21b1b6ab011be332f07ca765747839cbeef3b8ed384b9cf3110",
+      "bytes": 3757
+    }
+  ]
+}

@@ -36,12 +36,12 @@ $ErrorActionPreference = 'Stop'
 # Recompute-and-refill after any change, never hand-edit.
 $expected = [ordered]@{
   'YeManFanHost.exe' = 'A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733'
-  'YeManFanHost.dll' = '46362F20E3B860BB19AC81D3D8EF54ED55B7D1B0CC6BCB160873C3F0CE078867'
+  'YeManFanHost.dll' = '75CFBCACBB51D87EF6B20B07D0FF95D6C561D7CAF108D38458E028902AD716F0'
 }
 # Keep this file pure ASCII: PS 5.1 misdecodes non-ASCII scripts without BOM
 # and drops the next statement (verified 2026-09-11); additionally the
 # build-workspace pre-gate auto-verifies this chain.
-$expectedManifestSha256 = '1776faaefe9df422dbd38452e46542a3efb183803f30426d6c4bb8677b06f79e'
+$expectedManifestSha256 = '848b74e800cf051e6477ce94490c9b8d66ad8353d27b81f41d316b68fc627448'
 # Installed artifact98/d8: exact fixed fan-batch C# inputs and two projects; broader39-source archive is independently pinned.
 $compiledSourcePins = [ordered]@{
   'capabilities/AsusFanCapabilitySession.cs' = '305b947ba9d2f24748459e2ceba48ab6e762b50f766fac02a457ef267f8bc549'
@@ -81,7 +81,7 @@ $compiledSourcePins = [ordered]@{
   'FanLab/real-host/PinnedSourceFanSelection.cs' = '628b0cf4d338cb2ec3b41d4b628c583a7d068aa5a23abc589e6cef7ab1680b8a'
   'FanLab/real-host/PinnedSourceFanTransports.cs' = '119c09c24493edb32f9f10ff1b672e8f1588a118dce77cd1af9bb460604b5c7a'
   'FanLab/real-host/PinnedUmaEcFanTransport.cs' = '1f2f32091472402ccd97afffcb9541f3b05d9eefcd51e5c39e9494aff7bc81ba'
-  'FanLab/real-host/Program.cs' = 'f975c3422a049cac04e3cb473aa11652e2b6a7c4426b2db78ad472a08a156aab'
+  'FanLab/real-host/Program.cs' = '106bfdafccd7121b1573d2e8ba087c06c0c1e21e171fb3f9c62f99585b622adf'
   'FanLab/real-host/Section18CandidateFakes.cs' = 'ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6'
   'FanLab/real-host/Section18CandidateLifecycle.cs' = '10d8841234bebe348d5b3d4c7d98a50ea2c869b51828077d9cc287fad7a556ca'
   'FanLab/real-host/Section19CandidateLifecycle.cs' = '4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272'
@@ -112,9 +112,9 @@ function Get-Sha256([string]$Path) {
 
 # Select exact approved component sources independently of unfinished live development.
 $liveProjectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
-$componentSourceBundleRelative = 'deps/fan-host-source/candidate-fan-win4-open-c01-20261119'
-$componentSourceBundleManifestSha256 = '1dfb0d6ba86fa436e90573069e42927755343606d178af2927d249d500bac020'
-$componentBackendSha256 = 'e3dfcccd84dc2f000b2939d1cdc9cba7f1896163512560aabf5059ec6198876a'
+$componentSourceBundleRelative = 'deps/fan-host-source/candidate-fan-shared-lease-settlement-20261121'
+$componentSourceBundleManifestSha256 = '8e839285a2010ef58c7fc658954fcc1a6c1e0bff206d971665ace50ea80c70c4'
+$componentBackendSha256 = '70402bf05e2d92b47873739c8bb152ab7d7b426e6788ef029e47823173e7fe67'
 $selectedSourceRoot = if ([string]::IsNullOrWhiteSpace($SourceRoot)) { Join-Path $liveProjectRoot ($componentSourceBundleRelative + '/source') } else { $SourceRoot }
 $sourceBundleVerifier = Join-Path $PSScriptRoot 'hc-device-runtime/verify-host-source-bundle.ps1'
 if (-not (Test-Path -LiteralPath $sourceBundleVerifier -PathType Leaf)) { throw 'FAN_HOST_SOURCE_BUNDLE_VERIFIER_UNAVAILABLE' }

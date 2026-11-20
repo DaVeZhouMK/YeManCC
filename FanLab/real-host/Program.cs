@@ -17618,6 +17618,7 @@ internal sealed partial class FanHostEngine : IDisposable
             // cycle counters and OEM evidence; this is not restore success.
             if (stopDeviceManager && state.HcDeviceManagerStopCompleted)
             {
+                RecordPublicLeaseReturned(state.Lease);
                 state.Lease = null;
                 state.LeaseGeneration = null;
                 leaseTimer?.Dispose();
