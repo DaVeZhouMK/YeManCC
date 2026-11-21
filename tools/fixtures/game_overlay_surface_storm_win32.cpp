@@ -2,6 +2,7 @@
 // WebView/COM and panel input attachment are declared faultable ports.
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@ static BOOL fixtureDestroy(HWND h){if(destroyFailures){--destroyFailures;failedD
 #include "game_overlay_presentation.h"
 #include "game_overlay_display_tree_lease.h"
 #include "shortcut_window_toggle.h"
+#include "window_taskbar_layout.h"
 #include "sleep_power_dispatch.h"
 #undef RemoveWindowSubclass
 using json=nlohmann::json;
@@ -25,9 +27,9 @@ static std::atomic<bool> g_fullHeight=false;
 static std::atomic<bool> g_exitRequested=false,g_shortcutRecordingActive=false;
 static ymcc::sleeppower::SharedPowerV1 sharedPower;
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,std::uint32_t bytes){if(!value||bytes<sizeof(*value))return 0;*value=sharedPower;return 1;}
-struct FocusSessionPort{bool active=false,lightNoGame=false;};static FocusSessionPort g_focusSession;
+struct FocusSessionPort{bool active=false,lightNoGame=false,returning=false,lightForegroundAcquired=false;};static FocusSessionPort g_focusSession;
 static unsigned returnFailures=0,attachFailures=0,submitFailures=0,retargetCalls=0;
-struct ControllerPort {HRESULT put_IsVisible(BOOL){return S_OK;}HRESULT put_Bounds(RECT){return submitFailures?(--submitFailures,E_FAIL):S_OK;}HRESULT NotifyParentWindowPositionChanged(){return S_OK;}};
+struct ControllerPort {bool visible=false;HRESULT put_IsVisible(BOOL v){visible=v!=FALSE;return S_OK;}HRESULT put_Bounds(RECT){return submitFailures?(--submitFailures,E_FAIL):S_OK;}HRESULT NotifyParentWindowPositionChanged(){return S_OK;}};
 struct ViewPort{HRESULT ExecuteScript(const wchar_t*,void*){return S_OK;}};
 static ControllerPort controller;static ViewPort view;static ControllerPort* g_ctrl=&controller;static ViewPort* g_view=&view;
 struct CompositionPort {
@@ -47,6 +49,12 @@ struct EditorPort{unsigned owner=0;bool enabled=false;bool active()const{return 
 struct ReturnPort{void invalidate(){}void begin(std::uint64_t,ULONGLONG){}void end(std::uint64_t,ULONGLONG){}};static ReturnPort g_gameOverlayReturn;
 static std::atomic<std::shared_ptr<const ymcc::gameoverlay::Binding>> g_gameOverlayReturning;
 struct FocusTargetSnapshot{HWND hwnd=nullptr;DWORD pid=0;bool valid=false;};
+static HWND summonForeground=nullptr;
+static ULONGLONG summonTick=100;
+static long long g_nativeKeyboardShortcutRevision=1;
+static bool g_mainWindowWasMaximized=false;
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out);
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& expected);
 static void gameOverlaySurfaceRecord(const char*,const json& =json::object())noexcept{}
 static void endControllerEditorWidth(unsigned){g_controllerEditorWidth.enabled=false;}
 static bool radialHasInputOwner(){return false;}static bool customSteamLibraryInputSuppressed(){return false;}
@@ -68,8 +76,8 @@ static bool gameOverlayOwnPresentationPeer(HWND){return false;}
 enum class GameOverlayAttempt{Ordinary,Begun,Refused};
 static std::uint64_t g_summonGeneration=0;static std::atomic<std::uint64_t> g_summonRegistrationGeneration=0;
 static std::atomic<bool> g_focusIsolationGameOpen=false;static FocusTargetSnapshot g_pendingSummonTarget;
-static unsigned registrationCalls=0,ordinaryShows=0;static bool refuseRoute=false;
-static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target){return !refuseRoute&&gameOverlaySurfaceShow(target,[]{ymcc::gameoverlay::Binding b;b.globalProbe=true;b.originalUiInput=true;b.power=1;return b;}(),false)?GameOverlayAttempt::Begun:GameOverlayAttempt::Refused;}
+static unsigned registrationCalls=0,ordinaryShows=0;static bool refuseRoute=false,ordinaryRoute=false;
+static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target,bool maximize){if(ordinaryRoute)return GameOverlayAttempt::Ordinary;return !refuseRoute&&gameOverlaySurfaceShow(target,[]{ymcc::gameoverlay::Binding b;b.globalProbe=true;b.originalUiInput=true;b.power=1;return b;}(),false,{},maximize)?GameOverlayAttempt::Begun:GameOverlayAttempt::Refused;}
 static void focusShortcutInputEvidence(const char*,std::uint64_t,bool){}static void appendNativeLifecycleLog(const char*,const json&){}
 static std::atomic<bool> g_focusIsolationPrepared=false;
 static std::atomic<ULONGLONG> g_focusLightProofNotBefore=0;
@@ -82,8 +90,12 @@ static void focusBeginReturnToPreviousWindow(ULONGLONG){ShowWindow(g_hwnd,SW_HID
 static bool focusLightNoGameQualified(ULONGLONG){return false;}static bool focusLightIsolationCurrent(){return true;}
 static json nativeSummonCandidateSnapshot(const FocusTargetSnapshot&,std::uint64_t generation){return{{"generation",generation}};}
 static void queueSummonGameRegistration(const FocusTargetSnapshot&,std::uint64_t){++registrationCalls;}
-static void bringToFront(HWND h,bool){++ordinaryShows;ShowWindow(h,SW_SHOWNOACTIVATE);}
+static void bringToFront(HWND h,bool maximize){++ordinaryShows;ShowWindow(h,maximize?SW_MAXIMIZE:SW_SHOWNOACTIVATE);g_ctrl->put_IsVisible(TRUE);}
+#define GetForegroundWindow() summonForeground
+#define GetTickCount64() summonTick
 #include "summon-consumer.inc"
+#undef GetTickCount64
+#undef GetForegroundWindow
 // All other public power consumers are inert ports. The actual projector and
 // actual monitor delivery deduplication are extracted unchanged from main.cpp.
 static std::atomic<bool> g_sharedPowerProjectionPending=false,g_sensorSuspendCallbackActive=false;
@@ -125,8 +137,9 @@ static void publishPowerToActualProjector(){sharedPower.publicationRevision=++g_
 static void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 static ymcc::gameoverlay::Binding binding(){ymcc::gameoverlay::Binding b;b.globalProbe=true;b.originalUiInput=true;b.power=1;return b;}
 static void cleanup(){sharedPower={};sharedPower.generation=1;sharedPower.flags=ymcc::sleeppower::kKnown;removeFailures=destroyFailures=0;g_gameOverlay.end("fixture-cleanup");returnFailures=attachFailures=submitFailures=0;gameOverlaySurfaceRestore();if(failedDestroy&&IsWindow(failedDestroy))DestroyWindow(failedDestroy);failedDestroy=nullptr;g_mainWebViewComposition.enabled=true;g_ctrl=&controller;g_view=&view;}
+#include "game_overlay_surface_render_ready_cases.inc"
 int wmain(int argc,wchar_t** argv){
- if(argc!=2)return 2;json result={{"scope","actual surface show/restore/proc/controller-close source; real owned private-desktop HWNDs, Carrier and DisplayTreeLease; declared COM/panel attachment fault ports; no full renderer or physical input"}};json cases=json::array();bool ok=true;
+ if(argc!=2)return 2;json result={{"scope","actual surface and render-ready callback; real owned private-desktop HWNDs, Carrier and DisplayTreeLease; declared COM/panel attachment fault ports; no full renderer or physical input"}};json cases=json::array();bool ok=true;
  const auto original=GetThreadDesktop(GetCurrentThreadId());auto name=L"YMCC_SurfaceStorm_"+std::to_wstring(GetCurrentProcessId());auto desktop=CreateDesktopW(name.c_str(),nullptr,nullptr,0,DESKTOP_CREATEWINDOW|DESKTOP_READOBJECTS|DESKTOP_WRITEOBJECTS,nullptr);if(!desktop||!SetThreadDesktop(desktop))return 3;
  WNDCLASSW cls{};cls.hInstance=GetModuleHandleW(nullptr);cls.lpfnWndProc=DefWindowProcW;cls.lpszClassName=L"YMCC_SurfaceStorm_Original";RegisterClassW(&cls);
  g_hwnd=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_NOREDIRECTIONBITMAP,cls.lpszClassName,L"",WS_POPUP,0,0,500,600,nullptr,nullptr,cls.hInstance,nullptr);
@@ -134,7 +147,39 @@ int wmain(int argc,wchar_t** argv){
  auto test=[&](const char* name,auto action){try{cleanup();action();cases.push_back({{"case",name},{"pass",true}});}catch(const std::exception& e){ok=false;cases.push_back({{"case",name},{"pass",false},{"failure",e.what()}});}cleanup();};
  test("96-setup-show-hide-return-cycles",[]{for(unsigned i=0;i<96;++i){need(gameOverlaySurfaceShow({},binding(),false),"show");need(g_gameOverlay.active()&&GetParent(child)==g_gameOverlaySurface,"same controller child borrowed");g_gameOverlay.end("normal-close");need(!g_gameOverlaySurface&&!g_gameOverlaySurfaceAttached&&GetParent(child)==g_hwnd&&IsWindowEnabled(child),"full return");}});
  test("original-summon-handler-400-toggle-actions-keep-one-route",[]{const auto start=g_summonGeneration;const auto registrations=registrationCalls;for(unsigned i=0;i<400;++i){need(nativeYmccShortcutSummon({}),"actual original summon accepted");need(g_gameOverlay.active()==(i%2==0),"original toggle owns one presentation");need(!IsWindowVisible(g_hwnd),"floating route cannot show original main HWND");need(g_summonRegistrationGeneration.load()==g_summonGeneration,"hide invalidates late original registration generation too");}need(g_summonGeneration==start+400&&registrationCalls==registrations+200&&ordinaryShows==0,"one registration for each actual open, no ordinary route");});
- test("failed-floating-route-does-not-open-ordinary-window",[]{refuseRoute=true;const auto registrations=registrationCalls;need(nativeYmccShortcutSummon({}),"refused action consumed");refuseRoute=false;need(!g_gameOverlay.active()&&!IsWindowVisible(g_hwnd)&&registrationCalls==registrations&&ordinaryShows==0,"refusal cannot create duplicate presentation or registration");});
+ test("failed-floating-route-does-not-open-ordinary-window",[]{refuseRoute=true;const auto registrations=registrationCalls;const bool accepted=nativeYmccShortcutSummon({});refuseRoute=false;need(!accepted,"refused action must not report success");need(!g_gameOverlay.active()&&!IsWindowVisible(g_hwnd)&&registrationCalls==registrations&&ordinaryShows==0,"refusal cannot create duplicate presentation or registration");});
+ test("minimized-main-retains-state-and-restores-maximized-surface",[]{
+  ShowWindow(g_hwnd,SW_SHOWMINNOACTIVE);g_mainWindowWasMaximized=true;
+  need(IsWindowVisible(g_hwnd)&&IsIconic(g_hwnd),"test requires visible minimized HWND");
+  need(nativeYmccShortcutSummon({})&&g_gameOverlay.active(),"summon from minimized main");
+  RECT actual{},wanted{};need(GetWindowRect(g_gameOverlaySurface,&actual)&&ymcc::windowlayout::safeMonitorArea(MonitorFromWindow(g_gameOverlaySurface,MONITOR_DEFAULTTONEAREST),wanted)&&EqualRect(&wanted,&actual),"floating surface uses actual maximized work area");
+  need(IsIconic(g_hwnd)&&nativeYmccShortcutSummon({})&&!g_gameOverlay.active()&&IsIconic(g_hwnd)&&GetParent(child)==g_hwnd,"close restores parent without raising the main window");
+  g_mainWindowWasMaximized=false;ShowWindow(g_hwnd,SW_RESTORE);ShowWindow(g_hwnd,SW_HIDE);
+ });
+ test("delayed-render-coalesces-and-replays-once-with-maximize",[]{
+  summonForeground=g_hwnd;const FocusTargetSnapshot target{g_hwnd,GetCurrentProcessId(),true};
+  const auto start=registrationCalls;g_webviewReady=false;summonTick=100;
+  need(nativeYmccShortcutSummon(target)&&!g_gameOverlay.active()&&registrationCalls==start,"accepted while renderer is busy without touching display");
+  ++summonTick;need(nativeYmccShortcutSummon(target,true)&&g_pendingShortcutSummon->requestedAt==100,"second edge coalesces and does not extend deadline");
+  summonTick=2400;g_webviewReady=true;replayShortcutSummonAfterRender();replayShortcutSummonAfterRender();
+  need(g_gameOverlay.active()&&!g_pendingShortcutSummon&&registrationCalls==start+1,"one presentation on delayed readiness");
+  RECT actual{},wanted{};need(GetWindowRect(g_gameOverlaySurface,&actual)&&ymcc::windowlayout::safeMonitorArea(MonitorFromWindow(g_gameOverlaySurface,MONITOR_DEFAULTTONEAREST),wanted)&&EqualRect(&wanted,&actual),"maximize survives render delay");
+ });
+ test("deferred-request-retires-on-foreground-sleep-rules-expiry-or-explicit-close",[]{
+  const auto start=registrationCalls;
+  for(int cause=0;cause<6;++cause){
+   summonForeground=g_hwnd;g_webviewReady=false;summonTick=100;
+   need(nativeYmccShortcutSummon({g_hwnd,GetCurrentProcessId(),true}),"queue deferred request");
+   if(cause==0)summonForeground=nullptr;
+   if(cause==1)++sharedPower.suspendSerial;
+   if(cause==2)++g_nativeKeyboardShortcutRevision;
+   if(cause==3)summonTick+=ymcc::kSummonIntentLifetimeMs+1;
+   if(cause==4)++g_summonGeneration;
+   if(cause==5)shortcutSummonClearRenderWait();
+   g_webviewReady=true;replayShortcutSummonAfterRender();
+   need(!g_pendingShortcutSummon&&!g_gameOverlay.active()&&registrationCalls==start,"invalidated request never opens");
+  }
+ });
  test("shared-power-unknown-pending-and-nonready-refuse-before-attachment",[]{for(unsigned shape=0;shape<5;++shape){sharedPower.generation=1;sharedPower.flags=shape==0?0:ymcc::sleeppower::kKnown;sharedPower.phase=shape>1?shape-1:0;if(shape==1)sharedPower.flags|=ymcc::sleeppower::kNotificationPending;const auto calls=retargetCalls;need(!gameOverlaySurfaceShow({},binding(),false)&&!g_gameOverlaySurface&&retargetCalls==calls,"held power cannot borrow or show browser");}});
  test("shared-ready-without-hardware-admission-still-allows-settings",[]{sharedPower.flags=ymcc::sleeppower::kKnown;need(!ymcc::sleeppower::powerAdmitted(sharedPower)&&gameOverlaySurfaceShow({},binding(),false),"presentation Ready must not require hardware admission");});
  test("metadata-only-shared-publication-does-not-recreate-ui",[]{need(gameOverlaySurfaceShow({},binding(),false),"show");const auto surface=g_gameOverlaySurface;const auto calls=retargetCalls;for(unsigned i=0;i<1000;++i){++sharedPower.publicationRevision;g_gameOverlay.sharedPowerChanged(sharedPower);}need(g_gameOverlay.active()&&surface==g_gameOverlaySurface&&calls==retargetCalls,"metadata cannot replay display work");});
@@ -201,6 +246,7 @@ int wmain(int argc,wchar_t** argv){
   windowOverlayPrelude(g_hwnd,WM_CLOSE,0,0);
   need(!g_gameOverlay.active()&&!g_gameOverlaySurface,"ordinary window close still returns presentation");
  });
+ runReadinessCases(test);
  test("controller-close-releases-retained-hidden-owner",[]{need(gameOverlaySurfaceShow({},binding(),false),"show");returnFailures=2;g_gameOverlay.end("close-fault");const auto old=g_gameOverlaySurface;g_mainWebViewComposition.enabled=false;g_ctrl=nullptr;g_view=nullptr;gameOverlaySurfaceControllerClosed();need(!g_gameOverlaySurface&&!g_gameOverlaySurfaceAttached&&!IsWindow(old),"closed controller permits final hidden owner destruction");child=nullptr;});
  cleanup();if(g_gameOverlaySurface&&IsWindow(g_gameOverlaySurface))DestroyWindow(g_gameOverlaySurface);g_gameOverlaySurface=nullptr;if(g_hwnd)DestroyWindow(g_hwnd);g_hwnd=nullptr;
  result["cases"]=cases;result["hooksAfterClose"]=g_gameOverlay.ownedHookCount();const bool restored=SetThreadDesktop(original)!=FALSE,closed=CloseDesktop(desktop)!=FALSE;result["privateDesktopClosed"]=closed;result["pass"]=ok&&restored&&closed&&!g_gameOverlay.ownedHookCount();

@@ -1,12 +1,4 @@
 ﻿{
-    "version":  "0.0.41",
-    "notes":  "0.0.41：加固更新安装与失败恢复，隔离旧配置影响，补充安装阶段日志。",
-    "sha256":  "C6D7838DF750E82CB40B468CA3C3CAC4018802848A438F904CE8C628ABC2E26B",
-    "publishedAt":  "2026-11-20",
-    "buildId":  "9d1d32ad2b6c0a9a509180d66686f63c3cf81ab28ced942828c1fcf5dde1ee36",
-    "nativeSha256":  "d3e1de5fe040a61de66dfbc3801b6b67a2566699d12693655ede935d79e96133",
-    "pluginSha256":  "2ffb526c847b9cb6f6abbbfb940da7af08f29eefa2bc47a9a0e94f6ccd7c1d5b",
-    "package":  "Packages/YeManCC.zip",
-    "releaseMode":  "fast",
-    "fixtureValidation":  "NOT_RUN"
+    "version":  "0.0.42",
+    "notes":  "0.0.42：修正全屏悬浮界面的恢复顺序，更新 GPD 风扇运行时与唤醒恢复。"
 }

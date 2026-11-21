@@ -9527,6 +9527,7 @@ static ymcc::windowlayout::TaskbarEvents g_taskbarLayoutEvents;
 #define GP_STATE_FALLBACK_TIMER_ID 0x5A35 // ROG/复合 HID 驱动可能漏投 WM_INPUT 时的低频状态兜底
 
 static void showWindowAnimated(HWND hwnd, int showCmd, bool activate);
+static void shortcutSummonClearRenderWait();
 static void hideWindowAnimated(HWND hwnd);
 
 static ULONGLONG focusFileTimeTicks(const FILETIME& ft) {
@@ -10611,6 +10612,7 @@ static bool focusLightReturnTick(ULONGLONG now) {
 }
 
 static void focusBeginReturnToPreviousWindow(ULONGLONG now) {
+    shortcutSummonClearRenderWait();
     if(g_gameOverlay.active()){gameOverlayStop("original-close-action");return;}
     focusLightHandoffCancel();
     KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
@@ -60542,34 +60544,7 @@ static void gameOverlayOutputReceipt(const std::shared_ptr<const ymcc::gameoverl
 #include "game_overlay_surface.h"
 
 enum class GameOverlayAttempt { Ordinary, Refused, Begun };
-static bool gameOverlayQualifyCapturedGame(const FocusTargetSnapshot& target) {
-    if (!target.valid || !target.pid || !target.processCreated || !target.hwnd || target.path.empty()) return false;
-    ymcc::sleeppower::SharedPowerV1 power;
-    if (!captureSharedPowerLifecycle(power)) return false;
-    const auto cancellation = observeSharedPowerRevocation(power);
-    const auto current = [&] {
-        return cancellation && !cancellation.cancelled() && sharedPowerLifecycleCurrent(power);
-    };
-    if (!current()) return false;
-    std::vector<std::wstring> excludes, whitelist, configured;
-    unsigned long long rulesEpoch;
-    try {
-        std::lock_guard lock(g_gameRulesMx);
-        nativeRefreshGameRulesEpochFromDiskLocked();
-        sgReadRecognitionGameRules(excludes, whitelist);
-        configured = nativeConfiguredGameExes();
-        rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
-    } catch (...) { return false; }
-    if (!current()) return false;
-    // The foreground is a presentation hint. Qualify that exact process
-    // without committing or clearing the shared game selection.
-    const auto game = nativeScanGame(target.pid, excludes, whitelist, configured);
-    return current() && rulesEpoch == g_gameRulesEpoch.load(std::memory_order_acquire) &&
-        GetAncestor(GetForegroundWindow(), GA_ROOT) == target.hwnd &&
-        game.pid == target.pid && game.processCreated == target.processCreated &&
-        _wcsicmp(game.path.c_str(), target.path.c_str()) == 0;
-}
-static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target) {
+static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target, bool maximizeWindow) {
     if(!gameOverlayEnabled())return GameOverlayAttempt::Ordinary;
     const bool foregroundBound=target.valid&&target.hwnd&&GetAncestor(GetForegroundWindow(),GA_ROOT)==target.hwnd;
     QUERY_USER_NOTIFICATION_STATE notification=QUNS_NOT_PRESENT;
@@ -60579,7 +60554,12 @@ static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target)
     const ymcc::gameoverlay::RouteFacts route{true,foregroundBound,fse,target.fullscreen,
         SUCCEEDED(notificationResult),SUCCEEDED(notificationResult)&&notification==QUNS_RUNNING_D3D_FULL_SCREEN,
         ymcc::gameoverlay::desktopShellTarget(target.path,target.className)};
-    const bool selected=foregroundBound;
+    // Fullscreen facts bind this presentation to its foreground; they do not
+    // qualify a game or change the isolation authority. Game registration is
+    // already dispatched separately, after the window is shown.
+    const bool gameContext=ymcc::gameoverlay::overlayRoute(route);
+    const bool mainPresented=gameOverlayMainPresented(g_hwnd);
+    const bool selected=foregroundBound&&(gameContext||!mainPresented);
     appendNativeLifecycleLog("game-overlay-decision",{{"route",selected?"composition-candidate":"ordinary"},
         {"enabled",route.enabled},{"foregroundBound",foregroundBound},{"fse",fse},{"fseKnown",platform.activeKnown},
         {"capturedFullscreen",target.fullscreen},{"notificationKnown",route.notificationKnown},
@@ -60594,8 +60574,7 @@ static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target)
     };
     if(!target.valid||!target.pid||!target.processCreated||!target.hwnd||
        GetAncestor(GetForegroundWindow(),GA_ROOT)!=target.hwnd||!focusTargetIdentityMatches(target,target.pid))return refuse("captured-target-not-current");
-    bool gameContext=ymcc::gameoverlay::overlayRoute(route);
-    if(gameContext&&!fse)gameContext=gameOverlayQualifyCapturedGame(target);
+    if(mainPresented)return refuse("main-window-already-presented");
     if(!g_webviewReady||!g_ctrl||!g_view)return refuse("original-webview-not-ready");
     if(!g_mainWebViewComposition.active())return refuse("composition-controller-unavailable");
     if(g_shortcutRecordingActive.load()||radialHasInputOwner()||customSteamLibraryInputSuppressed())return refuse("another-input-owner");
@@ -60620,16 +60599,19 @@ static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot& target)
         {"controllerRequested",true},{"inputMechanism","original-native-ui"},
         {"isolationMode",g_focusSession.lightNoGame?"light-no-game":"original"},{"configurationChanged",false}});
     bool begun=false;
-    try{begun=gameOverlaySurfaceShow(target,b,false,releaseOriginal);}catch(...){releaseOriginal();throw;}
+    try{begun=gameOverlaySurfaceShow(target,b,false,releaseOriginal,maximizeWindow);}catch(...){releaseOriginal();throw;}
     if(!begun)releaseOriginal();
     else{steamLightGamepadUiChanged();msiNativeForegroundUiEvent(true);}
     return begun?GameOverlayAttempt::Begun:refuse("carrier-start-failed");
 }
 
 // Sample on demand, not on the controller poll or foreground observer.
+static bool g_mainWindowWasMaximized=false; // WM_SIZE, UI lane only.
 static ymcc::ShortcutWindowVisibility readShortcutWindowVisibility(HWND hwnd) {
     ymcc::ShortcutWindowVisibility state{IsWindowVisible(hwnd) != FALSE, IsIconic(hwnd) != FALSE};
-    if (state.visible && !state.iconic) {
+    if (state.iconic) {
+        state.restoreMaximized=hwnd==g_hwnd&&g_mainWindowWasMaximized;
+    } else if (state.visible) {
         DWORD cloak = 0;
         state.cloakKnown = SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloak, sizeof(cloak)));
         if (state.cloakKnown) state.cloak = cloak;
@@ -60637,17 +60619,60 @@ static ymcc::ShortcutWindowVisibility readShortcutWindowVisibility(HWND hwnd) {
     return state;
 }
 
+struct PendingShortcutSummon {
+    FocusTargetSnapshot target;
+    ymcc::sleeppower::SharedPowerV1 power;
+    ULONGLONG requestedAt;
+    unsigned long long presentation;
+    long long rules;
+    bool maximize;
+};
+static std::optional<PendingShortcutSummon> g_pendingShortcutSummon;
+static bool shortcutSummonRenderBusy() {
+    return !g_webviewReady||!g_ctrl||!g_view||g_deferFirstShow;
+}
+static bool shortcutSummonPendingCurrent(const PendingShortcutSummon& pending, ULONGLONG now) {
+    return now-pending.requestedAt<=ymcc::kSummonIntentLifetimeMs&&pending.presentation==g_summonGeneration&&
+        pending.rules==g_nativeKeyboardShortcutRevision&&
+        !g_exitRequested.load()&&!g_shortcutRecordingActive.load()&&!radialHasInputOwner()&&!customSteamLibraryInputSuppressed()&&
+        ymcc::presentationpower::current(&readSharedSystemPower,pending.power)&&GetAncestor(GetForegroundWindow(),GA_ROOT)==pending.target.hwnd;
+}
+static bool shortcutSummonWaitForRender(const FocusTargetSnapshot& target,bool maximize) {
+    const auto now=GetTickCount64();
+    if(g_pendingShortcutSummon&&shortcutSummonPendingCurrent(*g_pendingShortcutSummon,now)&&
+            g_pendingShortcutSummon->target.hwnd==target.hwnd){
+        g_pendingShortcutSummon->maximize|=maximize;
+        return true;
+    }
+    ymcc::sleeppower::SharedPowerV1 power;
+    if(!target.valid||!target.hwnd||GetAncestor(GetForegroundWindow(),GA_ROOT)!=target.hwnd||
+        !ymcc::presentationpower::capture(&readSharedSystemPower,power))return false;
+    g_pendingShortcutSummon=PendingShortcutSummon{target,power,now,g_summonGeneration,g_nativeKeyboardShortcutRevision,maximize};
+    appendNativeLifecycleLog("gamepad-summon-hold",{{"status","queued-render-not-ready"}});
+    return true;
+}
+static void shortcutSummonClearRenderWait(){g_pendingShortcutSummon.reset();}
+
 // Shared only by shortcut summon routes, not tray/startup/recovery focus calls.
 static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool maximizeWindow = false,
         const ymcc::ShortcutWindowVisibility* sampled = nullptr) {
     if (!g_hwnd || !IsWindow(g_hwnd)) return false;
+    const bool overlayActive=g_gameOverlay.active();
+    bool hides=false;
+    if(!overlayActive){
+        const auto state=sampled?*sampled:readShortcutWindowVisibility(g_hwnd);
+        const bool zoomed=IsZoomed(g_hwnd)!=FALSE;
+        const bool fullHeight=g_fullHeight.load(std::memory_order_acquire);
+        hides=ymcc::summonPressHides(state,zoomed,fullHeight);
+        maximizeWindow=!fullHeight&&(maximizeWindow||state.restoreMaximized||zoomed);
+        if(!hides&&shortcutSummonRenderBusy())return shortcutSummonWaitForRender(target,maximizeWindow);
+    }
+    shortcutSummonClearRenderWait();
     const auto generation = ++g_summonGeneration; // invalidate late registration receipts on hide too
     g_summonRegistrationGeneration.store(generation, std::memory_order_release);
     focusShortcutInputEvidence("before-decision",generation,target.valid);
     if(g_gameOverlay.active()){gameOverlayStop("summon-toggle");return true;}
-    const auto state = sampled ? *sampled : readShortcutWindowVisibility(g_hwnd);
-    if (ymcc::summonPressHides(state, IsZoomed(g_hwnd) != FALSE,
-            g_fullHeight.load(std::memory_order_acquire))) {
+    if (hides) {
         g_pendingSummonTarget = {};
         focusBeginReturnToPreviousWindow(GetTickCount64());
         appendNativeLifecycleLog("gamepad-summon-hidden", {{"generation", generation}});
@@ -60660,13 +60685,13 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
     // handoff to focusPrepareSummonSession before UI input ownership begins.
     focusPrepareIsolationBeforeShow();
     g_pendingSummonTarget = target;
-    const auto overlayAttempt=gameOverlayTryBegin(target);
+    const auto overlayAttempt=gameOverlayTryBegin(target,maximizeWindow);
     if(overlayAttempt!=GameOverlayAttempt::Ordinary){
         if(overlayAttempt==GameOverlayAttempt::Begun){
             auto candidate=nativeSummonCandidateSnapshot(target,generation);candidate["presentationRoute"]="game-overlay-candidate";
             ipc_emit("gamepad.summon",candidate);queueSummonGameRegistration(target,generation);
         }else focusEndIsolationOnUi();
-        return true;
+        return overlayAttempt==GameOverlayAttempt::Begun;
     }
     const bool selectedLightNoGame = focusLightNoGameQualified(GetTickCount64());
     bringToFront(g_hwnd, maximizeWindow);
@@ -60689,15 +60714,26 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
     return true;
 }
 
+static bool replayShortcutSummonAfterRender() {
+    if(!g_pendingShortcutSummon)return false;
+    const auto pending=std::exchange(g_pendingShortcutSummon,std::nullopt);
+    const auto now=GetTickCount64();
+    const bool current=shortcutSummonPendingCurrent(*pending,now)&&!g_gameOverlay.active()&&
+        !gameOverlayMainPresented(g_hwnd)&&focusTargetIdentityMatches(pending->target,pending->target.pid);
+    const bool accepted=current&&nativeYmccShortcutSummon(pending->target,pending->maximize);
+    appendNativeLifecycleLog("gamepad-summon-hold",{{"status",accepted?"render-ready-accepted":current?"render-ready-refused":"render-request-retired"},
+        {"waitMs",now-pending->requestedAt}});
+    return accepted;
+}
+
 static bool nativeDefaultSummonTry(const FocusTargetSnapshot& target) {
-    // These conditions are checked before any presentation state is changed.
+    // The built-in chord still requires a continuous hold while waiting.
     if (!g_hwnd || !IsWindow(g_hwnd)) return false;
     if (g_gameOverlay.active()) return nativeYmccShortcutSummon(target);
     const auto state = readShortcutWindowVisibility(g_hwnd);
     if (!ymcc::summonPressHides(state, IsZoomed(g_hwnd) != FALSE,
             g_fullHeight.load(std::memory_order_acquire)) &&
-        (!g_webviewReady || !g_ctrl || !g_view || g_deferFirstShow ||
-         (g_webviewRecoveryInProgress && !state.presentable()))) return false;
+        (shortcutSummonRenderBusy() || (g_webviewRecoveryInProgress && !state.presentable()))) return false;
     return nativeYmccShortcutSummon(target, false, &state);
 }
 
@@ -65543,7 +65579,7 @@ static json nativeTouchTaskViewButton(const json& args) {
             if(!session||!g_gameOverlay.active()||g_gameOverlay.snapshot()!=presentation||presentation->session!=session||
                 !g_gameOverlaySurfaceAttached||g_gameOverlaySurface!=window||presentation->carrier!=window||
                 !presentation->pointerInteractive||!presentation->detachedPointer||presentation->visualProbe||presentation->observationHold||
-                IsWindowVisible(mainWindow)||!g_mainWebViewComposition.active()||!gameOverlayBindingCurrent(*presentation))
+                gameOverlayMainPresented(mainWindow)||!g_mainWebViewComposition.active()||!gameOverlayBindingCurrent(*presentation))
                 return "presentation-unavailable";
             if(!g_gameOverlayPanel.ready()||g_gameOverlayPanel.window()!=receiver)return "receiver-unavailable";
             if(g_gameOverlay.snapshot()!=presentation)return "presentation-changed";
@@ -70231,7 +70267,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
     if (!event || !*event) return false;
     static const char* const kBaseEvents[] = {
         "controller-isolation-boundary",
-        "game-overlay-surface", "game-overlay-decision", "game-overlay-refused", "game-overlay-input-admission", // Explicit summon/close transitions only.
+        "game-overlay-surface", "game-overlay-decision", "game-overlay-refused", "game-overlay-input-admission", "gamepad-summon-hold", // Explicit summon/close transitions only.
         "onex-oem-input-edge", // Canonical receipt edges only; no raw typing, polling or action-success claim.
         "aya-oem-input-edge", // Same retained keyboard edge receipt; physical origin and action result remain unproven.
         "oem-input-runtime", // Existing worker mode transitions only; no input or action-success claim.
@@ -74781,6 +74817,7 @@ static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {
 }
 
 static void hideWindowAnimated(HWND hwnd) {
+    if(hwnd==g_hwnd)shortcutSummonClearRenderWait();
     if(hwnd==g_hwnd&&g_gameOverlay.active()){
         gameOverlaySurfaceRecord("hide-request",{{"entrypoint","hideWindowAnimated"}});
         gameOverlayStop("original-hide-action");return;
@@ -96554,9 +96591,13 @@ static void finalizeWebViewRenderReady(
 
     if (g_focusSession.lightNoGame && !focusLightMayRefocus(GetTickCount64())) focusClearSession();
     const auto focusSequence = g_focusSessionSequence;
-    if (g_deferFirstShow) {
-        const int showCmd = g_firstShowCmd;
-        g_deferFirstShow = false;
+    // A queued shortcut gets first claim on the recovered shared controller.
+    const bool firstShow = std::exchange(g_deferFirstShow, false);
+    const int showCmd = g_firstShowCmd;
+    if (firstShow && showCmd == SW_MAXIMIZE && g_pendingShortcutSummon)
+        g_pendingShortcutSummon->maximize = true;
+    const bool replayed = replayShortcutSummonAfterRender();
+    if (firstShow && !g_gameOverlay.active() && (!replayed || !gameOverlayMainPresented(g_hwnd))) {
         showWindowAnimated(g_hwnd, showCmd, !g_focusSession.lightNoGame);
         UpdateWindow(g_hwnd);
     }
@@ -96588,7 +96629,7 @@ static void finalizeWebViewRenderReady(
         g_webviewNeedsShowNudge = true;
         KillTimer(g_hwnd, WEBVIEW_POST_SHOW_NUDGE_TIMER_ID);
         SetTimer(g_hwnd, WEBVIEW_POST_SHOW_NUDGE_TIMER_ID, 60, nullptr);
-    } else if (g_ctrl) {
+    } else if (!g_gameOverlay.active() && g_ctrl) {
         g_ctrl->put_IsVisible(FALSE);
     }
 }
@@ -99554,6 +99595,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         break;
 
     case WM_SIZE:
+        if(h==g_hwnd&&w!=SIZE_MINIMIZED)g_mainWindowWasMaximized=IsZoomed(h)!=FALSE;
         if (w == SIZE_MINIMIZED) focusEndIsolationOnUi();
         if (w == SIZE_MINIMIZED || g_gestureSummon.active())
             PostMessageW(h, ymcc::gesturesummon::kRefreshMessage, 0, 0);

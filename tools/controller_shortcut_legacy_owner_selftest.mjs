@@ -118,7 +118,7 @@ static void gameOverlayStop(const char*){overlayActive=false;++overlayStops;}
 static void focusBeginReturnToPreviousWindow(ULONGLONG){++shortcutReturns;}
 static void focusPrepareIsolationBeforeShow(){}
 enum class GameOverlayAttempt {Ordinary,Begun,Refused};
-static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot&){return GameOverlayAttempt::Ordinary;}
+static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot&,bool){return GameOverlayAttempt::Ordinary;}
 static json nativeSummonCandidateSnapshot(const FocusTargetSnapshot&,ULONGLONG){return json::object();}
 static void ipc_emit(const char*,const json& = json::object()){}
 static void queueSummonGameRegistration(const FocusTargetSnapshot&,ULONGLONG){}
@@ -128,6 +128,10 @@ static bool focusLightIsolationCurrent(){return false;}
 static std::atomic<bool> g_focusIsolationGameOpen{false};
 static struct {bool lightNoGame=false;} g_focusSession;
 static void bringToFront(HWND,bool){++shortcutOpens;}
+static bool g_mainWindowWasMaximized=false;
+static bool shortcutSummonWaitForRender(const FocusTargetSnapshot&,bool){return false;}
+static void shortcutSummonClearRenderWait(){}
+${extract('shortcutSummonRenderBusy')}
 ${extract('readShortcutWindowVisibility')}
 ${extract('nativeYmccShortcutSummon')}
 ${extract('nativeDefaultSummonTry')}
@@ -208,6 +212,12 @@ int main(){try{
  check(legacySummons==0,"249 ms does not trigger");legacyTick(both,20250);
  check(legacySummons==1,"stored default triggers at 250 ms");legacyTick(both,21000);
  check(legacySummons==1,"accepted hold never toggles again");
+ for(ULONGLONG delay:{1251,1800,2600,3000}){
+  load(json::array({defaultSummon()}));legacyTick(both,20000);legacyTick(both,20000+delay);
+  legacyTick(both,23300);check(legacySummons==1,"delayed first hold dispatches once under UI contention");
+ }
+ load(json::array({defaultSummon()}));legacyTick(both,20000);legacyTick(both,23001);
+ check(legacySummons==0,"expired first hold does not surprise-open");
  load(json::array({defaultSummon()}));g_webviewReady=false;legacyTick(both,20000);legacyTick(both,20250);
  check(legacySummons==0&&summonProbes==1,"the actual WebView readiness gate defers without dispatch");
  g_webviewReady=true;legacyTick(both,20299);check(summonProbes==1,"raw-input bursts cannot increase retry rate");
