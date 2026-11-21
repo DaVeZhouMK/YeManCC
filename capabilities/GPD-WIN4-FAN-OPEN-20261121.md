@@ -1,5 +1,13 @@
 # GPD Win4 6800U: cold fan Open refusal on 0.0.41
 
+## November 21, 11:23 field follow-up and family regression
+
+The 11:23 export (`30F7E582…`) confirms software enable on the reported Win4. In Host PID 12756, `fan-host-fault.log:154–160` identifies `GPDWin4`, records the corrected HC disk hash `f79edd9d…` and shows the software profile callback. `yeman-fan-host20261121.log:21` records the EC unlock; `fan-lifecycle.log:172–176` shows enable activity and a successful lease renewal. The user reports the fan works. The export does not establish click count, RPM, explicit OFF, or physical OEM return. Its Host `46362f20…` differs from the full `9b39fd73` test ZIP's `75cfbcac…`; this is evidence for the corrected HC on Win4, with no new Win5 wake result.
+
+The fix is in the shared shipping HC read/write helper, so all consumers of those methods inherit it. The audit resolved port definitions through all 92 types in the HC catalog and cross-checked 70 fan registration rows. Of the 52 registered types with a recorded pair, only base `GPDWin4` declares `2E/2F`; the other 51 resolve to `4E/4F`. These include Win4 2023/2024, Win5, Win Max 2 and Win Mini, plus AYANEO, OneXPlayer, AOKZOE, SuiPlay, Legion Go 2 and Zotac declarations. A declaration does not establish use of LPC for a specific operation. The seven YMCC source-owned SuperIO declarations use `4E/4F` and reject foreign pairs before I/O. The two banked WMI declarations and Super X UMA use independent terminals. No other reachable fan writer was found with this port selection bug; no new model permissions or release strategies are implied.
+
+The existing `fan.unified-capability-roundtrip` now checks the actual pinned shipping HC selector for both reads and writes and the existing source-owned terminal rejects mispaired and foreign ports before issuing I/O. Four selected cases passed, 1,445 checks, no hardware I/O. The old 00:20 failure remains documented below. [Field and regression evidence](G:/YeManCC-Work/Testing/YMCC/Evidence/GPD-Win4-FanOpen-20261119/FamilyPortRegression-20261121/REPORT.zh-CN.md)
+
 Status: reproduced the shipped port selector defect offline. Mainline now selects the corrected DLL `f79edd9d…` in both the production runtime and its DeviceCore build input. The 00:20 test export predates this runtime correction. Physical fan operation has not been verified.
 
 The 2026-11-21 00:20 (UTC+8) Win4 export is from `G1618-04`, `HandheldCompanion.Devices.GPDWin4`, Native PID 10704, Host PID 3972, generation 7889626. Its manifest records Native `29eae0a6…`, FanHost `46362f20…`, Backend `e3dfcccd…`, payload manifest `1776faae…` and HC `4cd3dea2…`, matching the November 21 `69e43d30` test export. Disk hashes alone do not prove the loaded image; the five matching, newly added structured Host receipts also appeared in this instance's live log.
@@ -12,4 +20,4 @@ The 2026-11-21 00:20 (UTC+8) Win4 export is from `G1618-04`, `HandheldCompanion.
 
 The production profile, runtime manifest, export lock and LightSetter pin select the new hash. FanHost already validates the split runtime by its deployment manifests, so its existing Program/backend artifacts and wake logic are unchanged. Release preflight checks the corrected HC identity in addition to the existing Host pins. The ordinary export also checks the runtime at source, stage and final ZIP. The previous 00:20 ZIP is rejected by the new export lock.
 
-On Win4, verify one enable gives successful Open, lease, curve and a visible RPM change; then verify explicit OFF and OEM return. Use an export whose HC hash begins `f79edd9d`. Do not extrapolate this result to Win4 2023/2024 or the Win5 resume path.
+The original field test request was one enable, visible RPM change, explicit OFF and OEM return using HC `f79edd9d…`. The 11:23 follow-up above closes the software Open/enable portion. RPM and OFF/OEM return remain separate checks.

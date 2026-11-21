@@ -18,6 +18,7 @@ public sealed class HcBinaryAdapter : IDisposable
     private const string ExpectedHcSha256 = "0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49";
     private const string ExpectedSentrySha256 = "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0";
     private const string ExpectedLhmSha256 = "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf";
+    private const string ShippingHcSha256 = "f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c";
     private readonly object gate = new();
     private readonly IsolatedHcContext context;
     private readonly MemoryAcpiProxy transport;
@@ -122,17 +123,52 @@ public sealed class HcBinaryAdapter : IDisposable
         }
     }
 
+    private static void CheckShippingLpcSlots(Assembly hc, string runtimeDirectory, Action<bool, string> check)
+    {
+        // The exact LHM image contains the reviewed PawnIO LpcIO implementation.
+        ReadPinned(Path.Combine(runtimeDirectory, "LibreHardwareMonitorLib.dll"), ExpectedLhmSha256);
+        var helper = hc.GetType("HandheldCompanion.OpenLibSys", true)!;
+        var legacy = new byte[] { 0x03, 0x1f, 0x2e, 0xfe, 0x01, 0x16, 0xfe, 0x01 };
+        var corrected = new byte[] { 0x03, 0x1f, 0x2e, 0x61, 0x17, 0xfe, 0x03, 0x00 };
+        static Func<int, int, int> BindSelector(byte[] expression)
+        {
+            var body = new DynamicMethod("LpcSlotSelector", typeof(int), new[] { typeof(int), typeof(int) });
+            var il = body.GetDynamicILInfo();
+            il.SetLocalSignature(new byte[] { 0x07, 0x00 });
+            il.SetCode(expression.Append((byte)OpCodes.Ret.Value).ToArray(), 2);
+            return (Func<int, int, int>)body.CreateDelegate(typeof(Func<int, int, int>));
+        }
+        var oldSelect = BindSelector(legacy);
+        foreach (var (name, signature) in new[] {
+            ("ReadIoPortByte", new[] { typeof(ushort) }),
+            ("WriteIoPortByte", new[] { typeof(ushort), typeof(byte) })
+        })
+        {
+            var code = helper.GetMethod(name, signature)!.GetMethodBody()!.GetILAsByteArray()!;
+            var expression = code.AsSpan(29, corrected.Length).ToArray();
+            // Run only the reviewed integer selector IL, never OpenLibSys or PawnIO.
+            check(expression.SequenceEqual(corrected) || expression.SequenceEqual(legacy), $"shipping-lpc:{name}:reviewed-selector");
+            var select = BindSelector(expression);
+            check(oldSelect(0, 0x2e) == 0 && oldSelect(0, 0x2f) == 1, $"shipping-lpc:{name}:old-data-port-rejected-by-slot-zero-contract");
+            check(select(0, 0x2e) == 0 && select(0, 0x2f) == 0, $"shipping-lpc:{name}:index-and-data-in-slot-zero");
+            check(select(0, 0x4e) == 1 && select(0, 0x4f) == 1, $"shipping-lpc:{name}:index-and-data-in-slot-one");
+            check(Enumerable.Range(0, ushort.MaxValue + 1).All(port => port == 0x2f || select(0, port) == oldSelect(0, port)),
+                $"shipping-lpc:{name}:all-unrelated-port-selectors-unchanged");
+        }
+    }
+
     // Existing roundtrip's explicit shipping-image branch. Allocate only inert
     // uninitialized data objects; no HC constructor, GetCurrent, Open or manager runs.
     public static object RunShippingOneXContracts(string hcDllPath)
     {
-        const string shippingSha = "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583";
-        var image = ReadPinned(hcDllPath, shippingSha);
-        var ctx = new IsolatedHcContext(Path.GetDirectoryName(Path.GetFullPath(hcDllPath))!);
+        var image = ReadPinned(hcDllPath, ShippingHcSha256);
+        var runtimeDirectory = Path.GetDirectoryName(Path.GetFullPath(hcDllPath))!;
+        var ctx = new IsolatedHcContext(runtimeDirectory);
         Assembly hc; using (var stream = new MemoryStream(image, false)) hc = ctx.LoadFromStream(stream);
         ctx.BlockNativeImports(hc);
         var checks = new List<string>();
         void Check(bool ok, string name) { if (!ok) throw new InvalidDataException(name); checks.Add(name); }
+        CheckShippingLpcSlots(hc, runtimeDirectory, Check);
         var ecWriter = "HandheldCompanion.Devices.OneXAOKZOE";
         var baseDevice = hc.GetType("HandheldCompanion.Devices.IDevice", true)!;
         var field = baseDevice.GetField("ECDetails", BindingFlags.Public | BindingFlags.Instance)!;
@@ -194,7 +230,7 @@ public sealed class HcBinaryAdapter : IDisposable
         }
         Check(!MiniAmdFanContractAdapter.IsFactory("HandheldCompanion.Devices.OneXPlayerX2MiniPro")&&FanCapabilityCatalog.FindPinnedFanSource("HandheldCompanion.Devices.OneXPlayerX2MiniPro")!.Maximum==255,"shipping-mini:X2MiniPro-independent255-retained");
         ctx.ThrowIfNativeImportAttempted();Check(!ctx.NativeImportAttempted,"shipping-onex:no-native-import");
-        return new { status="passed-actual-shipping-one-x-contract",hcSha256=shippingSha,checks,correctedWrites,legacyWrites,
+        return new { status="passed-actual-shipping-one-x-contract",hcSha256=ShippingHcSha256,checks,correctedWrites,legacyWrites,
             loadedImageSha256=ctx.LoadedImageSha256,hcConstructorsInvoked=false,portConstructorsInvoked=false,
             instanceAllocation="uninitialized data only; actual HC constructors and lifecycle never entered",actualInheritedMiniDutyInvoked=true,
             ecTerminal="inert override; no OpenLibSys/PawnIO",hostMainInvoked=false,physicalAcceptance=false };

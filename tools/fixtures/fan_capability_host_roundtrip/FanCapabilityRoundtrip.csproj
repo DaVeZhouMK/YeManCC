@@ -28,6 +28,8 @@
     <Compile Include="../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
     <Compile Include="../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
     <Compile Include="../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="../../../native/SharedSleepPower/RemotePowerContracts.cs" Link="SharedSleepPower/RemotePowerContracts.cs" />
+    <Compile Include="../../../native/SharedSleepPower/RemoteNativePowerClient.cs" Link="SharedSleepPower/RemoteNativePowerClient.cs" />
     <ProjectReference Include="../../../FanLab/fan-backend/YeManFanBackend.csproj" />
   </ItemGroup>
 </Project>
