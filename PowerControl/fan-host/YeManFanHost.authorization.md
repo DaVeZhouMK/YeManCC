@@ -1,8 +1,8 @@
-﻿candidateOnly: true
+candidateOnly: true
 releaseApproved: false
 installed: false
-sourceBatch: candidate-fan-win5-resume-settlement-20261118
-sourceSnapshotManifestSha256: f0c35d7d5ef2efcbd5b2fb1929502007fc8b1ef0ba5fe2b4f4cf36b3b6f67122
+sourceBatch: candidate-fan-shared-lease-settlement-20261121
+sourceSnapshotManifestSha256: 8e839285a2010ef58c7fc658954fcc1a6c1e0bff206d971665ace50ea80c70c4
 
 # YeManFanHost 正式授权记录
 
@@ -12,8 +12,8 @@ hardwareWriteAuthorizationGranted: true
 hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
-approvedHostExeSha256: F1163D7AAFACAA376E32D6AB14F10DD1B3C51380FF9BE7B392573F9AEBA77C0E
-approvedHostDllSha256: 52ADB1550FD280E75D1359E7E11048EF0201E4A19612CD0D2565F67A7EEB1934
+approvedHostExeSha256: A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733
+approvedHostDllSha256: 75CFBCACBB51D87EF6B20B07D0FF95D6C561D7CAF108D38458E028902AD716F0
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline

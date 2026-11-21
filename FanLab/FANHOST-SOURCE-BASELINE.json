@@ -5,9 +5,9 @@
     "sourceDirectory":  "real-host",
     "sourceFileCount":  53,
     "sourceFilesIndex":  "fanhost-source-files.sha256",
-    "sourceFilesIndexSha256":  "917D74A880F5869AE787E6918ADE574CCB3D8912466C1A6B2FA8BFF8918DA90F",
+    "sourceFilesIndexSha256":  "54FB07040FB0B1E5C883259D08462D9F0C89F6A5FB1ECE6C392D96402D68EC55",
     "coreFiles":  {
-                      "Program.cs":  "0F864F9F8F289217DFD9D3ECA54F09BF31A059D95AC850A0F2EE9F697D5F0744",
+                      "Program.cs":  "106BFDAFCCD7121B1573D2E8BA087C06C0C1E21E171FB3F9C62F99585B622ADF",
                       "YeManFanHost.csproj":  "62DA1B6F23C44C8CCDECAFAF0CA1E0F28DC3DE88723573C8FFC249EB356020C4"
                   },
     "omittedArtifacts":  {
@@ -1645,9 +1645,9 @@
                                               },
                        "current":  {
                                        "sourceFileCount":  53,
-                                       "sourceFilesIndexSha256":  "917D74A880F5869AE787E6918ADE574CCB3D8912466C1A6B2FA8BFF8918DA90F",
+                                       "sourceFilesIndexSha256":  "54FB07040FB0B1E5C883259D08462D9F0C89F6A5FB1ECE6C392D96402D68EC55",
                                        "coreFiles":  {
-                                                         "Program.cs":  "0F864F9F8F289217DFD9D3ECA54F09BF31A059D95AC850A0F2EE9F697D5F0744",
+                                                         "Program.cs":  "106BFDAFCCD7121B1573D2E8BA087C06C0C1E21E171FB3F9C62F99585B622ADF",
                                                          "YeManFanHost.csproj":  "62DA1B6F23C44C8CCDECAFAF0CA1E0F28DC3DE88723573C8FFC249EB356020C4"
                                                      }
                                    },

@@ -355,7 +355,11 @@ static void gameOverlayStop(const char*){}
 static void focusEndIsolationOnUi(){}
 ${source.includes('static HWND mainUiPresentationWindow()')?'static HWND mainUiPresentationWindow(){return g_hwnd;} // ordinary-window memory boundary; no overlay runtime':''}
 enum class GameOverlayAttempt { Ordinary, Begun, Refused };
-template<class Target>static GameOverlayAttempt gameOverlayTryBegin(const Target&){return GameOverlayAttempt::Ordinary;}
+template<class Target>static GameOverlayAttempt gameOverlayTryBegin(const Target&,bool){return GameOverlayAttempt::Ordinary;}
+static ymcc::ShortcutWindowVisibility readShortcutWindowVisibility(HWND h){return {IsWindowVisible(h)!=FALSE,IsIconic(h)!=FALSE};}
+static bool shortcutSummonRenderBusy(){return false;}
+template<class Target>static bool shortcutSummonWaitForRender(const Target&,bool){return false;}
+static void shortcutSummonClearRenderWait(){}
 ` : ''}
 // Windows/focus/timer edges of actual bringToFront are all inert memory ports.
 ${shieldStruct('FocusSessionState')}

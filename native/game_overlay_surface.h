@@ -76,10 +76,12 @@ static LRESULT CALLBACK gameOverlaySurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(m==WM_ERASEBKGND)return 1;
     return DefWindowProcW(h,m,w,l);
 }
-static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameoverlay::Binding binding,bool observation,std::function<void()> ended={}){
+static bool gameOverlayMainPresented(HWND window){return IsWindowVisible(window)&&!IsIconic(window);}
+
+static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameoverlay::Binding binding,bool observation,std::function<void()> ended={},bool maximize=false){
   try{
     const HWND foregroundAtEntry=GetAncestor(GetForegroundWindow(),GA_ROOT);
-    if(g_gameOverlay.active()||(g_focusSession.active&&!binding.originalUiInput)||IsWindowVisible(g_hwnd)||!g_webviewReady||!g_ctrl||!g_view||!g_mainWebViewComposition.active())return false;
+    if(g_gameOverlay.active()||(g_focusSession.active&&!binding.originalUiInput)||gameOverlayMainPresented(g_hwnd)||!g_webviewReady||!g_ctrl||!g_view||!g_mainWebViewComposition.active())return false;
     if(radialHasInputOwner()||customSteamLibraryInputSuppressed()||g_shortcutRecordingActive.load())return false;
     if(!ymcc::presentationpower::capture(&readSharedSystemPower,binding.sharedPower)||
        binding.power!=binding.sharedPower.generation)return false;
@@ -90,7 +92,13 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
     const auto returnBinding=std::make_shared<const ymcc::gameoverlay::Binding>(binding);
     WNDCLASSEXW cls{sizeof(cls)};cls.lpfnWndProc=gameOverlaySurfaceProc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"YMCC_IndependentOverlaySurface";
     if(!RegisterClassExW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return false;
-    RECT base{};if(!GetWindowRect(g_hwnd,&base))return false;
+    RECT base{};
+    if(IsIconic(g_hwnd)){
+        WINDOWPLACEMENT saved{sizeof(saved)};
+        if(!GetWindowPlacement(g_hwnd,&saved))return false;
+        base=saved.rcNormalPosition; // GetWindowRect on an iconic HWND is not its restore size.
+    }else if(!GetWindowRect(g_hwnd,&base))return false;
+    if(base.right<=base.left||base.bottom<=base.top)return false;
     HWND display=CreateWindowExW(static_cast<DWORD>(ymcc::hudinput::requiredExStyle)|WS_EX_TOPMOST|WS_EX_NOREDIRECTIONBITMAP,cls.lpszClassName,L"YeManCC Overlay",WS_POPUP|WS_DISABLED,base.left,base.top,base.right-base.left,base.bottom-base.top,nullptr,nullptr,cls.hInstance,nullptr);
     if(!display)return false;
     if(!ymcc::hudinput::ensure(display)||!ymcc::hudinput::registerTouchPassthrough(display)){DestroyWindow(display);return false;}
@@ -105,17 +113,24 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
         [target,display](const auto& current){return current.power==currentPowerGeneration()&&
             !g_exitRequested.load()&&g_webviewReady&&g_ctrl&&g_view&&g_gameOverlaySurfaceAttached&&g_gameOverlaySurface==display&&
             !radialHasInputOwner()&&!customSteamLibraryInputSuppressed()&&(current.originalUiInput||!g_shortcutRecordingActive.load())&&
-            !IsWindowVisible(g_hwnd)&&(current.visualProbe?
+            !gameOverlayMainPresented(g_hwnd)&&(current.visualProbe?
                 ymcc::presentationpower::current(&readSharedSystemPower,current.sharedPower):gameOverlayBindingCurrent(current))&&
             (current.globalProbe||focusTargetIdentityMatches(target,target.pid));},
-        [target,display,base]{
+        [target,display,base,maximize]{
             if(g_controllerEditorWidth.active())return applyControllerEditorWidth();
-            if(g_fullHeight)return applyFullHeightLayout(MonitorFromWindow(target.hwnd?target.hwnd:display,MONITOR_DEFAULTTONEAREST));
-            MONITORINFO info{sizeof(info)};
-            if(!GetMonitorInfoW(MonitorFromWindow(target.hwnd?target.hwnd:display,MONITOR_DEFAULTTONEAREST),&info))return false;
-            const int width=std::min<int>(base.right-base.left,info.rcWork.right-info.rcWork.left);
-            const int height=std::min<int>(base.bottom-base.top,info.rcWork.bottom-info.rcWork.top);
-            return SetWindowPos(display,nullptr,windowPlacementIsLeft()?info.rcWork.left:info.rcWork.right-width,info.rcWork.top,width,height,SWP_NOZORDER|SWP_NOACTIVATE)!=FALSE;
+            const HMONITOR monitor=MonitorFromWindow(target.hwnd?target.hwnd:display,MONITOR_DEFAULTTONEAREST);
+            if(g_fullHeight)return applyFullHeightLayout(monitor);
+            RECT area{};
+            if(maximize){
+                if(!ymcc::windowlayout::safeMonitorArea(monitor,area))return false;
+            }else{
+                MONITORINFO info{sizeof(info)};
+                if(!GetMonitorInfoW(monitor,&info))return false;
+                area=info.rcWork;
+            }
+            const int width=maximize?area.right-area.left:std::min<int>(base.right-base.left,area.right-area.left);
+            const int height=maximize?area.bottom-area.top:std::min<int>(base.bottom-base.top,area.bottom-area.top);
+            return SetWindowPos(display,nullptr,maximize||windowPlacementIsLeft()?area.left:area.right-width,area.top,width,height,SWP_NOZORDER|SWP_NOACTIVATE)!=FALSE;
         },
         [display]{
             RECT bounds{};
@@ -140,7 +155,7 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
             const auto session=g_gameOverlay.snapshot();
             ipc_emit("window.overlayPresentation",{{"active",active},{"session",active&&session?std::to_string(session->session):std::string()},{"candidate",true},{"reason",reason}});
             ipc_emit(active?"window.shown":"window.hidden",json::object());
-            gameOverlaySurfaceRecord(active?"preparing":"hidden",{{"reason",reason},{"independentSurface",true},{"originalMainVisible",IsWindowVisible(g_hwnd)!=FALSE},{"carrierVisible",IsWindow(display)&&IsWindowVisible(display)!=FALSE},{"screenVisibleVerified",false}});
+            gameOverlaySurfaceRecord(active?"preparing":"hidden",{{"reason",reason},{"independentSurface",true},{"originalMainVisible",gameOverlayMainPresented(g_hwnd)},{"carrierVisible",IsWindow(display)&&IsWindowVisible(display)!=FALSE},{"screenVisibleVerified",false}});
         },
         []{return g_gameOverlayDisplayTree.protect();},
         []{return g_gameOverlayPanel.synchronize();},

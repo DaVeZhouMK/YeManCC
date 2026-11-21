@@ -48,6 +48,7 @@ import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepos
 import { emitNativeEvent } from '@/bridge/ipc';
 import { onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
 let stopSharedFanPower: (() => void) | null = null;
+let stopFanWakeAdmission: (() => void) | null = null;
 
 type FanPreset = FanFeatureSettings['preset'];
 
@@ -715,14 +716,18 @@ function onDocumentVisibilityChange(): void {
 function onFanPowerSuspending(event: Event): void {
   const detail = (event as CustomEvent<{ generation?: number; scope?: string; resumeCatchup?: boolean }>).detail;
   const generation = Number(detail?.generation) || 0;
+  const coordinator = fanHostLifecycle.coordinatorSnapshot;
   if (!Number.isSafeInteger(generation) || generation <= 0
-      || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration
+      || generation < coordinator.powerGeneration
       || generation < fanPowerGeneration) return;
   // Wake-time Close catchup belongs to this ON request. App owns the lease
   // retirement; keep the page commit and its fixed click guard until it settles.
   // Shared/legacy sleep events still retire the page epoch below.
-  if (event.type === 'ipc:fan.suspending' && detail?.scope === 'fan-only'
-      && detail.resumeCatchup === true) return;
+  if (event.type === 'ipc:fan.suspending' && detail?.scope === 'fan-only') {
+    if (detail.resumeCatchup === true) return;
+    // Match App's Fan-only ordering check before retiring the page commit.
+    if (coordinator.phase === 'ready' && generation === coordinator.wakeReadyGeneration) return;
+  }
   fanWakeProtectionDeadline = 0;
   fanControlSwitchProtectionDeadline = 0;
   syncControlSwitchLock();
@@ -760,16 +765,10 @@ function onFanPowerSuspending(event: Event): void {
 
 // Existing native wake facts restart only visible-page status observation.
 // The App/bridge remains the sole owner of HC resume and curve replay.
-function onFanPowerWake(event: Event): void {
-  const generation = Number((event as CustomEvent<{ generation?: number }>).detail?.generation);
+function onFanPowerWake(generation: number): void {
   const coordinator = fanHostLifecycle.coordinatorSnapshot;
-  if (!Number.isSafeInteger(generation) || generation <= 0
-    || generation < coordinator.powerGeneration) return;
-  // A second alias for an already-confirmed wake is not new loss of control.
-  // Keep the established ON/OFF direction; new sleep and pending recovery still enter below.
-  if (generation === fanWakeProtectionGeneration && !fanSuspendBoundary
-    && coordinator.wakeReadyGeneration === generation && fanHostLifecycle.state === 'ready'
-    && controlEstablished.value && !controlIntentPending()) return;
+  if (generation !== coordinator.powerGeneration || generation !== coordinator.wakeReadyGeneration) return;
+  if (generation === fanWakeProtectionGeneration && !fanSuspendBoundary) return;
   fanSuspendBoundary = false;
   if (!fanHostLifecycle.hasControlIntent && !controlIntentPending()) return;
   if (fanWakeProtectionGeneration !== generation) {
@@ -1377,21 +1376,16 @@ onMounted(() => {
   viewVisible = !document.hidden;
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
   window.addEventListener('ipc:fan.suspending', onFanPowerSuspending);
-  let sharedPowerKey = '', sharedGeneration = 0;
+  stopFanWakeAdmission = fanHostLifecycle.onWakeAdmitted(onFanPowerWake);
+  let sharedPowerKey = '';
   stopSharedFanPower = onSharedPowerLifecycle(state => {
-    const key = `${state.generation}:${state.phase}:${state.known}`;
+    const key = `${state.generation}:${state.phase}:${state.known}:${state.notificationPending}`;
     if (key === sharedPowerKey) return;
-    const newGeneration = sharedGeneration > 0 && state.generation > sharedGeneration;
-    sharedPowerKey = key; sharedGeneration = state.generation;
-    // Shared unknown/input readiness cannot replace the Fan-only kernel facts.
-    if (state.known === false) return;
-    const event = new CustomEvent('shared:power-lifecycle', { detail: state });
-    if (state.phase === 'suspending' || state.phase === 'suspended') onFanPowerSuspending(event);
-    else if (state.phase === 'ready' && (newGeneration || fanSuspendBoundary || fanHostLifecycle.state === 'suspended'))
-      onFanPowerWake(event);
+    sharedPowerKey = key;
+    if (state.known === false || state.notificationPending === true) return;
+    if (state.phase === 'suspending' || state.phase === 'suspended')
+      onFanPowerSuspending(new CustomEvent('shared:power-lifecycle', { detail: state }));
   });
-  window.addEventListener('ipc:power.resume-ready', onFanPowerWake);
-  window.addEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.addEventListener('fan:guard-state', onFanGuardState);
   window.addEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.addEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);
@@ -1471,9 +1465,8 @@ onUnmounted(() => {
   emitNativeEvent('gamepad.fan-node-edit', { active: false });
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
   stopSharedFanPower?.(); stopSharedFanPower = null;
+  stopFanWakeAdmission?.(); stopFanWakeAdmission = null;
   window.removeEventListener('ipc:fan.suspending', onFanPowerSuspending);
-  window.removeEventListener('ipc:power.resume-ready', onFanPowerWake);
-  window.removeEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.removeEventListener('fan:guard-state', onFanGuardState);
   window.removeEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.removeEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);

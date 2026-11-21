@@ -1,5 +1,5 @@
 name: Build and verify immutable YMCC release
-description: One fast build and all pre-publication checks shared by preparation and formal publishing. No release, tag push, manifest write or fixtures.
+description: One fast build and all pre-publication checks shared by preparation and formal publishing. No release, tag push, manifest write or full fixture suite.
 inputs:
   mode:
     description: formal requires an immutable version tag; prepare uses its immutable branch commit
@@ -68,7 +68,7 @@ runs:
       "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "commit=$commit" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       "notes-path=$notesPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-  - name: Check GitHub publication conditions before build
+  - name: Verify approved Fan inputs and GitHub publication conditions before build
     shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
@@ -182,6 +182,88 @@ runs:
       pnpm install --frozen-lockfile
       if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed.' }
     shell: pwsh
+  - name: Verify that the Fan wake and first-click fixes carried forward
+    if: ${{ inputs.check-only != 'true' }}
+    shell: pwsh
+    env:
+      YMCC_FAN_AUTO_APP_SOURCE: ${{ github.workspace }}/src/App.vue
+      YMCC_FAN_AUTO_CASE: FAN-PUBLIC-RETRY
+      YMCC_FAN_NATIVE_WAIT_CASE: pending native state disappears temporarily
+    run: |
+      foreach ($name in @('fan_boot_autostart_sim', 'fan_native_manual_wait_selftest', 'fan_cold_open_admission_selftest', 'fan_resume_continuous_recovery_selftest', 'fan_duplicate_wake_replay_selftest')) {
+        $bundle = Join-Path $env:RUNNER_TEMP "release-$name.mjs"
+        node node_modules/esbuild/bin/esbuild "tools/$name.ts" --bundle --platform=node --format=esm --alias:@=./src "--outfile=$bundle"
+        if ($LASTEXITCODE -ne 0) { throw "Fan release check could not bundle $name" }
+        if ($name -eq 'fan_resume_continuous_recovery_selftest') {
+          node $bundle --committed-wake-only
+          if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: committed wake ownership' }
+          continue
+        }
+        $lines = @(node $bundle)
+        $exitCode = $LASTEXITCODE
+        $lines | Write-Output
+        if ($exitCode -ne 0) { throw "Fan release check failed: $name" }
+        $result = $lines[-1] | ConvertFrom-Json
+        if ($name -eq 'fan_cold_open_admission_selftest') {
+          if ($result.ok -ne $true -or $result.checks -lt 15 -or $result.hardwareCalls -ne 0) {
+            throw 'Fan release check did not exercise cold Open and Win4 refusal.'
+          }
+          continue
+        }
+        if ($name -eq 'fan_duplicate_wake_replay_selftest') {
+          if ($result.ok -ne $true -or $result.checks -lt 54 -or $result.hardwareCalls -ne 0) {
+            throw 'Fan release check did not exercise the full wake replay matrix.'
+          }
+          continue
+        }
+        if ($result.ok -ne $true -or $result.checks -ne 1 -or $result.hardwareCalls -ne 0 -or @($result.observations).Count -lt 2) {
+          throw "Fan release check did not exercise the expected scenarios: $name"
+        }
+        if ($name -eq 'fan_boot_autostart_sim' -and !($result.observations | Where-Object {
+          $_.variant -ceq 'unconfirmed-newer-hint' -and $_.continued -eq $true
+        })) {
+          throw 'Fan release check did not verify recovery after an unconfirmed newer hint.'
+        }
+      }
+      $wakeIpcEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-wake-ipc'
+      node tools/fan_manual_wake_ipc_selftest.mjs $wakeIpcEvidence '' '' --native-owner-rearm-only
+      if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: Native wake admission.' }
+      $wakeIpc = Get-Content -LiteralPath (Join-Path $wakeIpcEvidence 'result.json') -Raw | ConvertFrom-Json
+      $handoffs = @($wakeIpc.results | Where-Object {
+        $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake retains a curve across delayed native permission: *'
+      })
+      $unavailable = @($wakeIpc.results | Where-Object {
+        $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake survives an unavailable Native write fact: *'
+      })
+      $passedNames = @($wakeIpc.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
+      if ($wakeIpc.ok -ne $true -or $wakeIpc.hardwareCalls -ne 0 -or
+          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          @($unavailable.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          $passedNames -cnotcontains 'native-owner real HTTP delayed native permission preserves the newest explicit curve' -or
+          $passedNames -cnotcontains 'native-owner real HTTP first manual curve waits for a changing Native write fact') {
+        throw 'Fan release check did not exercise Native permission handoff, OFF, newer sleep and explicit control.'
+      }
+      $backgroundWakeEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-background-wake-ipc'
+      node tools/fan_manual_wake_ipc_selftest.mjs $backgroundWakeEvidence '' '' --background-ready-only
+      if ($LASTEXITCODE -ne 0) { throw 'Fan release check failed: one-shot background wake admission.' }
+      $backgroundWake = Get-Content -LiteralPath (Join-Path $backgroundWakeEvidence 'result.json') -Raw | ConvertFrom-Json
+      $boundaryFacts = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.facts.boundary })
+      $requiredBoundaries = @('recovers', 'off', 'new-sleep', 'sleep-during-read', 'still-unknown', 'wrong-generation',
+        'ipc-recovers', 'ipc-off', 'ipc-still-failing')
+      $backgroundPassedNames = @($backgroundWake.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
+      $requiredProjectedWake = @(
+        'background-ready without the private notification: resume',
+        'background-ready without the private notification: read',
+        'background-ready without the private notification: off',
+        'background-ready without the private notification: new-sleep',
+        'background-ready without the private notification: pending',
+        'background-ready without the private notification: stale'
+      )
+      if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
+          @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0 -or
+          @($requiredProjectedWake | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
+        throw 'Fan release check did not cover one-shot wake, coordinator IPC failures and the projection without a private notification.'
+      }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}
     shell: pwsh
@@ -332,4 +414,4 @@ runs:
       GH_TOKEN: ${{ github.token }}
     run: |
       # Re-read current tag/release/main state after a potentially long build.
-      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-final.json')
+      & tools/github-release-preflight.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Mode $env:YMCC_GIT_RELEASE_MODE -ExpectedCommit $env:YMCC_RELEASE_COMMIT -PublicationRecheckOnly -EvidencePath (Join-Path $env:RUNNER_TEMP 'release-preflight-final.json')

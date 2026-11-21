@@ -112,6 +112,7 @@ applyTheme(
 const uiVisible = ref(isUiVisible());
 let uiPowerReconciliation: ReturnType<typeof startUiPowerReconciliation> | null = null;
 let stopSharedPowerWatch: (() => void) | null = null;
+let stopSharedFanWakeWatch: (() => void) | null = null;
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -139,7 +140,26 @@ let fanBootAutoStartDone = false;
 const fanAutoStartGenerations = new Set<number>();
 // One wake delivery keeps its first cancellation receipt. A delayed duplicate
 // cannot turn an explicit OFF into a fresh automatic start for the same wake.
-let fanWakeRequest: { generation: number; cancellationRevision: number } | null = null;
+type FanWakeRequest = {
+  generation: number;
+  cancellationRevision: number;
+  retryAfterPublicReady?: (state: SharedPowerLifecycleSnapshot | null) => void;
+  publicRetryUsed?: boolean;
+  nativeReadyInFlight?: boolean;
+  nativeReadyConfirmed?: boolean;
+  nativeReadyRedelivered?: boolean;
+};
+const fanWakeRequests = new Map<number, FanWakeRequest>();
+
+function rememberFanWakeRequest(generation: number): FanWakeRequest {
+  const current = fanHostLifecycle.coordinatorSnapshot.powerGeneration;
+  for (const older of fanWakeRequests.keys()) if (older < current) fanWakeRequests.delete(older);
+  const previous = fanWakeRequests.get(generation);
+  if (previous) return previous;
+  const request = { generation, cancellationRevision: fanHostLifecycle.controlCancellationRevision };
+  fanWakeRequests.set(generation, request);
+  return request;
+}
 function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<void> {
   // Explicit AI session has its own requests; do not inherit real stored on-state.
   if (aiFanMockActive) return Promise.resolve();
@@ -938,25 +958,34 @@ function onPowerSuspending(e: Event): void {
   suspendBackgroundVideo();
 }
 function onFanPhysicalSuspending(e: Event): void {
-  const generation = Number((e as CustomEvent).detail?.generation) || 0;
-  if (generation <= 0 || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
-  fanHostLifecycle.setPowerGeneration(generation);
+  const detail = (e as CustomEvent<{ generation?: number; scope?: string; resumeCatchup?: boolean }>).detail;
+  const generation = Number(detail?.generation) || 0;
+  const coordinator = fanHostLifecycle.coordinatorSnapshot;
+  if (!Number.isSafeInteger(generation) || generation <= 0 || generation < coordinator.powerGeneration) return;
   // This is still native-owned Close; only its explicit wake catchup keeps
   // the current request. A genuine sleep notification always supersedes it.
-  const resumeCatchup = (e as CustomEvent).detail?.scope === 'fan-only'
-    && (e as CustomEvent).detail?.resumeCatchup === true;
+  const fanOnly = detail?.scope === 'fan-only';
+  const resumeCatchup = fanOnly && detail?.resumeCatchup === true;
+  // Native gives a subsequent physical sleep a new Fan generation. A delayed
+  // Close notice for the live session must not revoke its wake admission.
+  if (fanOnly && !resumeCatchup && coordinator.phase === 'ready'
+      && generation === coordinator.wakeReadyGeneration) return;
+  fanHostLifecycle.setPowerGeneration(generation);
   fanHostLifecycle.observePowerBoundary(resumeCatchup ? 'manual-resume-start' : 'suspending', generation);
+  if (fanOnly && !resumeCatchup) rememberFanWakeRequest(generation);
   setFanControlActive(false);
+}
+function onSharedFanWake(state: SharedPowerLifecycleSnapshot): void {
+  if (state.known === true && state.notificationPending !== true && state.fanWakeGeneration)
+    onFanResumeReady(state.fanWakeGeneration);
 }
 function onPowerResuming(e: Event): void {
   tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
   // Start the same Fan wake request at the public wake boundary. An OFF
   // before its first delayed F5 notification must still cancel that request.
-  if (Number.isSafeInteger(generation) && generation > 0 &&
-      (!fanWakeRequest || generation > fanWakeRequest.generation)) {
-    fanWakeRequest = { generation, cancellationRevision: fanHostLifecycle.controlCancellationRevision };
-  }
+  if (Number.isSafeInteger(generation) && generation > 0 && generation >= fanHostLifecycle.coordinatorSnapshot.powerGeneration)
+    rememberFanWakeRequest(generation);
   // A shared Resuming fact must not revoke this generation's independently
   // issued Fan F5 readiness. A new generation still retires the old device work.
   if (generation > fanHostLifecycle.coordinatorSnapshot.wakeReadyGeneration)
@@ -983,15 +1012,13 @@ function onPowerResumeReady(generation: number | undefined): void {
  * that Fan-local compensation and never treats it as an OEM acknowledgement.
  */
 function requestFanCommittedResume(generation: number): void {
-  if (!Number.isSafeInteger(generation) || generation <= 0) return;
+  if (!Number.isSafeInteger(generation) || generation <= 0 || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
   // A durable public Ready can replace a lost Fan-only event. Keep that
   // request's original OFF receipt before the asynchronous continuation.
-  if (!fanWakeRequest || generation > fanWakeRequest.generation) {
-    fanWakeRequest = { generation, cancellationRevision: fanHostLifecycle.controlCancellationRevision };
-  }
-  const request = fanWakeRequest;
+  const request = rememberFanWakeRequest(generation);
+  if (request.cancellationRevision !== fanHostLifecycle.controlCancellationRevision) return;
   void fanHostLifecycle.resumeAfterCommittedPowerWake(generation).then(() => {
-    if (fanWakeRequest !== request || request.generation !== generation || generation !== latestResumeGeneration ||
+    if (!resumeLifecycleActive || fanWakeRequests.get(generation) !== request || generation !== latestResumeGeneration ||
         request.cancellationRevision !== fanHostLifecycle.controlCancellationRevision || fanHostLifecycle.hasControlIntent) return;
     // The retained curve already won when present. Otherwise use the same
     // Native-checked Fan entry to consume the configured automatic preference.
@@ -1005,14 +1032,20 @@ function requestFanCommittedResume(generation: number): void {
 }
 // FAN-938 R4: a Fan-only Ready notification must not restart the shared input/UI transaction.
 function onFanResumeReady(resumeGeneration: number): void {
-  if (!Number.isSafeInteger(resumeGeneration) || resumeGeneration <= 0) return;
+  if (!resumeLifecycleActive || !Number.isSafeInteger(resumeGeneration) || resumeGeneration <= 0) return;
   if (resumeGeneration < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
   const cancellationRevision = fanHostLifecycle.controlCancellationRevision;
-  const previous = fanWakeRequest;
-  if (previous && (resumeGeneration < previous.generation ||
-      (resumeGeneration === previous.generation && cancellationRevision !== previous.cancellationRevision))) return;
-  const request = previous?.generation === resumeGeneration ? previous : { generation: resumeGeneration, cancellationRevision };
-  fanWakeRequest = request;
+  // The notification may be ahead of the current Fan fact. It cannot replace
+  // another generation's cancellation receipt or suppress its confirmed wake.
+  const request = rememberFanWakeRequest(resumeGeneration);
+  if (cancellationRevision !== request.cancellationRevision) return;
+  if (request.nativeReadyInFlight) {
+    request.nativeReadyRedelivered = true;
+    return;
+  }
+  if (request.nativeReadyConfirmed && fanHostLifecycle.coordinatorSnapshot.wakeReadyGeneration === resumeGeneration) return;
+  request.nativeReadyConfirmed = false;
+  request.nativeReadyRedelivered = false;
   // F5 remains a device-session hint. The lifecycle reads the shared Native
   // context before admitting it; late/unknown/pending events grant no wake.
   // HC SystemReady opens the device fire-and-forget: start the fan rebuild in
@@ -1022,17 +1055,54 @@ function onFanResumeReady(resumeGeneration: number): void {
   // FAN-932 §2.2：唤醒必须先**完成**现有 resume（含已有活动曲线的恢复），再按偏好自动启动。
   // 本事件处理器保持非阻塞（按代异步事务），不改成同步等待；resume 失败/被取代时
   // 本代**不做默认曲线 fallback**，也不覆盖用户曲线。
-  void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).catch((error) => {
-    fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed', {
-      generation: resumeGeneration,
-      error: error instanceof Error ? error.message : String(error),
+  const startedAt = getSharedPowerLifecycle();
+  const stillCurrent = () => resumeLifecycleActive && fanWakeRequests.get(resumeGeneration) === request &&
+    cancellationRevision === fanHostLifecycle.controlCancellationRevision &&
+    resumeGeneration >= fanHostLifecycle.coordinatorSnapshot.powerGeneration;
+  const attempt = (mayWaitForPublic = true) => {
+    request.nativeReadyInFlight = true;
+    void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).then((resumeOk) => {
+      request.nativeReadyInFlight = false;
+      if (!stillCurrent()) return;
+      if (resumeOk) {
+        request.nativeReadyConfirmed = true;
+        request.retryAfterPublicReady = undefined;
+        request.publicRetryUsed = true;
+        if (fanHostLifecycle.hasControlIntent) return;
+        return ensureFanAutoStart('resume', resumeGeneration);
+      }
+      if (!mayWaitForPublic || request.publicRetryUsed) return;
+      if (request.retryAfterPublicReady) {
+        request.retryAfterPublicReady(getSharedPowerLifecycle());
+        return;
+      }
+      // A private Fan generation may be newer than the public Ready generation.
+      // Keep the rejected hint and make one fresh Fan read after public admission advances.
+      request.retryAfterPublicReady = (power) => {
+        if (!stillCurrent()) { request.retryAfterPublicReady = undefined; return; }
+        if (!power || !isSharedPowerLifecycleAdmitted(power)) return;
+        if (power.generation > resumeGeneration) { request.retryAfterPublicReady = undefined; return; }
+        if (request.nativeReadyInFlight) return;
+        if (!request.nativeReadyRedelivered && startedAt && isSharedPowerLifecycleAdmitted(startedAt) && power.generation === startedAt.generation &&
+            power.observedNotificationSequence === startedAt.observedNotificationSequence &&
+            power.publicationRevision === startedAt.publicationRevision) return;
+        request.retryAfterPublicReady = undefined;
+        request.publicRetryUsed = true;
+        attempt(false);
+      };
+      // Public Ready can arrive while the first Fan read is still returning.
+      request.retryAfterPublicReady(getSharedPowerLifecycle());
+    }, (error) => {
+      request.nativeReadyInFlight = false;
+      throw error;
+    }).catch((error) => {
+      fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed', {
+        generation: resumeGeneration,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
-    return false as const;
-  }).then((resumeOk) => {
-    if (resumeOk !== true || fanWakeRequest !== request || cancellationRevision !== fanHostLifecycle.controlCancellationRevision) return;
-    if (fanHostLifecycle.hasControlIntent) return; // 已有曲线已恢复：不重复写
-    return ensureFanAutoStart('resume', resumeGeneration);
-  });
+  };
+  attempt();
 }
 function onPowerResumed(e: Event): void {
   // A few native builds omitted the generation on the final commit event even
@@ -1811,6 +1881,7 @@ onMounted(async () => {
     resumeWorkAllowed = state.known !== false && state.notificationPending !== true &&
       (state.phase === 'ready' || state.phase === 'resuming');
     const admitted = isSharedPowerLifecycleAdmitted(state);
+    if (admitted) for (const request of fanWakeRequests.values()) request.retryAfterPublicReady?.(state);
     if (!admitted) {
       sleepPlanOptimizationQueue.invalidate();
       if (sleepPlanOptimizationConfirmation) sleepPlanOptimizationConfirmation.denied = true;
@@ -1850,6 +1921,7 @@ onMounted(async () => {
     // Cold Ready is not a new wake. Existing mount/device receipts below keep
     // their own recovery; subsequent same-gen Ready corrects any private hold.
   });
+  stopSharedFanWakeWatch = onSharedPowerLifecycle(onSharedFanWake, { observeFanWakeGeneration: true });
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
   stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
     onPowerResumeReady(generation);
@@ -2193,11 +2265,13 @@ onUnmounted(() => {
   backgroundPresentationDisposed = true;
   stopUndervoltRuntime();
   cancelBootModeLaunches();
+  fanWakeRequests.clear();
   cancelBootModeDeferredMouse();
   stopBootModeReceipts?.(); stopBootModeReceipts = null;
   uiPowerReconciliation?.stop();
   uiPowerReconciliation = null;
   stopSharedPowerWatch?.(); stopSharedPowerWatch = null;
+  stopSharedFanWakeWatch?.(); stopSharedFanWakeWatch = null;
   updatePredownloadHost?.stop(); updatePredownloadHost = null;
   controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
   window.removeEventListener('game-media:changed',onSharedMediaChanged);

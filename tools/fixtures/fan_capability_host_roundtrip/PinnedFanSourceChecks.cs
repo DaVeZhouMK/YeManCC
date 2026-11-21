@@ -138,10 +138,11 @@ internal static class PinnedFanSourceChecks
         public FakeRawPort(){if(FailConstructor)throw new IOException("constructor uncertainty");_pawnIO=new();Instances.Add(this);}
         public FakePawn Pawn=>_pawnIO;
         public int Reads {get;private set;}
+        public int Selections {get;private set;}
         public readonly Dictionary<ushort,byte> Values=new();
         private byte command,selector,upper,lower;
         public readonly List<(ushort,byte)> Writes=new();
-        public void SelectSlot(int slot){if(slot!=1)throw new IOException("wrong fixed port slot");}
+        public void SelectSlot(int slot){Selections++;if(slot!=1)throw new IOException("wrong fixed port slot");}
         public byte ReadPort(ushort port){Reads++;return Values.GetValueOrDefault((ushort)((upper<<8)|lower));}
         public void WritePort(ushort port,byte value)
         {
@@ -295,6 +296,17 @@ internal static class PinnedFanSourceChecks
             check(raw.IsReady,"pinned-fan:quiet-close-retains-exact-remaining-resource");
             port.Pawn.IgnoreClose=false;raw.Dispose();raw.Dispose();
             check(port.Pawn.Closes==1&&!raw.IsReady,"pinned-fan:retry-does-not-double-close-completed-resource");
+        }
+        {
+            ResetRaw();using var raw=RawTerminal();raw.Initialize();var primary=FakeRawPort.Instances.Single();
+            foreach (var (status, data) in new (ushort, ushort)[] { (0x2e, 0x2f), (0x2e, 0x4f), (0x4e, 0x2f), (0x4f, 0x4e) })
+            {
+                bool rejected=false;
+                try { raw.Enter(status,data); }
+                catch (IOException ex) when (ex.Message == "Source catalog SuperIO ports changed") { rejected=true; }
+                check(rejected && FakeConfigPort.Instances.Count==0 && primary.Selections==0 && primary.Reads==0 && primary.Writes.Count==0,
+                    $"pinned-fan:foreign-port-pair-refused-before-io:{status:X2}/{data:X2}");
+            }
         }
         {
             ResetRaw();var raw=RawTerminal();var bus=new MemoryBus();using var t=new PinnedSuperIoFanTransport(raw,source,bus);t.Initialize();

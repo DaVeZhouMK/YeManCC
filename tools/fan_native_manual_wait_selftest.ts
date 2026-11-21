@@ -216,10 +216,20 @@ async function main(){
   }finally{await cleanup(f);}
  });
  await check('pending native state disappears temporarily, bounded observation later recovers',async()=>{
-  const f=make(1200);try{await f.life.start({manualRecovery:true});f.host.half();f.set(state('resuming'));let probes=0;
-   f.afterRead(()=>{probes++;if(probes===3)f.set(null);if(probes===4)f.set(state());});
-   const error=await bounded(f.life.start({manualRecovery:true}).then(()=>'',e=>String(e)),1600);assert.equal(error,'');await f.life.apply(curve);assert.deepEqual(f.host.enabledOwners,[2]);
-  }finally{await cleanup(f);}
+  // power.fanLifecycle returns no phase or generation when capture races a notification.
+  const changing={known:false,reason:'power-context-changing',scope:'fan-only',hardwareWritesAllowed:false,resumeReady:false} as unknown as PowerLifecycleState;
+  for(const [variant,unavailable] of [['missing',null],['unknown',changing]] as const){
+   const f=make(1200);try{await f.life.start({manualRecovery:true});f.host.half();f.set(state('resuming'));let probes=0;
+    f.afterRead(()=>{probes++;if(probes===3)f.set(unavailable);if(probes===4){
+     assert.equal(f.starts(),1);assert.equal(f.stops(),0);assert.deepEqual(f.host.closedOwners,[]);assert.deepEqual(f.host.enabledOwners,[]);
+     f.set(state());
+    }});
+    const error=await bounded(f.life.start({manualRecovery:true}).then(()=>'',e=>String(e)),1600);
+    assert.equal(error,'',variant+' snapshot retired the original manual click');
+    assert(probes>=4);await f.life.apply(curve);assert.deepEqual(f.host.enabledOwners,[2]);assert.equal(f.wakeCalls(),0,'existing Resuming does not need a second wake');
+    observations.push({scenario:'manual-native-wait-transient-observation',variant,probes,wakeCalls:f.wakeCalls(),closeOwners:f.host.closedOwners,enabledOwners:f.host.enabledOwners});
+   }finally{await cleanup(f);}
+  }
  });
  await check('normal ready manual ON and curve edits add no wait or promotion',async()=>{
   const f=make();try{await f.life.start({manualRecovery:true});await f.life.apply(curve);const n=f.reads();await f.life.apply(curve);assert.equal(f.reads(),n);assert.equal(f.wakeCalls(),0);assert.equal(f.starts(),1);assert.equal(f.host.closedOwners.length,0);

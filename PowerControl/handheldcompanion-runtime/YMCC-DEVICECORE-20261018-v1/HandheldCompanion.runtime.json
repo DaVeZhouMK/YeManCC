@@ -34,7 +34,7 @@
     },
     {
       "path": "HandheldCompanion.dll",
-      "sha256": "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c"
+      "sha256": "f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c"
     },
     {
       "path": "HandheldCompanion.json",
@@ -352,7 +352,7 @@
   "role": "YMCC derived device-only runtime; modified output, not upstream HC package",
   "upstreamRuntimeId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
   "upstreamManifestSha256": "4a97af7fb2e37763f2fe896da97412c3b1a9d19c22de2b4ae83ba1a6d5e83b63",
-  "deviceCoreProfileSha256": "dccc76c1715c36224d1c5f192ae162fa3bb6bd0444e969e80fef0435de284278",
+  "deviceCoreProfileSha256": "a5d6df37ca3d27037889b6595d39d8704202e28147e671332e1d117e642f786e",
   "modifiedByYmcc": true,
   "forbiddenEntryPoints": [
     "HC ordinary App/UI entry point",

@@ -97,7 +97,10 @@ static void shortcutSummonFrontendCases() {
         check(nativeYmccShortcutEmit("window.summon",0) && fixtureOwnActions==std::vector<std::string>{"window.summon"},
             "normal/hidden/iconic YMCC restores instead of hiding remembered maximization");
     }
-    check(!ymcc::summonPressHides(false,true,false,true,true),"invalid HWND cannot enter hide branch");
+    const HWND savedMainWindow=g_hwnd;
+    g_hwnd=nullptr;
+    check(!nativeYmccShortcutEmit("window.summon",0),"invalid HWND cannot enter hide or show branch");
+    g_hwnd=savedMainWindow;
 #if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
     resetRoute(json::array());tick(0,10000);fixtureLegacyReset();fixtureWindowZoomed=true;
     fixtureLegacyEval(XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER,10100);

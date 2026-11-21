@@ -189,7 +189,7 @@ public:
     Carrier(const Carrier&)=delete;
     Carrier& operator=(const Carrier&)=delete;
     bool active() const {return published.load(std::memory_order_acquire)!=nullptr;}
-    auto snapshot() const {return published.load(std::memory_order_acquire);}
+    std::shared_ptr<const Binding> snapshot() const {return published.load(std::memory_order_acquire);}
 private:
     bool sessionInputAccepted(const Binding& b) const {
         return (b.originalUiInput||!b.visualProbe)&&b.session==acceptedSession.load(std::memory_order_acquire)&&

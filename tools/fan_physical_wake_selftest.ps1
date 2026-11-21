@@ -38,6 +38,8 @@ function Get-ProductionIpcBody([string]$signature){
 $gates=(Get-ProductionFunction 'static bool fanHostPhysicalWakeCurrent() {')+"`n"+(Get-ProductionFunction 'static bool fanHostPowerMayWrite() {')+"`n"+(Get-ProductionFunction 'static bool fanHostPowerMayResume() {')
 $lifecycle=Get-ProductionIpcBody '    ipc_on("power.fanLifecycle", [](const json&) -> json {'
 $manual=Get-ProductionIpcBody '    ipc_on("power.fanManualWake", [](const json& a) -> json {'
+$sharedSnapshot=(Get-ProductionFunction 'static json sharedPowerLifecycleSnapshot() {')+"`n"+
+    (Get-ProductionFunction 'static void publishSharedFanWake(unsigned long long generation) noexcept {')
 $queueWithContinuation='static void fanHostQueueSuspend(const char* reason,unsigned long long generation,bool resumeUnstarted) {'
 if($native.Contains($queueWithContinuation)){
     $queueDeclaration='static void fanHostQueueSuspend(const char* reason, unsigned long long generation, bool resumeUnstarted = false);'
@@ -89,6 +91,8 @@ $factPath=Join-Path $EvidenceRoot 'fan_physical_wake_native_fact.inc'
 $gatesPath=Join-Path $EvidenceRoot 'fan_physical_wake_native_gates.inc'
 $lifecyclePath=Join-Path $EvidenceRoot 'fan_physical_wake_native_lifecycle.inc'
 $manualPath=Join-Path $EvidenceRoot 'fan_physical_wake_native_manual.inc'
+$snapshotPath=Join-Path $EvidenceRoot 'fan_physical_wake_native_shared_snapshot.inc'
+[IO.File]::WriteAllText($snapshotPath,$sharedSnapshot,$utf8)
 [IO.File]::WriteAllText($gatesPath,$gates,$utf8)
 [IO.File]::WriteAllText($lifecyclePath,$lifecycle,$utf8)
 [IO.File]::WriteAllText($manualPath,$manual,$utf8)
@@ -114,6 +118,7 @@ if($LASTEXITCODE -ne 0){Get-Content (Join-Path $EvidenceRoot 'build.out');throw 
 foreach($binding in @(@($nativePath,$nativeSha),@($headerPath,$headerSha),@($fixturePath,$fixtureSha),@($runnerPath,$runnerSha),@($jsonPath,$jsonSha))){if((Get-FileHash -LiteralPath $binding[0] -Algorithm SHA256).Hash -ne $binding[1]){throw "source changed during native fixture preparation: $($binding[0])"}}
 if([IO.File]::ReadAllText($queuePath) -cne $queue -or [IO.File]::ReadAllText($publishPath) -cne $publish -or [IO.File]::ReadAllText($factPath) -cne $fact -or [IO.File]::ReadAllText($gatesPath) -cne $gates -or [IO.File]::ReadAllText($lifecyclePath) -cne $lifecycle -or [IO.File]::ReadAllText($manualPath) -cne $manual){throw 'extracted native caller bytes changed'}
 foreach($binding in $sharedHeaders){if((Get-FileHash -LiteralPath $binding.path -Algorithm SHA256).Hash -ne $binding.sha256){throw 'Shared power header drift'}}
+if([IO.File]::ReadAllText($snapshotPath) -cne $sharedSnapshot){throw 'extracted shared Fan projection bytes changed'}
 & $exe @($(if($CallersOnly){'--callers-only'}elseif($SharedPowerOnly){'--shared-power-only'})) *> (Join-Path $EvidenceRoot 'gate.out');$code=$LASTEXITCODE
 Get-Content (Join-Path $EvidenceRoot 'gate.out') -Tail 2
 if($code -ne 0){throw 'physical gate failed'}
@@ -122,6 +127,7 @@ if($code -ne 0){throw 'physical gate failed'}
     exit=$code;headerSha256=$headerSha;nativeSourcePath=$nativePath;nativeSha256=$nativeSha;fixtureSha256=$fixtureSha;runnerSha256=$runnerSha;jsonSha256=$jsonSha
     extractedSources=@(@{path=$queuePath;sha256=(Get-FileHash -LiteralPath $queuePath -Algorithm SHA256).Hash},@{path=$publishPath;sha256=(Get-FileHash -LiteralPath $publishPath -Algorithm SHA256).Hash},@{path=$factPath;sha256=(Get-FileHash -LiteralPath $factPath -Algorithm SHA256).Hash},@{path=$gatesPath;sha256=(Get-FileHash -LiteralPath $gatesPath -Algorithm SHA256).Hash},@{path=$lifecyclePath;sha256=(Get-FileHash -LiteralPath $lifecyclePath -Algorithm SHA256).Hash},@{path=$manualPath;sha256=(Get-FileHash -LiteralPath $manualPath -Algorithm SHA256).Hash})
     sharedPowerHeaders=$sharedHeaders
+    sharedFanProjection=@{path=$snapshotPath;sha256=(Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash}
     scheduler='deterministic-deferred-production-worker; original concurrent header assertion uses real threads'
     limits='external Windows/HTTP/Host/shared-commit dependencies are no-I/O stubs; real local JSON and virtual clock; no device or shared-resource acceptance claim'
 }|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $EvidenceRoot 'result.json') -Encoding UTF8

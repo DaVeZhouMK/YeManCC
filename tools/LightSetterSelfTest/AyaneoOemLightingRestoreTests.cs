@@ -18,7 +18,7 @@ internal static class AyaneoOemLightingRestoreTests
     {
         checks=0;
         var hcPin=typeof(Program).GetMethod("HcPinForProfile",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,new object[]{"ymcc-device-core-v1"});
-        Check((string)hcPin! == "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c","actual helper HC profile accepts current KUN-corrected runtime");
+        Check((string)hcPin! == "f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c","actual helper HC profile accepts current DeviceCore runtime");
         var names=new[]{"AYANEO2","AYANEO2S","AYANEOAIR","AYANEOAIR1S","AYANEOAIRLite","AYANEOAIRPlusAMD","AYANEOAIRPlusAMDMendocino","AYANEOAIRPlusIntel","AYANEOAIRPro","AYANEOFlip1SKB","AYANEOFlipKB","AYANEOKUN","AYANEOSlide"};
         foreach(var name in names){var row=HcLightingCapabilityCatalog.ResolveOemOwnership("HandheldCompanion.Devices."+name);Check(row is not null,"eligible "+name);Check(row!.SharedChargeIndicatorDeclared==(name is "AYANEOAIR" or "AYANEOSlide"),"charge declaration "+name);}
         foreach(var name in new[]{"AYANEO3","AYANEONEXT2","AYANEODeviceCEc","AYANEODeviceCEii","ClawCG3EM","XboxROGAllyX","OneXPlayer3","GPDWin5","Unknown"})

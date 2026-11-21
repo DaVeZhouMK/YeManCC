@@ -74,6 +74,7 @@ export interface FanResumeRequest {
   reason?: string;
 }
 export interface FanState {
+  win4OpenFailure?: { generation: number; cleanupComplete: boolean };
   fanCapabilitySupported?: boolean | null;
   fanControlCapabilityDeclared?: boolean | null;
   fanCapabilityEvidence?: string;
@@ -330,6 +331,10 @@ function validFanResponseState(value: unknown): value is FanState {
     if (field !== undefined && typeof field !== 'boolean') return false;
   }
   if (!validSourceFanState(value)) return false;
+  const openFailure = value.win4OpenFailure;
+  if (openFailure !== undefined && (!isFanResponseObject(openFailure)
+      || !Number.isSafeInteger(openFailure.generation) || Number(openFailure.generation) < 0
+      || typeof openFailure.cleanupComplete !== 'boolean')) return false;
   if (value.lease !== undefined && value.lease !== null && !validFanResponseLease(value.lease)) return false;
   return value.leaseGeneration === undefined || value.leaseGeneration === null ||
     (Number.isSafeInteger(value.leaseGeneration) && (value.leaseGeneration as number) > 0);

@@ -46,7 +46,7 @@ internal static class Program
 
     // Awaiting main-controller derivative identity/pin. Empty means disabled;
     // neither a caller hash nor a runtime manifest may enable this profile.
-    private const string ExpectedYmccHcCoreSha256 = "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c";
+    private const string ExpectedYmccHcCoreSha256 = "f79edd9dc1c60d5b5e9f3c456174b3c049ea6087ea0c988facd95bc1c174b93c";
     private const string ExpectedYmccHcCoreAssemblyName = "HandheldCompanion";
 
     private static string HcPinForProfile(string profile) => profile switch
