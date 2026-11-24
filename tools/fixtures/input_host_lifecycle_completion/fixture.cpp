@@ -6,11 +6,13 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 #include "json.hpp"
+#include "sleep_power_state.h"
 @@HEADER@@
 using json=nlohmann::json;using ULONGLONG=unsigned long long;
 static std::atomic<bool> failAllocation{false},armAuthorityAllocation{false};static unsigned allocationFailures=0;

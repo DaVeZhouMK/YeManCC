@@ -14,8 +14,11 @@ def main():
  raw=((options.negative_preimage/'main.cpp.before') if options.negative_preimage else (repo/'native/main.cpp')).read_bytes();source=raw.decode('utf-8-sig').replace('\r\n','\n')
  parser=(repo/'tools/virtual_sample_tree_perf_selftest.py').read_bytes();module=ast.parse(parser.decode('utf-8-sig'));nodes=[n for n in module.body if isinstance(n,ast.FunctionDef) and n.name in ['clean','match_brace','source_function']]
  scope={'re':re};exec(compile(ast.Module(body=nodes,type_ignores=[]),'<source-parser>','exec'),scope);extract=scope['source_function']
- signatures=['static bool taskViewContextCurrent(','static json nativeTouchTaskViewButton(','static bool ipc_cmd_async(']
+ capture='static bool taskViewCapturePower('
+ signatures=['static bool taskViewContextCurrent(','static json nativeTouchTaskViewButton(','static bool ipc_cmd_async(']+([capture] if capture in source else [])
  bodies={s:extract(source,s) for s in signatures}
+ surface=(repo/'native/game_overlay_surface.h').read_bytes()
+ main_presented=extract(surface.decode('utf-8-sig').replace('\r\n','\n'),'static bool gameOverlayMainPresented(')
  guardStart='        if(cmd=="window.touchTaskViewButton"&&sourceView!=g_view.Get())'
  guard=source[source.index(guardStart):source.index('        // The main window\'s render handshake',source.index(guardStart))]
  registration='    ipc_on("window.touchTaskViewButton", [](const json& args) -> json {return nativeTouchTaskViewButton(args);});'
@@ -24,9 +27,10 @@ def main():
  assert all(x not in body for x in ['SendInput','InjectTouchInput','nativeSendTaskView','shell.taskView'])
  assert source.index(guardStart,source.index('static void ipc_dispatch('))<source.index('        if (cmd == "shell.taskView")',source.index('static void ipc_dispatch('))
  header=((options.negative_preimage/'task_view_touch_activation.h.before') if options.negative_preimage else (repo/'native/task_view_touch_activation.h')).read_bytes();j=(repo/'deps/json/json.hpp').read_bytes()
- for name,data in [('task_view_touch_activation.h',header),('json.hpp',j)]:
+ sleep_headers={name:(repo/'native'/name).read_bytes() for name in ['sleep_power_state.h','sleep_power_observation.h']}
+ for name,data in [('task_view_touch_activation.h',header),('json.hpp',j),*sleep_headers.items()]:
   with (run/name).open('xb') as f:f.write(data)
- template=(base/'task_view_touch_native_fixture.cpp.in').read_bytes();fixture=template.decode('utf-8').replace('__CONTEXT__',bodies[signatures[0]]).replace('__ENDPOINT__',body).replace('__ASYNC__',bodies[signatures[2]]).replace('__SOURCE_GUARD__',guard).replace('__REGISTRATION__',registration)
+ template=(base/'task_view_touch_native_fixture.cpp.in').read_bytes();fixture=template.decode('utf-8').replace('__MAIN_PRESENTED__',main_presented).replace('__CONTEXT__',bodies.get(capture,'')+'\n'+bodies[signatures[0]]).replace('__ENDPOINT__',body).replace('__ASYNC__',bodies[signatures[2]]).replace('__SOURCE_GUARD__',guard).replace('__REGISTRATION__',registration)
  write(run/'fixture.cpp',fixture)
  sdk=Path('C:/Program Files (x86)/Windows Kits/10');version='10.0.26100.0';vc=Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
  includes=';'.join(str(sdk/'Include'/version/x) for x in ['ucrt','shared','um','winrt','cppwinrt']);libs=';'.join(str(sdk/'Lib'/version/x/'x64') for x in ['ucrt','um'])
@@ -50,6 +54,8 @@ def main():
  current=(repo/'native/main.cpp').read_text(encoding='utf-8-sig')
  assert all(extract(current,s)==b for s,b in bodies.items()) and guard in current and registration in current
  assert (repo/'native/task_view_touch_activation.h').read_bytes()==header
- result={'pass':True,'profiles':profiles,'run':str(run),'functionHashes':{s:sha(b.encode()) for s,b in bodies.items()},'guardHash':sha(guard.encode()),'registrationHash':sha(registration.encode()),'headerSha256':sha(header),'inputPins':{'mainObservedSha256':sha(raw),'parserSha256':sha(parser),'templateSha256':sha(template),'jsonSha256':sha(j)},'actualOSInput':False,'fullNative':False}
+ assert all((repo/'native'/name).read_bytes()==data for name,data in sleep_headers.items())
+ assert extract((repo/'native/game_overlay_surface.h').read_text(encoding='utf-8-sig'),'static bool gameOverlayMainPresented(')==main_presented
+ result={'pass':True,'profiles':profiles,'run':str(run),'functionHashes':{s:sha(b.encode()) for s,b in {**bodies,'static bool gameOverlayMainPresented(':main_presented}.items()},'guardHash':sha(guard.encode()),'registrationHash':sha(registration.encode()),'headerSha256':sha(header),'inputPins':{'mainObservedSha256':sha(raw),'parserSha256':sha(parser),'templateSha256':sha(template),'jsonSha256':sha(j),'gameOverlaySurfaceSha256':sha(surface),**{name:sha(data) for name,data in sleep_headers.items()}},'actualOSInput':False,'fullNative':False}
  write(run/'result.json',json.dumps(result,indent=2));write(out/'NATIVE-RESULT.json',json.dumps(result,indent=2));print(json.dumps(result))
 if __name__=='__main__':main()

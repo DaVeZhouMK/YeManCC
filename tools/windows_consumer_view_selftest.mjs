@@ -12,7 +12,7 @@ try{
  let view=source.slice(viewStart,viewEnd);result.sections=[{name:'typed-preparation',sha256:sha(source.slice(transportStart,viewStart))},{name:'consumer-view',sha256:sha(view)}];
  // Reuse the same memory counter type in the controlled old transport backend.
  // Its production declaration has no behavior; all view functions stay exact.
- if(!nativeContext&&source.includes('static void inputCaptureWindowsSelectionPublishContext('))view+='\nstatic void inputCaptureWindowsSelectionPublishContext(const WindowsSensorView*){auto c=std::atomic_load(&g_windowsSelectionWorkerContext);if(c&&!fixtureModelBound)c->active->store(false);}\n';
+ if(!nativeContext&&source.includes('static void inputCaptureWindowsSelectionPublishContext('))view+='\nstatic void inputCaptureWindowsSelectionPublishContext(const WindowsSensorView*){auto c=g_windowsSelectionWorkerContext.load();if(c&&!fixtureModelBound)c->active->store(false);}\n';
  const choice='struct WindowsChoiceCounter {std::atomic<std::uint64_t> activeBindingGeneration{1};};';if(!view.includes(choice))throw Error('Choice type');view=view.replace(choice,'using WindowsChoiceCounter=Sink;');result.fixtureTypeAlias='WindowsChoiceCounter aliases controlled transport Sink; same atomic field, explicit test epoch 20';
  if(control==='--borrow-default-raw'){const anchor='part.axes={raw.sample.x,raw.sample.y,raw.sample.z};';if(!view.includes(anchor))throw Error('Raw anchor');view=view.replace(anchor,'part.axes=kind==0?std::array<double,3>{g_inputCaptureSink->gx,g_inputCaptureSink->gy,g_inputCaptureSink->gz}:std::array<double,3>{g_inputCaptureSink->ax,g_inputCaptureSink->ay,g_inputCaptureSink->az};');}
  if(control==='--discard-sequence')view=view.replace('part.sequence=raw.sequence;','part.sequence=0;');

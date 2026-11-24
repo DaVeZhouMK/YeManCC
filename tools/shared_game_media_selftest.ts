@@ -22,8 +22,14 @@ class SharedGameMedia extends ProductionSharedGameMedia {
 }
 const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');
 const dcPowerOnly=process.argv.includes('--dc-power');
-for(const option of process.argv.slice(2))if(!['--stability-recovery','--dc-power'].includes(option))throw Error('Unknown media scenario selection: '+option);
-if(dcPowerOnly&&stabilityRecoveryOnly)throw Error('Choose one exact selection');
+const lookupOnly=process.argv.includes('--lookup-coalescing-only');
+const options=process.argv.slice(2);
+for(let i=0;i<options.length;i++){
+ const option=options[i];
+ if(option==='--lookup-case'&&lookupOnly&&options[i+1]&&!options[i+1].startsWith('--')){++i;continue;}
+ if(!['--stability-recovery','--dc-power','--lookup-coalescing-only'].includes(option))throw Error('Unknown media scenario selection: '+option);
+}
+if(Number(dcPowerOnly)+Number(stabilityRecoveryOnly)+Number(lookupOnly)>1)throw Error('Choose one exact selection');
 let cases=0,checks=0;
 
 function equal(actual:unknown,expected:unknown,message:string){checks++;assert.deepEqual(actual,expected,message);}
@@ -98,6 +104,30 @@ async function lookupCoalescingCases(){
  await scenario('lookup: nested request metadata differences remain separate',async f=>{const tasks=[one(f,{appId:570,selection:{url:'https://example.invalid/a'}}),one(f,{appId:570,selection:{url:'https://example.invalid/b'}})];release(f);await Promise.all(tasks);equal(f.calls.length,2,'all nested native arguments participate');});
  await scenario('lookup: Steam epochs revisions and ordinary readers never share authority',async f=>{const tasks=[one(f,{appId:570},steamTicket()),one(f,{appId:570},{...steamTicket(),demandEpoch:'new-focus'}),one(f,{appId:570},{...steamTicket(),demandRevision:2}),one(f,{appId:570})];release(f);await Promise.all(tasks);equal(f.calls.length,4,'different native authority creates independent reads');});
  await scenario('lookup: equal ticket bytes still validate each caller after response',async f=>{let active=true;const a=one(f,{appId:570},steamTicket(()=>active)),b=one(f,{appId:570},steamTicket());active=false;release(f);await assert.rejects(()=>a,/steam-demand-withdrawn/);checks++;equal((await b).ready,true,'other current ticket remains usable');equal(f.calls.length,1,'identical native ticket values share only transport work');});
+ await scenario('lookup: reselected Steam game does not join the retired selection',async f=>{
+  let selection=1;
+  const target={appId:570,name:'Fixture'};
+  const original=one(f,target,steamTicket(()=>selection===1));
+  selection=2;
+  const other=one(f,{appId:730,name:'Other'},steamTicket(()=>selection===2));
+  selection=3;
+  const newTicket=steamTicket(()=>selection===3);
+  const current=one(f,target,newTicket);
+  equal(f.calls.length,3,'A-B-A issues a fresh read under the same native foreground');
+  equal(f.calls[2].args,f.calls[0].args,'no selection token is added to the wire');
+  f.pending.shift().resolve(value());
+  await assert.rejects(()=>original,/steam-demand-withdrawn/);checks++;
+  f.pending.shift().resolve(value());
+  await assert.rejects(()=>other,/steam-demand-withdrawn/);checks++;
+  const joined=one(f,target,newTicket);
+  equal(f.calls.length,3,'retired settlement cannot remove current deduplication');
+  const prior=value();
+  f.pending.shift().resolve({...prior,asset:{...prior.asset!,id:'derived-720p30',kind:'video',reducedPlayback:true}});
+  for(const found of await Promise.all([current,joined])){
+   equal(found.asset?.id,'derived-720p30','both current consumers see the derivative');
+   equal(found.bindingRevision,prior.bindingRevision,'a derivative does not revise the binding');
+  }
+ });
  await scenario('lookup: already withdrawn demand sends zero native requests',async f=>{const a=one(f,{appId:570},steamTicket(()=>false));await assert.rejects(()=>a,/steam-demand-withdrawn/);checks++;equal(f.calls.length,0,'denied before IPC');});
  await scenario('lookup: event invalidation and old completion preserve a replacement flight',async f=>{
   const a=one(f);f.owner.changed('asset','steam-570');const b=one(f);equal(f.calls.length,2,'post-change read does not share pre-change query');f.pending.shift().resolve(value(1));await a;const c=one(f);equal(f.calls.length,2,'old cleanup cannot remove the replacement flight');release(f,2);equal((await b).bindingRevision,2,'new query owns current result');equal((await c).bindingRevision,2,'later overlapping read shares replacement');
@@ -107,7 +137,7 @@ async function lookupCoalescingCases(){
  await scenario('lookup: stop rejects both a late response and future queries',async f=>{const a=one(f);f.owner.stop();release(f);await assert.rejects(()=>a,/media-owner-stopped/);checks++;const b=one(f);release(f);await assert.rejects(()=>b,/media-owner-stopped/);checks++;equal(f.calls.length,1,'no new native query after stop');equal((f.owner as any).lookupFlights?.size,0,'stop releases all sharing records');const inactive=await f.owner.ensure({appId:570,name:'Fixture',verified:true},'library');equal(inactive.status,'consumer-inactive','stopped ensure completes inertly under the original contract');equal(f.calls.length,1,'inert ensure creates no query or admission');});
  await scenario('lookup: bounded map dispatches every overflow request',async f=>{const tasks=Array.from({length:80},(_,i)=>one(f,{appId:1000+i}));const retained=(f.owner as any).lookupFlights?.size;tasks.push(one(f,{appId:1079}));release(f);const responses=await Promise.all(tasks);equal(responses.length,81,'overflow is not dropped');equal(f.calls.length,81,'untracked overflow dispatches independently');equal(retained,64,'retained in-flight keys have a fixed bound');equal((f.owner as any).lookupFlights?.size,0,'settling overflow leaves no records');});
  await scenario('lookup: synchronous transport exceptions do not poison later reads',async f=>{let count=0;const owner=new ProductionSharedGameMedia({invoke:((command:string)=>{equal(command,'gameMedia.resolve','original command');if(++count===1)throw Error('fixture-sync-failure');return Promise.resolve(value(2));}) as any});try{let first:Promise<any>;try{first=Promise.resolve(owner.lookup({appId:570}));}catch(error){first=Promise.reject(error);}await assert.rejects(()=>first,/fixture-sync-failure/);checks++;equal((await owner.lookup({appId:570})).bindingRevision,2,'second read recovers');equal(count,2,'two actual boundary calls');}finally{owner.stop();}});
- await scenario('lookup: two ordinary ensure callers retain one native admission',async f=>{const target={appId:570,name:'Fixture',verified:true};const a=f.owner.ensure(target,'ymcc',true,true),b=f.owner.ensure(target,'library',true,true);void a.catch(()=>{});void b.catch(()=>{});f.tasks.push(a,b);for(const pending of f.pending.splice(0))pending.resolve({key:'steam-570',bindingRevision:1,status:'missing'});await flush();const native=f.calls.filter((x:any)=>x.command==='gameMedia.background').length;release(f);await Promise.all([a,b]);equal(f.calls.filter((x:any)=>x.command==='gameMedia.resolve').length,1,'one common lookup');equal(native,1,'original background admission sharing preserved');});
+ await scenario('lookup: local and editor projections retain one native admission',async f=>{const target={appId:570,name:'Fixture',verified:true};const a=f.owner.ensure(target,'ymcc',true,true),b=f.owner.ensure(target,'library',true,true);void a.catch(()=>{});void b.catch(()=>{});f.tasks.push(a,b);for(const pending of f.pending.splice(0))pending.resolve({key:'steam-570',bindingRevision:1,status:'missing'});await flush();const native=f.calls.filter((x:any)=>x.command==='gameMedia.background').length;release(f);await Promise.all([a,b]);equal(f.calls.filter((x:any)=>x.command==='gameMedia.resolve').map((x:any)=>x.args.localWallpaperDelivery),[true,undefined],'local playback and editor keep their respective delivery projections');equal(native,1,'original background admission sharing preserved');});
   await scenario('lookup: replaced flight survives old transport rejection',async f=>{
    const old=one(f),rejected=assert.rejects(()=>old,/fixture-old-transport-failed/);void rejected.catch(()=>{});f.tasks.push(rejected);
    f.owner.invalidateLookups();const current=one(f);
@@ -129,7 +159,7 @@ async function lookupCoalescingCases(){
   });
  return callCounts;
 }
-if(process.argv.includes('--lookup-coalescing-only')){
+if(lookupOnly){
  const invocationCounts=await lookupCoalescingCases();
  const selectedOk=reports.length>0&&reports.every(row=>row.ok);
  console.log(JSON.stringify({ok:selectedOk,cases,checks,reports,invocationCounts,selection:'lookup-coalescing-only',defaultGroups:'NOT_RUN',realNetworkOrApplication:false}));
@@ -429,22 +459,34 @@ async function stabilityRecoveryCases(){
  const retryAt=source.indexOf("  const retry=sharedGameMedia.subscribe(reason=>",end),retryEnd=source.indexOf('\n',retryAt);assert.ok(retryAt>=end&&retryEnd>retryAt,'actual retry subscription boundary');
  const makeRefresh=new Function('env','with(env){'+body+source.slice(retryAt,retryEnd)+';return {refresh,stop:retry};}');
  const flush=async()=>{for(let n=0;n<4;n++)await new Promise<void>(r=>setImmediate(r));};
- function harness(consumer:string|undefined,options:{steam?:boolean;ymcc?:boolean;background?:boolean;requested?:boolean;attachHost?:boolean;deadline?:boolean}={}){
-  let clock=Date.now(),id=0;const settings={steam:options.steam??true,ymcc:options.ymcc??true,background:options.background??true};const calls:any[]=[],ensures:any[]=[],timers=new Map<number,{fn:()=>void;ms:number}>();
+ function harness(consumer:string|undefined,options:{steam?:boolean;ymcc?:boolean;background?:boolean;requested?:boolean;attachHost?:boolean;deadline?:boolean;shortcut?:boolean}={}){
+  let clock=Date.now(),id=0;const settings={steam:options.steam??true,ymcc:options.ymcc??true,background:options.background??true};const calls:any[]=[],ensures:any[]=[],frames:any[]=[],timers=new Map<number,{fn:()=>void;ms:number}>();
   let record:GameMediaEntry={key:'steam-570',appId:570,name:'Current fixture',bindingRevision:4,status:'error',ready:false,retryAt:options.deadline===false?0:clock+1000,refreshRequested:options.requested===true,...(consumer===undefined?{}:{demandConsumer:consumer})};
   const schedule=((fn:()=>void,ms:number)=>{timers.set(++id,{fn,ms});return id;}) as any,cancel=((timer:number)=>timers.delete(timer)) as any;
   const owner=new ProductionSharedGameMedia({enabled:()=>settings.steam,backgroundEnabled:()=>settings.background,nativeBackground:true,now:()=>clock,schedule,cancel,invoke:(async(command:string,args:any)=>{calls.push({command,args});if(command==='gameMedia.resolve')return {...record};if(command==='gameMedia.background')return {};throw Error('unexpected owner command '+command);}) as any});
   const actualEnsure=owner.ensure.bind(owner);owner.ensure=((...args:any[])=>{ensures.push(args);return (actualEnsure as any)(...args);}) as any;
   const env:any={wallpaperPowerBlocked,captureWallpaperPower,wallpaperPowerCurrent,disposed:false,refreshing:false,refreshAgain:false,revisions:new Map([['steam-570',4]]),aliases:new Map(),reconcileMediaAliases,sharedGameMedia:owner,steamWallpaperEnabled:()=>settings.steam,backgroundDownloadEnabled:()=>settings.background,manualAllowed:()=>false,getUiSetting:()=>settings.ymcc,gameMediaPairComplete,window:{dispatchEvent(){}},CustomEvent:globalThis.CustomEvent,Date:{now:()=>clock},scan(){},invoke:async(command:string)=>{calls.push({command});if(command!=='gameMedia.snapshot')throw Error(command);return {entries:{'steam-570':{...record}},aliases:{}};}};
   const reader=makeRefresh(env);let host:ReturnType<typeof startSteamWallpaperHost>|null=null,extension:any,foreground:(value:any)=>void=()=>{};
-  if(options.attachHost){host=startSteamWallpaperHost({enabled:()=>settings.steam,readForeground:async()=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'live-retry',revision:1}),onForeground:handler=>{foreground=handler;return()=>{};},onResume:()=>()=>{},inventory:()=>{},appearance:()=>({opacity:.64,blur:0}),media:owner,now:()=>clock,schedule,cancel,register:value=>{extension=value;return()=>{};},invoke:(async(command:string)=>{if(command==='deckySidebar.mirrorReply')return true;throw Error(command);}) as any});host.ready();extension.connected({connection:'1',runId:'a'.repeat(32)});extension.request({connection:'1',runId:'a'.repeat(32),request:{command:'wallpaper.context',contextSeq:1,appId:'570',visible:true}});}
-  return {owner,reader,calls,ensures,timers,settings,env,foreground,async fire(){const next=[...timers][0];assert.ok(next,'retained failure needs a deadline timer');timers.delete(next[0]);clock+=next[1].ms;next[1].fn();await flush();},setRecord(value:Partial<GameMediaEntry>){record={...record,...value};},async settle(){await flush();},stop(){host?.stop();reader.stop();owner.stop();}};
+  if(options.attachHost){host=startSteamWallpaperHost({enabled:()=>settings.steam,readForeground:async()=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'live-retry',revision:1}),onForeground:handler=>{foreground=handler;return()=>{};},onResume:()=>()=>{},inventory:()=>{},appearance:()=>({opacity:.64,blur:0}),media:owner,now:()=>clock,schedule,cancel,register:value=>{extension=value;return()=>{};},invoke:(async(command:string,args:any)=>{if(command==='gameMedia.shortcut'&&options.shortcut)return {executable:'G:/fixture/game.exe',verified:false};if(command==='deckySidebar.mirrorReply'){if(args.message.type==='wallpaper')frames.push(args.message);return true;}throw Error(command);}) as any});host.ready();extension.connected({connection:'1',runId:'a'.repeat(32)});extension.request({connection:'1',runId:'a'.repeat(32),request:{command:'wallpaper.context',contextSeq:1,appId:options.shortcut?'4294967296':'570',visible:true}});}
+  return {owner,reader,calls,ensures,frames,timers,settings,env,foreground,async fire(){const next=[...timers][0];assert.ok(next,'retained failure needs a deadline timer');timers.delete(next[0]);clock+=next[1].ms;next[1].fn();await flush();},setRecord(value:Partial<GameMediaEntry>){record={...record,...value};},async settle(){await flush();},stop(){host?.stop();reader.stop();owner.stop();}};
  }
  for(const consumer of ['library','ymcc',undefined])await run('R18 recovery: '+(consumer||'legacy library')+' keeps independent identity through failure deadline',async()=>{const f=harness(consumer,{steam:false});try{await f.reader.refresh();equal(f.timers.size,1,'independent owner retains one deadline with Steam OFF');equal(f.ensures.length,0,'no preparation before its deadline');await f.fire();equal(f.ensures.length,1,'deadline submits one current independent retry');equal(f.ensures[0][1],consumer==='ymcc'?'ymcc':'library','library/legacy never become ticketless Steam');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,1,'one native background admission');equal(f.calls.some(x=>x.args?.demandConsumer==='steam'),false,'independent request never borrows a Steam ticket');equal(f.timers.size,0,'no duplicate deadline timer');}finally{f.stop();}});
  await run('R18 recovery: global refresh never manufactures a Steam retry ticket',async()=>{const f=harness('steam');try{await f.reader.refresh();equal(f.timers.size,1,'retained Steam failure announces one shared deadline');await f.fire();equal(f.ensures.length,0,'global refresh must leave Steam retry to selected Host');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,0,'global refresh cannot submit a ticketless Steam request');}finally{f.stop();}});
  await run('R18 recovery: real Shared owner and Host share one deadline and one current-ticket retry',async()=>{const f=harness('steam',{attachHost:true});try{await f.reader.refresh();await f.settle();equal(f.timers.size,1,'Host and global refresh share one existing retry owner');equal(f.ensures.length,0,'failed resource waits for actual deadline');await f.fire();equal(f.ensures.length,1,'only current Host owns ensure at deadline');equal(f.ensures[0][1],'steam','retry keeps Steam consumer');equal([f.ensures[0][4].demandEpoch,f.ensures[0][4].demandRevision],['live-retry',1],'retry captures current native proof');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,1,'one target admission, not global plus Host');equal(f.timers.size,0,'completed attempt leaves no duplicate retry timer');}finally{f.stop();}});
  await run('R18 recovery: expired deadline cannot recreate Steam demand after native blur',async()=>{const f=harness('steam',{attachHost:true});try{await f.reader.refresh();await f.settle();f.foreground({source:'native-steam-bigpicture-foreground',known:true,foreground:false,current:false,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'blur-retry',revision:2});await f.settle();await f.fire();equal(f.ensures.length,0,'blurred Host never retries from global deadline');equal(f.calls.filter(x=>x.command==='gameMedia.background').length,0,'blurred deadline cannot submit background work');}finally{f.stop();}});
  await run('R18 recovery: explicit library refresh and disabled independent owners retain their own gates',async()=>{const manual=harness('steam',{steam:false,requested:true,deadline:false});try{await manual.reader.refresh();equal(manual.ensures.length,1,'explicit library request is preserved');equal(manual.ensures[0][1],'library','explicit edit uses independent library consumer');}finally{manual.stop();}for(const [consumer,settings] of [['ymcc',{steam:false,ymcc:false}],['library',{steam:false,background:false}],['background',{steam:true}],['unrecognized',{steam:true}]] as const){const f=harness(consumer,{...settings,deadline:false});try{await f.reader.refresh();equal(f.ensures.length,0,'disabled/unknown owner has no implicit fallback authorization');equal(f.timers.size,0,'disabled/unknown owner has no retry clock');}finally{f.stop();}}});
+ await run('R18 recovery: download OFF retains both shortcut lookup projections',async()=>{
+  const f=harness('steam',{attachHost:true,shortcut:true,background:false,deadline:false});try{
+   await f.settle();equal(f.calls.map(x=>x.command),['gameMedia.resolve','gameMedia.resolve'],'different shortcut projections are not collapsed');equal(f.calls.map(x=>[x.args.appId,x.args.currentGameWallpaper]),[[undefined,true],[0,undefined]],'read-only EXE fallback and explicit AppID remain distinct');equal(f.frames.map(x=>[x.appId,x.status,x.entry]),[['4294967296','error',null]],'the client still receives the current selection');
+  }finally{f.stop();}
+ });
+ await run('R18 recovery: download OFF uses one same-target read and still sees a later asset edit',async()=>{
+  const f=harness('steam',{attachHost:true,background:false,deadline:false});try{
+   await f.settle();equal(f.frames.map(x=>[x.contextSeq,x.status,x.entry]),[[1,'error',null]],'initial failure status reaches the current selection');equal(f.calls.map(x=>x.command),['gameMedia.resolve'],'same-target publication has no speculative second resolve');
+   f.setRecord({bindingRevision:5,status:'ready',ready:true,staticReady:true,asset:{id:'new-image',revision:'5',kind:'image',mime:'image/jpeg',extension:'jpg',bytes:10},url:'http://127.0.0.1/new-image'});f.owner.changed('asset','steam-570');await f.settle();
+   equal(f.calls.map(x=>x.command),['gameMedia.resolve','gameMedia.resolve'],'asset notification still causes one fresh local resolve without background work');equal(f.frames.at(-1)?.entry?.assetId,'new-image','explicit asset edit reaches Decky even while downloads stay disabled');equal(f.timers.size,0,'no extra retry timer');
+  }finally{f.stop();}
+ });
 }
 
 

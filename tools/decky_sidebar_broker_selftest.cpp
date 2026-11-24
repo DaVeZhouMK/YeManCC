@@ -21,10 +21,27 @@ static DWORD observedBrokerWait(DWORD count,const WSAEVENT* events,BOOL all,DWOR
     if(writeProbe::enabled.load()&&timeout==WSA_INFINITE)writeProbe::infiniteWaits.fetch_add(1);
     return ::WSAWaitForMultipleEvents(count,events,all,timeout,alertable);
 }
+// Hold just the selected real read until its client has half-closed.
+namespace closeProbe {
+    static std::atomic<bool> arm{false},release{true},entered{false};
+    static std::atomic<unsigned> eof{0};
+}
+static int observedBrokerRecv(SOCKET socket,char* data,int size,int flags){
+    if(closeProbe::arm.exchange(false)){
+        closeProbe::entered.store(true);
+        const auto until=GetTickCount64()+2000;
+        while(!closeProbe::release.load()&&GetTickCount64()<until)Sleep(1);
+    }
+    const int n=::recv(socket,data,size,flags);
+    if(n==0)closeProbe::eof.fetch_add(1);
+    return n;
+}
 #define send observedBrokerSend
+#define recv observedBrokerRecv
 #define WSAWaitForMultipleEvents observedBrokerWait
 #include "../native/decky_sidebar_broker.h"
 #undef WSAWaitForMultipleEvents
+#undef recv
 #undef send
 #include "../native/decky_sidebar_diagnostics.h"
 #include <iostream>
@@ -115,33 +132,68 @@ struct LoopbackSocket {
     }
 };
 // Explicit bounded current-peer branch; default protocol and write tests stay separate.
-static int peerAdmissionTests(){
+static int peerAdmissionTests(bool stampCost){
     Broker broker;std::mutex queueMutex;std::vector<Json> queued;
+    std::atomic<DWORD> requestThread{0};Json cpuSamples=Json::array();
+    const auto sampleCpu=[&](const char* stage){
+        static constexpr DWORD sentinel=0x1234;
+        SetLastError(sentinel);
+        const auto sample=broker.diagnosticWorkerCpu();
+        check(GetLastError()==sentinel,"broker CPU diagnostics preserve caller LastError");
+        if(sample)cpuSamples.push_back({{"stage",stage},{"threadId",sample->id},{"threadBirth100ns",std::to_string(sample->birth)},
+            {"kernel100ns",sample->kernel},{"user100ns",sample->user}});
+        return sample;
+    };
+    Json stampSamples=Json::array();
     const auto accept=[&](const Json& packet){return broker.acceptsRequest(packet.value("connection",std::string{}),packet.value("runId",std::string{}),packet.value("connectionRevision",0ull));};
     check(!broker.acceptsRequest("1",std::string(32,'a'),1),"inactive transport refuses a purported current request");
+    check(!broker.requestStamp("")&&!broker.requestStamp("1"),"inactive transport publishes no ingress stamp");
+    check(!broker.authenticatedPeerTick(),"inactive transport has no authenticated tick");
+    check(!broker.matchesRunId("")&&!broker.matchesRunId(std::string(32,'a')),"inactive broker cannot accept a watch run hint");
+    check(!sampleCpu("before-start"),"inactive broker has no worker sample");
     const Config config{[&](const std::string& connection,const Json& request){
-        const auto current=broker.status();std::lock_guard lock(queueMutex);
-        queued.push_back({{"connection",connection},{"runId",current["runId"]},{"connectionRevision",current["connectionRevision"]},{"request",request}});
+        const auto current=broker.requestStamp(connection);if(!current)return;
+        requestThread.store(GetCurrentThreadId());
+        std::lock_guard lock(queueMutex);
+        queued.push_back({{"connection",connection},{"runId",current->runId},{"revision",current->revision},{"connectionRevision",current->connectionRevision},{"request",request}});
     },{}};
     check(broker.start(config),"start owned loopback broker");
+    check(!broker.authenticatedPeerTick(),"listening alone has no authenticated tick");
+    const auto listening=sampleCpu("listening");
+    check(listening&&listening->birth&&listening->id!=GetCurrentThreadId(),"listening broker has a distinct real worker");
     const auto boot=broker.bootstrap();Json oldPacket,newPacket;
+    const auto run=boot.at("runId").get<std::string>();
+    auto wrongRun=run;wrongRun[0]=run[0]=='a'?'b':'a';
+    check(broker.matchesRunId(run)&&!broker.matchesRunId(wrongRun),"only current watch run matches before peer authentication");
     {
-        LoopbackSocket first(boot);
+        const auto firstBegan=GetTickCount64();LoopbackSocket first(boot);
         first.sendFrame(Json{{"command","snapshot"},{"runId",boot["runId"]},{"isCurrent",true},{"connectionRevision",999999}}.dump());
         check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==1;},1000),"original authenticated A request reaches native callback");
         {std::lock_guard lock(queueMutex);oldPacket=queued.front();}
         check(accept(oldPacket),"A is accepted only while its native receipt is current");
+        const auto firstTick=broker.authenticatedPeerTick();
+        check(firstTick&&*firstTick>=firstBegan&&*firstTick<=GetTickCount64(),"A tick is latched in the real handshake window");
+        const auto active=sampleCpu("authenticated-request");
+        check(active&&active->id==requestThread.load()&&active->id==listening->id&&active->birth==listening->birth&&
+            active->kernel>=listening->kernel&&active->user>=listening->user,"actual request worker matches sampled object and cumulative counters");
         first.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual A socket close retires the native peer");
         check(!accept(oldPacket),"queued A cannot dispatch after its actual disconnect");
+        check(!broker.requestStamp(oldPacket.at("connection").get<std::string>()),"closed A publishes no ingress stamp");
+        check(!broker.authenticatedPeerTick(),"closed A publishes no authenticated tick");
+        const auto disconnected=sampleCpu("peer-disconnected");
+        check(disconnected&&disconnected->id==active->id&&disconnected->birth==active->birth,"peer disconnect does not retire listening worker identity");
+        check(broker.matchesRunId(run),"closed peer does not invalidate this broker run's wake hint");
         const auto closed=broker.status().at("peerClose");
         check(closed["closeReason"]=="remote-eof"||closed["closeReason"]=="socket-close","actual remote EOF has a bounded close cause");
         check(closed.at("socketError")==0&&!closed.at("websocketCloseCodeKnown").get<bool>(),"orderly remote EOF has no fabricated error or WS code");
-        LoopbackSocket second(boot);
+        const auto secondBegan=GetTickCount64();LoopbackSocket second(boot);
         second.sendFrame(Json{{"command","snapshot"},{"runId",boot["runId"]},{"isCurrent",false},{"connectionRevision",0}}.dump());
         check(waitUntil([&]{std::lock_guard lock(queueMutex);return queued.size()==2;},1000),"authenticated B request reaches native callback");
         {std::lock_guard lock(queueMutex);newPacket=queued.back();}
         check(oldPacket["connection"]!=newPacket["connection"],"new socket receives a distinct native connection");
         check(accept(newPacket),"native B fact is valid even when client says isCurrent false");
+        const auto secondTick=broker.authenticatedPeerTick();
+        check(secondTick&&*secondTick>=secondBegan&&*secondTick<=GetTickCount64(),"B publishes its own authenticated tick");
         check(!accept(oldPacket),"retired A stays refused even when client says isCurrent true");
         auto forged=newPacket;forged["runId"]=std::string(32,'f');check(!accept(forged),"wrong native run is refused");
         forged=newPacket;forged["connection"]="999999";check(!accept(forged),"unknown connection is refused");
@@ -149,6 +201,32 @@ static int peerAdmissionTests(){
         forged=newPacket;forged["connectionRevision"]=0;check(!accept(forged),"missing native serial cannot borrow client payload metadata");
         const auto stable=broker.status();for(unsigned i=0;i<100;++i)check(accept(newPacket),"stable reads retain native B");
         check(broker.status()==stable,"dispatch checks do not change transport revision or state");
+        const auto connection=newPacket.at("connection").get<std::string>();
+        const auto beforeReply=broker.requestStamp(connection);
+        check(beforeReply&&beforeReply->runId==stable.at("runId").get_ref<const std::string&>()&&beforeReply->connectionRevision==stable.at("connectionRevision").get<unsigned long long>()&&beforeReply->revision==stable.at("revision").get<unsigned long long>(),"ingress stamp matches same-state full diagnostic receipt");
+        check(!broker.requestStamp(oldPacket.at("connection").get<std::string>())&&!broker.requestStamp(""),"A or no peer cannot borrow B receipt");
+        check(broker.reply(connection,{{"type","snapshot"},{"runId",beforeReply->runId},{"snapshot",{{"revision",42u},{"runId",beforeReply->runId}}}}),"owner snapshot advances original revision");
+        const auto nextStamp=broker.requestStamp(connection);
+        check(nextStamp&&nextStamp->revision==42&&nextStamp->connectionRevision==beforeReply->connectionRevision&&nextStamp->runId==beforeReply->runId,"snapshot revision updates without changing the ingress owner");
+        check(broker.authenticatedPeerTick()==secondTick,"snapshot reply does not renew the authentication tick");
+        if(stampCost){
+            // Within the same real stable peer, compare the exact old JSON
+            // snapshot operation with the new small copy. No IPC/network sends.
+            constexpr unsigned iterations=25000;
+            const auto sample=[&](bool typed){
+                ULONG64 c0=0,c1=0;LARGE_INTEGER t0{},t1{},frequency{};QueryPerformanceFrequency(&frequency);
+                const bool counted=QueryThreadCycleTime(GetCurrentThread(),&c0)!=FALSE;QueryPerformanceCounter(&t0);
+                unsigned long long checksum=0;
+                for(unsigned i=0;i<iterations;++i){
+                    if(typed){const auto stamp=broker.requestStamp(connection);if(stamp)checksum+=stamp->runId.size()+stamp->revision+stamp->connectionRevision;}
+                    else{const auto status=broker.status();if(status.value("connection",std::string{})==connection)checksum+=status.at("runId").get_ref<const std::string&>().size()+status.at("revision").get<unsigned long long>()+status.at("connectionRevision").get<unsigned long long>();}
+                }
+                QueryPerformanceCounter(&t1);const bool cyclesKnown=QueryThreadCycleTime(GetCurrentThread(),&c1)!=FALSE&&counted;
+                check(checksum==iterations*(nextStamp->runId.size()+nextStamp->revision+nextStamp->connectionRevision),"both paths return identical real peer receipt throughout cost window");
+                stampSamples.push_back({{"typed",typed},{"iterations",iterations},{"elapsedUs",1000000.0*double(t1.QuadPart-t0.QuadPart)/double(frequency.QuadPart)},{"threadCyclesKnown",cyclesKnown},{"threadCycles",cyclesKnown?Json(c1-c0):Json(nullptr)}});
+            };
+            for(unsigned r=0;r<5;++r){sample((r&1)!=0);sample((r&1)==0);}
+        }
         // Each currently exposed command family must cross the REAL native
         // broker whitelist; callback acceptance is separate from owner mutation.
         for(const char* command:{"snapshot","game.setField","fan.setEnabled","fan.setPreset","fan.setChoice","frame.setField","touchpad.setField","global.setField","audioOptimization.setEnabled","monitor.setEnabled","performance.setControls","hud.status","hud.ack","wallpaper.context","wallpaper.status","wallpaper.neighbors","updater.status","updater.request"}){
@@ -165,18 +243,49 @@ static int peerAdmissionTests(){
         second.close();check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual B close is observed");
         check(!accept(newPacket),"B request cannot dispatch after its socket closes");
     }
-    for(const unsigned short closeCode:{1000,4001}){LoopbackSocket closing(boot);std::string payload;payload+=char(closeCode>>8);payload+=char(closeCode&255);payload+="PRIVATE-CLOSE-REASON";
+    Json observedCloseCodes=Json::array();
+    for(const unsigned short closeCode:{1000,4001,4002}){LoopbackSocket closing(boot);std::string payload;payload+=char(closeCode>>8);payload+=char(closeCode&255);payload+="PRIVATE-CLOSE-REASON";
      closing.sendFrame(payload,8);check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"actual WS close frame disconnects");
      const auto facts=broker.status().at("peerClose");check(facts.at("closeReason")=="remote-close"&&facts.at("websocketCloseCode")==closeCode&&facts.at("websocketCloseCodeKnown").get<bool>(),"actual WS numeric code retained");
      check(facts.dump().find("PRIVATE-CLOSE-REASON")==std::string::npos,"remote close reason text is never retained");
-     check(ymcc::deckydiag::record("mirror-peer",{{"peerClose",facts}}).at("peerClose")==facts,"Actual numeric client cause survives the existing native filter");}
+     check(ymcc::deckydiag::record("mirror-peer",{{"peerClose",facts}}).at("peerClose")==facts,"Actual numeric client cause survives the existing native filter");
+     observedCloseCodes.push_back(facts.at("websocketCloseCode"));}
+    Json terminalClose=Json::array();
+    for(const char* scenario:{"close-and-fin","truncated-close-and-fin","request-and-fin"}){
+        LoopbackSocket closing(boot);
+        const std::string mode=scenario;
+        auto wire=mode=="request-and-fin"?masked(Json{{"command","performance.setControls"},{"runId",run}}.dump()):masked(std::string("\x0f\xa2",2)+"PRIVATE-CLOSE-REASON",8);
+        if(mode=="truncated-close-and-fin")wire.pop_back();
+        size_t callbacks=0;{std::lock_guard lock(queueMutex);callbacks=queued.size();}
+        const auto before=closeProbe::eof.load();
+        closeProbe::entered.store(false);closeProbe::release.store(false);closeProbe::arm.store(true);
+        closing.sendBytes(reinterpret_cast<const char*>(wire.data()),wire.size());
+        const bool entered=waitUntil([]{return closeProbe::entered.load();},1000);
+        const int ended=shutdown(closing.value,SD_SEND);closeProbe::release.store(true);
+        check(entered&&ended==0,"real broker wait overlaps client half-close");
+        check(waitUntil([&]{return !broker.status().value("connected",false);},1000),"terminal receive retires the owned peer");
+        check(closeProbe::eof.load()==before+1,"real recv observed TCP EOF in the held drain");
+        {std::lock_guard lock(queueMutex);check(queued.size()==callbacks,"terminal receive never dispatches a buffered request");}
+        const auto facts=broker.status().at("peerClose");
+        terminalClose.push_back({{"case",scenario},{"facts",facts}});
+        const bool valid=mode=="close-and-fin";
+        const bool correct=facts.at("closeReason")== (valid?"remote-close":"remote-eof")&&facts.at("websocketCloseCodeKnown")==valid&&
+            (valid?facts.value("websocketCloseCode",0)==4002:!facts.contains("websocketCloseCode"));
+        if(!correct)std::cerr<<Json{{"terminalClose",terminalClose},{"realRecvEof",true},{"callbacksAdded",0}}.dump()<<std::endl;
+        check(correct,"terminal close keeps only a proven numeric cause");
+        check(facts.dump().find("PRIVATE-CLOSE-REASON")==std::string::npos,"terminal diagnostics contain no reason text");
+    }
     {LoopbackSocket owned(boot);broker.stop();const auto facts=broker.status().at("peerClose");check(facts.at("closeReason")=="owner-stop","owner stop differs from peer/network loss");
      const auto safe=ymcc::deckydiag::record("mirror-peer",{{"peerClose",facts}});check(safe.at("peerClose")==facts,"actual close facts survive the native allowlist");
      const auto privateFacts=ymcc::deckydiag::record("mirror-peer",{{"peerClose",{{"closeReason","PRIVATE"},{"token","SECRET"},{"socketError",-1},{"websocketCloseCodeKnown","true"}}}});
      check(!privateFacts.contains("peerClose"),"arbitrary strings and invalid close fact types rejected");
      check(!ymcc::deckydiag::record("runtime",{{"peerClose",facts}}).contains("peerClose"),"close facts cannot leak into unrelated events");}
     broker.stop();check(!accept(newPacket),"OFF/stop cannot be revived by a queued request");check(broker.bootstrap().empty(),"stopped broker exposes no endpoint");
-    std::cout<<Json{{"ok",true},{"mode","peer-admission"},{"observedCloseCodes",Json::array({1000,4001})},{"checks",checks},{"actualWinsock",true},{"realSteam",false},{"clientCurrentFlagsTrusted",false},{"queuedRequestsReplayed",false},{"brokerStopped",true}}.dump()<<std::endl;return 0;
+    check(!broker.requestStamp(newPacket.at("connection").get<std::string>()),"stopped broker cannot emit an old receipt");
+    check(!broker.authenticatedPeerTick(),"stopped broker cannot publish the old authenticated tick");
+    check(!broker.matchesRunId(run),"stopped broker rejects the old watch run");
+    check(!sampleCpu("stopped"),"stopped broker cannot publish old worker CPU");
+    std::cout<<Json{{"ok",true},{"mode","peer-admission"},{"observedCloseCodes",std::move(observedCloseCodes)},{"checks",checks},{"actualWinsock",true},{"realSteam",false},{"clientCurrentFlagsTrusted",false},{"queuedRequestsReplayed",false},{"brokerStopped",true},{"requestStampCosts",stampSamples},{"workerCpuSamples",cpuSamples},{"terminalClose",terminalClose}}.dump()<<std::endl;return 0;
 }
 static void fillUntilBlocked(Broker& broker,const Json& boot){
     const auto blocked=writeProbe::blocked.load();const auto connection=broker.status()["connection"].get<std::string>();
@@ -190,9 +299,53 @@ static void fillUntilBlocked(Broker& broker,const Json& boot){
     check(writeProbe::blocked.load()>blocked,"real non-reading loopback reaches WSAEWOULDBLOCK");
     std::cout<<Json{{"stage","actual-backpressure"},{"messages",sent},{"sendBytes",writeProbe::bytes.load()},{"blocked",writeProbe::blocked.load()}}.dump()<<std::endl;
 }
-static int writeDeadlineTests(){
+static void outputBurstTests(){
+    std::atomic<unsigned> accepted{0};const std::string payload(49152,'b');
+    Broker broker;
+    // All three replies are queued by the actual worker before its send event
+    // runs. The receiver and the sender both use real Winsock.
+    check(broker.start({[&](const std::string& connection,const Json& request){
+        if(request.value("command",std::string{})!="hud.status")return;
+        for(unsigned sequence=1;sequence<=3;++sequence){
+            if(broker.reply(connection,{{"type","reply"},{"runId",request["runId"]},{"sequence",sequence},{"payload",payload}}))++accepted;
+        }
+    },{}}),"burst broker starts");
+    const auto boot=broker.bootstrap();
+    const auto sendBurst=[&](LoopbackSocket& socket){socket.sendFrame(Json{{"command","hud.status"},{"runId",boot["runId"]}}.dump());};
+    {
+        LoopbackSocket stalled(boot);fillUntilBlocked(broker,boot);sendBurst(stalled);
+        check(waitUntil([&]{return !broker.status().value("connected",false);},2000),"real blocked peer still closes at the output limit");
+        const auto facts=broker.status().at("peerClose");
+        std::cout<<Json{{"stage","blocked-burst"},{"accepted",accepted.load()},{"peerClose",facts}}.dump()<<std::endl;
+        check(accepted.load()==3&&facts.at("closeReason")=="output-limit"&&facts.at("pendingOutputBytes").get<size_t>()<=kMaxPayload*2,
+            "genuine backpressure retains the same bound and reason");
+        check(broker.bootstrap()==boot,"overflow retains the listener and run identity");
+    }
+    {
+        LoopbackSocket reader(boot);sendBurst(reader);
+        unsigned received=0;
+        try{
+            for(unsigned sequence=1;sequence<=3;++sequence){
+                const auto reply=Json::parse(reader.readFrame());
+                if(reply.at("sequence")!=sequence||reply.at("payload")!=payload)break;
+                ++received;
+            }
+        }catch(const std::exception&){/* Report the actual close and frames received below. */}
+        const auto state=broker.status();const bool connected=state.value("connected",false);
+        std::cout<<Json{{"stage","reading-burst"},{"accepted",accepted.load()-3},{"receivedInOrder",received},
+            {"connected",connected},{"peerClose",state.value("peerClose",Json())}}.dump()<<std::endl;
+        check(accepted.load()==6&&received==3&&connected,"reading peer receives the whole burst in order without a false disconnect");
+    }
+    broker.stop();check(broker.bootstrap().empty(),"burst broker returns its endpoint");
+}
+static int writeDeadlineTests(bool burstOnly){
     WSADATA data{};check(WSAStartup(MAKEWORD(2,2),&data)==0,"test Winsock session starts");
     struct Cleanup{~Cleanup(){writeProbe::enabled.store(false);WSACleanup();}} cleanup;
+    if(burstOnly){
+        writeProbe::enabled.store(true);outputBurstTests();
+        std::cout<<Json{{"ok",true},{"mode","write-deadline:output-burst"},{"checks",checks},{"actualWinsock",true}}.dump()<<std::endl;
+        return 0;
+    }
     Broker broker;std::atomic<unsigned> requests{0},disconnects{0};std::atomic<bool> replyFailed{false};
     Config config{[&](const std::string& connection,const Json& message){
         ++requests;if(!broker.reply(connection,{{"type","reply"},{"runId",message["runId"]},{"value",message.value("value",std::string{})}}))replyFailed=true;
@@ -249,8 +402,8 @@ static int writeDeadlineTests(){
 }
 
 int main(int argc,char** argv){
-    if(argc>1&&std::string(argv[1])=="--peer-admission"){if(argc!=2)return 2;try{return peerAdmissionTests();}catch(const std::exception& error){std::cerr<<"FAIL peer-admission: "<<error.what()<<std::endl;return 1;}}
-    if(argc>1&&std::string(argv[1])=="--write-deadline"){try{return writeDeadlineTests();}catch(const std::exception& error){std::cerr<<"FAIL write-deadline: "<<error.what()<<std::endl;return 1;}}
+    if(argc>1&&std::string(argv[1])=="--peer-admission"){const bool stampCost=argc==3&&std::string(argv[2])=="--stamp-cost";if(argc!=2&&!stampCost)return 2;try{return peerAdmissionTests(stampCost);}catch(const std::exception& error){std::cerr<<"FAIL peer-admission: "<<error.what()<<std::endl;return 1;}}
+    if(argc>1&&std::string(argv[1])=="--write-deadline"){const bool burstOnly=argc==3&&std::string(argv[2])=="--output-burst";if(argc!=2&&!burstOnly)return 2;try{return writeDeadlineTests(burstOnly);}catch(const std::exception& error){std::cerr<<"FAIL write-deadline: "<<error.what()<<std::endl;return 1;}}
     if(argc<2)return protocolTests();
     const bool relayMode = std::string(argv[1])=="--serve-relay-fixture";
     if(!relayMode && std::string(argv[1])!="--serve-fixture")return 2;

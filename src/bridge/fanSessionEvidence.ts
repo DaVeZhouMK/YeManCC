@@ -85,11 +85,20 @@ export function hasBlockingFanTransition(remote: FanState): boolean {
     || remote.powerState === 'Resuming' || remote.powerOperationStatus === 'pending'
     || remote.powerOperationStatus === 'executing';
 }
-export function hasFailedFanOperation(remote: FanState): boolean {
+export function awaitsPublicFanResumeGrant(remote: FanState, generation: number): boolean {
+  return generation > 0 && remote.powerOperationGeneration === generation && remote.resumePhaseGeneration === generation
+    && typeof remote.powerOperationAttempt === 'number' && Number.isSafeInteger(remote.powerOperationAttempt) && remote.powerOperationAttempt > 0
+    && remote.resumeAwaitingPublicGrant === true && remote.powerOperationStatus === 'superseded'
+    && remote.powerOperationOutcome === 'public-power-superseded' && remote.state === 'AwaitingControl'
+    && remote.resumePhase === 'AwaitingControl' && remote.powerState === 'On' && remote.controlAccepting === false
+    && remote.unknownState === false && remote.hcCloseCleanupPending === false && remote.closeCalled === false;
+}
+export function hasFailedFanOperation(remote: FanState, generation: number): boolean {
   // Explicit OFF cancels that older resume; it is not a fault preventing a
   // later real manual Open. Its waiter still receives superseded from Host.
   return remote.powerOperationStatus === 'failed'
-    || (remote.powerOperationStatus === 'superseded' && remote.powerOperationOutcome !== 'user-cancelled');
+    || (remote.powerOperationStatus === 'superseded' && remote.powerOperationOutcome !== 'user-cancelled'
+      && !awaitsPublicFanResumeGrant(remote, generation));
 }
 
 /** Exact source resource retirement; it does not claim an HC or physical callback. */

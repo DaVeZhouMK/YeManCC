@@ -24,7 +24,7 @@ inline ByteRange parseRange(const std::string& text,uint64_t size) {
     return r;
 }
 class Server {
-    struct Asset {fs::path path;std::string mime,key;powerPolicy::Ticket power;};
+    struct Asset {fs::path path;std::string mime,key,fallback;powerPolicy::Ticket power;};
     SOCKET listener_=INVALID_SOCKET;unsigned short port_=0;std::string token_=randomId()+randomId();
     std::atomic<bool> stopping_{false};std::thread acceptor_;std::vector<std::thread> workers_;
     std::mutex mutex_;std::condition_variable ready_;std::deque<SOCKET> queue_;std::set<SOCKET> active_,activeVideos_;std::map<std::string,Asset> assets_;
@@ -40,9 +40,17 @@ class Server {
                 current->second=revision;
             }else if(revision)bindingRevisions_.emplace(key,revision);
         }
-        const auto prefix=key+":";std::set<std::string> valid;
-        if(entry.contains("assets")&&!entry.value("deleted",false))for(const auto* slot:{"static","dynamic"})if(entry["assets"].contains(slot)&&(!entry.contains("deletedSlots")||!entry["deletedSlots"].value(slot,false))){const auto& asset=entry["assets"][slot];if(entry.contains("invalidSlots")&&entry["invalidSlots"].value(slot,std::string{})==asset.value("id",std::string{}))continue;valid.insert(asset.value("id",std::string{})+"."+asset.value("extension",std::string{}));}
-        for(auto it=assets_.begin();it!=assets_.end();)if(it->second.key.rfind(prefix,0)==0&&!valid.count(it->first))it=assets_.erase(it);else ++it;
+        const auto prefix=key+":";std::set<std::string> valid,eligibleSources;
+        if(entry.contains("assets")&&!entry.value("deleted",false))for(const auto* slot:{"static","dynamic"})if(entry["assets"].contains(slot)&&(!entry.contains("deletedSlots")||!entry["deletedSlots"].value(slot,false))){
+            const auto& asset=entry["assets"][slot];if(entry.contains("invalidSlots")&&entry["invalidSlots"].value(slot,std::string{})==asset.value("id",std::string{}))continue;
+            const auto id=asset.value("id",std::string{})+"."+asset.value("extension",std::string{});
+            valid.insert(id);
+            if(asset.value("playback30RejectedPolicy",0)!=playback30Policy)eligibleSources.insert(id);
+        }
+        // A read started before publication can have the same binding revision
+        // and no derivative metadata. Its original is still current.
+        for(auto it=assets_.begin();it!=assets_.end();)if(it->second.key.rfind(prefix,0)==0&&
+            !valid.count(it->first)&&!eligibleSources.count(it->second.fallback))it=assets_.erase(it);else ++it;
         return true;
     }
     static bool sendAll(SOCKET s,const char* p,size_t n){while(n){int sent=send(s,p,static_cast<int>(std::min<size_t>(n,65536)),0);if(sent<=0)return false;p+=sent;n-=sent;}return true;}
@@ -67,13 +75,27 @@ class Server {
         if(!admitted()){error(s,403,"Wallpaper Paused");return;}
         const auto disk=custom_steam_library::ioPath(asset.path);std::error_code ec;auto size=fs::file_size(disk,ec);if(ec||!size){error(s,404,"Not Found");return;}
         auto range=parseRange(headers["range"],size);if(!range.valid){error(s,416,"Range Not Satisfiable","Content-Range: bytes */"+std::to_string(size)+"\r\n");return;}
-        std::ifstream file(disk,std::ios::binary);if(!file){error(s,404,"Not Found");return;}
+        struct OpenFile {
+            HANDLE handle;
+            ~OpenFile(){if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);}
+        } file{CreateFileW(disk.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
+            nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};
+        if(file.handle==INVALID_HANDLE_VALUE){error(s,404,"Not Found");return;}
         auto count=range.last-range.first+1;std::string response=range.partial?"HTTP/1.1 206 Partial Content\r\n":"HTTP/1.1 200 OK\r\n";
         response+="Content-Type: "+asset.mime+"\r\nContent-Length: "+std::to_string(count)+"\r\nAccept-Ranges: bytes\r\nCache-Control: private, max-age=31536000, immutable\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n";
         if(range.partial)response+="Content-Range: bytes "+std::to_string(range.first)+"-"+std::to_string(range.last)+"/"+std::to_string(size)+"\r\n";
         if(!origin.empty())response+="Access-Control-Allow-Origin: "+origin+"\r\nVary: Origin\r\n";
         response+="\r\n";if(!sendAll(s,response.data(),response.size())||method=="HEAD")return;
-        file.seekg(static_cast<std::streamoff>(range.first));char chunk[65536];while(count&&!stopping_&&admitted()){auto n=static_cast<std::streamsize>(std::min<uint64_t>(count,sizeof chunk));file.read(chunk,n);auto got=file.gcount();if(got<=0||!admitted()||!sendAll(s,chunk,static_cast<size_t>(got)))return;count-=got;}
+        LARGE_INTEGER offset{};offset.QuadPart=static_cast<LONGLONG>(range.first);
+        if(range.first&&!SetFilePointerEx(file.handle,offset,nullptr,FILE_BEGIN))return;
+        // Read directly into the existing send chunk without a CRT file buffer.
+        char chunk[65536];
+        while(count&&!stopping_&&admitted()){
+            const auto requested=static_cast<DWORD>(std::min<uint64_t>(count,sizeof chunk));
+            DWORD got=0;
+            if(!ReadFile(file.handle,chunk,requested,&got,nullptr)||!got||!admitted()||!sendAll(s,chunk,got))return;
+            count-=got;
+        }
     }
 public:
     Server(){WSADATA w{};if(WSAStartup(MAKEWORD(2,2),&w))throw std::runtime_error("media-winsock-failed");listener_=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(listener_==INVALID_SOCKET){WSACleanup();throw std::runtime_error("media-socket-failed");}BOOL exclusive=TRUE;setsockopt(listener_,SOL_SOCKET,SO_EXCLUSIVEADDRUSE,reinterpret_cast<char*>(&exclusive),sizeof exclusive);sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);if(bind(listener_,reinterpret_cast<sockaddr*>(&a),sizeof a)||listen(listener_,8)){closesocket(listener_);WSACleanup();throw std::runtime_error("media-listen-failed");}int n=sizeof a;getsockname(listener_,reinterpret_cast<sockaddr*>(&a),&n);port_=ntohs(a.sin_port);
@@ -86,17 +108,20 @@ public:
     size_t prewarm(const Store&,const Json&){return 0;}
     CachePrewarmer::Stats prewarmStats(){return {};}
     void reconcile(const Json& entry){std::lock_guard lock(mutex_);reconcileLocked(entry,entry.value("key",std::string{}));}
-    std::string expose(const Store& store,const Json& entry){
+    std::string expose(const Store& store,const Json& entry,const Json* playback30=nullptr){
         if(!entry.contains("asset")||entry.value("deleted",false)){reconcile(entry);return {};}
-        const auto& asset=entry["asset"];
-        const auto slot=asset.value("kind",std::string{})=="video"?"dynamic":"static";
-        if(entry.contains("invalidSlots")&&entry["invalidSlots"].value(slot,std::string{})==asset.value("id",std::string{})){reconcile(entry);return {};}
+        const auto& original=entry["asset"];
+        const auto slot=original.value("kind",std::string{})=="video"?"dynamic":"static";
+        if(entry.contains("invalidSlots")&&entry["invalidSlots"].value(slot,std::string{})==original.value("id",std::string{})){reconcile(entry);return {};}
+        if(playback30){const auto* match=Store::playback30Asset(original);if(!match||*match!=*playback30)return {};}
+        const auto& asset=playback30?*playback30:original;
         auto id=asset.value("id",std::string{})+"."+asset.value("extension",std::string{});auto path=store.assetPath(asset);
         const auto entryKey=entry.value("key",std::string{}),key=entryKey+":"+asset.value("kind",std::string{});
         std::lock_guard lock(mutex_);
         if(!reconcileLocked(entry,entryKey))return {};
-        for(auto it=assets_.begin();it!=assets_.end();)if(it->second.key==key&&it->first!=id)it=assets_.erase(it);else ++it;
-        assets_[id]={path,asset.value("mime",std::string{}),key,powerPolicy::ticket()};
+        const auto fallback=playback30?original.value("id",std::string{})+"."+original.value("extension",std::string{}):std::string{};
+        for(auto it=assets_.begin();it!=assets_.end();)if(it->second.key==key&&it->second.fallback==fallback&&it->first!=id)it=assets_.erase(it);else ++it;
+        assets_[id]={path,asset.value("mime",std::string{}),key,fallback,powerPolicy::ticket()};
         return "http://127.0.0.1:"+std::to_string(port_)+"/asset/"+id+"?token="+token_;
     }
 };

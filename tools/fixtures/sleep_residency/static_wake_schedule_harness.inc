@@ -67,7 +67,7 @@ static std::deque<Message> messages;
 static std::function<void()> duringScan,duringRestore,duringPost,duringGenerationRead,duringClockRead;
 static std::vector<json> receipts;
 using ymcc::sleeppower::SharedPowerV1;
-static std::uint64_t notificationSequence=0,publicationRevision=1;
+static std::uint64_t notificationSequence=0,publicationRevision=1,suspendSerial=0;
 static bool pendingNotification=false,powerKnown=true;
 static ymcc::sleeppower::RevocationMirrors fixtureRevocations;
 #if defined(YMCC_STATIC_WAKE_LEGACY_AUTHORITY_CONTROL)
@@ -79,6 +79,7 @@ static int __cdecl staticWakePowerRead(SharedPowerV1* power,std::uint32_t bytes)
     if(bytes!=sizeof(*power)||g_exitRequested||!powerKnown)return 0;
     *power={};power->generation=testScheduleGeneration;
     power->publicationRevision=publicationRevision;power->observedNotificationSequence=notificationSequence;
+    power->suspendSerial=suspendSerial;
     power->phase=g_powerLifecycle==PowerLifecycle::Ready?0u:2u;
     power->flags=ymcc::sleeppower::kKnown|(gate?ymcc::sleeppower::kHardwareAllowed:0u)|
         (pendingNotification?ymcc::sleeppower::kNotificationPending:0u);
@@ -164,7 +165,7 @@ static void work(){
 }
 static void reset(){g_sgStaticScanDelay={};g_sgStaticScanPreference=-1;g_sgStaticScanRevision=1;g_sgStaticScanArmedRevision=0;g_sgStaticScanRunning=false;
  g_sgStaticScanQueuedArm={};
- notificationSequence=0;publicationRevision=1;pendingNotification=false;powerKnown=true;statusHints=0;workerTouchedWebView=false;
+ notificationSequence=0;publicationRevision=1;suspendSerial=0;pendingNotification=false;powerKnown=true;statusHints=0;workerTouchedWebView=false;
  tick=1000;testScheduleGeneration=1;timerDue=0;gate=true;queueAvailable=true;scans=scanWrites=restores=restoreWrites=0;jobs.clear();messages.clear();receipts.clear();duringScan={};duringRestore={};duringPost={};duringGenerationRead={};duringClockRead={};g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;}
 static unsigned run(){unsigned checks=0;auto expect=[&](bool ok,const char* name){++checks;if(!ok)throw std::runtime_error(name);};
  expect(sgStaticScanEnabled(json::object()),"new installs preserve enabled automatic scanning default");
@@ -193,6 +194,22 @@ static unsigned run(){unsigned checks=0;auto expect=[&](bool ok,const char* name
  gate=true;g_powerLifecycle=PowerLifecycle::Ready;++testScheduleGeneration;sgStaticScanSchedule(false);pump();
  expect(timerDue==121000,"actual confirmed wake starts a fresh minute");const auto due=timerDue;tick+=2000;sgStaticScanSchedule(false);pump();
  expect(timerDue==due,"actual repeated same wake cannot postpone scan");
+ reset();sgStaticScanPreference(true,true);pump();++testScheduleGeneration;++suspendSerial;
+ sgStaticScanSchedule(false);pump();const auto interruptedDue=timerDue;
+ tick+=5000;gate=false;g_powerLifecycle=PowerLifecycle::Suspended;++suspendSerial;++notificationSequence;
+ sgStaticScanCancel("same-generation-sleep");const auto delayedCancel=messages.front();messages.pop_front();
+ gate=true;g_powerLifecycle=PowerLifecycle::Ready;++notificationSequence;sgStaticScanSchedule(false);pump();
+ const auto resumedDue=tick+60000;
+ expect(resumedDue>interruptedDue&&timerDue==resumedDue&&g_sgStaticScanArmedPower.suspendSerial==suspendSerial,
+     "a later shared suspend serial in the same generation must rearm an interrupted scan");
+ sgStaticScanMessage(delayedCancel.cause,delayedCancel.revision);
+ tick=interruptedDue;sgStaticScanTimer();work();
+ expect(timerDue==resumedDue&&scans==0,"old cancel and timer cannot consume the successor scan");
+ ++publicationRevision;sgStaticScanSchedule(false);pump();
+ expect(timerDue==resumedDue,"another publication for the same suspend episode cannot extend the delay");
+ tick=resumedDue;sgStaticScanTimer();work();pump();
+ expect(scans==1&&scanWrites==2&&!g_sgStaticScanDelay.pending,"successor scan runs exactly once on its shared Ready");
+ sgStaticScanSchedule(false);pump();expect(timerDue==0,"a completed suspend episode cannot rearm");
  reset();sgStaticScanPreference(true,true);pump();sgStaticScanPreference(false);tick=61000;sgStaticScanTimer();work();
  expect(scans==0,"actual OFF veto acts before queued cancel message");pump();expect(!g_sgStaticScanDelay.pending,"actual OFF closes pending delay");
  sgStaticScanPreference(true);pump();expect(timerDue==121000,"actual re-enable in same generation still schedules");

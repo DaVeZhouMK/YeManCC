@@ -160,7 +160,8 @@ static void sgStaticScanMessage(WPARAM cause,LPARAM ticket) {
     const auto& power=queued.power;
     if(g_sgStaticScanPreference.load()!=1||!sharedPowerLifecycleCurrent(power))return;
     auto next=g_sgStaticScanDelay;
-    if(!next.arm(GetTickCount64(),cause==1,cause==2?power.generation:0)||!sharedPowerLifecycleCurrent(power))return;
+    if(!next.arm(GetTickCount64(),cause==1,cause==2?power.generation:0,power.suspendSerial)||
+       !sharedPowerLifecycleCurrent(power))return;
     auto expected=static_cast<ULONGLONG>(revision);
     if(expected==(std::numeric_limits<ULONGLONG>::max)())return;
     const auto armed=expected+1;
@@ -172,5 +173,6 @@ static void sgStaticScanMessage(WPARAM cause,LPARAM ticket) {
         g_sgStaticScanDelay.cancel();sgRecordFact("static-wake-delay-canceled",{{"reason","timer-unavailable"},{"mandatoryEvidence",true}});return;
     }
     sgRecordFact("static-wake-delay-armed",{{"trigger",cause==1?"startup":"confirmed-wake-or-enable"},
-        {"delayMs",60000},{"generation",power.generation},{"periodic",false},{"mandatoryEvidence",true}});
+        {"delayMs",60000},{"generation",power.generation},{"suspendSerial",power.suspendSerial},
+        {"periodic",false},{"mandatoryEvidence",true}});
 }

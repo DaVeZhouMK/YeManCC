@@ -2,7 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import assert from 'node:a
 const out=path.resolve(process.argv[2]),source=path.resolve(process.argv[3]||'native/main.cpp');fs.mkdirSync(out,{recursive:true});
 const text=fs.readFileSync(source,'utf8'),marker='static bool steamAppearanceResumeCommitted(unsigned long long generation) {';const at=text.indexOf(marker);assert(at>=0,'Production CSS Ready callback missing');let depth=0,end=-1,string=null,escape=false;
 for(let i=at+marker.length-1;i<text.length;i++){const c=text[i];if(string){if(escape)escape=false;else if(c==='\\')escape=true;else if(c===string)string=null;continue;}if(c==='"'||c==="'"){string=c;continue;}if(c==='{')depth++;if(c==='}'&&!--depth){end=i+1;break;}}
-assert(end>at);const code=text.slice(at,end);assert(code.includes('requestPublicResumeRecovery(session, power)')&&code.includes('sharedPowerLifecycleCurrent(power)'));assert(!/ShellExecute|SetUIMode|RestartJSContext|launchSteam/.test(code));
+assert(end>at);const code=text.slice(at,end);assert(code.includes('requestPublicResumeRecovery(session, power)')&&code.includes('captureSharedPowerLifecycle(power)')&&text.includes('cssGuard.powerReader = &readSharedSystemPower;'));assert(!/ShellExecute|SetUIMode|RestartJSContext|launchSteam/.test(code));
 const publicMarker='static void steamAppearancePublicReady(unsigned long long generation) noexcept {';
 const publicAt=text.indexOf(publicMarker),publicEnd=text.indexOf('\n}',publicAt);assert(publicAt>end&&publicEnd>publicAt);
 const publicReady=text.slice(publicAt,publicEnd+2);assert(publicReady.includes('steamAppearanceResumeCommitted(generation)'));
@@ -17,3 +17,9 @@ const stableAt=text.indexOf('    modeObserver.cssBigPicturePublished =');assert(
 assert(stable.includes('g_steamCssGuard.observeMode(session, sample, stable)')&&stable.includes('appearanceModeReady(session, state)'));
 fs.appendFileSync(path.join(out,'production-css-resume.h'),'\ninline const auto productionCssBigPicturePublished = '+stable+';\ninline void productionCssStableMode(const ymcc::steamsession::Session& session) { productionCssBigPicturePublished(session, g_steamModeObserver.snapshot(session), {}, true); }\n');
 fs.writeFileSync(path.join(out,'stable-source.json'),JSON.stringify({source,sha256:crypto.createHash('sha256').update(text).digest('hex'),stableCallback:stable,scope:'Exact CSS publication callback, called with the fixture-owned verified mode result'},null,2));
+
+for(const [field,name] of [['readMode','productionCssReadMode'],['refreshPublicResumeMode','productionCssPublicResumeRefresh']]){
+ const at=text.indexOf(`    cssGuard.${field} = []`),start=text.indexOf('[]',at),end=text.indexOf('\n    };',start);
+ assert(at>=0&&start>=at&&end>start);
+ fs.appendFileSync(path.join(out,'production-css-resume.h'),`\ninline const auto ${name} = ${text.slice(start,end+6).trim()};\n`);
+}

@@ -33,7 +33,7 @@ static void publishSharedPowerLifecycle(const char*){g_sharedPowerPublicationRev
 static HWND g_hwnd=nullptr;
 static void sleepPowerPostResumeCommit(HWND,unsigned long long){++terminalPosts;}
 static void steamAppearancePublicReady(unsigned long long) noexcept {}
-static void deckySidebarRecheckRepeatedCommit(unsigned long long,uint64_t,uint64_t) noexcept {}
+[[maybe_unused]] static void deckySidebarRecheckRepeatedCommit(unsigned long long,uint64_t,uint64_t) noexcept {}
 static RecoveryStateSnapshot* g_recoveryStateView=nullptr;
 static std::mutex g_recoveryStateMx;
 static std::atomic<int> g_recoveryStateBusyDepth{0};
@@ -143,7 +143,7 @@ struct RecoveryMappingScope {
     HANDLE mapping=nullptr;RecoveryStateWithPower* full=nullptr;SnapshotChannel channel;bool legacy=false,prefixOnly=false;
     explicit RecoveryMappingScope(bool old=false,bool powerPrefix=false):legacy(old),prefixOnly(powerPrefix){
         recoveryFixtureNow=100000;nativeGate=true;moveNativeAuthority=false;revokeDuringCapture=false;terminalPosts=0;recoveryDispatchStorage=configuredRecoveryDispatch();
-        g_systemSleeping=false;g_lastWakeTick=0;g_lastSuspendTick=0;g_recoveryPowerObservationSerial=0;
+        g_systemSleeping=false;g_lastWakeTick=0;g_lastSuspendTick=0;g_recoveryPowerObservationSerial=0;g_recoveryPowerAppliedSerial=0;
         g_powerLifecycle=PowerLifecycle::Ready;g_powerGeneration=7;g_resumeReadyGeneration=0;
         g_exitRequested=false;g_inputReady=false;g_lastPowerResumeCommitGeneration=6;g_lastPowerResumeCommitTick=90000;
         g_recoveryStateBusyDepth=0;g_recoveryStateExitIntent=false;g_recoveryUiDispatchPulse=42;
@@ -235,7 +235,7 @@ struct RecoveryGuardConsumer {
     Options options;HANDLE process=nullptr;SnapshotChannel channel;const std::wstring emptyLog;
     std::wstring log;ymcc::sleeppower::RecoveryTerminationPermit terminationPermit;RecoveryOps ops;unsigned spawns=0;
     explicit RecoveryGuardConsumer(OwnRecoveryGuardChild& child){
-        recoveryFixtureNow=100000;g_systemSleeping=false;g_lastWakeTick=0;g_lastSuspendTick=0;g_recoveryPowerObservationSerial=0;
+        recoveryFixtureNow=100000;g_systemSleeping=false;g_lastWakeTick=0;g_lastSuspendTick=0;g_recoveryPowerObservationSerial=0;g_recoveryPowerAppliedSerial=0;
         options.pid=child.pid;process=child.process;
         ops.processAlive=[&]{return processAlive(process);};ops.waitTargetExit=[&]{return targetTerminationSettled(process);};
         ops.ownerProbe=[] {return OwnerProbe{};};ops.spawnTarget=[&]{++spawns;return true;};ops.now=ops.uiNow=[]{return recoveryFixtureNow;};ops.sleep=[](DWORD ms){recoveryFixtureNow+=ms;};
@@ -308,6 +308,59 @@ int runRecoverySharedPowerCases(int argc,char** argv){
 
     cases.emplace_back("native-live-resuming-request-cannot-cross-new-ready-commit",[]{OwnRecoveryGuardChild child(true,true);RecoveryGuardConsumer service(child);for(unsigned i=0;i!=3;++i)child.step();recoveryCheck(service.capture(),"current Resuming request captured before Ready");const auto old=service.terminationPermit.boundary;child.step();const auto calls=guardKernelCalls;recoveryCheck(!service.ops.terminateTarget()&&processAlive(child.process)&&guardKernelCalls==calls,"completed new Native Ready commit retires the prior Resuming request before its final API");const auto ready=service.observation();const auto tick=ready.powerObservation.projection.committedTick;recoveryFixtureNow=ready.powerObservation.publishedTick+1;recoveryCheck(!service.capture()&&g_lastWakeTick==tick,"fresh Ready uses its original fifteen-second grace");recoveryFixtureNow=tick+kWakeGraceMs;recoveryCheck(service.capture()&&!old.current(),"new Ready request heals after grace while the old Resuming request stays revoked");});
     cases.emplace_back("native-live-ready-closed-gate-keeps-grace-without-clearing-sleep",[]{RecoveryMappingScope owner;g_lastPowerResumeCommitGeneration=7;g_lastPowerResumeCommitTick=recoveryFixtureNow;nativeGate=false;owner.publish();ymcc::sleeppower::RecoveryTerminationPermit permit;recoveryCheck(captureRecoveryTerminationPermit(L"",owner.read(),permit)&&g_lastWakeTick==g_lastPowerResumeCommitTick,"a recorded Ready commit protects its original grace before the hardware gate opens");recoveryFixtureNow=g_lastPowerResumeCommitTick+kWakeGraceMs;recoveryCheck(!captureRecoveryTerminationPermit(L"",owner.read(),permit)&&!(owner.full->power.power.flags&ymcc::sleeppower::kHardwareAllowed),"watchdog may heal a stuck closed gate after grace without granting device permission");powerNotifyCallback(nullptr,PBT_APMSUSPEND,nullptr);recoveryFixtureNow+=1000;g_lastPowerResumeCommitTick=recoveryFixtureNow;owner.publish();recoveryCheck(captureRecoveryTerminationPermit(L"",owner.read(),permit)&&g_systemSleeping,"fresh Ready tick with a closed hardware gate cannot clear actual sleeping");});
+    cases.emplace_back("local-delayed-suspend-uses-notification-ingress-time",[]{
+        RecoveryMappingScope owner;const auto deliveredAt=recoveryFixtureNow;
+        const std::function<void()> commitBeforeApply=[&]{owner.commit();};
+        recoveryBeforeLocalPowerLock=&commitBeforeApply;
+        owner.suspend();
+        recoveryCheck(g_lastSuspendTick==deliveredAt,"delayed local Suspend keeps its ingress time before the shared commit");
+        recoveryCheck(guarded(owner.read())&&!g_systemSleeping&&g_lastWakeTick==g_lastPowerResumeCommitTick,"a current commit observed after local ingress settles the delayed Suspend under original grace");
+    });
+    cases.emplace_back("local-earlier-suspend-cannot-overwrite-newer-resume",[]{
+        RecoveryMappingScope owner;owner.publish();
+        const std::function<void()> resumeBeforeApply=[] {++recoveryFixtureNow;powerNotifyCallback(nullptr,PBT_APMRESUMEAUTOMATIC,nullptr);};
+        recoveryBeforeLocalPowerLock=&resumeBeforeApply;
+        owner.suspend();
+        recoveryCheck(!g_systemSleeping&&guarded(owner.read()),"receipt order preserves the newer local Resume and its grace");
+        recoveryFixtureNow+=kWakeGraceMs;owner.publish();
+        recoveryCheck(!guarded(owner.read()),"processing the old Suspend last cannot leave the original watchdog stuck");
+    });
+    cases.emplace_back("local-ingress-revokes-before-notification-gets-lock",[]{
+        OwnRecoveryGuardChild child;RecoveryGuardConsumer service(child);
+        recoveryCheck(service.capture(),"initial watchdog permit is current");
+        const auto calls=guardKernelCalls;bool stopped=false;
+        ymcc::sleeppower::RecoveryTerminationPermit pendingPermit;
+        bool pendingDeferred=false;
+        const std::function<void()> tryWhilePending=[&]{
+            pendingDeferred=captureRecoveryTerminationPermit(L"",service.observation(),pendingPermit);
+            stopped=service.ops.terminateTarget();
+        };
+        recoveryBeforeLocalPowerLock=&tryWhilePending;
+        powerNotifyCallback(nullptr,PBT_APMSUSPEND,nullptr);
+        recoveryCheck(pendingDeferred&&!pendingPermit.accepted,"an unprocessed power receipt cannot mint a new watchdog permit");
+        recoveryCheck(!stopped&&guardKernelCalls==calls&&processAlive(child.process),"local Suspend at ingress retires an in-flight watchdog permit before the callback obtains its lock");
+    });
+    cases.emplace_back("local-notification-during-identity-check-retires-permit",[]{
+        OwnRecoveryGuardChild child;RecoveryGuardConsumer service(child);
+        recoveryCheck(service.capture(),"initial watchdog permit is current");
+        GuardFixtureHandle arrived{CreateEventW(nullptr,TRUE,FALSE,nullptr)};
+        recoveryCheck(arrived.value!=nullptr,"owned callback arrival event created");
+        std::jthread callback;bool entered=false;
+        const std::function<void()> interruptIdentity=[&]{
+            callback=std::jthread([&]{
+                const std::function<void()> signal=[&]{SetEvent(arrived.value);};
+                recoveryBeforeLocalPowerLock=&signal;
+                powerNotifyCallback(nullptr,PBT_APMSUSPEND,nullptr);
+            });
+            entered=WaitForSingleObject(arrived.value,3000)==WAIT_OBJECT_0;
+        };
+        recoveryBeforeProcessTimes=&interruptIdentity;
+        const auto calls=guardKernelCalls;
+        const bool stopped=service.ops.terminateTarget();
+        recoveryBeforeProcessTimes=nullptr;
+        if(callback.joinable())callback.join();
+        recoveryCheck(entered&&!stopped&&guardKernelCalls==calls&&processAlive(child.process),"local ingress during exact process identity recheck retires the permit before the kernel call");
+    });
     if(argc>2)return 2;const std::string selected=argc==2?argv[1]:"";const bool suffix=selected.starts_with("from:");const auto name=suffix?selected.substr(5):selected;if(argc==2&&std::none_of(cases.begin(),cases.end(),[&](const auto& c){return c.first==name;}))return 2;
     json executed=json::array(),failures=json::array();bool reached=false;for(const auto& c:cases){if(c.first==name)reached=true;if(argc==2&&!(suffix?reached:c.first==name))continue;executed.push_back(c.first);try{c.second();}catch(const std::exception& e){failures.push_back({{"case",c.first},{"message",e.what()}});break;}}
     std::cout<<json({{"cases",executed},{"assertions",recoveryChecks},{"actualMappingsReturned",recoveryReturned},{"actualGuardChildrenStarted",guardChildrenStarted},{"actualGuardChildrenReturned",guardChildrenReturned},{"forcedGuardChildCleanup",guardForcedCleanup},{"guardHandleCloseFailures",guardHandleCloseFailures},{"guardKernelCalls",guardKernelCalls},{"guardKernelWithoutLock",guardKernelWithoutLock},{"externalTerminateAttempts",guardExternalTerminateAttempts},{"publisherMappingsCreated",publisherMappingsCreated.load()},{"publisherMappingsClosed",publisherMappingsClosed.load()},{"publisherEventsCreated",publisherEventsCreated.load()},{"publisherEventsClosed",publisherEventsClosed.load()},{"publisherViewsMapped",publisherViewsMapped.load()},{"publisherViewsUnmapped",publisherViewsUnmapped.load()},{"publisherPublicationCalls",publisherPublicationCalls.load()},{"failures",failures},{"physicalSleep",false},{"killAndSpawnMocked",true}}).dump()<<std::endl;return failures.empty()?0:1;

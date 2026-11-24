@@ -24,12 +24,21 @@ static void prepare(const std::string& cls,YmccFamily family=YmccFamily::OneXPla
     g_oemBackProfileId=static_cast<int>(cls.find("OneXPlayerX2MiniPro")!=std::string::npos?OemChordProfileId::OneXX2MiniPro:cls.find("OneXPlayer3")!=std::string::npos?OemChordProfileId::OneXX3:OemChordProfileId::OneXX1);
     g_gpdChordPubGen=0;g_gpdBackIfaceGen=0;g_gpdBackIfaceReady=false;
     fixtureRadialOwner=false;g_inputReleaseRequired=false;recordedClicks.clear();recordedChords.clear();g_nativeKeyboardShortcuts.clear();g_nativeOemEdgeEpochSeen=0;g_nativeWmiAuthoritySeen=false;g_nativeShortcutLegacyOverrideMask=0;g_oemShortcutEdgePostFailures=0;evaluations.clear();rogReceipts.clear();appmock::jobs.clear();appmock::actions.clear();appmock::logs.clear();appmock::posts=appmock::refreshes=0;
+#ifdef YMCC_FIXTURE_OEM_DEMAND
+    g_nativeShortcutNeedsLiveOem=false;
+#endif
     appmock::diagnostic=false;appmock::postAccepted=appmock::serialAccepted=true;appmock::beforeCompletion={};appmock::afterSourceRevoke={};appmock::beforeEnumeration={};appmock::afterEnumeration={};appmock::afterOwnerOpen={};appmock::afterRead={};appmock::writePermissionOverride={};appmock::hardwareAllowed=true;appmock::permissionChecks=0;appmock::notificationAccepted=true;appmock::registrations=appmock::unregistrations=0;appmock::notifications.clear();
     if(present){auto d=mock::device();d.input=input;d.output=output;mock::w.devices.push_back(d);}
 }
 static void boot(){ownerAt(appmock::now);eq(g_onexX2Transport.snapshot().phase,p::Phase::Live,"actual owner binds exact supported vendor");eq(mock::w.dataOpens,1u,"one vendor owner handle");eq(mock::w.readsCalled,1u,"actual owner starts reader");}
 static void deliver(unsigned id,bool pressed=true){auto& io=mock::pending(false);mock::complete(io,true,io.size,ERROR_SUCCESS,raw(id,pressed,io.size));ownerAt(appmock::now+1);}
-static void rule(const std::string& trigger="press",uint64_t mask=kOemBitHome){NativeKeyboardShortcutRule r;r.requiredMask=mask;r.trigger=trigger;r.ownAction="test.home";r.doubleWindowMs=500;r.needsNeutral=false;g_nativeKeyboardShortcuts.push_back(r);}
+static void appendRule(const NativeKeyboardShortcutRule& r){
+    g_nativeKeyboardShortcuts.push_back(r);
+#ifdef YMCC_FIXTURE_OEM_DEMAND
+    g_nativeShortcutNeedsLiveOem = g_nativeShortcutNeedsLiveOem || (r.requiredMask >> 20) != 0;
+#endif
+}
+static void rule(const std::string& trigger="press",uint64_t mask=kOemBitHome){NativeKeyboardShortcutRule r;r.requiredMask=mask;r.trigger=trigger;r.ownAction="test.home";r.doubleWindowMs=500;r.needsNeutral=false;appendRule(r);}
 static void jobs(){while(!appmock::jobs.empty()){auto job=std::move(appmock::jobs.front());appmock::jobs.pop_front();job();}}
 static std::size_t logs(const std::string& event){return static_cast<std::size_t>(std::count_if(appmock::logs.begin(),appmock::logs.end(),[&](const auto& l){return l.event==event;}));}
 static json ownerLog(){for(auto it=appmock::logs.rbegin();it!=appmock::logs.rend();++it)if(it->event=="onex-x2-owner")return it->fields;test::fail("owner diagnostic missing");}
@@ -170,7 +179,7 @@ static void crossGenerationHold(){test::section="held-rebind";
     }
 }
 
-static void rearRule(uint64_t mask){NativeKeyboardShortcutRule r;r.requiredMask=mask;r.ownAction="test.rear";r.trigger="press";g_nativeKeyboardShortcuts.push_back(r);}
+static void rearRule(uint64_t mask){NativeKeyboardShortcutRule r;r.requiredMask=mask;r.ownAction="test.rear";r.trigger="press";appendRule(r);}
 static void evaluateLive(){nativeKeyboardShortcutsEvaluate(g_curW,g_curPad,appmock::now,true,nullptr,false,0,nullptr);}
 static void contextRebind(bool evaluateGap=false){
     ++g_powerGeneration;ownerAt(appmock::now+1);auto& r=mock::pending(false);mock::complete(r,false);ownerAt(appmock::now+1);

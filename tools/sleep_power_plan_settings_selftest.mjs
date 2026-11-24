@@ -29,7 +29,7 @@ const scheme = '381b4222-f694-41f0-9685-ff5bb260df2e';
 const directory = 'G:\\fixture-only\\PowerControl';
 const file = `${directory}\\yeman-settings.json`;
 const ready = { phase: 'ready', generation: 71, known: true, hardwareWritesAllowed: true,
-  inputReady: true, publicationRevision: 15, observedNotificationSequence: 9, notificationPending: false };
+  inputReady: true, publicationRevision: 15, observedNotificationSequence: 9, suspendSerial: 7, notificationPending: false };
 function holdOnce() {
   const entered = Promise.withResolvers(), gate = Promise.withResolvers();
   return { entered: entered.promise, release: gate.resolve, async hold() { entered.resolve(); await gate.promise; } };
@@ -67,6 +67,7 @@ async function fixture() {
         assert.equal(target, scheme);
         assert.equal(args.expectedPowerGeneration, ready.generation);
         assert.equal(args.expectedPowerNotificationSequence, ready.observedNotificationSequence);
+        assert.equal(args.expectedPowerSuspendSerial, ready.suspendSerial);
         assert.equal(args.requireSleepPowerPlanEnabled, true);
         fx.writes.push(args);
         const name = verb === '/setacvalueindex' ? 'ACSettingIndex' : 'DCSettingIndex';
@@ -99,7 +100,7 @@ async function fixture() {
   assert.equal((await api.repo.readSettingsSection('sleep')).sleepPowerPlanOptimizationEnabled, true);
   const admission = api.captureStaticWakeAdmission();
   assert.ok(admission);
-  return { api, fx, stop, optimize: () => api.optimizeSleepPowerPlans({ ...admission, isCurrent: () => true }) };
+  return { api, fx, stop, optimize: () => api.optimizeSleepPowerPlans({ ...admission, expectedPowerSuspendSerial: ready.suspendSerial, isCurrent: () => true }) };
 }
 
 const cases = [];

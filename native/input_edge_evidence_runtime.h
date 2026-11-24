@@ -92,10 +92,75 @@ static LRESULT CALLBACK inputEdgeMouseHookProc(int code,WPARAM message,LPARAM da
     }
     return CallNextHookEx(nullptr,code,message,data);
 }
+// Window-thread owner. Keep device notifications enabled in both modes. Win32
+// re-announces existing mice when the route changes; only consume an arrival
+// already observed at this window, with the same handle, path and rebind time.
+static std::atomic<unsigned> g_inputEdgeRawMouseMode{0}; // unknown, foreground, background
+struct InputEdgeRawMouseDevice {
+    HANDLE handle=nullptr;
+    std::array<wchar_t,512> path{};
+    bool replay=false;
+};
+static std::array<InputEdgeRawMouseDevice,16> g_inputEdgeRawMouseDevices{};
+static ULONGLONG g_inputEdgeRawMouseRebindStart=0,g_inputEdgeRawMouseRebindEnd=0;
+static DWORD inputEdgeRawMouseFlags(bool background) noexcept {
+    return RIDEV_DEVNOTIFY|(background?RIDEV_INPUTSINK:0u);
+}
+static void inputEdgeRawMouseInitialRegistration(bool background,bool ok) noexcept {
+    g_inputEdgeRawMouseDevices={};
+    g_inputEdgeRawMouseRebindStart=g_inputEdgeRawMouseRebindEnd=0;
+    g_inputEdgeRawMouseMode.store(ok?(background?2u:1u):0u,std::memory_order_release);
+}
+static void inputEdgeReconcileRawMouse(HWND target,bool background) noexcept {
+    const unsigned desired=background?2u:1u;
+    if(!target||g_inputEdgeRawMouseMode.load(std::memory_order_acquire)==desired)return;
+    const auto now=GetTickCount64();
+    // Let the previous rebind's queued notices retire before changing mode
+    // again. The existing diagnostic reconciliation retries missing routes.
+    if(g_inputEdgeRawMouseRebindEnd&&now-g_inputEdgeRawMouseRebindEnd<=1000){
+        for(const auto& device:g_inputEdgeRawMouseDevices)if(device.replay)return;
+    }
+    const RAWINPUTDEVICE mouse{1,2,inputEdgeRawMouseFlags(background),target};
+    if(!RegisterRawInputDevices(&mouse,1,sizeof(mouse)))return;
+    g_inputEdgeRawMouseRebindStart=now;
+    g_inputEdgeRawMouseRebindEnd=GetTickCount64();
+    for(auto& device:g_inputEdgeRawMouseDevices)device.replay=device.handle!=nullptr;
+    g_inputEdgeRawMouseMode.store(desired,std::memory_order_release);
+}
+static bool inputEdgeConsumeRawMouseReplay(WPARAM notice,LPARAM payload) noexcept {
+    const auto handle=reinterpret_cast<HANDLE>(payload);
+    if(!handle)return false;
+    auto end=g_inputEdgeRawMouseDevices.end();
+    auto entry=std::find_if(g_inputEdgeRawMouseDevices.begin(),end,[&](const auto& device){return device.handle==handle;});
+    if(notice!=GIDC_ARRIVAL){
+        if(entry!=end)*entry={};
+        return false;
+    }
+    const auto saved=GetLastError();
+    struct RestoreError {DWORD value;~RestoreError(){SetLastError(value);}} restore{saved};
+    const auto posted=static_cast<DWORD>(GetMessageTime());
+    RID_DEVICE_INFO info{};info.cbSize=sizeof(info);UINT infoSize=sizeof(info);
+    std::array<wchar_t,512> path{};UINT pathSize=static_cast<UINT>(path.size());
+    if(GetRawInputDeviceInfoW(handle,RIDI_DEVICEINFO,&info,&infoSize)==~0u||info.dwType!=RIM_TYPEMOUSE||
+       GetRawInputDeviceInfoW(handle,RIDI_DEVICENAME,path.data(),&pathSize)==~0u||!path.front()||path.back()){
+        if(entry!=end)*entry={};
+        return false;
+    }
+    const auto start=g_inputEdgeRawMouseRebindStart,endTick=g_inputEdgeRawMouseRebindEnd;
+    if(entry!=end&&entry->replay&&entry->path==path&&start&&endTick-start<=1000&&GetTickCount64()-endTick<=1000&&
+       posted-static_cast<DWORD>(start)<=endTick-start){
+        entry->replay=false;
+        return true;
+    }
+    if(entry==end)entry=std::find_if(g_inputEdgeRawMouseDevices.begin(),end,[](const auto& device){return !device.handle;});
+    if(entry!=end)*entry={handle,path,false};
+    return false;
+}
 static void inputEdgeReconcileOnUi(bool destroying) noexcept {
     if(!destroying&&(!g_hwnd||GetCurrentThreadId()!=GetWindowThreadProcessId(g_hwnd,nullptr)))return;
     const DWORD saved=GetLastError();const bool wanted=!destroying&&g_inputEdgeHooksWanted.load(std::memory_order_acquire)&&!g_exitRequested.load();
     const bool mouseWanted=!destroying&&!g_exitRequested.load()&&(wanted||g_inputEdgeCursorMouseWanted.load(std::memory_order_acquire));
+    if(!destroying&&!g_exitRequested.load())inputEdgeReconcileRawMouse(g_hwnd,wanted);
     if(wanted){
         if(!g_inputEdgeKeyboardHook){g_inputEdgeKeyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,inputEdgeKeyboardHookProc,GetModuleHandleW(nullptr),0);g_inputEdgeKeyboardError.store(g_inputEdgeKeyboardHook?ERROR_SUCCESS:GetLastError());}
     }else{
@@ -113,7 +178,8 @@ static void inputEdgeUpdateGate(bool wanted,ULONGLONG now) noexcept {
     if(!g_inputEdgeEvents.enable(wanted)){SetLastError(saved);return;}
     const bool changed=g_inputEdgeHooksWanted.exchange(wanted,std::memory_order_acq_rel)!=wanted;
     static ULONGLONG lastPost=0;
-    const bool missing=wanted&&(!g_inputEdgeKeyboardInstalled.load()||!g_inputEdgeMouseInstalled.load());
+    const bool missing=(wanted&&(!g_inputEdgeKeyboardInstalled.load()||!g_inputEdgeMouseInstalled.load()))||
+        g_inputEdgeRawMouseMode.load(std::memory_order_acquire)!=(wanted?2u:1u);
     if(changed||(missing&&(!lastPost||now-lastPost>=5000))){
         lastPost=now;
         if(g_hwnd&&GetCurrentThreadId()==GetWindowThreadProcessId(g_hwnd,nullptr))inputEdgeReconcileOnUi(false);

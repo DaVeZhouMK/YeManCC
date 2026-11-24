@@ -8,6 +8,12 @@ export const OBSERVER_PUBLICATION_GENERATOR='tools/fixtures/steam_session_observ
 const originalPin=Object.freeze({path:OBSERVER_PUBLICATION_SOURCE,bytes:30391,sha256:'3b4d7ad634e8a78fe19ffca05e4ca0f5594ed3edd5e4ee5fdf90c26eda0abad3'});
 const derivedPin=Object.freeze({path:OBSERVER_PUBLICATION_SOURCE,bytes:31695,sha256:'041139e02cf983cd71d296048ca813729e2808e972467a022f35c8f29578d59f'});
 const declaredEpochs=Object.freeze([
+    // Scoped window name hooks; publication and the private adapter are unchanged.
+    Object.freeze({"original":{"path":"native/steam_session_observer.h","bytes":47766,"sha256":"12111a0d2271417fe33b1928946bddb8ba042ddd3a0b46328c31ad8e066ece22"},"derived":{"path":"native/steam_session_observer.h","bytes":49070,"sha256":"092e327a3ab6682296567baf90c5a7c61abd31f8a223584883b93632604cbae9"}}),
+    // Idle clock reads now require a pending retry; the publication adapter is unchanged.
+    Object.freeze({"original":{"path":"native/steam_session_observer.h","bytes":44266,"sha256":"4ef196aa2aae17bcc8f0358a588d85751c9470d8a15400bae656adbc083a6f95"},"derived":{"path":"native/steam_session_observer.h","bytes":45570,"sha256":"5840479b81cbaf800fc411b1fd9e966a92aa7bfaa981d175521bde2ca9da021e"}}),
+    // Window callback borrows its observer-thread receipt; the publication port is unchanged.
+    Object.freeze({"original":{"path":"native/steam_session_observer.h","bytes":44006,"sha256":"c6b59a0947c05139d2b359f9d433326fb4a214ac2f5251191e8ad95d1844e8d3"},"derived":{"path":"native/steam_session_observer.h","bytes":45310,"sha256":"1c36f4ff6d317ac7d063900c28f5f4fc7dda99b1f6eef53da3181cfbd769d296"}}),
     // The window observer matches the held path in place; publication is unchanged.
     Object.freeze({"original":{"path":"native/steam_session_observer.h","bytes":43608,"sha256":"b28d2b83c09c57e2c9a36b7102b85cccf60e493e55ab70b67ac4f44961aa3f0a"},"derived":{"path":"native/steam_session_observer.h","bytes":44912,"sha256":"b6b809fdd1d5128c6db078b3c38c308c8723f20e1b9d702fb1c307996890dfa9"}}),
     // Current shared Steam observer; exact private publication adapter unchanged.

@@ -115,7 +115,6 @@ static void capture(Work& w) {
         current.publicationRevision>=w.origin.publicationRevision;
     w.bound=sameCohort&&signalOwnerCurrent(w,now)&&now<w.deadline&&personaValid(w.persona);
     if(w.bound){
-        w.wire=encode(w);
         // A later notification invalidates this permission. Only the explicit
         // shared post-gate Ready delivery below may authorize another effect.
         if(sleeppower::powerAdmitted(w.origin)&&sleeppower::samePowerObservation(w.origin,current)){w.admitted=w.origin;w.deliveryAuthorized=true;}

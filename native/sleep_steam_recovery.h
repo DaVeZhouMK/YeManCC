@@ -656,6 +656,7 @@ struct CaptureRequest {
     std::shared_ptr<NativeOriginalGameRulesLease> ruleLease;
     bool revoked=false; // captureMx; the cancellation event is polled outside this lock.
     unsigned long long boundaryGeneration=0,pendingCaptureGeneration=0;
+    ULONGLONG pendingCaptureBoundary=0;
     CaptureRequest(unsigned long long s,unsigned long long e,unsigned long long r,
         std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> c):serial(s),configEpoch(e),rulesEpoch(r),cancellation(std::move(c)){}
 };
@@ -1119,9 +1120,11 @@ static json inspect(unsigned long long generation, const char* diagnosticPurpose
 // Capture BEFORE unrelated suspend handlers or a delayed Kernel-Power 506 can
 // run after wake. Only an unbound fallback account permits a fixed bounded
 // read from the verified Steam process; this never suspends or touches devices.
-static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected={});
-static void prepareSuspend() {
+static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected={},ULONGLONG originalBoundary=0);
+static void prepareSuspend(ULONGLONG originalBoundary=0) {
     if(!g_sleepRecoveryAutoEnabled.load()||g_exitRequested.load())return;
+    const auto now=sgNowFileTime();
+    if(originalBoundary>now)return;
     const auto gen=currentPowerGeneration(),epoch=g_sleepRecoveryAutoConfigEpoch.load();
     std::shared_ptr<CaptureRequest> request;
     {std::lock_guard<std::mutex> lock(captureMx);
@@ -1141,7 +1144,7 @@ static void prepareSuspend() {
         if(captureRequest==request)capturePreparing=false;};
     try{
         Captured value;value.request=request;value.generation=gen;value.configEpoch=epoch;
-        value.boundaryGeneration=gen;value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();
+        value.boundaryGeneration=gen;value.at=GetTickCount64();value.powerBoundaryFileTime=originalBoundary?originalBoundary:now;
         value.client=prepareSession();value.boundary="power-suspend-notification";
         if(!captureRequestCurrent(request)){finish();return;}
         value.identitySnapshot=g_steamSettingsObserver.identitySnapshot();
@@ -1159,14 +1162,16 @@ static void prepareSuspend() {
         bindNativeRecordIdentity(value);
         if(!bindOriginalRuleLease(request,selected)){finish();return;}
         unsigned long long continuation=0;
+        ULONGLONG continuationBoundary=0;
         {std::lock_guard<std::mutex> lock(captureMx);
             if(!captureRequestCurrentLocked(request)){if(captureRequest==request)capturePreparing=false;return;}
             prepared=value;preparedPending=true;capturePreparing=false;
             continuation=request->pendingCaptureGeneration;request->pendingCaptureGeneration=0;
+            continuationBoundary=request->pendingCaptureBoundary;request->pendingCaptureBoundary=0;
         }
         // Complete only this original request. Replacement between publication
         // and continuation cannot turn the late call into a new target's capture.
-        if(continuation)captureSuspend(continuation,request);
+        if(continuation)captureSuspend(continuation,request,continuationBoundary);
         sgRecordFact("sleep-steam-boundary-prepared",{{"generation",value.generation},{"pid",value.game.pid},{"created",std::to_string(value.game.created)},
             {"boundary",value.boundary},{"identityAvailable",value.game.pid!=0},{"steamClient",clientIdentity(value.client)},{"targetSelection",value.targetSelection},
             {"nativeRecordIdentityBound",value.nativeRecord.bound},{"nativeRecordIdentityReason",value.nativeRecord.reason},{"physicalPreSleepVerified",false}});
@@ -1179,10 +1184,12 @@ static void cancelPreparedSuspend(){
     std::lock_guard<std::mutex> lock(captureMx);cancelCaptureRequestLocked();preparedPending=false;prepared={};
     repeatedSuspendGeneration=0;repeatedSuspendEpoch=0;
 }
-static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected) {
+static void captureSuspend(unsigned long long generation,const std::shared_ptr<CaptureRequest>& expected,ULONGLONG originalBoundary) {
     const auto epoch=g_sleepRecoveryAutoConfigEpoch.load();if(!sleepSteamRecoveryAllows(generation,epoch))return;
+    const auto now=sgNowFileTime();
+    if(originalBoundary>now)return;
     Captured value;value.generation=generation;value.configEpoch=epoch;value.boundaryGeneration=generation;
-    value.at=GetTickCount64();value.powerBoundaryFileTime=sgNowFileTime();
+    value.at=GetTickCount64();value.powerBoundaryFileTime=originalBoundary?originalBoundary:now;
     bool early=false,repeatedOriginal=false;
     {std::lock_guard<std::mutex> lock(captureMx);
         if(expected&&(!captureRequestCurrentLocked(expected)||captureRequest!=expected))return;
@@ -1190,14 +1197,19 @@ static void captureSuspend(unsigned long long generation,const std::shared_ptr<C
         if(capturePreparing&&captureRequestCurrentLocked(captureRequest)&&
             (captureRequest->boundaryGeneration==generation||
              (captureRequest->boundaryGeneration!=ULLONG_MAX&&captureRequest->boundaryGeneration+1==generation))){
+            auto& pendingBoundary=captureRequest->pendingCaptureBoundary;
+            if(captureRequest->pendingCaptureGeneration!=generation ||
+               (originalBoundary&&(!pendingBoundary||originalBoundary<pendingBoundary)))pendingBoundary=originalBoundary;
             captureRequest->pendingCaptureGeneration=generation;return;
         }
         if(preparedPending&&prepared.configEpoch==epoch&&captureRequestCurrentLocked(prepared.request)&&
+            (!originalBoundary||prepared.powerBoundaryFileTime<=originalBoundary)&&
             (prepared.generation==generation||(prepared.generation!=ULLONG_MAX&&prepared.generation+1==generation))){
             value=prepared;value.generation=generation;early=true;
         }else if(repeatedSuspendGeneration&&repeatedSuspendEpoch==epoch&&
             (g_powerLifecycle.load()==PowerLifecycle::Suspending||g_powerLifecycle.load()==PowerLifecycle::Suspended)&&
             captured.generation==repeatedSuspendGeneration&&captured.configEpoch==epoch&&captureRequestCurrentLocked(captured.request)&&
+            (!originalBoundary||captured.powerBoundaryFileTime<=originalBoundary)&&
             repeatedSuspendGeneration!=ULLONG_MAX&&repeatedSuspendGeneration+1==generation){
             value=captured;value.generation=generation;early=true;repeatedOriginal=true;
         }else{value.request=beginCaptureRequestLocked(epoch);if(!value.request)return;capturePreparing=true;}

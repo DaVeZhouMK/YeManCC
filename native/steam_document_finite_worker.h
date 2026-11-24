@@ -48,10 +48,10 @@ inline Request parse(std::string_view bytes){
 inline Json unavailable(const char* reason){
     return {{"ok",false},{"reason",reason},{"mutated",false},{"complete",false},{"documents",Json::array()}};
 }
-template<class Emit>inline int run(std::string_view bytes,HANDLE cancel,Emit&& emit){
-    Request request;Json result;
+// Entry already validated this frame before binding its listener identity.
+template<class Emit>inline int run(const Request& request,HANDLE cancel,Emit&& emit){
+    Json result;
     try{
-        request=parse(bytes);
         auto token=std::make_shared<deckymirror::CancelToken>(cancel);
         DocumentIoScope io(token);io.operationEnd=request.end;
         steamlive::listenersource::Deadline listenerEnd(request.end);
@@ -126,8 +126,24 @@ inline Json read(const steamsession::Session& supplied,const StylePlan& plan,
     Json result=unavailable("document-worker-unavailable");
     if(!ownerCurrent||!ownerCurrent())return unavailable("document-read-cancelled");
     validate(plan.sp);validate(plan.mainMenu);validate(plan.quickAccess);
+    const auto budget=(std::max<DWORD>)(1,(std::min<DWORD>)(4000,budgetMs));
+    using Clock=std::chrono::steady_clock;
+    Clock::time_point queuedDeadline{};
     std::unique_lock serialized(steamlive::transportMutex,std::try_to_lock);
-    if(!serialized.owns_lock())return unavailable("live-busy");
+    if(!serialized.owns_lock()){
+        const auto queuedAt=Clock::now();
+        // One wait, even if the sampled holder changes before acquisition.
+        // This is only lock admission, not evidence of document readiness.
+        if(steamlive::TransportHoldObservation::sample().holder!=steamlive::TransportHolder::Mode)
+            return unavailable("live-busy");
+        if(!ownerCurrent())return unavailable("document-read-cancelled");
+        const auto lockDeadline=queuedAt+std::chrono::milliseconds((std::min)(DWORD{250},budget));
+        if(Clock::now()>=lockDeadline)return unavailable("live-busy");
+        (void)serialized.try_lock_until(lockDeadline);
+        if(!ownerCurrent())return unavailable("document-read-cancelled");
+        if(!serialized.owns_lock()||Clock::now()>=lockDeadline)return unavailable("live-busy");
+        queuedDeadline=queuedAt+std::chrono::milliseconds(budget);
+    }
     const steamlive::TransportHoldObservation holder(serialized,steamlive::TransportHolder::DocumentWorker);
     auto& lifetime=documentParent();
     auto ownership=lifetime.acquire();
@@ -135,7 +151,14 @@ inline Json read(const steamsession::Session& supplied,const StylePlan& plan,
     steamlive::SteamProcessLease process;
     if(!process.bind(session)||!ownerCurrent())return unavailable("document-read-cancelled");
     const auto current=[&]()noexcept{try{return lifetime.current()&&process.current()&&ownerCurrent();}catch(...){return false;}};
-    const auto end=GetTickCount64()+(std::max<DWORD>)(1,(std::min<DWORD>)(4000,budgetMs));
+    const auto available=[&]() -> DWORD {
+        if(queuedDeadline==Clock::time_point{})return budget;
+        const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(queuedDeadline-Clock::now()).count();
+        return left>0?static_cast<DWORD>(left):0;
+    };
+    const auto remaining=available();
+    if(!remaining)return unavailable("document-worker-deadline");
+    const auto end=GetTickCount64()+remaining;
     auto ready=ownership.ready();
     auto& owner=ownership.owner();auto& reader=ownership.reader();Observation state;
     HANDLE child=nullptr;bool cleanupDone=false;
@@ -156,6 +179,10 @@ inline Json read(const steamsession::Session& supplied,const StylePlan& plan,
     };
     struct Finish {decltype(cleanup)& action;~Finish(){action();}} finish{cleanup};
     try{
+        if(queuedDeadline!=Clock::time_point{}){
+            if(!current())throw std::runtime_error("document-read-cancelled");
+            if(!available()||!listenerproxy::left(end))throw std::runtime_error("document-worker-deadline");
+        }
         const auto started=ownership.start();state.started=bool(started);
         if(!started)throw std::runtime_error("document-worker-start-failed");
         char id[33]{};snprintf(id,sizeof(id),"%016llx%016llx",static_cast<unsigned long long>(GetCurrentProcessId()),
@@ -196,7 +223,7 @@ inline Json read(const steamsession::Session& supplied,const StylePlan& plan,
             std::vector<std::uint8_t> bytes;DWORD error=0;const auto received=reader.advance(bytes,error);
             if(received==clientdetail::EventReader::Read::frame){
                 std::vector<std::set<std::string>> keys;
-                const auto reply=Json::parse(bytes,[&](int depth,Json::parse_event_t event,Json& value){
+                auto reply=Json::parse(bytes,[&](int depth,Json::parse_event_t event,Json& value){
                     worker::require(depth<=32,"document-worker-reply-invalid");
                     if(event==Json::parse_event_t::object_start)keys.emplace_back();
                     else if(event==Json::parse_event_t::object_end)keys.pop_back();
@@ -220,7 +247,7 @@ inline Json read(const steamsession::Session& supplied,const StylePlan& plan,
                 worker::require(reply.is_object()&&reply.size()==4&&reply.value("schema",std::string{})==schema&&
                     reply.at("id")==id&&reply.at("generation")==generation&&reply.at("detail").is_object()&&!work,
                     "document-worker-reply-invalid");
-                auto value=reply.at("detail");
+                auto& value=reply.at("detail");
                 validateResult(value,plan);
                 result=!current()?unavailable("document-read-cancelled"):
                     GetTickCount64()>=end?unavailable("document-worker-deadline"):std::move(value);

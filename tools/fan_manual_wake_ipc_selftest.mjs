@@ -111,10 +111,11 @@ function fixture(mode='ack',factoryType='HandheldCompanion.Devices.OneXPlayerX1M
    if (mode.startsWith('native-owner-deferred-close-') && msg.args.continueReadyOnly === true && manuals === 2) {
     if(mode.endsWith('-lost'))return;
     // A new Windows notice crosses the renderer Ready read and the Native gate.
-    native={...native,phase:'resuming',hardwareWritesAllowed:false,notificationPending:true};
+    const suspended=mode.endsWith('-suspended');
+    native={...native,phase:suspended?'suspended':'resuming',hardwareWritesAllowed:false,notificationPending:!mode.endsWith('-settled-suspended')};
     releaseCleanup=()=>{native={...native,phase:'ready',hardwareWritesAllowed:true,notificationPending:false};};
     if(mode.endsWith('-capture'))queueMicrotask(()=>deliver(msg,{ok:true,generation:native.generation,phase:'ready',admitted:true,resumeScheduled:false,resumeDisposition:'awaiting-power'}));
-    else queueMicrotask(()=>deliver(msg,{ok:false,generation:native.generation,phase:mode.endsWith('-resuming')?native.phase:'ready',admitted:false,reason:'wake_not_ready'}));
+    else queueMicrotask(()=>deliver(msg,{ok:false,generation:native.generation,phase:suspended||mode.endsWith('-resuming')?native.phase:'ready',admitted:false,reason:'wake_not_ready'}));
     return;
    }
    const rejected=native.phase==='suspending'||mode==='reject'||(observedWakeOnly&&(!native.resumeReady||!native.hardwareWritesAllowed||native.notificationPending))
@@ -195,6 +196,30 @@ for(const kind of ['unknown','pending','stale'])await check('shared-ready '+kind
 await check('shared-ready valid device receipt resumes once without input readiness',async()=>{
  const f=fixture('ack',undefined,true);try{await f.boot();f.setNative({phase:'ready',resumeReady:true,hardwareWritesAllowed:true,inputReady:false,known:true,notificationPending:false});await f.host.resume({generation:4});f.rootReady(4);await f.advance(2000);assert.equal(f.life.state,'ready');assert.equal(f.host.calls.filter(v=>v==='enable').length,1);f.rootReady(4);await f.advance(2000);assert.equal(f.host.calls.filter(v=>v==='enable').length,1,'duplicate current notification replayed confirmed curve');return {trace:[...f.host.calls],state:f.life.state};}finally{await f.done();}
 });
+await check('shared-ready Fan-only receipt is bound to the public suspend serial',async()=>{
+ const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
+ let stop;
+ try{
+  await f.boot();
+  f.setNative({generation:4,sharedGeneration:3,phase:'ready',resumeReady:true,hardwareWritesAllowed:true,
+   inputReady:false,known:true,notificationPending:false,scope:'fan-only',physicalWakeObserved:true,sharedPowerCommitted:false});
+  await f.host.resume({generation:4});
+  stop=f.watchSharedWake();
+  f.publishShared({suspendSerial:12});await f.flush();
+  f.publishShared({suspendSerial:13});await f.flush();
+  const fanReads=()=>f.calls.filter(v=>v.cmd==='power.fanLifecycle').length;
+  const before=fanReads();
+  f.publishFanWake({suspendSerial:12,fanWakeGeneration:4});await f.advance(2000);
+  assert.equal(fanReads(),before,'old suspend serial reached the Fan wake observer');
+  assert(!f.host.calls.includes('enable'),'old suspend serial replayed the retained curve');
+  f.publishFanWake({suspendSerial:13,fanWakeGeneration:4});await f.advance(2000);
+  assert.equal(f.life.state,'ready');
+  assert.equal(f.host.calls.filter(v=>v==='enable').length,1);
+  assert.equal(f.api.getSharedPowerLifecycle().suspendSerial,13);
+  assert.equal(f.api.getSharedPowerLifecycle().fanWakeGeneration,undefined,'Fan-only delivery changed public authority');
+  return {staleSerial:12,currentSerial:13,trace:[...f.host.calls]};
+ }finally{stop?.();await f.done();}
+});
 await check('background-ready retained private cycle resumes and renews without opening the fan page',async()=>{
  const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
  try{
@@ -265,7 +290,7 @@ for (const boundary of ['recovers', 'off', 'new-sleep', 'sleep-during-read', 'st
 }
 
 async function nativeBoot(f){const p=f.observe(f.boot());for(let n=0;n<100&&p.status==='pending';n++)await f.advance(100);if(p.status!=='fulfilled')console.log(JSON.stringify({diagnostic:'boot',status:p.status,error:p.error,state:f.life.state,host:f.host.calls,ipc:f.calls.map(x=>({cmd:x.cmd,url:x.args?.url}))}));assert.equal(p.status,'fulfilled',p.error??'boot pending');}
-for(const boundary of ['resume','read','off','new-sleep','pending','stale']) {
+for(const boundary of ['resume','redelivery','read','off','new-sleep','pending','stale']) {
  await check('background-ready without the private notification: '+boundary,async()=>{
   const f=fixture('ack','HandheldCompanion.Devices.GPDWin5',true);
   let stop,stopOrdinary;
@@ -280,6 +305,7 @@ for(const boundary of ['resume','read','off','new-sleep','pending','stale']) {
    }
    const ordinaryBefore=ordinaryNotices;
    const readBefore=f.calls.filter(c=>c.cmd==='power.fanLifecycle').length;
+   const publicReadsBefore=f.calls.filter(c=>c.cmd==='power.lifecycle').length;
    if(boundary==='off')await f.life.disable();
    await f.host.resume({generation:4});
    f.setNative({known:true,generation:4,sharedGeneration:3,phase:'ready',resumeReady:true,hardwareWritesAllowed:true,inputReady:false,notificationPending:false});
@@ -287,6 +313,12 @@ for(const boundary of ['resume','read','off','new-sleep','pending','stale']) {
    if(boundary==='read'){
     f.publishShared({fanWakeGeneration:4,publicationRevision:2});stop=f.watchSharedWake();
    }else{
+    if(boundary==='redelivery'){
+     // Both first posts were lost while this background subscriber already existed.
+     await f.advance(150);
+     assert.equal(f.calls.filter(c=>c.cmd==='power.fanLifecycle').length,readBefore);
+     assert.equal(f.host.calls.filter(c=>c==='enable').length,0);
+    }
     // Native can capture fresher unrelated fields; only Fan may consume this projection.
     f.publishFanWake({fanWakeGeneration:4,publicationRevision:1,inputReady:true,
       observedNotificationSequence:boundary==='stale'?9:10,notificationPending:boundary==='pending'});
@@ -298,10 +330,18 @@ for(const boundary of ['resume','read','off','new-sleep','pending','stale']) {
     f.releaseFanRead();
    }
    await f.advance(2000);
-   const positive=boundary==='resume'||boundary==='read';
+   const positive=boundary==='resume'||boundary==='redelivery'||boundary==='read';
    assert.equal(f.host.calls.filter(c=>c==='acquire').length,positive?1:0,'unsafe or missing lease');
    assert.equal(f.host.calls.filter(c=>c==='enable').length,positive?1:0,'unsafe or missing curve replay');
    assert.equal(ordinaryNotices,ordinaryBefore,'Fan projection leaked into ordinary power observers');
+   if(boundary==='redelivery'){
+    const readsAfterWake=f.calls.filter(c=>c.cmd==='power.fanLifecycle').length;
+    for(let i=0;i<2;i++)f.publishFanWake({fanWakeGeneration:4,publicationRevision:1});
+    await f.flush();
+    assert.equal(f.calls.filter(c=>c.cmd==='power.fanLifecycle').length,readsAfterWake,'duplicate resend read the confirmed Fan gate again');
+    assert.equal(f.calls.filter(c=>c.cmd==='power.lifecycle').length,publicReadsBefore,'Fan recovery did not need public polling');
+    assert.equal(ordinaryNotices,ordinaryBefore,'duplicate resends reached ordinary observers');
+   }
    f.publishShared({publicationRevision:3});await f.advance(2000);
    assert.equal(f.host.calls.filter(c=>c==='enable').length,positive?1:0,'duplicate shared observation replayed the curve');
    assert.equal(f.manuals,0);
@@ -341,7 +381,7 @@ await check('native-owner real HTTP first click continues after native Close and
   assert(!f.calls.some(x=>x.cmd==='http.request'&&x.args.url.endsWith('/api/resume')));
  }finally{await nativeDone(f);}
 });
-for (const point of ['gate','resuming','capture','held','lost','new-sleep']) await check('native-owner real HTTP first click handles second Ready '+point,async()=>{
+for (const point of ['gate','resuming','pending-suspended','settled-suspended','capture','held','lost','new-sleep']) await check('native-owner real HTTP first click handles second Ready '+point,async()=>{
  const f=fixture('native-owner-deferred-close-'+point);try{
   await nativeBoot(f);f.life.adapter=new f.api.HttpFanApiAdapter('http://127.0.0.1:8765','0123456789abcdef'.repeat(4));
   const click=await f.begin();await f.advance(400);
@@ -349,6 +389,15 @@ for (const point of ['gate','resuming','capture','held','lost','new-sleep']) awa
   f.releaseCleanup();
   for(let i=0;i<16&&f.manuals<2&&click.status==='pending';i++)await f.advance(100);
   assert.equal(f.manuals,2);
+  if(point==='settled-suspended'){
+   assert.equal(f.native.phase,'suspended');assert.equal(f.native.notificationPending,false);
+   await f.advance(500);
+   assert.equal(click.status,'rejected');assert.match(String(click.error),/FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary/);
+   f.releaseCleanup();await f.advance(500);
+   assert.equal(f.manuals,2,'late Ready resurrected a settled suspend');
+   assert(!f.host.calls.some(call=>['resume','acquire','enable'].includes(call)));
+   return;
+  }
   if(point==='lost'){
    for(let i=0;i<160&&click.status==='pending';i++)await f.advance(100);
    assert.equal(click.status,'rejected');assert.match(String(click.error),/FAN_RESUME_WAIT_DEADLINE/);

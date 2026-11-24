@@ -728,8 +728,8 @@ ULONGLONG joinAdmissionPrepare(bool unexpected,unsigned initialSpent=2){
 void joinAdmissionStart(bool unexpected){if(unexpected)sgEvaluateExternalDeviceWake();else sgSleepTimeoutTick();}
 void joinAdmissionReach(JoinAdmissionGate& gate){
  joinAdmissionGate=&gate;joinRecoveryHook=joinAdmissionArmFinalCleanup;
- const auto gen=generation;
- gate.worker=std::thread([&gate,gen]{try{consumeActualWake({SgWork::WakeSuspend,gen});}catch(...){gate.error=std::current_exception();}});
+ const auto delivery=fixtureWorkReceipt(SgWork::WakeSuspend,generation);
+ gate.worker=std::thread([&gate,delivery]{try{consumeActualWake(delivery);}catch(...){gate.error=std::current_exception();}});
  check(gate.ready(),"admission: actual worker did not reach final stop after its locked guard");
  check(!frozen&&resumeCount==1,"admission: worker barrier preceded exact lease return");
 }
@@ -741,14 +741,14 @@ void joinAdmissionReturn(JoinAdmissionGate& gate){
   sgConsumeEntryObservationHandoffReady(WM_TIMER);
  }
 }
-static ULONGLONG joinAdmissionPublishedGeneration=0;
+static SgWorkItem joinAdmissionPublishedDelivery{};
 void joinAdmissionConsumeOldWorker(){
  std::exception_ptr error;
- std::thread worker([&]{try{consumeActualWake({SgWork::WakeSuspend,joinAdmissionPublishedGeneration});}catch(...){error=std::current_exception();}});
+ std::thread worker([&]{try{consumeActualWake(joinAdmissionPublishedDelivery);}catch(...){error=std::current_exception();}});
  worker.join();if(error)std::rethrow_exception(error);
 }
 void joinAdmissionReverse(bool unexpected){
- const auto origin=joinAdmissionPrepare(unexpected);joinAdmissionPublishedGeneration=generation;
+ const auto origin=joinAdmissionPrepare(unexpected);joinAdmissionPublishedDelivery=fixtureWorkReceipt(SgWork::WakeSuspend,generation);
  joinStartPublishedHook=joinAdmissionConsumeOldWorker;joinAdmissionStart(unexpected);
  check(!joinStartPublishedHook&&sgSleepRetryActive()&&timerDue&&g_sgTask.generation==generation&&
        g_sgLastPowerButtonSleepIntentFileTime.load()==origin&&frozen&&resumeCount==0&&g_sgAutomaticSleepBudget.requests()==2,
@@ -1187,6 +1187,18 @@ void joinKernelSuccessBeforeJournal(){
  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
  joinAdmissionStart(true);dispatch();
  check(requestCount==1,"callback prior success blocked a genuine subsequent unexpected wake");
+ // A valid original 507 does not confirm the display cycle without an explicit end.
+ for(const std::string status:{"false","true","","unknown","parse-fault"}){
+  baseCycle(false,false);
+  joinKernelXml=timeoutXml(507,32,nowFile,false);
+  if(status=="parse-fault")joinKernelEvidenceThrows=true;
+  if(!status.empty())joinKernelXml.insert(joinKernelXml.find("</EventData>"),
+      "<Data Name='IsCsSessionInProgressOnExit'>"+(status=="parse-fault"?std::string("false"):status)+"</Data>");
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+  const auto exit=g_sgKernelCycles.displayCycle(0,0,generation,0,0).exit;
+  check(!joinKernelEvidenceThrows&&exit.at==nowFile&&exit.sessionEnded==(status=="false"),
+        "actual 507 callback conflated unavailable or continuing session status with ended");
+ }
 }
 
 
@@ -1761,6 +1773,40 @@ void joinRetryTimerFailure(){
  for(const unsigned kind:{1U,2U,0U})for(const unsigned stage:{0U,1U,2U,3U})for(const unsigned input:{0U,1U,2U,3U,4U,5U,6U,7U})one(kind,stage,input);
  for(const unsigned input:{0U,1U,2U,3U,4U,5U,6U,7U})one(0,4,input);
  for(const unsigned input:{8U,9U,10U,11U})one(1,0,input);
+ for(const unsigned fault:{0U,1U,2U,3U,4U}){
+  JoinRepairHooksScope hooks;joinNew506Arm(2,0);requestAccepted=false;keepInput=fault==2;
+  const auto resumes=resumeCount;const auto queued=actualWakeQueue.size();const bool paused=frozen;
+  const auto spent=g_sgAutomaticSleepBudget.requests();const auto calls=requestCount;
+  if(fault==0)joinTimerFail=true;
+  else{
+   g_sgTask.retryAttempt=SG_MAX_ENTRY_RETRIES-1;
+   while(g_sgAutomaticSleepBudget.requests()<SG_MAX_ENTRY_RETRIES-1)check(g_sgAutomaticSleepBudget.consume(),"terminal journal: prepare last budget slot");
+  }
+  const auto beforeSend=g_sgAutomaticSleepBudget.requests();
+  joinCleanupFactEvent=fault==0?"sleep-retry-timer-failed":fault==2?"sleep-retry-exhausted-keep-writer":"sleep-retry-finished";
+  joinCleanupFactSource.clear();joinCleanupFactFired=false;
+  const auto fail=[](){throw std::runtime_error("terminal journal port refused");};
+  if(fault==3)joinResumeIpcHook=fail;
+  else if(fault==4)joinCleanupFactHook=[](){joinNew506Publish();throw std::runtime_error("terminal journal port refused after new Windows entry");};
+  else joinCleanupFactHook=fail;
+  bool escaped=false;try{dispatch();}catch(const std::runtime_error&){escaped=true;}
+  const bool observed=fault==3?!joinResumeIpcHook:joinCleanupFactFired;
+  joinResumeIpcHook=joinCleanupFactHook=nullptr;joinTimerFail=false;requestAccepted=true;keepInput=false;
+  check(observed&&!escaped,"terminal journal: observer failure interrupts the original recovery");
+  check(requestCount==calls+1&&g_sgAutomaticSleepBudget.requests()==beforeSend+1&&beforeSend>=spent,
+     "terminal journal: failure did not add, refund or skip an original request");
+  check(!sgSleepRetryActive()&&!timerDue&&!g_sgRetryDueTick&&g_sgInternalSleepRequest.kind==SgRetryKind::None,
+     "terminal journal: no active retry, timer or request marker remains");
+  if(fault==4){
+   check(joinNew506Callbacks==1&&g_powerLifecycle.load()!=PowerLifecycle::Resuming&&actualWakeQueue.size()==queued&&frozen==paused,
+      "terminal journal: newer Windows entry vetoes all old recovery");
+  }else{
+   check(g_powerLifecycle.load()==PowerLifecycle::Resuming&&actualWakeQueue.size()==queued+1,
+      "terminal journal: current failed attempt queues original recovery once");
+   drainActualWake();check(!frozen&&resumeCount==resumes+(paused?1:0),"terminal journal: existing lease was returned exactly once");
+  }
+  sgDispatchSameModeRetry();check(requestCount==calls+1,"terminal journal: stale timer cannot replay retired retry");
+ }
  std::cout<<"RETRY_TIMER_MATRIX "<<rows.dump()<<'\n';passed("joined-original-retry-timer-failure-owned-terminal");
 }
 
@@ -2022,6 +2068,40 @@ void joinOwnerOverdueVetoes(){
 
 
 void joinKernelDeliveryOrder(const std::string& kind){
+ if(kind=="before-gui"){
+  baseCycle(false,false);
+  const auto closed=nowFile-20000;
+  g_sgClosedSleepIntentFileTime=closed;
+  g_sgLastPowerButtonWakeEventFileTime=0;
+  const auto observeEntry=[](ULONGLONG stamp){
+   joinKernelXml=timeoutXml(506,20,stamp);
+   const auto before=joinKernelStaticScanCancellations;
+   sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+   return joinKernelStaticScanCancellations-before;
+  };
+  check(observeEntry(closed-1)==0,"late Kernel-Power 506 cannot revoke the newer Ready scan");
+  check(observeEntry(closed)==0,"entry at the closed boundary cannot revoke the newer Ready scan");
+  check(observeEntry(0)==0,"missing original entry time cannot revoke a Ready scan");
+  check(observeEntry(nowFile+1)==0,"future entry cannot revoke a Ready scan");
+  check(observeEntry(closed+1)==1,"a fresh original entry still revokes inventory before window work");
+  const auto sendFanFact=[](int id,ULONGLONG stamp){
+   const auto before=joinKernelFanPosts;
+   joinKernelXml=timeoutXml(id,20,stamp);
+   sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+   return joinKernelFanPosts-before;
+  };
+  check(sendFanFact(506,nowFile+1)==0,"future original 506 cannot create a Fan Close boundary");
+  const auto futureWake=nowFile+10000ULL;
+  joinKernelBeforeJournal=[&](){at(nowTick+2);};
+  check(sendFanFact(507,futureWake)==0,"future original 507 cannot become a Fan wake during callback logging");
+  check(!joinKernelBeforeJournal&&nowFile>futureWake,"Fan future receipt control advanced the clock before posting");
+  check(sendFanFact(506,0)==0&&sendFanFact(507,0)==0,"missing original time cannot change Fan ordering");
+  const auto validEntry=futureWake-1,validWake=futureWake;
+  check(sendFanFact(506,validEntry)==1&&joinLastFanFact.eventId==506&&joinLastFanFact.fileTime==validEntry,
+        "valid original 506 still reaches Fan with its exact timestamp");
+  check(sendFanFact(507,validWake)==1&&joinLastFanFact.eventId==507&&joinLastFanFact.fileTime==validWake,
+        "valid original 507 still reaches Fan with its exact timestamp");
+ }
  baseCycle(true,false);joinInjectSuspendOnDispatch=joinInjectManualOnDispatch=false;
  const auto observed=nowFile,start=nowTick,from=generation;
  const auto original=observed-485435ULL,oldExit=original+11609238ULL,nextEntry=original+11627607ULL;

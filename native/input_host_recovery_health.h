@@ -37,6 +37,10 @@ inline bool fresh(const Source& s, Tick now, Tick power, unsigned topology) noex
     return ymcc::virtualOutputSourceCurrent({s.sequence,s.started,s.completed,s.power,s.topology,s.stable},
         now,power,topology);
 }
+inline Tick advanceContinuity(Tick previous) noexcept {
+    constexpr auto exhausted = std::numeric_limits<Tick>::max();
+    return previous >= exhausted-1 ? exhausted : previous+1;
+}
 // The canonical producer stamps continuity under its existing snapshot mutex.
 // A reader stall is retained even if it resumes before maintenance next runs;
 // healthy intermediate reads survive normal output deduplication.
@@ -48,7 +52,7 @@ inline Tick nextContinuity(const Source& previous, const Source& current, Tick n
         fresh(previous,current.started,current.power,current.topology);
     if (continuous && previous.continuity && previous.continuity != exhausted)
         return previous.continuity;
-    return previous.continuity >= exhausted-1 ? exhausted : previous.continuity+1;
+    return advanceContinuity(previous.continuity);
 }
 // Pure evidence window. The existing Host mutex owns it. Wall-clock maintenance
 // cannot extend coverage; only an accepted receipt for a fresh read can do so.

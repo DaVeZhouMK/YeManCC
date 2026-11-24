@@ -19,6 +19,7 @@ struct RuntimeReceipt {
     std::wstring button,status;
     std::string reason="unobserved";
     std::uint64_t configRevision=0,observedAt=0;
+    ymcc::sleeppower::SharedPowerV1 powerScope;
 };
 inline RuntimeReceipt selectRuntime(const std::vector<Identity>& candidates,bool unreadable){
     RuntimeReceipt r;
@@ -168,7 +169,7 @@ class RuntimeMonitor {
             if(!current()){releaseScope();continue;}
             if(r.running&&(!identityValid||!heldProcess->alive())){r.known=false;r.readable=false;r.reason="runtime-identity-unavailable";}
             if(r.running&&r.known&&!r.readable)r.reason="scaling-state-unavailable";
-            lastRead=GetTickCount64();r.observedAt=lastRead;
+            lastRead=GetTickCount64();r.observedAt=lastRead;r.powerScope=captured;
             std::function<void(const RuntimeReceipt&)> emit;
             {std::lock_guard<std::mutex> lock(mutex_);
                 if(!active_||requestRevision_!=revision||signal_->ended.load()||cancellation.cancelled()||!powerCurrent(access.read,captured))continue;

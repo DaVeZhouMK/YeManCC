@@ -47,9 +47,9 @@ Require-Text $service 'confirmation-deferred-sleep' 'sleeping/wake-grace must de
 Require-Text $service 'kWakeGraceMs' 'a bounded wake grace constant must exist'
 
 Require-Text $native 'case WM_RECOVERY_WEBVIEW_PING:' 'native window must answer recovery pings'
-Require-Text $native 'sgRecordFact("sleep-orphan-recovery-start")' 'sleep orphan recovery must stay in the sleep-facts stream'
+Require-Text $native 'sgRecordFact(settled ? "sleep-orphan-recovery-complete" : "sleep-orphan-recovery-deferred", {' 'sleep orphan recovery outcomes must stay in the sleep-facts stream'
 Require-Text $native 'appendFanLifecycleLog("fan-exit-handoff-result"' 'fan exit recovery must stay in the fan lifecycle stream'
-if ($native.Contains('appendNativeLifecycleLog("sleep-orphan-recovery-start")')) {
+if ($native -match 'appendNativeLifecycleLog\s*\([^;]*"sleep-orphan-recovery-') {
   throw 'FAIL: sleep recovery must not duplicate into the generic native log'
 }
 
@@ -93,9 +93,13 @@ Require-Text $native 'kRecoveryStateHeartbeatMs' 'native must publish at a bound
 Require-Text $native 'recoveryStatePublisherStart' 'native must start the publisher thread'
 Require-Text $native 'recoveryStatePublisherStop' 'native must stop the publisher thread'
 Require-Text $native 'recoverySnapSetExitIntent' 'exit intent must be published'
-Require-Text $native 'RecoveryStateBusyGuard recoveryBusyGuard("input-host-stop")' 'inputHostStop must mark the lifecycle busy'
+Require-Text $native '#include "virtual_controller_stop_runtime.h"' 'native must compile the inputHostStop runtime'
+Require-Text $native '#include "virtual_controller_start_runtime.h"' 'native must compile the inputHostStart runtime'
+$inputHostStop = Get-Content -LiteralPath (Join-Path $root 'native\virtual_controller_stop_runtime.h') -Raw
+$inputHostStart = Get-Content -LiteralPath (Join-Path $root 'native\virtual_controller_start_runtime.h') -Raw
+Require-Text $inputHostStop 'RecoveryStateBusyGuard recoveryBusyGuard("input-host-stop")' 'inputHostStop must mark the lifecycle busy'
 Require-Text $native 'RecoveryStateBusyGuard recoveryLifecycleBusy("lifecycle-work")' 'lifecycle work must mark the lifecycle busy'
-Require-Text $native 'RecoveryStateBusyGuard recoveryBusyGuard("input-host-start")' 'inputHostStart must mark the lifecycle busy'
+Require-Text $inputHostStart 'RecoveryStateBusyGuard recoveryBusyGuard("input-host-start")' 'inputHostStart must mark the lifecycle busy'
 Require-Text $native 'recoverySnapNoteCommand(command)' 'the host command funnel must publish the last command'
 Require-Text $native '--recovery-state-selftest' 'the native channel selftest entry must exist'
 Forbid-Text $native 'connectedMask == virtualEndpointMask' 'the suspended single-slot gate must not come back'

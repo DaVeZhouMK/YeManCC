@@ -48,7 +48,7 @@ console.log(JSON.stringify({ok:true,checks,scope:'production download coordinato
 }
 
 async function publicMediaPowerCases():Promise<void>{
- const args=process.argv.slice(2),names=['sequence-held-read','denial-ready','generation-change','metadata-only','startup-sequence','held-recheck','late-failure','stop'];
+ const args=process.argv.slice(2),names=['sequence-held-read','denial-ready','generation-change','metadata-only','startup-sequence','held-recheck','late-failure','stop','coalesced-ready'];
  assert.equal(args.length,4);assert.equal(args[0],'--public-power-case');assert.equal(args[2],'--out');
  const selected=args[1];assert(selected==='all'||names.includes(selected),'Unknown public media power case');
  const {writeFileSync}=await import('node:fs');const {join,isAbsolute}=await import('node:path');assert(isAbsolute(args[3]));
@@ -57,7 +57,7 @@ async function publicMediaPowerCases():Promise<void>{
   const events=new EventTarget(),timers=new Map<number,{fn:()=>void,at:number}>(),calls:any[]=[],holds:any[]=[];let serial=0,now=0,hold=name!=='startup-sequence';
   class Detail extends Event {detail:any;constructor(type:string,detail:any){super(type);this.detail=detail;}}
   const original={window:(globalThis as any).window,document:(globalThis as any).document,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout};
-  const state:any={known:true,phase:'ready',generation:100,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
+  const state:any={known:true,phase:'ready',generation:100,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,suspendSerial:7};
   Object.assign(globalThis,{window:events,document:{visibilityState:'visible',addEventListener(){},removeEventListener(){}},setTimeout:(fn:()=>void,ms:number)=>{const id=++serial;timers.set(id,{fn,at:now+ms});return id;},clearTimeout:(id:number)=>timers.delete(id),__mediaPowerRead:()=>Promise.resolve({...state})});
   const startupDeadline=Date.now()+30000;let downloads=0,rechecks=0;
   const invoke=async(command:string,args:any)=>{
@@ -80,6 +80,12 @@ async function publicMediaPowerCases():Promise<void>{
    else if(name==='denial-ready'){
     await publish({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before,'denied public state must not issue status read');
     hold=false;await publish({notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});assert.equal(downloads,before+1,'same-generation Ready must continue with a fresh read');
+   }else if(name==='coalesced-ready'){
+    hold=false;await publish({publicationRevision:2,suspendSerial:8});
+    assert.equal(downloads,before+1,'same-generation Ready with a new suspend serial must replace the held status read');
+    await publish({publicationRevision:3,inputReady:false});
+    await publish({publicationRevision:4,suspendSerial:7});
+    assert.equal(downloads,before+1,'duplicate and delayed pre-suspend Ready must not start another read');
    }else {hold=false;await publish({publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before+1,'same-generation notification must retire the held read before its return');}
    if(name==='startup-sequence'){assert.equal(timers.size,1,'one original startup observation timer');assert([...timers.values()][0].at<=startupDue!+1,'sequence change extended original startup deadline');}
    assert.equal(calls.filter(x=>x.command==='gameMedia.background'&&!x.args.recheck).length,writes,'power observation must not replay background policy writes');

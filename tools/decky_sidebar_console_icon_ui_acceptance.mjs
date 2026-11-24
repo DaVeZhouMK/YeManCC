@@ -9,7 +9,7 @@ import {targets,connect} from './fixtures/decky_cdp.mjs';
 const require=createRequire(path.join(root,'package.json'));
 const {transformSync}=require('esbuild');
 const source=fs.readFileSync(path.join(root,'decky-plugin/src/index.tsx'),'utf8');
-const jsx=source.match(/const consoleIcon = ([\s\S]*?);\r?\nconst placement/)?.[1];
+const jsx=source.match(/const consoleIcon = ([\s\S]*?);\r?\nlet placement/)?.[1];
 assert.ok(jsx,'Production icon expression must exist');
 const module={exports:null};
 vm.runInNewContext(transformSync('module.exports = '+jsx,{loader:'tsx',format:'cjs',jsxFactory:'SP_REACT.createElement'}).code,{module,SP_REACT:{createElement:(type,props,...children)=>({type,props:props??{},children})}});

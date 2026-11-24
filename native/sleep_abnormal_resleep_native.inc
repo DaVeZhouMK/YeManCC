@@ -319,12 +319,12 @@ static void sgAbnormalRecordConservativeIntent(ULONGLONG originalHumanIntent,ULO
     // REQUIRED ordinary fact once per current original human intent. DRIPS
     // accounting remains information in the existing507 capture. This record
     // neither depends on detail logging nor authorizes any power/source work.
-    sgRecordFact("abnormal-sleep-conservative-policy",{{"policy","conservative-windows-events"},
+    try { sgRecordFact("abnormal-sleep-conservative-policy",{{"policy","conservative-windows-events"},
         {"drips","drips-observation-only"},{"highPower","highPower-deferred"},
         {"originalHumanIntent",sgFormatFactFileTime(originalHumanIntent)},
         {"requestFileTime",sgFormatFactFileTime(requestFileTime)},{"trigger",trigger},
         {"automaticHighPowerRepair",false},{"automaticRequests",g_sgAutomaticSleepBudget.requests()},
-        {"detailLogsRequired",false},{"mandatoryEvidence",true}});
+        {"detailLogsRequired",false},{"mandatoryEvidence",true}}); } catch (...) {}
 }
 static void sgAbnormalArm(int reason,ULONGLONG eventTime) {
     // Conservative production entry: log the policy, leave Windows/manual and

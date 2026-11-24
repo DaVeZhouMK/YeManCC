@@ -5,7 +5,58 @@ const read=p=>fs.readFileSync(path.join(pack,p),'utf8');const files=['Round/roun
 const {chromium}=createRequire(process.env.YMCC_PLAYWRIGHT_PACKAGE_JSON||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
 const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const cases=[];
 try{
+ const eventPage=await browser.newPage({viewport:{width:1280,height:800}});
+ const eventFocus=[];
+ for(const viewport of [{width:1280,height:720},{width:1280,height:800}]){
+  const page=eventPage;
+  await page.setViewportSize(viewport);
+  await page.setContent(`<!doctype html><body class="BasicUI"><main id="frame"><p id="title">Game update</p><section id="panel" tabindex="0" class="Panel"><article id="event" class="basicpartnereventspage_BasicPartnerEvent_2yuwU"><h2>Event</h2><p>Event details</p></article></section><button id="next">Next event</button></main></body>`);
+  await page.addStyleTag({content:`body{margin:0;background:#161d29;color:white}#frame{display:grid;gap:12px;padding:30px;width:60%}#panel{padding:0 6px;overflow:hidden}article{margin:12px auto 8px;padding:14px 20px;width:75%;border:1px solid #374759;border-radius:12px;background:#263346}#next{justify-self:start}`});
+  await page.addStyleTag({content:files.map(read).join('\n')});
+  const get=()=>page.evaluate(()=>{
+   const event=document.querySelector('#event'),s=getComputedStyle(event);
+   return {boxes:['title','panel','event','next'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return[r.x,r.y,r.width,r.height]}),
+    border:s.border,margin:s.margin,radius:s.borderRadius,outline:[s.outlineStyle,s.outlineWidth,s.outlineColor,s.outlineOffset]};
+  });
+  const resting=await get();assert.equal(resting.outline[0],'none');
+  const toggle=enabled=>page.locator('#panel').evaluate((node,on)=>node.classList.toggle('gpfocus',on),enabled);
+  await page.locator('#panel').focus();await toggle(true);
+  const focused=await get();
+  eventFocus.push({viewport,resting,focused});
+  fs.writeFileSync(path.join(out,'partner-event-focus.json'),JSON.stringify(eventFocus,null,2));
+  assert.deepEqual(focused.boxes,resting.boxes,'Partner event focus must not move the article, panel or neighboring controls');
+  assert.deepEqual([focused.border,focused.margin,focused.radius],[resting.border,resting.margin,resting.radius]);
+  assert.deepEqual(focused.outline,['solid','2px','rgba(255, 255, 255, 0.6)','-2px']);
+  await toggle(false);await page.locator('#next').focus();assert.deepEqual(await get(),resting);
+  cases.push('Partner event at '+viewport.width+'x'+viewport.height+': a static focus outline without article, panel or sibling movement');
+ }
+ await eventPage.close();
  const page=await browser.newPage({viewport:{width:1280,height:800}});
+ for(const radius of ['3px','10px','30px']){
+  await page.setContent(`<!doctype html><body class="BasicUI"><button id="outside">Other</button><button id="news" class="gamepadhomewhatsnew_EventPreviewOuterWrapper_10b1V"><span id="art" class="gamepadhomewhatsnew_EventImage_116GS"></span><span>News</span></button></body>`);
+  await page.addStyleTag({content:`body{padding:40px}#art{display:block;height:100px;width:200px;background:#5482a1}#news:focus-visible,#news.gpfocus{outline:3px solid #fff}`});
+  await page.addStyleTag({content:[read('Round/shared.css'),read('Round/intensity/'+radius+'.css')].join('\n')});
+  await page.mouse.move(0,0);
+  const news=()=>page.evaluate(()=>{
+   const card=document.querySelector('#news'),art=document.querySelector('#art'),s=getComputedStyle(art);
+   return {radius:[s.borderTopLeftRadius,s.borderTopRightRadius,s.borderBottomRightRadius,s.borderBottomLeftRadius],boxes:[card,art].map(e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height]}),focus:card===document.activeElement,hover:card.matches(':hover'),outline:getComputedStyle(card).outlineWidth};
+  });
+  const initial=await news();assert.deepEqual(initial.radius,[radius,radius,'0px','0px']);
+  const stable=(state,where)=>{
+   assert.deepEqual(state.radius,initial.radius,where+': Round must not grow the news image corners');
+   assert.deepEqual(state.boxes,initial.boxes,where+': image and card geometry must stay fixed');
+  };
+  await page.locator('#news').hover();await page.waitForFunction(()=>document.querySelector('#news:hover'),null,{timeout:2000});
+  const mouse=await news();assert(mouse.hover);stable(mouse,'pointer hover');
+  await page.mouse.move(0,0);await page.locator('#outside').focus();await page.keyboard.press('Tab');
+  const keyboard=await news();assert(keyboard.focus);assert.equal(keyboard.outline,'3px');stable(keyboard,'keyboard focus');
+  await page.locator('#outside').focus();await page.locator('#news').evaluate(e=>e.classList.add('gpfocus'));
+  const controller=await news();assert.equal(controller.outline,'3px');stable(controller,'Steam gamepad focus class');
+  await page.locator('#news').hover();stable(await news(),'combined hover and gamepad focus');
+  await page.mouse.move(0,0);await page.locator('#news').evaluate(e=>e.classList.remove('gpfocus'));
+  stable(await news(),'focus exit');
+  cases.push('News artwork radius '+radius+' is static on hover, keyboard and Steam gamepad focus; geometry and focus outline remain');
+ }
  await page.setContent(`<body class="BasicUI"><div class="ReactVirtualized__Grid__innerScrollContainer"><div id="tile"><button id="cover" class="appportrait_LibraryItemBox_WYgDg Focusable">cover</button><div id="reflection" class="libraryassetimage_Container_1R9r2 basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf"></div></div></div><div id="ring" class="focusring_FocusRing_1IZrQ"></div><div class="appactivityday_NoCommentSupport_2CB_R"><div class="appactivityday_EventBody_NEMXh"><div class="Panel"><div class="focusring_FocusRingRoot_3PH_X"><div id="exception" class="focusring_FocusRing_1IZrQ"></div></div></div></div></div><button id="outside">outside</button>`);
  await page.addStyleTag({content:`body{margin:0;--round-radius-size:10px}#tile{position:relative;width:140px;height:210px}#cover{width:140px;height:210px}#ring,#exception{position:absolute;left:300px;top:50px;width:140px;height:210px}@keyframes nativePulse{0%{outline-width:12px}100%{outline-width:2px}}.BasicUI .appportrait_LibraryItemBox_WYgDg.Focusable:focus{outline:2px solid white;animation:nativePulse .4s ease 20}#reflection{position:absolute}`});
  await page.addStyleTag({content:files.map(read).join('\n')});
@@ -108,6 +159,77 @@ try{
   }
  }
  await page.screenshot({path:path.join(out,'flat-layout.png')});
+
+ const backdropClass='sharedappdetailsheader_ImgBlurBackdrop_ooM_c';
+ const capsuleClass='sharedappdetailsheader_TopCapsule_2meE3';
+ await page.setContent(`<!doctype html><body class="BasicUI"><section class="appdetails_Header_2gZXh"><div class="${capsuleClass}">
+  <img id="main-art"><img id="reflected-img" class="${backdropClass}"><canvas id="reflected-canvas" class="${backdropClass}"></canvas>
+  <video id="details-video" controls></video><button id="play-action">Play</button></div></section>
+  <div class="${capsuleClass}"><canvas id="other-canvas" class="${backdropClass}"></canvas></div></body>`);
+ await page.addStyleTag({content:`.${backdropClass}{width:160px;height:60px;filter:saturate(1);mask-image:linear-gradient(transparent,black)}`});
+ const readBackdrops=()=>page.evaluate(()=>Object.fromEntries(['main-art','reflected-img','reflected-canvas','details-video','other-canvas','play-action'].map(id=>{
+  const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);
+  return [id,{box:[r.x,r.y,r.width,r.height],visibility:s.visibility,filter:s.filter,mask:s.maskImage}];
+ })));
+ const beforeBackdrops=await readBackdrops();
+ const detailsStyle=await page.addStyleTag({content:read('YMCC Game Details/shared.css')});
+ const themedBackdrops=await readBackdrops();
+ for(const id of ['reflected-img','reflected-canvas']){
+  assert.equal(beforeBackdrops[id].visibility,'visible');
+  assert.deepEqual(themedBackdrops[id],{box:beforeBackdrops[id].box,visibility:'hidden',filter:'none',mask:'none'});
+ }
+ for(const id of ['main-art','details-video','other-canvas','play-action']){
+  const {box,...visual}=themedBackdrops[id];
+  const {box:unused,...baseline}=beforeBackdrops[id];
+  assert.deepEqual(visual,baseline);
+ }
+ await page.locator('#play-action').focus();
+ assert.equal(await page.locator('#play-action').evaluate(el=>document.activeElement===el),true);
+ await page.evaluate(()=>document.body.classList.remove('BasicUI'));
+ assert.deepEqual(await readBackdrops(),beforeBackdrops,'Desktop Steam keeps its native styling');
+ await page.evaluate(()=>document.body.classList.add('BasicUI'));
+ await detailsStyle.evaluate(el=>el.remove());
+ assert.deepEqual(await readBackdrops(),beforeBackdrops,'Turning the theme off restores native styling');
+ cases.push('Only the Steam Big Picture details backdrop image/canvas stop painting; layout boxes, video controls and focus remain');
+
+ const backgroundClass='sharedappdetailsheader_HeaderBackgroundImage_1sarA';
+ await page.setContent(`<!doctype html><body class="BasicUI"><section class="appdetails_Header_2gZXh"><div class="${capsuleClass}">
+  <div id="native-bg" class="${backgroundClass}"><button id="details-action">Play</button></div>
+  <div id="wallpaper-bg" class="${backgroundClass}" data-ymcc-wallpaper-target="/library/app"><video id="wallpaper-video" controls></video></div>
+  </div></section><div id="outside-bg" class="${backgroundClass}"></div></body>`);
+ await page.addStyleTag({content:`.${backgroundClass}{opacity:1;transition:opacity 800ms ease, transform 800ms ease}
+  .${backgroundClass}.dim{opacity:.2;transform:translateY(40px)}
+  [data-ymcc-wallpaper-target]{opacity:1!important}[data-ymcc-wallpaper-target] video{transition:opacity 250ms ease}`});
+ const backgroundState=()=>page.evaluate(()=>{
+  const read=id=>{const s=getComputedStyle(document.getElementById(id));return [s.transitionProperty,s.transitionDuration,s.opacity]};
+  return ['native-bg','wallpaper-bg','outside-bg','wallpaper-video'].map(read);
+ });
+ const beforeFade=await backgroundState();
+ assert.deepEqual(beforeFade[0],['opacity, transform','0.8s, 0.8s','1']);
+ const fadeStyle=await page.addStyleTag({content:read('YMCC Game Details/shared.css')});
+ const afterFade=await backgroundState();
+ assert.equal(afterFade[0][0],'transform','Details native art must not run an opacity transition');
+ assert.deepEqual(afterFade.slice(1),beforeFade.slice(1),'Wallpaper host, video and unrelated artwork retain their transitions');
+ await page.locator('#details-action').focus();
+ const fades=await page.evaluate(()=>{
+  const native=document.getElementById('native-bg');
+  native.classList.add('dim');
+  const style=getComputedStyle(native),opening=[style.opacity,native.getAnimations().map(a=>a.transitionProperty)];
+  native.classList.remove('dim');
+  return {opening,returned:style.opacity,focus:document.activeElement.id};
+ });
+ assert.deepEqual(fades,{opening:['0.2',['transform']],returned:'1',focus:'details-action'});
+ await page.locator('#native-bg').evaluate(e=>e.setAttribute('data-ymcc-wallpaper-target','/library/app'));
+ assert.deepEqual(await backgroundState(),beforeFade,'Wallpaper attaching to the same node restores the native transition contract');
+ await page.locator('#native-bg').evaluate(e=>e.removeAttribute('data-ymcc-wallpaper-target'));
+ assert.deepEqual(await backgroundState(),afterFade);
+ await page.evaluate(()=>document.body.classList.remove('BasicUI'));
+ assert.deepEqual(await backgroundState(),beforeFade,'Desktop Steam keeps the original fade');
+ await page.evaluate(()=>document.body.classList.add('BasicUI'));
+ await fadeStyle.evaluate(e=>e.remove());
+ assert.deepEqual(await backgroundState(),beforeFade,'Turning off the theme restores the original fade');
+ cases.push('Details native artwork skips only opacity interpolation; native transform, focus, wallpaper, desktop and theme-off paths remain');
+
  const resourceManifest=JSON.parse(fs.readFileSync(path.join(packRoot,'manifest.json'),'utf8'));
  await page.setContent('<body></body>');
  const sourceCss=resourceManifest.files.filter(file=>file.path.endsWith('.css'));

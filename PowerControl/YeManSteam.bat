@@ -137,21 +137,38 @@ function Find-SteamExe {
     return ''
 }
 function Get-BootNetworkTask {
-    # The Power page's network-startup switch is the registered task, not the
-    # obsolete startupDesired.steamCommunity settings mirror.
-    $tool=Join-Path $env:SystemRoot 'System32\schtasks.exe'
-    $query=Start-Quiet $tool '/Query /TN "\Steamcommunity_302" /XML' -Capture
-    if($query.Code -ne 0){return [pscustomobject]@{state='task-unavailable';ready=$false;code=$query.Code}}
-    if($query.Text.Length -gt 131072){return [pscustomobject]@{state='task-xml-too-large';ready=$false}}
-    $document=[Xml.XmlDocument]::new();$document.XmlResolver=$null;$document.LoadXml($query.Text)
+    $service=New-Object -ComObject Schedule.Service
+    $service.Connect()
+    Select-BootNetworkTask ($service.GetFolder('\'))
+}
+function Select-BootNetworkTask($Folder) {
+    # Prefer V15; read failures must not be mistaken for absence.
+    foreach($candidate in @(@{Name='\Steamcommunity302 V15';Arguments='--start-service'},@{Name='\Steamcommunity_302';Arguments=''})){
+        $task=Read-BootNetworkTask $Folder $candidate.Name $candidate.Arguments
+        if($task.ready){return $task}
+        if($task.state -notin @('task-missing','startup-disabled')){return $task}
+    }
+    return [pscustomobject]@{state='startup-disabled-or-unavailable';ready=$false}
+}
+function Read-BootNetworkTask($Folder,[string]$Name,[string]$ExpectedArguments) {
+    try{$registered=$Folder.GetTask($Name.Substring(1))}
+    catch{
+        for($errorValue=$_.Exception;$errorValue;$errorValue=$errorValue.InnerException){
+            if($errorValue.HResult -in @(-2147024894,-2147024893)){return [pscustomobject]@{state='task-missing';ready=$false}}
+        }
+        throw
+    }
+    $xml=$registered.Xml
+    if($xml.Length -gt 131072){return [pscustomobject]@{state='task-xml-too-large';ready=$false}}
+    $document=[Xml.XmlDocument]::new();$document.XmlResolver=$null;$document.LoadXml($xml)
     if($document.DocumentType){return [pscustomobject]@{state='task-xml-doctype-rejected';ready=$false}}
     $ns=[Xml.XmlNamespaceManager]::new($document.NameTable);$ns.AddNamespace('t','http://schemas.microsoft.com/windows/2004/02/mit/task')
     $enabled=$document.SelectSingleNode('/t:Task/t:Settings/t:Enabled',$ns)
     if($enabled -and $enabled.InnerText -ne 'true'){return [pscustomobject]@{state='startup-disabled';ready=$false}}
-    $logon=$document.SelectNodes('/t:Task/t:Triggers/t:LogonTrigger',$ns)
-    $logonEnabled=$false
-    foreach($trigger in $logon){$flag=$trigger.SelectSingleNode('t:Enabled',$ns);if(-not $flag -or $flag.InnerText -eq 'true'){$logonEnabled=$true}}
-    if(-not $logonEnabled){return [pscustomobject]@{state='logon-trigger-disabled';ready=$false}}
+    $triggers=$document.SelectNodes('/t:Task/t:Triggers/*',$ns)
+    if($triggers.Count -ne 1 -or $triggers[0].LocalName -ne 'LogonTrigger'){return [pscustomobject]@{state='logon-trigger-unverified';ready=$false}}
+    $logonEnabled=$triggers[0].SelectSingleNode('t:Enabled',$ns)
+    if($logonEnabled -and $logonEnabled.InnerText -ne 'true'){return [pscustomobject]@{state='logon-trigger-disabled';ready=$false}}
     $instances=$document.SelectSingleNode('/t:Task/t:Settings/t:MultipleInstancesPolicy',$ns)
     if($instances -and $instances.InnerText -ne 'IgnoreNew'){return [pscustomobject]@{state='duplicate-policy-unverified';ready=$false}}
     $demand=$document.SelectSingleNode('/t:Task/t:Settings/t:AllowStartOnDemand',$ns)
@@ -159,8 +176,11 @@ function Get-BootNetworkTask {
     $actions=$document.SelectNodes('/t:Task/t:Actions/*',$ns)
     if($actions.Count -ne 1 -or $actions[0].LocalName -ne 'Exec'){return [pscustomobject]@{state='task-action-unverified';ready=$false}}
     $command=$actions[0].SelectSingleNode('t:Command',$ns);$arguments=$actions[0].SelectSingleNode('t:Arguments',$ns)
-    if(-not $command -or [IO.Path]::GetFullPath($command.InnerText.Trim().Trim('"')) -ine 'C:\SOFT\steamcommunity\steamcommunity_302.cli.exe' -or ($arguments -and -not [string]::IsNullOrWhiteSpace($arguments.InnerText))){return [pscustomobject]@{state='task-action-unverified';ready=$false}}
-    [pscustomobject]@{state='startup-enabled';ready=$true;task='\Steamcommunity_302';singleInstance=$true}
+    $directory=$actions[0].SelectSingleNode('t:WorkingDirectory',$ns)
+    $argumentText=if($arguments){$arguments.InnerText.Trim()}else{''}
+    $image=if($command){$command.InnerText.Trim() -replace '^"([^"]+)"$','$1'}else{''}
+    if($image -ine 'C:\SOFT\steamcommunity\steamcommunity_302.cli.exe' -or $argumentText -cne $ExpectedArguments -or -not $directory -or $directory.InnerText.Trim() -ine 'C:\SOFT\steamcommunity'){return [pscustomobject]@{state='task-action-unverified';ready=$false}}
+    [pscustomobject]@{state='startup-enabled';ready=$true;task=$Name;singleInstance=$true}
 }
 function Get-BootNetworkProcess {
     $found=[pscustomobject]@{state='absent';pid=0;birth=0L}
@@ -188,14 +208,14 @@ function Invoke-BootNetworkAcceleration($P) {
         # policy arbitrates a concurrent logon trigger of the same registered task.
         $running=& $P.Process
         if($running.state -ne 'absent'){& $P.Log 'network-startup-skip' ('reason='+$running.state+' pid='+$running.pid+' birth='+$running.birth);return}
-        $result=& $P.Request
-        & $P.Log 'network-startup-request' ('task=\Steamcommunity_302 stage=ymcc-companion requested=True submitted='+($result.Code -eq 0)+' code='+$result.Code+' waitForAcceleratorReady=False startupConfirmed=False detail='+([string]$result.Text).Substring(0,[Math]::Min(400,([string]$result.Text).Length)))
+        $result=& $P.Request $task.task
+        & $P.Log 'network-startup-request' ('task='+$task.task+' stage=ymcc-companion requested=True submitted='+($result.Code -eq 0)+' code='+$result.Code+' waitForAcceleratorReady=False startupConfirmed=False detail='+([string]$result.Text).Substring(0,[Math]::Min(400,([string]$result.Text).Length)))
     }catch{& $P.Log 'network-startup-failed' $_.Exception.Message}
 }
 function Start-BootNetworkAcceleration {
     $ports=@{
         Task={Get-BootNetworkTask};Process={Get-BootNetworkProcess}
-        Request={Start-Quiet (Join-Path $env:SystemRoot 'System32\schtasks.exe') '/Run /TN "\Steamcommunity_302"' -Capture}
+        Request={param($Name)Start-Quiet (Join-Path $env:SystemRoot 'System32\schtasks.exe') ('/Run /TN "'+$Name+'"') -Capture}
         Log={param($Event,$Detail)Write-BootLog $Event $Detail}
     }
     Invoke-BootNetworkAcceleration $ports

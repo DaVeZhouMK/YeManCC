@@ -351,15 +351,15 @@
     },
     {
       "path": "Round/round-outline.css",
-      "sha256": "92958df2567ebf63223497078fff4e0c212a5559e39c7873db93065a4b3b778b",
-      "bytes": 1862,
-      "contentProperty": "--ymcc-content-01fede0cb344dceb"
+      "sha256": "be47888c5fcc730f08b2ff66a3d75f16550fe5546ad6d2e746536cf10f842866",
+      "bytes": 1784,
+      "contentProperty": "--ymcc-content-67560bb851c8b058"
     },
     {
       "path": "Round/shared.css",
-      "sha256": "1c2f8995b2fb81a40289fe01f5b225d6d830f7cffb5219c06212caf1c142c567",
-      "bytes": 15341,
-      "contentProperty": "--ymcc-content-a57f2e4999c6cc47"
+      "sha256": "de2e6c4f6b1399ccc84054daed683425d6034968652af217055efa0b679008ee",
+      "bytes": 15085,
+      "contentProperty": "--ymcc-content-cb3b4b8dab818b30"
     },
     {
       "path": "Round/theme.json",
@@ -378,9 +378,9 @@
     },
     {
       "path": "YMCC Game Details/shared.css",
-      "sha256": "5a985bfa5dbcc553ba50b7b3304bc522d0060234feab746701c78fb98584b1f3",
-      "bytes": 1613,
-      "contentProperty": "--ymcc-content-6559ccaed176dc47"
+      "sha256": "d7a9027e5b18e7c714c348bce1889779c360133238c188bbf397fb1d43a86ecb",
+      "bytes": 2325,
+      "contentProperty": "--ymcc-content-1600ea7e89521bab"
     }
   ],
   "renderContentProtocol": 1

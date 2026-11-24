@@ -69,86 +69,19 @@ inline TrackedProcessInventory trackedProcessInventory(const std::vector<std::st
     return result;
 }
 
-// Index 0 is RunningListAndProcess; index 1 is ProcessLifetime. The original
-// single-view parser remains unchanged. A view that hits its member cap stays
-// failed even when later rows reset or remove entries in the other view.
-inline std::array<TrackedProcessInventory,2> trackedProcessInventories(const std::vector<std::string>& lines) {
-    std::array<TrackedProcessInventory,2> result;
-    if(lines.empty())return result;
-    if(!trackerLinesWithinBudget(lines)){
-        for(auto& view:result){view.complete=false;view.reason="steam-tracker-byte-limit";}
-        return result;
-    }
-    std::array<std::map<std::pair<std::uint32_t,std::uint32_t>,TrackedProcessRow>,2> live;
-    unsigned scanned=0;
-    for(const auto& line:lines){
-        ++scanned;std::string at;if(!timestamp(line,at))continue;const auto text=line.substr(22);
-        if(text.rfind("Client version:",0)==0){
-            for(std::size_t i=0;i<2;++i)if(result[i].complete)live[i].clear();
-            continue;
-        }
-        if(text.rfind("Remove ",0)==0){
-            const auto end=text.find(" from running list",7);std::uint32_t app=0;
-            if(result[0].complete&&end!=std::string::npos&&appId(text.substr(7,end-7),app))
-                for(auto i=live[0].begin();i!=live[0].end();)if(i->first.first==app)i=live[0].erase(i);else ++i;
-            continue;
-        }
-        if(text.rfind("AppID ",0)!=0)continue;
-        const auto sep=text.find(' ',6);std::uint32_t app=0;
-        if(sep==std::string::npos||!appId(text.substr(6,sep-6),app))continue;
-        const auto action=text.substr(sep);const std::string adding=" adding PID ",dropping=" no longer tracking PID ";
-        const bool add=action.rfind(adding,0)==0,drop=action.rfind(dropping,0)==0;if(!add&&!drop)continue;
-        const auto begin=add?adding.size():dropping.size(),end=action.find_first_of(" ,",begin);std::uint64_t pid=0;
-        if(end==std::string::npos||!unsignedDecimal(action.substr(begin,end-begin),pid)||!pid||pid>0xffffffffULL)continue;
-        const auto key=std::make_pair(app,static_cast<std::uint32_t>(pid));
-        if(drop){for(std::size_t i=0;i<2;++i)if(result[i].complete)live[i].erase(key);continue;}
-        const std::string marker=" as a tracked process ";if(action.compare(end,marker.size(),marker)!=0)continue;
-        const auto path=commandExe(action.substr(end+marker.size()));if(path.empty())continue;
-        TrackedProcessRow decoded{app,static_cast<std::uint32_t>(pid),path,at};
-        decoded.gameIdRaw=text.substr(6,sep-6);decoded.sourceLine=scanned;
-        std::uint64_t full=0;
-        decoded.fullGameIdKnown=unsignedDecimal(decoded.gameIdRaw,full)&&
-            ((app<=0xffffffU&&full==app)||
-             ((full>>32)==app&&(full&0xffffffffULL)==0x02000000ULL));
-        if(decoded.fullGameIdKnown)decoded.fullGameId=full;
-        for(std::size_t i=0;i<2;++i){
-            if(!result[i].complete)continue;
-            auto row=decoded;
-            const auto previous=live[i].find(key);
-            if(previous!=live[i].end()){
-                const auto& old=previous->second;
-                row.identityConflict=old.identityConflict||
-                    old.fullGameIdKnown!=row.fullGameIdKnown||
-                    (old.fullGameIdKnown&&old.fullGameId!=row.fullGameId)||
-                    (!old.fullGameIdKnown&&old.gameIdRaw!=row.gameIdRaw)||
-                    pathKey(old.path)!=pathKey(row.path);
-            }
-            live[i][key]=std::move(row);
-            if(live[i].size()>32){
-                result[i].complete=false;result[i].reason="steam-tracker-live-process-limit";
-                live[i].clear();
-            }
-        }
-        if(!result[0].complete&&!result[1].complete)return result;
-    }
-    for(std::size_t i=0;i<2;++i)if(result[i].complete)
-        for(const auto& item:live[i])result[i].rows.push_back(item.second);
-    return result;
-}
-
 struct TrackedSourceScopes {
     // Index 0 is RunningListAndProcess; index 1 is ProcessLifetime.
     std::array<Binding,2> bindings;
     std::array<TrackedProcessInventory,2> inventories;
 };
-// Used only when this call needs all four views of the same immutable source.
-// The standalone and dual-only entry points above retain their original paths.
-inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& lines,
+// Project both inventories and, when requested, the selected binding in each.
+template <typename Line>
+inline TrackedSourceScopes trackedSourceScopesImpl(const std::vector<Line>& lines,
     std::uint32_t selectedPid,const std::string& selectedPath,const std::string& earliest,const std::string& latest) {
     TrackedSourceScopes result;
     const bool bind=selectedPid&&!selectedPath.empty()&&!earliest.empty()&&!latest.empty()&&earliest<=latest;
     if(lines.empty())return result;
-    if(!trackerLinesWithinBudget(lines)){
+    if(!trackerLinesWithinBudgetImpl(lines)){
         for(auto& view:result.inventories){view.complete=false;view.reason="steam-tracker-byte-limit";}
         if(bind)for(auto& view:result.bindings)view.status="incomplete";
         return result;
@@ -158,30 +91,36 @@ inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& l
     std::array<std::map<std::pair<std::uint32_t,std::uint32_t>,TrackedProcessRow>,2> live;
     unsigned scanned=0;
     for(const auto& line:lines){
-        ++scanned;std::string at;if(!timestamp(line,at))continue;const auto text=line.substr(22);
-        if(text.rfind("Client version:",0)==0){
+        ++scanned;
+        if(line.size()<22)continue;
+        const std::string_view text(line.data()+22,line.size()-22);
+        const bool reset=text.starts_with("Client version:");
+        const bool remove=text.starts_with("Remove ");
+        if(!reset&&!remove&&!text.starts_with("AppID "))continue;
+        std::string_view at;if(!timestampView(line,at))continue;
+        if(reset){
             for(std::size_t i=0;i<2;++i){
                 if(result.inventories[i].complete)live[i].clear();
                 if(bind)bindings[i].clear();
             }
             removed.fill(false);continue;
         }
-        if(text.rfind("Remove ",0)==0){
+        if(remove){
             const auto end=text.find(" from running list",7);std::uint32_t app=0;
-            if(end!=std::string::npos&&appId(text.substr(7,end-7),app)){
+            if(end!=std::string_view::npos&&appId(text.substr(7,end-7),app)){
                 if(result.inventories[0].complete)
                     for(auto i=live[0].begin();i!=live[0].end();)if(i->first.first==app)i=live[0].erase(i);else ++i;
                 if(bind&&bindings[0].erase(app))removed[0]=true;
             }
             continue;
         }
-        if(text.rfind("AppID ",0)!=0)continue;
         const auto sep=text.find(' ',6);std::uint32_t app=0;
-        if(sep==std::string::npos||!appId(text.substr(6,sep-6),app))continue;
-        const auto action=text.substr(sep);const std::string adding=" adding PID ",dropping=" no longer tracking PID ";
-        const bool add=action.rfind(adding,0)==0,drop=action.rfind(dropping,0)==0;if(!add&&!drop)continue;
+        if(sep==std::string_view::npos||!appId(text.substr(6,sep-6),app))continue;
+        const auto action=text.substr(sep);
+        constexpr std::string_view adding=" adding PID ",dropping=" no longer tracking PID ";
+        const bool add=action.starts_with(adding),drop=action.starts_with(dropping);if(!add&&!drop)continue;
         const auto begin=add?adding.size():dropping.size(),end=action.find_first_of(" ,",begin);std::uint64_t pid=0;
-        if(end==std::string::npos||!unsignedDecimal(action.substr(begin,end-begin),pid)||!pid||pid>0xffffffffULL)continue;
+        if(end==std::string_view::npos||!unsignedDecimal(action.substr(begin,end-begin),pid)||!pid||pid>0xffffffffULL)continue;
         const auto key=std::make_pair(app,static_cast<std::uint32_t>(pid));
         if(drop){
             for(std::size_t i=0;i<2;++i){
@@ -190,7 +129,7 @@ inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& l
             }
             continue;
         }
-        const std::string marker=" as a tracked process ";if(action.compare(end,marker.size(),marker)!=0)continue;
+        constexpr std::string_view marker=" as a tracked process ";if(action.compare(end,marker.size(),marker)!=0)continue;
         const bool needsInventory=result.inventories[0].complete||result.inventories[1].complete;
         const bool needsBinding=bind&&pid==selectedPid&&at>=earliest&&at<=latest;
         if(!needsInventory&&!needsBinding)continue;
@@ -202,7 +141,7 @@ inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& l
         // Empty commands cannot create an inventory member. Binding keeps its
         // own original pathKey equality above (including unusual caller paths).
         if(!needsInventory||path.empty())continue;
-        TrackedProcessRow decoded{app,static_cast<std::uint32_t>(pid),path,at};
+        TrackedProcessRow decoded{app,static_cast<std::uint32_t>(pid),path,std::string(at)};
         decoded.gameIdRaw=text.substr(6,sep-6);decoded.sourceLine=scanned;
         std::uint64_t full=0;
         decoded.fullGameIdKnown=unsignedDecimal(decoded.gameIdRaw,full)&&
@@ -232,5 +171,12 @@ inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& l
             for(const auto& item:live[i])result.inventories[i].rows.push_back(item.second);
     }
     return result;
+}
+inline TrackedSourceScopes trackedSourceScopes(const std::vector<std::string>& lines,
+    std::uint32_t selectedPid,const std::string& selectedPath,const std::string& earliest,const std::string& latest) {
+    return trackedSourceScopesImpl(lines,selectedPid,selectedPath,earliest,latest);
+}
+inline std::array<TrackedProcessInventory,2> trackedProcessInventories(const std::vector<std::string>& lines) {
+    return trackedSourceScopesImpl(lines,0,{},{},{}).inventories;
 }
 }

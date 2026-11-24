@@ -65,12 +65,19 @@ try{
     window.dispatchEvent(new Event('ymcc-decky-connection-result'));await Promise.resolve();const result=window.signals.splice(0);
     window.dispatchEvent(new Event('ymcc-decky-connection-check'));window.dispatchEvent(new Event('ymcc-decky-connection-result'));
     await Promise.resolve();const coalesced=window.signals.splice(0);
-    window.dispatchEvent(new Event('ymcc-decky-connection-result'));mirror.revoked=true;await Promise.resolve();const revokedResult=window.signals.splice(0);delete mirror.revoked;
-    return {one,two,revoked,result,coalesced,revokedResult};
+    window.dispatchEvent(new Event('ymcc-decky-connection-result'));
+    for(let i=0;i<1000;i++)window.dispatchEvent(new Event(i%2?'ymcc-decky-connection-result':'ymcc-decky-connection-check'));
+    await Promise.resolve();const reverse=window.signals.splice(0);
+    window.dispatchEvent(new Event('ymcc-decky-connection-check'));window.dispatchEvent(new Event('ymcc-decky-connection-result'));
+    mirror.revoked=true;await Promise.resolve();const revokedResult=window.signals.splice(0);delete mirror.revoked;
+    window.dispatchEvent(new Event('ymcc-decky-connection-check'));await Promise.resolve();const nextOpening=window.signals.splice(0);
+    return {one,two,revoked,result,coalesced,reverse,revokedResult,nextOpening};
    });
    assert.deepEqual(openings.one,[{runId:run,code:'decky-connection-check'}]);assert.deepEqual(openings.two,openings.one);assert.deepEqual(openings.revoked,[]);
    assert.deepEqual(openings.result,[{runId:run,code:'decky-connection-result'}],'probe completion must remain distinguishable from an opening');
-   assert.deepEqual(openings.coalesced,openings.one);assert.deepEqual(openings.revokedResult,[]);
+   assert.deepEqual(openings.coalesced,openings.result,'completion survives an already queued opening without sending two hints');
+   assert.deepEqual(openings.reverse,openings.result,'opening storms cannot downgrade a pending completion');
+   assert.deepEqual(openings.revokedResult,[]);assert.deepEqual(openings.nextOpening,openings.one);
    await page.evaluate(()=>{document.querySelector('.likely-occured-msg').textContent='This error likely occurred in ExamplePlugin.';});
    await page.waitForFunction(()=>window.boundaryRecords.length===2);
    const plugin=await page.evaluate(()=>window.boundaryRecords.at(-1));assert.equal(plugin.attribution,'plugin');assert.equal(plugin.fault,'network');
@@ -156,6 +163,18 @@ try{
      for(const bad of [null,{},'raw-secret',{stamp:run+':'+('b'.repeat(64)),phase:'failed',probes:1,dispatched:false},{stamp,phase:'credential-raw-text',probes:1,dispatched:false},{stamp,phase:'failed',probes:-1,dispatched:false},{stamp,phase:'failed',probes:4,dispatched:false},{stamp,phase:'failed',probes:1.5,dispatched:false},{stamp,phase:'failed',probes:1,dispatched:'secret'}]){window.__YMCC_DECKY_FRONTEND_BOOT__=bad;api.read();}
      malformedAdded=records().length-beforeBad;window.__YMCC_DECKY_FRONTEND_BOOT__=goodBoot;
      window.__YMCC_DECKY_FRONTEND_UPDATE__={stamp,phase:'pending',attempts:1,pending:true};api.read();const update=records().at(-1);
+     delete window.__YMCC_DECKY_FRONTEND_BOOT__;
+     const beforeSlot=records().length;
+     window.__YMCC_DECKY_FRONTEND_UPDATE__={stamp,phase:'waiting-official-slot',attempts:1,pending:false};
+     for(let n=0;n<128;n++)api.read();
+     const slotRecords=records().slice(beforeSlot);
+     const beforeBadSlot=records().length;
+     for(const next of [{stamp:'other:'+build},{phase:'waiting-secret'},{attempts:4},{pending:'secret'}]){
+      window.__YMCC_DECKY_FRONTEND_UPDATE__={stamp,phase:'waiting-official-slot',attempts:1,pending:false,...next};api.read();
+     }
+     const badSlotAdded=records().length-beforeBadSlot;
+     window.__YMCC_DECKY_FRONTEND_BOOT__=goodBoot;
+     window.__YMCC_DECKY_FRONTEND_UPDATE__={stamp,phase:'pending',attempts:1,pending:true};
      const beforeRevoked=records().length;window.__YMCC_DECKY_MIRROR__.revoked=true;window.__YMCC_DECKY_FRONTEND_BOOT__={stamp,phase:'failed',probes:2,dispatched:false};api.read();const revokedAdded=records().length-beforeRevoked;delete window.__YMCC_DECKY_MIRROR__.revoked;
      const originalInfo=console.info;console.info=()=>{throw Error('controlled diagnostic sink rejection');};let readOnLogFailure;try{readOnLogFailure=api.read();}finally{console.info=originalInfo;}
      const firstApi=api;api.dispose();const afterDisposeBefore=records().length;firstApi.read();const afterDisposeAdded=records().length-afterDisposeBefore;
@@ -168,7 +187,7 @@ try{
       const bad={...value,runId:'d'.repeat(32),frontendBuildId:badBuild};const badApi=install(bad);if(badApi.read()==='')malformedBuildReads++;badApi.dispose();
      }
      const malformedBuildAdded=records().length-malformedBuildStart;
-     return {malformedBuildReads,malformedBuildAdded,healthyLogs,waiting,repeated,reading,update,malformedAdded,revokedAdded,readOnLogFailure,afterDisposeAdded,newRunFirst,cap,privacy,network,timers,sockets,signals:window.signals};
+     return {malformedBuildReads,malformedBuildAdded,healthyLogs,waiting,repeated,reading,update,slotRecords,badSlotAdded,malformedAdded,revokedAdded,readOnLogFailure,afterDisposeAdded,newRunFirst,cap,privacy,network,timers,sockets,signals:window.signals};
     }finally{
      window.__YMCC_DECKY_HEALTH__?.dispose();window.fetch=saved.fetch;window.WebSocket=saved.ws;window.setTimeout=saved.timeout;window.setInterval=saved.interval;window.DeckyBackend=saved.backend;window.__YMCC_DECKY_FRONTEND__=saved.frontend;window.__YMCC_DECKY_FRONTEND_BOOT__=saved.boot;window.__YMCC_DECKY_FRONTEND_UPDATE__=saved.update;
     }
@@ -178,7 +197,8 @@ try{
    assert.equal(loadFacts.healthyLogs,0);assert.deepEqual(loadFacts.waiting,{schema:1,stage:'frontend-load-state',ordinal:1,bootPhase:'waiting-loader',bootProbes:0,bootDispatched:false});
    assert.equal(loadFacts.repeated,1);assert.equal(loadFacts.reading.bootPhase,'reading-enabled-plugin');assert.equal(loadFacts.reading.bootProbes,1);
    assert.deepEqual({phase:loadFacts.update.updatePhase,attempts:loadFacts.update.updateAttempts,pending:loadFacts.update.updatePending},{phase:'pending',attempts:1,pending:true});
-   for(const key of ['malformedAdded','revokedAdded','afterDisposeAdded','network','timers','sockets'])assert.equal(loadFacts[key],0,key);
+   assert.deepEqual(loadFacts.slotRecords,[{schema:1,stage:'frontend-load-state',ordinal:4,updatePhase:'waiting-official-slot',updateAttempts:1,updatePending:false}]);
+   for(const key of ['badSlotAdded','malformedAdded','revokedAdded','afterDisposeAdded','network','timers','sockets'])assert.equal(loadFacts[key],0,key);
    assert.equal(loadFacts.malformedBuildReads,4);assert.equal(loadFacts.malformedBuildAdded,0);assert.equal(loadFacts.readOnLogFailure,'');assert.equal(loadFacts.newRunFirst.ordinal,1);assert.equal(loadFacts.cap,16);assert(loadFacts.privacy);assert.deepEqual(loadFacts.signals,[]);
 
 

@@ -3,5 +3,5 @@
   "protocol": 2,
   "component": "YeManBatteryHost",
   "implementation": "in-process-60s-msi-cg3em-ap-v1",
-  "sourceId": "fe351be2fb442f92f96d8dcc9fcc219f1f52eb54d33888e224e6243f45635421"
+  "sourceId": "0bbe41a9077e5b250a7a056d509954642ddefc624654d885bc84b071afa2af30"
 }

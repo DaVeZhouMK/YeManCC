@@ -77,7 +77,7 @@
          Number.isInteger(boot.probes)&&boot.probes>=0&&boot.probes<=3&&typeof boot.dispatched==='boolean'){
         facts.bootPhase=boot.phase;facts.bootProbes=boot.probes;facts.bootDispatched=boot.dispatched;
       }
-      if(update?.stamp===frontendStamp&&['pending','current','failed','canceled'].includes(update.phase)&&
+      if(update?.stamp===frontendStamp&&['pending','waiting-official-slot','current','failed','canceled'].includes(update.phase)&&
          Number.isInteger(update.attempts)&&update.attempts>=0&&update.attempts<=3&&typeof update.pending==='boolean'){
         facts.updatePhase=update.phase;facts.updateAttempts=update.attempts;facts.updatePending=update.pending;
       }
@@ -212,14 +212,17 @@
   }
   // A real QAM opening is an observation request, never a healthy verdict or
   // launch permission. Reuse the current authenticated watch and native ladder.
-  let checkQueued=false;
+  let pendingCheck=null;
   const checkConnection=event=>{
-    if(checkQueued||!current())return;
-    const code=event.type==='ymcc-decky-connection-result'?'decky-connection-result':'decky-connection-check';
-    checkQueued=true;Promise.resolve().then(()=>{
-      checkQueued=false;
+    const completed=event.type==='ymcc-decky-connection-result';
+    const code=completed?'decky-connection-result':'decky-connection-check';
+    if((pendingCheck&&(!completed||pendingCheck===code))||!current())return;
+    // Both hints request the same read; only completion can advance a wake slot.
+    if(pendingCheck){pendingCheck=code;return;}
+    pendingCheck=code;Promise.resolve().then(()=>{
+      const next=pendingCheck;pendingCheck=null;
       if(!current())return;
-      if(typeof host[binding]==='function')host[binding](JSON.stringify({runId:value.runId,code}));
+      if(typeof host[binding]==='function')host[binding](JSON.stringify({runId:value.runId,code:next}));
     });
   };
   function stopObserving(){

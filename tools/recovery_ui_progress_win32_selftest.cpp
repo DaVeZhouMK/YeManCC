@@ -3,17 +3,32 @@
 #if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <functional>
 static ULONGLONG recoveryFixtureNow=100000;
 static ULONGLONG recoveryFixtureTick(){return recoveryFixtureNow;}
 static BOOL recoveryFixtureTerminateProcess(HANDLE,UINT);
+static thread_local const std::function<void()>* recoveryBeforeLocalPowerLock=nullptr;
+static thread_local const std::function<void()>* recoveryBeforeProcessTimes=nullptr;
+static void recoveryFixtureAcquireExclusive(PSRWLOCK lock){
+    if(const auto* action=recoveryBeforeLocalPowerLock){recoveryBeforeLocalPowerLock=nullptr;(*action)();}
+    ::AcquireSRWLockExclusive(lock);
+}
+static BOOL WINAPI recoveryFixtureProcessTimes(HANDLE process,LPFILETIME created,LPFILETIME exited,LPFILETIME kernel,LPFILETIME user){
+    if(const auto* action=recoveryBeforeProcessTimes){recoveryBeforeProcessTimes=nullptr;(*action)();}
+    return ::GetProcessTimes(process,created,exited,kernel,user);
+}
 #define TerminateProcess recoveryFixtureTerminateProcess
 #define GetTickCount64 recoveryFixtureTick
+#define AcquireSRWLockExclusive recoveryFixtureAcquireExclusive
+#define GetProcessTimes recoveryFixtureProcessTimes
 #endif
 #define wWinMain unusedRecoveryServiceEntry
 #include "../native/recovery_service.cpp"
 #undef wWinMain
 #if defined(YMCC_RECOVERY_POWER_PROJECTION_FIXTURE)
 #undef TerminateProcess
+#undef AcquireSRWLockExclusive
+#undef GetProcessTimes
 #endif
 #include <thread>
 #include <cassert>

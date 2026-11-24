@@ -4,7 +4,22 @@
 #define NOMINMAX
 #endif
 #define YMCC_SCREEN_NATIVE_INPUT_CANDIDATE 1
+#include <windows.h>
+static bool rejectNextWakeTimer=false;
+static bool rejectNextWakeRebind=false;
+static BOOL WINAPI fixtureWakePostMessage(HWND window,UINT message,WPARAM w,LPARAM l){
+ if(rejectNextWakeRebind&&message==WM_APP+176){rejectNextWakeRebind=false;SetLastError(ERROR_NOT_ENOUGH_QUOTA);return FALSE;}
+ return ::PostMessageW(window,message,w,l);
+}
+static UINT_PTR WINAPI fixtureWakeSetTimer(HWND window,UINT_PTR id,UINT delay,TIMERPROC proc){
+ if(rejectNextWakeTimer&&(id&0xffff0000u)==0x59550000u){rejectNextWakeTimer=false;SetLastError(ERROR_NOT_ENOUGH_MEMORY);return 0;}
+ return ::SetTimer(window,id,delay,proc);
+}
+#define SetTimer fixtureWakeSetTimer
+#define PostMessageW fixtureWakePostMessage
 #include "screen_touchpad_owner.h"
+#undef PostMessageW
+#undef SetTimer
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -17,11 +32,12 @@ static bool runtimeClosed=false,queueClosed=false,workerEnded=false;static DWORD
 static HANDLE doneEvent=nullptr;
 static bool channelOnly=false,notifyOnly=false,stopOnly=false,commandOnly=false,displayOnly=false,displayBoundaryOnly=false,channelDisplayOnly=false,presentationRecoveryOnly=false,inputOverflowOnly=false,workerRetirementOnly=false,workerRetirementQuota=false,manualChannelRecoveryOnly=false,channelStageOnly=false;
 static bool wakeOnly=false,persistentOnly=false,reentryOnly=false,lateFaultOnly=false,cumulativeOnly=false;
-static void check(const std::string& name,bool ok){cases.push_back({{"name",name},{"ok",ok}});passed=passed&&ok;}
+static void check(const std::string& name,bool ok){cases.push_back({{"name",name},{"ok",ok}});passed=passed&&ok;if(!ok)std::cerr<<"FAIL "<<name<<std::endl;}
 static std::wstring desktopName(HDESK h){wchar_t name[256]{};DWORD bytes=0;return h&&GetUserObjectInformationW(h,UOI_NAME,name,sizeof(name),&bytes)?name:L"";}
 static std::wstring inputName(){HDESK h=OpenInputDesktop(0,FALSE,DESKTOP_READOBJECTS);auto name=desktopName(h);if(h)CloseDesktop(h);return name;}
 static void pump(){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
 static HWND createOwner(){WNDCLASSW wc{};wc.lpfnWndProc=[](HWND h,UINT m,WPARAM w,LPARAM l)->LRESULT{
+ ownerResumeContinueOnWindowMessage(h,m);
  if(m==WM_DISPLAYCHANGE||m==WM_DPICHANGED){queueOwnerDisplayRefresh(true);return 0;}
  if(m==WM_SETTINGCHANGE&&w==SPI_SETWORKAREA){queueOwnerDisplayRefresh(false);return 0;}
  if(m==kOwnerRebindMessage){consumeOwnerRebind((UINT_PTR)w);return 0;}
@@ -42,6 +58,111 @@ static bool fixtureOwnerResumeReady(unsigned long long generation){
  fixturePowerCallbacks();fixturePower.generation=generation;fixturePower.phase=0;
  fixturePower.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;
  return ownerResumeReady(generation);
+}
+static void publicWakeDeliveryCases(HWND host){
+ owner=host;initialized=true;inputTeardown=false;nativeInputCandidateRequested=true;
+ activeProfile=appliedProfile=1;windowError=0;
+ fixturePowerCallbacks();
+ const auto deliver=[](unsigned long long generation,bool ready){
+  fixturePower.generation=generation;fixturePower.phase=0;
+  fixturePower.flags=ymcc::sleeppower::kKnown|(ready?ymcc::sleeppower::kHardwareAllowed:0);
+  ownerSharedPowerChanged(fixturePower);
+ };
+ deliver(200,true);++fixturePower.suspendSerial;deliver(201,false);
+ rejectNextWakeRebind=true;deliver(201,true);
+ check("wake-public-ready-does-not-depend-on-private-rebind-post",rejectNextWakeRebind&&windowError==0&&
+     !ownerRebindQueued&&ownerResumeRecovery.pending&&ownerResumeRecovery.powerGeneration==201);
+ rejectNextWakeRebind=false;windowError=0;fireWake();fireWake();
+ ++fixturePower.suspendSerial;deliver(202,false);
+ presentationSuspended=true;deliver(202,true);
+ const auto held=ownerResumeRecovery;
+ check("wake-public-ready-retained-while-presentation-is-suspended",held.pending&&held.timer&&held.powerGeneration==202);
+ fireWake();deliver(202,true);
+ check("wake-presentation-block-spends-no-checks-and-keeps-deadline",ownerResumeRecovery.pending&&
+     ownerResumeRecovery.checks==0&&ownerResumeRecovery.repairs==0&&ownerResumeRecovery.deadline==held.deadline);
+ presentationSuspended=false;fireWake();fireWake();
+ check("wake-presentation-release-completes-without-another-ready",!ownerResumeRecovery.pending&&
+     ownerResumeRecovery.clean==2&&ownerResumeRecovery.repairs==0&&std::string_view(ownerResumeRecovery.status)=="healthy");
+
+ ++fixturePower.suspendSerial;deliver(203,false);
+ displayTransitionFence.idleSuspended=true;ownerDisplayReflowInterrupted=true;
+ ymcc::customtouch::editing=true;deliver(203,true);const auto edited=ownerResumeRecovery;
+ fireWake();
+ check("wake-public-ready-does-not-probe-or-resume-reflow-in-editor",edited.pending&&edited.powerGeneration==203&&
+     ownerResumeRecovery.pending&&!ownerResumeRecovery.checks&&!ownerResumeRecovery.repairs&&!ownerDisplayRefresh.pending);
+ ymcc::customtouch::editing=false;fireWake();
+ check("wake-editor-exit-resumes-interrupted-reflow-on-original-deadline",ownerDisplayRefresh.pending&&
+     !ownerDisplayReflowInterrupted&&ownerResumeRecovery.pending&&ownerResumeRecovery.deadline==edited.deadline);
+ const auto oldTimer=ownerResumeRecovery.timer;
+ ++fixturePower.suspendSerial;deliver(204,false);ownerResumeTimerProc(host,WM_TIMER,oldTimer,0);
+ check("wake-new-suspend-cancels-editor-recovery-and-display-timer",!ownerResumeRecovery.pending&&
+     !ownerResumeRecovery.timer&&!ownerDisplayRefresh.pending);
+ cancelOwnerDisplayRefresh();displayTransitionFence={};ownerDisplayReflowInterrupted=false;
+ deliver(204,true);fireWake();const auto beforeQuery=ownerResumeRecovery;
+ const auto beforeQueryTimer=beforeQuery.timer;
+ ++fixturePower.observedNotificationSequence;deliver(204,false);
+ ownerResumeTimerProc(host,WM_TIMER,beforeQueryTimer,0);
+ deliver(204,true);
+ check("wake-same-boundary-query-resumes-original-verifier-budget",beforeQuery.pending&&beforeQuery.checks==1&&
+     ownerResumeRecovery.pending&&ownerResumeRecovery.timer&&ownerResumeRecovery.timer!=beforeQueryTimer&&
+     ownerResumeRecovery.deadline==beforeQuery.deadline&&ownerResumeRecovery.checks==beforeQuery.checks&&
+     ownerResumeRecovery.repairs==beforeQuery.repairs&&ownerResumeRecovery.clean==0);
+ presentationSuspended=true;fireWake();
+ if(ownerResumeRecovery.pending)ownerResumeRecovery.deadline=GetTickCount64();
+ fireWake();presentationSuspended=false;deliver(204,true);
+ check("wake-local-block-expiry-does-not-reopen-original-budget",!ownerResumeRecovery.pending&&
+     !ownerResumeRecovery.timer&&ownerResumeRecovery.checks==beforeQuery.checks&&std::string_view(ownerResumeRecovery.status)=="expired");
+ ++fixturePower.suspendSerial;deliver(205,true);
+ check("wake-coalesced-ready-after-local-expiry-starts-only-new-boundary",ownerResumeRecovery.pending&&
+     ownerResumeRecovery.powerGeneration==205&&ownerResumeRecovery.checks==0&&ownerResumeRecovery.repairs==0);
+ cancelOwnerResumeRecovery("fixture-complete");initialized=false;owner=nullptr;nativeInputCandidateRequested=false;
+}
+static void wakeTimerCases(HWND host){
+ // Only the window and timer are needed by this selected delivery case.
+ // Bind the same owner/profile fields without starting a WinRT input surface.
+ owner=host;initialized=true;inputTeardown=false;nativeInputCandidateRequested=true;
+ activeProfile=appliedProfile=1;
+ core.config=Config{};core.config.summonEnabled=false;core.config.summonPosition=SummonPosition::Off;
+ ownerResumeRecovery.observed=true;rejectNextWakeTimer=true;
+ fixtureOwnerResumeReady(100);
+ const auto deferred=ownerResumeRecovery;
+ check("wake-timer-rejection-keeps-original-recovery",!rejectNextWakeTimer&&deferred.pending&&
+     !deferred.timer&&deferred.retryOnMessageAt&&deferred.repairs==0&&deferred.powerGeneration==100);
+ fixtureOwnerResumeReady(100);ownerResumeTimerProc(host,WM_TIMER,deferred.serial,0);
+ check("wake-duplicate-ready-and-undelivered-timer-keep-original-budget",ownerResumeRecovery.deadline==deferred.deadline&&
+     ownerResumeRecovery.retryOnMessageAt==deferred.retryOnMessageAt&&ownerResumeRecovery.checks==0);
+ SendMessageW(host,WM_NULL,0,0);
+ check("wake-ordinary-message-before-due-does-not-run-check",ownerResumeRecovery.checks==0);
+ const auto waitDue=[] {
+  const auto now=GetTickCount64(),due=ownerResumeRecovery.retryOnMessageAt;
+  if(due>now)Sleep(static_cast<DWORD>(due-now));
+ };
+ waitDue();SendMessageW(host,WM_POWERBROADCAST,0,0);
+ check("wake-power-message-cannot-run-deferred-check",ownerResumeRecovery.checks==0);
+ SendMessageW(host,WM_NULL,0,0);
+ check("wake-ordinary-message-runs-original-check-and-rearms",ownerResumeRecovery.checks==1&&
+     ownerResumeRecovery.deadline==deferred.deadline&&ownerResumeRecovery.repairs==0&&ownerResumeRecovery.timer&&
+     !ownerResumeRecovery.retryOnMessageAt);
+ fireWake();
+ check("wake-original-verifier-ends-after-two-clean-checks",!ownerResumeRecovery.pending&&!ownerResumeRecovery.timer&&
+     ownerResumeRecovery.clean==2&&std::string_view(ownerResumeRecovery.status)=="healthy");
+ const auto newDeferred=[&](unsigned long long generation){
+  ++ownerLifecycleEpoch;ownerResumeRecovery.observed=true;rejectNextWakeTimer=true;
+  fixtureOwnerResumeReady(generation);
+ };
+ newDeferred(101);waitDue();++fixturePower.suspendSerial;
+ SendMessageW(host,WM_NULL,0,0);
+ check("wake-new-sleep-vetoes-deferred-check-without-device-work",!ownerResumeRecovery.pending&&
+     !ownerResumeRecovery.timer&&!ownerResumeRecovery.retryOnMessageAt&&ownerResumeRecovery.checks==0);
+ newDeferred(102);waitDue();ownerResumeRecovery.deadline=GetTickCount64();SendMessageW(host,WM_NULL,0,0);
+ check("wake-deferred-check-honors-original-deadline",!ownerResumeRecovery.pending&&!ownerResumeRecovery.retryOnMessageAt&&
+     ownerResumeRecovery.checks==0&&std::string_view(ownerResumeRecovery.status)=="expired");
+ newDeferred(103);const auto stale=ownerResumeRecovery.serial;
+ cancelOwnerResumeRecovery("fixture-complete");initialized=false;owner=nullptr;nativeInputCandidateRequested=false;
+ ownerResumeTimerProc(host,WM_TIMER,stale,0);SendMessageW(host,WM_NULL,0,0);
+ check("wake-owner-stop-clears-deferred-delivery-and-late-callback",!ownerResumeRecovery.pending&&!ownerResumeRecovery.timer&&
+     !ownerResumeRecovery.retryOnMessageAt&&ownerResumeRecovery.checks==0);
+ publicWakeDeliveryCases(host);
 }
 static void persistentRuntimeCases(){
  Config cfg=getConfig();cfg.masterEnabled=true;cfg.enabled=true;cfg.layout=Layout::Dual;cfg.left=cfg.right=Mode::Deck;configure(cfg,1,true);
@@ -678,12 +799,14 @@ static void channelStageCompletionCases(){
 #endif
 }
 
-static void worker(HDESK desktop){
+static void worker(HDESK desktop,bool wakeTimerOnly){
  HWND host=nullptr;bool apartment=false;std::vector<HWND> originals;
  try{
   if(!SetThreadDesktop(desktop))throw std::runtime_error("private desktop binding failed");
   winrt::init_apartment(winrt::apartment_type::single_threaded);apartment=true;
-  if(channelStageOnly){channelStageCompletionCases();}else{
+  if(wakeTimerOnly){
+   host=createOwner();if(!host)throw std::runtime_error("private owner unavailable");wakeTimerCases(host);
+  }else if(channelStageOnly){channelStageCompletionCases();}else{
   host=createOwner();if(!host)throw std::runtime_error("private owner unavailable");
   dryRun=true;setNativeInputCandidate(true);setContext("steamdeck",true);
   Config cfg;cfg.enabled=false;cfg.specialMask=3;cfg.specialEnabled=true;cfg.summonPosition=SummonPosition::Off;cfg.summonEnabled=false;cfg.touchFeedback=TouchFeedbackMode::Off;cfg.autoHideSeconds=0;
@@ -756,13 +879,15 @@ static void worker(HDESK desktop){
  if(host)DestroyWindow(host);if(apartment)winrt::uninit_apartment();workerEnded=true;SetEvent(doneEvent);
 }
 int wmain(int argc,wchar_t** argv){
- if(argc<2||argc>3)return 2;if(argc==3){const std::wstring option=argv[2];if(option!=L"--wake-only"&&option!=L"--persistent-only"&&option!=L"--reentrant-only"&&option!=L"--late-fault-only"&&option!=L"--cumulative-only"&&option!=L"--independent-reset-only"&&option!=L"--channel-notify-only"&&option!=L"--channel-stop-only"&&option!=L"--channel-command-only"&&option!=L"--display-transition-only"&&option!=L"--display-boundary-only"&&option!=L"--channel-display-only"&&option!=L"--presentation-recovery-only"&&option!=L"--input-overflow-only"&&option!=L"--worker-retirement-only"&&option!=L"--worker-retirement-quota-only"&&option!=L"--manual-channel-recovery-only"&&option!=L"--channel-stage-only")return 2;wakeOnly=true;persistentOnly=option==L"--persistent-only";reentryOnly=option==L"--reentrant-only";lateFaultOnly=option==L"--late-fault-only";cumulativeOnly=option==L"--cumulative-only";channelOnly=option==L"--independent-reset-only";notifyOnly=option==L"--channel-notify-only";stopOnly=option==L"--channel-stop-only";commandOnly=option==L"--channel-command-only";displayOnly=option==L"--display-transition-only";displayBoundaryOnly=option==L"--display-boundary-only";channelDisplayOnly=option==L"--channel-display-only";presentationRecoveryOnly=option==L"--presentation-recovery-only";inputOverflowOnly=option==L"--input-overflow-only";workerRetirementOnly=option==L"--worker-retirement-only"||option==L"--worker-retirement-quota-only";workerRetirementQuota=option==L"--worker-retirement-quota-only";manualChannelRecoveryOnly=option==L"--manual-channel-recovery-only";channelStageOnly=option==L"--channel-stage-only";}
+ if(argc<2||argc>3)return 2;
+ const bool wakeTimerOnly=argc==3&&std::wstring_view(argv[2])==L"--wake-timer-only";
+ if(argc==3&&!wakeTimerOnly){const std::wstring option=argv[2];if(option!=L"--wake-only"&&option!=L"--persistent-only"&&option!=L"--reentrant-only"&&option!=L"--late-fault-only"&&option!=L"--cumulative-only"&&option!=L"--independent-reset-only"&&option!=L"--channel-notify-only"&&option!=L"--channel-stop-only"&&option!=L"--channel-command-only"&&option!=L"--display-transition-only"&&option!=L"--display-boundary-only"&&option!=L"--channel-display-only"&&option!=L"--presentation-recovery-only"&&option!=L"--input-overflow-only"&&option!=L"--worker-retirement-only"&&option!=L"--worker-retirement-quota-only"&&option!=L"--manual-channel-recovery-only"&&option!=L"--channel-stage-only")return 2;wakeOnly=true;persistentOnly=option==L"--persistent-only";reentryOnly=option==L"--reentrant-only";lateFaultOnly=option==L"--late-fault-only";cumulativeOnly=option==L"--cumulative-only";channelOnly=option==L"--independent-reset-only";notifyOnly=option==L"--channel-notify-only";stopOnly=option==L"--channel-stop-only";commandOnly=option==L"--channel-command-only";displayOnly=option==L"--display-transition-only";displayBoundaryOnly=option==L"--display-boundary-only";channelDisplayOnly=option==L"--channel-display-only";presentationRecoveryOnly=option==L"--presentation-recovery-only";inputOverflowOnly=option==L"--input-overflow-only";workerRetirementOnly=option==L"--worker-retirement-only"||option==L"--worker-retirement-quota-only";workerRetirementQuota=option==L"--worker-retirement-quota-only";manualChannelRecoveryOnly=option==L"--manual-channel-recovery-only";channelStageOnly=option==L"--channel-stage-only";}
 #ifndef YMCC_CHANNEL_STAGE_COMPLETION_FIXTURE
  if(channelStageOnly)return 2;
 #endif
  const auto inputBefore=inputName();const auto name=L"YMCC_ButtonAbort_"+std::to_wstring(GetCurrentProcessId());
  HDESK desktop=CreateDesktopW(name.c_str(),nullptr,nullptr,0,GENERIC_ALL,nullptr);if(!desktop)return 3;
- doneEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::thread task(worker,desktop);
+ doneEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::thread task(worker,desktop,wakeTimerOnly);
  if(WaitForSingleObject(doneEvent,20000)!=WAIT_OBJECT_0){Json fail={{"ok",false},{"error","worker-timeout"},{"cleanupProven",false}};std::ofstream file(std::filesystem::path(argv[1]),std::ios::binary);file<<fail.dump(2);file.close();ExitProcess(4);}
  task.join();CloseHandle(doneEvent);const bool closed=CloseDesktop(desktop)!=FALSE;const bool inputUnchanged=inputBefore==inputName();
  check("private-desktop-closed",closed);check("input-desktop-unchanged",inputUnchanged);check("runtime-and-dispatcher-queue-closed",runtimeClosed&&queueClosed&&workerEnded);

@@ -81,7 +81,7 @@ int main(int argc,char** argv){
        need(a.admitted==b.admitted,"BUS_ADMISSION_EQUIVALENCE");need(a.matrixIdentity==b.matrixIdentity,"BUS_RECIPE_EQUIVALENCE");need(a.processCalls==b.processCalls,"GAMEPAD_MOTION_EFFECT_COUNT_EQUIVALENCE");
        for(unsigned axis=0;axis<6;++axis){if(correctedWin5&&b.admitted)need(a.active[axis]==win5Old[axis]&&b.active[axis]==win5New[axis],"WIN5_REVIEWED_BUS_CORRECTION");else need(a.active[axis]==b.active[axis],"BUS_OUTPUT_EQUIVALENCE");if(correctedWin5&&b.processCalls)need(a.processAxes[axis]==static_cast<float>(win5Old[axis])&&b.processAxes[axis]==static_cast<float>(win5New[axis]),"WIN5_REVIEWED_PROCESS_AXES");else need(a.processAxes[axis]==b.processAxes[axis],"GAMEPAD_MOTION_AXES_EQUIVALENCE");}
        if(correctedWin5&&b.admitted)++win5Windows;
-       need(priorBus==currentBus+(family?1u:0u),"BUS_LOOKUP_DELTA");oldBusFind+=priorBus;newBusFind+=currentBus;oldEffects+=a.processCalls;newEffects+=b.processCalls;++windows;if(b.admitted)++admitted;else ++rejected;
+       need(priorBus==currentBus+((family&&b.admitted)?1u:0u),"BUS_LOOKUP_DELTA");oldBusFind+=priorBus;newBusFind+=currentBus;oldEffects+=a.processCalls;newEffects+=b.processCalls;++windows;if(b.admitted)++admitted;else ++rejected;
      }
     }
     categories[std::to_string(state)]=categories.value(std::to_string(state),0ULL)+samples.size();

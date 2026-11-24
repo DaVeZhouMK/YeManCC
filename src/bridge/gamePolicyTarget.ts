@@ -3,6 +3,7 @@ import {
   refreshGameStatusStrict, subscribeGameStatus, type DetectedGame, type GameStatusListener,
 } from './gamedetect';
 export { samePolicyGame, gamePolicyKey } from './gamePolicyHysteresis';
+export { isGameStatusCurrent as isPolicyGameCurrent, subscribeGameTargetReadiness as subscribePolicyGameReadiness } from './gamedetect';
 
 // Compatibility facade only: policy consumers project the same authoritative
 // target as the top bar. Behaviour-specific debounce must not retain a second PID.

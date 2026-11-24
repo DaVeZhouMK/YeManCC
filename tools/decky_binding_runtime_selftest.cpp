@@ -108,12 +108,22 @@ struct Scope {
 };
 }
 #endif
+namespace rtHealthWakeProbe {
+inline thread_local unsigned* signals = nullptr;
+inline BOOL signal(HANDLE event) {
+    if (signals) ++*signals;
+    return ::SetEvent(event);
+}
+}
+#define SetEvent(event) rtHealthWakeProbe::signal(event)
 #include "../native/decky_sidebar_runtime.h"
+#undef SetEvent
 #include "../native/decky_resource_worker.h"
 #include "../native/steam_ui_mode_observer.h"
 #include "../native/steam_cssloader_mode.h"
 #include "../native/decky_update_recovery.h"
 #include "../native/decky_sidebar_diagnostics.h"
+#include "../native/sleep_power_state.h"
 #include <chrono>
 #include <condition_variable>
 namespace rtfixture {
@@ -192,7 +202,8 @@ inline bool tryStalledChild(int& exit) {
                     {"contextPid",fixture=="foreign"?GetCurrentProcessId():GetProcessId(context.value)},
                     {"runId",request.bootstrap.at("runId")},{"contextAttachedTick",fixture=="stale"?tick-8000:tick}});
             }
-            channel.waitCancelled(15000);exit=0;return true;
+            // The late-page control observes the original 20s settling window.
+            channel.waitCancelled(request.bootstrap.value("fixtureLatePageWindow",false)?25000:15000);exit=0;return true;
         }
 
         std::mutex mutex;std::condition_variable condition;bool released=false;
@@ -283,7 +294,7 @@ struct Harness {
         else config.prepareEnvironment=[this,retained](const std::function<bool()>& current){need(current(),"current resource preparation");++preparations;if(retained)Sleep(180);return std::string{};};
         if(admission)config.launchAdmission=std::move(admission);else config.launchAdmission=[retained](){return ymcc::deckysidebar::LaunchAdmission{true,{},false,{},retained};};
         const auto cef=worker::number(context.lease.at("pid"));
-        config.bindingPlan=[this,cef,plan=std::move(plan)](ymcc::deckysidebar::BindingMode mode,std::uint64_t generation){
+        config.bindingPlan=[this,cef,plan=std::move(plan)](ymcc::deckysidebar::BindingMode mode,std::uint64_t generation,const auto&){
             const auto attempt=++plans;auto request=makeRequest(generation);request["bootstrap"]["fixtureContextPid"]=cef;
             if(mode==ymcc::deckysidebar::BindingMode::retained){request["requireFreshContext"]=false;request["retainedFrontendOnly"]=true;request["bootstrap"]["frontendBuildId"]=std::string(64,'d');}
             if(plan)plan(request,attempt);
@@ -635,6 +646,40 @@ inline Json preparationAdmissionHints(const std::filesystem::path& output,const 
             {"canceled",canceled.load()},{"completed",completed.load()},{"boundaryAccepted",boundaryAccepted},{"duplicateReadyRejected",duplicateRejected},{"offHintRejected",offRejected},
             {"bindingPlans",h.plans.load()},{"afterOff",state(resources)},{"beforeHandles",before},{"afterHandles",handles()}});
     }
+    for(const std::string boundary:{"deadline-ready","deadline-session","ordinary-failure","cleanup-ready","cleanup-session","cleanup-preflight"}){
+        const bool parked=boundary!="ordinary-failure",launch=boundary=="cleanup-preflight";
+        const std::string failure=boundary.starts_with("cleanup-")?"resource-worker-cleanup-incomplete":
+            parked?"resource-worker-deadline":"resource-hash-mismatch";
+        std::atomic<unsigned> reads{0},admissions{0},preflights{0};std::atomic<bool> allowed{false};
+        Harness h(output/boundary,context,false,[&]{++admissions;return allowed.load()?ymcc::deckysidebar::LaunchAdmission{true}:
+                ymcc::deckysidebar::LaunchAdmission{false,"steam-ui-state-pending",true};},
+            {},[&]{++preflights;return std::string("resource-hash-mismatch");},{},{},{},{},[&](const std::function<bool()>&){
+                if(++reads==1)return failure;
+                return std::string{};
+            });
+        const auto before=handles();need(h.runtime.setEnabled(true),"prewarm-deadline-enable");
+        need(waitFor([&]{return reads==1&&h.runtime.snapshot().phase=="waiting-manual-steam";},1500),"prewarm-deadline-initial-result");
+        for(unsigned hint=0;hint<4;++hint){
+            const auto prior=admissions.load();need(h.runtime.requestLaunchAdmissionRefresh(),"prewarm-deadline-hint-accepted");
+            need(waitFor([&]{return admissions>prior;},500),"prewarm-deadline-hint-consumed");
+        }
+        // Observe the completed worker turn, not just entry to its admission read.
+        if(!parked)need(waitFor([&]{return reads>=2;},500),"ordinary-failure-no-longer-rechecked");
+        const auto beforeBoundary=reads.load();
+        bool boundaryAccepted=true;
+        if(boundary.ends_with("-ready"))boundaryAccepted=h.runtime.requestPreparationRefresh(79);
+        if(boundary.ends_with("-session"))h.runtime.observeSteam(1,true);
+        if(launch){
+            allowed=true;boundaryAccepted=h.runtime.requestLaunchAdmissionRefresh();
+            need(waitFor([&]{return preflights==1&&h.runtime.snapshot().reason=="resource-hash-mismatch";},1500),"parked-prewarm-blocked-admitted-preflight");
+        }else if(parked)need(waitFor([&]{return reads>=2;},1500),"prewarm-real-boundary-did-not-recheck");
+        h.runtime.shutdown();const auto resources=h.client->snapshot();
+        const bool ok=beforeBoundary==(parked?1u:2u)&&reads==(launch?1u:2u)&&preflights==(launch?1u:0u)&&boundaryAccepted&&
+            !h.runtime.requestLaunchAdmissionRefresh()&&h.plans==0&&resources.fullyDestroyed&&
+            resources.handles==0&&resources.pendingIo==0&&resources.jobActiveProcesses==0&&before==handles()&&context.alive();
+        passed=passed&&ok;rows.push_back({{"boundary",boundary},{"passed",ok},{"readsBeforeBoundary",beforeBoundary},
+            {"reads",reads.load()},{"preflightReads",preflights.load()},{"bindingPlans",h.plans.load()},{"beforeHandles",before},{"afterHandles",handles()}});
+    }
     return {{"passed",passed&&initialHandles==handles()&&context.alive()},{"cases",rows},{"hintsPerCase",32},{"beforeHandles",initialHandles},{"afterHandles",handles()},{"cefUnaffected",context.alive()}};
 }
 inline Json resourceAdmissionHandoff(const std::filesystem::path& output,const std::string& variant){
@@ -661,7 +706,62 @@ inline Json resourceAdmissionHandoff(const std::filesystem::path& output,const s
     const bool expected=(variant=="recover"||variant=="automatic")?healed&&inspections==3&&plans==1&&phase.pid!=0&&elapsed>=2900:
         !healed&&inspections==2&&plans==0&&phase.pid==0&&(variant!="off"||!phase.enabled);
     const auto preparationHints=variant=="automatic"?preparationAdmissionHints(output/"preparation-hints",context):Json{{"passed",true},{"selected",false}};
-    return {{"id","native.typed-history-resource-handoff-"+variant},{"preparationHints",preparationHints},{"passed",preparationHints.value("passed",false)&&deniedReads==1&&deniedPlans==0&&expected&&pairedPlanDiagnostics&&
+    Json retryOnHint={{"passed",true},{"selected",false}};
+    if(variant=="automatic"){
+        std::atomic<unsigned> hintReads{0};std::atomic<bool> hintDenied{false};
+        std::atomic<ULONGLONG> opened{0},earlyCheck{0},second{0},third{0};
+        bool firstHealth=true; // Read only by Runtime's worker.
+        Harness hinted(output/"resource-retry-with-mode-hints",context,false,[&]{
+            return hintDenied.load()?ymcc::deckysidebar::LaunchAdmission{false,"steam-ui-state-pending",true,"shared-mode-pending"}:
+                ymcc::deckysidebar::LaunchAdmission{true};
+        },{},[&]{
+            const auto read=++hintReads;
+            if(read==1)Sleep(2400); // Cleaned timeout after a slow prewarm.
+            const auto now=GetTickCount64();
+            if(read==1)opened=now;
+            if(read==2)second=now;
+            if(read==3)third=now;
+            if(read<=2){hintDenied=true;return std::string("resource-worker-deadline");}
+            return std::string{};
+        },{},{},[&]{
+            // Health can sample pending before admission sees the shared mode
+            // publication. Its existing 5s check then overlaps the resource wait.
+            if(std::exchange(firstHealth,false))return ymcc::deckysidebar::ConnectionHealth{false,false,"steam-bigpicture-unconfirmed",true};
+            if(hintDenied&&hintReads==1)earlyCheck=GetTickCount64();
+            return hintDenied?ymcc::deckysidebar::ConnectionHealth{false,false,"steam-bigpicture-unconfirmed",true}:
+                ymcc::deckysidebar::ConnectionHealth{true,false,"authenticated-peer-missing",false,"same-steam-session"};
+        },{},[](const auto& current){
+            Sleep(2350);need(current(),"resource-retry-hint-current-prewarm");return std::string{};
+        });
+        const auto hintHandles=handles();need(hinted.runtime.setEnabled(true),"resource-retry-hint-enable");
+        const auto parked=[&](unsigned n){return hintReads==n&&hinted.runtime.snapshot().phase=="waiting-manual-steam";};
+        need(waitFor([&]{return parked(1);},6500),"resource-retry-hint-first-park");
+        const auto openedTick=opened.load(),firstHint=GetTickCount64();
+        hintDenied=false;need(hinted.runtime.requestLaunchAdmissionRefresh(),"resource-retry-first-mode-return");
+        // Nothing independently wakes the second denial: it is first visible
+        // at the original 3s resource slot. Do not assume the 1s attempt reads
+        // admission again after it fails.
+        need(waitFor([&]{return parked(2);},3500),"resource-retry-hint-second-park");
+        while(GetTickCount64()-opened<3200)Sleep(20);
+        const bool quiet=hintReads==2&&hinted.plans==0;
+        const auto lateHint=GetTickCount64();
+        hintDenied=false;need(hinted.runtime.requestLaunchAdmissionRefresh(),"resource-retry-second-mode-return");
+        const bool resumed=waitFor([&]{return hinted.healthyGeneration==1;},2500);
+        hinted.runtime.shutdown();const auto resources=hinted.client->snapshot();
+        const auto delay=second-opened;
+        const auto check=earlyCheck.load();
+        const bool early=check>=openedTick&&check<=firstHint&&firstHint<openedTick+1000;
+        retryOnHint={{"passed",early&&delay>=1000&&quiet&&resumed&&hintReads==3&&hinted.plans==1&&third>=lateHint&&
+                resources.fullyDestroyed&&resources.handles==0&&hintHandles==handles()},
+            {"selected",true},{"earlyBoundaryExercised",early},{"healthWakeAfterFailureMs",check>=openedTick?check-openedTick:0},
+            {"firstHintAfterFailureMs",firstHint-openedTick},{"secondPreflightAfterMs",delay},
+            {"lateHintAfterFailureMs",lateHint-openedTick},{"thirdPreflightAfterFailureMs",third>=openedTick?third-openedTick:0},
+            {"quietWhileAdmissionUnknown",quiet},
+            {"resumed",resumed},{"preflightReads",hintReads.load()},{"bindingPlans",hinted.plans.load()},
+            {"beforeHandles",hintHandles},{"afterHandles",handles()}};
+    }
+    return {{"id","native.typed-history-resource-handoff-"+variant},{"preparationHints",preparationHints},{"retryOnHint",retryOnHint},
+        {"passed",preparationHints.value("passed",false)&&retryOnHint.value("passed",false)&&deniedReads==1&&deniedPlans==0&&expected&&pairedPlanDiagnostics&&
         destroyed.fullyDestroyed&&destroyed.handles==0&&destroyed.pendingIo==0&&before==handles()&&context.alive()},
         {"variant",variant},{"preflightReads",inspections},{"bindingPlans",plans},{"readsWhileDenied",deniedReads},{"plansWhileDenied",deniedPlans},
         {"recovered",healed},{"pairedPlanDiagnostics",pairedPlanDiagnostics},{"elapsedFromFirstFailureMs",elapsed},{"phase",phase.phase},{"reason",phase.reason},
@@ -674,9 +774,11 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
     const bool malformedBusy=variant=="malformed-busy",externalBusy=variant=="transport-busy";
     const bool busy=localBusy||malformedBusy||externalBusy;
     const bool early=variant=="connection-early";
+    const bool stopDuringPreflight=variant=="connection-preflight-off";
     const bool scoped=!variant.empty(),connection=scoped&&!busy&&variant!="mode-same";
     const ymcc::deckysidebar::LaunchBindingScope prepared{session,session.account,1,"doc:1"};
     std::atomic<unsigned> reads{0},preflights{0};std::atomic<bool> settle{false};
+    std::atomic<bool> secondPreflightEntered{false},preflightRevoked{false},loaderPublished{false};
     ymcc::steamui::ModeObserver shared;
     ymcc::steamui::ModeObserverConfig mode;mode.debounceMs=1;mode.minimumGapMs=1;
     mode.readOwned=[&](const auto& s,const auto& current){
@@ -733,9 +835,19 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
         }
     },[&]{++preflights;return std::string{};},{},{},{},{},{},{},[&](ymcc::deckysidebar::Config& config){
         if(!scoped)return;
+        if(stopDuringPreflight){
+            auto changed=std::move(config.changed);
+            config.changed=[&,changed=std::move(changed)](const auto& state){if(state.pid)loaderPublished=true;changed(state);};
+            config.scopedPreflight=[&](const std::function<bool()>& current){
+                if(++preflights!=2)return std::string{};
+                secondPreflightEntered=current();
+                preflightRevoked=waitFor([&]{return !current();},2000);
+                return std::string(preflightRevoked?"preparation-cancelled":"fixture-preflight-revocation-missing");
+            };
+        }
         auto plan=std::move(config.bindingPlan);
-        config.bindingPlan=[&,plan=std::move(plan)](auto kind,auto generation){
-            auto result=plan(kind,generation);result.launchScope=prepared;return result;
+        config.bindingPlan=[&,plan=std::move(plan)](auto kind,auto generation,const auto& current){
+            auto result=plan(kind,generation,current);result.launchScope=prepared;return result;
         };
     });owner=&harness;
     const auto before=handles(); // Compare after both owners have stopped.
@@ -776,10 +888,13 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
         settle=true;
         need(waitFor([&]{return shared.snapshot(session).value("mode",std::string{})=="bigpicture";}),"final-admission-shared-mode-did-not-settle");
         wakeAccepted=harness.runtime.requestLaunchAdmissionRefresh();
-        harness.waitForCheckpoint([&]{return harness.runtime.snapshot().pid!=0;},"final-admission-loader-did-not-start");
+        if(stopDuringPreflight)need(waitFor([&]{return secondPreflightEntered.load();}),"held-second-preflight-not-entered");
+        else harness.waitForCheckpoint([&]{return harness.runtime.snapshot().pid!=0;},"final-admission-loader-did-not-start");
     }
     const auto launched=harness.runtime.snapshot();
+    const auto beforeShutdown=GetTickCount64();
     harness.runtime.shutdown();const auto after=harness.client->snapshot();
+    const auto shutdownElapsedMs=GetTickCount64()-beforeShutdown;
     ymcc::steamui::ModeCacheMiss freshMiss;
     const auto lastMode=shared.snapshot(session,&freshMiss);
     const bool freshReceiptCleared=!busy||off||(lastMode.value("mode",std::string{})=="bigpicture"&&!freshMiss.reason);
@@ -797,14 +912,17 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
     const bool unknownOmitted=!ymcc::deckydiag::record("bootstrap-watch",synthetic).contains("preparedBindingHold");
     synthetic["preparedBindingHold"]="held";synthetic["scope"]="other-stage";
     const bool wrongScopeOmitted=!ymcc::deckydiag::record("bootstrap-watch",synthetic).contains("preparedBindingHold");
+    const bool expectedLaunch=stopDuringPreflight?launched.pid==0&&wakeAccepted&&preflightRevoked&&!loaderPublished&&shutdownElapsedMs<=3200:
+        off?launched.pid==0:launched.pid!=0&&wakeAccepted;
     const bool result=expectHold?phase.phase=="starting"&&!waiting.fullyDestroyed&&waiting.handles>0&&
-        harness.plans==(page?2u:1u)&&(off?launched.pid==0:launched.pid!=0&&wakeAccepted)&&preflights==(off?1u:2u):
+        harness.plans==(page?2u:1u)&&expectedLaunch&&preflights==(off?1u:2u):
         busy?phase.phase=="waiting-manual-steam"&&waiting.fullyDestroyed&&waiting.handles==0&&waiting.pendingIo==0&&
             harness.plans==2&&launched.pid!=0&&wakeAccepted&&preflights==2:
         harness.plans==1&&waiting.fullyDestroyed&&waiting.handles==0&&waiting.pendingIo==0;
     return {{"id","native.typed-rejected-final-admission-releases-watch-before-off"},
         {"passed",attributed&&holdAttributed&&unknownOmitted&&wrongScopeOmitted&&freshReceiptCleared&&admissions>=2&&phase.pid==0&&result&&after.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&before==afterHandles&&context.alive()},
         {"parameter",variant},{"phaseBeforeFreshRead",phase.phase},{"launchPid",launched.pid},{"freshWakeAccepted",wakeAccepted},{"preflights",preflights.load()},
+        {"secondPreflightEntered",secondPreflightEntered.load()},{"preflightRevoked",preflightRevoked.load()},{"loaderPublished",loaderPublished.load()},{"shutdownElapsedMs",shutdownElapsedMs},
         {"admissionReads",admissions.load()},{"completedBindingPlans",harness.plans.load()},{"loaderPid",phase.pid},{"beforeOff",state(waiting)},{"afterOff",state(after)},
         {"beforeHandles",before},{"afterHandles",afterHandles},{"cefUnaffected",context.alive()},
         {"modeCacheMissLog",logs},{"attributed",attributed},{"holdAttributed",holdAttributed},{"holdUnknownOmitted",unknownOmitted},
@@ -1151,6 +1269,40 @@ inline Json admissionParkResume(const std::filesystem::path& output){
         {"globalMissedEventProbeExecuted",runGlobalMissedEventProbe},{"globalRecoveredWithoutEvent",runGlobalMissedEventProbe?Json(globalRecovered):Json()},{"globalElapsedMs",runGlobalMissedEventProbe?Json(globalElapsed):Json()},{"globalBindingPlans",globalPlans},{"globalOffStopped",runGlobalMissedEventProbe?Json(globalOffStopped):Json()},{"globalVirtualClockChecks",true},{"actualStageCallbackScenarios",stageScenarios},{"globalRecoveryLog",globalLog},{"timerResumed",resumed},{"admissionRecoveryPhase",phase.phase},{"admissionRecoveryReason",phase.reason},{"admissionRecoveryLaunchStage",phase.launchStage},{"admissionRecoveryHealthyGeneration",h.healthyGeneration.load()},{"recoveredWithoutExtraEvent",recovered},{"originalBudgetAndStopAssertions",true},{"refusalStormSignals",20000},{"bindingPlans",h.plans.load()},
         {"cefUnaffected",context.alive()},{"afterOff",state(destroyed)},{"beforeHandles",before},{"afterHandles",handles()}};
 }
+inline Json deferredPreflightSession(const std::filesystem::path& output){
+    Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
+    std::atomic<unsigned> attempts{0},preflights{0};
+    std::atomic<bool> secondEntered{false},revoked{false},newSession{false},staleLoader{false};
+    Harness h(output,context,false,{},{},{},{},{},{},{},{},[&](const auto& state){if(state.pid&&!newSession)staleLoader=true;},[&](ymcc::deckysidebar::Config& config){
+        auto plan=std::move(config.bindingPlan);
+        config.bindingPlan=[&,plan=std::move(plan)](auto mode,auto generation,const auto& current){
+            if(++attempts==1)return ymcc::deckysidebar::BindingPlan{{},"live-debug-unavailable"};
+            return plan(mode,generation,current);
+        };
+        config.scopedPreflight=[&](const std::function<bool()>& current){
+            if(++preflights!=2)return std::string{};
+            secondEntered=current();revoked=waitFor([&]{return !current();},2000);
+            return std::string(revoked?"preparation-cancelled":"fixture-preflight-revocation-missing");
+        };
+    });
+    const auto beforeHandles=handles();need(h.runtime.setEnabled(true),"deferred-preflight-enable");
+    need(waitFor([&]{return secondEntered.load();}),"deferred-preflight-did-not-retry");
+    const auto bound=h.client->snapshot();const auto revokedAt=GetTickCount64();
+    const bool noOldLoader=h.runtime.snapshot().pid==0&&attempts==2&&h.plans==1;
+    h.runtime.observeSteam(0,true);
+    const bool retired=waitFor([&]{const auto s=h.runtime.snapshot();return s.phase=="waiting-steam"&&s.pid==0;},3200);
+    const auto retiredAt=GetTickCount64();const auto returned=h.client->snapshot();
+    newSession=true;h.runtime.observeSteam(1,true);
+    const bool currentStarted=waitFor([&]{return h.runtime.snapshot().pid!=0;});
+    const auto current=h.runtime.snapshot();h.runtime.shutdown();const auto done=h.client->snapshot();
+    const auto afterHandles=handles();
+    const bool passed=noOldLoader&&bound.handles>0&&bound.jobActiveProcesses>0&&revoked&&retired&&retiredAt-revokedAt<=3200&&returned.fullyDestroyed&&returned.childExited&&
+        returned.handles==0&&returned.pendingIo==0&&returned.jobActiveProcesses==0&&!staleLoader&&currentStarted&&preflights==3&&attempts==3&&h.plans==2&&done.fullyDestroyed&&afterHandles==beforeHandles&&context.alive();
+    return {{"id","native.typed-preparation-rechecks-admission-before-binding"},{"parameter","deferred-session"},{"passed",passed},
+        {"secondPreflightEntered",secondEntered.load()},{"preflightRevoked",revoked.load()},{"oldLoaderPublished",staleLoader.load()},{"newLoaderPid",current.pid},
+        {"preflights",preflights.load()},{"planAttempts",attempts.load()},{"bindingPlans",h.plans.load()},{"retired",retired},{"retiredElapsedMs",retiredAt-revokedAt},
+        {"beforeSessionLeave",state(bound)},{"afterSessionLeave",state(returned)},{"afterOff",state(done)},{"beforeHandles",beforeHandles},{"afterHandles",afterHandles}};
+}
 inline Json rejectedAfterPreparation(const std::filesystem::path& output){
     Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     std::atomic<unsigned> admissions{0};
@@ -1164,13 +1316,19 @@ inline Json rejectedAfterPreparation(const std::filesystem::path& output){
 inline Json queuedRecoveryHealth(const std::filesystem::path& output,bool previouslyConnected=false){
     Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     Json scenarios=Json::array();
-    for(const bool watch:{false,true}){
-        std::atomic<unsigned> phase{0};std::atomic<bool> missingCycleComplete{false},positiveCycleComplete{false};
-        const auto health=[&]{const auto value=phase.load();if(value==2)positiveCycleComplete=true;
+    enum class Return { ui,peer,flap,peerSilently };
+    for(const auto returned:{Return::ui,Return::peer,Return::flap,Return::peerSilently})for(const bool watch:{false,true}){
+        const bool peerOnly=returned!=Return::ui,flapped=returned==Return::flap,silent=returned==Return::peerSilently;
+        if(peerOnly&&!previouslyConnected)continue;
+        if(watch&&(flapped||silent))continue;
+        std::atomic<unsigned> phase{0};std::atomic<bool> missingCycleComplete{false},positiveCycleComplete{false},peerRead{false},secondLossRead{false};
+        const auto health=[&]{const auto value=phase.load();if(value==2)positiveCycleComplete=true;if(value==3)peerRead=true;
+            if(value==4)secondLossRead=true;
             ymcc::deckysidebar::ConnectionHealth result{value!=0,value==2,"queued-mirror-observation",false,"queued-health-fixed-session"};
-            result.transportConnected=value==2;return result;
+            result.transportConnected=value==2||value==3;return result;
         };
-        Harness h(output/(watch?"watch-pending":"automatic-only"),context,false,{},{},{},[&]{if(phase==1)missingCycleComplete=true;},{},health);
+        const auto scope=flapped?output/"flap":silent?output/"peer-silent":peerOnly?output/"peer-only":output;
+        Harness h(scope/(watch?"watch-pending":"automatic-only"),context,false,{},{},{},[&]{if(phase==1)missingCycleComplete=true;},{},health);
         const auto before=handles();need(h.runtime.setEnabled(true),"queued-health-enable");
         need(waitFor([&]{return h.healthyGeneration==1;}),"queued-health-first-binding");
         const auto initial=h.runtime.snapshot();const auto originalBinding=h.client->snapshot().processId;
@@ -1181,16 +1339,35 @@ inline Json queuedRecoveryHealth(const std::filesystem::path& output,bool previo
         phase=1;const auto missingAt=GetTickCount64();need(h.runtime.requestConnectionCheck(),"queued-health-first-check");
         need(waitFor([&]{return missingCycleComplete.load();},1000),"queued-health-missing-cycle-not-consumed");
         if(watch)need(h.runtime.requestTransportRecovery(),"queued-health-independent-watch-refused");
-        phase=2;need(h.runtime.requestConnectionCheck(),"queued-health-returned-check");
-        need(waitFor([&]{return h.globalConnected.load()>0;},1000),"queued-health-return-not-consumed");
+        phase=peerOnly?3:2;
+        if(!silent){
+            need(h.runtime.requestConnectionCheck(),"queued-health-returned-check");
+            need(waitFor([&]{return peerOnly?peerRead.load():h.globalConnected.load()>0;},1000),"queued-health-return-not-consumed");
+        }
         const auto returnedMs=GetTickCount64()-missingAt;need(returnedMs<200,"queued-health-restored-after-original-retry-window");
+        if(flapped){
+            phase=4;need(h.runtime.requestConnectionCheck(),"queued-peer-second-loss-check");
+            need(waitFor([&]{return secondLossRead.load();},1000)&&GetTickCount64()-missingAt<200,
+                "queued-peer-second-loss-not-consumed-before-original-retry");
+        }
         Sleep(450); // Cross the actual existing 250ms retry, without advancing its clock.
         const auto plans=h.plans.load();const auto binding=h.client->snapshot().processId;const auto measured=h.runtime.snapshot();
+        const bool waitedForUiProof=peerOnly&&h.globalConnected.load()==0;
+        const bool peerReadBeforeUiProof=peerRead.load();
+        if(peerOnly){
+            need(waitedForUiProof,"queued-peer-mistaken-for-complete-ui-proof");
+            phase=2;need(h.runtime.requestConnectionCheck(),"queued-peer-ui-proof-check");
+            need(waitFor([&]{return h.globalConnected.load()>0;},1000),"queued-peer-ui-proof-not-consumed");
+        }
         h.runtime.shutdown();const auto destroyed=h.client->snapshot();
-        need(watch?plans==2&&binding!=originalBinding:plans==1&&binding==originalBinding,
-             watch?"queued-health-lost-independent-watch-repair":"queued-automatic-repair-ran-after-connected");
+        const bool shouldReplace=watch||flapped;
+        need(shouldReplace?plans==2&&binding!=originalBinding:plans==1&&binding==originalBinding,
+             flapped?"queued-peer-flap-lost-original-retry":watch?"queued-health-lost-independent-watch-repair":
+             peerOnly?"queued-automatic-repair-ran-after-peer-return":"queued-automatic-repair-ran-after-connected");
+        if(silent)need(peerReadBeforeUiProof,"queued-silent-peer-not-confirmed-before-retry");
         need(measured.pid==initial.pid&&destroyed.fullyDestroyed&&before==handles()&&context.alive(),"queued-health-resource-return-or-loader-identity");
-        scenarios.push_back({{"independentWatchFault",watch},{"bindingPlans",plans},{"returnedBeforeRetryMs",returnedMs},
+        scenarios.push_back({{"independentWatchFault",watch},{"peerOnly",peerOnly},{"peerFlapped",flapped},{"peerReturnWithoutHint",silent},
+            {"peerReadBeforeUiProof",peerReadBeforeUiProof},{"waitedForUiProof",waitedForUiProof},{"bindingPlans",plans},{"returnedBeforeRetryMs",returnedMs},
             {"sameLoader",measured.pid==initial.pid},{"bindingReplaced",binding!=originalBinding},{"beforeHandles",before},{"afterHandles",handles()},{"atExit",state(destroyed)}});
     }
     return {{"passed",true},{"scenarios",scenarios},{"previouslyConnected",previouslyConnected},{"actualRuntime",true},{"realSteamActions",0}};
@@ -1377,20 +1554,26 @@ inline Json retainedBindingHandshake(const std::filesystem::path& output){
 }
 // Keep the original verified-fault case; exercise the reserved production port
 // on the same retained owner with no actual Steam command.
-inline Json retainedPageGrant(const std::filesystem::path& output,bool identityOnly=false){
-    using Action=ymcc::deckysidebar::ConnectionRecoveryWindow::Action;
+inline Json retainedPageGrant(const std::filesystem::path& output,std::string_view selection={}){
+    using Window=ymcc::deckysidebar::ConnectionRecoveryWindow;
+    using Action=Window::Action;
     Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     Json rows=Json::array();
-    for(const std::string scenario:{"refused","granted","uncertain","await-identity","await-without-proof"}){
+    for(const std::string scenario:{"refused","granted","uncertain","await-identity","await-without-proof","late-healthy","late-unhealthy"}){
         const bool pending=scenario=="await-identity",missingProof=scenario=="await-without-proof";
-        if(identityOnly&&!pending)continue;
+        const bool lateHealthy=scenario=="late-healthy",late=lateHealthy||scenario=="late-unhealthy";
+        if((selection=="late-health")!=late||(selection=="await-identity"&&!pending))continue;
         std::atomic<unsigned> healthPhase{0},steps{0},heldAtStep{0},releasedAtGate{0},gateCalls{0};
+        std::atomic<unsigned> staleReads{0};std::atomic<ULONGLONG> lateReceiptAt{0};
         std::atomic<Action> nextPage{Action::none};std::atomic<ULONGLONG> pendingAt{0},resolvedAt{0};
         std::atomic<bool> sawFirstHealth{false};
         Harness* target=nullptr;DWORD originalPid=0;
-        Harness h(output/scenario,context,true,{},{},{},{},{},[&]{
+        Harness h(output/scenario,context,true,{},[&](Json& request,unsigned){
+            if(late)request["bootstrap"]["fixtureLatePageWindow"]=true;
+        },{},{},{},[&]{
             const auto phase=healthPhase.load();
             if(phase==1)sawFirstHealth=true;
+            if(lateReceiptAt&&phase==3)++staleReads;
             ymcc::deckysidebar::ConnectionHealth value{phase!=0,phase==2,"fixture-official-backend-unavailable",false,"fixture-retained-page"};
             value.transportConnected=phase!=0;return value;
         },{},{},{},[&](auto& config){
@@ -1409,7 +1592,11 @@ inline Json retainedPageGrant(const std::filesystem::path& output,bool identityO
                 if(grant){
                     ([&]{if(beforeEffect){++gateCalls;if(beforeEffect()&&target->client->snapshot().processId==0)++releasedAtGate;}}(),...);
                 }
-                if(scenario!="refused"||action==Action::reopen)healthPhase=2;
+                if(late&&action==Action::reopen){
+                    lateReceiptAt=GetTickCount64();++steps;
+                    return Json{{"ok",false},{"mutated",false},{"uncertain",false},{"reason","decky-bigpicture-already-healthy"}};
+                }
+                if(!late&&(scenario!="refused"||action==Action::reopen))healthPhase=2;
                 ++steps;
                 if(grant)return Json{{"ok",true},{"mutated",true}};
                 if(scenario=="uncertain")return Json{{"ok",false},{"mutated",true},{"uncertain",true}};
@@ -1425,16 +1612,31 @@ inline Json retainedPageGrant(const std::filesystem::path& output,bool identityO
         healthPhase=2;need(h.runtime.requestConnectionCheck(),"reserved-page-positive-proof-request");
         need(waitFor([&]{return h.globalConnected.load()==1;},1000),"reserved-page-positive-proof");
         healthPhase=3;need(h.runtime.requestConnectionCheck(),"reserved-page-official-fault-request");
-        const unsigned expectedSteps=scenario=="refused"||pending||missingProof?2u:1u;
+        const unsigned expectedSteps=scenario=="refused"||pending||missingProof||late?2u:1u;
         if(pending){
             need(waitFor([&]{return steps>=1;},2000),"identity-refusal-not-observed");
             for(unsigned i=0;i<100;++i)need(h.runtime.requestConnectionCheck(),"identity-check-hint-refused");
         }
-        const bool completed=waitFor([&]{return steps>=expectedSteps&&h.globalConnected.load()>=2;},
+        if(late){
+            need(waitFor([&]{return steps==expectedSteps;},2000),"late-reopen-receipt-not-observed");
+            need(h.runtime.requestConnectionCheck(),"late-reopen-stale-check");
+            need(waitFor([&]{return staleReads>0;},1000),"late-reopen-stale-read-not-observed");
+            if(lateHealthy){healthPhase=2;need(h.runtime.requestConnectionCheck(),"late-reopen-confirmation-check");}
+            else while(GetTickCount64()-lateReceiptAt<Window::settleGraceMs+500)Sleep(50);
+        }
+        const bool completed=late&&!lateHealthy?staleReads>1:waitFor([&]{return steps>=expectedSteps&&h.globalConnected.load()>=2;},
             pending?12500:7500); // Original retry and subsequent health confirmation are separate waits.
         const auto plans=h.plans.load();const auto finalPid=h.client->snapshot().processId;
         h.runtime.shutdown();const auto returned=h.client->snapshot();
-        const bool behavior=heldAtStep==expectedSteps&&((scenario=="refused"||missingProof)?gateCalls==0&&plans==1&&finalPid==originalPid&&
+        unsigned exhausted=0,reopen=0;bool expired=false;
+        if(late)for(const auto& record:h.globalRecoveryLog){
+            const auto stage=record.value("stage",std::string{});
+            if(stage=="reopen-bigpicture")++reopen;
+            if(stage=="recovery-exhausted"){++exhausted;expired=record.value("recoveryTrigger",std::string{})=="observation-budget-expired";}
+        }
+        const bool behavior=heldAtStep==expectedSteps&&(late?gateCalls==0&&plans==1&&finalPid==originalPid&&reopen==1&&
+            (lateHealthy?exhausted==0&&h.globalConnected==2:exhausted==1&&expired&&h.globalConnected==1):
+            (scenario=="refused"||missingProof)?gateCalls==0&&plans==1&&finalPid==originalPid&&
             (!missingProof||nextPage==Action::reopen):pending?nextPage==Action::rebuild&&resolvedAt>=pendingAt&&
             resolvedAt-pendingAt>=ymcc::deckysidebar::ConnectionRecoveryWindow::evidenceIntervalMs&&gateCalls==1&&releasedAtGate==1:
             scenario=="granted"?gateCalls==1&&releasedAtGate==1&&finalPid!=originalPid:gateCalls==0&&finalPid!=originalPid);
@@ -1444,6 +1646,8 @@ inline Json retainedPageGrant(const std::filesystem::path& output,bool identityO
             {"identityWaitMs",pendingAt&&resolvedAt>=pendingAt?resolvedAt-pendingAt:0},
             {"originalChild",originalPid},{"observedChild",finalPid},{"plans",plans},{"completed",completed},{"beforeHandles",before},
             {"afterHandles",handles()},{"returned",returned.fullyDestroyed},{"realSteamOrDeviceActions",0}});
+        if(late)rows.back().update(Json{{"staleReads",staleReads.load()},{"reopen",reopen},{"exhausted",exhausted},
+            {"expiredNormally",expired},{"connected",h.globalConnected.load()},{"recoveryLog",h.globalRecoveryLog}});
     }
     return rows;
 }
@@ -1479,6 +1683,9 @@ inline Json ready(const std::filesystem::path& output,bool retained,const ReadyB
     const Json ownedBackendProof=backendObserver?backendObserver(harness.runtime,originalLoader,ownedLoader.value):Json{{"passed",true},{"exercised",false}};
     bool coldBackendKeptMirror=true;
     if(!retained){
+        // Exercise the cold owned-Loader window after the independent
+        // first-handshake grace has expired; that branch already reports reuse.
+        Sleep(ymcc::deckysidebar::ConnectionRecoveryWindow::transportGraceMs);
         coldBackendPhase=1;need(harness.runtime.requestConnectionCheck(),"cold-backend-observation-refused");
         Sleep(450); // Past the original 250ms transport retry, inside actual cold grace.
         coldBackendKeptMirror=harness.plans==1&&harness.client->snapshot().processId==originalBinding&&harness.runtime.snapshot().pid==originalLoader;
@@ -1507,7 +1714,14 @@ inline Json ready(const std::filesystem::path& output,bool retained,const ReadyB
     if(ownedLoader.value){CloseHandle(ownedLoader.value);ownedLoader.value=nullptr;}
     if(foreignContext.value){CloseHandle(foreignContext.value);foreignContext.value=nullptr;}
     need(harness.loaderStopLog.size()==(retained?0u:2u),"owned-loader-stop-edge-pair-missing-or-spurious");
+    Json coldBackendReconnect=Json::array();
     if(!retained){
+        for(const auto& row:harness.globalRecoveryLog){
+            if(row.value("stage",std::string{})=="reconnect"&&row.value("reason",std::string{})=="official-backend-unconfirmed")
+                coldBackendReconnect.push_back(ymcc::deckydiag::record("connection-recovery",row));
+        }
+        need(coldBackendReconnect.size()==1&&coldBackendReconnect[0].value("attempted",false)&&
+            coldBackendReconnect[0].value("bindingReused",false),"cold-backend-observation-must-report-existing-binding-reuse");
         const auto& began=harness.loaderStopLog[0];const auto& ended=harness.loaderStopLog[1];
         need(began.value("bootstrapStage",std::string{})=="loader-stop-started"&&ended.value("bootstrapStage",std::string{})=="loader-stop-finished","loader-stop-stage-order");
         for(const auto& row:harness.loaderStopLog)need(row.at("pid")==originalLoader&&row.at("loaderStopCause")=="runtime-stop"&&row.at("loaderBirth100ns").is_string(),"loader-stop-held-root-identity-and-cause");
@@ -1520,6 +1734,7 @@ inline Json ready(const std::filesystem::path& output,bool retained,const ReadyB
     return {{"id",retained?"native.typed-retained-ready-rebind-never-starts-loader":"native.typed-ready-rebind-keeps-original-owned-loader"},
         {"queuedHealthProof",queuedHealthProof},
         {"coldBackendSettleExercised",!retained},{"coldBackendKeptMirror",coldBackendKeptMirror},
+        {"coldBackendReconnect",coldBackendReconnect},
         {"loaderStopLog",harness.loaderStopLog},{"optionalStopDiagnosticsThrowDidNotSkipCleanup",true},
         {"ownedBackendProofScheduled",proofScheduled},{"ownedBackendProofCalls",proofCalls.load()},{"nativeOwnedLoaderAttested",loaderOwnership},{"foreignContextAndParentRejected",foreignRejected},{"ownershipRevokedAfterOff",ownershipRevoked},
         {"actualOwnedBackendProof",ownedBackendProof},{"passed",ownedBackendProof.at("passed").get<bool>()&&proofScheduled&&proofCalls==1&&loaderOwnership&&foreignRejected&&ownershipRevoked&&accepted&&!duplicate&&!zero&&preparationAccepted&&connectionUnaffected&&preparedBefore==(retained?0u:1u)&&harness.preparations==preparedBefore&&harness.plans==2&&harness.healthyGeneration==2&&sameOwnership&&nextBinding&&nextBinding!=originalBinding&&destroyed.fullyDestroyed&&before==handles()},
@@ -1539,16 +1754,43 @@ static std::atomic<bool> g_exitRequested{false};
 static struct {bool isolated=false;} g_aiFanMockSession;
 static unsigned long long observedGeneration=177;
 static unsigned long long currentPowerGeneration(){return observedGeneration;}
-struct Session {unsigned pid=41;unsigned long long created=123;std::wstring root=L"C:\\FixtureSteam";};
+struct Session {unsigned pid=41;unsigned long long created=123;std::wstring root=L"C:\\FixtureSteam";bool operator==(const Session&) const=default;};
 static struct {Session sessionSnapshot()const{return {};}} g_steamSettingsObserver;
-static struct {unsigned reads=0;std::function<void()> refreshed;void requestRefresh(const Session&){++reads;if(refreshed)refreshed();}} g_steamModeObserver;
+static struct {
+ unsigned reads=0;std::function<void()> refreshed;
+ void requestRefresh(const Session&){++reads;if(refreshed)refreshed();}
+ bool requestDeckyResumeRefresh(const Session&,const ymcc::sleeppower::SharedPowerV1&,std::string*){return false;}
+} g_steamModeObserver;
+[[maybe_unused]] static ymcc::sleeppower::SharedPowerV1 fixtureDeckyPower(unsigned long long generation){
+    using namespace ymcc::sleeppower;
+    SharedPowerV1 power;power.generation=power.suspendSerial=generation;power.publicationRevision=1;
+    power.phase=g_powerLifecycle==PowerLifecycle::Ready?0u:3u;
+    power.flags=kKnown|(power.phase==0&&!g_exitRequested?kHardwareAllowed:0u);
+    return power;
+}
+[[maybe_unused]] static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power) noexcept {
+    return ymcc::sleeppower::samePowerRevocation(power,fixtureDeckyPower(currentPowerGeneration()));
+}
 static Json diagnostics=Json::array();
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool){diagnostics.push_back({{"event",event},{"detail",detail}});}
 // The exact shared Ready slice also notifies lighting; its hardware boundary
 // stays inert here, as in the existing baseline fixture.
-[[maybe_unused]] static void nativeAyaLightingResume() {}
 #include "decky_wake_ready_consumer.inc"
 #include "decky_wake_committed_consumer.inc"
+static bool deliverReady(unsigned long long generation){
+#ifdef YMCC_FIXTURE_PUBLIC_DECKY_READY
+    const auto before=diagnostics.size();
+    (void)deckySidebarRecheckPublicReady(fixtureDeckyPower(generation));
+    return diagnostics.size()!=before;
+#else
+    return deckySidebarResumeAfterIntent(generation);
+#endif
+}
+#ifdef YMCC_FIXTURE_PUBLIC_DECKY_READY
+static constexpr auto readyDeliveryEntry="public-ready";
+#else
+static constexpr auto readyDeliveryEntry="legacy-committed-ready";
+#endif
 #undef g_deckySidebarRuntime
 }
 // WM_POWER_RESUME_COMMIT calls this same production consumer with the current
@@ -1574,17 +1816,17 @@ inline Json intentReady(const std::filesystem::path& output,bool retained){
     Harness h(output,context,retained);const auto beforeHandles=handles();need(h.runtime.setEnabled(true),"intent-ready-enable");h.waitForCheckpoint([&]{return isHealthy(h,retained,1);},"intent-ready-initial");
     wakeReady::runtime=&h.runtime;wakeReady::observedGeneration=retained?278:177;const auto power=wakeReady::observedGeneration;
     const auto loader=h.runtime.snapshot().pid;const auto plans=h.plans.load(),preparations=h.preparations.load(),reads=wakeReady::g_steamModeObserver.reads;
-    for(auto phase:{wakeReady::PowerLifecycle::Suspended,wakeReady::PowerLifecycle::Resuming}){wakeReady::g_powerLifecycle=phase;need(!wakeReady::deckySidebarResumeAfterIntent(power),"nonready S0 recovery admitted");}
+    for(auto phase:{wakeReady::PowerLifecycle::Suspended,wakeReady::PowerLifecycle::Resuming}){wakeReady::g_powerLifecycle=phase;need(!wakeReady::deliverReady(power),"nonready S0 recovery admitted");}
     wakeReady::g_powerLifecycle=wakeReady::PowerLifecycle::Ready;
-    need(!wakeReady::deckySidebarResumeAfterIntent(0)&&!wakeReady::deckySidebarResumeAfterIntent(power-1),"stale power generation admitted");
-    wakeReady::g_exitRequested=true;need(!wakeReady::deckySidebarResumeAfterIntent(power),"exit admitted wake recovery");wakeReady::g_exitRequested=false;
-    wakeReady::g_aiFanMockSession.isolated=true;need(!wakeReady::deckySidebarResumeAfterIntent(power),"isolated wake reached IO");wakeReady::g_aiFanMockSession.isolated=false;
+    need(!wakeReady::deliverReady(0)&&!wakeReady::deliverReady(power-1),"stale power generation admitted");
+    wakeReady::g_exitRequested=true;need(!wakeReady::deliverReady(power),"exit admitted wake recovery");wakeReady::g_exitRequested=false;
+    wakeReady::g_aiFanMockSession.isolated=true;need(!wakeReady::deliverReady(power),"isolated wake reached IO");wakeReady::g_aiFanMockSession.isolated=false;
     need(h.plans==plans&&wakeReady::g_steamModeObserver.reads==reads,"invalid wake touched connection");
-    need(wakeReady::deckySidebarResumeAfterIntent(power),"committed S0 Ready ignored");
+    need(wakeReady::deliverReady(power),"committed S0 Ready ignored");
     h.waitForCheckpoint([&]{return isHealthy(h,retained,2);},"S0 Ready must replace stale binding and reach healthy new snapshot");
-    for(unsigned i=0;i<512;++i){need(!wakeReady::deckySidebarResumeAfterIntent(power),"duplicate S0 notification refilled recovery");wakeReady::productionCommittedReady();}
+    for(unsigned i=0;i<512;++i){need(!wakeReady::deliverReady(power),"duplicate S0 notification refilled recovery");wakeReady::productionCommittedReady();}
     need(h.plans==plans+1&&wakeReady::g_steamModeObserver.reads==reads+1&&h.runtime.snapshot().pid==loader,"wake storm restarts Loader or creates duplicate binding/mode reads");
-    const auto after=runtimeState(h);h.runtime.setEnabled(false);++wakeReady::observedGeneration;need(!wakeReady::deckySidebarResumeAfterIntent(wakeReady::observedGeneration),"OFF revived on late wake");
+    const auto after=runtimeState(h);h.runtime.setEnabled(false);++wakeReady::observedGeneration;need(!wakeReady::deliverReady(wakeReady::observedGeneration),"OFF revived on late wake");
     wakeReady::runtime=nullptr;
     Json committed;
     {
@@ -1603,13 +1845,13 @@ inline Json intentReady(const std::filesystem::path& output,bool retained){
         need(wakeReady::g_steamModeObserver.reads==priorReads+1,"committed Ready must refresh stale shared mode even without a Loader");
         parked.waitForCheckpoint([&]{return isHealthy(parked,retained,1);},"committed Ready missing-loader path must reach a fresh typed binding without another UI event");
         const auto healthyPlans=parked.plans.load();
-        for(unsigned i=0;i<512;++i){wakeReady::productionCommittedReady();need(!wakeReady::deckySidebarResumeAfterIntent(wakeReady::observedGeneration),"S0 after committed Ready refilled recovery");}
+        for(unsigned i=0;i<512;++i){wakeReady::productionCommittedReady();need(!wakeReady::deliverReady(wakeReady::observedGeneration),"S0 after committed Ready refilled recovery");}
         need(wakeReady::g_steamModeObserver.reads==priorReads+1&&parked.plans==healthyPlans,"committed Ready storm must coalesce with S0 recovery by generation");
         const auto readyState=runtimeState(parked);parked.runtime.setEnabled(false);
         ++wakeReady::observedGeneration;wakeReady::productionCommittedReady();
         need(wakeReady::g_steamModeObserver.reads==priorReads+1&&parked.client->snapshot().fullyDestroyed,"late committed Ready revived OFF or touched shared mode");
         wakeReady::g_steamModeObserver.refreshed={};wakeReady::runtime=nullptr;
-        committed={{"actualCommittedConsumer",true},{"noLoaderOnEntry",true},{"terminalAdmissionOnEntry",true},{"modeReads",wakeReady::g_steamModeObserver.reads-priorReads},{"duplicateSignals",512},{"after",readyState},{"atExit",state(parked.client->snapshot())}};
+        committed={{"readyDeliveryEntry",wakeReady::readyDeliveryEntry},{"noLoaderOnEntry",true},{"terminalAdmissionOnEntry",true},{"modeReads",wakeReady::g_steamModeObserver.reads-priorReads},{"duplicateSignals",512},{"after",readyState},{"atExit",state(parked.client->snapshot())}};
     }
     return {{"id",retained?"native.typed-s0-intent-ready-retained":"native.typed-s0-intent-ready-owned"},{"passed",true},{"productionConsumerExtracted",true},{"committedReady",committed},
         {"powerGeneration",power},{"plansBefore",plans},{"plansAfter",h.plans.load()},{"modeReads",wakeReady::g_steamModeObserver.reads-reads},
@@ -1735,8 +1977,24 @@ inline Json healthy(const std::filesystem::path& output){
     // The original context provider now fails after its first captured use.
     // A post-start relay must retain that use, not sample the replacement state.
     harness.poisonContextAfterResult=true;
+    need(!harness.runtime.diagnosticRuntimeThreadCpu(),"runtime-cpu-off-reported-a-thread");
     const auto beforeHandles=handles();const auto handleSnapshotBefore=handleTable();const auto beforeThreads=threadCount();harness.start();
+    SetLastError(ERROR_MORE_DATA);
+    const auto cpuBefore=harness.runtime.diagnosticRuntimeThreadCpu();
+    need(GetLastError()==ERROR_MORE_DATA,"runtime-cpu-changed-caller-last-error");
     const bool drained=waitFor([&]{return harness.burstDone.load();});const auto activeThreads=threadCount();
+    const auto cpuAfter=harness.runtime.diagnosticRuntimeThreadCpu();
+    need(cpuBefore&&cpuAfter&&cpuBefore->id!=GetCurrentThreadId()&&cpuBefore->id==cpuAfter->id&&
+        cpuBefore->birth&&cpuBefore->birth==cpuAfter->birth&&cpuAfter->kernel>=cpuBefore->kernel&&
+        cpuAfter->user>=cpuBefore->user,"runtime-cpu-not-the-same-held-worker");
+    {
+        detail::Handle thread{OpenThread(THREAD_QUERY_LIMITED_INFORMATION,FALSE,cpuAfter->id)};
+        FILETIME born{},exited{},kernel{},user{};
+        need(thread.value&&GetProcessIdOfThread(thread.value)==GetCurrentProcessId()&&
+            GetThreadTimes(thread.value,&born,&exited,&kernel,&user)&&
+            ((static_cast<ULONGLONG>(born.dwHighDateTime)<<32)|born.dwLowDateTime)==cpuAfter->birth,
+            "runtime-cpu-worker-owner-or-birth-mismatch");
+    }
     const auto active=harness.client->snapshot();const auto plansBeforeExit=harness.plans.load();
     bool childExitDrained=false;
     {
@@ -1755,6 +2013,7 @@ inline Json healthy(const std::filesystem::path& output){
         need(childExitDrained&&harness.loaderFaultPublications==0,"confirmed-exit-child-death-is-cleanup-not-loader-failure");
     }
     harness.runtime.observeSteam(1,true);harness.runtime.shutdown();
+    need(!harness.runtime.diagnosticRuntimeThreadCpu(),"runtime-cpu-reported-a-thread-after-return");
     const auto remaining=harness.client->snapshot();const bool cefAlive=context.alive();
     Json watchTrace=Json::array();Json bindingStart;
     for(const auto& row:harness.failureTraceLog){
@@ -1770,6 +2029,9 @@ inline Json healthy(const std::filesystem::path& output){
     need(fault.dump().size()<=2304&&fault.dump().find("secret")==std::string::npos&&fault.dump().find("private-token")==std::string::npos,"watch-failure-leaked-private-text");
     return {{"id","native.typed-runtime-drains-live-watch-without-extra-reader-thread"},
         {"passed",drained&&harness.diagnostics==192&&remaining.fullyDestroyed&&beforeHandles==handles()&&activeThreads==beforeThreads+1&&cefAlive&&harness.plans==plansBeforeExit},
+        {"runtimeWorkerCpu",{{"threadId",cpuAfter->id},{"threadBirth100ns",std::to_string(cpuAfter->birth)},
+            {"kernelDelta100ns",cpuAfter->kernel-cpuBefore->kernel},{"userDelta100ns",cpuAfter->user-cpuBefore->user},
+            {"retiredAfterShutdown",true}}},
         {"watchFailureTrace",watchTrace},{"watchContextProviderFailedAfterResult",harness.throwFailureContext.load()},
         {"diagnosticFrames",harness.diagnostics.load()},{"watchDrained",drained},{"beforeThreads",beforeThreads},{"activeThreads",activeThreads},
         {"beforeHandles",beforeHandles},{"afterHandles",handles()},{"handleSnapshotBefore",handleSnapshotBefore},{"handleSnapshotAfter",handleTable()},{"active",state(active)},{"atExit",state(remaining)},{"cefUnaffected",cefAlive},
@@ -1916,9 +2178,12 @@ inline void clear(){g_deckyEvents.clear();g_deckyEventPosted=false;g_hwnd=nullpt
 } // namespace rtfixture
 namespace ymcc::deckymirror {
 inline thread_local unsigned fixtureFrontendBuildReads=0;
+inline thread_local void (*fixtureAfterFrontendRead)()=nullptr;
 inline std::string countFixtureFrontendBuildId(const std::wstring& path){
     ++fixtureFrontendBuildReads;
-    return frontendBuildId(path);
+    auto id=frontendBuildId(path);
+    if(fixtureAfterFrontendRead)fixtureAfterFrontendRead();
+    return id;
 }
 }
 namespace rtfixture {
@@ -1928,7 +2193,7 @@ using Session=ymcc::steamsession::Session;
 inline ymcc::deckysidebar::Runtime* runtime=nullptr;
 inline Session observedSession;
 inline Json observedMode;
-inline unsigned brokerStops=0,refreshes=0;
+inline unsigned brokerStops=0,brokerStarts=0,refreshes=0;
 inline std::atomic<unsigned> modeSnapshots{0};
 inline std::atomic<ULONGLONG> fixedTick{0};
 inline ULONGLONG clockNow(){const auto now=fixedTick.load();return now?now:GetTickCount64();}
@@ -1982,14 +2247,20 @@ struct Modes {
   if(realModeObserver){++refreshes;return admissionRefresh(realModeObserver,session,satisfied);}
   return satisfied(session,observedMode,false)||requestRefresh(session);
  }
- template<class M>static bool connectionRefresh(M* observer,const Session& session){
-  if constexpr(requires(M& value){value.requestConnectionRefresh(session);})return observer->requestConnectionRefresh(session);
+ template<class M>static bool connectionRefresh(M* observer,const Session& session,std::source_location origin,ymcc::steamui::ConnectionRefreshQueue* queue,bool probeWithPeer=false){
+  if constexpr(requires(M& value){value.requestConnectionRefresh(session,origin,queue,probeWithPeer);})return observer->requestConnectionRefresh(session,origin,queue,probeWithPeer);
+  else if constexpr(requires(M& value){value.requestConnectionRefresh(session,origin,queue);})return observer->requestConnectionRefresh(session,origin,queue);
+  else if constexpr(requires(M& value){value.requestConnectionRefresh(session);})return observer->requestConnectionRefresh(session);
   else return observer->requestRefresh(session); // Compatibility port for the unchanged old-source semantic control only.
  }
- bool requestConnectionRefresh(const Session& session){++refreshes;return realModeObserver?connectionRefresh(realModeObserver,session):true;}
- template<class M>static Json readSnapshot(M* observer,const Session& session,ymcc::steamui::ModeCacheMiss* miss,std::uint64_t* publication=nullptr,ULONGLONG* observationTick=nullptr){
+ bool requestConnectionRefresh(const Session& session,std::source_location origin=std::source_location::current(),ymcc::steamui::ConnectionRefreshQueue* queue=nullptr,bool probeWithPeer=false){
+  ++refreshes;return realModeObserver?connectionRefresh(realModeObserver,session,origin,queue,probeWithPeer):true;
+ }
+ template<class M>static Json readSnapshot(M* observer,const Session& session,ymcc::steamui::ModeCacheMiss* miss,std::uint64_t* publication,ULONGLONG* observationTick,unsigned long long* peerRevision=nullptr){
   if(observationTick)*observationTick=0;
-  if constexpr(requires(M& value){value.snapshot(session,miss,nullptr,publication,observationTick);})return observer->snapshot(session,miss,nullptr,publication,observationTick);
+  if(peerRevision)*peerRevision=0;
+  if constexpr(requires(M& value){value.snapshot(session,miss,nullptr,publication,observationTick,peerRevision);})return observer->snapshot(session,miss,nullptr,publication,observationTick,peerRevision);
+  else if constexpr(requires(M& value){value.snapshot(session,miss,nullptr,publication,observationTick);})return observer->snapshot(session,miss,nullptr,publication,observationTick);
   else if constexpr(requires(M& value){value.snapshot(session,miss,nullptr,publication);})return observer->snapshot(session,miss,nullptr,publication);
   else if constexpr(requires(M& value){value.snapshot(session,miss);})return observer->snapshot(session,miss);
   else return observer->snapshot(session);
@@ -1997,13 +2268,21 @@ struct Modes {
  bool refusePassiveRefresh=false;
  std::uint64_t controlledPublication=1; // Advanced by the controlled facts, never by cache reads.
  ULONGLONG controlledObservationTick=0;
+ unsigned long long controlledPeerRevision=1;
+ std::optional<Session> publishBeforeSnapshotReturns;
  void setDemand(ymcc::steamui::ModeConsumer consumer,bool enabled){if(realModeObserver)realModeObserver->setDemand(consumer,enabled);}
- Json snapshot(const Session& session,ymcc::steamui::ModeCacheMiss* miss=nullptr,ymcc::steamui::ModeCacheTiming* =nullptr,std::uint64_t* publication=nullptr,ULONGLONG* observationTick=nullptr){
+ Json snapshot(const Session& session,ymcc::steamui::ModeCacheMiss* miss=nullptr,ymcc::steamui::ModeCacheTiming* =nullptr,std::uint64_t* publication=nullptr,ULONGLONG* observationTick=nullptr,unsigned long long* peerRevision=nullptr){
   ++modeSnapshots;if(publication)*publication=realModeObserver?0:controlledPublication;
   if(observationTick)*observationTick=realModeObserver?0:controlledObservationTick;
-  return realModeObserver?readSnapshot(realModeObserver,session,miss,publication,observationTick):observedMode;
+  if(peerRevision)*peerRevision=realModeObserver?0:controlledPeerRevision;
+  if(publishBeforeSnapshotReturns){
+   observedSession=std::move(*publishBeforeSnapshotReturns);
+   publishBeforeSnapshotReturns.reset();
+  }
+  return realModeObserver?readSnapshot(realModeObserver,session,miss,publication,observationTick,peerRevision):observedMode;
  }
- bool requestRefresh(const Session& session,bool invalidate=true){++refreshes;return realModeObserver?realModeObserver->requestRefresh(session,invalidate):invalidate||!refusePassiveRefresh;}};
+ bool requestRefresh(const Session& session,bool invalidate=true){++refreshes;return realModeObserver?realModeObserver->requestRefresh(session,invalidate):invalidate||!refusePassiveRefresh;}
+ bool requestDeckyHealthRefresh(const Session& session){++refreshes;return realModeObserver?realModeObserver->requestDeckyHealthRefresh(session):!refusePassiveRefresh;}};
 inline bool retainedConsent=false;
 inline ymcc::deckyupdate::Recovery* initialUpdateRecovery=nullptr;
 struct Consent {
@@ -2016,12 +2295,21 @@ struct Consent {
  }
  bool waitsForFrontendUpdateBackend(const Session& s,const Json& state,const std::string& build,const char* loader){return initialUpdateRecovery&&pending(*initialUpdateRecovery,s,state,build,loader);}
 };
-struct Broker {bool connected=false;void stop(){++brokerStops;connected=false;}Json bootstrap(){return makeRequest(1).at("bootstrap");}Json status(){return {{"active",true},{"connected",connected},{"runId",makeRequest(1).at("bootstrap").at("runId")}};}};
+struct Broker {bool connected=false;void stop(){++brokerStops;connected=false;}Json bootstrap(){return makeRequest(1).at("bootstrap");}Json status(){return {{"active",true},{"connected",connected},{"runId",makeRequest(1).at("bootstrap").at("runId")}};}
+    bool matchesRunId(const std::string& run){return !run.empty()&&run==bootstrap().at("runId").get_ref<const std::string&>();}
+    std::optional<ULONGLONG> pinnedAuthTick;
+    std::atomic<unsigned long long> authRevision{1};
+    std::optional<ULONGLONG> authenticatedPeerTick(unsigned long long* revision=nullptr){if(revision)*revision=connected?authRevision.load():0;
+        const auto now=clockNow();return connected?std::optional<ULONGLONG>{pinnedAuthTick.value_or(now>=64?now-64:0)}:std::nullopt;}};
 struct Cost {void binding(const Json&,DWORD,ULONGLONG,ULONGLONG){}};
 inline Observer g_steamSettingsObserver;
 inline Modes g_steamModeObserver;
 inline Consent g_steamLinkAdmission,g_deckyUpdateRecovery;
 inline Broker g_deckyMirrorBroker;
+template<class C> void stampModeReader(C& config){
+ if constexpr(requires(C& value){value.readDeckyPeerRevision;})
+    config.readDeckyPeerRevision=[] {return g_deckyMirrorBroker.authRevision.load();};
+}
 // CSS-use scheduling is an explicit memory leaf in this Decky consumer.
 // Observe only publication forwarding; no CSS helper, request or native wake.
 struct CssUsePublicationPort {
@@ -2030,7 +2318,7 @@ struct CssUsePublicationPort {
 };
 inline CssUsePublicationPort g_steamCssUse;
 inline Cost g_deckyCostContext;
-inline std::string deckySidebarStartMirrorBroker(){return {};}
+inline std::string deckySidebarStartMirrorBroker(){++brokerStarts;return {};}
 inline Json deckySidebarEnvironment(bool,const std::function<bool()>& = {},bool = false){return {{"ready",true}};}
 inline std::atomic<bool> g_exitRequested{false};
 // Overlay startup is outside this offline Runtime consumer scope; retain the
@@ -2047,6 +2335,15 @@ inline void deckySidebarDiagnostic(const char* event,const Json& value,bool=fals
  if(diagnosticCapture)diagnosticCapture->push_back(ymcc::deckydiag::record(event,value));
 }
 inline std::atomic<unsigned long long> fixturePower{1};inline unsigned long long currentPowerGeneration(){return fixturePower.load();}
+inline std::atomic<unsigned long long> fixtureSuspendSerial{0};
+inline int __cdecl readFixturePower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes){
+    if(!out||bytes<sizeof(*out))return 0;
+    *out={};out->generation=currentPowerGeneration();out->suspendSerial=fixtureSuspendSerial.load();
+    out->flags=ymcc::sleeppower::kKnown|(g_powerLifecycle.load()==PowerLifecycle::Ready?ymcc::sleeppower::kHardwareAllowed:0);
+    return 1;
+}
+inline bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output){return ymcc::sleeppower::capturePower(&readFixturePower,output);}
+inline bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value){return ymcc::sleeppower::powerCurrent(&readFixturePower,value);}
 inline bool metadataAccepted=true;
 inline unsigned metadataPosts=0;
 inline Json lastMetadata;
@@ -2059,17 +2356,20 @@ inline bool deckySidebarPost(const char* event,const Json& value,const char* pac
  if(cachedIdentityPublication){++metadataPosts;lastMetadata=value;if(packetKind)lastMetadata["bindingPacketKind"]=packetKind;return metadataAccepted;}
  return true;
 }
-inline std::atomic<unsigned> stableCssHints{0},stableWallpaperHints{0},stableManagedHints{0};
+inline std::atomic<unsigned> stableCssHints{0},stableWallpaperHints{0},stableManagedHints{0},stableAdmissionWakes{0};
 struct StableCssGuard {void observeMode(const Session&,const ymcc::steamcss::ModeSample&,bool){++stableCssHints;}};
 inline StableCssGuard g_steamCssGuard;
 inline void steamWallpaperForegroundWake(){++stableWallpaperHints;}
 inline void deckySidebarResumeManagedMode(const Session&){++stableManagedHints;}
-inline void deckySidebarAdmissionWakeDiagnostic(ymcc::deckysidebar::AdmissionRefreshReceipt) noexcept {} // No product log sink in this fixture.
+inline void deckySidebarAdmissionWakeDiagnostic(ymcc::deckysidebar::AdmissionRefreshReceipt) noexcept {++stableAdmissionWakes;}
 #define g_deckySidebarRuntime (*runtime)
 #define GetTickCount64() clockNow()
 #define ProcessIdToSessionId bindingWindowsQuery
 #define frontendBuildId countFixtureFrontendBuildId
 #include "decky_offline_consumers.inc"
+inline auto bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode mode,std::uint64_t generation){
+    return deckySidebarOwnedBindingPlan(mode,generation,[]{return true;});
+}
 #undef frontendBuildId
 #undef ProcessIdToSessionId
 #undef GetTickCount64
@@ -2266,7 +2566,43 @@ inline Json borrowedPostQueue(bool fault){
   if(post::postCalls)contract=contract&&post::lastMessage==WM_USER+30&&post::lastW==0&&post::lastL==0;
   rows.push_back({{"index",which},{"legacy",legacy},{"actual",actual},{"passed",contract}});if(!contract)break;
  }
- post::clear();return {{"parameter","borrowed-post-queue"},{"rows",rows},{"passed",rows.size()==10&&std::all_of(rows.begin(),rows.end(),[](const Json& row){return row.at("passed").get<bool>();})&&before==handles()},{"beforeHandles",before},{"afterHandles",handles()},{"actualOriginalFunction",true},{"windowsPostPort","fixed in-memory callback only; no real HWND/API action"}};
+ const auto wanted=[](unsigned revision,bool subscribe,const char* source){
+  return Json{{"connection","1"},{"connectionRevision",3u},{"revision",revision},{"runId","fixture-current"},
+    {"request",{{"command","snapshot"},{"runId","fixture-current"},{"subscribe",subscribe},{"requestSource",source}}}};
+ };
+ const auto pause=wanted(1,false,"demand-stop"),newer=wanted(2,false,"hidden-snapshot");
+ Json pauses=Json::array();
+ for(const std::string_view boundary:{"adjacent","next-batch","resubscribe","safety-stop","connection","connection-revision","run","id-bearing","revision-regression","saturated"}){
+  post::clear();post::g_hwnd=reinterpret_cast<HWND>(1);
+  if(boundary=="saturated"){
+   post::g_deckyEventPosted=true;
+   for(unsigned i=0;i<31;++i)post::g_deckyEvents.push_back({{"event","seed"},{"data",i}});
+  }
+  const auto postRequest=[](const Json& input){return post::deckySidebarPost("deckySidebar.mirrorRequest",input);};
+  bool accepted=postRequest(pause);auto second=newer;std::size_t expected=2;unsigned posts=1;
+  if(boundary=="adjacent")expected=1;
+  if(boundary=="saturated"){expected=32;posts=0;}
+  if(boundary=="next-batch"){post::g_deckyEvents.clear();post::g_deckyEventPosted=false;expected=1;posts=2;}
+  if(boundary=="resubscribe"){accepted=postRequest(wanted(1,true,"demand-start"))&&accepted;expected=3;}
+  if(boundary=="safety-stop"){accepted=post::deckySidebarPost("deckySidebar.safetyStop",packet,"diagnostic")&&accepted;expected=3;}
+  if(boundary=="connection")second["connection"]="2";
+  if(boundary=="connection-revision")second["connectionRevision"]=4u;
+  if(boundary=="run"){second["runId"]="fixture-other";second["request"]["runId"]="fixture-other";}
+  if(boundary=="id-bearing")second["request"]["id"]="requires-receipt";
+  if(boundary=="revision-regression")second["revision"]=0u;
+  const bool secondAccepted=postRequest(second);const auto size=post::g_deckyEvents.size();
+  const bool frontOkay=size>0&&(boundary=="saturated"?post::g_deckyEvents.front().at("event")=="seed":
+    expected==1||post::g_deckyEvents.front().at("data")==pause);
+  const bool middleOkay=(boundary!="resubscribe"||(size==3&&post::g_deckyEvents[1].at("data").at("request").at("subscribe")==true))&&
+    (boundary!="safety-stop"||(size==3&&post::g_deckyEvents[1].at("event")=="deckySidebar.safetyStop"));
+  const bool okay=accepted&&secondAccepted&&size==expected&&post::postCalls==posts&&post::g_deckyEventPosted&&
+    frontOkay&&middleOkay&&post::g_deckyEvents.back().at("data")==second;
+  pauses.push_back({{"boundary",boundary},{"queued",size},{"posts",post::postCalls},{"secondAccepted",secondAccepted},{"passed",okay}});
+ }
+ post::clear();return {{"parameter","borrowed-post-queue"},{"rows",rows},{"pauses",pauses},
+  {"passed",rows.size()==10&&std::all_of(rows.begin(),rows.end(),[](const Json& row){return row.at("passed").get<bool>();})&&
+    pauses.size()==10&&std::all_of(pauses.begin(),pauses.end(),[](const Json& row){return row.at("passed").get<bool>();})&&before==handles()},
+  {"beforeHandles",before},{"afterHandles",handles()},{"actualOriginalFunction",true},{"windowsPostPort","fixed in-memory callback only; no real HWND/API action"}};
 }
 
 
@@ -2378,42 +2714,384 @@ inline Json bindingReportBoundary(const std::filesystem::path& output,unsigned s
 #endif
 
 #include "fixtures/decky_initial_update_cases.inc"
+inline Json wakeProbeReadSlot(const offlineConsumer::Session& session,Json mode,const char* control){
+    namespace actual=offlineConsumer;
+    using ymcc::steamui::ModeConsumer;using ymcc::steamui::ConnectionRefreshQueue;
+    const auto serial=actual::fixtureSuspendSerial.exchange(1);
+    struct RestoreSerial{unsigned long long serial;~RestoreSerial(){actual::fixtureSuspendSerial=serial;}} restore{serial};
+    mode["deckyBackendConnected"]=true;mode["deckyClientState"]="socket-connecting";
+    const std::string_view kind(control);
+    const bool inFlightControl=kind=="reopen-in-flight"||kind=="power-css-in-flight";
+    std::atomic<unsigned> reads{0};
+    std::atomic<bool> held{false},released{false},retiredFence{false},stalePublished{false};
+    ymcc::steamui::ModeObserver observer;ymcc::steamui::ModeObserverConfig cfg;
+    cfg.debounceMs=180;cfg.admissionPowerReader=&actual::readFixturePower;
+    cfg.readOwned=[&](const auto&,const auto& current){
+        if(++reads==7&&inFlightControl){
+            auto stale=mode;stale["deckyClientVerified"]=true;held=true;
+            if(!waitFor([&]{return released.load();},2500))return Json{};
+            retiredFence=!current();
+            return stale; // Simulate a reply crossing the final transport fence.
+        }
+        return current()?mode:Json{};
+    };
+    cfg.cssBigPicturePublished=[&](const auto&,const auto& result,const auto&,bool){
+        if(result.value("deckyClientVerified",false))stalePublished=true;
+    };
+    need(observer.initialize(std::move(cfg)),"wake-probe-slot-observer-started");
+    observer.setDemand(ModeConsumer::Decky,true);observer.setDemand(ModeConsumer::Css,true);observer.observeSteam(session);
+    const auto published=[&](unsigned n,DWORD budget=1800){return waitFor([&]{std::uint64_t p=0;observer.snapshot(session,nullptr,nullptr,&p);return p>=n;},budget);};
+    need(published(1),"wake-probe-slot-known-first-sample");
+    for(unsigned n=2;n<=6;++n){need(observer.requestRefresh(session,false)&&published(n),"wake-probe-slot-ordinary-cadence-after-finite-startup");}
+    const auto origin=std::source_location::current();
+    const auto refresh=[&](bool probe,ConnectionRefreshQueue* queue=nullptr){return actual::Modes::connectionRefresh(&observer,session,origin,queue,probe);};
+    ConnectionRefreshQueue ordinary,early;
+    need(refresh(false,&ordinary)&&refresh(true,&early),"wake-probe-slot-original-and-probe-accepted");
+    const bool expedited=ordinary.slotWaitMs>=4000&&early.slotWaitMs<=180&&early.coalesced&&!early.inFlight;
+    bool passed=false;DWORD repeatWait=0;
+    if(kind=="consume"){
+        const bool proof=published(7);
+        ConnectionRefreshQueue repeat;
+        for(unsigned i=0;i<64;++i)need(refresh(true,&repeat),"wake-probe-slot-repeat-coalesces");
+        repeatWait=repeat.slotWaitMs;
+        passed=proof&&reads==7&&repeatWait>=4000;
+    }else if(inFlightControl){
+        if(expedited&&waitFor([&]{return held.load();},1800)){
+            bool admitted=true;
+            if(kind=="reopen-in-flight"){
+                observer.setDemand(ModeConsumer::Decky,false);
+                observer.setDemand(ModeConsumer::Decky,true);
+            }else{
+                ++actual::fixturePower;
+                ymcc::sleeppower::SharedPowerV1 next;
+                admitted=actual::captureSharedPowerLifecycle(next)&&observer.requestPublicResumeRefresh(session,next);
+            }
+            released=true;
+            const bool successor=published(7,6500);
+            passed=admitted&&retiredFence&&successor&&reads==8&&!observer.snapshot(session).value("deckyClientVerified",true);
+        }
+    }else{
+        if(kind=="off")observer.setDemand(ModeConsumer::Decky,false);
+        else ++actual::fixturePower;
+        Sleep(550);
+        passed=reads==6;
+    }
+    observer.shutdown();
+    return {{"control",control},{"ordinaryWaitMs",ordinary.slotWaitMs},{"probeWaitMs",early.slotWaitMs},
+        {"repeatWaitMs",repeatWait},{"reads",reads.load()},{"retiredFence",retiredFence.load()},
+        {"stalePublished",stalePublished.load()},{"passed",expedited&&passed&&!stalePublished}};
+}
+inline Json offlineRebuiltOwnedProof(const std::filesystem::path& output,const Context& context,Json good){
+    namespace actual=offlineConsumer;
+    const auto before=handles();
+    good.erase("deckyBackendConnected");good["deckyBackendState"]="socket-missing";
+    good["modeEpoch"]="offline-old:1";
+    auto rebuilt=good;rebuilt["modeEpoch"]="offline-rebuilt:2";
+    auto pending=rebuilt;pending["deckyAccountWatchAvailable"]=false;
+    std::atomic<unsigned> phase{0},reads{0},loops{0},changed{0},stable{0},steps{0};
+    std::atomic<bool> connected{false},paused{false};
+    auto health=actual::actualConnectionHealth();auto publishStable=actual::actualStableBigPicture();
+    ymcc::steamui::ModeObserver shared;
+    ymcc::steamui::ModeObserverConfig config;config.debounceMs=1;config.minimumGapMs=1;
+    config.read=[&](const auto&){const auto value=phase.load();return value==0?good:value==1?pending:rebuilt;};
+    config.changed=[&](const auto&,const auto&){++changed;};
+    config.stableBigPicture=[&](const auto& session){publishStable(session);++stable;};
+    actual::stampModeReader(config);
+    need(shared.initialize(std::move(config)),"offline-owned-real-shared-reader");
+    shared.setDemand(ymcc::steamui::ModeConsumer::Decky,true);shared.observeSteam(actual::observedSession);
+    need(waitFor([&]{return shared.snapshot(actual::observedSession)==good;}),"offline-owned-old-document-read");
+    actual::g_deckyMirrorBroker.connected=true;actual::g_deckyMirrorBroker.pinnedAuthTick=1;
+    Harness h(output,context,false,{},{},{},[&]{++loops;},{},[&]{
+        const auto result=health();connected=result.connected;paused=result.paused;++reads;return result;
+    },[&](auto){++steps;return Json{{"ok",false},{"mutated",false}};});
+    struct Clear{~Clear(){actual::realModeObserver=nullptr;actual::runtime=nullptr;actual::g_deckyMirrorBroker.pinnedAuthTick.reset();}}clear;
+    actual::runtime=&h.runtime;actual::realModeObserver=&shared;
+    h.start();need(waitFor([&]{return h.burstDone.load();}),"offline-owned-binding-live");
+    const auto pid=h.runtime.snapshot().pid;
+    const auto plans=h.plans.load();
+    phase=1;
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{return shared.snapshot(actual::observedSession)==pending;}),
+        "offline-rebuilt-document-published-without-account-proof");
+    const auto gapReads=reads.load(),gapLoops=loops.load();
+    need(h.runtime.requestConnectionCheck()&&waitFor([&]{return reads>gapReads&&loops>gapLoops&&paused&&!connected;},1000),
+        "offline-rebuilt-document-parks-owned-loader-health");
+    const auto lackProofStable=stable.load(),lackProofReads=reads.load();
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{return stable>lackProofStable;},1000),
+        "offline-rebuilt-document-repeats-missing-proof");
+    need(reads==lackProofReads&&paused,"missing-account-proof-does-not-wake-owned-loader-health");
+    const auto proofAt=GetTickCount64();
+    const auto proofStable=stable.load();
+    const auto proofChanges=changed.load(),proofLoops=loops.load();phase=2;
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{return stable>proofStable&&shared.snapshot(actual::observedSession)==rebuilt;},1000),
+        "offline-current-page-proof-only-changes-account-witness");
+    const bool delivered=waitFor([&]{return reads>lackProofReads&&loops>proofLoops&&connected&&!paused;},900);
+    const auto elapsed=GetTickCount64()-proofAt,proofReads=static_cast<ULONGLONG>(reads.load()-lackProofReads);
+    const auto idleStable=stable.load(),idleReads=reads.load();
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{return stable>idleStable;},1000),"offline-rebuilt-stable-proof-repeated");
+    const bool idle=reads==idleReads;
+    const bool unchanged=changed==proofChanges&&h.runtime.snapshot().pid==pid&&h.plans==plans&&steps==0;
+    h.runtime.setEnabled(false);h.runtime.shutdown();const auto stoppedReads=reads.load();
+    publishStable(actual::observedSession);
+    const bool off=stoppedReads==reads&&!h.runtime.requestConnectionCheck(true);
+    shared.shutdown();const auto returned=h.client->snapshot();
+    const bool resources=returned.fullyDestroyed&&returned.handles==0&&returned.pendingIo==0&&before==handles()&&context.alive();
+    const Json result={{"passed",delivered&&proofReads==1&&idle&&unchanged&&off&&resources},{"delivered",delivered},{"elapsedMs",elapsed},
+        {"healthReads",proofReads},{"idle",idle},{"off",off},{"originalLoaderAndBinding",unchanged},{"returned",resources},
+        {"beforeHandles",before},{"afterHandles",handles()},{"additionalBindingPlans",h.plans.load()-plans},{"recoverySteps",steps.load()}};
+    std::cout<<"OFFLINE_REBUILT_PAGE_PROOF "<<result.dump()<<std::endl;
+    return result;
+}
+inline Json retiredOfflineFirstProof(const std::filesystem::path& output){
+    namespace actual=offlineConsumer;
+    Controls controls(L"burst");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
+    const auto before=handles();
+    const auto base=makeRequest(59);
+    const auto session=actual::observedSession={worker::wide(base["steam"]["root"]),GetCurrentProcessId(),0,worker::decimal(base["steam"]["created"])};
+    const Json initial={{"known",true},{"running",true},{"mode","bigpicture"},{"modeEpoch","offline-old:1"},
+        {"pid",session.pid},{"birth",std::to_string(session.created)},{"observedAccount",12345678u},
+        {"deckyAccountWatchAvailable",true},{"deckyFrontendLoaded",true},{"deckyHooksInstalled",true},
+        {"deckyClientConnected",true},{"deckyClientVerified",true},{"deckyClientChecking",false},{"deckyBackendState","socket-missing"},
+        {"deckyUpdateResidue",{{"protocol",1},{"active",true},{"bridgePresent",true},
+            {"frontendBuildId",std::string(64,'d')},{"loaderVersion",ymcc::deckyidentity::version}}}};
+    auto recovered=initial;recovered["modeEpoch"]="offline-current:2";
+    auto missing=recovered;missing["deckyAccountWatchAvailable"]=false;
+    std::mutex gate;std::atomic<unsigned> phase{0},stableProofs{0},changes{0},readyChecks{0},steps{0};
+    std::atomic<bool> deliverUnconfirmed{false},unconfirmedDelivered{false};
+    actual::retainedConsent=true;actual::g_deckyMirrorBroker.connected=true;actual::g_deckyMirrorBroker.pinnedAuthTick=1;
+    ymcc::steamui::ModeObserver shared;ymcc::steamui::ModeObserverConfig mode;mode.debounceMs=1;mode.minimumGapMs=20;
+    auto stable=actual::actualStableBigPicture();auto health=actual::actualConnectionHealth();auto admit=actual::actualAdmission();
+    mode.read=[&](const auto&){const auto value=phase.load();return value==0?initial:value==1?missing:recovered;};
+    mode.changed=[&](const auto&,const auto&){++changes;};
+    mode.stableBigPicture=[&](const auto& source){
+        std::lock_guard lock(gate);
+        if(phase==1&&deliverUnconfirmed.exchange(false)){stable(source);unconfirmedDelivered=true;}
+        else if(phase==2){stable(source);++stableProofs;}
+    };
+    actual::stampModeReader(mode);
+    need(shared.initialize(std::move(mode)),"retired-offline-reader-starts");
+    shared.setDemand(ymcc::steamui::ModeConsumer::Decky,true);shared.observeSteam(session);
+    need(waitFor([&]{return shared.snapshot(session)==initial;}),"retired-offline-initial-proof");
+    Harness h(output,context,true,[&]{std::lock_guard lock(gate);return admit();},[&](Json&,unsigned){
+        std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=true;
+    },{},{},{},[&]{
+        std::lock_guard lock(gate);auto result=health();
+        if(phase==2&&result.connected&&!result.paused&&actual::runtime->snapshot().phase=="frontend-attached")++readyChecks;
+        return result;
+    },[&](auto){++steps;return Json{{"ok",false},{"mutated",false}};},{},[&](const auto& state){
+        std::lock_guard lock(gate);actual::actualRuntimeChanged(state);
+    });
+    struct Clear{~Clear(){actual::runtime=nullptr;actual::realModeObserver=nullptr;actual::retainedConsent=false;actual::g_deckyMirrorBroker.pinnedAuthTick.reset();}}clear;
+    actual::runtime=&h.runtime;actual::realModeObserver=&shared;
+    need(h.runtime.setEnabled(true)&&waitFor([&]{return h.burstDone&&h.runtime.snapshot().phase=="frontend-attached";}),"retired-offline-initial-binding");
+    phase=1;
+    need(shared.requestRefresh(session,false)&&waitFor([&]{return shared.snapshot(session)==missing;}),"retired-offline-page-published-without-proof");
+    need(h.runtime.requestConnectionCheck()&&waitFor([&]{return h.runtime.snapshot().phase=="waiting-manual-steam";}),"retired-offline-old-binding-retires-on-gap");
+    need(waitFor([&]{return shared.snapshot(session)==missing;}),"retired-offline-gap-observation-settled");
+    const auto beforeMissing=actual::stableAdmissionWakes.load(),oldPlans=h.plans.load();
+    deliverUnconfirmed=true;
+    need(shared.requestRefresh(session,false)&&waitFor([&]{return unconfirmedDelivered.load();}),"retired-offline-unconfirmed-stable-notification-delivered");
+    const auto missingWakes=actual::stableAdmissionWakes.load()-beforeMissing;
+    need(waitFor([&]{return shared.snapshot(session)==missing;}),"retired-offline-before-proof-returns");
+    const auto changesBefore=changes.load();phase=2;const auto began=GetTickCount64();
+    need(shared.requestRefresh(session,false)&&waitFor([&]{return stableProofs>0&&h.plans>oldPlans&&h.runtime.snapshot().phase=="frontend-attached";}),"retired-offline-normal-attachment-returns");
+    const bool verified=waitFor([&]{return readyChecks>0;},1000);
+    const auto elapsed=GetTickCount64()-began, checks=static_cast<ULONGLONG>(readyChecks.load());
+    const auto stableBefore=stableProofs.load();
+    need(shared.requestRefresh(session,false)&&waitFor([&]{return stableProofs>stableBefore;}),"retired-offline-repeated-stable-proof");
+    const bool idle=checks==readyChecks, unchanged=changes==changesBefore;
+    const auto additionalPlans=h.plans.load()-oldPlans;
+    h.runtime.setEnabled(false);h.runtime.shutdown();shared.shutdown();
+    const auto returned=h.client->snapshot();
+    const bool resources=returned.fullyDestroyed&&returned.handles==0&&returned.pendingIo==0&&before==handles()&&context.alive();
+    const Json result={{"passed",verified&&checks==1&&idle&&unchanged&&missingWakes==0&&additionalPlans==1&&steps==0&&resources},
+        {"unconfirmedAdmissionWakes",missingWakes},{"changedPublications",changes.load()-changesBefore},{"additionalPlans",additionalPlans},
+        {"readyChecks",checks},{"verified",verified},{"elapsedMs",elapsed},{"idle",idle},{"recoverySteps",steps.load()},
+        {"resourcesReturned",resources},{"beforeHandles",before},{"afterHandles",handles()}};
+    std::cout<<"RETIRED_OFFLINE_FIRST_PROOF "<<result.dump()<<std::endl;
+    return result;
+}
+inline Json sharedModeWorkerCounters(const ymcc::steamsession::Session& session,const Json& good){
+    constexpr unsigned healthCallsPerSlot=32;
+    std::atomic<unsigned> entered{0},releaseThrough{0};
+    ymcc::steamui::ModeObserver shared;
+    ymcc::steamui::ModeObserverConfig cfg;cfg.debounceMs=1;cfg.minimumGapMs=1;
+    cfg.read=[&](const auto&){const auto n=++entered;
+        (void)waitFor([&]{return releaseThrough>=n;},2000);return good;};
+    need(shared.initialize(std::move(cfg)),"shared-counter-worker-start");
+    shared.setDemand(ymcc::steamui::ModeConsumer::Decky,true);
+    shared.observeSteam(session);
+    need(waitFor([&]{return entered==1;}),"initial-shared-read-paused");
+    const auto initial=shared.diagnosticDeckyWorkerCpu();
+    need(initial&&initial->readsStarted==1&&initial->deckyHealthSlotsArmed==0,"initial-read-is-not-a-decky-health-slot");
+    need(shared.requestRefresh(session,false),"independent-refresh-arms-next-slot");
+    for(unsigned i=0;i<healthCallsPerSlot;++i)need(shared.requestDeckyHealthRefresh(session),"health-can-join-independent-slot");
+    const auto joined=shared.diagnosticDeckyWorkerCpu();
+    need(joined&&joined->readsStarted==1&&joined->deckyHealthSlotsArmed==0,"joining-another-request-does-not-attribute-its-slot-to-health");
+    releaseThrough=1;need(waitFor([&]{return entered==2;}),"independent-shared-read-paused");
+    for(unsigned i=0;i<healthCallsPerSlot;++i)need(shared.requestDeckyHealthRefresh(session),"health-arms-and-joins-own-slot");
+    const auto armed=shared.diagnosticDeckyWorkerCpu();
+    need(armed&&armed->readsStarted==2&&armed->deckyHealthSlotsArmed==1,"queued-and-executing-counts-stay-distinct");
+    releaseThrough=3;need(waitFor([&]{return entered==3;}),"health-only-schedules-one-additional-read");
+    const auto dispatched=shared.diagnosticDeckyWorkerCpu();
+    need(dispatched&&dispatched->readsStarted==3&&dispatched->deckyHealthSlotsArmed==1&&
+        dispatched->id==initial->id&&dispatched->birth==initial->birth,"dispatch-is-counted-on-the-existing-shared-worker");
+    shared.setDemand(ymcc::steamui::ModeConsumer::Css,true);
+    shared.setDemand(ymcc::steamui::ModeConsumer::Decky,false);
+    need(!shared.diagnosticDeckyWorkerCpu()&&!shared.requestDeckyHealthRefresh(session),"retired-decky-health-cannot-schedule-css-only-work");
+    need(shared.requestRefresh(session,false),"css-consumer-can-still-queue-a-read");
+    releaseThrough=4;need(waitFor([&]{return entered==4;}),"css-only-read-still-executes");
+    shared.shutdown();
+    return {{"initialReadsStarted",initial->readsStarted},{"independentCoalescedHealthSlots",joined->deckyHealthSlotsArmed},
+        {"readsBeforeHealthDispatch",armed->readsStarted},{"totalReadsStarted",dispatched->readsStarted},
+        {"deckyHealthSlotsArmed",dispatched->deckyHealthSlotsArmed},{"coalescedHealthCalls",healthCallsPerSlot*2-1},
+        {"offRejectedWithCssDemand",true},{"cssOnlyReadAccepted",true}};
+}
 inline Json retainedFirstProof(const std::filesystem::path& output){
     namespace actual=offlineConsumer;
     Controls controls(L"burst");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     const auto before=handles();std::mutex gate;std::atomic<unsigned> reads{0},steps{0},readPhase{0};std::atomic<bool> release{false};
+    std::atomic<bool> holdNextPeerRead{false},peerReadEntered{false},releasePeerRead{false};
     const auto base=makeRequest(59);actual::observedSession={worker::wide(base["steam"]["root"]),GetCurrentProcessId(),0,worker::decimal(base["steam"]["created"])};
     Json old={{"known",true},{"running",true},{"mode","bigpicture"},{"pid",actual::observedSession.pid},{"birth",std::to_string(actual::observedSession.created)},
         {"observedAccount",12345678u},{"deckyAccountWatchAvailable",true},{"deckyFrontendLoaded",true},{"deckyBackendConnected",false},{"deckyHooksInstalled",true},
         {"deckyClientConnected",false},{"deckyClientVerified",false},{"deckyClientChecking",false},{"deckyClientState","socket-missing"}};
+    old["deckyUpdateResidue"]={{"protocol",1},{"active",true},{"bridgePresent",true},
+        {"frontendBuildId",std::string(64,'a')},{"loaderVersion",ymcc::deckyidentity::version}};
     auto good=old;good["deckyClientConnected"]=true;good["deckyClientVerified"]=true;good["deckyClientState"]="connected";
+    const auto workerCounters=sharedModeWorkerCounters(actual::observedSession,good);
     actual::observedMode=old;actual::retainedConsent=true;actual::g_deckyMirrorBroker.connected=true;actual::fixedTick=0;
     ymcc::steamui::ModeObserver shared;ymcc::steamui::ModeObserverConfig cfg;cfg.debounceMs=1;cfg.minimumGapMs=runRetainedLocalBusyProbe?500:1;
-    cfg.read=[&](const auto& session){const auto n=++reads;if(n==1)return old;
+    std::atomic<DWORD> readerTid{0};
+    actual::stampModeReader(cfg);
+    cfg.read=[&](const auto& session){readerTid=GetCurrentThreadId();const auto n=++reads;if(n==1)return old;
+
         if(readPhase==2)return Json{{"known",true},{"running",true},{"mode","unknown"},{"pid",session.pid},{"birth",std::to_string(session.created)},{"reason","live-busy"},{"localReadBusy",true}};
-        const auto end=GetTickCount64()+2000;while(!release&&GetTickCount64()<end)Sleep(1);return readPhase==1?Json{{"known",false},{"mode","unknown"},{"reason","inert-read-failure"}}:good;};
+        const auto end=GetTickCount64()+2000;
+        if(holdNextPeerRead.exchange(false)){peerReadEntered=true;while(!releasePeerRead&&GetTickCount64()<end)Sleep(1);}
+        while(!release&&GetTickCount64()<end)Sleep(1);return readPhase==1?Json{{"known",false},{"mode","unknown"},{"reason","inert-read-failure"}}:good;};
+    need(!shared.diagnosticDeckyWorkerCpu(),"unstarted-shared-mode-worker-not-sampled");
     need(shared.initialize(std::move(cfg)),"first-proof-real-shared-observer-started");
+    need(!shared.diagnosticDeckyWorkerCpu(),"no-Decky-demand-no-shared-mode-cpu-sample");
     shared.setDemand(ymcc::steamui::ModeConsumer::Decky,true);shared.observeSteam(actual::observedSession);
     need(waitFor([&]{return shared.snapshot(actual::observedSession).value("mode",std::string{})=="bigpicture";}),"first-proof-old-pre-binding-mode-present");
+    const DWORD sentry=ERROR_BAD_UNIT;
+    SetLastError(sentry);
+    const auto sharedCpu=shared.diagnosticDeckyWorkerCpu();
+    const bool preservedError=GetLastError()==sentry;
+    need(sharedCpu&&sharedCpu->id==readerTid.load()&&sharedCpu->birth&&!sharedCpu->cssDemand&&preservedError,
+        "shared-mode-cpu-identifies-actual-reader-and-preserves-last-error");
+    {
+        detail::Handle thread{OpenThread(THREAD_QUERY_LIMITED_INFORMATION,FALSE,sharedCpu->id)};
+        FILETIME born{},exited{},kernel{},user{};
+        const auto ticks=[](const FILETIME& t){return (static_cast<ULONGLONG>(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+        need(thread.value&&GetProcessIdOfThread(thread.value)==GetCurrentProcessId()&&
+             GetThreadTimes(thread.value,&born,&exited,&kernel,&user)&&ticks(born)==sharedCpu->birth&&
+             ticks(kernel)>=sharedCpu->kernel&&ticks(user)>=sharedCpu->user,"shared-mode-cpu-os-thread-identity-and-counters");
+    }
+    const unsigned beforeSamples=reads.load();
+    for(unsigned i=0;i<16;++i)need(shared.diagnosticDeckyWorkerCpu().has_value(),"shared-mode-cpu-borrows-live-worker");
+    need(beforeSamples==1&&reads==beforeSamples,"shared-mode-diagnostics-do-not-dispatch-read");
     auto sourceLease=shared.observedSource(actual::observedSession);need(sourceLease.current(),"first-proof-public-source-initially-current");
     actual::realModeObserver=&shared;
     struct Clear {~Clear(){actual::realModeObserver=nullptr;actual::runtime=nullptr;actual::retainedConsent=false;}}clear;
     auto admission=actual::actualAdmission();auto health=actual::actualConnectionHealth();
-    Harness h(output,context,true,[&]{std::lock_guard lock(gate);return admission();},[&](Json&,unsigned){std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=true;},{},{},{},
-        [&]{std::lock_guard lock(gate);return health();},[&](auto){++steps;return Json{{"ok",false},{"mutated",false},{"reason","inert-unexpected-recovery"}};},{},
+    std::atomic<bool> holdHealth{false},healthHeld{false},throwHealth{false},healthFaultEntered{false},lastHealthConnected{false};
+    std::atomic<unsigned> healthReads{0},loopsAfterHealthFault{0};
+    Harness h(output,context,true,[&]{std::lock_guard lock(gate);return admission();},[&](Json&,unsigned){std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=true;},{},[&]{if(healthFaultEntered)++loopsAfterHealthFault;},{},
+        [&]{++healthReads;if(holdHealth){healthHeld=true;const auto end=GetTickCount64()+1500;while(holdHealth&&GetTickCount64()<end)Sleep(1);healthHeld=false;}
+            if(throwHealth.exchange(false)){healthFaultEntered=true;throw std::bad_alloc();}
+            std::lock_guard lock(gate);const auto result=health();lastHealthConnected=result.connected&&!result.paused;return result;},[&](auto){++steps;return Json{{"ok",false},{"mutated",false},{"reason","inert-unexpected-recovery"}};},{},
         [&](const auto& state){std::lock_guard lock(gate);actual::actualRuntimeChanged(state);});
     actual::runtime=&h.runtime;need(h.runtime.setEnabled(true),"first-proof-runtime-enabled");
     need(waitFor([&]{return h.runtime.snapshot().phase=="frontend-attached"&&h.burstDone.load();}),"first-proof-retained-binding-accepted");
     need(shared.snapshot(actual::observedSession).value("reason",std::string{})=="shared-mode-pending","retained-attachment-must-retire-pre-binding-mode");
     need(sourceLease.current(),"retained-connection-observation-must-not-revoke-public-Steam-source");
     need(waitFor([&]{return reads>=2;}),"first-proof-original-reader-starts-current-request");
-    for(unsigned hint=0;hint<32;++hint){std::lock_guard lock(gate);actual::deckySidebarOwnedBindingDiagnostic({{"bootstrapStage","connection-check"},{"reason","qam-open"},{"runId",actual::g_deckyMirrorBroker.bootstrap()["runId"]}});}
+    holdHealth=true;
+    need(h.runtime.requestConnectionCheck()&&waitFor([&]{return healthHeld.load();},1000),"first-proof-health-worker-holds-in-flight-check");
+    const auto beforeHints=healthReads.load();
+    Json queueRows=Json::array();unsigned wakeSignals=0;
+    {
+        std::lock_guard lock(gate);actual::diagnosticCapture=&queueRows;
+        rtHealthWakeProbe::signals=&wakeSignals;
+        struct ResetCapture{~ResetCapture(){actual::diagnosticCapture=nullptr;rtHealthWakeProbe::signals=nullptr;}}resetCapture;
+        const auto run=actual::g_deckyMirrorBroker.bootstrap()["runId"];
+        for(unsigned hint=0;hint<32;++hint)
+            actual::deckySidebarOwnedBindingDiagnostic({{"bootstrapStage","connection-check"},{"reason",hint==0?"probe-result":"qam-open"},{"runId",run}});
+        actual::deckySidebarOwnedBindingDiagnostic({{"bootstrapStage","connection-check"},{"reason","probe-result"},{"runId","retired"}});
+    }
+    const bool hintsRanWhileHeld=healthHeld.load();holdHealth=false;
+    const bool followup=waitFor([&]{return healthReads.load()>beforeHints;},1000);
+    std::cout<<"CONNECTION_WAKE_COALESCING "<<Json{{"hints",32},{"wakeSignals",wakeSignals},{"held",hintsRanWhileHeld},{"followup",followup}}.dump()<<std::endl;
+    need(hintsRanWhileHeld&&followup&&wakeSignals==1,"first-proof-one-kernel-wake-per-pending-check-and-no-lost-successor");
+    need(queueRows.size()==33&&queueRows.front().at("source")=="probe-result","queue-observation-records-existing-probe-and-open-events");
+    for(unsigned i=0;i<32;++i){const auto& row=queueRows.at(i);
+        need(row.at("attempted")==true&&row.at("readInFlight")==true&&row.at("readSlotWaitMs").is_number_unsigned()&&
+             row.at("readSlotWaitMs")<=(runRetainedLocalBusyProbe?500u:1u)&&!row.contains("runId"),"accepted-inflight-queue-diagnostic-is-bounded");
+        if(i>0)need(row.at("readCoalesced")==true,"repeated-hints-observe-the-same-queued-slot");
+    }
+    need(queueRows.back().at("attempted")==false&&!queueRows.back().contains("readSlotWaitMs"),"retired-run-logs-no-queue-observation");
+    const auto scrub=[](Json row,const char* event,const char* field,Json value){
+        row[field]=std::move(value);return ymcc::deckydiag::record(event,row).contains("readSlotWaitMs");};
+    need(!scrub(queueRows.front(),"connection-check","readSlotWaitMs",60001u)&&
+         !scrub(queueRows.front(),"connection-check","readCoalesced","true")&&
+         !scrub(queueRows.front(),"connection-check","scope","another-diagnostic")&&
+         !scrub(queueRows.front(),"other","readSlotWaitMs",1u),"queue-observation-filter-rejects-overlimit-and-wrong-scope-or-types");
     need(sourceLease.current()&&reads==2,"inflight-connection-hints-coalesce-without-revoking-public-source");Sleep(40);
     need(h.plans==1&&steps==0&&h.runtime.snapshot().phase=="frontend-attached","first-proof-pending-does-not-recycle-or-rebuild");
     release=true;need(waitFor([&]{return shared.snapshot(actual::observedSession).value("deckyClientVerified",false);}),"first-proof-current-native-reply-reaches-shared-reader");
     need(h.runtime.requestConnectionCheck(),"first-proof-original-health-check-wakes");Sleep(40);
     need(h.plans==1&&steps==0&&h.runtime.snapshot().phase=="frontend-attached","first-proof-native-confirmation-needs-no-recovery-step");
-    need(sourceLease.current(),"same-association-native-proof-keeps-original-source-lease");
+    need(sourceLease.current(),"same-association-native-proof-keeps-original-source-lease");    // The already attached peer does not reauthenticate on each health read.
+    ULONGLONG verifiedAt=0;
+    need(shared.snapshot(actual::observedSession,nullptr,nullptr,nullptr,&verifiedAt).value("deckyClientVerified",false)&&verifiedAt,
+        "first-proof-fault-fixture-has-a-verified-observation-tick");
+    {std::lock_guard lock(gate);actual::g_deckyMirrorBroker.pinnedAuthTick=verifiedAt-1;}
+    throwHealth=true;
+    need(h.runtime.requestConnectionCheck()&&waitFor([&]{return loopsAfterHealthFault.load()>0;},1000),"first-proof-health-exception-finished-on-real-worker");
+    const auto afterFault=GetTickCount64();const auto afterFaultReads=healthReads.load(),afterFaultLoops=loopsAfterHealthFault.load();
+    const bool publicationAccepted=h.runtime.requestConnectionCheck(true);
+    const bool publicationRead=publicationAccepted&&waitFor([&]{return healthReads>afterFaultReads&&loopsAfterHealthFault>afterFaultLoops;},1000);
+    const bool recovered=publicationRead&&lastHealthConnected;
+    const bool healthyIdle=!h.runtime.requestConnectionCheck(true);
+    {std::lock_guard lock(gate);actual::g_deckyMirrorBroker.pinnedAuthTick.reset();}
+    Json healthPublication={{"accepted",publicationAccepted},{"read",publicationRead},{"connected",recovered},{"healthyIdle",healthyIdle},{"waitMs",GetTickCount64()-afterFault},
+        {"reads",healthReads.load()-afterFaultReads},{"steps",steps.load()}};
+    std::cout<<"HEALTH_PUBLICATION_AFTER_EXCEPTION "<<healthPublication.dump()<<std::endl;
+    need(recovered&&healthyIdle&&healthReads==afterFaultReads+1&&h.plans==1&&steps==0&&sourceLease.current(),
+        "first-proof-stable-publication-must-wake-health-once-after-exception");
+
+    // Exercise a plain renewal after the hint burst has settled. The burst
+    // itself invalidates its in-flight read before it can publish anything.
+    std::uint64_t initialPublication=0,latePublication=0;
+    unsigned long long initialPeer=0,latePeer=0;
+    ULONGLONG lateReturnedAt=0;
+    (void)actual::Modes::readSnapshot(&shared,actual::observedSession,nullptr,&initialPublication,nullptr,&initialPeer);
+    holdNextPeerRead=true;
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{return peerReadEntered.load();}),"replacement-peer-has-a-read-in-flight");
+    const auto replacementPeerAt=GetTickCount64();
+    {std::lock_guard lock(gate);actual::g_deckyMirrorBroker.pinnedAuthTick=replacementPeerAt;++actual::g_deckyMirrorBroker.authRevision;}
+    releasePeerRead=true;
+    need(waitFor([&]{
+        (void)actual::Modes::readSnapshot(&shared,actual::observedSession,nullptr,&latePublication,&lateReturnedAt,&latePeer);
+        return latePublication>initialPublication;
+    }),"replacement-peer-old-in-flight-result-publishes");
+    auto peerHealth=actual::actualConnectionHealth();ymcc::deckysidebar::ConnectionHealth crossed;
+    {std::lock_guard lock(gate);crossed=peerHealth();}
+    std::cout<<"PEER_REPLACED_DURING_MODE_READ "<<Json{{"paused",crossed.paused},{"connected",crossed.connected},{"reason",crossed.reason},
+        {"publication",latePublication},{"readPeerRevision",latePeer},{"currentPeerRevision",actual::g_deckyMirrorBroker.authRevision.load()},
+        {"returnedAfterAuthentication",lateReturnedAt>=replacementPeerAt}}.dump()<<std::endl;
+    need(initialPeer&&latePeer==initialPeer&&lateReturnedAt>=replacementPeerAt,"replacement-peer-test-published-the-old-read-not-its-successor");
+    need(crossed.paused&&!crossed.connected&&crossed.reason=="frontend-client-proof-stale","first-proof-older-in-flight-result-cannot-confirm-replacement-peer");
+    need(shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{
+        std::uint64_t publication=0;unsigned long long peer=0;
+        (void)actual::Modes::readSnapshot(&shared,actual::observedSession,nullptr,&publication,nullptr,&peer);
+        return publication>latePublication&&peer==actual::g_deckyMirrorBroker.authRevision.load();
+    }),"replacement-peer-gets-fresh-shared-read");
+    {std::lock_guard lock(gate);const auto fresh=peerHealth();
+        need(fresh.connected&&!fresh.paused&&h.plans==1&&steps==0,"fresh-read-confirms-replacement-peer-without-recovery-action");
+        actual::g_deckyMirrorBroker.pinnedAuthTick.reset();}
+
     Json contentionRounds=Json::array();
     if(runRetainedLocalBusyProbe){
         {std::lock_guard lock(gate);actual::brokerStops=0;}
@@ -2447,12 +3125,35 @@ inline Json retainedFirstProof(const std::filesystem::path& output){
     need(!shared.snapshot(actual::observedSession).contains("deckyClientVerified"),"connection-refresh-removes-stale-positive-proof-before-reader");release=true;
     need(waitFor([&]{return !failureLease.current();}),"completed-invalid-shared-read-still-revokes-source");
     shared.setDemand(ymcc::steamui::ModeConsumer::Css,true);
+    const auto jointCpu=shared.diagnosticDeckyWorkerCpu();
+    need(jointCpu&&jointCpu->id==sharedCpu->id&&jointCpu->birth==sharedCpu->birth&&jointCpu->cssDemand&&
+        jointCpu->kernel>=sharedCpu->kernel&&jointCpu->user>=sharedCpu->user,"shared-mode-cpu-labels-joint-demand");
     h.runtime.setEnabled(false);h.runtime.shutdown();const auto returned=h.client->snapshot();
+    need(!shared.diagnosticDeckyWorkerCpu(),"CSS-only-worker-not-sampled-as-Decky-demand");
+    need(!h.runtime.requestConnectionCheck(true),"OFF-publication-cannot-wake-retired-health-intent");
     need(!actual::g_steamModeObserver.requestConnectionRefresh(actual::observedSession),"OFF-connection-refresh-cannot-start-new-read-even-while-CSS-remains-ON");
     need(shared.requestRefresh(actual::observedSession,false),"ordinary-CSS-refresh-remains-available-while-Decky-is-OFF");
     shared.setDemand(ymcc::steamui::ModeConsumer::Css,false);shared.shutdown();actual::realModeObserver=nullptr;sourceLease={};failureLease={};
+    need(!shared.diagnosticDeckyWorkerCpu(),"joined-shared-mode-worker-not-sampled");
+    Json wakeProbeSlots=Json::array();bool wakeProbeSlotsPassed=true;
+    if(!runRetainedLocalBusyProbe){
+        for(const auto* control:{"consume","off","power","reopen-in-flight","power-css-in-flight"}){
+            auto row=wakeProbeReadSlot(actual::observedSession,old,control);
+            wakeProbeSlotsPassed&=row.value("passed",false);wakeProbeSlots.push_back(std::move(row));
+        }
+        std::cout<<"WAKE_PROBE_READ_SLOTS "<<wakeProbeSlots.dump()<<std::endl;
+    }
     need(returned.fullyDestroyed&&returned.handles==0&&returned.pendingIo==0&&before==handles()&&context.alive(),"first-proof-all-resources-return-and-external-context-lives");
-    return {{"passed",true},{"actualRuntime",true},{"actualSharedModeObserver",true},{"actualChangedPrefix",true},{"actualHealth",true},
+    const auto offlineProof=runRetainedLocalBusyProbe?Json{}:offlineRebuiltOwnedProof(output/"offline-rebuilt",context,good);
+    return {{"passed",wakeProbeSlotsPassed&&(offlineProof.is_null()||offlineProof.value("passed",false))},{"actualRuntime",true},{"actualSharedModeObserver",true},{"actualChangedPrefix",true},{"actualHealth",true},
+        {"wakeProbeSlots",wakeProbeSlots},
+        {"sharedModeWorkerCounters",workerCounters},
+        {"sharedModeWorkerCpu",{{"threadId",jointCpu->id},{"threadBirth100ns",std::to_string(jointCpu->birth)},
+            {"kernel100ns",jointCpu->kernel},{"user100ns",jointCpu->user},{"cssDemandAtSample",jointCpu->cssDemand},
+            {"extraReads",0},{"samplesWithoutRead",16}}},
+        {"connectionReadQueueRows",queueRows},
+        {"healthPublicationAfterException",healthPublication},
+        {"offlineRebuiltPageProof",offlineProof},
         {"sharedLocalBusy",runRetainedLocalBusyProbe},{"contentionRounds",contentionRounds},{"modeReads",reads.load()},{"publicSourcePreservedWhilePending",true},{"ordinaryInvalidateStillRevokes",true},{"failedReadStillRevokes",true},{"bindingPlans",h.plans.load()},{"recoverySteps",steps.load()},{"beforeHandles",before},{"afterHandles",handles()}};
 }
 inline Json retainedRefresh(const std::filesystem::path& output){
@@ -2589,7 +3290,53 @@ inline Json offlineIdentity(const std::filesystem::path& output){
         {"birth",std::to_string(actual::observedSession.created)},{"observedAccount",12345678u},{"deckyAccountWatchAvailable",true},{"deckyFrontendLoaded",false}};
     need(ProcessIdToSessionId(GetCurrentProcessId(),&actual::observedWindowsSession)!=FALSE,"shared-receipt-setup-session");
     actual::identityVariant=0;actual::identityRefreshes=actual::bindingWindowsQueries=0;
-    Json openingCadenceEvidence,refreshAdmissionCounts=Json::array();
+    Json openingCadenceEvidence,refreshAdmissionCounts=Json::array(),sessionRace=Json::array();
+    {
+        using Window=ymcc::deckysidebar::ConnectionRecoveryWindow;
+        using Action=Window::Action;
+        const auto originalSession=actual::observedSession;
+        const auto originalMode=actual::observedMode;
+        const bool originalMirror=actual::g_deckyMirrorBroker.connected;
+        auto known=originalSession;known.account=12345678u;
+        auto foreignAccount=known;foreignAccount.account=23456789u;
+        auto nextProcess=originalSession;++nextProcess.created;
+        const auto trial=[&](const char* label,const auto& before,const auto& after,bool transient){
+            constexpr ULONGLONG start=700000;
+            actual::observedSession=before;actual::observedMode=originalMode;
+            actual::g_deckyMirrorBroker.connected=false;
+            auto health=actual::actualConnectionHealth();Window window;
+            actual::fixedTick=start;
+            need(window.observe(start,health())==Action::reconnect,"publication-race-original-reconnect-starts");
+            const auto episode=window.episode();
+            const auto at=actual::refreshes;
+            // Publish new identity at the end of the old mode read; withhold the
+            // Decky callback to reproduce the publication/intent ordering.
+            actual::g_steamModeObserver.publishBeforeSnapshotReturns=after;
+            const auto gap=health();
+            const auto action=window.observe(start+1,gap);
+            std::cout<<"IDENTITY_PUBLICATION_RACE "<<label<<" paused="<<gap.paused<<" stopped="<<(action==Action::stopped)<<std::endl;
+            need(!gap.required&&!gap.connected&&gap.identity.empty()&&actual::refreshes==at,
+                "superseded-mode-is-never-consumed-or-refreshed");
+            need(gap.paused==transient&&action==(transient?Action::none:Action::stopped),
+                "only-same-process-account-gap-parks-the-original-episode");
+            if(transient){
+                actual::fixedTick=start+Window::transportGraceMs-1;
+                need(window.observe(actual::fixedTick,health())==Action::none&&window.attempts()==1&&window.episode()==episode,
+                    "account-publication-gap-does-not-reset-or-shorten-original-rung");
+                ++actual::fixedTick;
+                need(window.observe(actual::fixedTick,health())==Action::recycle&&window.attempts()==2&&window.episode()==episode,
+                    "current-health-continues-original-rung-at-original-deadline");
+            }
+            sessionRace.push_back({{"case",label},{"paused",gap.paused},{"stopped",action==Action::stopped},
+                {"extraRefreshesOnGap",0},{"attempts",window.attempts()}});
+        };
+        trial("same-process-account-lost",known,originalSession,true);
+        trial("same-process-account-returned",originalSession,known,true);
+        trial("same-process-known-account-switch",known,foreignAccount,false);
+        trial("same-pid-new-birth-account-missing",known,nextProcess,false);
+        actual::observedSession=originalSession;
+        actual::observedMode=originalMode;actual::g_deckyMirrorBroker.connected=originalMirror;actual::fixedTick=0;
+    }
     {
         const auto originalMode=actual::observedMode;const bool originalMirror=actual::g_deckyMirrorBroker.connected;
         actual::g_deckyMirrorBroker.connected=true;
@@ -2639,30 +3386,89 @@ inline Json offlineIdentity(const std::filesystem::path& output){
     }
 
     const auto admission=actual::actualAdmission();need(admission().allowed,"actual-offline-main-admission");
-    auto plan=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::prepare,51);
+    Json canceledIntent;
+    {
+        using namespace ymcc::deckysidebar;
+        static std::atomic<bool> frontendRead{false};
+        bool offObserved=false;
+        BindingPlan retired;
+        Runtime probe;Config config;config.home=output.wstring();config.executable=detail::executable();
+        config.ownedBinding=std::make_shared<Client>();const auto client=config.ownedBinding;
+        config.preflight=[] {return std::string{};};
+        config.bindingPlan=[&](BindingMode mode,std::uint64_t generation,const auto& current){
+            ymcc::deckymirror::fixtureAfterFrontendRead=[] {
+                frontendRead=true;
+                waitFor([]{return !actual::runtime->snapshot().enabled;},3000);
+            };
+            retired=actual::deckySidebarOwnedBindingPlan(mode,generation,current);
+            offObserved=!probe.snapshot().enabled;
+            ymcc::deckymirror::fixtureAfterFrontendRead=nullptr;
+            return retired;
+        };
+        const auto originalPeer=actual::g_deckyMirrorBroker.connected;
+        actual::g_deckyMirrorBroker.connected=true;
+        const auto stops=actual::brokerStops,starts=actual::brokerStarts;
+        const auto generation=actual::currentPowerGeneration(),serial=actual::fixtureSuspendSerial.load();
+        const auto proof=handles();frontendRead=false;actual::runtime=&probe;
+        probe.initialize(std::move(config));probe.observeSteam(1,true);
+        const auto enabled=probe.setEnabled(true);
+        const auto entered=enabled&&waitFor([]{return frontendRead.load();});
+        const auto stopped=probe.setEnabled(false);actual::runtime=&h.runtime;
+        const auto after=client->snapshot();
+        canceledIntent={{"offObserved",offObserved},{"brokerStops",actual::brokerStops-stops},{"brokerStarts",actual::brokerStarts-starts},
+            {"connectedBeforeOwnerCleanup",actual::g_deckyMirrorBroker.connected},{"powerUnchanged",actual::currentPowerGeneration()==generation&&actual::fixtureSuspendSerial==serial},
+            {"reason",retired.reason},{"childReturned",after.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&after.jobActiveProcesses==0}};
+        std::cout<<"BINDING_OFF_INTENT "<<canceledIntent.dump()<<std::endl;
+        need(entered&&stopped&&offObserved&&retired.request.empty()&&retired.reason=="mirror-bootstrap-canceled"&&
+            canceledIntent.at("powerUnchanged")==true&&canceledIntent.at("childReturned")==true&&
+            actual::g_deckyMirrorBroker.connected&&actual::brokerStops==stops&&actual::brokerStarts==starts&&proof==handles(),
+            "off-intent-revokes-binding-before-broker-replacement");
+        actual::g_deckyMirrorBroker.connected=originalPeer;
+    }
+    const auto stopsBeforeResleep=actual::brokerStops,startsBeforeResleep=actual::brokerStarts;
+    const auto generationBeforeResleep=actual::currentPowerGeneration();
+    const bool connectedBeforeResleep=actual::g_deckyMirrorBroker.connected;
+    actual::g_deckyMirrorBroker.connected=true;
+    actual::fixtureSuspendSerial=0;
+    ymcc::deckymirror::fixtureAfterFrontendRead=[] { ++actual::fixtureSuspendSerial; };
+    const auto revoked=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,50);
+    ymcc::deckymirror::fixtureAfterFrontendRead=nullptr;
+    const Json canceledBinding={{"sameGeneration",actual::currentPowerGeneration()==generationBeforeResleep},
+        {"suspendSerial",actual::fixtureSuspendSerial.load()},{"brokerStops",actual::brokerStops-stopsBeforeResleep},
+        {"brokerStarts",actual::brokerStarts-startsBeforeResleep},{"connected",actual::g_deckyMirrorBroker.connected},
+        {"reason",revoked.reason}};
+    std::cout<<"BINDING_RESLEEP "<<canceledBinding.dump()<<std::endl;
+    need(actual::currentPowerGeneration()==generationBeforeResleep&&actual::fixtureSuspendSerial==1&&
+        actual::g_deckyMirrorBroker.connected&&actual::brokerStops==stopsBeforeResleep&&
+        actual::brokerStarts==startsBeforeResleep&&revoked.request.empty()&&revoked.reason=="mirror-binding-power-deferred",
+        "same-generation-resleep-revokes-binding-before-broker-replacement");
+    actual::g_deckyMirrorBroker.connected=connectedBeforeResleep;
+    auto plan=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::prepare,51);
     const auto request=worker::parse(plan.request.dump());
     need(plan.reason.empty()&&request.liveUiAccount&&request.steam.account==12345678,"actual-offline-main-plan-provenance");
     need(request.windowsSession==actual::observedWindowsSession,"binding-plan-uses-shared-windows-session");
+    need(actual::brokerStops==stopsBeforeResleep+1&&actual::brokerStarts==startsBeforeResleep+1,
+        "current-preparation-still-replaces-broker-exactly-once");
     unsigned receiptRefusals=0;
     for(unsigned variant=1;variant<=6;++variant){
         actual::identityVariant=variant;const auto beforeRefresh=actual::identityRefreshes,beforeBroker=actual::brokerStops;
-        const auto missing=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::prepare,500+variant);
+        const auto missing=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::prepare,500+variant);
         need(missing.request.empty()&&missing.reason=="steam-session-unconfirmed","unknown-or-foreign-receipt-never-builds-plan");
         need(actual::identityRefreshes==beforeRefresh+1&&actual::brokerStops==beforeBroker,"missing-shared-fact-only-requests-original-producer");
         ++receiptRefusals;
     }
     actual::identityVariant=7;
-    auto uiLocal=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::prepare,507);
+    auto uiLocal=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::prepare,507);
     need(uiLocal.reason.empty()&&worker::parse(uiLocal.request.dump()).windowsSession==actual::observedWindowsSession,"account-only-receipt-change-keeps-shared-process-fact");
     actual::identityVariant=0;
     need(actual::bindingWindowsQueries==0,"production-binding-plan-performs-zero-windows-session-queries");
     actual::observedMode["deckyAccountWatchAvailable"]=false;const auto pendingRefreshes=actual::refreshes;
     need(!admission().allowed,"actual-offline-missing-live-proof-refused");
     need(actual::refreshes==pendingRefreshes+1,"actual-offline-async-proof-requests-original-shared-refresh");
-    need(!actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::prepare,52).reason.empty(),"actual-offline-missing-proof-no-plan");
+    need(!actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::prepare,52).reason.empty(),"actual-offline-missing-proof-no-plan");
     actual::observedMode["deckyAccountWatchAvailable"]=true;actual::observedSession.account=12345678;
     need(admission().allowed,"same-account-online-admission");
-    plan=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,53);
+    plan=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,53);
     need(!worker::parse(plan.request.dump()).liveUiAccount,"online-retains-original-registry-contract");
     actual::observedSession.account=0;
     const auto beforeNewDocument=actual::refreshes;
@@ -2686,26 +3492,26 @@ inline Json offlineIdentity(const std::filesystem::path& output){
         const auto currentBirth=std::to_string(actual::observedSession.created);
         actual::observedMode["birth"]=std::to_string(actual::observedSession.created+1);
         need(!admission().allowed,"account-switch-stale-birth-admission-refused");
-        need(!actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,60+cycle*3).reason.empty(),"account-switch-stale-birth-plan-refused");
+        need(!actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,60+cycle*3).reason.empty(),"account-switch-stale-birth-plan-refused");
         ++staleProofRefusals;actual::observedMode["birth"]=currentBirth;
         actual::observedMode["pid"]=actual::observedSession.pid+1;
         need(!admission().allowed,"account-switch-stale-pid-admission-refused");
-        need(!actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,61+cycle*3).reason.empty(),"account-switch-stale-pid-plan-refused");
+        need(!actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,61+cycle*3).reason.empty(),"account-switch-stale-pid-plan-refused");
         ++staleProofRefusals;actual::observedMode["pid"]=actual::observedSession.pid;
         need(admission().allowed,"account-switch-current-offline-proof-admitted");
-        auto switched=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,62+cycle*3);
+        auto switched=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,62+cycle*3);
         auto switchedRequest=worker::parse(switched.request.dump());
         need(switched.reason.empty()&&switchedRequest.liveUiAccount&&switchedRequest.steam.account==currentAccount,"account-switch-current-offline-plan");
         actual::observedSession.account=currentAccount;
         need(admission().allowed,"account-switch-online-readmitted");
-        switched=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,100+cycle);
+        switched=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,100+cycle);
         switchedRequest=worker::parse(switched.request.dump());
         need(switched.reason.empty()&&!switchedRequest.liveUiAccount&&switchedRequest.steam.account==currentAccount,"account-switch-online-plan-retains-registry");
         // Replay a stale nonzero registry account on the SAME current Steam.
         // Admission, typed binding and outage recovery must all keep working.
         actual::observedSession.account=currentAccount==12345678u?87654321u:12345678u;
         need(admission().allowed,"stale-registry-current-ui-admission");
-        switched=actual::deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode::refresh,200+cycle);
+        switched=actual::bindingPlanForCurrentIntent(ymcc::deckysidebar::BindingMode::refresh,200+cycle);
         switchedRequest=worker::parse(switched.request.dump());
         need(switched.reason.empty()&&switchedRequest.liveUiAccount&&switchedRequest.steam.account==currentAccount,"stale-registry-current-ui-binding");
         need(actual::actualConnectionHealth()().required,"stale-registry-current-ui-recovery-required");
@@ -2885,7 +3691,7 @@ inline Json offlineIdentity(const std::filesystem::path& output){
         {"accountTransitions",accountTransitions},{"staleProofRefusals",staleProofRefusals},{"actualAccountLoginPerformed",false},
         {"sharedReceiptRefusals",receiptRefusals},{"bindingWindowsQueries",actual::bindingWindowsQueries},{"sharedIdentityRefreshes",actual::identityRefreshes},
         {"unconfirmedRefreshesIn25s",unconfirmedReads},{"desktopAdmissionDeadlinesPerHour",0},{"desktopEventResumeMs",eventResumeMs},
-        {"actualAdmissionAndHealthConsumers",true},{"openingCadenceEvidence",openingCadenceEvidence},{"combinedSlowRefreshRequestsIn25s",combinedSlowRefreshes},
+        {"actualAdmissionAndHealthConsumers",true},{"openingCadenceEvidence",openingCadenceEvidence},{"sessionReadPublicationRace",sessionRace},{"canceledBinding",canceledBinding},{"canceledIntent",canceledIntent},{"combinedSlowRefreshRequestsIn25s",combinedSlowRefreshes},
         {"initialFastAccountProofRetained",true},{"offlineProofBeforeSlowDeadline",true},{"realSteamModeOperations",0}};
 }
 }
@@ -3143,7 +3949,8 @@ int main(int argc,char** argv){
     if(argc==4&&std::string_view(argv[3]).starts_with("--initial-update-backend=")){
         if(std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
         const auto variant=std::string(argv[3]).substr(std::string("--initial-update-backend=").size());
-        if(variant!="ready"&&variant!="deadline"&&variant!="off"&&variant!="boundaries"&&variant!="backend-outage"&&variant!="backend-outage-sidebar-only"&&variant!="backend-recovers"&&variant!="backend-off"&&variant!="backend-boundaries"&&variant!="backend-notify"&&variant!="backend-report-memory")return 64;
+        const bool notification=variant=="backend-notify"||variant=="backend-notify-closed-client";
+        if(!notification&&variant!="ready"&&variant!="deadline"&&variant!="off"&&variant!="boundaries"&&variant!="backend-outage"&&variant!="backend-outage-sidebar-only"&&variant!="backend-recovers"&&variant!="backend-off"&&variant!="backend-boundaries"&&variant!="backend-report-memory")return 64;
 #ifndef YMCC_DECKY_REPORT_ALLOCATION_FIXTURE
         if(variant=="backend-report-memory")return 64;
 #endif
@@ -3167,7 +3974,7 @@ int main(int argc,char** argv){
                 if(reportAllocationProbe::hits!=1||ymcc::deckybinding::fixture::constructionprobe::failures!=1)value["passed"]=false;
             }else
 #endif
-            value=variant=="backend-notify"?rtfixture::retainedBackendNotification(out):variant.starts_with("backend-")?rtfixture::retainedOfficialBackend(out,variant):rtfixture::initialUpdateBackend(out,variant);
+            value=notification?rtfixture::retainedBackendNotification(out,variant):variant.starts_with("backend-")?rtfixture::retainedOfficialBackend(out,variant):rtfixture::initialUpdateBackend(out,variant);
         }
         catch(const std::exception& error){value={{"passed",false},{"error",error.what()}};}
         value["registrationId"]="native.typed-ready-rebind";value["parameter"]="initial-update-backend";
@@ -3184,11 +3991,18 @@ int main(int argc,char** argv){
         if(finalAdmissionVariant!="connection-same"&&finalAdmissionVariant!="connection-page"&&
            finalAdmissionVariant!="connection-off"&&finalAdmissionVariant!="mode-same"&&finalAdmissionVariant!="local-busy"&&
            finalAdmissionVariant!="local-busy-off"&&finalAdmissionVariant!="local-busy-page"&&
-           finalAdmissionVariant!="transport-busy"&&finalAdmissionVariant!="malformed-busy"&&finalAdmissionVariant!="connection-early")return 64;
+           finalAdmissionVariant!="transport-busy"&&finalAdmissionVariant!="malformed-busy"&&finalAdmissionVariant!="connection-early"&&
+           finalAdmissionVariant!="connection-preflight-off")return 64;
     }
-    const bool identityWaitOnly=argc==4&&std::string_view(argv[3])=="--retained-verified-fault-only=await-identity";
-    if(identityWaitOnly&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
-    if(!identityWaitOnly&&finalAdmissionVariant.empty()&&argc!=2&&argc!=3&&!(argc==4&&(std::string_view(argv[3])=="--loader-native-close=joint-live"||std::string_view(argv[3])=="--loader-native-close=joint"||std::string_view(argv[3])=="--loader-native-close=final"||std::string_view(argv[3])=="--loader-native-close=reentry"||std::string_view(argv[3])=="--loader-native-close=paused"||std::string_view(argv[3]).rfind("--pre-result-retirement=",0)==0||std::string_view(argv[3])=="--global-missed-event"||std::string_view(argv[3])=="--terminal-reconnect"||std::string_view(argv[3])=="--retained-refresh"||std::string_view(argv[3])=="--retained-busy"||std::string_view(argv[3])=="--retained-first-proof"||std::string_view(argv[3])=="--retained-local-busy"||std::string_view(argv[3])=="--presence-publication"||std::string_view(argv[3])=="--queued-stable-only"||std::string_view(argv[3])=="--watch-reattach-only"||std::string_view(argv[3])=="--fresh-handshake-only"||std::string_view(argv[3])=="--retained-handshake-only"||std::string_view(argv[3])=="--retained-first-peer-only"||std::string_view(argv[3])=="--retained-verified-fault-only")))return 64;
+    const auto parameter=argc==4?std::string_view(argv[3]):std::string_view{};
+    const bool retiredOfflineSelection=parameter=="--retired-offline-proof";
+    if(retiredOfflineSelection&&std::string_view(argv[2])!="native.typed-offline-current-ui-account-consumers")return 64;
+    const bool deferredPreflightSelection=parameter=="--preparation-revalidation=deferred-session";
+    if(deferredPreflightSelection&&std::string_view(argv[2])!="native.typed-preparation-revalidation")return 64;
+    const auto pageGrantSelection=parameter=="--retained-verified-fault-only=await-identity"?"await-identity":
+        parameter=="--retained-verified-fault-only=late-health"?"late-health":"";
+    if(*pageGrantSelection&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
+    if(!retiredOfflineSelection&&!deferredPreflightSelection&&!*pageGrantSelection&&finalAdmissionVariant.empty()&&argc!=2&&argc!=3&&!(argc==4&&(std::string_view(argv[3])=="--loader-native-close=joint-live"||std::string_view(argv[3])=="--loader-native-close=joint"||std::string_view(argv[3])=="--loader-native-close=final"||std::string_view(argv[3])=="--loader-native-close=reentry"||std::string_view(argv[3])=="--loader-native-close=paused"||std::string_view(argv[3]).rfind("--pre-result-retirement=",0)==0||std::string_view(argv[3])=="--global-missed-event"||std::string_view(argv[3])=="--terminal-reconnect"||std::string_view(argv[3])=="--retained-refresh"||std::string_view(argv[3])=="--retained-busy"||std::string_view(argv[3])=="--retained-first-proof"||std::string_view(argv[3])=="--retained-local-busy"||std::string_view(argv[3])=="--presence-publication"||std::string_view(argv[3])=="--queued-stable-only"||std::string_view(argv[3])=="--watch-reattach-only"||std::string_view(argv[3])=="--fresh-handshake-only"||std::string_view(argv[3])=="--retained-handshake-only"||std::string_view(argv[3])=="--retained-first-peer-only"||std::string_view(argv[3])=="--retained-verified-fault-only")))return 64;
     if(argc==4&&std::string_view(argv[3])=="--watch-reattach-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
     if(argc==4&&std::string_view(argv[3])=="--queued-stable-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
     if(argc==4&&std::string_view(argv[3])=="--fresh-handshake-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
@@ -3254,22 +4068,23 @@ int main(int argc,char** argv){
         const auto name=std::string("native.typed-history-session-")+variant+"-retained";
         test(name.c_str(),[&]{return sessionRevalidation(output/(std::string("session-")+variant),variant,true);});
     }
-    test("native.typed-offline-current-ui-account-consumers",[&]{return offlineIdentity(output/"offline-identity");});
+    test("native.typed-offline-current-ui-account-consumers",[&]{return retiredOfflineSelection?retiredOfflineFirstProof(output/"retired-offline"):offlineIdentity(output/"offline-identity");});
     test("native.typed-loader-temp-path-budget",[&]{return loaderTempPathBudget(output/"temp-path");});
     test("native.typed-admission-park-resume",[&]{return admissionParkResume(output/"admission-park");});
     test("native.typed-runtime-live-watch",[&]{return healthy(output/"healthy");});
     test("native.typed-stalled-binding-stop",[&]{return stalled(output/"stalled-cv",L"runtime-stall-cv");});
     test("native.typed-stalled-binding-descendants",[&]{return stalled(output/"stalled-descendants",L"stubborn-descendant");});
     test("native.typed-rejected-final-admission",[&]{return rejectedFinalAdmission(output/"final-admission",finalAdmissionVariant);});
-    test("native.typed-preparation-revalidation",[&]{return rejectedAfterPreparation(output/"preparation-admission");});
+    test("native.typed-preparation-revalidation",[&]{return deferredPreflightSelection?deferredPreflightSession(output/"deferred-session"):rejectedAfterPreparation(output/"preparation-admission");});
     test("native.typed-s0-intent-ready-owned",[&]{return intentReady(output/"intent-ready-owned",false);});
     test("native.typed-s0-intent-ready-retained",[&]{return intentReady(output/"intent-ready-retained",true);});
     test("native.typed-ready-rebind",[&]{
         if(argc==4&&std::string_view(argv[3])=="--watch-reattach-only")return watchReattachHandshake(output/"wr");
-        if(identityWaitOnly){
-            auto rows=retainedPageGrant(output/"page-grant",true);
-            const bool passed=rows.size()==1&&rows.at(0).value("passed",false);
-            return Json{{"id","native.typed-ready-rebind"},{"passed",passed},{"parameter","await-identity"},
+        if(*pageGrantSelection){
+            auto rows=retainedPageGrant(output/"page-grant",pageGrantSelection);
+            const bool passed=rows.size()==(std::string_view(pageGrantSelection)=="late-health"?2u:1u)&&
+                std::all_of(rows.begin(),rows.end(),[](const auto& row){return row.value("passed",false);});
+            return Json{{"id","native.typed-ready-rebind"},{"passed",passed},{"parameter",pageGrantSelection},
                 {"reservedPageScenarios",std::move(rows)},{"realSteamOrDeviceActions",0}};
         }
         if(runRetainedHandshakeProbe){

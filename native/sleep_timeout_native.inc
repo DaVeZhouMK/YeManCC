@@ -42,8 +42,9 @@ static void sgSleepTimeoutClearReentry() noexcept {
     g_sgSleepTimeoutReentry={};
 
 }
-static void sgSleepTimeoutRecordKernel(int id,int reason,ULONGLONG at,ULONGLONG generation) noexcept {
-    if(at&&at<=sgNowFileTime())g_sgKernelCycles.record(id,{at,generation,reason});
+static void sgSleepTimeoutRecordKernel(int id,int reason,ULONGLONG at,ULONGLONG generation,
+                                       bool continuing=false,bool sessionEnded=false) noexcept {
+    if(at&&at<=sgNowFileTime())g_sgKernelCycles.record(id,{at,generation,reason,0,continuing,sessionEnded});
 }
 static void sgSleepTimeoutStageReentry(ULONGLONG generation,const ymcc::sleeppower::Dispatch::Receipt& receipt) {
     const auto origin=g_sgSleepTimeoutWindow.origin,from=g_sgSleepTimeoutGeneration;
@@ -84,7 +85,7 @@ static bool sgSleepTimeoutDeferReentryPublication() {
     auto& link=g_sgSleepTimeoutReentry;
     const auto [entry,exit]=g_sgKernelCycles.latest();
     if((entry.generation!=link.from&&entry.generation!=link.to)||(exit.generation!=link.from&&exit.generation!=link.to)||entry.reason<0||entry.reason==1||entry.reason==3||
-       exit.reason==1||exit.reason==20||!exit.at||exit.at<link.origin||
+       exit.continuing||exit.reason==1||exit.reason==20||!exit.at||exit.at<link.origin||
        entry.at<=exit.at||entry.at<=g_sgSleepTimeoutAdoptedEntry||exit.at<g_sgSleepTimeoutAdoptedEntry||
        entry.at>link.receipt.fileTime100ns||
        g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)>=entry.at)return false;
@@ -104,7 +105,7 @@ static bool sgSleepTimeoutAdoptReentry() {
     // Original source order, not journal/GUI order. A bare/unclassified or
     // unrelated newer Suspend has no matching pre-receipt platform interval.
     if((entry.generation!=link.from&&entry.generation!=link.to)||(exit.generation!=link.from&&exit.generation!=link.to)||entry.reason<0||entry.reason==1||entry.reason==3||
-       exit.reason==1||exit.reason==20||!exit.at||exit.at<link.origin||
+       exit.continuing||exit.reason==1||exit.reason==20||!exit.at||exit.at<link.origin||
        entry.at<=exit.at||entry.at<=g_sgSleepTimeoutAdoptedEntry||exit.at<g_sgSleepTimeoutAdoptedEntry||
        entry.at>link.receipt.fileTime100ns||
        g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)!=entry.at)return false;
@@ -422,7 +423,7 @@ static void sgSleepTimeoutArm(int reason,ULONGLONG original) {
 }
 static bool sgSleepTimeoutSuccessAfter(ULONGLONG original) {
     return original&&(sgSleepTimeoutSuccessfulExitTime()>=original||
-        g_sgKernelCycles.completed(original,currentPowerGeneration(),SG_S0_ENTRY_FAILURE_WINDOW_MS));
+        g_sgKernelCycles.entered(original,currentPowerGeneration(),SG_S0_ENTRY_FAILURE_WINDOW_MS));
 }
 static void sgSleepTimeoutRecordSystemSuccess(ULONGLONG at) noexcept {
     if(!at||at>sgNowFileTime())return;
@@ -430,7 +431,7 @@ static void sgSleepTimeoutRecordSystemSuccess(ULONGLONG at) noexcept {
     while(at>previous&&!g_sgKernelSystemWake.compare_exchange_weak(previous,at,std::memory_order_acq_rel)){}
 }
 static void sgSleepTimeoutObserveCompleted(const json& evidence,ULONGLONG at,ULONGLONG generation,int reason) noexcept {
-    if(at&&at<=sgNowFileTime())g_sgKernelCycles.completeExit({at,generation,reason,sgKernelCompletedSessionUs(evidence)});
+    if(at&&at<=sgNowFileTime())g_sgKernelCycles.observeSleepExit(sgKernelSleepExit(evidence,at,generation,reason));
 }
 static void sgSleepTimeoutPowerBroadcast(ULONG code) {
     if(!g_sgSleepTimeoutWindow.active()&&!g_sgSleepTimeoutObservation.waiting)return;

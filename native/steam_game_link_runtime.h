@@ -50,6 +50,7 @@ struct Control {
     std::atomic<bool> observationsClosed{false};
     std::atomic<bool> observationWorkerExited{false};
     std::atomic<unsigned> hintsPending{0};
+    bool hintWakeSucceeded=false; // Accessed only by hint producers under lifecycleMx.
     std::mutex snapshotMx;json snapshot={{"schemaVersion",1},{"phase","idle"},{"linked",false},{"readOnly",true},{"repairAuthorized",false}};
     json history=json::array();
     StartupCaptureDiagnostic startupCaptureDiagnostic; // Protected by snapshotMx; diagnostics only.
@@ -609,8 +610,7 @@ static void run(const std::shared_ptr<Control>& c) {
             }
         }
         const bool notified=forceObserve;
-        if(state.active()&&(forceObserve||waitPolicy.readReady(now)||now>=state.snapshot().dueTick||!enabled||state.snapshot().configEpoch!=epoch||
-            WaitForSingleObject(gameHandle.value,0)==WAIT_OBJECT_0||WaitForSingleObject(clientHandle.value,0)==WAIT_OBJECT_0)){
+        if(state.active()&&(forceObserve||waitPolicy.readReady(now)||now>=state.snapshot().dueTick||!enabled||state.snapshot().configEpoch!=epoch)){
             forceObserve=false;waitPolicy.observed(now);
             Evidence e;e.sequence=++sequence;e.tick=GetTickCount64();e.enabled=enabled;e.configEpoch=epoch;
             e.game=identity(gameHandle.value,game.pid,game.created,game.path,session);e.steam=identity(clientHandle.value,client.pid,client.created,client.root+L"\\steam.exe",session);
@@ -839,15 +839,17 @@ static void run(const std::shared_ptr<Control>& c) {
                 // Recheck once through normal discovery, never retarget its identity.
                 pending=e.enabled;idleDue=e.tick;}
         }
-        HANDLE waits[5]{c->stopEvent,c->pokeEvent};DWORD count=2,dirIndex=MAXDWORD,gameIndex=MAXDWORD,steamIndex=MAXDWORD;
-        if(directory.handle()&&!waitPolicy.directoryPending()){dirIndex=count;waits[count++]=directory.handle();}
+        HANDLE waits[5]{c->stopEvent};DWORD count=1,dirIndex=MAXDWORD,gameIndex=MAXDWORD,steamIndex=MAXDWORD;
+        // Ready process exits win over recurring hints and directory traffic.
         if(state.active()){gameIndex=count;waits[count++]=gameHandle.value;steamIndex=count;waits[count++]=clientHandle.value;}
-        else if(!revokedOriginals.empty()){gameIndex=count;waits[count++]=revokedOriginals.front().handle.value;}
+        const DWORD pokeIndex=count;waits[count++]=c->pokeEvent;
+        if(directory.handle()&&!waitPolicy.directoryPending()){dirIndex=count;waits[count++]=directory.handle();}
+        if(!state.active()&&!revokedOriginals.empty()){gameIndex=count;waits[count++]=revokedOriginals.front().handle.value;}
         const auto nowWait=GetTickCount64();const auto due=state.active()?state.snapshot().dueTick:pending?idleDue:ULLONG_MAX;
         const DWORD timeout=waitpolicy::timeout(nowWait,waitPolicy.nextDue(due),state.active()||pending||waitPolicy.scheduled());
         const auto waited=WaitForMultipleObjects(count,waits,FALSE,timeout);
         if(waited==WAIT_OBJECT_0||waited==WAIT_FAILED)break;
-        if(waited==WAIT_OBJECT_0+1){
+        if(waited==WAIT_OBJECT_0+pokeIndex){
             if(const auto pendingHints=c->hintsPending.exchange(0,std::memory_order_acq_rel)){
                 steamOriginalRecoveryObserveHint();
                 NativeGameNoGameReceipt noGame;
@@ -929,10 +931,12 @@ static void steamGameLinkStart(){
 }
 static void steamGameLinkNotify(bool windowHint){
     std::lock_guard<std::mutex> lock(SteamGameLink::lifecycleMx);
-    if(SteamGameLink::control&&SteamGameLink::control->pokeEvent){
+    if(const auto& c=SteamGameLink::control;c&&c->pokeEvent){
         using ymcc::steamlink::waitpolicy::Hint;
-        SteamGameLink::control->hintsPending.fetch_or(windowHint ? Hint::Window : Hint::Immediate, std::memory_order_release);
-        SetEvent(SteamGameLink::control->pokeEvent);
+        const auto pending=c->hintsPending.fetch_or(windowHint ? Hint::Window : Hint::Immediate, std::memory_order_release);
+        // The waiter exchanges the whole batch, including urgency upgrades posted
+        // after it has received the auto-reset signal but before it takes the hints.
+        if(!pending||!c->hintWakeSucceeded)c->hintWakeSucceeded=SetEvent(c->pokeEvent)!=FALSE;
     }
 }
 static void steamGameLinkShutdown(){

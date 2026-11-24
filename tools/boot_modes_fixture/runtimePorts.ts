@@ -6,7 +6,7 @@ import { equalSettingsDocuments } from '../../src/bridge/settingsBaseline';
 import { captureBootPreferenceWrite, type BootPreferenceWrite } from '../../src/bridge/bootModeGlobalPreferences';
 /** In-memory native owners. Never imports production IO or writes user settings. */
 export const copy = <T>(value: T): T => structuredClone(value);
-export const calls: Array<{op:string;value?:any}> = [];
+export const calls: Array<{op:string;value?:any;origin?:string;scopedAppearanceRead?:boolean}> = [];
 export const faults: Record<string,number> = {};
 export const hooks: Record<string,undefined|((...args:any[])=>any)> = {};
 const ipcListeners = new Map<string,Set<(data:any)=>unknown>>();
@@ -109,7 +109,7 @@ export const batteryCharge={async get(){await hooks.chargeRead?.();return copy(s
 export const steamUi={subscribe:(handler:()=>void)=>on('steam.uiStateChanged',handler),async read(){return copy(state.steamUi);},async switchMode(_identity:any,mode:string,options:any){record('steam.switchMode',{mode,userInitiated:options?.userInitiated===true});if(options?.userInitiated!==true)throw Error('Steam switch requires manual intent');state.steamUi.mode=mode;return copy(state.steamUi);},async showBigPicture(_identity:any,options:any){record('steam.showBigPicture',{userInitiated:options?.userInitiated===true});if(options?.userInitiated!==true)throw Error('Steam show requires manual intent');return copy(state.steamUi);}};
 export async function launchSteam(options?:{userInitiated:true;isCurrent?:()=>boolean}){const current=options?.isCurrent?.();record('steam.launch',{userInitiated:options?.userInitiated===true,hasCurrentGuard:typeof options?.isCurrent==='function',currentAtDispatch:current,currentMode:settings.extensions.bootModes?.current});if(options?.userInitiated!==true||current!==true)throw Error('Steam launch requires fresh manual intent and current generation');state.steamUi={known:true,running:true,mode:'desktop',pid:4321,birth:'fixture-steam-birth'};}
 export const STEAM_APPEARANCE_THEMES=[];
-export const steamAppearance={async read(){await hooks.appearanceRead?.();return copy(state.appearance);},async apply(_before:any,states:any,options?:any){record('appearance.apply',states);calls[calls.length-1].origin=options?.origin;return {ok:true};}};
+export const steamAppearance={async read(){await hooks.appearanceRead?.();return copy(state.appearance);},async apply(_before:any,states:any,options?:any){record('appearance.apply',states);calls[calls.length-1].origin=options?.origin;return {ok:true};},async applyScene(states:any,options:any,observe:(read:()=>Promise<any>)=>Promise<any>){const snapshot=await observe(()=>this.read());const result=await this.apply(snapshot,states,options);calls[calls.length-1].scopedAppearanceRead=true;return result;}};
 export async function readMonitorOutputPreferences(){return copy(state.monitor);}
 export async function saveMonitorOutputPreferences(value:any){record('monitor.save',value);await hooks.monitorSave?.();state.monitor=copy(value);settings.rtss.monitorOutput=copy(value);}
 export function onMonitorOutputApplied(listener:(preferences:any,result:any,intent:any)=>unknown){return on('fixture.monitor-applied',value=>listener(value.preferences,value.result,value.intent));}
@@ -122,7 +122,7 @@ export async function screenTouchpadsSaveProfiles(profiles:any,expectedProfiles:
  record('touch.saveProfiles',{profiles,expectedProfiles,bootContext});
  const context=copy(bootContext),nativeResult=await hooks.touchWrite?.(copy(context));
  if(nativeResult&&nativeResult.settingsSaved!==true)return nativeResult;
- if(context&&(bootMouseExpired(context)||context.boot!==settings.input.startupObservedBoot||context.mode!==settings.extensions?.bootModes?.current||context.revision!==settings.extensions?.bootModes?.revision))
+ if(!nativeResult&&context&&(bootMouseExpired(context)||context.boot!==settings.input.startupObservedBoot||context.mode!==settings.extensions?.bootModes?.current||context.revision!==settings.extensions?.bootModes?.revision))
   return {ok:false,settingsSaved:false,reason:'boot-mode-context-changed'};
  const staged=copy(state.touch);
  const keys=new Set(Object.keys(screenTouchpadDefaults('disabled')));
@@ -130,7 +130,7 @@ export async function screenTouchpadsSaveProfiles(profiles:any,expectedProfiles:
   const previous=normalizeScreenTouchpadSummon(await screenTouchpadsGet(persona));
   staged[persona]={...Object.fromEntries(Object.entries(previous).filter(([key])=>keys.has(key))),...copy(patch as any)};
  }
- state.touch=staged;return {ok:true,settingsSaved:true,reason:'saved',profiles:copy(staged)};
+ state.touch=staged;return nativeResult??{ok:true,settingsSaved:true,reason:'saved',profiles:copy(staged)};
 }
 export async function setTrayResident(enabled:boolean){record('tray.set',enabled);}
 export const shell={async execute(path:string,args:any,bootContext?:any){record('app.launch',{path,args});await hooks.shellExecute?.(path,copy(bootContext));if(bootMouseExpired(bootContext))return false;(state.softwareEffects??=[]).push({op:'launch',path});return true;},async open(path:string){record('app.open',path);},async run(path:string,args:any[],timeout:any){record('app.run',{path,args,timeout});return {exitCode:state.shellExit??0,stdout:'',stderr:''};}};

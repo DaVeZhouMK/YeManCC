@@ -123,17 +123,32 @@ static void timeoutObservationCompletionDeadline(bool workerLate){
  check(!requestCount&&!sgSleepRetryActive()&&!g_sgSleepTimeoutWindow.active()&&!timeoutTimerDue&&!g_sgSleepTimeoutObservation.waiting,"expired completed result authorized or retained timeout");
  passed(workerLate?"timeout-worker-completed-after-deadline-before-UI":"timeout-timely-worker-result-expired-before-UI");
 }
+static void receiptFresh();
+static ymcc::sleeppower::Dispatch::Receipt receiptAdmit(bool query,ULONGLONG delay);
 static void timeoutObservationQueryFailure(bool active){
- baseCycle(false,false);const auto origin=nowFile;
  if(active){
+  baseCycle(false,false);const auto origin=nowFile;
   timeoutSourceEvents={timeoutXml(506,1,origin)};at(timeoutTimerDue);sgSleepTimeoutTick();drainTimeoutSource();sgSleepTimeoutTick();dispatch();
   check(requestCount==1&&g_sgAutomaticSleepBudget.requests()==1&&sgSleepRetryActive(),"query failure test did not reach first original send");
   timeoutQueryFailureActiveBranch();
   check(sgSleepRetryActive()&&g_sgSleepTimeoutWindow.requested&&!timerDue,"unbound query lost the original request or armed another");
   sgDispatchSameModeRetry();check(requestCount==1&&g_sgAutomaticSleepBudget.requests()==1,"unbound query added a send or refunded shared budget");
  }else{
-  timeoutQueryFailureActiveBranch();
-  check(!timeoutTimerDue&&!g_sgSleepTimeoutObservation.waiting&&!g_sgSleepTimeoutWindow.active()&&!requestCount,"query failure retained an unconfirmed observation");
+  for(const bool confirmed:{false,true}){
+   receiptFresh();receiptAdmit(!confirmed,0);
+   const auto due=timeoutTimerDue,gen=generation,origin=g_sgSleepTimeoutObservation.origin;
+   check(due&&origin&&g_sgSleepTimeoutObservation.waiting&&g_sgSleepQueryOwnsGeneration==!confirmed,
+         "query-failure test did not establish the intended public boundary and active observation");
+   const auto failure=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPENDFAILED,nowTick,nowFile);
+   check(bool(failure),"query failure did not enter actual ordered delivery");
+   timeoutQueryFailureActiveBranch();
+   g_sleepPowerDispatch.complete(failure,nowTick);
+   if(!confirmed)
+    check(!timeoutTimerDue&&!g_sgSleepTimeoutObservation.waiting&&!g_sgSleepTimeoutWindow.active()&&!requestCount,"query failure retained an unconfirmed observation");
+   else
+    check(timeoutTimerDue==due&&g_sgSleepTimeoutObservation.waiting&&g_sgSleepTimeoutObservation.origin==origin&&
+          generation==gen&&!requestCount&&!sgSleepRetryActive(),"late query failure erased the confirmed observation or started a retry");
+  }
  }
  passed(active?"timeout-query-rejection-keeps-original-retry-budget":"timeout-query-rejection-retires-unconfirmed-observation");
 }

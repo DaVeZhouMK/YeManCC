@@ -8,7 +8,7 @@ const AUDIO_DEFAULTS_VERSION = 1;
 const CONTROLLER_DEFAULTS_VERSION = 2;
 export const BOOT_MODE_IDS = ['global', 'xbox', 'steam', 'xbox-steam'] as const;
 export type BootModeId = typeof BOOT_MODE_IDS[number];
-export const BOOT_MODE_MODULES = ['performance', 'charge', 'input', 'gyro', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
+export const BOOT_MODE_MODULES = ['performance', 'charge', 'input', 'gyro', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background'] as const;
 export type BootModeModule = typeof BOOT_MODE_MODULES[number];
 export type BootValue = null | boolean | number | string | BootValue[] | {
     [key: string]: BootValue;
@@ -170,7 +170,8 @@ export function normalizeBootStartupResult(raw: unknown, observedBoot: unknown):
         status: raw.status === 'failed' ? 'failed' : unprovedInput.length ? 'partial' : raw.status as BootStartupResult['status'],
         ...(modules ? { modules } : {}),
         ...Object.fromEntries(lists.map(key => {
-            const values = (raw[key] as string[]).slice(0, 64).map(value => value.slice(0, 500));
+            const values = (raw[key] as string[]).filter(value => value !== '系统 S4 休眠：本机未确认支持' &&
+                !/^睡眠优化(?:$|[：:])/.test(value)).slice(0, 64).map(value => value.slice(0, 500));
             if (key === 'applied') return [key, values.filter(value => !unprovedInput.some(id => value === (id === 'input' ? '虚拟手柄' : '陀螺仪') || value === '全局手柄与陀螺仪'))];
             if (key === 'pending') {
                 const waiting = unprovedInput.map(id => id === 'input' ? '手柄输出：等待本次配置的原生输出回执' : '陀螺仪：等待本次配置的原生传感器回执').filter(value => !values.includes(value));
@@ -195,7 +196,6 @@ export const BOOT_MODE_CATEGORIES = [
     { id: 'input', label: '手柄与陀螺仪', icon: 'gamepad', modules: ['input', 'gyro'] },
     { id: 'touch', label: '触摸板与屏幕按键', icon: 'fullscreen', modules: ['touch'] },
     { id: 'steam', label: 'Steam 大屏', icon: 'steam', modules: ['steamAppearance', 'steamWallpaper', 'steamDecky'] },
-    { id: 'sleep', label: '睡眠优化', icon: 'sleep', modules: ['sleep'] },
     { id: 'display', label: '监控与画面', icon: 'monitor', modules: ['monitor', 'display', 'background'] },
 ] as const;
 export type BootModeCategory = typeof BOOT_MODE_CATEGORIES[number]['id'];
@@ -242,8 +242,7 @@ function normalizeTouchModule(value: BootConfig, seedMissing=false): BootConfig 
 }
 function overrides(value: unknown, migrateTouch=true): Partial<BootModeSnapshot> {
     const out: Partial<BootModeSnapshot> = {};
-    // Legacy fan snapshots are retired. The common startup preference and
-    // original fan preset/curve table are independent of every mode bank.
+    // Fan and sleep intent is shared outside every mode bank.
     if (object(value))
         for (const id of BOOT_MODE_MODULES)
             if (object(value[id]))
@@ -284,8 +283,6 @@ const moduleShapes: Record<BootModeModule, BootShape> = {
     steamAppearance: { states: { '*': flag } }, steamWallpaper: { enabled: flag, download: flag, cpuThreshold: numeric }, steamDecky: { enabled: flag },
     monitor: { preferences: { enabled: flag, ymccEnabled: flag, rtssEnabled: flag, ymccTemplate: choice('A', 'B'), ymcc: monitorPanel, templates: { '*': monitorPanel } } },
     display: { brightness: numeric, resolution: string, hz: v => string(v) || numeric(v) }, background: { ui: { theme: string, backgroundOpacity: numeric, backgroundBlur: numeric, dynamicBackgroundEnabled: flag } },
-    sleep: { config: { mode: choice('off', 'custom'), enabled: flag, pauseGameOnSleep: flag, retryOnEntryFailure: flag, retryOnSleepTimeout: flag, retryOnNonUserWake: flag, wakePasswordEnabled: flag, sleepPowerPlanOptimizationEnabled: flag, staticWakeAutoScanEnabled: flag },
-        acButton: numeric, dcButton: numeric, hibernate: flag, hibernateSize: numeric, timeouts: v => v === null || object(v) && Object.values(v).every(numeric), steamAutoRecovery: flag },
 };
 function assertBootShape(value: unknown, shape: BootShape, path: string): void {
     if (typeof shape === 'function') { if (shape(value)) return; }
@@ -305,10 +302,12 @@ function assertBootSnapshot(value: unknown, path: string): void {
         if (Object.prototype.hasOwnProperty.call(value, module)) assertBootShape(value[module], moduleShapes[module], path + '.' + module);
 }
 function assertStoredBootDocument(raw: Record<string, unknown>): void {
-    if (raw.unresolvedGlobal !== undefined && (!Array.isArray(raw.unresolvedGlobal) ||
-        raw.unresolvedGlobal.some(value => value !== 'fan' && !BOOT_MODE_MODULES.includes(value as BootModeModule)) ||
-        new Set(raw.unresolvedGlobal).size !== raw.unresolvedGlobal.length))
-        throw new Error('开机模式全局数据来源标记无效，原配置已保留');
+    if (raw.unresolvedGlobal !== undefined) {
+        const retained = Array.isArray(raw.unresolvedGlobal) ? raw.unresolvedGlobal.filter(value => value !== 'sleep') : null;
+        if (!retained || retained.some(value => value !== 'fan' && !BOOT_MODE_MODULES.includes(value as BootModeModule)) ||
+            new Set(retained).size !== retained.length)
+            throw new Error('开机模式全局数据来源标记无效，原配置已保留');
+    }
     for (const key of ['current', 'boot']) if (raw[key] !== undefined && !isBootModeId(raw[key])) throw new Error('开机模式标识无效：' + key);
     if (raw.bootEnabled !== undefined && typeof raw.bootEnabled !== 'boolean') throw new Error('开机模式开关格式无效');
     if (raw.revision !== undefined && (!Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0)) throw new Error('开机模式版本号无效');
@@ -360,9 +359,11 @@ export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocu
     assertBootSnapshot(baseline, 'baseline');
     const global = cloneBootValue(baseline), activeSnapshot = cloneBootValue(baseline);
     // A legacy document can itself be supplied as the normalization baseline.
-    // Retire its fan module there too, before merging any saved mode fields.
+    // Retire shared-only modules there too, before merging saved mode fields.
     Reflect.deleteProperty(global, 'fan');
     Reflect.deleteProperty(activeSnapshot, 'fan');
+    Reflect.deleteProperty(global, 'sleep');
+    Reflect.deleteProperty(activeSnapshot, 'sleep');
     retireBootControllerSnapshots({ global, activeSnapshot });
     global.touch=normalizeTouchModule(global.touch,true);
     global.input = { ...global.input, persona: 'disabled',
@@ -496,6 +497,7 @@ export function resolveBootMode(document: BootModeDocument, id: BootModeId): Boo
     if (!isBootModeId(id)) throw new Error('开机模式标识无效');
     const snapshot = cloneBootValue(document.global);
     Reflect.deleteProperty(snapshot, 'fan');
+    Reflect.deleteProperty(snapshot, 'sleep');
     if (id !== 'global')
         for (const module of BOOT_MODE_MODULES) {
             const value = document.scenes[id].overrides[module];
@@ -511,7 +513,8 @@ export function bootGlobalModuleUnresolved(document: BootModeDocument, module: B
 /** Current values are references for an explicit edit, never recovered intent. */
 export function previewBootMode(document: BootModeDocument, id: BootModeId, reference: BootModeSnapshot): BootModeSnapshot {
     const snapshot = resolveBootMode(document, id);
-    for (const module of document.unresolvedGlobal ?? []) snapshot[module] = mergeBootConfig(reference[module] ?? {}, snapshot[module]);
+    for (const module of BOOT_MODE_MODULES)
+        if (document.unresolvedGlobal?.includes(module)) snapshot[module] = mergeBootConfig(reference[module] ?? {}, snapshot[module]);
     return snapshot;
 }
 function coversReference(reference: BootValue | BootConfig, intent: BootValue | undefined): boolean {
@@ -562,7 +565,7 @@ export interface BootDeviceSupport {
     reason: string;
     choices?: number[];
 }
-export type BootDeviceCapabilities = Partial<Record<'hybridCores' | 'performance' | 'charge' | 'gyro' | 'hibernate', BootDeviceSupport>>;
+export type BootDeviceCapabilities = Partial<Record<'hybridCores' | 'performance' | 'charge' | 'gyro', BootDeviceSupport>>;
 export interface BootApplyStep {
     id: string;
     apply(): Promise<void>;

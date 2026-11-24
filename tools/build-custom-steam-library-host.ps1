@@ -67,6 +67,7 @@ if($Publish){
   $manifest | Add-Member -NotePropertyName backgroundVideoQualityPolicy -NotePropertyValue 3 -Force
   $manifest | Add-Member -NotePropertyName backgroundManualProtocol -NotePropertyValue 1 -Force
   $manifest | Add-Member -NotePropertyName backgroundVideoSelectionProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundPlayback30Protocol -NotePropertyValue 1 -Force
   $manifest.sourceBuild.host=$hash
   $manifest.sourceBuild | Add-Member -NotePropertyName hostSources -NotePropertyValue $sourceIndex -Force
   $manifest.generatedAt=[DateTimeOffset]::Now.ToString('o')

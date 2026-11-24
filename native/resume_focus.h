@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <cstdint>
+#include <optional>
 #include "sleep_power_observation.h"
 
 namespace ymcc {
@@ -13,26 +14,31 @@ struct ResumeFocusRequest {
     sleeppower::SharedPowerV1 power;
     ULONGLONG notBefore = 0;
     ULONGLONG deadline = 0;
+    std::optional<std::uint64_t> wakeSleepBoundary;
 };
 enum class ResumeFocusGate { Ready, Deferred, Invalid, Superseded, StalePower, Exiting, Expired };
-// Readiness may settle within one wake. A new public notice or suspend edge
-// retires the request even before the window sees a different generation.
-inline bool sameResumeFocusWake(const sleeppower::SharedPowerV1& origin,
-                                const sleeppower::SharedPowerV1& now) noexcept {
+// Only the confirmed thaw handoff may follow a later notice, and only while
+// the caller still holds the same observed sleep boundary before submission.
+inline bool sameResumeFocusSleep(const sleeppower::SharedPowerV1& origin,
+                                 const sleeppower::SharedPowerV1& now) noexcept {
     return sleeppower::powerObservationKnown(origin) && sleeppower::powerObservationKnown(now) &&
         !((origin.flags | now.flags) & sleeppower::kNotificationPending) &&
         origin.generation == now.generation && origin.suspendSerial == now.suspendSerial &&
-        origin.observedNotificationSequence == now.observedNotificationSequence &&
+        origin.observedNotificationSequence <= now.observedNotificationSequence &&
         origin.publicationRevision <= now.publicationRevision;
 }
+inline bool sameResumeFocusWake(const sleeppower::SharedPowerV1& origin,
+                                const sleeppower::SharedPowerV1& now) noexcept {
+    return origin.observedNotificationSequence == now.observedNotificationSequence && sameResumeFocusSleep(origin, now);
+}
 inline ResumeFocusGate resumeFocusGate(const ResumeFocusRequest& r, ULONGLONG now,
-    std::uint64_t latestTicket, sleeppower::Reader readPower, bool exiting, bool inputReady) {
+    std::uint64_t latestTicket, const sleeppower::SharedPowerV1& power, bool exiting, bool inputReady,
+    bool followWake = false) {
     if (!r.ticket || !r.pid || !r.processCreated || !sleeppower::powerObservationKnown(r.power))
         return ResumeFocusGate::Invalid;
     if (exiting) return ResumeFocusGate::Exiting;
     if (r.ticket != latestTicket) return ResumeFocusGate::Superseded;
-    sleeppower::SharedPowerV1 power;
-    if (!sleeppower::capturePowerObservation(readPower, power) || !sameResumeFocusWake(r.power, power))
+    if (!(followWake ? sameResumeFocusSleep(r.power, power) : sameResumeFocusWake(r.power, power)))
         return ResumeFocusGate::StalePower;
     if (now >= r.deadline) return ResumeFocusGate::Expired;
     if (now < r.notBefore || !sleeppower::powerAdmitted(power) || !inputReady) return ResumeFocusGate::Deferred;

@@ -54,6 +54,7 @@ import { deckySidebar, deckySidebarCanRepair, deckyConnectionSummary, deckySideb
 import InlineIcon from '@/components/InlineIcon.vue';
 import { dialog, shell } from '@/bridge/api';
 import { isUiVisible, onUiVisibilityChange, getUiVisibilityState } from '@/bridge/uiLifecycle';
+import { isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
 import { steamUi, type SteamUiState } from '@/bridge/steamUi';
 import { createSteamReadBudget, STEAM_AUTOMATIC_READ_GAP_MS } from '@/bridge/steamReadBudget';
 import {
@@ -80,25 +81,43 @@ const deckyState = ref<DeckySidebarState | null>(null);
 const deckyBusy = ref(false);
 let stopDeckyState: (() => void) | null = null;
 let deckyViewEpoch = 0;
+type DeckyRepairNotice = { text: string; revision: number; connectionRevision: number; pid: number; birth: string };
+const deckyRepairMessage = ref<DeckyRepairNotice | null>(null);
+function isCurrentDeckyRepairNotice(notice: DeckyRepairNotice): boolean {
+  const state=deckyState.value,steam=steamUiState.value;
+  return !!state&&deckySidebarCanRepair(state)&&!state.mirrorConnected&&state.powerReady!==false&&
+    state.revision===notice.revision&&(state.connectionRevision??0)===notice.connectionRevision&&
+    !!steam?.known&&steam.running&&steam.mode==='bigpicture'&&steam.pid===notice.pid&&steam.birth===notice.birth;
+}
 function acceptDeckyState(state: DeckySidebarState) {
   if (deckyState.value && state.revision < deckyState.value.revision) return;
   if(deckyState.value&&state.revision===deckyState.value.revision&&
     (state.connectionRevision??0)<(deckyState.value.connectionRevision??0))return;
   deckyState.value = state;
-  if(!deckySidebarCanRepair(state)||state.mirrorConnected||state.powerReady===false)deckyRepairMessage.value='';
+  if(deckyRepairMessage.value&&!isCurrentDeckyRepairNotice(deckyRepairMessage.value))deckyRepairMessage.value=null;
   if (state.enabled && (state.phase === 'failed' || state.phase === 'unavailable')) showNotice(deckySidebarDescription(state));
 }
 const deckyConnection = computed(()=>deckyConnectionSummary(deckyState.value));
-const deckyRepairMessage = ref('');
+const deckyRepairDetail = computed(()=>{
+  const notice=deckyRepairMessage.value;
+  return notice&&isCurrentDeckyRepairNotice(notice)?notice.text:deckyConnection.value.detail;
+});
 async function repairDeckyConnection() {
   const state=deckyState.value,steam=steamUiState.value;
   if(deckyBusy.value||!state||!deckySidebarCanRepair(state)||!steam?.known||!steam.running||steam.mode!=='bigpicture')return;
-  deckyBusy.value=true;deckyRepairMessage.value='正在修复连接…';const epoch=deckyViewEpoch;
+  deckyBusy.value=true;const epoch=deckyViewEpoch;
+  deckyRepairMessage.value={text:'正在修复连接…',revision:state.revision,connectionRevision:state.connectionRevision??0,pid:steam.pid,birth:steam.birth};
+  // A command reply describes the requested action, not the current connection.
+  // Push/readback can have already replaced this owner before await resumes.
+  const settle=(text:string)=>{
+    if(epoch!==deckyViewEpoch)return;
+    const notice=deckyRepairMessage.value;
+    deckyRepairMessage.value=notice&&isCurrentDeckyRepairNotice(notice)?{...notice,text}:null;
+  };
   try {
     const result=await deckySidebar.repairConnection(steam.pid,steam.birth,state.revision);
-    if(epoch!==deckyViewEpoch)return;
-    deckyRepairMessage.value=result.ok?'已请求恢复，等待连接':result.mutated?'正在确认恢复结果，请稍候':result.reason==='decky-repair-wait'||result.reason==='decky-repair-already-requested'?'已有恢复请求，请稍候':'暂时无法修复，请检查连接状态';
-  } catch { if(epoch===deckyViewEpoch)deckyRepairMessage.value='正在确认恢复结果，请稍候'; }
+    settle(result.ok?'已请求恢复，等待连接':result.mutated?'正在确认恢复结果，请稍候':result.reason==='decky-repair-wait'||result.reason==='decky-repair-already-requested'?'已有恢复请求，请稍候':'暂时无法修复，请检查连接状态');
+  } catch { settle('正在确认恢复结果，请稍候'); }
   finally {if(epoch===deckyViewEpoch)deckyBusy.value=false;}
 }
 async function setDeckyEnabled(enabled: boolean) {
@@ -130,7 +149,6 @@ let steamEventTimer: ReturnType<typeof setTimeout> | null = null;
 const steamReadBudget = createSteamReadBudget();
 let steamLastStatusRead = -Infinity;
 let steamForceObservation = false;
-watch(running, () => window.dispatchEvent(new Event('steam-appearance:environment')));
 const addonStates: Record<string, boolean> = {};
 const states = ref({ ...addonStates });
 
@@ -146,6 +164,7 @@ let steamConfirmationHint = false;
 let steamActive = false;
 let steamPowerIntent = 0, steamPowerPending = false;
 let stopUiVisibility: (() => void) | null = null;
+let stopSteamPowerObservation: (() => void) | null = null;
 let steamVisibilitySeedPending = false;
 const customLibrarySummary = ref<CustomSteamLibrarySummary | null>(null);
 const customLibraryBusy = ref(false);
@@ -171,7 +190,7 @@ function steamReadVisible() {
   return state.documentVisible && state.nativeWindowVisible;
 }
 
-const steamReadonlyEvents = ['ipc:power.resume-ready', 'ipc:power.resumed', 'ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned'];
+const steamReadonlyEvents = ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned'];
 async function detectSteamState(automatic = false): Promise<SteamUiState | null> {
   try { return await steamUi.read(automatic ? { automatic: true } : undefined); } catch { return null; }
 }
@@ -304,17 +323,18 @@ function finishSteamPower(intent: number) {
   if (steamConfirmationHint) { steamConfirmationHint = false; retainSteamObservation('published'); }
   resumeQueuedSteamObservation();
 }
+function retireSteamObservation() {
+  ++steamObservationEpoch;
+  steamVisibilitySeedPending = false;
+  if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
+  steamStateRefreshQueued = null; steamForceObservation = false;
+}
 function cancelSteamPowerWait() {
   ++steamPowerIntent; ++steamReadEpoch;
   const readsVisible = steamActive && steamReadVisible();
   // A late global power gate cancels actions, not an already-queued/read-only
   // wake observation. Truly hiding/leaving the view invalidates both.
-  if (!readsVisible) {
-    ++steamObservationEpoch;
-    steamVisibilitySeedPending = false;
-    if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
-    steamStateRefreshQueued = null; steamForceObservation = false;
-  }
+  if (!readsVisible) retireSteamObservation();
   steamPendingTarget.value = null;
   stopSteamConfirmation();
   if (steamPowerPending) { steamPowerPending = false; busy.value = false; }
@@ -425,19 +445,41 @@ function confirmSteamState(
   if (hinted) owner.notify();
 }
 
-// 并行异步加载；状态检测失败时保持未确认，不把 Steam 错误显示为运行中。
-async function refresh() {
-  const [, customRes, ...addonRes] = await Promise.allSettled([
-    refreshSteamState({ automatic: true }),
-    steamCustomAddons(),
-    ...STEAM_ADDONS.map((a) => steamAddonExists(a.key).catch(() => false)),
-  ]);
-  if (customRes.status === 'fulfilled') customAddons.value = customRes.value;
-  const next: Record<string, boolean> = {};
-  STEAM_ADDONS.forEach((a, i) => {
-    next[a.key] = addonRes[i]?.status === 'fulfilled' ? addonRes[i].value : false;
-  });
-  states.value = next;
+let addonRefreshPending = false, addonRefreshRunning = false, addonViewEpoch = 0;
+function retireAddonRefresh() {
+  ++addonViewEpoch;
+  if (addonRefreshRunning) addonRefreshPending = true;
+}
+async function flushAddonRefresh() {
+  if (!addonRefreshPending || addonRefreshRunning || !steamActive || !isUiVisible()) return;
+  addonRefreshPending = false;
+  addonRefreshRunning = true;
+  const epoch = addonViewEpoch;
+  try {
+    const [customRes, ...addonRes] = await Promise.allSettled([
+      steamCustomAddons(),
+      ...STEAM_ADDONS.map((a) => steamAddonExists(a.key)),
+    ]);
+    if (epoch !== addonViewEpoch || !steamActive || !isUiVisible()) {
+      addonRefreshPending = true;
+      return;
+    }
+    if (customRes.status === 'fulfilled') customAddons.value = customRes.value;
+    const next: Record<string, boolean> = {};
+    STEAM_ADDONS.forEach((a, i) => {
+      next[a.key] = addonRes[i]?.status === 'fulfilled' ? addonRes[i].value : false;
+    });
+    states.value = next;
+  } finally {
+    addonRefreshRunning = false;
+    void flushAddonRefresh();
+  }
+}
+function refresh() {
+  void refreshSteamState({ automatic: true });
+  // Addon files are presentation data. Keep one pending read while hidden or busy.
+  addonRefreshPending = true;
+  void flushAddonRefresh();
 }
 
 async function launch() {
@@ -688,6 +730,26 @@ if (globalRefreshKey) {
 onMounted(() => {
   steamActive = true;
   if (!stopSteamUiState) stopSteamUiState = steamUi.subscribe(onSteamStateChanged, { publishedMediaState: true });
+  let sawPower = false, wakeGeneration = 0, wakeSuspendSerial = 0, wakeStage = 0;
+  stopSteamPowerObservation = onSharedPowerLifecycle(power => {
+    const first = !sawPower;
+    sawPower = true;
+    if (power.generation <= 0 || power.generation < wakeGeneration) return;
+    const suspendSerial = power.suspendSerial ?? wakeSuspendSerial;
+    if (power.generation !== wakeGeneration || suspendSerial !== wakeSuspendSerial) {
+      if (wakeGeneration > 0) retireSteamObservation();
+      wakeGeneration = power.generation;
+      wakeSuspendSerial = suspendSerial;
+      wakeStage = 0;
+    }
+    if (power.known !== true || power.notificationPending === true) return;
+    // A confirmed F5 permits observation before input or hardware writes are ready.
+    const stage = isSharedPowerLifecycleAdmitted(power) ? 2 :
+      (power.phase === 'resuming' || power.phase === 'ready') && power.resumeReady === true ? 1 : 0;
+    if (stage <= wakeStage) return;
+    wakeStage = stage;
+    if (!first && steamActive && steamReadVisible()) queueSteamResumeRefresh();
+  }, { observeSuspendSerial: true });
   for (const event of steamReadonlyEvents) window.addEventListener(event, queueSteamResumeRefresh);
   // document visibility can return after resume-ready while powerReady is still false.
   // The aggregate lifecycle suppresses that unchanged false state; read-only Steam
@@ -697,8 +759,12 @@ onMounted(() => {
   window.addEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   let subscribing = true;
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
-    if (!visible) cancelSteamPowerWait();
+    if (!visible) {
+      retireAddonRefresh();
+      cancelSteamPowerWait();
+    }
     else if (steamActive) {
+      void flushAddonRefresh();
       // The subscription's synchronous first value is not a visibility edge.
       if (subscribing) steamVisibilitySeedPending = true;
       else queueSteamResumeRefresh();
@@ -718,15 +784,18 @@ onActivated(() => {
 });
 onDeactivated(() => {
   steamActive = false;
+  retireAddonRefresh();
   cancelSteamPowerWait();
 });
 onBeforeUnmount(() => {
   stopSteamUiState?.(); stopSteamUiState = null;
+  stopSteamPowerObservation?.(); stopSteamPowerObservation = null;
   for (const event of steamReadonlyEvents) window.removeEventListener(event, queueSteamResumeRefresh);
   document.removeEventListener('visibilitychange', queueSteamResumeRefresh);
   window.removeEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
   window.removeEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   steamActive = false;
+  retireAddonRefresh();
   cancelSteamPowerWait();
   if (noticeTimer) clearTimeout(noticeTimer);
   stopUiVisibility?.();
@@ -777,7 +846,7 @@ onBeforeUnmount(() => {
 
      </div>
     </template>
-    <template #library>
+    <template #library="{ active: libraryVisible }">
     <section class="card custom-library-entry-card" aria-label="自定义游戏库">
       <h2>Steam自定义游戏库</h2>
       <p class="custom-library-subtitle">扫描非Steam游戏加入Steam大屏</p>
@@ -800,7 +869,7 @@ onBeforeUnmount(() => {
     </section>
 
 
-     <SteamAppearanceCard />
+     <SteamAppearanceCard :steam-state="steamUiState" :steam-state-stale="steamStateStale" :section-visible="libraryVisible" />
     </template>
     <template #wallpaper>
      <section class="steam-group wallpaper-settings" aria-label="动态壁纸与下载设置">
@@ -840,7 +909,7 @@ onBeforeUnmount(() => {
       <div class="decky-connection" :data-tone="deckyConnection.tone">
         <div class="decky-connection-copy" role="status" aria-live="polite">
           <span class="decky-connection-label"><i aria-hidden="true"></i>{{deckyConnection.label}}</span>
-          <span class="decky-connection-detail">{{deckyRepairMessage || deckyConnection.detail}}</span>
+          <span class="decky-connection-detail">{{deckyRepairDetail}}</span>
         </div>
         <button v-if="deckySidebarCanRepair(deckyState)" type="button" class="decky-repair-button"
           data-gp-id="steam-decky-repair" data-gp-row="1" data-gp-col="0"

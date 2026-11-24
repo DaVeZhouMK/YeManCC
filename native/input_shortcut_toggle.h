@@ -99,19 +99,31 @@ class InputShortcutRuntime {
     InputShortcutJson context_ = nullptr;
     InputShortcutJson target_ = nullptr;
     InputShortcutJson motion_ = nullptr;
+    bool revalidate(const InputShortcutJson& input, const std::string& session) {
+        if (active() && context_ != inputShortcutContext(input, session)) clear();
+        return active();
+    }
 public:
     bool active() const { return !context_.is_null(); }
     void clear() { context_ = nullptr; target_ = nullptr; motion_ = nullptr; }
     InputShortcutJson effective(const InputShortcutJson& input, const std::string& session) {
         auto result = effectiveGameInput(input, session);
-        if (!context_.is_null()) {
-            if (context_ != inputShortcutContext(input, session)) clear();
-            else {
-                result["outputTarget"] = target_;
-                result["gyroMotion"] = motion_;
-            }
+        if (revalidate(input, session)) {
+            result["outputTarget"] = target_;
+            result["gyroMotion"] = motion_;
         }
         return result;
+    }
+    bool steamDeckTargetEnabled(const InputShortcutJson& input, const std::string& session) {
+        const auto& base = effectiveGameInputView(input, session);
+        const auto saved = base.find("outputTarget");
+        const auto* target = revalidate(input, session) ? &target_ :
+            (saved != base.end() ? &*saved : nullptr);
+        if (!target || !target->is_object()) return false;
+        const auto persona = target->find("persona");
+        return persona != target->end() && persona->is_string() &&
+            persona->get_ref<const std::string&>() == "steamdeck" &&
+            (inputShortcutBool(*target, "buttonMappingEnabled") || inputShortcutBool(*target, "gyroEnabled"));
     }
     InputShortcutToggleResult toggle(const InputShortcutJson& input, const std::string& session,
         const std::string& action, const std::string& preset, const InputShortcutJson& expectedContext = nullptr) {

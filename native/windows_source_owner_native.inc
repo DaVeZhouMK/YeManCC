@@ -18,7 +18,7 @@ static json inputCaptureWindowsSourceSelectionStatus() {
     value["busy"]=g_windowsSelectionRunning||bool(g_windowsSelectionPending);
     value["acceptingRequests"]=g_windowsSelectionStaOpen;
     value["nativeLeaseCount"]=g_windowsSelectionLeaseCount.load(std::memory_order_acquire);
-    const auto context=std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire);
+    const auto context=g_windowsSelectionWorkerContext.load(std::memory_order_acquire);
     value["workerContextCurrent"]=inputCaptureWindowsSelectionContextCurrent(context);
     const auto cache=std::atomic_load_explicit(&g_windowsProcessingReceipt,std::memory_order_acquire);
     const auto processed=cache?cache->read(GetTickCount64(),currentPowerGeneration()):std::nullopt;
@@ -41,7 +41,7 @@ static bool inputCaptureWindowsSelectionHasWork() {
 static json inputCaptureWindowsSourceSelectionRequest(const json& args,bool returnDefault) {
     using namespace ymcc::sensors;
     try {
-        const auto context=std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire);
+        const auto context=g_windowsSelectionWorkerContext.load(std::memory_order_acquire);
         if(!inputCaptureWindowsSelectionContextCurrent(context))return {{"ok",false},{"reason","processing-context-not-current"}};
         WindowsSelectionRequest request;request.returnDefault=returnDefault;
         if(!returnDefault){
@@ -97,10 +97,10 @@ class WindowsSelectionStaOwner final {
         return !request_||request_->cancelled->load(std::memory_order_acquire)||inputCaptureSensorStopRequested()||
             g_sensorThreadMailbox.hasQueuedWork()||g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready||
             !inputCaptureWindowsSelectionContextCurrent(context_)||
-            std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire)!=context_;
+            g_windowsSelectionWorkerContext.load(std::memory_order_acquire)!=context_;
     }
     ymcc::sensors::stream::CaptureParent parent()const {
-        const auto now=std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire);
+        const auto now=g_windowsSelectionWorkerContext.load(std::memory_order_acquire);
         ymcc::sensors::stream::CaptureParent result;
         if(now){result.scope=now->capture;result.lifetime=now->lifetime;result.currentLifetime=g_windowsSourceModuleLifetime.load();
             result.currentPower=currentPowerGeneration();result.model=ymcc::sensors::selection::fingerprint(now->model);
@@ -143,9 +143,9 @@ class WindowsSelectionStaOwner final {
         }return value;
     }
     void revokePublication() noexcept {
-        const auto projection=std::atomic_load_explicit(&g_windowsPrivateConsumerProjection,std::memory_order_acquire);
+        const auto projection=g_windowsPrivateConsumerProjection.load(std::memory_order_acquire);
         if(projection&&projection->publication)projection->publication->revoke();
-        const auto fence=std::atomic_load_explicit(&g_windowsDefaultPublicationFence,std::memory_order_acquire);if(fence)fence->revoke();
+        const auto fence=g_windowsDefaultPublicationFence.load(std::memory_order_acquire);if(fence)fence->revoke();
     }
     bool reserve(std::uint64_t floor,std::uint64_t& generation) {
         auto observed=g_windowsChoiceCounter->activeBindingGeneration.load(std::memory_order_acquire);
@@ -160,7 +160,7 @@ class WindowsSelectionStaOwner final {
         const auto safety=ymcc::windows_motion::PublicationFence::pending(ymcc::windows_motion::guarded(context_->capture.binding,
             ymcc::windows_motion::retain(g_windowsChoiceCounter,g_windowsChoiceCounter->activeBindingGeneration.load())));
         if(!safety){failure_="default-publication-safety-fence-not-created";return false;}
-        revokePublication();std::atomic_store_explicit(&g_windowsDefaultPublicationFence,safety,std::memory_order_release);managed_=true;
+        revokePublication();g_windowsDefaultPublicationFence.store(safety,std::memory_order_release);managed_=true;
         if(!reserve(floor,generation)){failure_="choice-generation-not-reserved";return false;}
         auto next=target;next.scope.binding=ymcc::windows_motion::retain(g_windowsChoiceCounter,generation);next.scope.power=context_->capture.power;
         next.authority=authority;next.selectionId=request_->proposal.requestId;next.currentPower=currentPowerGeneration();
@@ -171,12 +171,12 @@ class WindowsSelectionStaOwner final {
         if(next.resource){const auto found=leases_.find(next.resource);if(found==leases_.end())return false;
             auto projection=std::make_shared<WindowsPrivateConsumerProjection>();projection->source=found->second->source();projection->selected=next;
             projection->context=context_;projection->parent=parent();projection->processingOwnerAccepted=true;projection->publication=fence;
-            std::atomic_store_explicit(&g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>(projection),std::memory_order_release);
+            g_windowsPrivateConsumerProjection.store(std::shared_ptr<const WindowsPrivateConsumerProjection>(projection),std::memory_order_release);
         }else {
             // Closed permission is installed before removing the private route.
-            std::atomic_store_explicit(&g_windowsDefaultPublicationFence,fence,std::memory_order_release);
+            g_windowsDefaultPublicationFence.store(fence,std::memory_order_release);
             std::atomic_store_explicit(&g_windowsDefaultSelectedRoute,std::make_shared<const Active>(next),std::memory_order_release);
-            std::atomic_store_explicit(&g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>{},std::memory_order_release);
+            g_windowsPrivateConsumerProjection.store(std::shared_ptr<const WindowsPrivateConsumerProjection>{},std::memory_order_release);
         }
         route_=std::move(next);processingConfirmed_=false;return true;
     }
@@ -217,8 +217,8 @@ class WindowsSelectionStaOwner final {
         phase("awaiting-actual-processing");const auto started=GetTickCount64();
         if(started>(std::numeric_limits<std::uint64_t>::max)()-2000){failure_="processing-clock-overflow";return false;}
         auto deadline=started+2000;
-        const auto pendingView=std::atomic_load_explicit(&g_windowsPrivateConsumerProjection,std::memory_order_acquire);
-        const auto pending=pendingView?pendingView->publication:std::atomic_load_explicit(&g_windowsDefaultPublicationFence,std::memory_order_acquire);
+        const auto pendingView=g_windowsPrivateConsumerProjection.load(std::memory_order_acquire);
+        const auto pending=pendingView?pendingView->publication:g_windowsDefaultPublicationFence.load(std::memory_order_acquire);
         while(!cancelled()){
             if(inputHostLifecycleBusy()){
                 const auto paused=GetTickCount64();if(!waitForProcessingOwner())return false;
@@ -248,10 +248,10 @@ class WindowsSelectionStaOwner final {
                     match=match&&sequences[kind]<=part.sequence&&times[kind]<=part.sample.timestamp100ns;}
                 if(match){const auto fence=ymcc::windows_motion::PublicationFence::committed(id.source);
                     if(!fence||cancelled())return false;
-                    if(route_.resource){const auto prior=std::atomic_load_explicit(&g_windowsPrivateConsumerProjection,std::memory_order_acquire);
+                    if(route_.resource){const auto prior=g_windowsPrivateConsumerProjection.load(std::memory_order_acquire);
                         if(!prior||prior->publication!=pending)return false;auto next=std::make_shared<WindowsPrivateConsumerProjection>(*prior);next->publication=fence;
-                        std::atomic_store_explicit(&g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>(next),std::memory_order_release);
-                    }else std::atomic_store_explicit(&g_windowsDefaultPublicationFence,fence,std::memory_order_release);
+                        g_windowsPrivateConsumerProjection.store(std::shared_ptr<const WindowsPrivateConsumerProjection>(next),std::memory_order_release);
+                    }else g_windowsDefaultPublicationFence.store(fence,std::memory_order_release);
                     if(cancelled()){fence->revoke();return false;}processingConfirmed_=true;committedProof_=receipt;return true;
                 }
             }
@@ -329,9 +329,9 @@ public:
         if(context_&&context_->active)context_->active->store(false,std::memory_order_release);
         if(managed_){auto generation=g_windowsChoiceCounter->activeBindingGeneration.load();
             if(generation!=(std::numeric_limits<std::uint64_t>::max)())g_windowsChoiceCounter->activeBindingGeneration.store(generation+1,std::memory_order_release);
-            std::atomic_store(&g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>{});
+            g_windowsPrivateConsumerProjection.store(std::shared_ptr<const WindowsPrivateConsumerProjection>{});
             std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<const Active>{});
-            std::atomic_store(&g_windowsDefaultPublicationFence,std::shared_ptr<const ymcc::windows_motion::PublicationFence>{});}
+            g_windowsDefaultPublicationFence.store(std::shared_ptr<const ymcc::windows_motion::PublicationFence>{});}
         managed_=processingConfirmed_=false;lastNativePoll_=0;committedProof_.reset();context_.reset();request_.reset();route_={};savedDefault_={};g_windowsSourceModuleLifetime.fetch_add(1,std::memory_order_acq_rel);
     }
     void run(const WindowsSelectionRequest& request) {
@@ -339,7 +339,7 @@ public:
         request_=request;failure_.clear();hresult_.reset();readinessWaitUsedMs_=0;
         {std::lock_guard<std::mutex> lock(g_windowsSelectionMx);g_windowsSelectionStatus["processingOwnerWaitMs"]=0;g_windowsSelectionStatus["processingOwnerWaitBudgetMs"]=readinessWaitBudgetMs_;}
         {std::lock_guard<std::mutex> lock(g_windowsSelectionMx);g_windowsSelectionStatus["preparationEvidence"]=nullptr;}
-        const auto context=std::atomic_load_explicit(&g_windowsSelectionWorkerContext,std::memory_order_acquire);
+        const auto context=g_windowsSelectionWorkerContext.load(std::memory_order_acquire);
         if(managed_&&context&&context!=context_&&inputCaptureWindowsSelectionContextCurrent(context)){
             // A new capture/model lifetime cannot inherit the old authority.
             // Start from a closed default projection; this explicit request
@@ -349,9 +349,9 @@ public:
             route_=defaultRoute();savedDefault_=route_;processingConfirmed_=false;
             const auto pending=ymcc::windows_motion::PublicationFence::pending(rawStamp());
             if(!pending)throw std::runtime_error("replacement-context-pending-fence-failed");
-            std::atomic_store(&g_windowsDefaultPublicationFence,pending);
+            g_windowsDefaultPublicationFence.store(pending);
             std::atomic_store(&g_windowsDefaultSelectedRoute,std::make_shared<const Active>(route_));
-            std::atomic_store(&g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>{});
+            g_windowsPrivateConsumerProjection.store(std::shared_ptr<const WindowsPrivateConsumerProjection>{});
         }
         if(!managed_){context_=context;route_=defaultRoute();savedDefault_=route_;}
         Receipt result;

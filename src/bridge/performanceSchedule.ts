@@ -6,7 +6,7 @@ import { detectGameCorePolicy, applyGameCorePolicy, clearGameCorePolicy } from '
 import { getPolicyGame, gamePolicyKey } from './gamePolicyTarget';
 import { fs, powerLifecycle } from './api';
 import { loadGlobalFrameRates, ensureGlobalFrameRates, applyIndependentFrameRates, publishFrameRatesChanged, frameRatePair, dedicatedFrameRatePair, dedicatedFrameRateRecord, frameRateSetting, type FrameRatePair } from './frameRateLimits';
-import { loadSettings, getSettingsGeneration, getSettingsSectionRevision, assertSettingsGeneration, updateSettings, rememberOrdinaryPerformancePreferences, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection, type UnifiedSettings } from './settingsRepository';
+import { loadSettings, validateSettingsRead, getSettingsGeneration, getSettingsSectionRevision, assertSettingsGeneration, updateSettings, rememberOrdinaryPerformancePreferences, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection, type UnifiedSettings } from './settingsRepository';
 import {bootStartupReceiptOwner,captureBootPreferenceWrite,type BootPreferenceWrite} from './bootModeGlobalPreferences';
 import { detectPolicyGame, isPolicyTargetCurrent } from './gamePolicyTarget';
 import { validateGameTarget, isCurrentGameTarget, isGameStatusCurrent } from './gamedetect';
@@ -539,7 +539,7 @@ async function waitForPowerWritesReady(): Promise<boolean> {
   }
   return false;
 }
-async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>): Promise<T> {
+async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>, retryBlockedWrite = true): Promise<T> {
   const gen = ++scheduleOpGen;
   pendingScheduleOps += 1;
   let resolveNext: (() => void) | null = null;
@@ -553,7 +553,7 @@ async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>): Promi
     try {
       return await fn();
     } catch (error) {
-      if (!isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
+      if (!retryBlockedWrite || !isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
       if (gen !== scheduleOpGen) throw new SkipApplyError();
       return await fn();
     }
@@ -688,13 +688,52 @@ export async function restorePerformanceScheduleIfConfigured(expectedSide?: Powe
   });
 }
 
+export type WakePerformanceResult = 'settled' | 'retry-on-ready' | 'unconfirmed';
+
+interface WakePerformanceAttempt {
+  admitted: () => boolean;
+  beginActions: () => void;
+}
+
+export async function restorePerformanceScheduleAfterWake(expectedSide: PowerSide, dedicatedOnly: boolean,
+  ownsWake: () => boolean): Promise<WakePerformanceResult> {
+  let beganActions = false;
+  let accepted = false;
+  let finished = false;
+  const wake: WakePerformanceAttempt = {
+    // After successful handoff the resident policy uses its normal owner checks.
+    admitted: () => accepted || (!finished && ownsWake()),
+    beginActions() {
+      if (!wake.admitted()) throw new SkipApplyError();
+      beganActions = true;
+    },
+  };
+  try {
+    return await withScheduleOp<WakePerformanceResult>(true, async () => {
+      if (!wake.admitted()) return 'retry-on-ready';
+      await restorePerformanceScheduleUnsafe(expectedSide, {
+        dedicatedOnly, automaticOnly: true, restoreRemembered: true, forceRemembered: true,
+      }, undefined, undefined, wake);
+      if (!ownsWake()) return beganActions ? 'unconfirmed' : 'retry-on-ready';
+      accepted = true;
+      return 'settled';
+    }, false);
+  } catch (error) {
+    if (!beganActions && !ownsWake()) return 'retry-on-ready';
+    if (!(error instanceof SkipApplyError)) console.error('[wake performance restore]', error);
+    return 'unconfirmed';
+  } finally {
+    finished = true;
+  }
+}
+
 async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, options: PerformanceScheduleRestoreOptions = {},
   accepted?: (scope: 'global' | 'dedicated', ownership: Exclude<PerformanceScheduleOwnership, 'none'>, application?: ContinuousPerformanceApplication, reused?: true) => void,
-  startup?: ContinuousPerformanceApplicationContext,
+  startup?: ContinuousPerformanceApplicationContext, wake?: WakePerformanceAttempt,
 ): Promise<PerformanceScheduleOwnership> {
     if (scheduleSuspended) return 'none';
     const side = await detectPowerModeReliable();
-    if (!side || (expectedSide && side !== expectedSide)) throw new SkipApplyError();
+    if (wake?.admitted() === false || !side || (expectedSide && side !== expectedSide)) throw new SkipApplyError();
     const master = await loadPerformanceSchedule();
     if (scheduleSuspended || master.suspended) return 'none';
     const game = await detectPolicyGame();
@@ -722,8 +761,8 @@ async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, option
       let application: ContinuousPerformanceApplication | undefined, reused: true | undefined;
       const applied = await applyContinuousBankUnsafe(side, snapshot.bank, {
         ...snapshot.identity, policyTarget: true,
-      }, snapshot.frameRates, undefined, undefined, snapshot.bank.mode === 'manual' && options.restoreRemembered
-        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup);
+      }, snapshot.frameRates, undefined, wake?.admitted, snapshot.bank.mode === 'manual' && options.restoreRemembered
+        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake?.beginActions);
       if (!applied) throw new SkipApplyError();
       const ownership = snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
       accepted?.('dedicated', ownership, application, reused);
@@ -744,9 +783,9 @@ async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, option
       return 'manual';
     }
     let application: ContinuousPerformanceApplication | undefined, reused: true | undefined;
-    const applied = await applyContinuousBankUnsafe(side, snapshot.bank, undefined, snapshot.frameRates, undefined, undefined,
+    const applied = await applyContinuousBankUnsafe(side, snapshot.bank, undefined, snapshot.frameRates, undefined, wake?.admitted,
       snapshot.bank.mode === 'manual' && options.restoreRemembered
-        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup);
+        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake?.beginActions);
     if (!applied) throw new SkipApplyError();
     const ownership = snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
     accepted?.('global', ownership, application, reused);
@@ -1316,6 +1355,22 @@ export function getGameCustomConfig(): GameCustomConfig {
   return gameCustomCache && gameCustomCacheGeneration===getSettingsGeneration()
     ? structuredClone(gameCustomCache):defaultGameCustomConfig();
 }
+const gameCustomDisplaySources=new WeakMap<GameCustomConfig,GameCustomConfig>();
+function copyGameCustomRead(source:GameCustomConfig,access:'ensure'|'read-only'):GameCustomConfig {
+  const copy=structuredClone(source);
+  if(access==='read-only')gameCustomDisplaySources.set(copy,source);
+  return copy;
+}
+// Owners replace the normalized cache rather than editing it after publication.
+// Only a detached read from the exact current source can skip the comparison.
+export function gameCustomDisplayMatches(document:GameCustomConfig): boolean {
+  const current=gameCustomCacheGeneration===getSettingsGeneration()?gameCustomCache:null;
+  const source=gameCustomDisplaySources.get(document);
+  if(source && source===current)return true;
+  // A different read can replace the cache with equivalent contents. Keep the
+  // original full-document check for that case and for untracked copies.
+  return JSON.stringify(current??defaultGameCustomConfig())===JSON.stringify(source??document);
+}
 async function loadGameCustomConfigUnlocked(operation:GameCustomOperation = {
   generation:getSettingsGeneration(),path:gameCustomPath(),active:true,
 }, access:'ensure'|'read-only'='ensure',onTiming?:GameCustomReadTiming):Promise<GameCustomConfig> {
@@ -1331,6 +1386,7 @@ async function loadGameCustomConfigUnlocked(operation:GameCustomOperation = {
     let backup:GameCustomDocument;
     try{backup=await readStandaloneGameCustom(operation.path+'.bak',operation);}
     finally{if(onTiming)finishGameCustomReadTiming(onTiming,'backup',backupStarted);}
+    if(access==='read-only')checkGameCustom(operation);
     let next=standalone.value || backup.value;
     source=standalone.value?'main':backup.value?'backup':'defaults';
     if(!next){
@@ -1349,12 +1405,12 @@ async function loadGameCustomConfigUnlocked(operation:GameCustomOperation = {
     gameCustomCache=next;gameCustomCacheGeneration=operation.generation;
     if (reason !== 'corrupt' && gameCustomRecovery.status !== 'ready') invalidateContinuousPerformanceApplied();
     gameCustomRecovery={status:reason==='corrupt'?'runtime-fallback':'ready',reason:reason==='corrupt'?'corrupt':null,source,persisted:!!standalone.value || (access==='ensure'&&standalone.raw===null&&backup.raw===null),message:reason==='corrupt'?'游戏专属配置损坏，使用空配置；有效编辑保存时将保留原件并修复':''};
-    return structuredClone(next);
+    return copyGameCustomRead(next,access);
   }catch(error){
     checkGameCustom(operation);
     gameCustomCache=defaultGameCustomConfig();gameCustomCacheGeneration=operation.generation;
     gameCustomRecovery={status:'runtime-fallback',reason:error instanceof FutureGameCustomError?'unsupported':reason,source:'defaults',persisted:false,message:String((error as Error)?.message || error)};
-    return structuredClone(gameCustomCache);
+    return copyGameCustomRead(gameCustomCache,access);
   }
 }
 let gameCustomWriteQueue:Promise<void>=Promise.resolve();
@@ -1367,14 +1423,19 @@ function finishGameCustomReadTiming(onTiming:GameCustomReadTiming,stage:GameCust
 }
 let gameCustomLoad:Promise<GameCustomReadResult>|null=null;
 let gameCustomLoadGeneration=-1;
-async function runGameCustomOperation<T>(generation:number,action:(operation:GameCustomOperation)=>Promise<T>,loading=false,readSettlement?:GameCustomReadSettlement,onTiming?:GameCustomReadTiming):Promise<T>{
+async function runGameCustomOperation<T>(generation:number,action:(operation:GameCustomOperation)=>Promise<T>,loading=false,readSettlement?:GameCustomReadSettlement,onTiming?:GameCustomReadTiming,verifyDisplay?:()=>void,access:'ensure'|'read-only'='ensure'):Promise<T>{
   assertSettingsGeneration(generation);
   // Resolve the native-owned root before any standalone I/O; never guess a root
   // after discovery/read failure, and keep migration separate from root policy.
   const started=onTiming?Date.now():0;
-  try{await loadSettings();assertSettingsGeneration(generation);}
+  try{
+    if(access==='read-only')await validateSettingsRead();
+    else await loadSettings();
+    assertSettingsGeneration(generation);
+  }
   finally{if(onTiming)finishGameCustomReadTiming(onTiming,'settings',started);}
-  const operation:GameCustomOperation={generation,path:gameCustomPath(),active:true};
+  verifyDisplay?.();
+  const operation:GameCustomOperation={generation,path:gameCustomPath(),active:true,verify:verifyDisplay};
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{const result=await Promise.race([action(operation),new Promise<never>((_,reject)=>{
     timer=setTimeout(()=>reject(new Error('游戏专属配置操作超时')),GAME_CUSTOM_OPERATION_TIMEOUT_MS);
@@ -1383,10 +1444,12 @@ async function runGameCustomOperation<T>(generation:number,action:(operation:Gam
     return result;
   }catch(error){
     operation.active=false;assertSettingsGeneration(generation);
+    // A retired Decky read is not a failed configuration or recovery source.
+    verifyDisplay?.();
     gameCustomRecovery={status:'runtime-fallback',reason:error instanceof FutureGameCustomError?'unsupported':loading?'read-failed':'write-failed',source:'defaults',persisted:false,message:String((error as Error)?.message || error)};
     if(loading){gameCustomCache=defaultGameCustomConfig();gameCustomCacheGeneration=generation;
       if(readSettlement)readSettlement.recovery={...gameCustomRecovery};
-      return structuredClone(gameCustomCache) as T;}
+      return copyGameCustomRead(gameCustomCache,access) as T;}
     throw error;
   }finally{operation.active=false;if(timer!==undefined)clearTimeout(timer);}
 }
@@ -1395,30 +1458,34 @@ export async function loadGameCustomConfig(access:'ensure'|'read-only'='ensure',
   const onTiming=access==='read-only'?options.onTiming:undefined;
   // Every coalesced read retains its own outcome. A later healthy read must
   // never promote an earlier display fallback into a runtime configuration.
-  const read=async():Promise<GameCustomReadResult>=>{
+  const read=async(verifyDisplay?:()=>void):Promise<GameCustomReadResult>=>{
     const settled:GameCustomReadSettlement={};
-    const value=await runGameCustomOperation(generation,operation=>loadGameCustomConfigUnlocked(operation,access,onTiming),true,settled,onTiming);
+    const value=await runGameCustomOperation(generation,operation=>loadGameCustomConfigUnlocked(operation,access,onTiming),true,settled,onTiming,verifyDisplay,access);
     return {value,recovery:settled.recovery!};
   };
   const consume=(result:GameCustomReadResult)=>{
     if(requireReady&&result.recovery.status!=='ready')throw new Error('游戏专属配置尚未完成可靠读取');
-    return structuredClone(result.value);
+    // A read-only run has one consumer and already returned a detached copy.
+    // Coalesced ensure callers still need separate copies of the shared result.
+    return access==='read-only'?result.value:structuredClone(result.value);
   };
   if(access==='read-only'){
     // Keep the original file/CAS queue and deadlines. Never coalesce a display
     // with an ensure load, whose migration is an ordinary owner's operation.
     const queued=onTiming?Date.now():0,displayCurrent=options.displayCurrent;
+    const verifyDisplay=displayCurrent?()=>{if(!displayCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');}:undefined;
     const run=gameCustomWriteQueue.then(()=>{
       if(onTiming)finishGameCustomReadTiming(onTiming,'queue',queued);
-      // Retired display demand never starts an owner operation or publishes a fallback.
-      if(displayCurrent && !displayCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
-      return read();
+      // Keep the display lease through settings and each file boundary, not
+      // just the queue. Already-dispatched reads settle on their original deadline.
+      verifyDisplay?.();
+      return read(verifyDisplay);
     });
     gameCustomWriteQueue=run.then(()=>{},()=>{});
     return consume(await run);
   }
   if(!gameCustomLoad || gameCustomLoadGeneration!==generation){
-    const run=gameCustomWriteQueue.then(read);
+    const run=gameCustomWriteQueue.then(()=>read());
     gameCustomWriteQueue=run.then(()=>{},()=>{});gameCustomLoad=run;gameCustomLoadGeneration=generation;
   }
   const task=gameCustomLoad;
@@ -2028,7 +2095,8 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
 
 async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousSideControls,
   expectedTarget?: PerformanceScheduleTarget, frameRates?: FrameRatePair, onTdpWrite?: (receipt: NonNullable<ContinuousPerformanceSnapshot['tdpWriteReceipt']>) => void, admit?: () => boolean, completedStartupIntent?: () => string,
-  onCompleted?: (application?: ContinuousPerformanceApplication) => void, startup?: ContinuousPerformanceApplicationContext): Promise<boolean> {
+  onCompleted?: (application?: ContinuousPerformanceApplication) => void, startup?: ContinuousPerformanceApplicationContext,
+  beginActions?: () => void): Promise<boolean> {
   const bank = normalizeContinuousBank(requested, side), generation = getSettingsGeneration(), operation = runningScheduleOpGen;
   const game = await detectPolicyGame(), gameKey = game ? gamePolicyKey(game) : '';
   const tdpDataReady = () => bank.tdpValid !== false && (!game || gameCustomRecovery.status === 'ready');
@@ -2154,6 +2222,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
     onCompleted?.(); // Reuse only this service's existing complete application witness.
     return true;
   }
+  beginActions?.();
   // A later failed rewrite cannot leave an earlier success acknowledged.
   invalidateContinuousPerformanceApplied();
   await disableFloat(); // drain old CPU writes before the new bank can own the hardware.

@@ -341,9 +341,14 @@ const ayaPorts=String.raw`
 using HWND=HANDLE;
 static constexpr unsigned WM_AYA_LIGHTING_ARM=0x8000+829,NOTIFY_FOR_THIS_SESSION=0;
 static HWND g_hwnd=42;
-static std::atomic<bool>g_exitRequested{false};static std::atomic<uint64_t>ayaPower{1};
+static std::atomic<bool>g_exitRequested{false};static std::atomic<uint64_t>ayaPower{1},ayaSuspend{1};
 static std::atomic<bool>g_superJoyLightingStopped{false};static std::atomic<uint64_t>g_superJoyLightingTopology{1};
 static unsigned long long currentPowerGeneration(){return ayaPower.load();}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out) noexcept{
+    out={};if(!powerAllowed||g_exitRequested)return false;
+    out.generation=ayaPower.load();out.suspendSerial=ayaSuspend.load();
+    out.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;return true;
+}
 static json ayaSettings={{"feedback",{{"lighting",{{"enabled",true},{"off",false},{"mode","solid"},{"color","#2ea6ff"},{"color2","#9d7cff"},{"speed",55},{"brightness",65}}}}}};
 static json ymSettingsSection(const char*){return ayaSettings;}
 static std::map<std::string,std::function<json(const json&)>>g_cmds;
@@ -358,7 +363,7 @@ static DWORD GetLastError(){return 5;}
 const legacyHelper=block('static json ymccLightSetterApply('),legacyAdmissionStart=legacyHelper.indexOf('    const bool legacyReturnDebtRoute = '),legacyAdmissionEnd=legacyHelper.indexOf('    const bool independentCore = ',legacyAdmissionStart);
 if(legacyAdmissionStart<0||legacyAdmissionEnd<legacyAdmissionStart)throw Error('Legacy lighting actual admission boundary absent');
 const legacyAdmission='static json actualLegacyLightingAdmission(){\n'+legacyHelper.slice(legacyAdmissionStart,legacyAdmissionEnd)+'\nreturn json{{"ok",true}};\n}\n';
-cpp=cpp.replace('static json execute(const json& a)',include('native/aya_lighting_write_owner.h')+'\n'+ayaPorts+'\n'+block('static void superJoyLightingOwnerResume() noexcept {')+'\n'+ayaRuntime+'\n'+legacyAdmission+'static json execute(const json& a)');
+cpp=cpp.replace('static json execute(const json& a)',include('native/sleep_power_state.h')+'\n'+include('native/aya_lighting_write_owner.h')+'\n'+ayaPorts+'\n'+block('static void superJoyLightingOwnerResume() noexcept {')+'\n'+ayaRuntime+'\n'+legacyAdmission+'static json execute(const json& a)');
 if(selectedCase==='aya-lifecycle'||selectedCase==='selector'){
  if(selectedCase==='aya-lifecycle'){
   const baseEvent=block('static bool nativeLifecycleEventIsBase(const char* event) {');
@@ -372,7 +377,8 @@ if(selectedCase==='aya-lifecycle'||selectedCase==='selector'){
 int main(int argc,char**argv){std::ifstream f(argv[1]);json catalog;f>>catalog;int checks=0;std::vector<std::string>actual,failures;unsigned admittedEntries=0,rejectedEntries=0;
 auto check=[&](bool ok,const std::string& why){++checks;if(!ok)throw std::runtime_error(why);};
 const json saved=ayaSettings;
-auto resetAya=[&]{reset();ayaSettings=saved;ayaLastHelper=json::object();ayaHelperBeforeWrite={};ayaJobs.clear();g_cmds.clear();ayaPoolAllowed=ayaNotifyOk=true;ayaPower.fetch_add(1);g_exitRequested=false;g_ayaLightingStopping=false;g_ayaLightingRestoreReasons=0;g_ayaLightingRestoreQueued=false;g_ayaLightingLastResume=~0ull;g_ayaLightingSessionArmed=g_ayaLightingNotifyRegistered=false;g_ayaLightingIdentityPostPending=false;ayaRegistrations=ayaUnregistrations=ayaPosted=0;g_ayaLightingWrites.invalidate();g_machineIdentity.family=YmccFamily::Ayanero;g_machineIdentity.deviceClass="HandheldCompanion.Devices.AYANEOAIR1S";g_legacyLightSetterRetiredProcess=0;fakeRetiredSignaled=false;g_cmds["gamepad.setLed"]=[](const json& a){return execute(a);};};
+auto resetAya=[&]{reset();ayaSettings=saved;ayaLastHelper=json::object();ayaHelperBeforeWrite={};ayaJobs.clear();g_cmds.clear();ayaPoolAllowed=ayaNotifyOk=true;ayaPower.fetch_add(1);ayaSuspend=1;g_exitRequested=false;g_ayaLightingStopping=false;g_ayaLightingRestoreReasons=0;g_ayaLightingRestoreQueued=false;g_ayaLightingSessionArmed=g_ayaLightingNotifyRegistered=false;g_ayaLightingIdentityPostPending=false;ayaRegistrations=ayaUnregistrations=ayaPosted=0;g_ayaLightingWrites.invalidate();g_machineIdentity.family=YmccFamily::Ayanero;g_machineIdentity.deviceClass="HandheldCompanion.Devices.AYANEOAIR1S";g_legacyLightSetterRetiredProcess=0;fakeRetiredSignaled=false;g_cmds["gamepad.setLed"]=[](const json& a){return execute(a);};};
+auto nativeAyaLightingResume=[&]{ymcc::sleeppower::SharedPowerV1 ready;return captureSharedPowerLifecycle(ready)&&nativeAyaLightingPublicReady(ready);};
 auto drain=[&]{unsigned bounded=0;while(!ayaJobs.empty()){check(++bounded<=4,"unbounded-restore-worker-loop");auto job=std::move(ayaJobs.front());ayaJobs.pop_front();job();}};
 auto run=[&](const char* name,auto body){actual.push_back(name);resetAya();try{body();}catch(const std::exception& e){failures.push_back(std::string(name)+":"+e.what());}};
 run("catalog-scope",[&]{
@@ -394,9 +400,26 @@ run("saved-opt-in",[&]{ayaSettings["feedback"]["lighting"]["enabled"]=false;nati
 run("off-intent",[&]{ayaSettings["feedback"]["lighting"]["off"]=true;nativeAyaLightingRequestRestore(4);drain();check(helperCalls==1&&!ayaLastHelper["enabled"].get<bool>(),"saved-off-became-on");});
 run("actual-unlock-subscription",[&]{nativeAyaLightingIdentityReady();check(ayaPosted==1,"identity-not-posted");nativeAyaLightingIdentityReady();check(ayaPosted==1,"identity-post-not-coalesced");nativeAyaLightingSessionArm(g_hwnd);nativeAyaLightingSessionArm(g_hwnd);check(ayaRegistrations==1&&ayaJobs.size()==1,"session-arm-not-once");drain();check(helperCalls==1,"startup-did-not-reapply");nativeAyaLightingRequestRestore(8);drain();check(helperCalls==2,"unlock-did-not-reapply");});
 run("event-coalescing",[&]{for(int i=0;i<50;i++)nativeAyaLightingRequestRestore(4);check(ayaJobs.size()==1,"event-storm-queued-many-writers");drain();check(helperCalls==1,"event-storm-repeated-device-writes");});
-run("resume-once-per-generation",[&]{for(int i=0;i<20;i++)nativeAyaLightingResume();check(ayaJobs.size()==1,"ready-queued-many");drain();check(helperCalls==1,"ready-did-not-write");nativeAyaLightingResume();drain();check(helperCalls==1,"same-ready-wrote-again");ayaPower.fetch_add(1);nativeAyaLightingResume();drain();check(helperCalls==2,"new-ready-missed");});
+run("resume-once-per-generation",[&]{
+ for(int i=0;i<20;i++)nativeAyaLightingResume();check(ayaJobs.size()==1,"ready-queued-many");drain();check(helperCalls==1,"ready-did-not-write");nativeAyaLightingResume();drain();check(helperCalls==1,"same-ready-wrote-again");ayaPower.fetch_add(1);nativeAyaLightingResume();drain();check(helperCalls==2,"new-ready-missed");
+ ayaPower.fetch_add(1);ayaPoolAllowed=false;check(!nativeAyaLightingResume()&&ayaJobs.empty(),"refused-ready-queued");ayaPoolAllowed=true;check(nativeAyaLightingResume(),"ready-redelivery-not-accepted");drain();check(helperCalls==3,"same-ready-refused-once-never-recovered");
+ ymcc::sleeppower::SharedPowerV1 old;check(captureSharedPowerLifecycle(old),"could-not-capture-ready");
+ ayaSuspend.fetch_add(1);check(nativeAyaLightingResume()&&ayaJobs.size()==1,"same-generation-new-suspend-suppressed");
+ ayaSuspend.fetch_add(1);check(nativeAyaLightingResume()&&ayaJobs.size()==2,"old-job-prevented-new-ready");
+ check(!nativeAyaLightingPublicReady(old),"late-prior-ready-admitted");
+ auto obsolete=std::move(ayaJobs.front());ayaJobs.pop_front();obsolete();check(helperCalls==3,"old-job-wrote-after-new-suspend");
+ drain();check(helperCalls==4,"stale-worker-consumed-new-ready");
+ ymcc::sleeppower::SharedPowerV1 duplicate;captureSharedPowerLifecycle(duplicate);++duplicate.publicationRevision;
+ nativeAyaLightingPublicReady(duplicate);drain();check(helperCalls==4,"metadata-only-ready-replayed-lighting");
+ ayaSuspend.fetch_add(1);g_cmds["gamepad.setLed"]=[&](const json& request){ayaSuspend.fetch_add(1);return execute(request);};
+ nativeAyaLightingResume();drain();check(helperCalls==4,"write-admission-accepted-old-suspend-serial");
+ g_cmds["gamepad.setLed"]=[](const json& request){return execute(request);};nativeAyaLightingResume();drain();check(helperCalls==5,"write-time-revocation-blocked-successor");
+ ayaSuspend.fetch_add(1);ayaPoolAllowed=false;check(!nativeAyaLightingResume(),"manual-priority-control-did-not-refuse");
+ auto manual=nativeAyaSavedLightingRequest(ayaSettings);manual["color"]="#ff0000";check(execute(manual).value("ok",false),"manual-after-refusal-rejected");
+ ayaPoolAllowed=true;nativeAyaLightingResume();drain();check(helperCalls==6&&ayaLastHelper["red"]==255,"redelivery-overwrote-later-manual");
+});
 run("manual-replaces-queued-restore",[&]{nativeAyaLightingRequestRestore(4);ayaSettings["feedback"]["lighting"]["color"]="#ff0000";auto manual=nativeAyaSavedLightingRequest(ayaSettings);check(execute(manual).value("ok",false),"manual-rejected");drain();check(helperCalls==1&&ayaLastHelper["red"]==255,"queued-restore-overwrote-manual");});
-run("settings-change-before-acquire",[&]{auto request=nativeAyaSavedLightingRequest(ayaSettings);request["_ayaLightingSequence"]=g_ayaLightingWrites.sequence();request["_ayaLightingPower"]=ayaPower.load();request["_ayaLightingModel"]=g_machineIdentity.deviceClass;ayaSettings["feedback"]["lighting"]["enabled"]=false;const auto result=execute(request);check(!result.value("ok",true)&&result.value("reason",std::string{})=="aya-lighting-saved-settings-changed"&&helperCalls==0,"stale-enabled-request-wrote");});
+run("settings-change-before-acquire",[&]{auto request=nativeAyaSavedLightingRequest(ayaSettings);request["_ayaLightingSequence"]=g_ayaLightingWrites.sequence();request["_ayaLightingPower"]=ayaPower.load();request["_ayaLightingSuspendSerial"]=ayaSuspend.load();request["_ayaLightingModel"]=g_machineIdentity.deviceClass;ayaSettings["feedback"]["lighting"]["enabled"]=false;const auto result=execute(request);check(!result.value("ok",true)&&result.value("reason",std::string{})=="aya-lighting-saved-settings-changed"&&helperCalls==0,"stale-enabled-request-wrote");});
 run("model-change",[&]{nativeAyaLightingRequestRestore(4);g_machineIdentity.deviceClass="HandheldCompanion.Devices.AYANEOKUN";drain();check(helperCalls==0,"old-model-restore-wrote");});
 run("power-change",[&]{nativeAyaLightingRequestRestore(4);ayaPower.fetch_add(1);drain();check(helperCalls==0,"old-power-restore-wrote");powerAllowed=false;nativeAyaLightingRequestRestore(4);drain();check(helperCalls==0,"closed-power-gate-wrote");});
 run("exit-cancels",[&]{nativeAyaLightingRequestRestore(4);g_exitRequested=true;drain();check(helperCalls==0,"exit-restore-wrote");});
@@ -426,7 +449,7 @@ json report={{"status",failures.empty()?"PASS":"FAIL"},{"cases",actual.size()},{
 }
 `;
  const at=cpp.indexOf('int main(int argc,char**argv)');if(at<0)throw Error('Missing existing selector main');const candidate=selectedCase==='aya-lifecycle'?cpp.slice(0,at)+tests:cpp;
- const negative=candidate.replace('    nativeAyaLightingRequestRestore(2);','    (void)generation; // negative: committed Ready drops its lighting request');const ownerNegative=candidate.replace('            superJoyLightingOwnerResume();','            (void)route; // negative: lighting still waits for input capture');if(selectedCase==='aya-lifecycle'&&negative===candidate)throw Error('Missing actual Ready request control');
+ const negative=candidate.replace('if(!poolSubmit([power,model=context.model,sequence]{nativeAyaLightingRunRestore(power,model,sequence,2);}))return false;','// negative: public Ready records progress without submitting its lighting request');const ownerNegative=candidate.replace('            superJoyLightingOwnerResume();','            (void)route; // negative: lighting still waits for input capture');if(selectedCase==='aya-lifecycle'&&negative===candidate)throw Error('Missing actual Ready request control');
  const sdkSessionBindings='#define WIN32_LEAN_AND_MEAN\n#define NOMINMAX\n#include <Windows.h>\n#include <wtsapi32.h>\n#pragma comment(lib,"Wtsapi32.lib")\n#include "json.hpp"\nusing json=nlohmann::json;\n'+include('native/aya_lighting_write_owner.h')+'\nstatic HWND g_hwnd=nullptr;\nstatic constexpr UINT WM_AYA_LIGHTING_ARM=WM_APP+829;\n'+ayaRuntime.slice(ayaRuntime.indexOf('static ymcc::ayaLighting::WriteOwner g_ayaLightingWrites;'),ayaRuntime.indexOf('static ymcc::ayaLighting::Context nativeAyaLightingContext()'))+'\nstatic ymcc::ayaLighting::Context nativeAyaLightingContext(){return {};}\nstatic void nativeAyaLightingRequestRestore(unsigned){}\nstatic void appendNativeLifecycleLog(const char*,const json&){}\n'+['static void nativeAyaLightingIdentityReady() {','static void nativeAyaLightingSessionArm(','static void nativeAyaLightingSessionStop('].map(block).join('\n')+'\nint main(){return 0;}\n';
  const tool='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat',preamble=calibrationToolchainPreamble(tool),steps=[];
  const run=(exe,argv,label,exit=0)=>{const started=Date.now(),result=spawnSync(exe,argv,{cwd:out,encoding:'utf8',windowsHide:true,timeout:90000,maxBuffer:4*1024*1024});fs.writeFileSync(path.join(out,label+'.stdout.log'),result.stdout??'',{flag:'wx'});fs.writeFileSync(path.join(out,label+'.stderr.log'),result.stderr??'',{flag:'wx'});steps.push({label,exitCode:result.status,elapsedMs:Date.now()-started,error:result.error?String(result.error):null});if(result.status!==exit)throw Error(label+' wrong exit '+result.status);return result.stdout;};

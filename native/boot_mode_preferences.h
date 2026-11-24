@@ -51,6 +51,7 @@ inline bool delta(Json& target, const Json& before, const Json& next) {
 /** Called inside the original settings lock, only for explicit ordinary saves.
  * Runtime/startup restoration never recaptures its effective scene as global. */
 inline bool rememberSection(Json& document, const std::string& section, const Json& next, const Json& intent = Json()) {
+    if (section == "sleep") return true; // Shared sleep settings never depend on a mode document.
     auto extensions = document.find("extensions");
     if (extensions == document.end() || !extensions->is_object()) return true;
     auto mode = extensions->find("bootModes");
@@ -73,17 +74,6 @@ inline bool rememberSection(Json& document, const std::string& section, const Js
                 }
             }
         } else if (oldProfiles != profiles) changed = delta(global["touch"]["profiles"], oldProfiles, profiles);
-    } else if (section == "sleep") {
-        for (const char* key : {"mode", "enabled", "pauseGameOnSleep", "retryOnEntryFailure", "retryOnSleepTimeout", "retryOnNonUserWake", "wakePasswordEnabled", "sleepPowerPlanOptimizationEnabled", "staticWakeAutoScanEnabled"}) {
-            if (intent.is_object() && !intent.contains(key)) continue;
-            if (next.contains(key) && (intent.is_object() || !before.contains(key) || before[key] != next[key]))
-                changed = (intent.is_object() ? rememberValue(global["sleep"]["config"][key],next[key]) :
-                    delta(global["sleep"]["config"][key], before.value(key, Json()), next[key])) || changed;
-        }
-        if ((!intent.is_object() || intent.contains("autoWakeRecovery")) && next.contains("autoWakeRecovery") &&
-            (intent.is_object() || before.value("autoWakeRecovery", Json()) != next["autoWakeRecovery"]))
-            changed = (intent.is_object() ? rememberValue(global["sleep"]["steamAutoRecovery"],next["autoWakeRecovery"]) :
-                delta(global["sleep"]["steamAutoRecovery"], before.value("autoWakeRecovery", Json()), next["autoWakeRecovery"])) || changed;
     } else if (section=="extensions") {
         const auto old=before.value("deckySidebar",Json::object()), value=next.value("deckySidebar",Json::object());
         const bool explicitEnabled=intent.is_object() && intent.contains("deckySidebar") && intent["deckySidebar"].is_object() && intent["deckySidebar"].contains("enabled");

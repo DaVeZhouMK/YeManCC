@@ -56,7 +56,13 @@ static void publish(int code,unsigned long long power,unsigned long long demand=
 #endif
 }
 static std::mutex g_nativeMonitorMx;static std::condition_variable g_nativeMonitorCv;static bool g_nativeMonitorStop=false;
+[[maybe_unused]] static std::atomic<bool> g_nativeMonitorPowerWaiting{false};
+static unsigned monitorInvalidations=0;
+[[maybe_unused]] static void monitorSnapshotInvalidate(){++monitorInvalidations;}
+struct MonitorPowerPort {unsigned changes=0;void sharedPowerChanged(){++changes;}};
+[[maybe_unused]] static MonitorPowerPort g_desktopMonitorHud,g_monitorNoticeCarrier;
 // ACTUAL_POWER_WAIT
+// ACTUAL_POWER_DELIVERY
 namespace ymcc::hwinfo {
 static unsigned fixtureManagerCalls=0;static std::function<void()> fixtureManagerStep;static std::function<bool()> fixtureCancellation;
 inline Result fixtureManagerRun(Request,std::function<bool()> cancelled,bool){++fixtureManagerCalls;fixtureCancellation=cancelled;if(fixtureManagerStep)fixtureManagerStep();return cancelled&&cancelled()?Result{15,false,ERROR_CANCELLED,"fixture cancelled",{}}:Result{};}
@@ -87,8 +93,19 @@ static int runSharedPower(const char* output){json checks=json::array();bool ok=
  const auto limit=GetTickCount64()+2000;while(!sharedReads&&GetTickCount64()<limit)Sleep(1);const auto reads=sharedReads.load();const bool blocked=future.wait_for(std::chrono::milliseconds(40))==std::future_status::timeout;check("collector shared wait performs no periodic power query",blocked&&reads==sharedReads.load());
  {std::lock_guard<std::mutex> lock(g_nativeMonitorMx);sharedGate=true;g_nativeMonitorCv.notify_all();}const bool ready=future.wait_for(std::chrono::seconds(2))==std::future_status::ready;if(!ready){std::lock_guard<std::mutex> lock(g_nativeMonitorMx);g_nativeMonitorStop=true;g_nativeMonitorCv.notify_all();}waiter.join();check("shared owner notification resumes the same collector wait",ready&&future.get());
  reset();sharedGate=false;sharedReads=0;std::promise<bool> stopped;auto stopFuture=stopped.get_future();std::thread finalWaiter([&]{ymcc::sleeppower::SharedPowerV1 p;stopped.set_value(monitorWaitForSharedPower(p));});const auto stopLimit=GetTickCount64()+2000;while(!sharedReads&&GetTickCount64()<stopLimit)Sleep(1);{std::lock_guard<std::mutex> lock(g_nativeMonitorMx);g_nativeMonitorStop=true;g_nativeMonitorCv.notify_all();}finalWaiter.join();check("application stop returns the suspended collector without Ready",!stopFuture.get());g_nativeMonitorStop=false;
+ reset();monitorSharedPowerChanged();const auto invalidations=monitorInvalidations,hud=g_desktopMonitorHud.changes,notice=g_monitorNoticeCarrier.changes;
+ sharedKnown=false;sharedReads=0;std::promise<bool> duplicateReady;auto duplicateFuture=duplicateReady.get_future();
+ std::thread duplicateWaiter([&]{ymcc::sleeppower::SharedPowerV1 p;duplicateReady.set_value(monitorWaitForSharedPower(p)&&p.generation==powerGeneration);});
+ const auto duplicateLimit=GetTickCount64()+2000;while(!sharedReads&&GetTickCount64()<duplicateLimit)Sleep(1);
+ const bool readUnknown=sharedReads!=0;
+ {std::lock_guard<std::mutex> lock(g_nativeMonitorMx);sharedKnown=true;++sharedRevision;}
+ monitorSharedPowerChanged();const bool duplicateDelivered=duplicateFuture.wait_for(std::chrono::milliseconds(500))==std::future_status::ready;
+ if(!duplicateDelivered){std::lock_guard<std::mutex> lock(g_nativeMonitorMx);g_nativeMonitorStop=true;g_nativeMonitorCv.notify_all();}
+ duplicateWaiter.join();g_nativeMonitorStop=false;
+ check("same-scope Ready wakes a collector parked after transient Unknown without replaying presentation",readUnknown&&duplicateDelivered&&duplicateFuture.get()&&!g_nativeMonitorPowerWaiting&&monitorInvalidations==invalidations&&g_desktopMonitorHud.changes==hud&&g_monitorNoticeCarrier.changes==notice);
 #else
  check("collector shared wait performs no periodic power query",false);check("shared owner notification resumes the same collector wait",false);check("application stop returns the suspended collector without Ready",false);
+ check("same-scope Ready wakes a collector parked after transient Unknown without replaying presentation",false);
 #endif
  const json result={{"ok",ok},{"selection","shared-power"},{"cases",checks},{"systemPowerQueries",0},{"hardwareWrites",false},{"error",""}};const auto text=result.dump(2);const auto f=CreateFileW(std::filesystem::path(output).c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(f==INVALID_HANDLE_VALUE)return 2;DWORD wrote=0;const bool saved=WriteFile(f,text.data(),(DWORD)text.size(),&wrote,nullptr)&&wrote==text.size();CloseHandle(f);std::cout<<text;return saved?(ok?0:3):2;
 }
@@ -99,6 +116,7 @@ static int runScopeRearm(const char* output){
   if(mode==2)++collectionPower.publicationRevision;else ++collectionPower.observedNotificationSequence;
   ymcc::monitorrecovery::RetryBudget hwRecoveryBudget;hwRecoveryBudget.waiting=mode==1;hwRecoveryBudget.retryAt=123456;
   bool g_nativeHWiNFORecoveryArmed=false;struct Reset {unsigned count=0;void reset(){++count;}void stop(){++count;}}hwParseReuse,hwProducerStall,frameOutput,batteryModel,batteryFallback,fpsLimitReader,fileSystemReader;
+  [[maybe_unused]] Reset gameDetection;
   unsigned g_monitorFreshness=9;long long g_monitorLastFreshMs=42;
 // ACTUAL_COLLECTION_SCOPE
   if(mode==0)check("same-generation Ready rearms cancelled recovery",g_nativeHWiNFORecoveryArmed&&!hwRecoveryBudget.waiting&&hwParseReuse.count==1);

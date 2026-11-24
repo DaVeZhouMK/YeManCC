@@ -19,7 +19,7 @@ template<class Api=Win32> class Names {
     const wchar_t* names_[2];
     SRWLOCK lock_=SRWLOCK_INIT;
     std::atomic<bool> ready_{false};
-    HWND owner_=nullptr;
+    std::atomic<HWND> owner_{nullptr};
     ATOM atoms_[2]{};
     struct Presence {Names& self;bool found=false;};
     static int CALLBACK existing(HWND,wchar_t* name,HANDLE,ULONG_PTR context) noexcept {
@@ -41,7 +41,7 @@ public:
     bool attach(HWND window) noexcept {
         if(!window)return false;
         AcquireSRWLockExclusive(&lock_);
-        if(owner_){ReleaseSRWLockExclusive(&lock_);return false;}
+        if(owner_.load(std::memory_order_relaxed)){ReleaseSRWLockExclusive(&lock_);return false;}
         Presence presence{*this};
         SetLastError(ERROR_SUCCESS);
         const int enumerated=Api::enumerate(window,&existing,reinterpret_cast<LPARAM>(&presence));
@@ -57,19 +57,24 @@ public:
             if(first)(void)Api::remove(window,names_[0]);
             ReleaseSRWLockExclusive(&lock_);return false;
         }
-        owner_=window;atoms_[0]=a;atoms_[1]=b;
+        atoms_[0]=a;atoms_[1]=b;
         ready_.store(true,std::memory_order_release);
+        owner_.store(window,std::memory_order_release);
         ReleaseSRWLockExclusive(&lock_);return true;
     }
     void detach(HWND window) noexcept {
         AcquireSRWLockExclusive(&lock_);
-        if(owner_==window&&owner_){
+        if(window&&owner_.load(std::memory_order_relaxed)==window){
+            owner_.store(nullptr,std::memory_order_release);
             ready_.store(false,std::memory_order_release);
-            atoms_[0]=atoms_[1]=0;owner_=nullptr;
+            atoms_[0]=atoms_[1]=0;
             (void)Api::remove(window,names_[1]);
             (void)Api::remove(window,names_[0]);
         }
         ReleaseSRWLockExclusive(&lock_);
+    }
+    bool isAttachedWindow(HWND window) const noexcept {
+        return window&&owner_.load(std::memory_order_acquire)==window;
     }
     HANDLE get(HWND window,unsigned index) noexcept {
         if(!ready_.load(std::memory_order_acquire))return Api::get(window,names_[index]);

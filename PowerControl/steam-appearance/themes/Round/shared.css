@@ -90,12 +90,6 @@ div.gamepadcontextmenu_contextMenuContents_sIgB- {
 .gamepadhomewhatsnew_EventImage_116GS {
   border-radius: var(--round-radius-size) var(--round-radius-size) 0px 0px;
 }
-.gamepadhomewhatsnew_EventPreviewOuterWrapper_10b1V:hover
-  .gamepadhomewhatsnew_EventImage_116GS,
-.gpfocus .gamepadhomewhatsnew_EventImage_116GS {
-  border-radius: calc(var(--round-radius-size) + 10px)
-    calc(var(--round-radius-size) + 10px) 0px 0px;
-}
 .gamepadhomewhatsnew_EventInfo_6TGe7 {
   border-radius: 0px 0px var(--round-radius-size) var(--round-radius-size);
 }
@@ -466,4 +460,4 @@ button.appdetailsactivitysection_FetchMoreContainer_39Zur.DialogButton.gamepaddi
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-f2a3b738282d5024: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-a57f2e4999c6cc47: 1; }
+:root { --ymcc-content-cb3b4b8dab818b30: 1; }

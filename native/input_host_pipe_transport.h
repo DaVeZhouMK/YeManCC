@@ -310,7 +310,8 @@ public:
     }
     Result run(HANDLE source,Kind kind,void* data,DWORD size,DWORD timeoutMs,DWORD graceMs=50,
                IssueGuard issueGuard=nullptr,void* issueContext=nullptr,
-               Cancellation cancellation={},SlowReadAllowance slowRead={})noexcept{
+               Cancellation cancellation={},SlowReadAllowance slowRead={},
+               IssueGuard claimWrite=nullptr,void* claimContext=nullptr)noexcept{
         Result r;
         if(slowRead.totalMs && (kind!=Kind::Read || !slowRead.current || !timeoutMs ||
            timeoutMs==INFINITE || slowRead.totalMs<=timeoutMs || slowRead.totalMs>kMaxSchedulingReadMs)){
@@ -385,6 +386,10 @@ public:
                     r.error=scopeState==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE;
                     releaseOperation(storage);return r;
                 }
+            }
+            // A recovery claim spends its budget only when WriteFile will be issued.
+            if(kind==Kind::Write && claimWrite && !claimWrite(claimContext)) {
+                r.contextRejected=true;r.error=ERROR_OPERATION_ABORTED;releaseOperation(storage);return r;
             }
             op.accounted=true;payload_+=payloadSize;pending_.fetch_add(1,std::memory_order_release);++nextOperation_;++admitted_;
             r.admitted=true;r.operation=op.id;r.lease=op.lease->id;

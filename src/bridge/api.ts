@@ -32,11 +32,11 @@ export const fs = {
     invoke<string | null>('fs.getFileIcon', { path }, { timeoutMs: 6000 }),
   // Fan small-file reads opt into a complete, size-bounded native range receipt.
   // Other consumers retain the existing command and default waiting behavior.
-  readTextFile: (path: string, maxBytes = 1 << 20, options?: { timeoutMs?: number; bounded?: boolean; textEncoding?: 'windows-config' }): Promise<string> => {
+  readTextFile: (path: string, maxBytes = 1 << 20, options?: { timeoutMs?: number; signal?: AbortSignal; bounded?: boolean; textEncoding?: 'windows-config' }): Promise<string> => {
     if (!options?.bounded) return invoke<string>('fs.readTextFile', { path, maxBytes, ...(options?.textEncoding ? { textEncoding: options.textEncoding } : {}) }, options);
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return Promise.reject(new Error('FILE_READ_LIMIT_INVALID'));
     return invoke<{ content: string; offset: number; size: number }>('fs.readTextRange',
-      { path, offset: 0, maxBytes }, { timeoutMs: options.timeoutMs }).then(receipt => {
+      { path, offset: 0, maxBytes }, { timeoutMs: options.timeoutMs, signal: options.signal }).then(receipt => {
       if (!receipt || typeof receipt.content !== 'string' || receipt.offset !== 0 || !Number.isSafeInteger(receipt.size) || receipt.size < 0)
         throw new Error('FILE_READ_RECEIPT_INVALID');
       if (receipt.size > maxBytes) throw new Error('FILE_READ_LIMIT_EXCEEDED');
@@ -58,7 +58,7 @@ export const fs = {
   // FAN-927 §2.2：部署边界只需要对**少量清单文件**取摘要。复用 native 进程内 SHA-256，
   // 不再为每个依赖文件起一次 certutil 子进程；正常开启不遍历依赖目录。
   sha256File: (path: string) => invoke<string>('fs.sha256File', { path }, { timeoutMs: 15000 }),
-  readDir: (path: string) => invoke<any[]>('fs.readDir', { path }),
+  readDir: (path: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => invoke<any[]>('fs.readDir', { path }, options),
   stat: (path: string) => invoke<any>('fs.stat', { path }),
   mkdir: (path: string, timeoutMs?: number, options: BootPreferenceWrite = {}) => {
     const submitted=captureBootPreferenceWrite(options);
@@ -136,12 +136,13 @@ export const losslessRuntime = {
 
 // The same native low-priority catalog owner used at YMCC startup.
 export const optiClient = {
-  prepareCatalog: () => invoke<{status:'prepared'|'running'|'unavailable'|'busy'|'cancelled'|'error';exitCode?:number;focused?:boolean}>('optiClient.prepareCatalog'),
+  prepareCatalog: (executablePath?: string) => invoke<{status:'prepared'|'running'|'unavailable'|'busy'|'cancelled'|'error';exitCode?:number;focused?:boolean}>('optiClient.prepareCatalog', executablePath ? { executablePath } : undefined),
 };
 
 export interface ShellIntentAdmission {
   expectedPowerGeneration:number;
   expectedPowerNotificationSequence?:number;
+  expectedPowerSuspendSerial?:number;
   expectedMirrorPeer?:{connection:string;runId:string;connectionRevision:number};
   requireSleepPowerPlanEnabled?:true;
 }
@@ -149,11 +150,13 @@ export const shell = {
   run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext, intentAdmission?: ShellIntentAdmission, bootContext?:BootPreferenceContext) => {
     if(intentAdmission!==undefined&&(!intentAdmission||!Number.isSafeInteger(intentAdmission.expectedPowerGeneration)||intentAdmission.expectedPowerGeneration<=0))throw Error('SHELL_INTENT_INVALID_GENERATION');
     if(intentAdmission?.expectedPowerNotificationSequence!==undefined&&(!Number.isSafeInteger(intentAdmission.expectedPowerNotificationSequence)||intentAdmission.expectedPowerNotificationSequence<0))throw Error('SHELL_INTENT_INVALID_NOTIFICATION_SEQUENCE');
+    const expectedPowerSuspendSerial = intentAdmission?.expectedPowerSuspendSerial;
+    if(expectedPowerSuspendSerial!==undefined&&(!Number.isSafeInteger(expectedPowerSuspendSerial)||expectedPowerSuspendSerial<0))throw Error('SHELL_INTENT_INVALID_SUSPEND_SERIAL');
     const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));
     // Native 负责终止超时进程树；前端只提供稍晚的保险超时，避免响应链异常时 Promise 永久悬挂。
     return invoke<RunResult>(
       'shell.run',
-      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}), ...(intentAdmission===undefined?{}:{expectedPowerGeneration:intentAdmission.expectedPowerGeneration,...(intentAdmission.expectedPowerNotificationSequence===undefined?{}:{expectedPowerNotificationSequence:intentAdmission.expectedPowerNotificationSequence}),...(intentAdmission.expectedMirrorPeer===undefined?{}:{expectedMirrorPeer:intentAdmission.expectedMirrorPeer}),...(intentAdmission.requireSleepPowerPlanEnabled===true?{requireSleepPowerPlanEnabled:true}:{})}),...(bootContext===undefined?{}:{bootContext:structuredClone(bootContext)}) },
+      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}), ...(intentAdmission===undefined?{}:{expectedPowerGeneration:intentAdmission.expectedPowerGeneration,...(intentAdmission.expectedPowerNotificationSequence===undefined?{}:{expectedPowerNotificationSequence:intentAdmission.expectedPowerNotificationSequence}),...(intentAdmission.expectedMirrorPeer===undefined?{}:{expectedMirrorPeer:intentAdmission.expectedMirrorPeer}),...(intentAdmission.requireSleepPowerPlanEnabled===true?{requireSleepPowerPlanEnabled:true}:{})}),...(bootContext===undefined?{}:{bootContext:structuredClone(bootContext)}), ...(expectedPowerSuspendSerial===undefined?{}:{expectedPowerSuspendSerial}) },
       { timeoutMs: nativeTimeout + 5000 },
     );
   },
@@ -212,6 +215,10 @@ export const rtss = {
   loadOverlay: (dir: string, layout: string, options:BootPreferenceWrite={}) => {
     const submitted=captureBootPreferenceWrite(options);
     return invoke<RtssReloadResult>('rtss.loadOverlay', { dir, layout,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) }, { timeoutMs: 10000 });
+  },
+  setOsdVisible: (dir: string, visible: boolean, options:BootPreferenceWrite={}) => {
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<RtssReloadResult>('rtss.setOsdVisible', { dir, visible,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}) });
   },
 };
 
@@ -496,7 +503,7 @@ export const windowApi = {
   minimizeWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('window.minimize', evidence, { timeoutMs: 1500 }),
   maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
-  getState: () => invoke<{ visible: boolean; minimized: boolean }>('window.getState'),
+  getState: () => invoke<{ visible: boolean; minimized: boolean; foreground?: boolean }>('window.getState'),
   /** 主窗口左上角屏幕坐标（GetWindowRect.left/top）。 */
   position: () => invoke<{ x: number; y: number }>('window.position'),
   /** 将主窗口移动到屏幕坐标 (x, y)，不改尺寸与 Z 序。 */

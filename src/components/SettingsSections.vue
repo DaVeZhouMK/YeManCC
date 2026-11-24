@@ -4,10 +4,12 @@ import SectionIcon from './SettingsSectionIcon.vue';
 import {focusGamepadElement} from '@/gamepad/focus';
 export interface SettingsSection { id:string; title:string; description:string; icon:string }
 const props=defineProps<{sections:SettingsSection[];label:string;layoutVariant?:'a'|'b'|'c';shareNavigationScope?:boolean;initialSection?:string}>();
+const emit=defineEmits<{ 'section-change':[id:string] }>();
 const selected=ref(props.layoutVariant?'appearance':props.sections[0]?.id||'');const root=ref<HTMLElement|null>(null);
 watch(()=>props.sections,items=>{if(!items.some(item=>item.id===selected.value))selected.value=items[0]?.id||'';});
 function selectInitial(){if(props.initialSection&&props.sections.some(s=>s.id===props.initialSection))selected.value=props.initialSection;}
 watch(()=>props.initialSection,selectInitial,{immediate:true});onActivated(selectInitial);
+watch(selected,id=>emit('section-change',id),{immediate:true,flush:'sync'});
 function backToSection(event:Event){
  if(event.defaultPrevented||[...document.querySelectorAll('.dd-open,[data-gp-modal]')].some(modal=>!modal.contains(root.value)))return;
  const focused=document.activeElement as HTMLElement|null;

@@ -34,10 +34,10 @@ try{
   candidate::g_gmSetMode(candidate::g_gm,0);candidate::g_gmSetOffset(candidate::g_gm,0,0,0,0);write({{"keep",{{"unrelated",true}}}});
   fake_sdk::rawAxes={1,2,3,0,0,1};fake_sdk::intervalValue=0;fake_sdk::failOpenKind=-1;fake_sdk::nullMask=fake_sdk::badNumericMask=fake_sdk::badTimeMask=fake_sdk::frozenMask=0;fake_sdk::frameValue=0;
   candidate::g_sensorThreadMailbox.open();candidate::inputCaptureWindowsSelectionSetStaOpen(true);candidate::g_powerLifecycle=candidate::PowerLifecycle::Ready;
-  std::atomic_store(&candidate::g_windowsSelectionWorkerContext,std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
+  candidate::g_windowsSelectionWorkerContext.store(std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
   candidate::nativeBusTicks=candidate::pendingFrames=candidate::committedFrames=0;candidate::nativeProcessWitness=true;fake_sdk::onPump=[](){candidate::nativeBusPump();};candidate::nativeBusPump();
   txCheck(candidate::g_machineIdentity.deviceClass==cls,"actual identity matches source oracle: "+caseId);
-  const auto context=std::atomic_load(&candidate::g_windowsSelectionWorkerContext);txCheck(candidate::inputCaptureWindowsSelectionContextCurrent(context),"actual BUS publishes a usable native request context: "+caseId);
+  const auto context=candidate::g_windowsSelectionWorkerContext.load();txCheck(candidate::inputCaptureWindowsSelectionContextCurrent(context),"actual BUS publishes a usable native request context: "+caseId);
   if(!candidate::inputCaptureWindowsSelectionContextCurrent(context)){traces.push_back({{"case",caseId},{"phase","context-unavailable"}});continue;}
   coveredModels.insert(cls);++aliases;const auto normalKey=context->defaultKey;
   const auto defaultStamp=candidate::lastNativeBus.view.submission;
@@ -76,14 +76,14 @@ try{
    candidate::fixtureHostBusy=false;candidate::beforeNativeBus={};candidate::fixturePhysicalLive=true;candidate::nativeBusPump();candidate::returnNativeDefault();
    std::uint64_t pendingBusyUntil=0;
    candidate::fixturePhysicalLive=false;
-   candidate::beforeNativeBus=[&]{const auto projection=std::atomic_load(&candidate::g_windowsPrivateConsumerProjection);
+   candidate::beforeNativeBus=[&]{const auto projection=candidate::g_windowsPrivateConsumerProjection.load();
     if(projection&&projection->selected.pair.gyroId=="ACPI#HOST-PENDING#1#{GYRO}"&&!pendingBusyUntil)pendingBusyUntil=candidate::fixtureTick+5000;
     candidate::fixtureHostBusy=pendingBusyUntil&&candidate::fixtureTick<pendingBusyUntil;};
    const auto pendingReady=candidate::selectNative("HOST-PENDING");
    txCheck(pendingReady.value("inputProcessingCommitted",false)&&pendingReady.value("phase",std::string{})=="committed-input-observed"&&pendingReady["selected"].value("gyroDeviceId",std::string{})=="ACPI#HOST-PENDING#1#{GYRO}"&&pendingReady.value("processingOwnerWaitMs",std::uint64_t{0})>=5000,"already pending candidate waits for actual BUS readiness without spending its processing budget: "+caseId);
    candidate::fixtureHostBusy=false;candidate::beforeNativeBus={};candidate::nativeBusPump();
    bool sawUnavailable=false;std::uint64_t recoveryBusyUntil=0;
-   candidate::beforeNativeBus=[&]{const auto projection=std::atomic_load(&candidate::g_windowsPrivateConsumerProjection);
+   candidate::beforeNativeBus=[&]{const auto projection=candidate::g_windowsPrivateConsumerProjection.load();
     const bool unavailable=projection&&projection->selected.pair.gyroId=="ACPI#NO-RECEIPT#1#{GYRO}";
     candidate::g_gmProcess=unavailable?nullptr:&candidate::fixtureRecordingProcess;
     if(unavailable)sawUnavailable=true;

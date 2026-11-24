@@ -657,7 +657,7 @@ async function onOptiScalerCurrent() {
       gameName = basename(gamePath);
     }
     const uninstall = picked === 'uninstall';
-    const action = uninstall ? '卸载' : '安装';
+    const action = uninstall ? '卸载并还原' : '安装';
     const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked as OptiBackend;
     const selectedBackendLabel = selectedBackend === 'auto' ? '当前配置' : backendLabel(selectedBackend);
 
@@ -711,7 +711,8 @@ async function onOptiScalerCurrent() {
 
     let detail = uninstall
       ? `已卸载当前游戏的 OptiScaler。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
-      : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}${result.version ? `\n版本：${result.version}` : ''}${result.warnings?.length ? `\n${result.warnings.join('\n')}` : ''}`;
+      : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}${result.version ? `\n版本：${result.version}` : ''}`;
+    if (result.warnings?.length) detail += `\n${result.warnings.join('\n')}`;
     if (result.clientSyncMessage) detail += `\n${result.clientSyncMessage}`;
     if (antiCheatAcknowledged || result.antiCheat) detail += '\n未自动启动：请自行使用已确认的离线方式；未执行反作弊绕过。';
     statusMsg.value = detail.replace(/\n/g, '');
@@ -1192,7 +1193,7 @@ onUnmounted(() => {
         >
           <InlineIcon name="bolt" />
           <span class="quick-btn-copy opti-copy">
-            <span class="quick-main">FSR4.1/Xess-OPT自动导入</span>
+            <span class="quick-main">FSR4.1.2/XeSS-OPT自动导入</span>
             <span class="quick-sub">FSR4 / XeSS 自动套用 · OPT 客户端</span>
           </span>
         </button>
@@ -1248,16 +1249,13 @@ onUnmounted(() => {
           </div>
           <div class="opti-picker-anticheat-actions" role="group" aria-label="反作弊说明与还原">
             <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'help' }" :aria-pressed="optiPickerChoice === 'help'" @click="optiPickerChoice = 'help'">反作弊离线说明</button>
-            <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'uninstall' }" :aria-pressed="optiPickerChoice === 'uninstall'" @click="optiPickerChoice = 'uninstall'">还原</button>
-          </div>
-          <div class="opti-picker-maintenance">
             <button
               type="button"
               class="opti-option-btn uninstall"
               :class="{ selected: optiPickerChoice === 'uninstall' }"
               :aria-pressed="optiPickerChoice === 'uninstall'"
               @click="optiPickerChoice = 'uninstall'"
-            >卸载并还原游戏文件</button>
+            >卸载并还原</button>
           </div>
           <div class="rc-actions" data-gp-group="fsr-dialog">
             <button type="button" data-gp-group="fsr-dialog" @click="closeOptiBackendPicker(optiPickerChoice)">确认方案并继续</button>
@@ -1765,8 +1763,6 @@ onUnmounted(() => {
   font-size: 1em;
 }
 .opti-picker-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7em; margin-top: .6em; }
-.opti-picker-maintenance { margin-top: .6em; }
-.opti-picker-maintenance .opti-option-btn { width: 100%; }
 .opti-picker-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

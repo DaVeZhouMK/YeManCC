@@ -54,7 +54,7 @@ try{
   candidate::fixtureProcessCount=candidate::fixtureResetCount=0;candidate::fixtureEvents.clear();candidate::fixtureAfterProcess={};candidate::fixtureBeforeLoad={};candidate::fixtureAfterLoad={};candidate::fixtureBeforeFinish={};
   candidate::g_gmSetMode(candidate::g_gm,0);candidate::g_gmSetOffset(candidate::g_gm,0,0,0,0);{std::ofstream out(file);out<<"{}";}
   candidate::g_sensorThreadMailbox.open();candidate::g_powerLifecycle=candidate::PowerLifecycle::Ready;candidate::g_inputCaptureReady=true;candidate::fixtureHostBusy=false;candidate::fixturePhysicalLive=true;
-  candidate::inputCaptureWindowsSelectionSetStaOpen(true);fake_sdk::onPump={};std::atomic_store(&candidate::g_windowsSelectionWorkerContext,std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
+  candidate::inputCaptureWindowsSelectionSetStaOpen(true);fake_sdk::onPump={};candidate::g_windowsSelectionWorkerContext.store(std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
   candidate::mockSink.ResetSamples();candidate::mockSink.SetBindingGeneration(73);candidate::g_inputCaptureSensorGeneration=73;candidate::g_gyroSensor=candidate::g_accelSensor=false;
   if(isGeneric)++generic;
   check(candidate::inputCaptureMotionDeviceClass()==model,"sdk-owner-identity",model+": effective recipe agrees with independent HC class");

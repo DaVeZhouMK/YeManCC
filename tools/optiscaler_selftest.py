@@ -254,11 +254,16 @@ class OptiScalerTests(unittest.TestCase):
         self.patches = [patch.object(ctl, "_optiscaler_cache_roots", return_value=(str(self.root / "Client"), [str(self.cache)])),
                         patch.object(ctl, "_ymcc_backup_root", return_value=str(self.backup)),
                         patch.object(ctl, "_find_client_backup", return_value=None),
-                        patch.object(ctl, "_olog")]
+                        patch.object(ctl, "_olog"),
+                        patch.object(ctl, "OPTI_FSR_412_DX12_SHA256", "")]
         for p in self.patches:
             p.start()
         self.base = package(self.cache, "0.9.5-pre4")
-        package(self.cache, "0.9.4")
+        # Synthetic DLLs in source-only tests have known bytes, independent of
+        # the real release. The compiled fixture uses the production pin.
+        sample = dll(self.root / "stable-dx12-sr.dll", b"0.9.5")
+        ctl.OPTI_FSR_412_DX12_SHA256 = hashlib.sha256(sample.read_bytes()).hexdigest()
+        self.old_base = package(self.cache, "0.9.4")
         self.extra = dll(self.cache / "Extras/FSR_4.1.1b/amd_fidelityfx_upscaler_dx12.dll", b"new-INT8")
         dll(self.cache / "Extras/FSR_4.1.1/amd_fidelityfx_upscaler_dx12.dll", b"old-INT8")
         dll(self.cache / "OptiPatcher/0.41/OptiPatcher.asi")
@@ -279,26 +284,97 @@ class OptiScalerTests(unittest.TestCase):
         ini.read(self.game / "OptiScaler.ini", encoding="utf-8")
         return ini
 
-    def test_pinned_versions_and_extra_wins_over_old_sdk(self):
+    def test_pinned_legacy_base_does_not_use_extras(self):
         cfg = self.cfg()
         self.assertEqual(cfg["opti_version"], "0.9.5-pre4")
-        self.assertEqual(cfg["extra_version"], "FSR_4.1.1b")
-        self.assertEqual(cfg["runtime_files"]["fsr"]["amd_fidelityfx_upscaler_dx12.dll"], str(self.extra))
+        self.assertEqual(cfg["runtime_files"]["fsr"]["amd_fidelityfx_upscaler_dx12.dll"], str(self.base / self.extra.name))
         self.assertEqual(cfg["runtime_files"]["fsr"].get("amd_fidelityfx_framegeneration_dx12.dll"), str(self.base / "amd_fidelityfx_framegeneration_dx12.dll"))
         for backend in ("fsr", "xess"):
             plan = {x["rel"]: x for x in ctl._optiscaler_plan(str(self.game), cfg, backend)}
-            self.assertEqual(plan["amd_fidelityfx_upscaler_dx12.dll"]["src"], str(self.extra))
+            self.assertEqual(plan["amd_fidelityfx_upscaler_dx12.dll"]["src"], str(self.base / self.extra.name))
             for name in ("libxell.dll", "fakenvapi.dll", "libxess_fg.dll", "amd_fidelityfx_framegeneration_dx12.dll"):
                 self.assertIn(name, plan)
             self.assertIn("plugins\\OptiPatcher.asi", plan)
+
+    def test_stable_095_uses_its_bundled_fsr_even_with_old_extras(self):
+        stable = package(self.cache, "0.9.5")
+        for name in ("amd_fidelityfx_upscaler_vk.dll", "amd_fidelityfx_framegeneration_vk.dll"):
+            dll(stable / name)
+        # An old driver-name Extras DLL must not get copied either.
+        dll(self.extra.parent / "amdxcffx64.dll")
+        cfg = self.cfg()
+        self.assertEqual(cfg["opti_version"], "0.9.5")
+        self.assertFalse(any("Extras" in warning for warning in cfg["warnings"]))
+        for backend in ("fsr", "xess"):
+            plan = {x["rel"]: x["src"] for x in ctl._optiscaler_plan(str(self.game), cfg, backend)}
+            for name in ("amd_fidelityfx_upscaler_dx12.dll", "amd_fidelityfx_upscaler_vk.dll",
+                         "amd_fidelityfx_framegeneration_vk.dll"):
+                self.assertEqual(plan[name], str(stable / name))
+            self.assertNotIn("amdxcffx64.dll", plan)
+
+    def test_stable_095_rejects_modified_sr_and_prefers_verified_stable_cache(self):
+        stable = package(self.cache, "0.9.5")
+        modified = dll(stable / ctl.OPTI_FSR_412_DX12_SR, b"different-valid-x64-dll")
+        self.assertTrue(ctl._optiscaler_valid_dll(str(modified)))
+        fallback = self.cfg()
+        self.assertEqual(fallback["opti_version"], "0.9.5-pre4")
+        self.assertTrue(any("官方 FSR 4.1.2" in w for w in fallback["warnings"]))
+
+        second = self.root / "VerifiedCache"
+        verified = package(second, "0.9.5")
+        with patch.object(ctl, "_optiscaler_cache_roots", return_value=(
+                str(self.root / "Client"), [str(self.cache), str(second)])):
+            cfg = self.cfg()
+        self.assertEqual(cfg["source_root"], str(second))
+        self.assertEqual(cfg["opti_version"], "0.9.5")
+        self.assertEqual(ctl._optiscaler_source_version(cfg), "0.9.5")
+
+        # A source swap after cache selection must leave every live byte intact.
+        dll(verified / ctl.OPTI_FSR_412_DX12_SR, b"changed-between-selection-and-write")
+        dll(self.game / ctl.OPTI_FSR_412_DX12_SR, b"original-game-file")
+        before = self.snapshot()
+        result = ctl._optiscaler_install(str(self.game), cfg, False, "fsr")
+        self.assertFalse(result["ok"], result)
+        self.assertIn("确认后发生变化", " ".join(result["msgs"]))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_incomplete_or_ambiguous_stable_falls_back_to_pre4(self):
+        stable = package(self.cache, "0.9.5")
+        upscaler = stable / "amd_fidelityfx_upscaler_dx12.dll"
+        upscaler.unlink()
+        self.assertEqual(self.cfg()["opti_version"], "0.9.5-pre4")
+        dll(upscaler, b"stable-source")
+        dll(stable / "subpackage" / upscaler.name, b"different-source")
+        cfg = self.cfg()
+        self.assertEqual(cfg["opti_version"], "0.9.5-pre4")
+        self.assertEqual(ctl._optiscaler_source_version(cfg), "0.9.5-pre4")
+
+    def test_official_model_selection_and_legacy_fsr31_fallback(self):
+        legacy, _ = ctl._optiscaler_template("fsr", {"api": "dx12"}, self.cfg())
+        self.assertEqual(legacy["FSR"]["Fsr4ForceEnableInt8"], "auto")
+        self.assertEqual(legacy["FSR"]["Fsr4Update"], "false")
+        self.assertNotIn("Fsr4EnableWatermark", legacy["FSR"])
+        stable = package(self.cache, "0.9.5")
+        (stable / "amd_fidelityfx_framegeneration_dx12.dll").unlink()
+        cfg = self.cfg()
+        fsr, _ = ctl._optiscaler_template("fsr", {"api": "dx12"}, cfg)
+        xess, _ = ctl._optiscaler_template("xess", {"api": "dx12"}, cfg)
+        self.assertEqual(fsr["FSR"]["UpscalerIndex"], "0")
+        self.assertEqual(fsr["FSR"]["Fsr4Update"], "true")
+        self.assertEqual(fsr["FSR"]["Fsr4ForceEnableInt8"], "auto")
+        self.assertEqual(fsr["FSR"]["Fsr4EnableWatermark"], "false")
+        self.assertEqual(fsr["FrameGen"]["FGOutput"], "xefg")
+        self.assertEqual(xess["Upscalers"]["Dx12Upscaler"], "xess")
+        self.assertEqual(xess["FSR"]["Fsr4ForceEnableInt8"], "auto")
+        self.assertNotIn("Fsr4EnableWatermark", xess["FSR"])
 
     def test_corrupt_new_release_falls_back(self):
         (self.base / "OptiScaler.dll").write_bytes(b"MZ-truncated")
         self.extra.write_bytes(b"bad")
         cfg = self.cfg()
         self.assertEqual(cfg["opti_version"], "0.9.4")
-        self.assertEqual(cfg["extra_version"], "FSR_4.1.1")
-        self.assertEqual(len(cfg["warnings"]), 2)
+        self.assertEqual(cfg["runtime_files"]["fsr"][self.extra.name], str(self.old_base / self.extra.name))
+        self.assertTrue(any("FSR3.1" in warning for warning in cfg["warnings"]))
 
     def test_incomplete_new_release_falls_back(self):
         (self.base / "libxess.dll").unlink()
@@ -307,17 +383,14 @@ class OptiScalerTests(unittest.TestCase):
     def test_missing_new_release_falls_back(self):
         (self.base / "OptiScaler.dll").unlink()
         self.extra.unlink()
-        self.assertEqual(self.cfg()["opti_version"], "0.9.4")
-        self.assertEqual(self.cfg()["extra_version"], "FSR_4.1.1")
+        self.assertEqual(ctl._optiscaler_source_version(self.cfg()), "0.9.4")
 
     def test_future_nightly_and_fp8_are_ignored(self):
         package(self.cache, "0.10.999-nightly")
         dll(self.cache / "Extras/FSR_4.1.1b_FP8/amd_fidelityfx_upscaler_dx12.dll", b"FP8")
         self.assertEqual(self.cfg()["opti_version"], "0.9.5-pre4")
-        self.extra.unlink()
-        (self.cache / "Extras/FSR_4.1.1/amd_fidelityfx_upscaler_dx12.dll").unlink()
         cfg = self.cfg()
-        self.assertIsNone(cfg["src_extra"])
+        self.assertEqual(cfg["runtime_files"]["fsr"][self.extra.name], str(self.base / self.extra.name))
         template, _ = ctl._optiscaler_template("fsr", {"api": "dx12"}, cfg)
         self.assertEqual(template["FSR"]["UpscalerIndex"], "1")
         self.assertEqual(template["FSR"]["Fsr4Update"], "false")
@@ -343,8 +416,8 @@ class OptiScalerTests(unittest.TestCase):
                 cfg = self.cfg()
                 result = ctl._optiscaler_install(str(self.game), cfg, False, backend)
                 self.assertTrue(result["ok"], result)
-                self.assertEqual(result["version"], "0.9.5-pre4/FSR_4.1.1b")
-                self.assertEqual((self.game / "amd_fidelityfx_upscaler_dx12.dll").read_bytes(), self.extra.read_bytes())
+                self.assertEqual(result["version"], "0.9.5-pre4")
+                self.assertEqual((self.game / self.extra.name).read_bytes(), (self.base / self.extra.name).read_bytes())
                 ini = self.read_ini()
                 self.assertEqual(ini["Upscalers"]["Dx12Upscaler"], "fsr31" if backend == "fsr" else "xess")
                 self.assertEqual(ini["Upscalers"]["Dx11Upscaler"], "fsr31_12" if backend == "fsr" else "xess_12")
@@ -353,7 +426,8 @@ class OptiScalerTests(unittest.TestCase):
                 self.assertEqual(ini["XeFG"]["InterpolationCount"], "1")
                 self.assertEqual(ini["OptiFG"]["HUDFix"], "true")
                 self.assertNotIn("HUDFix", ini.sections())
-                self.assertEqual(ini["FSR"]["Fsr4ForceEnableInt8"], "true")
+                self.assertEqual(ini["FSR"]["Fsr4ForceEnableInt8"], "auto")
+                self.assertEqual(ini["FSR"]["Fsr4Update"], "false")
                 self.assertEqual(ini["QualityOverrides"]["QualityRatioOverrideEnabled"], "false")
                 self.assertEqual(ini["Custom"]["Keep"], "yes")
                 self.assertTrue(ctl._optiscaler_status(str(self.game), cfg)["installed"])
@@ -572,7 +646,7 @@ class OptiScalerTests(unittest.TestCase):
         for section, values in template.items():
             self.assertEqual(text, ctl._ini_set_section_values(text, section, values))
 
-    def test_split_fsr_effects_and_current_name_override_exact_slots(self):
+    def test_bundled_split_fsr_effects_ignore_all_extra_overrides(self):
         names = ("amd_fidelityfx_upscaler_dx12.dll", "amdxcffx64.dll",
                  "amd_fidelityfx_radiancecache_dx12.dll", "amd_fidelityfx_loader_dx12.dll",
                  "amd_fidelityfx_framegeneration_dx12.dll", "amd_fidelityfx_denoiser_dx12.dll")
@@ -588,34 +662,29 @@ class OptiScalerTests(unittest.TestCase):
                 plan = {p["rel"].lower(): p for p in ctl._optiscaler_plan(str(self.game), cfg, backend)}
                 self.assertEqual(plan["dxgi.dll"]["src"], str(self.base / "OptiScaler.dll"))
                 for name in names:
-                    self.assertEqual(plan[name]["src"], str(self.extra.parent / name))
+                    self.assertEqual(plan[name]["src"], str(self.base / name))
                 self.assertNotIn("amdxc64.dll", plan)
                 self.assertNotIn("unknown-installer.cmd", plan)
                 self.assertTrue(ctl._optiscaler_install(str(self.game), cfg, False, backend)["ok"])
                 for name in names:
-                    self.assertEqual((self.game / name).read_bytes(), (self.extra.parent / name).read_bytes())
+                    self.assertEqual((self.game / name).read_bytes(), (self.base / name).read_bytes())
                 self.assertTrue(ctl._optiscaler_uninstall(str(self.game), cfg, False)["ok"])
                 self.assertEqual(self.snapshot(), {})
 
-    def test_optional_effect_alone_cannot_enable_fsr4(self):
-        self.extra.unlink()
-        dll(self.extra.parent / "amd_fidelityfx_radiancecache_dx12.dll")
-        self.assertEqual(self.cfg()["extra_version"], "FSR_4.1.1")
-
-    def test_corrupt_optional_effect_rejects_whole_extra(self):
+    def test_extra_only_effect_corruption_and_duplicates_do_not_affect_selection(self):
+        only_extra = "amd_fidelityfx_radiancecache_dx12.dll"
+        dll(self.extra.parent / only_extra)
         (self.extra.parent / "amd_fidelityfx_denoiser_dx12.dll").write_bytes(b"truncated")
-        self.assertEqual(self.cfg()["extra_version"], "FSR_4.1.1")
-
-    def test_conflicting_duplicate_extra_name_refuses_candidate(self):
         dll(self.extra.parent / "nested/amd_fidelityfx_upscaler_dx12.dll", b"conflicting")
-        self.assertEqual(self.cfg()["extra_version"], "FSR_4.1.1")
+        cfg = self.cfg()
+        self.assertEqual(ctl._optiscaler_source_version(cfg), "0.9.5-pre4")
+        self.assertNotIn(only_extra, cfg["runtime_files"]["fsr"])
 
-    def test_xess_sr_preserves_int8_extra_configuration(self):
-        # XeSS is the chosen SR output, not a request to disable the installed INT8 swap.
+    def test_xess_sr_does_not_enable_legacy_fsr4_update(self):
         template, _ = ctl._optiscaler_template("xess", {"api": "dx12"}, self.cfg())
         self.assertEqual(template["Upscalers"]["Dx11Upscaler"], "xess_12")
-        self.assertEqual(template["FSR"]["Fsr4Update"], "true")
-        self.assertEqual(template["FSR"]["Fsr4ForceEnableInt8"], "true")
+        self.assertEqual(template["FSR"]["Fsr4Update"], "false")
+        self.assertEqual(template["FSR"]["Fsr4ForceEnableInt8"], "auto")
         self.assertEqual(template["FSR"]["Fsr4DoNotLoadAmdxc64"], "auto")
         self.assertEqual(template["FSR"]["FGIndex"], "1")
 
@@ -674,6 +743,80 @@ class OptiScalerTests(unittest.TestCase):
             self.assertFalse((self.game / "OptiScaler.ini").exists())
             # Do not delete a backup store owned by the client.
             self.assertTrue((cdir / "files/renamed-original.bin").exists())
+
+    def opti_log(self):
+        path = self.game / "OptiScaler.log"
+        lines = ("OptiScaler v0.9.5-final (90d9568) loaded", "---------------------------------",
+                 "OptiScaler is freely downloadable from", "GitHub : https://github.com/optiscaler/OptiScaler/releases")
+        path.write_bytes("".join("[19:01:47.941225] [W] " + line + "\r\n" for line in lines).encode("ascii"))
+        return path
+
+    def test_runtime_log_recognized_without_opening_scope_for_unknown_files(self):
+        p = self.opti_log()
+        content = p.read_bytes()
+        p.write_bytes(content + b"x" * 9000)
+        ctl._opti_check_client_cleanup_scope(str(self.game), [])
+        p.write_bytes(content.splitlines()[0])
+        with self.assertRaisesRegex(ValueError, "OptiScaler.log"):
+            ctl._opti_check_client_cleanup_scope(str(self.game), [])
+        p.write_bytes(content)
+        (self.game / "plugins").mkdir()
+        with self.assertRaisesRegex(ValueError, "plugins"):
+            ctl._opti_check_client_cleanup_scope(str(self.game), [])
+
+    def test_runtime_log_legacy_uninstall_protects_unknown_log_and_retries_delete_failure(self):
+        cfg = self.cfg()
+        self.assertTrue(ctl._optiscaler_install(str(self.game), cfg, False, "fsr")["ok"])
+        p = self.opti_log()
+        original_remove = ctl.os.remove
+
+        def blocked_remove(path):
+            if Path(path) == p:
+                raise PermissionError("fixture: log held open")
+            return original_remove(path)
+
+        with patch.object(ctl.os, "remove", side_effect=blocked_remove):
+            self.assertFalse(ctl._optiscaler_uninstall(str(self.game), cfg, False)["ok"])
+        self.assertTrue(p.exists())
+        self.assertTrue(ctl._find_ymcc_backup_dir(str(self.game)))
+        self.assertTrue(ctl._optiscaler_uninstall(str(self.game), cfg, False)["ok"])
+        self.assertFalse(p.exists())
+        self.assertFalse(ctl._find_ymcc_backup_dir(str(self.game)))
+        self.assertTrue(ctl._optiscaler_install(str(self.game), cfg, False, "fsr")["ok"])
+        p.write_bytes(b"unrelated user data")
+        result = ctl._optiscaler_uninstall(str(self.game), cfg, False)
+        self.assertTrue(result["ok"], result)
+        self.assertIn(p.name, result["warnings"][0])
+        self.assertEqual(p.read_bytes(), b"unrelated user data")
+
+    def test_runtime_log_client_dry_run_and_known_original_protection(self):
+        for preexisted in (True, False):
+            with self.subTest(preexisted=preexisted):
+                cdir, m, original = self.client_fixture()
+                p = self.opti_log()
+                if preexisted:
+                    m["PreInstallKeyFiles"].append({"RelativePath": "OPTISCALER.LOG", "Existed": True})
+                    (cdir / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+                with patch.object(ctl, "_find_client_backup", return_value=(m, str(cdir))):
+                    before = self.snapshot()
+                    dry = ctl._optiscaler_uninstall(str(self.game), self.cfg(), True)
+                    self.assertTrue(dry["ok"], dry)
+                    self.assertEqual("delete OptiScaler.log" in dry["actions"], not preexisted)
+                    self.assertEqual(self.snapshot(), before)
+                    done = ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)
+                    self.assertTrue(done["ok"], done)
+                    self.assertEqual((self.game / "dxgi.dll").read_bytes(), original)
+                    self.assertEqual(p.exists(), preexisted)
+
+    def test_runtime_log_client_bad_backup_does_not_clean_anything(self):
+        cdir, manifest, _ = self.client_fixture()
+        self.opti_log()
+        (cdir / "files/renamed-original.bin").write_bytes(b"corrupt")
+        before = self.snapshot()
+        with patch.object(ctl, "_find_client_backup", return_value=(manifest, str(cdir))):
+            self.assertFalse(ctl._optiscaler_uninstall(str(self.game), self.cfg(), False)["ok"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue((cdir / "manifest.json").is_file())
 
     def test_client_missing_original_refuses_all_mutation(self):
         cdir, manifest, _ = self.client_fixture()
@@ -1309,7 +1452,7 @@ class OptiScalerTests(unittest.TestCase):
     def test_ui_restores_entry_three_modes_and_no_process_toggle(self):
         for rel in ("src/components/GameQuickActions.vue", "src/views/QuickAppView.vue"):
             text = (ROOT / rel).read_text(encoding="utf-8")
-            self.assertIn("FSR4.1/Xess-OPT自动导入", text)
+            self.assertIn("FSR4.1.2/XeSS-OPT自动导入", text)
             self.assertIn("OPT 客户端</button>", text)
             self.assertIn("['fsr', 'xess']", text)
             self.assertLess(text.index("if (picked === 'client')"), text.index("const preflight ="))
@@ -1325,6 +1468,7 @@ if __name__ == "__main__":
     if LEDGER_MODE:
         import platform
         names = [name for name in dir(OptiScalerTests) if name.startswith("test_ledger_")]
+        names += [name for name in dir(OptiScalerTests) if name.startswith("test_runtime_log_")]
         names += ["test_both_modes_install_and_exact_uninstall_roundtrip", "test_failed_ini_write_rolls_back_every_file",
                   "test_partial_rollback_retains_original_backups", "test_pending_recovery_is_retriable_after_failed_rollback",
                   "test_missing_original_backup_refuses_uninstall_without_deleting", "test_legacy_ymcc_manifest_and_modified_ini_restore",

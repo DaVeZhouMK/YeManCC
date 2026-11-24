@@ -118,6 +118,23 @@ await check('production mirror reports a manually running unbound instance witho
 await check('program lamp remains available without a confirmed game and does not start anything',async()=>{
  const host=await hostFixture();host.state.game=null;host.state.losslessProgram={known:true,running:true};host.gameChanged();
  try{const snapshot=await host.read();assert.equal(snapshot.game,null);assert.equal(snapshot.actions.game,false);assert.equal(snapshot.losslessProgram.known,true);assert.equal(snapshot.losslessProgram.running,true);}finally{host.stop();}
+ for(const hidden of [false,true]){
+  const pending=deferred();let programReads=0;
+  const late=await hostFixture({readHooks:{losslessProgram:async()=>{programReads++;await pending.promise;}}});
+  late.state.game=null;late.state.losslessProgram={known:true,running:true};late.gameChanged();
+  try{
+   const before=await late.read();assert(before?.ready);assert.equal(before.losslessProgram.known,false);assert.equal(programReads,1);
+   if(hidden){late.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();}
+   const readCount=late.counts.frameReads,replies=late.replies.length;
+   pending.resolve();await flush();
+   assert.equal(late.counts.frameReads,readCount,'the display-only process result must not reread frame settings');
+   assert.equal(programReads,1);
+   if(hidden){assert.equal(late.replies.length,replies);continue;}
+   const after=late.replies.slice(replies).filter(r=>r.message.type==='snapshot').at(-1)?.message.snapshot;
+   assert(after?.ready);assert.equal(after.revision,before.revision);assert.deepEqual(after.actions,before.actions);
+   assert.equal(after.game,null);assert.equal(after.losslessProgram.running,true);
+  }finally{pending.resolve();late.stop();await flush();}
+ }
 });
 await check('failed process refresh cannot keep a stale green program lamp or block unrelated controls',async()=>{
  let fail=false;const host=await hostFixture({readHooks:{losslessProgram:async()=>{if(fail)throw Error('process receipt unavailable');}}});host.state.losslessProgram={known:true,running:true};

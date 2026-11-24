@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <functional>
+#include <optional>
 namespace ymcc::deckysidebar {
 inline bool recoverableWatchFailure(const std::string& reason) {
     return reason=="mirror-bootstrap-account-changed"||reason=="mirror-bootstrap-async-error"||reason=="mirror-bootstrap-deadline"||
@@ -65,6 +66,9 @@ struct ConnectionHealth { bool required=false,connected=false; std::string reaso
     // proof. A socket peer alone must not skip its original seven-second window.
     ULONGLONG freshBindingStarted=0;
     ULONGLONG pausedReadDue=0; // Next existing shared read for a usable mirror with unconfirmed official state.
+    std::optional<ULONGLONG> authenticatedPeerAgeMs; // Diagnostics only, not Steam UI proof.
+    std::optional<bool> sidebarVerifiedDuringBackendOutage; // Diagnostic only; not a business-ready receipt.
+    std::optional<ULONGLONG> sharedModeObservationAgeMs; // Age of the publication consumed, not of the first positive proof.
 };
 // Calibrated from the 2026-11-03 archive review, not 30-second retry counts.
 // 189 completed rebinds <=5128ms, with none in (7s,90s]; retain the native
@@ -79,7 +83,7 @@ struct ConnectionHealth { bool required=false,connected=false; std::string reaso
 // owned startup. Mirror success alone is never overall UI acceptance.
 class ConnectionRecoveryWindow {
     ULONGLONG check_=0,due_=0,opened_=0,rebuildConfirmedAt_=0,commandRetryAt_=0;
-    ULONGLONG rebuildLoaderStartedAt_=0;
+    ULONGLONG rebuildLoaderStartedAt_=0,rebuildIdentityRefusedAt_=0;
     unsigned attempts_=0; unsigned long long episode_=0;
     bool active_=false,paused_=false,failed_=false,started_=false,cold_=false;
     std::string identity_,trigger_;
@@ -91,7 +95,7 @@ private:
     Action waiting_=Action::none;
     DWORD budget()const{return cold_?coldStartGraceMs:waiting_==Action::reconnect?transportGraceMs:settleGraceMs;}
     Action issue(Action action,ULONGLONG now){
-        waiting_=action;failed_=started_=cold_=false;rebuildConfirmedAt_=rebuildLoaderStartedAt_=commandRetryAt_=0;
+        waiting_=action;failed_=started_=cold_=false;rebuildConfirmedAt_=rebuildLoaderStartedAt_=rebuildIdentityRefusedAt_=commandRetryAt_=0;
         if(action==Action::exhausted){due_=0;check_=now+intervalMs;return action;}
         ++attempts_;due_=now+budget();check_=now+evidenceIntervalMs;return action;
     }
@@ -133,6 +137,10 @@ public:
             due_=(std::min)(health.coldLoaderStarted+settleGraceMs,rebuildConfirmedAt_+coldStartGraceMs);
             rebuildConfirmedAt_=0;
         }
+        // The page never changed. Only an actual, still-live replacement Loader
+        // may use the remainder of this rung; do not reset the clock or retry it.
+        if(awaitingRefusedRebuildLoader()&&rebuildLoaderStartedAt_&&health.coldLoaderStarted==rebuildLoaderStartedAt_&&
+           now>=rebuildLoaderStartedAt_&&now<due_)return Action::none;
         // Fresh health may end the episode above, but repeated hints cannot
         // bypass (or postpone) the existing retry of a refused command slot.
         if((!failed_&&now<due_)||now<commandRetryAt_)return Action::none;
@@ -149,7 +157,15 @@ public:
     }
     // Actual operation receipts only; an old stage's late reply cannot spend the
     // new stage or refill its deadline. Successful submission is not health.
-    void failed(Action stage,ULONGLONG now){if(active_&&waiting_==stage&&stage!=Action::exhausted){failed_=true;due_=now;}}
+    void failed(Action stage,ULONGLONG now,bool identityDeferred=false){
+        if(!active_||waiting_!=stage||stage==Action::exhausted)return;
+        if(stage==Action::rebuild&&identityDeferred&&!started_&&now<due_){
+            if(!failed_){failed_=true;rebuildIdentityRefusedAt_=now;}
+            return;
+        }
+        failed_=true;rebuildIdentityRefusedAt_=0;due_=now;
+    }
+    bool awaitingRefusedRebuildLoader()const{return active_&&waiting_==Action::rebuild&&rebuildIdentityRefusedAt_!=0;}
     void parkUnstartedPage(Action stage,ULONGLONG now){
         if(!active_||waiting_!=stage||started_||failed_||(stage!=Action::rebuild&&stage!=Action::reopen))return;
         // No child, durable claim or effect exists. Restore the pending
@@ -164,7 +180,10 @@ public:
         }
     }
     bool serviceStarted(ULONGLONG now){
-        if(!active_||failed_)return false;
+        if(!active_)return false;
+        if(awaitingRefusedRebuildLoader()&&!rebuildLoaderStartedAt_&&now>=rebuildIdentityRefusedAt_&&now<due_)
+            rebuildLoaderStartedAt_=now;
+        if(failed_)return false;
         if(waiting_==Action::rebuild){
             if(rebuildConfirmedAt_&&!rebuildLoaderStartedAt_&&now>=rebuildConfirmedAt_&&now<due_)
                 rebuildLoaderStartedAt_=now;
@@ -222,29 +241,34 @@ public:
         return publication>closedPublication_&&observedAfterGrace?Observation::failed:Observation::awaitingPublication;
     }
 };
-// A proven elevated desktop source is an environment refusal, not a broken
-// Steam document. Recheck only the original idle cadence; the probe is read-only
-// and clearing this park still grants NO launch authority. Explicit enable or
-// a verified new Steam session resets it through the Runtime's existing epoch.
+// Local launch refusals are not broken Steam documents. Recheck on the same
+// idle cadence; clearing this park does not grant launch authority.
 class LaunchPolicyStop {
-    bool blocked_=false;
+public:
+    enum class Cause { none, elevatedShell, loaderPathUnavailable };
+private:
+    Cause cause_=Cause::none;
     ULONGLONG due_=0;
 public:
     static constexpr DWORD intervalMs=ConnectionRecoveryWindow::intervalMs;
     bool failed(const std::string& stage,DWORD error,ULONGLONG now){
-        if(stage!="shell-token-elevated"||error!=ERROR_ACCESS_DENIED)return false;
-        if(!blocked_){blocked_=true;due_=now+intervalMs;}return true;
+        const auto cause=stage=="shell-token-elevated"&&error==ERROR_ACCESS_DENIED?Cause::elevatedShell:
+            (stage=="create-process"||stage=="create-process-with-token")&&
+            (error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)?Cause::loaderPathUnavailable:Cause::none;
+        if(cause==Cause::none)return false;
+        if(!blocked()){cause_=cause;due_=now+intervalMs;}return true;
     }
-    template<class Probe> bool recheck(ULONGLONG now,Probe&& ordinarySourceObserved){
-        if(!blocked_||now<due_)return false;
+    template<class Probe> bool recheck(ULONGLONG now,Probe&& probe){
+        if(!blocked()||now<due_)return false;
         due_=now+intervalMs;
-        bool candidate=false;try{candidate=ordinarySourceObserved();}catch(...){return false;}
+        bool candidate=false;try{candidate=probe();}catch(...){return false;}
         if(!candidate)return false;
         reset();return true;
     }
-    bool blocked()const{return blocked_;}
-    DWORD timeout(ULONGLONG now)const{return !blocked_?INFINITE:now>=due_?0:static_cast<DWORD>(due_-now);}
-    void reset(){blocked_=false;due_=0;}
+    Cause cause()const{return cause_;}
+    bool blocked()const{return cause_!=Cause::none;}
+    DWORD timeout(ULONGLONG now)const{return !blocked()?INFINITE:now>=due_?0:static_cast<DWORD>(due_-now);}
+    void reset(){cause_=Cause::none;due_=0;}
 };
 class ConnectionRetryWindow {
     ULONGLONG due_ = 0;

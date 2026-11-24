@@ -55,7 +55,43 @@ export async function runSharedPowerCases({root,build,test,selection='default',p
    try{seen.length=0;armed=true;f.emit('power.lifecycleChanged',fact(9,'ready',11,{observedNotificationSequence:22}));assert(seen.length>0);assert(seen.every(value=>value.observedNotificationSequence===23),'retired notification scope was delivered after reentrant advancement');assert.equal(f.state().observedNotificationSequence,23);assert.equal(f.timers.size,0);}
    finally{first();second();f.stop();}
   });
-  return {source:input,sha256:before,actualFactory:true,selection,cases:2,legacyCasesExecuted:0};
+  await test('notification scope: a newer Ready notification cannot inherit the previous read confirmation',async()=>{
+   const f=await boot(fact(8,'ready',10,{observedNotificationSequence:21})),confirmed=[];
+   const offFirst=f.source.requestSharedPowerLifecycleReadyConfirmation(value=>{
+    confirmed.push(['first',value.observedNotificationSequence]);
+    f.emit('power.lifecycleChanged',fact(8,'ready',11,{observedNotificationSequence:22}));
+   });
+   const offSecond=f.source.requestSharedPowerLifecycleReadyConfirmation(value=>confirmed.push(['second',value.observedNotificationSequence]));
+   try{
+    await flush();assert.equal(f.calls,2);
+    await f.reply(fact(8,'ready',10,{observedNotificationSequence:21}));
+    assert.deepEqual(confirmed,[['first',21]],'a newer notification requires a fresh read before confirming remaining consumers');
+    assert.equal(f.state().observedNotificationSequence,22);assert.equal(f.calls,3);
+    await f.reply(fact(8,'ready',11,{observedNotificationSequence:22}));
+    assert.deepEqual(confirmed,[['first',21],['second',22]]);
+    assert.equal(f.timers.size,0);
+    assert.equal(f.source.getSharedPowerLifecycleDiagnostics().read.pendingReadyConfirmations,0);
+   }finally{offFirst();offSecond();f.stop();}
+  });
+  await test('notification scope: Ready recheck requires an accepted read and returns with its subscription',async()=>{
+   const f=await boot(fact(8,'ready',10,{observedNotificationSequence:21})),ordinary=[],rechecks=[];
+   const off=f.source.onSharedPowerLifecycle(value=>ordinary.push(value),{observeNotificationSequence:true,onReadyRecheck:value=>rechecks.push(value)});
+   try{
+    f.emit('power.lifecycleChanged',fact(8,'ready',11,{observedNotificationSequence:21}));
+    assert.equal(ordinary.length,1);assert.equal(rechecks.length,0);
+    f.source.requestSharedPowerLifecycleReconcile('same-scope');await flush();
+    assert.equal(rechecks.length,0,'cached Ready cannot trigger recheck');
+    await f.reply(fact(8,'ready',11,{observedNotificationSequence:21}));
+    assert.equal(rechecks.length,1);assert.equal(ordinary.length,1);
+    f.source.requestSharedPowerLifecycleReconcile('new-scope');await flush();
+    await f.reply(fact(8,'ready',12,{observedNotificationSequence:22}));
+    assert.equal(rechecks.length,1);assert.equal(ordinary.at(-1).observedNotificationSequence,22);
+    f.source.requestSharedPowerLifecycleReconcile('unsubscribe-in-flight');await flush();off();
+    await f.reply(fact(8,'ready',12,{observedNotificationSequence:22}));
+    assert.equal(rechecks.length,1);assert.equal(f.calls,4);assert.equal(f.timers.size,0);
+   }finally{off();f.stop();}
+  });
+  return {source:input,sha256:before,actualFactory:true,selection,cases:4,legacyCasesExecuted:0};
  }
  if(selection==='default'||selection==='lifecycle'){
   if(selection==='lifecycle'){

@@ -585,6 +585,7 @@ async function pageFixture(file, initial = base()) {
     async clearGameInputRestoreSnapshot(){throw Error('Legacy restore is outside the UI scope');},
   };
   const pageIpc = {
+    setGyroTelemetryInterest:()=>{},
     getLastGamepadState:()=>null,
     on:(name,cb)=>{if(!ipcListeners.has(name))ipcListeners.set(name,new Set());return subscribe(ipcListeners.get(name),cb);},
     async invoke(name,args){
@@ -780,7 +781,7 @@ currentSection = 'detection';
 // Actual shared detector + IPC timeout + scheduler + policy owner. All native
 // process replies and browser time are inert; no game or device is accessed.
 async function flushDetection() { for(let i=0;i<100;i++) await Promise.resolve(); }
-function detectionFixture(detectorSource = null) {
+function detectionFixture(detectorSource = null, { sharedTransport = false } = {}) {
   let now = 0, seq = 0, visible = false;
   const timers = new Map(), events = new Map(), documentEvents = new Map(), bridgeListeners = [], messages = [];
   const eventTarget = handlers => ({
@@ -795,7 +796,7 @@ function detectionFixture(detectorSource = null) {
     window:win,document:doc,CustomEvent:class{constructor(type,opts){this.type=type;this.detail=opts?.detail;}},queueMicrotask};
   Object.assign(win,{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,chrome:{webview:{
     addEventListener(_name,cb){bridgeListeners.push(cb);},
-    postMessage(msg){messages.push(structuredClone(msg));if(msg.cmd!=='game.detect')throw Error('Unexpected native IO '+msg.cmd);if(f.hold)return;
+    postMessage(msg){messages.push(structuredClone(msg));if(f.metadata && msg.cmd==='gameSteam.context.get')return;if(msg.cmd!=='game.detect')throw Error('Unexpected native IO '+msg.cmd);if(f.hold)return;
       const value=msg.args?.pid && f.native?.valid!==false && msg.args.pid!==f.native?.pid?null:structuredClone(f.native);
       queueMicrotask(()=>f.reply(msg.id,value));},
   }}});
@@ -808,14 +809,15 @@ function detectionFixture(detectorSource = null) {
   const ipc=load('src/bridge/ipc.ts',{},clock);
   f.power={phase:'ready',generation:100,known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
   const powerModule=load('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:()=>{throw Error('Unexpected shared singleton read');},on:()=>()=>{}}},clock);
-  f.sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>({...f.power}),listen:(name,listener)=>{if(!events.has('public:'+name))events.set('public:'+name,new Set());events.get('public:'+name).add(listener);return()=>events.get('public:'+name).delete(listener);},clock:{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}});
+  f.sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>{const state={...f.power};return f.powerReadHook?f.powerReadHook(state):state;},listen:sharedTransport?ipc.on:(name,listener)=>{if(!events.has('public:'+name))events.set('public:'+name,new Set());events.get('public:'+name).add(listener);return()=>events.get('public:'+name).delete(listener);},clock:{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}});
   f.stopPowerProbe=f.sharedPower.onSharedPowerLifecycle(()=>{});f.powerModule=powerModule;
-  f.broadcastPower=state=>{f.power={...state};for(const cb of [...events.get('public:power.lifecycleChanged')||[]])cb({...state});};
+  f.broadcastPower=state=>{f.power={...state};if(sharedTransport)f.emitNative('power.lifecycleChanged',state);else for(const cb of [...events.get('public:power.lifecycleChanged')||[]])cb({...state});};
   const uiPower=load('src/bridge/uiLifecycle.ts',{'./ipc':ipc,'./powerLifecycleState':f.sharedPower},clock);
   const scheduler=load('src/scheduler.ts',{'./bridge/uiLifecycle':{...uiPower,isUiVisible:()=>visible,onUiVisibilityChange:()=>()=>{}},'./bridge/powerLifecycleState':f.sharedPower},clock);
   f.scheduler={...scheduler,registerScheduledTask(...args){f.schedules.push({name:args[0],ms:args[1],options:args[3]});return scheduler.registerScheduledTask(...args);}};
   f.detector=evaluate(detectorSource??fs.readFileSync(path.join(root,'src/bridge/gamedetect.ts'),'utf8'),{'./ipc':ipc,'./powerLifecycleState':{...f.sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},'@/scheduler':f.scheduler,'../../PowerControl/GameTitlePolicy.json':JSON.parse(fs.readFileSync(path.join(root,'PowerControl/GameTitlePolicy.json'),'utf8'))},clock);
   f.policy=load('src/bridge/gamePolicyTarget.ts',{'./gamedetect':f.detector,'./gamePolicyHysteresis':hysteresis},clock);
+  f.loadMetadata=()=>{f.metadata=true;return load('src/bridge/gameSteamContext.ts',{'./gamedetect':f.detector,'./ipc':ipc,'./gameSteamContextModel':load('src/bridge/gameSteamContextModel.ts')},clock).gameSteamContext;};
   return f;
 }
 const TMNT={pid:11752,processCreated:'134372974230246308',name:'tmnt',title:"Teenage Mutant Ninja Turtles: Shredder's Revenge",path:'E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe',source:'whitelist',whitelistRule:'tmnt',ts:1792823823460};
@@ -829,7 +831,16 @@ await check('没有原生推送的旧壳也继续按1250ms后台发现游戏',as
 });
 await check('退出Xbox全屏恢复窗口或文档时自动校对，用户无需手动刷新',async()=>{
  for(const event of ['ipc:window.shown','ipc:window.restored','ipc:window.summoned','ipc:window.focus','ipc:power.resumed','document-visible']){
-  const f=detectionFixture(),block=blockDisplayScheduler(f),seen=[],stop=f.detector.subscribeGameStatus(g=>seen.push(g));await flushDetection();f.native={...TMNT};if(event==='document-visible')f.show();else f.signal(event);await flushDetection();assert.equal(seen.at(-1).pid,TMNT.pid,event);stop();block();
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f),seen=[],stop=f.detector.subscribeGameStatus(g=>seen.push(g));
+  try{
+   await flushDetection();f.native={...TMNT};
+   if(event==='document-visible')f.show();
+   else if(event==='ipc:power.resumed'){
+    f.power={...f.power,generation:101,publicationRevision:2,observedNotificationSequence:2};
+    f.emitNative('power.resumed',{generation:101});
+   }else f.signal(event);
+   await flushDetection();assert.equal(seen.at(-1).pid,TMNT.pid,event);
+  }finally{stop();block();f.stopPowerProbe();}
  }
 });
 await check('识别IPC无回执在8秒内释放共享等待，下一轮自动恢复且迟到回执不能覆盖新结果',async()=>{
@@ -1088,12 +1099,19 @@ await check('风暴：1000个跨微任务目标通知保留首读并合并尾部
 });
 await check('自愈：没有新事件时额外重试最多三次，退避后恢复且取消订阅清空恢复timer',async()=>{
  for(const cancel of [false,true]){
-  const f=detectionFixture(),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});f.hold=true;
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});f.hold=true;
   f.signal('ipc:game.target.changed',{generation:11});await flushDetection();f.fail(f.messages.at(-1).id,'inert outage');await flushDetection();const start=f.messages.length;
-  if(cancel){stop();assert.equal(f.timers.size,0,'last unsubscribe must cancel the owned recovery timer immediately');await f.advance(30000);assert.equal(f.messages.length,start);block();assert.equal(f.timers.size,0);continue;}
+  if(cancel){stop();assert.equal(f.timers.size,0,'last unsubscribe must cancel the owned recovery timer immediately');await f.advance(30000);assert.equal(f.messages.length,start);block();f.stopPowerProbe();assert.equal(f.timers.size,0);continue;}
   for(const delay of [500,1500,4000]){await f.advance(delay-1);assert.equal(f.messages.length,start+[500,1500,4000].indexOf(delay));await f.advance(1);assert.equal(f.messages.length,start+[500,1500,4000].indexOf(delay)+1);f.fail(f.messages.at(-1).id,'inert outage');await flushDetection();}
   assert.equal(f.messages.length,start+3);await f.advance(60000);assert.equal(f.messages.length,start+3,'exhausted recovery must not become a second periodic poller');assert(!f.detector.isGameStatusCurrent());
-  f.native=versionedGame(NEXT_GAME,11);f.hold=false;f.signal('ipc:power.resumed');await f.advance(4000);assert.equal(f.detector.getCurrentGame()?.pid,NEXT_GAME.pid);assert(f.detector.isGameStatusCurrent());stop();block();assert.equal(f.timers.size,0);
+  f.native=versionedGame(NEXT_GAME,11);f.hold=false;let confirmReady;
+  f.powerReadHook=state=>new Promise(resolve=>{confirmReady=()=>resolve(state);});
+  try{
+   f.emitNative('power.resumed',{generation:f.power.generation});await flushDetection();
+   assert.equal(typeof confirmReady,'function');assert.equal(f.messages.length,start+3,'unconfirmed wake started a game scan');
+   confirmReady();await flushDetection();assert.equal(f.messages.length,start+4,'same-scope confirmation must allow exactly one recovery scan');
+   assert.equal(f.detector.getCurrentGame()?.pid,NEXT_GAME.pid);assert(f.detector.isGameStatusCurrent());
+  }finally{confirmReady?.();stop();block();f.stopPowerProbe();assert.equal(f.timers.size,0);}
  }
 });
 
@@ -1160,7 +1178,7 @@ await check('自愈：普通读取遇旧壳通知会补读新目标，恢复time
 await check('风暴：六个固定种子的切换/断线/坏回包/旧通知混合后均收敛且不残留恢复任务',async()=>{
  for(const seed of [1,7,42,258,2026,0x5eed]){
   let rng=seed,generation=10,identity=10;const next=()=>{rng=(Math.imul(rng,1664525)+1013904223)>>>0;return rng;};
-  const f=detectionFixture(),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});
   for(let i=0;i<200;i++){
    const action=next()%6;
    if(action===0||action===3){generation++;identity++;f.native=versionedGame(next()%2?TMNT:NEXT_GAME,generation,identity);if(action===0)f.signal('ipc:game.target.changed',{generation});else assert.equal((await f.detector.refreshGameStatusStrict(f.native.pid))?.pid,f.native.pid);}
@@ -1170,7 +1188,7 @@ await check('风暴：六个固定种子的切换/断线/坏回包/旧通知混�
    await flushDetection();
    if(f.detector.isGameStatusCurrent()){const actual=f.detector.getCurrentGame();assert.equal(actual?.pid,f.native.pid,'seed '+seed+' step '+i);assert.equal(actual?.identityGeneration,f.native.identityGeneration);}
   }
-  f.signal('ipc:power.resumed');await f.advance(4500);assert(f.detector.isGameStatusCurrent(),'seed '+seed+' must recover');assert.equal(f.detector.getCurrentGame()?.pid,f.native.pid);assert.equal(f.detector.getCurrentGame()?.identityGeneration,f.native.identityGeneration);assert.equal(f.schedules.filter(x=>x.name==='game-status').length,1);assert(f.messages.length<=400,'mixed failures must keep a bounded read budget');stop();block();assert.equal(f.timers.size,0);
+  f.emitNative('power.resumed',{generation:f.power.generation});await f.advance(4500);assert(f.detector.isGameStatusCurrent(),'seed '+seed+' must recover');assert.equal(f.detector.getCurrentGame()?.pid,f.native.pid);assert.equal(f.detector.getCurrentGame()?.identityGeneration,f.native.identityGeneration);assert.equal(f.schedules.filter(x=>x.name==='game-status').length,1);assert(f.messages.length<=400,'mixed failures must keep a bounded read budget');stop();block();f.stopPowerProbe();assert.equal(f.timers.size,0);
  }
 });
 
@@ -1187,7 +1205,7 @@ await check('自愈：WebView传输恢复事件在空闲或请求在途均撤销
 
 await check('自愈：最后订阅撤销时在途观察至多八秒释放且不能重建后台恢复',async()=>{
  for(const [replyKind,foreground] of [['none',false],['stale',false],['fresh',false],['stale',true]]){
-  const f=detectionFixture(),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});f.hold=true;
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);f.native=versionedGame();await f.detector.refreshGameStatusStrict();const stop=f.detector.subscribeGameStatus(()=>{});f.hold=true;
   f.signal('ipc:game.target.changed',{generation:11});await flushDetection();const count=f.messages.length,pending=f.messages.at(-1);
   const retained=foreground?f.detector.refreshGameStatusStrict().then(game=>({game}),error=>({error})):null;stop();
   if(replyKind!=='none'){
@@ -1196,7 +1214,7 @@ await check('自愈：最后订阅撤销时在途观察至多八秒释放且不�
    else{assert.equal(f.messages.length,count,'an unobserved background request must not start another stale-snapshot read');assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'a background return after stop must not publish a new target');}
   }
   const expected=count+(foreground?1:0);await f.advance(8000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);
-  f.reply(pending.id,versionedGame(NEXT_GAME,11));f.signal('ipc:power.resumed');await f.advance(10000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);assert.equal(f.detector.getCurrentGame()?.pid,foreground?NEXT_GAME.pid:TMNT.pid);block();
+  f.reply(pending.id,versionedGame(NEXT_GAME,11));f.emitNative('power.resumed',{generation:f.power.generation});await f.advance(10000);assert.equal(f.timers.size,0);assert.equal(f.messages.length,expected);assert.equal(f.detector.getCurrentGame()?.pid,foreground?NEXT_GAME.pid:TMNT.pid);block();f.stopPowerProbe();
  }
 });
 await check('公共睡眠撤销立即退还游戏识别准入且旧显示不冒退出',async()=>{
@@ -1242,6 +1260,49 @@ await check('非 Steam：第一次 Ready 被下一次睡眠打断后继续识别
   assert.equal(seen.filter(game=>game===null).length,0,'power hold was reported as a game exit');
  }finally{stopReady();stop();block();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
 });
+await check('游戏关联读取跟随公共目标确认，迟到的旧电源通知不取消新读取',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true}),reader=f.loadMetadata();let old,newRead;
+ const reads=()=>f.messages.filter(message=>message.cmd==='gameSteam.context.get');
+ try{
+  f.native=versionedGame(TMNT,10,10);await f.detector.refreshGameStatusStrict();
+  old=reader.read();await flushDetection();assert.equal(reads().length,1);
+  const oldId=reads()[0].id,oldSignal=f.abortRecords.at(-1).signal;
+  const suspended={...f.power,phase:'suspended',hardwareWritesAllowed:false,inputReady:false,publicationRevision:2,observedNotificationSequence:2};
+  f.broadcastPower(suspended);await flushDetection();
+  assert(oldSignal.aborted);assert.equal((await old).game,null);assert.equal(f.detector.isGameStatusCurrent(),false);assert.equal(reads().length,1);
+  f.native=versionedGame(TMNT,11,10);
+  f.broadcastPower({...suspended,phase:'ready',generation:101,hardwareWritesAllowed:true,inputReady:true,publicationRevision:3});
+  await f.advance(300);assert(f.detector.isGameStatusCurrent());
+  newRead=reader.read();await flushDetection();assert.equal(reads().length,2);
+  const fresh=reads()[1],freshSignal=f.abortRecords.at(-1).signal;
+  f.emitNative('power.resuming',{generation:100});
+  f.emitNative('power.lifecycleChanged',suspended);
+  f.emitNative('power.resumed',{generation:100});
+  f.reply(oldId,null);await flushDetection();
+  assert(f.detector.isGameStatusCurrent(),'old notices changed the accepted target');
+  assert.equal(freshSignal.aborted,false,'late old power notice aborted a current context read');
+  const game={...fresh.args.expectedGame,rulesEpoch:'1',powerGeneration:'101',processValidated:false};
+  f.reply(fresh.id,{schemaVersion:1,game,steam:{status:'unknown',reason:'no-association',processValidated:false,currentSource:false}});
+  const result=await newRead;assert.equal(result.game?.pid,TMNT.pid);assert.equal(result.game?.powerGeneration,'101');assert.equal(result.steam.reason,'no-association');
+  assert.equal(reads().length,2,'power observations must not request metadata themselves');
+ }finally{reader.dispose();await Promise.allSettled([old,newRead]);f.stopPowerProbe();await flushDetection();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(f.timers.size,0);}
+});
+await check('旧唤醒和重复Ready不触发已确认游戏的额外扫描',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+ f.native=versionedGame(TMNT,10,10);await f.detector.refreshGameStatusStrict();
+ const stop=f.detector.subscribeGameStatus(()=>{});
+ try{
+  const oldGeneration=f.power.generation;
+  f.broadcastPower({...f.power,generation:oldGeneration+1,publicationRevision:2,observedNotificationSequence:2});
+  await f.advance(200);assert(f.detector.isGameStatusCurrent());
+  const calls=f.messages.length;
+  for(const generation of [oldGeneration,oldGeneration+1,oldGeneration+1]){
+   f.emitNative('power.resumed',{generation});await f.advance(110);
+   assert(f.detector.isGameStatusCurrent());
+   assert.equal(f.messages.length,calls,'compatibility wake caused another scan of a confirmed target');
+  }
+ }finally{stop();block();f.stopPowerProbe();assert.equal(f.timers.size,0);}
+});
 await check('公共新Ready不等旧识别读取且迟到成功失败不能污染后继',async()=>{
  for(const strict of [false,true]){const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;const old=f.detector.refreshGameStatusStrict(strict?TMNT.pid:0);old.catch(()=>{});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
  f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});f.native=versionedGame({...TMNT,pid:22222,processCreated:'2222200',path:'C:/new.exe'},12,12);f.hold=false;f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});await flushDetection();await f.advance(1250);assert(f.messages.length>before,'new Ready joined the old detection request');assert.equal(f.messages.at(-1).args.pid,undefined,'wake replayed a retired preferred PID');assert.equal(f.messages.at(-1).args.expectedPowerGeneration,101);assert.equal(f.messages.at(-1).args.expectedPowerNotificationSequence,2);assert.equal(f.detector.getCurrentGame().pid,22222);assert(f.detector.isGameStatusCurrent());f.reply(message.id,versionedGame(TMNT,10,10));await assert.rejects(old);await flushDetection();assert.equal(f.detector.getCurrentGame().pid,22222);assert(f.detector.isGameStatusCurrent());f.fail(message.id,'old failure');await flushDetection();assert(f.detector.isGameStatusCurrent());stop();f.stopPowerProbe();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
@@ -1249,6 +1310,281 @@ await check('公共新Ready不等旧识别读取且迟到成功失败不能污�
 await check('公共同代通知序号变化退休旧识别且拒绝缓存准入',async()=>{
  const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;const old=f.detector.refreshGameStatusStrict();old.catch(()=>{});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
  f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2});assert.equal(f.detector.isGameStatusCurrent(),false,'new sequence retained cached game admission');f.hold=false;f.native=versionedGame(TMNT,11,10);await f.detector.refreshGameStatusStrict();assert(f.messages.length>before,'same generation sequence joined old detection');assert(f.detector.isGameStatusCurrent());f.fail(message.id,'old retired read');await assert.rejects(old);assert(f.detector.isGameStatusCurrent());stop();f.stopPowerProbe();assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+});
+
+await check('game detection replaces an interrupted read on coalesced Ready',async()=>{
+ const f=detectionFixture(),block=blockDisplayScheduler(f),seen=[],ready=[];
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+ const stop=f.policy.subscribePolicyGameStatus(game=>seen.push(game));
+ const stopReady=f.detector.subscribeGameTargetReadiness(value=>ready.push(value));
+ try{
+  await flushDetection();assert(f.detector.isGameStatusCurrent());
+  assert.equal(seen.at(-1)?.pid,TMNT.pid);
+  const identityPublications=seen.length;
+  f.hold=true;
+  const old=f.detector.refreshGameStatusStrict(),rejected=assert.rejects(old);
+  await flushDetection();const pending=f.messages.at(-1),before=f.messages.length;
+  assert(f.detector.isGameStatusCurrent(),'ordinary refresh should preserve the last confirmed game before sleep');
+  const previous={...f.power};
+  f.hold=false;f.native=versionedGame(TMNT,12,10);
+  f.broadcastPower({...previous,publicationRevision:2,suspendSerial:1});
+  assert.equal(f.detector.isGameStatusCurrent(),false,'coalesced Ready retained the interrupted game observation');
+  assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid);
+  assert.equal(pending.args.expectedPowerSuspendSerial,0);
+  await f.advance(1250);
+  assert.equal(f.messages.length,before+1,'new Ready did not run exactly one successor read');
+  assert.equal(f.messages.at(-1).args.expectedPowerSuspendSerial,1);
+  assert.equal(f.messages.at(-1).args.automatic,true,'new Ready did not recover through the background reader');
+  assert(f.detector.isGameStatusCurrent());
+  f.reply(pending.id,noGame(11,11));await rejected;
+  f.broadcastPower({...previous,publicationRevision:3});
+  await flushDetection();
+  assert(f.detector.isGameStatusCurrent());
+  assert.equal(f.messages.length,before+1);
+  assert.deepEqual(ready,[false,true,false,true]);
+  assert.equal(seen.length,identityPublications,'interrupted read changed the published game identity');
+  assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid);
+ }finally{stopReady();stop();block();f.stopPowerProbe();}
+});
+
+await check('late native game target notification recovers readiness after coalesced Ready without polling',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true});
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+ await f.detector.refreshGameStatusStrict();
+ const readiness=[],stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+ try{
+   const beforeReady=f.messages.length;
+   f.native=versionedGame(TMNT,11,10);
+   f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2,suspendSerial:1});
+   await f.advance(100);
+   assert.equal(f.messages.length,beforeReady+1);
+   assert(f.detector.isGameStatusCurrent());
+
+   const beforeHint=f.messages.length,hint={generation:12,pid:NEXT_GAME.pid,path:NEXT_GAME.path};
+   f.hold=true;
+   f.emitNative('game.target.changed',hint);
+   f.emitNative('game.target.changed',hint);
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'unconfirmed hint must preserve the displayed target');
+   assert.equal(f.detector.isGameStatusCurrent(),false,'the hint cannot grant readiness by itself');
+   await f.advance(100);
+   assert.equal(f.messages.length,beforeHint+1,'late native notification must schedule one shared recheck without a poll');
+   const request=f.messages.at(-1);
+   assert.equal(request.cmd,'game.detect');
+   assert.deepEqual({...request.args},{automatic:true,expectedPowerGeneration:100,expectedPowerNotificationSequence:2,expectedPowerSuspendSerial:1});
+   assert.equal(f.detector.isGameStatusCurrent(),false);
+   f.reply(request.id,versionedGame(TMNT,12,10));
+   await flushDetection();
+   assert.deepEqual(readiness,[true,false,true,false,true]);
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
+   f.emitNative('game.target.changed',hint);
+   await f.advance(10000);
+   assert.equal(f.messages.length,beforeHint+1,'confirmed generation must not trigger another read');
+   assert.equal(f.schedules.length,0);
+ }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+
+await check('game detection rereads shared power after a native denial without a wake event',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true});
+ const initial={...f.power,suspendSerial:1};
+ f.broadcastPower(initial);f.native=versionedGame(TMNT);
+ await f.detector.refreshGameStatusStrict();
+ const readiness=[],stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+ try{
+  assert.equal(f.scheduler.hasScheduledTask('game-status'),false);
+  const before=f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted;
+  const suspended={...initial,phase:'suspended',generation:101,suspendSerial:2,inputReady:false,
+    hardwareWritesAllowed:false,notificationPending:true,publicationRevision:2,observedNotificationSequence:2};
+  f.power=suspended;f.hold=true;
+  const lost=f.detector.refreshGameStatusStrict();await flushDetection();
+  const denied=f.messages.at(-1);assert.equal(denied.args.expectedPowerSuspendSerial,1);
+  f.fail(denied.id,'GAME_TARGET_POWER_ADMISSION_UNAVAILABLE');await assert.rejects(lost,/GAME_TARGET_POWER_ADMISSION_UNAVAILABLE/);
+  await flushDetection();
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted,before+1,'native denial must request an authoritative public read');
+  assert.equal(f.sharedPower.getSharedPowerLifecycle()?.phase,'suspended');
+  assert.equal(f.detector.getCurrentGame()?.source,'whitelist');
+  assert.deepEqual(readiness,[true,false]);
+  f.emitNative('power.lifecycleChanged',initial);await flushDetection();
+  assert.equal(f.sharedPower.getSharedPowerLifecycle()?.generation,101,'late old Ready cannot reopen the gate');
+  const retryAt=f.messages.length;
+  f.power={...suspended,phase:'ready',inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:3,observedNotificationSequence:3};
+  f.hold=false;
+  await f.advance(999);assert.equal(f.messages.length,retryAt);
+  await f.advance(1);assert.equal(f.messages.length,retryAt+1);
+  const resumed=f.messages.at(-1);
+  assert.equal(resumed.args.automatic,true);assert.equal(resumed.args.pid,undefined);
+  assert.equal(resumed.args.expectedPowerGeneration,101);assert.equal(resumed.args.expectedPowerSuspendSerial,2);
+  assert.equal(resumed.args.expectedPowerNotificationSequence,3);
+  assert.equal(f.detector.getCurrentGame()?.processCreated,TMNT.processCreated);
+  assert(f.detector.isGameStatusCurrent());assert.deepEqual(readiness,[true,false,true]);
+ }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+
+await check('game detection deduplicates native power rejection without resetting its retry budget',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true});
+ f.native=versionedGame(TMNT);await f.detector.refreshGameStatusStrict();
+ const stop=f.detector.subscribeGameTargetReadiness(()=>{});
+ try{
+  const before=f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted;
+  const first=f.messages.length;f.hold=true;
+  const trigger=f.detector.refreshGameStatusStrict();await flushDetection();
+  f.fail(f.messages.at(-1).id,'GAME_TARGET_POWER_ADMISSION_EXPIRED');await assert.rejects(trigger,/GAME_TARGET_POWER_ADMISSION_EXPIRED/);
+  await flushDetection();
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted,before+1);
+  for(const [i,delay] of [500,1500,4000].entries()){
+   await f.advance(delay-1);assert.equal(f.messages.length,first+i+1);
+   await f.advance(1);assert.equal(f.messages.length,first+i+2);
+   f.fail(f.messages.at(-1).id,'GAME_TARGET_POWER_ADMISSION_EXPIRED');await flushDetection();
+  }
+  await f.advance(60000);
+  assert.equal(f.messages.length,first+4);
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted,before+1);
+  assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);assert.equal(f.detector.isGameStatusCurrent(),false);
+ }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+
+await check('game detection renews exhausted recovery only for a new sleep scope',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true});
+ const current=versionedGame(TMNT,10,10),stale=versionedGame(TMNT,9,9);
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=current;
+ await f.detector.refreshGameStatusStrict();
+ const readiness=[],stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+ try{
+  assert.equal(f.scheduler.hasScheduledTask('game-status'),false);
+  f.native=stale;
+  const before=f.messages.length;
+  f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2});
+  await flushDetection();
+  await f.advance(10000);
+  assert.equal(f.messages.length,before+12,'the initial observation exhausts its three timed recovery reads');
+  assert.equal(f.detector.isGameStatusCurrent(),false);
+  assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
+
+  const exhausted=f.messages.length;
+  f.broadcastPower({...f.power,publicationRevision:3,observedNotificationSequence:3});
+  await flushDetection();
+  await f.advance(10000);
+  assert.equal(f.messages.length,exhausted+3,'another notification for the same scope must not refund the timer budget');
+
+  const next=f.messages.length;
+  f.broadcastPower({...f.power,publicationRevision:4,suspendSerial:1});
+  await flushDetection();
+  assert.equal(f.messages.length,next+3,'coalesced Ready runs one current observation even if it receives stale replies');
+  assert.equal(f.detector.isGameStatusCurrent(),false);
+  f.native=current;
+  await f.advance(499);
+  assert.equal(f.messages.length,next+3);
+  await f.advance(1);
+  assert(f.detector.isGameStatusCurrent(),'new sleep scope must recover from its first failed observation without a poll or user action');
+  assert.equal(f.messages.length,next+4);
+  assert(f.messages.slice(next).every(m=>m.args.automatic===true&&m.args.pid===undefined&&m.args.expectedPowerSuspendSerial===1));
+  assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
+  assert.deepEqual(readiness,[true,false,true]);
+ }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+
+if(detectionOnly&&exactCase==='game detection recovers after a stale reply to a new public observation')await check('game detection recovers after a stale reply to a new public observation',async()=>{
+ const f=detectionFixture();
+ const current=versionedGame(TMNT,10,10), stale=versionedGame(TMNT,9,9);
+ f.native=current;
+ await f.detector.refreshGameStatusStrict();
+ const readiness=[];
+ const stop=f.detector.subscribeGameTargetReadiness(ready=>readiness.push(ready));
+ try{
+  assert.deepEqual(readiness,[true]);
+  assert.equal(f.scheduler.hasScheduledTask('game-status'),false);
+  f.native=stale;
+  const before=f.messages.length;
+  f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2});
+  await flushDetection();
+  assert.equal(f.detector.getCurrentGame()?.processCreated,TMNT.processCreated,'a stale reply must preserve the displayed game');
+  assert.deepEqual(readiness,[true,false]);
+  assert.equal(f.detector.isGameStatusCurrent(),false);
+  const beforeRetry=f.messages.length;
+  f.native=current;
+  await f.advance(499);
+  assert.equal(f.messages.length,beforeRetry,'recovery ran before its original delay');
+  await f.advance(1);
+  assert(f.detector.isGameStatusCurrent(),'a stale reply must leave the new power observation eligible for autonomous recovery');
+  assert.deepEqual(readiness,[true,false,true]);
+  assert.equal(f.messages.length,before+4,'three old replies and the existing recovery read are the only new reads');
+  assert(f.messages.slice(before).every(m=>m.args.automatic===true&&m.args.pid===undefined&&m.args.expectedPowerGeneration===100&&m.args.expectedPowerNotificationSequence===2));
+  assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
+  assert.equal(f.detector.getCurrentGame()?.generation,10);
+  f.native=stale;
+  const stable=f.messages.length;
+  assert.equal((await f.detector.refreshGameStatusStrict())?.generation,10,'the same-power cache stays eligible for stale fallback');
+  assert(f.detector.isGameStatusCurrent());
+  assert.equal(f.messages.length,stable+1);
+  assert.deepEqual(readiness,[true,false,true]);
+ }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+});
+
+if(detectionOnly&&exactCase==='game profile auto memory resumes after queued work loses public admission')await check('game profile auto memory resumes after queued work loses public admission',async()=>{
+ for(const [boundary,coalesced] of [['queued',false],['before-commit',false],['after-commit',false],['before-commit',true]]){
+  const f=detectionFixture(),power={...f.sharedPower,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted};
+  if(coalesced)f.power.suspendSerial=7;
+  const first=coalesced?7:100,next=coalesced?8:101;
+  const scope=()=>coalesced?f.power.suspendSerial:f.power.generation;
+  const target=load('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':hysteresis});
+  const listeners=new Set(),attempts=[],writes=[],restores=[];
+  let config={autoMemory:false,entries:{},rtss:{}},release;
+  const hold=new Promise(resolve=>{release=resolve;});
+  const publish=(patch={})=>{config={...config,...patch};for(const cb of listeners)cb(structuredClone(config));};
+  const auto=load('src/bridge/gameProfileAutoMemory.ts',{
+   './gamePolicyTarget':f.policy,'./gamedetect':f.detector,'./settingsRepository':{getSettingsGeneration:()=>1},
+   './powerLifecycleState':power,'./gameCustomProfileTarget':target,'./performanceSchedule':{
+    loadGameCustomConfig:async()=>structuredClone(config),
+    onGameCustomConfigChanged(cb){listeners.add(cb);return()=>listeners.delete(cb);},
+    async createGameCustomProfile(identity,_name,{automatic,admit}){
+     assert(automatic&&admit());assert.equal(identity.pid,TMNT.pid);assert.equal(identity.processCreated,TMNT.processCreated);
+     const attempt=scope();attempts.push(attempt);
+     if(config.entries[identity.exe])return false;
+     if(attempts.length===1&&boundary==='before-commit')await hold;
+     if(!admit())return false;
+     writes.push(attempt);publish({entries:{[identity.exe]:true}});
+     if(attempts.length===1&&boundary==='after-commit')await hold;
+     return true;
+    },
+    async restorePerformanceScheduleIfConfigured(){restores.push(scope());},
+   },
+  });
+  try{
+   f.native=versionedGame();await f.detector.refreshGameStatusStrict();
+   auto.startGameProfileAutoMemory();await flushDetection();
+   assert(f.detector.isGameStatusCurrent());assert.equal(writes.length,0);
+   publish({autoMemory:true});publish();
+   assert(auto.getGameProfileAutoMemoryDiagnostics().pending);
+   if(boundary!=='queued'){
+    await flushDetection();assert.deepEqual(attempts,[first]);assert(auto.getGameProfileAutoMemoryDiagnostics().busy);
+   }
+   if(coalesced){
+    f.broadcastPower({...f.power,publicationRevision:2,suspendSerial:next});
+    await flushDetection();await f.detector.refreshGameStatusStrict();
+   }else{
+   f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});
+   await flushDetection();
+   assert(!f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
+   assert.deepEqual(writes,boundary==='after-commit'?[100]:[]);assert.deepEqual(restores,[]);
+   if(boundary==='queued')assert.deepEqual(attempts,[],'revoked queued work reached the write port');
+   f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+   }
+   await flushDetection();await f.advance(1250);
+   assert(f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame()?.processCreated,TMNT.processCreated);
+   if(boundary!=='queued')assert.deepEqual(attempts,[first],'successor overlapped an unresolved write');
+   release();await flushDetection();
+   assert.deepEqual(writes,boundary==='after-commit'?[first]:[next],'same game did not resume after zero-work public revocation');
+   assert.deepEqual(attempts,boundary==='queued'?[next]:[first,next]);
+   assert.deepEqual(restores,boundary==='after-commit'?[]:[next]);
+   assert(!auto.getGameProfileAutoMemoryDiagnostics().pending&&!auto.getGameProfileAutoMemoryDiagnostics().busy);
+   const settled=attempts.length;
+   publish({entries:{}});await flushDetection();
+   assert.equal(attempts.length,settled,'config-only deletion re-created a handled profile');
+   publish({autoMemory:false});publish({autoMemory:true});publish({autoMemory:false});await flushDetection();
+   assert.equal(attempts.length,settled,'queued work ignored opt-out');
+   publish({autoMemory:true});auto.stopGameProfileAutoMemory();await flushDetection();
+   assert.equal(attempts.length,settled,'queued work survived stop');
+  }finally{release();auto.stopGameProfileAutoMemory();f.stopPowerProbe();await flushDetection();assert.equal(listeners.size,0);}
+ }
 });
 
 await check('公共睡眠恢复时策略首次识别不保留退休初始化Promise',async()=>{
@@ -1289,6 +1625,47 @@ await check('公共识别等待64轮撤销恢复归还本侧监听和timer且迟
   f.hold=false;f.native=versionedGame(n%2?TMNT:NEXT_GAME,20+n);f.broadcastPower({...f.power,generation:101+n,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:f.power.publicationRevision+1});await flushDetection();await f.advance(1250);assert(f.detector.isGameStatusCurrent());const current=f.detector.getCurrentGame();f.reply(message.id,versionedGame(previous,1,1));f.fail(message.id,'late retired failure');await flushDetection();assert.equal(f.detector.getCurrentGame().pid,current.pid);assert(f.detector.isGameStatusCurrent());assert(f.abortRecords.every(r=>r.callbacks.size===0),'completed IPC left cancellation listeners');
  }
  assert.equal(held,64);const count=f.messages.length;stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));await f.advance(20000);assert.equal(f.messages.length,count,'last consumer shutdown revived discovery');
+});
+
+if(detectionOnly&&exactCase==='非 Steam：首份电源快照一直不可用时释放手动识别，恢复后可重试')await check('非 Steam：首份电源快照一直不可用时释放手动识别，恢复后可重试',async()=>{
+ const f=detectionFixture();f.stopPowerProbe();
+ f.native=versionedGame(TMNT,10,10);
+ f.powerReadHook=async()=>{throw Error('inert Native power read unavailable');};
+ let first=null;
+ const held=f.detector.refreshGameStatusStrict(TMNT.pid).then(game=>{first={game};},error=>{first={error};});
+ await flushDetection();
+ try{
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,1);assert.equal(f.messages.length,0);
+  await f.advance(7999);assert.equal(first,null,'the request retired before its waiting budget');
+  await f.advance(1);
+  assert(first?.error,'a cold power observation failure must release the game selection wait');
+  assert.equal(f.messages.length,0,'an unavailable power snapshot cannot start game discovery');
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(f.timers.size,0);
+  f.powerReadHook=null;
+  const current=await f.detector.refreshGameStatusStrict(TMNT.pid);
+  assert.equal(current?.source,'whitelist');assert.equal(current?.pid,TMNT.pid);assert.equal(current?.processCreated,TMNT.processCreated);
+  assert.equal(f.messages.length,1);assert.equal(f.messages[0].args.expectedPowerGeneration,f.power.generation);
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(f.timers.size,0);
+ }finally{
+  f.powerReadHook=null;f.broadcastPower(f.power);await held;
+ }
+});
+
+if(detectionOnly&&exactCase==='非 Steam：首次电源状态返回只下发当前游戏选择')await check('非 Steam：首次电源状态返回只下发当前游戏选择',async()=>{
+ const f=detectionFixture();f.stopPowerProbe();
+ f.native=versionedGame(NEXT_GAME,11,11);
+ let allowPower;
+ f.powerReadHook=()=>new Promise(resolve=>{allowPower=resolve;});
+ const prior=f.detector.refreshGameStatusStrict(TMNT.pid);
+ await flushDetection();
+ const current=f.detector.refreshGameStatusStrict(NEXT_GAME.pid);
+ await flushDetection();
+ assert.equal(f.messages.length,0);assert.equal(typeof allowPower,'function');
+ allowPower({...f.power});
+ const results=await Promise.all([prior,current]);
+ assert.deepEqual(f.messages.map(message=>message.args.pid),[NEXT_GAME.pid],'an older selection cannot enter Native after admission changed hands');
+ assert(results.every(game=>game?.pid===NEXT_GAME.pid&&game.processCreated===NEXT_GAME.processCreated));
+ assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(f.timers.size,0);
 });
 
 if(detectionOnly&&exactCase==='公共睡眠输入覆盖：实际检测器和真实Repository在同游戏恢复后接续')await check('公共睡眠输入覆盖：实际检测器和真实Repository在同游戏恢复后接续',async()=>{

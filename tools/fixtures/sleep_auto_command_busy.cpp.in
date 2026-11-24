@@ -120,7 +120,7 @@ struct Foreground{std::string role="original-game";DWORD pid=10708;ULONGLONG cre
 static Captured captured;static bool identity=true;
 static Captured capturedFor(ULONGLONG){return captured;}static Captured wakeBoundaryFor(ULONGLONG){return captured;}static bool originalTargetCurrent(const Captured&){return identity&&allowed&&fixtureGameCurrent&&fixtureSessionCurrent;}
 static json capturedPauseState(ULONGLONG){return {{"available",true},{"paused",false},{"waitForSleepRelease",false}};}
-static void cancelPreparedSuspend(){}static void closeSuspendEpisode(){}static void prepareSuspend(){}static void captureSuspend(ULONGLONG){}
+static void cancelPreparedSuspend(){}static void closeSuspendEpisode(){}static void prepareSuspend(ULONGLONG){}static void captureSuspend(ULONGLONG,const std::shared_ptr<void>&,ULONGLONG){}
 static bool sameGame(const Game&){return fixtureGameCurrent;}static bool sameSession(const Session&){return fixtureSessionCurrent;}
 static bool gameNotPaused(const Game&){return true;}static bool nativePrimaryAllowsOriginal(const Session&,const Game&,std::uint32_t,bool){return fixtureGameCurrent&&fixtureSessionCurrent;}
 static Foreground foreground(const Game&,const Session&){return {};}

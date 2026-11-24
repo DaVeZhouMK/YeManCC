@@ -72,7 +72,7 @@ static void nativeBusPump(){
  if(afterNativeBus)afterNativeBus();
 }
 static json selectionArgs(const std::string& suffix){
- const auto context=std::atomic_load(&g_windowsSelectionWorkerContext);
+ const auto context=g_windowsSelectionWorkerContext.load();
  return {{"gyroDeviceId","ACPI#"+suffix+"#1#{GYRO}"},{"accelDeviceId","ACPI#"+suffix+"#1#{ACCEL}"},
      {"transformPolicy","explicit-current-model"},{"recipeFingerprint",ymcc::sensors::selection::fingerprint(context->model)}};
 }

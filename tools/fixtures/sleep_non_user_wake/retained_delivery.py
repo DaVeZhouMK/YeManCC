@@ -34,9 +34,13 @@ def bind_pause(c,returned):
     header=(c['args'].source.parent/'wake_game_recovery.h').read_text(encoding='utf-8-sig');masked=c['mask'](header);a=masked.index('struct SgWakeRecoveryBatch {');b=masked.index('{',a)+1;depth=1
     while depth:depth+=(masked[b]=='{')-(masked[b]=='}');b+=1
     batch=header[a:b+1]+'\nstatic SgWakeRecoveryBatch g_sgWakeRecovery;'
+    parked=re.findall(r'^static std::atomic<bool> g_sgWakeRecoveryParked\{false\};$',header,re.M);assert len(parked)<=1
+    batch+='\n'+'\n'.join(parked)
     old='struct { ULONGLONG generation=0;std::vector<RecoveryEntry> entries; } g_sgWakeRecovery;';assert p.count(old)==1;p=p.replace(old,batch)
     helper='\n'.join(function(n,returned,'native/sleep_returned_pause_native.inc') for n in ['sgOrdinaryPauseCurrent','sgReturnedPauseCurrent'])+'\n'+helpers
-    helper+='\n'+function('sgNotifyWork')+'\n'+'\n'.join(function(n,header,'native/wake_game_recovery.h') for n in ['sgCanceledSleepRecoveryEntryCurrent','sgQueueCanceledSleepLeaseRecoveryUnlocked'])+'\n'
+    cancel_helpers=['sgCanceledSleepRecoveryEntryCurrent','sgQueueCanceledSleepLeaseRecoveryUnlocked']
+    if 'sgCanceledSleepRecoveryBoundaryCurrent' in header:cancel_helpers.insert(0,'sgCanceledSleepRecoveryBoundaryCurrent')
+    helper+='\n'+function('sgNotifyWork')+'\n'+'\n'.join(function(n,header,'native/wake_game_recovery.h') for n in cancel_helpers)+'\n'
     return p,helper
 
 def bind_abort(c,p,returned,text):
@@ -58,10 +62,15 @@ def adapt_checks(c):
     observer=r'''
 static size_t fixtureWorkDeliveryCount(){return g_sgWorkQ.size()+static_cast<size_t>(std::count_if(g_sgRetainedWorkDelivery.begin(),g_sgRetainedWorkDelivery.end(),[](const auto& d){return d.order!=0;}));}
 static SgWorkItem& fixtureWorkDeliveryFront(){SgRetainedWorkDelivery* first=nullptr;for(auto& d:g_sgRetainedWorkDelivery)if(d.order&&(!first||d.order<first->order))first=&d;if(first&&first->ahead==0)return first->item;if(g_sgWorkQ.empty())throw std::runtime_error("no fixture-observed queued work");return g_sgWorkQ.front();}
-static void fixtureWorkDeliveryPop(){std::lock_guard<std::mutex> lock(g_sgWorkMx);SgWorkItem item{};if(!sgTakeWorkDeliveryLocked(item))throw std::runtime_error("original delivery pop rejected fixture work");}
+static bool fixtureTryWorkDeliveryPop(){std::lock_guard<std::mutex> lock(g_sgWorkMx);SgWorkItem item{};return sgTakeWorkDeliveryLocked(item);}
+static void fixtureWorkDeliveryPop(){if(!fixtureTryWorkDeliveryPop())throw std::runtime_error("original delivery pop rejected fixture work");}
 static void fixtureWorkDeliveryReset(){std::lock_guard<std::mutex> lock(g_sgWorkMx);g_sgWorkQ.clear();g_sgRetainedWorkDelivery={};g_sgRetainedWorkOrder=0;}
 '''
     # Functions need the original helpers defined before this test observer.
     c['functions']+='\n'+observer+'\n'
     for a,b in [('g_sgWorkQ.size()','fixtureWorkDeliveryCount()'),('g_sgWorkQ.empty()','(fixtureWorkDeliveryCount()==0)'),('g_sgWorkQ.front()','fixtureWorkDeliveryFront()'),('g_sgWorkQ.pop_front()','fixtureWorkDeliveryPop()'),('g_sgWorkQ.clear()','fixtureWorkDeliveryReset()')]:checks=checks.replace(a,b)
+    if c['args'].returned_pause_only and not c['args'].ordinary_pause_only:
+        old='fixtureWorkDeliveryPop();\n   runProductionSuspendPause(scope.generation,&scope);'
+        assert checks.count(old)==1
+        checks=checks.replace(old,'if(scenario=="changed-generation"){assert(!fixtureTryWorkDeliveryPop());}\n   else {fixtureWorkDeliveryPop();runProductionSuspendPause(scope.generation,&scope);}')
     return p,checks

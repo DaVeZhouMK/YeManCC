@@ -27,12 +27,21 @@ inline Json officialSocketFacts(const Json& value){
         return value;
     }catch(...){return nullptr;}
 }
-inline Json officialSocketSignal(const Json& packet,int context,const std::string& run){
+inline const std::string* officialSocketPayload(const Json& packet,int context){
+    if(context<=0)return nullptr;
+    const auto method=packet.find("method");
+    const auto* methodName=method==packet.end()?nullptr:method->get_ptr<const std::string*>();
+    if(!methodName||*methodName!="Runtime.bindingCalled")return nullptr;
+    const auto& params=packet.at("params");
+    const auto name=params.find("name");
+    const auto* binding=name==params.end()?nullptr:name->get_ptr<const std::string*>();
+    if(!binding||*binding!="__YMCC_DECKY_HEALTH_V1"||params.value("executionContextId",0)!=context)return nullptr;
+    const auto payload=params.find("payload");
+    const auto* raw=payload==params.end()?nullptr:payload->get_ptr<const std::string*>();
+    return raw&&raw->size()<=256?raw:nullptr;
+}
+inline Json officialSocketSignal(const std::string& raw,const std::string& run){
     try{
-        if(context<=0||packet.value("method",std::string{})!="Runtime.bindingCalled")return nullptr;
-        const auto& params=packet.at("params");
-        if(params.value("name",std::string{})!="__YMCC_DECKY_HEALTH_V1"||params.value("executionContextId",0)!=context)return nullptr;
-        const auto raw=params.value("payload",std::string{});if(raw.size()>256)return nullptr;
         auto value=Json::parse(raw,nullptr,false);
         if(!value.is_object()||value.size()<8||value.size()>10||value.value("runId",std::string{})!=run||value.value("code",std::string{})!="decky-socket-close")return nullptr;
         value.erase("runId");value.erase("code");value["schema"]=1;

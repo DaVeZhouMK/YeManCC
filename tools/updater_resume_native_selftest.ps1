@@ -1,8 +1,9 @@
 ﻿[CmdletBinding()]
-param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly,
+param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly,[switch]$ManifestSerializationOnly,
  [ValidatePattern('^[A-Za-z0-9 -]*$')][string]$ConfigStormCase='')
 $ErrorActionPreference='Stop'
 if($ConfigStormCase -and !$ConfigStormOnly){throw 'An exact config case requires ConfigStormOnly'}
+if($ConfigStormOnly -and $ManifestSerializationOnly){throw 'Select only one directed mode'}
 
 # Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
 $ownModules = Join-Path $PSHOME 'Modules'
@@ -64,6 +65,7 @@ $fixture=$fixture.Replace('//__PRODUCTION_ATOMIC_WRITER__',$atomicWriter.Replace
 
 
 $fixture=$fixture.Replace('//__PRODUCTION_PREDOWNLOAD_REGISTRATION__',(Slice '    ipc_on("app.updatePredownloadActivity"' '    ipc_on("app.version"'))
+$fixture=$fixture.Replace('//__PRODUCTION_MANIFEST_REGISTRATION__',(Slice '    ipc_on("app.checkUpdate"' '    ipc_on("app.updateState"'))
 $fixture=$fixture.Replace('//__PRODUCTION_CACHE_REGISTRATION__',(Slice '    ipc_on("app.retireUpdateDownload"' '    ipc_on("app.downloadUpdate"'))
 $source=Join-Path $run 'updater-resume-selftest.cpp'
 [IO.File]::WriteAllText($source,$fixture,[Text.UTF8Encoding]::new($false))
@@ -86,7 +88,7 @@ if errorlevel 1 call "$vcvars" >nul
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++20 /utf-8 /EHsc /W4 /MT /I"$project\deps\json" /I"$project\native" "$source" /Fo"$run\updater-resume-selftest.obj" /Fe"$run\updater-resume-selftest.exe" /link advapi32.lib user32.lib
 if errorlevel 1 exit /b 1
-"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}else{''}) $(if($ConfigStormCase){'"'+$ConfigStormCase+'"'}else{''})
+"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}elseif($ManifestSerializationOnly){'--manifest-serialization'}else{''}) $(if($ConfigStormCase){'"'+$ConfigStormCase+'"'}else{''})
 "@ | Set-Content -LiteralPath $bat -Encoding ascii
 & $bat *> (Join-Path $run 'compile-and-test.log')
 $code=$LASTEXITCODE
@@ -101,6 +103,7 @@ $sourceAfter['template']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'up
 foreach($name in $sourceBefore.Keys){if($sourceAfter[$name] -ne $sourceBefore[$name]){$sourceDrift+=$name}}
 $record['sourceInputsBefore']=$sourceBefore;$record['sourceInputsAfter']=$sourceAfter;$record['sourceDrift']=$sourceDrift;$record['configurationOnly']=[bool]$ConfigStormOnly
 $record['selectedConfigCase']=$ConfigStormCase
+$record['manifestSerializationOnly']=[bool]$ManifestSerializationOnly
 if($toolchainLine){$record['toolchainPath']=$toolchain;$record['toolchainSha256']=(Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash}
 if($sourceDrift.Count){$record['status']='SOURCE_DRIFT';if(!$code){$code=1}}
 

@@ -59,12 +59,16 @@ FACT(g_postHideCycleOwned);FACT(g_coldReturnCycleOwned);FACT(g_msiNativeForegrou
 static bool exitFence=false,physicalRelease=false;
 struct NativeOwner {
     bool active=false,postHideCycle=false,coldReturnCycle=false,restorePending=false;
+    bool configurationReturned=false,virtualHandoffHeld=false,cycleAccepted=false;
     ymcc::nativeForeground::Profile profile=ymcc::nativeForeground::Profile::Gpd;
-    std::uint64_t power=4;HANDLE cycleProcess=nullptr;
+    std::uint64_t power=4,suspendSerial=7,virtualHandoffRequest=0;HANDLE cycleProcess=nullptr;
+    DWORD helperExitCode=0;
+    std::string retiredNativeWriterAttempt;
     std::shared_ptr<int> nativeRefreshWriter,nativeVisibilitySession;
     std::vector<std::string> deferredVirtualWork;
 } g_msiNativeForegroundLease;
 static std::vector<json> lifecycleLogs;
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{7};
 static bool ymccIsRogFamily(){return g_machineIdentity.family==Family::Rog;}
 static bool msiClawKnownBoardAuthority(){return g_machineIdentity.family==Family::Msi;}
 static std::uint64_t inputHostStartProtectionNow(){return clockNow;}
@@ -177,6 +181,30 @@ int main(int argc,char**argv){
     reset();(void)onAfterOffWake();g_msiNativeForegroundCyclePending=true;auto& owner=g_msiNativeForegroundLease;
     owner.active=true;owner.cycleProcess=reinterpret_cast<HANDLE>(1);
     check("live-native-writer-keeps-hold-and-existing-queue-authority",originalBusWakeGate()&&g_wakeHoldPhysicalUnhide&&lifecycleLogs.empty());
+    const auto settledHandoff=[&]{
+        reset();const auto ticket=onAfterOffWake();
+        owner.active=true;owner.virtualHandoffHeld=true;owner.virtualHandoffRequest=ticket;
+        owner.cycleAccepted=true;owner.retiredNativeWriterAttempt="original-writer";
+        return ticket;
+    };
+    const auto heldTicket=settledHandoff();
+    check("settled-native-handoff-queues-original-first-on-without-clearing-hold",
+        originalBusWakeGate()&&g_wakeHoldPhysicalUnhide&&owner.active&&owner.virtualHandoffHeld&&
+        !g_inputHostProcess&&!g_inputHostEpoch&&owner.retiredNativeWriterAttempt=="original-writer"&&
+        owner.deferredVirtualWork.empty()&&lifecycleLogs.empty()&&
+        g_virtualStartProtection.view(clockNow).requestId==heldTicket);
+    const std::vector<std::pair<std::string,std::function<void()>>> settledRefusals{
+        {"not-held",[&]{owner.virtualHandoffHeld=false;}},{"other-request",[&]{++owner.virtualHandoffRequest;}},
+        {"other-suspend",[&]{++owner.suspendSerial;}},{"expired",[]{clockNow+=30000;}},
+        {"unknown-retirement",[&]{owner.retiredNativeWriterAttempt.clear();}},
+        {"no-success",[&]{owner.cycleAccepted=false;}},{"failed-writer",[&]{owner.helperExitCode=6;}},
+        {"unreturned-handle",[&]{owner.cycleProcess=reinterpret_cast<HANDLE>(1);}},
+        {"unreturned-writer",[&]{owner.nativeRefreshWriter=std::make_shared<int>(1);}},
+        {"still-returning",[&]{owner.restorePending=true;}},{"configuration-returned",[&]{owner.configurationReturned=true;}},
+        {"stale-power",[]{publicCurrent=false;}},{"unknown-power",[]{sharedKnown=false;}}
+    };
+    for(const auto& [name,alter]:settledRefusals){(void)settledHandoff();alter();
+        check("settled-native-handoff-refuses-"+name,!originalBusWakeGate()&&g_wakeHoldPhysicalUnhide);}
     for(bool native:{false,true}){
         reset();(void)onAfterOffWake();std::atomic<bool> locked=false,release=false;
         std::thread holder([&]{if(native)g_msiNativeForegroundMx.lock();else g_inputHostMx.lock();locked=true;while(!release)Sleep(1);if(native)g_msiNativeForegroundMx.unlock();else g_inputHostMx.unlock();});

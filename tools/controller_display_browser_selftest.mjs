@@ -12,7 +12,8 @@ const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compile
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 const {chromium}=createRequire(path.join(runtime,'_controller-display-test.cjs'))('playwright');
 const outputArgs=process.argv.slice(2);let positionalOut,explicitOut;
-for(let i=0;i<outputArgs.length;i++){const arg=outputArgs[i];if(arg==='--out'||arg==='--output'){assert(outputArgs[i+1],'output directory is required');explicitOut=outputArgs[++i]}else{assert(!arg.startsWith('--'),'unknown option: '+arg);assert(!positionalOut,'only one positional output directory is accepted');positionalOut=arg}}
+let powerPreviewOnly=false;
+for(let i=0;i<outputArgs.length;i++){const arg=outputArgs[i];if(arg==='--out'||arg==='--output'){assert(outputArgs[i+1],'output directory is required');explicitOut=outputArgs[++i]}else if(arg==='--power-preview-only'){assert(!powerPreviewOnly,'duplicate preview selection');powerPreviewOnly=true}else{assert(!arg.startsWith('--'),'unknown option: '+arg);assert(!positionalOut,'only one positional output directory is accepted');positionalOut=arg}}
 const out=path.resolve(explicitOut||positionalOut||process.env.YMCC_UI_BROWSER_OUT||path.resolve(root,'../../../Build/Validation/VirtualInput-CapabilityClosure-20261018/Browser','controller-display-'+new Date().toISOString().replace(/[:.]/g,'-')));
 assert(!fs.existsSync(path.join(out,'results.json'))&&!fs.existsSync(path.join(out,'source-bindings.json')),'choose a fresh output directory; prior run evidence is retained');
 fs.mkdirSync(out,{recursive:true});
@@ -33,7 +34,7 @@ const mocks={
   // Current views use GameInputEditor. This seam models only the base-settings
   // editor; the actual normalizeSettings/evaluateInputCasWrite remain below.
   '@/bridge/gameInputEditor':`import {loadSettings,compareAndSwapInputSettings} from '@/bridge/settingsRepository';export async function readGameInputEditor(){return {input:(await loadSettings()).input,target:{exe:'',pid:0,processCreated:'',generation:1},ownerEpoch:1,gameName:''}};export async function saveGameInputEditor(editor,patch,isCurrent=()=>true){if(!isCurrent())throw Error('stale editor');return compareAndSwapInputSettings(editor.input.revision,patch)};export function onGameInputEditorChanged(cb){const listeners=window.__fixture.editorListeners;listeners.add(cb);return ()=>listeners.delete(cb)}`,
-  '@/bridge/ipc':`export const isNativeRuntime=true;export function getLastGamepadState(){return window.__fixture.lastGamepadState};export function on(name,cb){const f=window.__fixture;const list=f.events[name]??=new Set();list.add(cb);return ()=>list.delete(cb)};export async function invoke(method,args){const f=window.__fixture;f.requests.push(method);f.ipcCalls.push({method,args:structuredClone(args??{})});if(method==='gyro.windowsSensors.get')return {contextStableAtCheck:true,selectedAtQuery:{gyro:{present:true}}};if(method==='oem.keys.get')return {familyId:'msi-claw',supported:true,keys:[{keyId:'m1',label:'M1',backIndex:1,captureImplemented:true},{keyId:'m2',label:'M2',backIndex:2,captureImplemented:true}]};if(method==='screenTouchpads.get'){const state=f.touchpads[args?.persona??'steamdeck'];if(!state)throw Error('unknown fixture touchpad persona');return structuredClone(state)}if(method==='screenTouchpads.set'){f.apiCalls.push('screenTouchpads.set');throw Error('touchpad writes outside display fixture')}if(method==='input.shortcutRuntime.get')return f.shortcut??{active:false};if(method==='input.shortcutRuntime.clear'){f.shortcut={active:false};window.__emit('input.shortcutRuntime',f.shortcut)}return {ok:true}}`,
+  '@/bridge/ipc':`export function setGyroTelemetryInterest(){};export const isNativeRuntime=true;export function getLastGamepadState(){return window.__fixture.lastGamepadState};export function on(name,cb){const f=window.__fixture;const list=f.events[name]??=new Set();list.add(cb);return ()=>list.delete(cb)};export async function invoke(method,args){const f=window.__fixture;f.requests.push(method);f.ipcCalls.push({method,args:structuredClone(args??{})});if(method==='gyro.windowsSensors.get')return {contextStableAtCheck:true,selectedAtQuery:{gyro:{present:true}}};if(method==='oem.keys.get')return {familyId:'msi-claw',supported:true,keys:[{keyId:'m1',label:'M1',backIndex:1,captureImplemented:true},{keyId:'m2',label:'M2',backIndex:2,captureImplemented:true}]};if(method==='screenTouchpads.get'){const state=f.touchpads[args?.persona??'steamdeck'];if(!state)throw Error('unknown fixture touchpad persona');return structuredClone(state)}if(method==='screenTouchpads.set'){f.apiCalls.push('screenTouchpads.set');throw Error('touchpad writes outside display fixture')}if(method==='input.shortcutRuntime.get')return f.shortcut??{active:false};if(method==='input.shortcutRuntime.clear'){f.shortcut={active:false};window.__emit('input.shortcutRuntime',f.shortcut)}return {ok:true}}`,
   '@/bridge/settingsRepository':`import {evaluateInputCasWrite} from ${JSON.stringify(path.join(root,'src/bridge/settingsRepository.ts'))};export {mergeSettings,VirtualStartProtectionActive} from ${JSON.stringify(path.join(root,'src/bridge/settingsRepository.ts'))};const clone=v=>JSON.parse(JSON.stringify(v));export function onInputSettingsChanged(cb){const listeners=window.__fixture.settingsListeners;listeners.add(cb);return ()=>listeners.delete(cb)};export async function loadSettings(){return clone(window.__fixture.settings)};export async function compareAndSwapInputSettings(revision,patch){const f=window.__fixture;const detached=clone(patch);f.writes.push(detached);const r=evaluateInputCasWrite(f.settings.input,revision,detached,true);if(r.ok){f.settings.input=clone(r.value);queueMicrotask(()=>{for(const cb of f.settingsListeners)cb()})}return r}`,
   // Profile deletion/performance restoration is outside this display fixture.
   // Keep this IO boundary inert; accidental actions are recorded and fail.
@@ -47,11 +48,17 @@ const mocks={
   '@/components/ControllerFeedbackCapabilitiesCard.vue':`export default {render(){return null}}`,
   '@/views/ControllerShortcutEditorView.vue':`export default {render(){return null}}`,
 };
-const result=await build({metafile:true,loader:{'.png':'dataurl'},stdin:{resolveDir:root,loader:'ts',contents:`
-import {DEFAULT_GAMEPAD_REDIST_DIRECTORY,HIDHIDE_INSTALLER_NAME} from './src/bridge/hidHideSetupPrompt.ts';import {createApp,nextTick} from 'vue';import {screenTouchpadDefaults} from './src/bridge/screenTouchpads.ts';import Controller from './src/views/ButtonMappingView.vue';import Gyro from './src/views/GyroMotionView.vue';import Preview from './src/components/GamepadVisualizer.vue';import {normalizeSettings} from './src/bridge/settingsRepository.ts';
+mocks['@/bridge/ipc']+='\nexport class IpcTimeoutError extends Error {}';
+if(powerPreviewOnly)mocks['@/bridge/ipc']=mocks['@/bridge/ipc'].replace("if(method==='gyro.windowsSensors.get')", "if(method==='power.lifecycle')return structuredClone(f.power);if(method==='gyro.windowsSensors.get')");
+const result=await build({metafile:true,loader:{'.png':'dataurl','.svg':'dataurl'},stdin:{resolveDir:root,loader:'ts',contents:`
+import {DEFAULT_GAMEPAD_REDIST_DIRECTORY,HIDHIDE_INSTALLER_NAME} from './src/bridge/hidHideSetupPrompt.ts';import {createApp,nextTick} from 'vue';import {screenTouchpadDefaults} from './src/bridge/screenTouchpads.ts';import Preview from './src/components/GamepadVisualizer.vue';import {normalizeSettings} from './src/bridge/settingsRepository.ts';
+${powerPreviewOnly ? 'const Controller=Preview,Gyro=Preview;' : `import Controller from './src/views/ButtonMappingView.vue';import Gyro from './src/views/GyroMotionView.vue';`}
+import {startUiPowerReconciliation} from './src/bridge/uiLifecycle.ts';
 const initial=normalizeSettings({input:{outputTarget:{persona:'steamdeck',buttonMappingEnabled:true,gyroEnabled:true},gyroMotion:{enabled:true,preset:'custom',outputStick:'right',outputMode:'virtual-stick',motionMode:'on',virtualPadLink:true}}});
 window.__fixture={settings:initial,events:{},writes:[],requests:[],ipcCalls:[],apiCalls:[],touchpads:Object.fromEntries(['disabled','steamdeck','dualsense-edge','elite'].map(persona=>[persona,{...screenTouchpadDefaults(persona),persona,ok:true,available:true,steamDeckAvailable:false,ps5Available:false,visible:false,reason:'isolated-display-fixture'}])),shortcut:null,lastGamepadState:null,settingsListeners:new Set(),editorListeners:new Set()};window.__emit=(name,data)=>{if(name==='gamepad.state')window.__fixture.lastGamepadState=data;for(const cb of window.__fixture.events[name]??[])cb(data)};window.__normalize=normalizeSettings;window.__tick=nextTick;window.__environmentInstallerDefaults={directory:DEFAULT_GAMEPAD_REDIST_DIRECTORY,name:HIDHIDE_INSTALLER_NAME};
-let app;window.__mount=(mode,persona='elite')=>{app?.unmount();app=createApp(mode==='controller'?Controller:mode==='gyro'?Gyro:Preview,mode==='preview'?{persona,settings:{enabled:false},showTestMode:false}:{});app.mount('#app')};window.__mount('controller');
+ let app;window.__mount=(mode,persona='elite')=>{app?.unmount();app=createApp(mode==='controller'?Controller:mode==='gyro'?Gyro:Preview,mode==='preview'?{persona,settings:{enabled:false},showTestMode:false}:{});app.mount('#app')};
+ ${powerPreviewOnly ? `window.__fixture.power={generation:1,phase:'ready',known:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,suspendSerial:7,inputReady:false,hardwareWritesAllowed:true};
+ const ui=startUiPowerReconciliation();window.__stopPreview=()=>{app.unmount();ui.stop();};window.__mount('preview');` : `window.__mount('controller');`}
 `},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'controller-display-fixture',setup(b){
   b.onResolve({filter:/.*/},args=>{
     if(args.path in mocks)return {path:args.path,namespace:'fixture'};
@@ -64,6 +71,7 @@ let app;window.__mount=(mode,persona='elite')=>{app?.unmount();app=createApp(mod
   });
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));
   b.onLoad({filter:/\.(?:ts|tsx|json)$/},args=>{if(args.path.startsWith(path.join(root,'src')+path.sep))return {contents:source(args.path).toString('utf8'),loader:path.extname(args.path).slice(1),resolveDir:path.dirname(args.path)}});
+   b.onLoad({filter:/\.svg$/},args=>{if(args.path.startsWith(path.join(root,'src')+path.sep))return {contents:source(args.path),loader:'dataurl'}});
   b.onLoad({filter:/\.vue$/},args=>{
     const {descriptor,errors}=parse(source(args.path).toString('utf8'),{filename:args.path});assert.deepEqual(errors,[]);
     const id='data-v-'+createHash('sha256').update(args.path).digest('hex').slice(0,8);
@@ -87,6 +95,39 @@ httpPort=server.address().port;
   const origin='http://127.0.0.1:'+httpPort;
   await page.route('**/*',route=>{const url=route.request().url();if(url.startsWith(origin+'/')||url.startsWith('data:'))return route.continue();errors.push('external request blocked: '+url);return route.abort()});
   await page.goto(origin);
+  if(powerPreviewOnly){
+    const artwork=page.locator('.device-vector');
+    await artwork.waitFor();
+    const unchanged=()=>page.evaluate(()=>window.__artwork===document.querySelector('.device-vector'));
+    const remember=()=>page.evaluate(()=>{window.__artwork=document.querySelector('.device-vector')});
+    await remember();
+    await page.evaluate(async()=>{const f=window.__fixture;f.power={...f.power,generation:2,phase:'resuming',publicationRevision:2,observedNotificationSequence:2,hardwareWritesAllowed:false};window.__emit('power.lifecycleChanged',f.power);
+      window.__emit('power.resume-ready',{generation:2});window.__emit('power.resumed',{generation:1});await window.__tick()});
+    assert.equal(await unchanged(),true,'unconfirmed Ready hints must not rebuild live artwork');
+    await page.evaluate(async()=>{window.dispatchEvent(new Event('ipc:window.hidden'));const f=window.__fixture;f.power={...f.power,phase:'ready',publicationRevision:3,hardwareWritesAllowed:true};window.__emit('window.focus');await window.__tick()});
+    await page.waitForFunction(()=>window.__fixture.ipcCalls.filter(call=>call.method==='power.lifecycle').length>=2);
+    assert.equal(await unchanged(),true,'confirmed wake must retain the redraw while hidden');
+    await page.evaluate(async()=>{window.dispatchEvent(new Event('ipc:window.shown'));await window.__tick()});
+    await page.waitForFunction(()=>window.__artwork!==document.querySelector('.device-vector'));
+    await remember();
+    await page.waitForFunction(()=>window.__artwork!==document.querySelector('.device-vector'),null,{timeout:1500});
+    await remember();
+    await page.evaluate(async()=>{const f=window.__fixture;window.__emit('power.lifecycleChanged',{...f.power,publicationRevision:4,inputReady:true});window.__emit('power.resumed',{generation:2});window.__emit('power.resume-ready',{generation:2});await window.__tick()});
+    assert.equal(await unchanged(),true,'committed duplicates or input readiness must not rebuild artwork again');
+    cases.push('Current public wake rebuilds the hidden controller preview once on show with the original bounded retry');
+    await page.evaluate(async()=>{window.dispatchEvent(new Event('ipc:window.hidden'));const f=window.__fixture;f.power={...f.power,publicationRevision:5,suspendSerial:8,inputReady:true};window.__emit('power.lifecycleChanged',f.power);await window.__tick()});
+    assert.equal(await unchanged(),true,'same-generation wake must defer hidden artwork work');
+    await page.evaluate(async()=>{window.dispatchEvent(new Event('ipc:window.shown'));await window.__tick()});
+    assert.equal(await unchanged(),false,'same-generation Ready with a new suspend serial must reload the artwork on show');
+    await remember();
+    await page.waitForFunction(()=>window.__artwork!==document.querySelector('.device-vector'),null,{timeout:1500});
+    await remember();
+    await page.evaluate(async()=>{const f=window.__fixture;window.__emit('power.lifecycleChanged',{...f.power,publicationRevision:6,inputReady:false});window.__emit('power.lifecycleChanged',{...f.power,publicationRevision:7,suspendSerial:7});await window.__tick()});
+    assert.equal(await unchanged(),true,'duplicate and delayed pre-suspend Ready must not reload the artwork');
+    await page.evaluate(()=>window.__stopPreview());
+    assert.deepEqual(await page.evaluate(()=>['power.lifecycleChanged','power.resumed','power.resume-ready','gamepad.state'].map(name=>(window.__fixture.events[name]?.size??0))),[0,0,0,0]);
+    cases.push('Coalesced same-generation Ready also rebuilds the hidden preview without duplicate recovery');
+  }else{
   await page.waitForFunction(()=>document.querySelector('.persona-btn.active')?.textContent==='SteamDeck');
   const baseline=await page.evaluate(()=>structuredClone(window.__fixture.settings));
   assert.deepEqual(await page.locator('.persona-btn').allTextContents(),['关闭虚拟手柄','SteamDeck','PS5','Xbox']);cases.push('current selector exposes disabled/Deck/Edge/Elite only');
@@ -277,6 +318,7 @@ httpPort=server.address().port;
     await sendAxes([0,0,0,0]);assert.deepEqual(await coords(),neutral);cases.push(persona+' neutral returns both sticks to unchanged centers');
   }
   assert.equal(await page.evaluate(()=>window.__fixture.writes.length),writesBeforePreview);cases.push('preview never changes settings');
+  }
   assert.deepEqual(await page.evaluate(()=>window.__fixture.apiCalls),[],'no window/shell APIs requested');
   assert(!Object.keys(result.metafile.inputs).some(p=>/(^|[/\\])src[/\\]bridge[/\\]ipc\.ts$/.test(p)),'real native bridge was not bundled');
   for(const binding of sources.values())assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root,binding.path))).digest('hex'),binding.sha256,'source drift: '+binding.path);

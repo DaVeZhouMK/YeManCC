@@ -43,6 +43,7 @@ internal sealed class HostDomainRouter(Func<Controller> createBattery,
     public void Tick(){lock(gate){if(!stopped)battery?.Tick();}}
     public void Suspend(){suspended=true;lock(gate){display?.Suspend();battery?.Suspend();}}
     public void Resume(){lock(gate){if(stopped)return;suspended=false;display?.Resume();battery?.Resume();}}
+    public void ContinueResumeAfterPowerAdmission(){lock(gate){if(!suspended&&!stopped)battery?.ContinueResumeAfterPowerAdmission();}}
     public void Shutdown()
     {
         stopped=true;

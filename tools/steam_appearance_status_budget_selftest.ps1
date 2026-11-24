@@ -7,7 +7,7 @@ $parseErrors=$null;$tokens=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw $parseErrors[0]}
 # Execute only these production function definitions; all external IO is mocked.
-$functions=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in @('Get-AppearanceStatus','Invoke-LoaderRpc')},$true)
+$functions=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in @('Get-AppearanceStatus','Invoke-LoaderRpc','Invoke-AppearanceControl')},$true)
 foreach($fn in $functions){Invoke-Expression $fn.Extent.Text}
 $script:LinkFile=Join-Path $Out 'missing-link.txt';$script:RpcDeadline=$null;$script:ThemeNames=@('Round')
 $checks=New-Object Collections.Generic.List[string]
@@ -17,12 +17,14 @@ function Reset-Fixture {
  $script:ThemeRoot='X:\before\themes';$script:actualRoot='X:\backend\themes';$script:running=$true
  $script:rowReads=0;$script:ownerChecks=0;$script:rpcCalls=New-Object Collections.Generic.List[string]
  $script:rowPaths=New-Object Collections.Generic.List[string];$script:rejectOwnerAt=0;$script:failRpc=''
+ $script:themeReply=@([pscustomobject]@{name='Round';enabled=$true});$script:rowInstalled=$true
 }
 function Get-BackendProcesses {if($script:running){[pscustomobject]@{Id=42}}}
 function Get-AppearanceSteamSession {if($script:running){[pscustomobject]@{pid=43;birth='100';root='X:\fixture-steam'}}}
 function Recover-PresetTransaction {}
 function Save-PresetTargetHint {}
-function Get-ThemeRows {$script:rowReads++;$script:rowPaths.Add($script:ThemeRoot);[pscustomobject]@{name='Round';installed=$true;configured=$true;backendEnabled=$null;parameterCount=0;error=''}}
+function Get-ThemeRows {param([switch]$RevisionOnly,[switch]$ValidateRenderOnly) $script:revisionOnlyRead=[bool]$RevisionOnly;$script:validateRenderOnlyRead=[bool]$ValidateRenderOnly;$script:rowReads++;$script:rowPaths.Add($script:ThemeRoot);[pscustomobject]@{name='Round';installed=$script:rowInstalled;configured=$true;backendEnabled=$null;parameterCount=0;error=''}}
+function New-AppearanceMutex([string]$Purpose) {Assert ($Purpose -eq 'ThemeControl') 'Unexpected fixture mutex';[Threading.Mutex]::new()}
 function Get-ThemeTargetId {$script:ThemeRoot}
 function Get-ThemeRevision($rows){'fixture-revision'}
 function Get-Process {param($Name) @()}
@@ -32,7 +34,7 @@ function Invoke-RestMethod {
  $request=[Text.Encoding]::UTF8.GetString($Body)|ConvertFrom-Json;$script:rpcCalls.Add($request.method)
  if($script:failRpc -eq $request.method){throw 'fixture unavailable'}
  if($request.method -eq 'fetch_theme_path'){return [pscustomobject]@{success=$true;res=$script:actualRoot}}
- if($request.method -eq 'get_themes'){return [pscustomobject]@{success=$true;res=@([pscustomobject]@{name='Round';enabled=$true})}}
+ if($request.method -eq 'get_themes'){return [pscustomobject]@{success=$true;res=$script:themeReply}}
  throw 'unexpected RPC'
 }
 if($Case -eq 'All'){
@@ -42,10 +44,45 @@ Check 'Status resolves the actual root before exactly one theme read' {
  Assert ($value.backendReady -and $value.configuredMatchesBackend -and $value.targetId -eq $script:actualRoot) 'backend target not reflected'
  Assert ($script:ownerChecks -eq 2 -and $script:rpcCalls.Count -eq 2) 'each RPC must check its current owner once'
 }
+Check 'Only an opted-in standalone Status omits wire plans and still validates themes and backend flags' {
+ $profile='{"profile":"ui-summary-v1"}'
+ foreach($case in @(
+  @{action='Status';json=$profile;summary=$true},
+  @{action='Status';json=(' ['+$profile+']');summary=$false},
+  @{action='Status';json='{"profile":["ui-summary-v1"]}';summary=$false},
+  @{action='Status';json=$null;summary=$false},
+  @{action='Automatic';json=$profile;summary=$false}
+ )){
+  Reset-Fixture
+  $Action=$case.action
+  $Payload=if($case.json){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($case.json))}else{''}
+  $result=Invoke-AppearanceControl 'Status'
+  $hasWirePlan=$null -ne $result.snapshot.themes[0].PSObject.Properties['renderPlan']
+  Assert ($result.ok -and $result.snapshot.configuredMatchesBackend -and $result.snapshot.targetId -eq $script:actualRoot) 'Status no longer returns fresh backend/target flags'
+  Assert (!$script:revisionOnlyRead -and $script:validateRenderOnlyRead -eq $case.summary -and $hasWirePlan -eq (!$case.summary) -and $script:rowReads -eq 1 -and $script:rpcCalls.Count -eq 2) ('Unexpected Status profile, validation or IO count: '+$Action+' '+$case.json)
+ }
+}
 Check 'Offline Status reads configurations once and sends no RPC' {
  Reset-Fixture;$script:running=$false;$value=Get-AppearanceStatus
  Assert ($script:rowReads -eq 1 -and $script:ownerChecks -eq 0 -and $script:rpcCalls.Count -eq 0) 'offline work amplified'
  Assert (!$value.backendReady) 'offline must not be ready'
+}
+Check 'Status confirms only unambiguous Boolean CSSLoader flags without extra reads' {
+ $enabled=[pscustomobject]@{name='Round';enabled=$true}
+ foreach($case in @(
+  @{label='case and foreign duplicates';reply=@([pscustomobject]@{name='rOuNd';enabled=$true},[pscustomobject]@{name='Other'},[pscustomobject]@{name='OTHER'});installed=$true;flag=$true;matched=$true},
+  @{label='managed duplicate';reply=@($enabled,[pscustomobject]@{name='ROUND';enabled='true'});installed=$true;flag=$null;matched=$false},
+  @{label='non-Boolean enabled';reply=@([pscustomobject]@{name='Round';enabled='true'});installed=$true;flag=$null;matched=$false},
+  @{label='disabled';reply=@([pscustomobject]@{name='Round';enabled=$false});installed=$true;flag=$false;matched=$false},
+  @{label='not yet installed';reply=@($enabled);installed=$false;flag=$true;matched=$false},
+  @{label='unexpected name shape';reply=@([pscustomobject]@{name=@('Round');enabled=$true});installed=$true;flag=$true;matched=$true},
+  @{label='no backend themes';reply=@();installed=$true;flag=$null;matched=$false}
+ )){
+  Reset-Fixture;$script:themeReply=$case.reply;$script:rowInstalled=$case.installed
+  $value=Get-AppearanceStatus
+  Assert ($value.backendReady -and $value.configuredMatchesBackend -eq $case.matched -and [object]::Equals($value.themes[0].backendEnabled,$case.flag)) ('unexpected backend state: '+$case.label)
+  Assert ($script:rowReads -eq 1 -and $script:ownerChecks -eq 2 -and $script:rpcCalls.Count -eq 2) ('read work amplified: '+$case.label)
+ }
 }
 Check 'Ownership change between RPCs prevents the second request' {
  Reset-Fixture;$script:rejectOwnerAt=2;$value=Get-AppearanceStatus
@@ -162,8 +199,8 @@ if($Case -eq 'RowsPaths'){& {
  $row=@(Get-ThemeRows)[0]
  $probes=[ordered]@{testPath=$script:RowPathTests;getItem=$script:RowItemReads;installed=$row.installed;configured=$row.configured}
  $probes|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Out 'row-path-probes.json') -Encoding UTF8
- Check 'Healthy rows reuse the guarded leaf type without redundant provider queries' {
-  Assert ($row.installed -and !$row.configured -and !$row.error -and $probes.testPath -eq 0 -and $probes.getItem -eq 2) 'Healthy path exceeded the guarded row probe budget or changed the saved selection'
+ Check 'Healthy rows validate the guarded leaf type without provider queries' {
+  Assert ($row.installed -and !$row.configured -and !$row.error -and $probes.testPath -eq 0 -and $probes.getItem -eq 0) 'Healthy path exceeded the guarded row probe budget or changed the saved selection'
  }
  Check 'A locked config is not confirmed' {
   $held=[IO.File]::Open($config,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
@@ -175,6 +212,15 @@ if($Case -eq 'RowsPaths'){& {
   [IO.Directory]::CreateDirectory($config)|Out-Null
   $value=@(Get-ThemeRows)[0];Assert (!$value.installed -and $value.configured -and !$value.error) 'Directory leaf changed default row behavior'
   [IO.Directory]::Delete($config,$false)
+ }
+ Check 'Hidden literal files are valid but a reparse leaf is rejected' {
+  [IO.File]::WriteAllText($config,$configText)
+  [IO.File]::SetAttributes($config,[IO.FileAttributes]::Hidden)
+  try{$value=@(Get-ThemeRows)[0];Assert ($value.installed -and !$value.configured -and !$value.error) 'Hidden config no longer readable'}
+  finally{[IO.File]::SetAttributes($config,[IO.FileAttributes]::Normal);[IO.File]::Delete($config)}
+  New-Item -ItemType Junction -Path $config -Target $external -ErrorAction Stop|Out-Null
+  try{$value=@(Get-ThemeRows)[0];Assert (!$value.installed -and $value.error -match 'Theme file link' -and $value.hash -eq 'missing') 'A reparse leaf was treated as ordinary absence'}
+  finally{[IO.Directory]::Delete($config,$false)}
  }
  Check 'Theme-directory junction is rejected before following its JSON' {
   [IO.File]::Delete($manifest);[IO.Directory]::Delete($folder,$false)

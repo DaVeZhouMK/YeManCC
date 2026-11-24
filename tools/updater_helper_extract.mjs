@@ -6,7 +6,9 @@ const repo=path.resolve(import.meta.dirname,'..');
 // flow. Every nonliteral must be supplied explicitly; unknown expressions fail.
 export function extractUpdaterHelper(source,bindings){
  const end=source.indexOf('helperScriptWritten = f.good()');
- const start=Math.max(source.lastIndexOf('std::ofstream f(script',end),source.lastIndexOf('std::ostringstream f; // Update helper PowerShell emission',end));
+ // Older published sources still emit directly into the legacy fixed file.
+ const start=Math.max(source.lastIndexOf('std::ofstream f(script',end),
+  source.lastIndexOf('std::ostringstream f; // Update helper PowerShell emission begins here.',end));
  if(start<0||end<start)throw Error('helper emission boundaries missing');
  const block=source.slice(start,end);let output='\ufeff',statements=0;
  const re=/\bf\s*<<((?:"(?:[^"\\]|\\.)*"|[^";])*);/g;

@@ -106,6 +106,17 @@ int wmain(int argc, wchar_t** argv) {
         expect(!readLink(link.wstring()).enabled, "missing checkbox link means disabled, not implicit enable");
         write(link, "\xef\xbb\xbf  " + executable + "\r\n");
         expect(readLink(link.wstring()).enabled && readLink(link.wstring()).executable == L"C:\\SOFT\\CSSLoader Desktop\\CssLoader-Standalone-Headless.exe", "UTF-8 BOM, spaces and CRLF preserve linked executable path");
+        const std::string leaf = "CssLoader-Standalone-Headless.exe";
+        for (const size_t length : {511, 512, 513, 4096}) {
+            std::string parent = "C:\\";
+            while (length - parent.size() - leaf.size() > 201) parent += std::string(200, 'a') + '\\';
+            parent += std::string(length - parent.size() - leaf.size() - 1, 'b') + '\\';
+            const auto absolute = parent + leaf;
+            write(link, parent + "unused\\..\\" + leaf);
+            const auto parsed = readLink(link.wstring());
+            expect(parsed.enabled && parsed.executable == std::wstring(absolute.begin(), absolute.end()) && parsed.error.empty(),
+                "normalized executable path survives short or long link buffer boundary");
+        }
         for (const auto& malformed : {std::string{}, std::string("relative/CssLoader-Standalone-Headless.exe"), executable + "\nextra", std::string("C:\\SOFT\\other.exe"), std::string("C:\\SOFT\\CSSLoader Desktop\\CssLoader-Standalone-Headless.exe --arg"), std::string(33000, 'a'), std::string("\xff\xff")}) {
             write(link, malformed); expect(!readLink(link.wstring()).enabled, "malformed/oversized/wrong executable link cannot authorize launch");
         }
@@ -129,6 +140,7 @@ int wmain(int argc, wchar_t** argv) {
         expect(until([&] { return runtime.snapshot().phase == "grace"; }), "shared session event schedules startup grace");
         Sleep(35); expect(calls == 0, "existing BAT has first chance before CSS guard check");
         expect(until([&] { return runtime.snapshot().phase == "running"; }), "already running backend is adopted, no duplicate launch");
+        expect(runtime.snapshot().notifyCard, "without a confirmation helper the running probe still refreshes the card");
         expect(calls == 1 && !runtime.snapshot().started, "existing backend adoption does not report a launch");
         expect(lifecycleEvents >= 2, "backend lifecycle publishes finite UI notifications without locking callbacks");
         const auto eventsBeforeIdle = lifecycleEvents.load();
@@ -230,17 +242,26 @@ int wmain(int argc, wchar_t** argv) {
         Sleep(500);expect(calls==3&&!runtime.snapshot().started,"missing loader remains absent; no auto-start/restart permission");runtime.shutdown();
         ResetEvent(helper.value);mode=2;calls=0;idleHelpers=0;parked=false;
         unsigned startupRequests=0;
+        std::atomic<unsigned> silentMissing{0}, silentRunning{0}, silentModeEntry{0}, notifiedUnconfirmed{0};
         auto startupConfig=idleConfig;
         startupConfig.confirmIdle=[&](const auto&,bool start,bool){++idleHelpers;if(start)++startupRequests;return duplicate(helper.value);};
+        startupConfig.changed=[&](const State& state){
+            if (!state.notifyCard && state.phase=="missing") ++silentMissing;
+            if (!state.notifyCard && state.phase=="running") ++silentRunning;
+            if (!state.notifyCard && state.reason=="bigpicture-entered") ++silentModeEntry;
+            if (state.notifyCard && state.reason=="appearance-unconfirmed") ++notifiedUnconfirmed;
+        };
         runtime.initialize(startupConfig);runtime.observeSteam(steam);
         expect(until([&]{return idleHelpers==1;}),"external Steam session requests missing CSS exactly once");
         expect(startupRequests==1&&calls==1,"missing CSS uses the startup helper instead of observation-only exhaustion");
         SetEvent(helper.value);Sleep(600);
         expect(calls==1&&idleHelpers==1,"helper failure never becomes repeated CSS launch or discovery");runtime.shutdown();
+        expect(silentMissing==1&&notifiedUnconfirmed==1,"missing probe stays diagnostic-only while unconfirmed result refreshes the card");
         ResetEvent(helper.value);calls=0;idleHelpers=0;startupRequests=0;mode=0;
         runtime.initialize(startupConfig);runtime.observeSteam(steam);
         expect(until([&]{return idleHelpers==1;}),"BAT-provided CSS uses the same bounded hold path");
         expect(startupRequests==0,"existing CSS is adopted without a second startup helper");runtime.shutdown();
+        expect(silentRunning==1,"running probe is diagnostic-only when a helper will report the outcome");
         ResetEvent(helper.value);calls=0;idleHelpers=0;startupRequests=0;
         auto lateStartup=startupConfig;
         lateStartup.ensure=[&](const auto&,const auto&,const auto&){
@@ -264,6 +285,7 @@ int wmain(int argc, wchar_t** argv) {
         observedMode=UiMode::BigPicture;runtime.requestUiRefresh();
         expect(until([&]{return modeUses==1;}),"external Steam desktop-to-bigpicture event starts appearance without YMCC UI");
         expect(modeStarts==1&&renewedModes==1,"new bigpicture entry bypasses the previous same-PID idle receipt");
+        expect(silentModeEntry==1,"immediate Big Picture probe edge does not separately refresh the card");
         for(unsigned i=0;i<1000;++i)runtime.requestUiRefresh();
         Sleep(220);expect(modeUses==1&&modeReads<=3,"1000 repeated notifications cause bounded reads and no duplicate CSS use");
         SetEvent(helper.value);expect(until([&]{return runtime.snapshot().phase=="idle";}),"mode application parks with a confirmed receipt");

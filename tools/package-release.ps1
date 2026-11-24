@@ -743,7 +743,8 @@ $hcReferenceStage = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -Runti
 $settingsBaselineBinding = Assert-YmccSettingsBaseline -ProjectRoot $ProjectRoot -StagingPowerControl $StagingPowerControl
 Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot (Join-Path $StagingPowerControl 'light-setter') | Out-Null
 . (Join-Path $packageProductTools 'steam-appearance-export.ps1')
-Assert-SteamAppearanceExport $sourcePowerControl $StagingPowerControl | Out-Null
+$appearanceInterop = New-SteamAppearanceInteropExport $sourcePowerControl $StagingPowerControl $PackageBuildRoot
+Assert-SteamAppearanceExport $sourcePowerControl $StagingPowerControl $appearanceInterop | Out-Null
 # Use the plugin captured beside this build, never a cached source dist.
 Copy-DirectoryContents $BuildDecky (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar')
 # Keep the release/updater tree self-contained even when the installer exists

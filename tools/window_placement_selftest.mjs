@@ -18,6 +18,12 @@ function evaluate(source,globals={},imports={}){
 const read=file=>fs.readFileSync(path.join(root,file),'utf8').replaceAll('\r\n','\n');
 const app=read('src/App.vue'),uiSource=read('src/bridge/uiSettings.ts'),native=read('native/main.cpp');
 const monitorLayout=evaluate(read('src/bridge/monitorLayout.ts'));
+const bootPreferences=evaluate(read('src/bridge/bootModeGlobalPreferences.ts'),{}, {
+ './inputConfigHash':evaluate(read('src/bridge/inputConfigHash.ts')),
+ './settingsBaseline':evaluate(read('src/bridge/settingsBaseline.ts'),{}, {
+  '../../PowerControl/settings-baseline.json':JSON.parse(read('PowerControl/settings-baseline.json'))
+ })
+});
 function block(source,anchor){
  const start=source.indexOf(anchor);assert(start>=0,`Missing anchor: ${anchor}`);
  const open=source.indexOf('{',start);assert(open>=0);
@@ -40,6 +46,7 @@ async function fixture(initial='right'){
  const target=new EventTarget(),placements=[],errors=[];
  const ui=evaluate(uiSource,{window:target,localStorage:{getItem(){return null;},removeItem(){}}},{
   './backgroundPosition':evaluate(read('src/bridge/backgroundPosition.ts')),
+  './bootModeGlobalPreferences':bootPreferences,
   './settingsSnapshot':{snapshotSettingsData:value=>structuredClone(value)},
   './settingsRepository':{getSettingsGeneration:()=>1,assertSettingsGeneration:()=>{},readSettingsSection:async()=>structuredClone(disk),saveSettingsSection:async(_,patch)=>{if(failWrite)throw Error('simulated storage failure');disk={...disk,...structuredClone(patch)};}}
  });
@@ -91,7 +98,7 @@ await check('settings handler rejects invalid choices and rapid writes retain th
 });
 await check('native lifecycle reflows all share the saved-side default policy',()=>{
  assert.match(native,/static bool applyFullHeightLayout\(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft\(\)\)/);
- for(const anchor of ['static void focusReflowMainWindow()', 'case WM_DPICHANGED:']){
+ for(const anchor of ['static void focusReflowMainWindow()', '\n    case WM_DPICHANGED:']){
   const begin=native.indexOf(anchor);assert(begin>=0);assert.match(native.slice(begin,begin+650),/applyFullHeightLayout\(focusCurrentTargetMonitor\(\)\)/);
  }
  assert.match(native,/if \(g_fullHeight\) \{\s*applyFullHeightLayout\(\);/);
@@ -195,6 +202,7 @@ if(process.argv.includes('--native')){
  assert.equal(process.platform,'win32','Native regression requires Windows/MSVC');
  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';assert(fs.existsSync(vcvars),'MSVC x64 tools missing');
  const helper=block(native,'static bool windowPlacementIsLeft() {');
+ const layoutWindow=block(native,'static HWND gameOverlayLayoutWindow(){');
  const layout=block(native,'static bool applyFullHeightLayout(');
  const editorWidth=read('native/controller_editor_width.h').replace('#include <windows.h>','');
  const covers=block(native,'static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {');
@@ -209,6 +217,7 @@ if(process.argv.includes('--native')){
  const displayTick=block(native,'static void taskbarDisplayReflowTick() {');
  const displaySchedule=block(native,'static void focusScheduleDisplayReflow() {');
  const cpp=`#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cwchar>
 #include <functional>
@@ -226,6 +235,7 @@ using DWORD=unsigned long;using UINT=unsigned int;using LPARAM=long long;
 constexpr DWORD ABM_GETSTATE=4,ABS_AUTOHIDE=1,ABM_GETAUTOHIDEBAREX=11;constexpr UINT ABE_LEFT=0,ABE_TOP=1,ABE_RIGHT=2,ABE_BOTTOM=3;
 struct APPBARDATA{DWORD cbSize;HWND hWnd;UINT uCallbackMessage;UINT uEdge;RECT rc;LPARAM lParam;};
 HWND g_hwnd=reinterpret_cast<HWND>(1);bool g_frameless=true,mainVisible=true,g_fullHeight=true,zoomed=false,iconic=false,monitorOk=true,rectOk=true,posOk=true,settingsOk=true;
+HWND g_gameOverlaySurface=nullptr;bool g_gameOverlaySurfaceAttached=false;
 bool trayExists=false,trayVisible=true,trayGeometryOk=true,enumOk=true,secondaryExists=false,secondaryVisible=true;
 RECT trayRect{0,1040,1920,1080},secondaryRect{0,1040,1920,1080};
 HMONITOR trayMonitor=reinterpret_cast<HMONITOR>(1),secondaryMonitor=reinterpret_cast<HMONITOR>(2);
@@ -236,8 +246,23 @@ RECT work{0,0,1920,1080},windowRect{0,0,580,780};json settings=json::object();
 json ymSettingsSection(const char*){if(!settingsOk)throw std::runtime_error("settings unavailable");return settings;}
 BOOL IsWindow(HWND h){return h!=nullptr;}BOOL IsZoomed(HWND){return zoomed;}BOOL IsIconic(HWND){return iconic;}
 HWND FindWindowW(const wchar_t*,const wchar_t*){return trayExists?reinterpret_cast<HWND>(2):nullptr;}
+constexpr DWORD ERROR_SUCCESS=0;
+DWORD lastError=ERROR_SUCCESS;
+bool lookupOk=true;
+int enumCalls=0,lookupCalls=0;
+HWND GetDesktopWindow(){return reinterpret_cast<HWND>(11);}
+void SetLastError(DWORD value){lastError=value;}
+DWORD GetLastError(){return lastError;}
+HWND FindWindowExW(HWND desktop,HWND after,const wchar_t* name,const wchar_t*){
+ ++lookupCalls;
+ if(!lookupOk||!enumOk||desktop!=GetDesktopWindow()){lastError=1400;return nullptr;}
+ if(after)return nullptr;
+ if(std::wcscmp(name,L"Shell_TrayWnd")==0&&trayExists)return reinterpret_cast<HWND>(2);
+ if(std::wcscmp(name,L"Shell_SecondaryTrayWnd")==0&&secondaryExists)return reinterpret_cast<HWND>(5);
+ return nullptr;
+}
 BOOL IsWindowVisible(HWND h){return h==g_hwnd?mainVisible:h==reinterpret_cast<HWND>(5)?secondaryVisible:trayVisible;}
-BOOL EnumWindows(BOOL(CALLBACK* cb)(HWND,LPARAM),LPARAM value){if(!enumOk)return FALSE;if(trayExists)cb(reinterpret_cast<HWND>(2),value);if(secondaryExists)cb(reinterpret_cast<HWND>(5),value);return TRUE;}
+BOOL EnumWindows(BOOL(CALLBACK* cb)(HWND,LPARAM),LPARAM value){++enumCalls;if(!enumOk)return FALSE;if(trayExists)cb(reinterpret_cast<HWND>(2),value);if(secondaryExists)cb(reinterpret_cast<HWND>(5),value);return TRUE;}
 int GetClassNameW(HWND h,wchar_t* name,int){wcscpy_s(name,64,h==reinterpret_cast<HWND>(9)?L"UnrelatedWindow":h==reinterpret_cast<HWND>(5)?L"Shell_SecondaryTrayWnd":L"Shell_TrayWnd");return 1;}
 constexpr LONG OBJID_WINDOW=0,CHILDID_SELF=0;constexpr DWORD WINEVENT_OUTOFCONTEXT=0,WINEVENT_SKIPOWNPROCESS=2,EVENT_OBJECT_SHOW=0x8002,EVENT_OBJECT_HIDE=0x8003,EVENT_OBJECT_LOCATIONCHANGE=0x800B;
 using EventCallback=void(CALLBACK*)(HWINEVENTHOOK,DWORD,HWND,LONG,LONG,DWORD,DWORD);
@@ -266,6 +291,8 @@ HMONITOR MonitorFromWindow(HWND h,int){return h==reinterpret_cast<HWND>(2)?trayM
 BOOL GetMonitorInfoW(HMONITOR mon,MONITORINFO* mi){queriedMonitor=mon;mi->rcWork=work;mi->rcMonitor=monitor;return monitorOk;}
 BOOL GetWindowRect(HWND hwnd,RECT* rect){if(hwnd==reinterpret_cast<HWND>(2)){*rect=trayRect;return trayGeometryOk;}if(hwnd==reinterpret_cast<HWND>(5)){*rect=secondaryRect;return true;}if(hwnd!=g_hwnd){*rect=gameRect;return gameRectOk;}*rect=windowRect;return rectOk;}
 BOOL SetWindowPos(HWND,void*,int x,int y,int w,int h,int flags){++moves;lastFlags=flags;if(!posOk)return FALSE;int width=windowRect.right-windowRect.left,height=windowRect.bottom-windowRect.top;if(!(flags&SWP_NOSIZE)){width=w;height=h;}windowRect={x,y,x+width,y+height};return 1;}
+namespace ymcc::screenpads { std::atomic_bool summonWindowOnLeft{false}; constexpr UINT kRefreshMessage=0x8000; }
+BOOL PostMessageW(HWND,UINT,UINT_PTR,LPARAM){return TRUE;}
 std::function<json(const json&)> place;
 template<class F> void ipc_on(const char*,F fn){place=fn;}
 ${helper}
@@ -280,6 +307,7 @@ UINT_PTR SetTimer(HWND,UINT_PTR id,UINT delay,void*){++timerArms;timerInterval=d
 BOOL KillTimer(HWND,UINT_PTR){++timerKills;return TRUE;}
 ${covers}
 ${looksFullscreen}
+${layoutWindow}
 ${layout}
 ${reflow}
 ${cancel}
@@ -297,6 +325,17 @@ int main(){try{registerPlace();int tests=0;
  run("default right startup",[&]{expect(applyFullHeightLayout(),"layout result");expect(windowRect.left==1117,"default right coordinate");});
  run("saved left startup",[&]{settings["windowPlacement"]="left";expect(applyFullHeightLayout(),"left layout");expect(windowRect.left==0,"left coordinate");});
  run("repeated DPI/display/wake reflow retains left",[&]{for(int i=0;i<5;++i)expect(applyFullHeightLayout(targetMonitor),"reflow");expect(windowRect.left==0,"left reflow");});
+ run("taskbar class lookup limits work to the current monitor or preserves enumeration order",[&]{
+  trayExists=true;secondaryExists=true;trayMonitor=currentMonitor;secondaryMonitor=reinterpret_cast<HMONITOR>(2);
+  RECT area{};int before=enumCalls,lookups=lookupCalls;
+  expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area),"class lookup");
+  expect(enumCalls==before&&lookupCalls-lookups==4,"separate monitors need no desktop enumeration");
+  secondaryMonitor=currentMonitor;
+  expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area)&&enumCalls==++before,"ambiguous monitor keeps original enumeration order");
+  lookupOk=false;
+  expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area)&&enumCalls==++before,"lookup failure uses original observation");
+  lookupOk=true;secondaryMonitor=reinterpret_cast<HMONITOR>(2);
+ });
  run("taskbar work area left offset",[&]{work={48,0,1920,1040};expect(applyFullHeightLayout(),"work area");expect(windowRect.left==48&&windowRect.top==0,"work offset");});
  run("negative-origin secondary monitor",[&]{work={-1920,-200,0,880};expect(applyFullHeightLayout(reinterpret_cast<HMONITOR>(2)),"secondary");expect(windowRect.left==-1920&&windowRect.top==-200,"secondary coordinates");});
  run("physical DPI-sized work area",[&]{work={0,0,2560,1440};expect(applyFullHeightLayout(),"dpi area");expect(windowRect.left==0&&windowRect.right==1071&&windowRect.bottom==1440,"physical dimensions");});

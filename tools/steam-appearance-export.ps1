@@ -103,12 +103,64 @@ Get-AppearanceVariableDefaults @args")
     }
     return $result
 }
-function Assert-SteamAppearanceExport([string]$SourcePowerControl,[string]$DestinationPowerControl) {
+function New-SteamAppearanceInteropExport([string]$SourcePowerControl,[string]$DestinationPowerControl,[string]$BuildRoot) {
+    $ErrorActionPreference='Stop'
+    $relative='steam-appearance\resident.ps1'
+    $source=[IO.Path]::GetFullPath((Join-Path $SourcePowerControl $relative))
+    $destination=[IO.Path]::GetFullPath((Join-Path $DestinationPowerControl $relative))
+    if($source -ieq $destination){throw 'Steam appearance interop must be built in a separate staging tree'}
+    # Compile and patch the same in-memory staged bytes; never keep two C# sources.
+    $inputBytes=[IO.File]::ReadAllBytes($destination)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$sourceDigest=[BitConverter]::ToString($sha.ComputeHash($inputBytes)).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+    if($sourceDigest -cne (Get-SteamAppearanceFileHash $source)){throw 'Steam appearance interop staging input does not match source'}
+    $encoding=[Text.UTF8Encoding]::new($true,$true)
+    $bomLength=if($inputBytes.Length -ge 3 -and $inputBytes[0] -eq 239 -and $inputBytes[1] -eq 187 -and $inputBytes[2] -eq 191){3}else{0}
+    $text=$encoding.GetString($inputBytes,$bomLength,$inputBytes.Length-$bomLength)
+    $tokens=$null;$errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw 'Steam appearance interop staging source does not parse'}
+    $initializer=@($ast.EndBlock.Statements|Where-Object {$_.Name -ceq 'Initialize-ResidentAppearanceInterop'})
+    if($initializer.Count -ne 1){throw 'Steam appearance interop initializer missing or repeated'}
+    $compile=@($initializer[0].Body.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Add-Type'},$true))
+    if($compile.Count -ne 1 -or $compile[0].CommandElements.Count -ne 3 -or $compile[0].CommandElements[1].ParameterName -cne 'TypeDefinition'){throw 'Steam appearance interop compiler input is not unique'}
+    $sourceLiteral=$compile[0].CommandElements[2]
+    if($sourceLiteral.StringConstantType -ne 'DoubleQuotedHereString' -or $sourceLiteral.NestedExpressions.Count){throw 'Steam appearance interop compiler input must be a literal'}
+    $slot=@($initializer[0].Body.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -ceq '$compiledInterop'},$true))
+    if($slot.Count -ne 1 -or $slot[0].Extent.Text -cne '$compiledInterop='''''){throw 'Steam appearance interop staging slot is not empty and unique'}
+    $work=Join-Path $BuildRoot ('steam-appearance-interop-'+[guid]::NewGuid().ToString('N'))
+    $null=[IO.Directory]::CreateDirectory($work)
+    $cs=Join-Path $work 'CssResidentProcess.cs'
+    $dll=Join-Path $work 'YMCC.CssResidentProcess.dll'
+    [IO.File]::WriteAllText($cs,$sourceLiteral.Value,[Text.UTF8Encoding]::new($false))
+    $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    & $compiler /nologo /noconfig /optimize+ /target:library /platform:anycpu /r:System.dll /r:System.Core.dll ('/out:'+$dll) $cs | Out-Host
+    if($LASTEXITCODE -ne 0 -or ![IO.File]::Exists($dll)){throw 'Steam appearance interop compilation failed'}
+    $image=[IO.File]::ReadAllBytes($dll)
+    if($image.Length -eq 0 -or $image.Length -gt 65536){throw 'Steam appearance interop image size invalid'}
+    $staged=$text.Insert($slot[0].Extent.EndOffset-1,[Convert]::ToBase64String($image))
+    [byte[]]$stagedBytes=$encoding.GetPreamble()+$encoding.GetBytes($staged)
+    if($stagedBytes.Length -gt 262144){throw 'Steam appearance interop staging file exceeds native size limit'}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{
+        $stagedDigest=[BitConverter]::ToString($sha.ComputeHash($stagedBytes)).Replace('-','').ToLowerInvariant()
+        $imageDigest=[BitConverter]::ToString($sha.ComputeHash($image)).Replace('-','').ToLowerInvariant()
+    }finally{$sha.Dispose()}
+    if(($sourceDigest -cne (Get-SteamAppearanceFileHash $source)) -or ($sourceDigest -cne (Get-SteamAppearanceFileHash $destination))){throw 'Steam appearance interop source changed during compilation'}
+    [IO.File]::WriteAllBytes($destination,$stagedBytes)
+    [pscustomobject]@{sourceSha256=$sourceDigest;stagedSha256=$stagedDigest;imageSha256=$imageDigest}
+}
+function Assert-SteamAppearanceExport([string]$SourcePowerControl,[string]$DestinationPowerControl,$InteropExport=$null) {
     if(Test-Path -LiteralPath (Join-Path $DestinationPowerControl 'steam-appearance\themes\Game Cover Reflections')){throw 'Retired reflection payload remains in export destination'}
     $files=@(Get-SteamAppearanceExportFiles $SourcePowerControl)
     foreach($relative in $files){
         $source=Join-Path $SourcePowerControl $relative;$destination=Join-Path $DestinationPowerControl $relative
-        if(!(Test-Path -LiteralPath $destination -PathType Leaf) -or (Get-SteamAppearanceFileHash $source) -ne (Get-SteamAppearanceFileHash $destination)){throw "Steam appearance export is mixed or incomplete: $relative"}
+        $expected=Get-SteamAppearanceFileHash $source
+        if($InteropExport -and $relative -ceq 'steam-appearance\resident.ps1'){
+            if($expected -cne $InteropExport.sourceSha256 -or $InteropExport.stagedSha256 -cnotmatch '^[a-f0-9]{64}$'){throw 'Steam appearance interop export source changed'}
+            $expected=$InteropExport.stagedSha256
+        }
+        if(!(Test-Path -LiteralPath $destination -PathType Leaf) -or $expected -cne (Get-SteamAppearanceFileHash $destination)){throw "Steam appearance export is mixed or incomplete: $relative"}
     }
     $themeCount=@((Get-Content -LiteralPath (Join-Path $SourcePowerControl 'steam-appearance\manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json).themes).Count
     [pscustomobject]@{ok=$true;controlProtocol=2;themes=$themeCount;defaultsEnabled=$themeCount;files=$files.Count}

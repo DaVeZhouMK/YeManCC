@@ -20014,7 +20014,7 @@
         },
         {
           "file": "native/BatteryHost/Controller.cs",
-          "sha256": "59ffb52b851533a2f8e38c59c9a10a214e98e37378b90fa028caf34493115f62"
+          "sha256": "b1b0c4ab85fa199521b6de7b16a822c98036585ed01d8654e9479f98020cacd5"
         },
         {
           "file": "native/BatteryHost/Providers.cs",
@@ -20070,11 +20070,11 @@
         },
         {
           "file": "native/BatteryHost/InProcessEntry.cs",
-          "sha256": "880eabb13299216ad985b4bff2c38c7bc0de48b5b337bae3dc5de6fcf8343b1e"
+          "sha256": "398c055a037113f336b253b27b6e018edd5e52cb65ce5e412f6d4b3510164c8d"
         },
         {
           "file": "native/BatteryHost/HostDomainRouter.cs",
-          "sha256": "4797323df5d2741d55ef99942d6167d925d091767dbeb49268a91d916cb646a4"
+          "sha256": "a1960a0e02623c4383489bb4e14862feca3ea373b48b62affe66a43ddeda1d9a"
         },
         {
           "file": "native/BatteryHost/SecondaryDisplayController.cs",
@@ -20089,7 +20089,7 @@
           "sha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a"
         }
       ],
-      "catalogSha256": "808b14c8406b0a4fe6de0397727332f9b26c23130c86fba5c1b8c36d3c199b03"
+      "catalogSha256": "41161d6f9ff2002688d01e1804043474cf57e3c0fa549fb100436d8e3184f54c"
     },
     "motion": {
       "schemaVersion": 1,

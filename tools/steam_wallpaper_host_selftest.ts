@@ -3,7 +3,10 @@ import {resolve} from 'node:path';
 import {strict as assert} from 'node:assert';
 import {startSteamWallpaperHost,resolveWallpaperTarget,steamWallpaperForegroundAllowed} from '../src/bridge/steamWallpaperHost';
 import type {GameMediaEntry} from '../src/bridge/sharedGameMedia';
+import type {MirrorPeer} from '../src/bridge/deckyMirrorRelay';
 import {subscribeGameMediaResume} from '../src/bridge/gameMediaPreparationPolicy';
+import {getSharedPowerLifecycle,onSharedPowerLifecycle} from '../src/bridge/powerLifecycleState';
+import {MirrorClient} from '../decky-plugin/src/mirrorClient';
 const caseArgs=process.argv.filter(arg=>arg.startsWith('--case='));
 assert.ok(caseArgs.length<=1&&(!caseArgs.length||caseArgs[0].length>7&&!process.argv.includes('--stability-recovery')),'one nonempty exact case without recovery mode');
 const exactCase=caseArgs.length?caseArgs[0].slice(7):null;
@@ -11,11 +14,12 @@ const stabilityRecoveryOnly=process.argv.includes('--stability-recovery');const 
 let cases=0,checks=0;const same=(a:unknown,b:unknown,label:string)=>{checks++;assert.deepEqual(a,b,label);};
 const settle=()=>new Promise<void>(resolve=>setImmediate(resolve));
 const entry=(id=570,revision=1):GameMediaEntry=>({key:'steam-'+id,appId:id,bindingRevision:revision,status:'ready',ready:true,asset:{id:'asset-'+id,revision:String(revision),kind:'video',extension:'mp4',mime:'video/mp4',bytes:120},url:'http://fixture/'+id,playback:{start:8,end:38,fit:'cover'}});
+const pairedEntry=(id=570,revision=1):GameMediaEntry=>({...entry(id,revision),staticReady:true,dynamicReady:true});
 const nativeProof=(extra:any={})=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'focus-1',revision:1,reason:'verified',...extra});
 function fixture(options:{foreground?:unknown;foregroundRead?:()=>Promise<unknown>;startReady?:boolean;lookup?:(target:any)=>Promise<GameMediaEntry>;ensure?:(target:any)=>Promise<GameMediaEntry>;shortcut?:any;shortcutRead?:()=>Promise<any>;nativePower?:boolean;playbackFailed?:(value:any)=>Promise<GameMediaEntry>;reply?:(message:any,options:any)=>Promise<boolean>}={}){
  let foregroundChanged:(value:unknown)=>void=()=>{};
  let extension:any,changed:(reason:string,key?:string)=>void=()=>{},resumed:(event:{generation?:number})=>void=()=>{},enabled=true;let opacity=.64;let current=entry();
- let timerId=0;const timers=new Map<number,{fn:()=>void;ms:number}>();const frames:any[]=[],calls:any[]=[],failures:any[]=[];const peer={connection:'1',runId:'a'.repeat(32)};
+ let timerId=0;const timers=new Map<number,{fn:()=>void;ms:number}>();const frames:any[]=[],calls:any[]=[],failures:any[]=[];const peer:MirrorPeer={connection:'1',runId:'a'.repeat(32)};
  const host=startSteamWallpaperHost({...({schedule:(fn:()=>void,ms:number)=>{timers.set(++timerId,{fn,ms});return timerId;},cancel:(id:number)=>timers.delete(id)} as any),...(!options.nativePower?{onResume:(handler:(event:{generation?:number})=>void)=>{resumed=handler;return()=>{resumed=()=>{};};}}:{}),readForeground:async()=>{calls.push({command:'foreground-read'});return options.foregroundRead?options.foregroundRead():options.foreground===undefined?nativeProof():options.foreground;},onForeground:handler=>{foregroundChanged=handler;return()=>{foregroundChanged=()=>{};};},enabled:()=>enabled,inventory:()=>{calls.push({command:'inventory'});},appearance:()=>({opacity,blur:0}),register:(value:any)=>{extension=value;return()=>extension=null;},invoke:(async(command:string,args:any,invokeOptions:any)=>{calls.push({command,args,options:invokeOptions});if(command==='deckySidebar.mirrorReply'){frames.push(args.message);return options.reply?options.reply(args.message,invokeOptions):true;}if(command==='gameMedia.shortcut')return options.shortcutRead?options.shortcutRead():options.shortcut||{executable:'G:/Games/local.exe',name:'Local Game',shortcutAppId:'4131894616',steamAccount:'17'};throw Error(command);}) as any,media:{selectSteamTarget:target=>{calls.push({command:'selectSteamTarget',target});},lookup:async (target,demand)=>{calls.push({command:'lookup',target,demand});return options.lookup?options.lookup(target):{...current};},ensure:async (target,_consumer,_priority,_complete,demand)=>{calls.push({command:'ensure',target,demand});return options.ensure?options.ensure(target):{...current};},subscribe:fn=>{changed=fn;return()=>{changed=()=>{};};},playbackFailed:async value=>{failures.push(value);return options.playbackFailed?options.playbackFailed(value):{...current};}}});
  const context=(id='570',seq=1,visible=true,other={})=>extension.request({...peer,...other,request:{command:'wallpaper.context',runId:peer.runId,contextSeq:seq,appId:id,name:'Fixture',visible,...(other as any).request}});
  if(options.startReady!==false)host.ready();extension.connected(peer);
@@ -33,7 +37,58 @@ await run('hidden page and user OFF cannot be revived by native foreground',asyn
 await run('late initial foreground read cannot replace a newer native veto',async()=>{let release!:(value:unknown)=>void;const f=fixture({foregroundRead:()=>new Promise(r=>release=r)});try{f.context();await settle();f.foreground(nativeProof({foreground:false,ownerEpoch:'native-veto',revision:2}));release(nativeProof());await settle();same(f.calls.filter(c=>['lookup','ensure','inventory'].includes(c.command)).length,0,'old affirmative RPC receipt cannot bypass newer native blur');for(let n=0;n<100;n++)f.change('asset');await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'background asset storms remain metadata-idle');}finally{f.host.stop();}});
 await run('native epoch history cannot revive an old low-revision proof',async()=>{const f=fixture();try{f.context();await settle();const baseline=f.calls.filter(c=>c.command==='lookup').length;for(let n=2;n<25;n++)f.foreground(nativeProof({foreground:false,ownerEpoch:'retired-'+n,revision:n}));f.foreground(nativeProof());await settle();same(f.calls.filter(c=>c.command==='lookup').length,baseline,'history eviction cannot grant a stale low revision');f.foreground(nativeProof({ownerEpoch:'fresh-current',revision:25}));await settle();same(f.calls.filter(c=>c.command==='lookup').length,baseline+1,'fresh positive revision owns one recovery');}finally{f.host.stop();}});
 await run('unknown foreground transport failure stays deny without heartbeat',async()=>{const f=fixture({foregroundRead:async()=>{throw Error('native owner unavailable');}});try{f.context();await settle();await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'unavailable backend never grants a fallback permission');same(f.timers.size,1,'transport failure owns one finite repair, never a permanent proof poll');}finally{f.host.stop();}});
-await run('native media refusal withdraws proof instead of repeating preparation',async()=>{const f=fixture({lookup:async()=>({key:'steam-570',bindingRevision:1,status:'consumer-inactive',ready:false})});try{f.context();await settle();same(f.calls.filter(c=>c.command==='lookup').length,1,'one already-issued query may discover native revocation');same(f.calls.filter(c=>c.command==='ensure').length,0,'native refusal never causes another lookup/preparation');same(f.output().at(-1).foreground,false,'native refusal withdraws player permission');}finally{f.host.stop();}});
+await run('native media refusal withdraws proof instead of repeating preparation',async()=>{
+ const inactive=(reason?:string)=>({key:'steam-570',bindingRevision:1,status:'consumer-inactive',ready:false,reason});
+ const rejected=inactive('media-steam-foreground-inactive');
+ const list=(f:ReturnType<typeof fixture>,command:string)=>f.calls.filter(c=>c.command===command);
+ for(const mode of ['untyped','power','fresh','same','repeat','hidden','peer','blur','reader-failure','ensure'] as const){
+  let reads=0,lookups=0,release!:(value:unknown)=>void;
+  const f=fixture({foregroundRead:async()=>{
+   if(++reads===1)return nativeProof();
+   if(['hidden','peer','blur'].includes(mode))return new Promise(r=>release=r);
+   if(mode==='reader-failure')throw Error('failed foreground transport');
+   return mode==='same'?nativeProof():nativeProof({ownerEpoch:'focus-2',revision:2});
+  },lookup:async()=>{
+   ++lookups;
+   if(mode==='ensure')return {key:'steam-570',bindingRevision:1,status:'missing',ready:false};
+   if(mode==='untyped')return inactive();
+   if(mode==='power')return inactive('wallpaper-on-battery');
+   return mode==='fresh'&&lookups>1?{...entry(570,2),staticReady:true,dynamicReady:true}:rejected;
+  },ensure:async()=>rejected});
+  try{
+   f.context();await settle();
+   if(mode==='untyped'||mode==='power'){
+    same([reads,lookups,list(f,'ensure').length],[1,1,0],mode+' refusal remains an authoritative deny without extra work');
+   }else{
+    same(reads,2,mode+' refusal takes one bounded native reading without an event');
+   }
+   if(mode==='fresh'){
+    same(list(f,'lookup').map(call=>call.demand.demandRevision),[1,2],'only a newer native proof reopens the media read');
+    same(f.output().at(-1).entry?.bindingRevision,2,'same connection resumes playback without a WinEvent');
+   }else if(mode==='same'||mode==='reader-failure'||mode==='repeat'||mode==='ensure'){
+    const rejectedProof=mode==='repeat'||mode==='ensure'?nativeProof({ownerEpoch:'focus-2',revision:2}):nativeProof();
+    same(lookups,mode==='repeat'||mode==='ensure'?2:1,'same proof, transport failure and a second refusal cannot create a lookup loop');
+    for(let n=0;n<32;n++){f.foreground(rejectedProof);f.change('asset');f.context('570',n+2);}
+    await settle();
+    same([reads,lookups],[2,mode==='repeat'||mode==='ensure'?2:1],'duplicate proof, asset and card events cannot refill the refusal budget');
+    same(f.output().at(-1).foreground,false,'denied proof remains non-playing');
+    if(mode==='same'){
+     f.context('570',34,false);await settle();f.context('730',35,true);await settle();
+     same([reads,lookups],[3,1],'reopening reads proof once, not media on a refused revision');
+     const reply=f.output().at(-1);
+     same([reply?.contextSeq,reply?.appId,reply?.foreground,reply?.entry],[35,'730',false,null],'the current visible card still gets a refusal receipt instead of timing out');
+    }
+   }else if(mode==='hidden'||mode==='peer'||mode==='blur'){
+    if(mode==='hidden')f.context('570',2,false);
+    if(mode==='peer')f.connect({connection:'2',runId:'b'.repeat(32)});
+    if(mode==='blur')f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'focus-3',revision:3}));
+    release(nativeProof({ownerEpoch:'focus-2',revision:2}));await settle();
+    same(lookups,1,'late reread cannot resurrect the withdrawn owner: '+mode);
+   }else same(f.output().at(-1).foreground,false,'native refusal withdraws player permission');
+   same(f.timers.size,0,mode+' must not leave any polling or retry timer');
+  }finally{f.host.stop();release?.(null);await settle();}
+ }
+});
 // Execute the shipping App readiness statements around a deliberately held
 // unrelated startup tail. Host/media are production with inert IO; this is
 // source-extracted startup ordering, not a full Vue/native boot acceptance.
@@ -56,13 +111,74 @@ for(const mode of ['normal','user-off','fan-isolated','cpu-isolated','settings-f
   tail.resolve();same((await handled).ok,true,'original tail can finish normally');const isolated=mode==='fan-isolated'||mode==='cpu-isolated';same(controls+hud+updates,isolated?0:3,'original non-wallpaper readiness guards retained');
  }finally{tail.resolve();f.host.stop();}
 });
-await run('cached output is immediate and identical completion is not sent twice',async()=>{const f=fixture();f.context();await settle();same(f.output().length,1,'one delivery');same(f.output()[0].entry.assetId,'asset-570','cached source');same(f.calls.filter(c=>c.command==='ensure').length,1,'shared owner complements cache');f.host.stop();});
+await run('cached output is immediate and identical completion is not sent twice',async()=>{
+ const f=fixture(),confirmed={...f.peer,connectionRevision:1,revision:1};
+ try{
+  f.connect(confirmed);f.context();await settle();
+  same(f.output().length,1,'one delivery');same(f.output()[0].entry.assetId,'asset-570','cached source');same(f.calls.filter(c=>c.command==='ensure').length,1,'shared owner complements cache');
+  const admitted=f.calls.find(c=>c.command==='lookup')!.demand,frames=f.frames.length,calls=f.calls.length;
+  for(let revision=2;revision<=33;revision++)f.connect({...confirmed,revision});
+  await settle();
+  same(admitted.current(),true,'authenticated same-transport attach must not revoke the current wallpaper demand');
+  same(f.frames.length,frames,'duplicate confirmation does not reannounce wallpaper');
+  same(f.calls.length,calls,'duplicate confirmation does not clear selection or reread media');
+  same(f.timers.size,0,'healthy reattach does not arm retry');
+  f.context('570',1,true);await settle();
+  same(f.calls.length,calls,'same-transport observation cannot reopen an old selection sequence');
+  f.setEntry(entry(570,2));f.change('asset','steam-570');await settle();
+  same(f.output().at(-1).entry.revision,'2','asset change still reaches the same selection without another context');
+  f.connect({...confirmed,connected:false,connectionRevision:2});await settle();
+  same(admitted.current(),false,'real disconnect still revokes wallpaper demand');
+ }finally{f.host.stop();}
+});
 await run('unrelated asset notifications do not resolve or publish current game',async()=>{const f=fixture();f.context();await settle();const count=f.calls.length;f.change('asset','steam-99');f.change('retry');await settle();same(f.calls.length,count,'no native/owner calls for unrelated changes');f.host.stop();});
 await run('shortcut EXE cache is displayed and missing pair uses shared identification queue',async()=>{const f=fixture();f.context('4131894616');await settle();same(f.output()[0].entry.assetId,'asset-570','same cached output reused');same(f.calls.find(c=>c.command==='ensure').target.appId,0,'unknown shortcut keeps file identity');same(f.calls.find(c=>c.command==='ensure').target.executable,'G:/Games/local.exe','exact file passed to shared queue');same(f.calls.find(c=>c.command==='ensure').target.catalogSource,'steam-shortcut','active selection retains added-Steam source');same(f.calls.find(c=>c.command==='ensure').target.steamAccount,'17','active selection retains current account');same(f.calls.find(c=>c.command==='ensure').target.shortcutAppId,'4131894616','active selection retains shortcut ID');same(f.calls.filter(c=>c.command==='gameMedia.identify').length,0,'render host performs no competing identity lookup');f.setEntry(entry(570,2));f.change('asset','steam-570');await settle();same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'same context reuses active-account resolution');same(f.output().at(-1).entry.revision,'2','selected cache revision republished');f.context('4131894616',2);await settle();same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,2,'new context rechecks account mapping');f.host.stop();});
 await run('confirmed file alias reuses a warm canonical asset on the selected shortcut',async()=>{let current:any={key:'exe-old',bindingRevision:0,status:'missing',ready:false};const f=fixture({lookup:async()=>current,ensure:async()=>current});f.context('4131894616');await settle();same(f.output().at(-1).entry,null,'selected unresolved file has no output');current=entry(570,3);f.change('asset','exe-old');await settle();same(f.output().at(-1).entry.assetId,'asset-570','targeted previous-key notification reuses cached canonical output');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'no extra current-account scan for the alias publication');f.host.stop();});
 await run('hidden route clears media without identity or preparation work',async()=>{const f=fixture();f.context('4131894616',1,false);await settle();same(f.output().at(-1).entry,null,'paused output');same(f.calls.some(c=>['lookup','ensure','gameMedia.shortcut'].includes(c.command)),false,'no hidden media reads');f.host.stop();});
 await run('old context or another connection cannot replace selected output',async()=>{const f=fixture();f.context('570',3);await settle();const count=f.calls.length;f.context('1091500',2);f.context('1091500',4,true,{connection:'999'});f.context('1091500',4,true,{runId:'b'.repeat(32)});await settle();same(f.calls.length,count,'stale and foreign requests ignored');f.host.stop();});
 await run('changing game fences an earlier asynchronous lookup',async()=>{let resolve!:(entry:GameMediaEntry)=>void;const pending=new Promise<GameMediaEntry>(yes=>resolve=yes);const f=fixture({lookup:async target=>target.appId===570?pending:entry(1091500),ensure:async target=>entry(target.appId)});f.context('570',1);await settle();f.context('1091500',2);await settle();resolve(entry());await settle();same(f.output().some(frame=>frame.appId==='570'),false,'no late old-game output');same(f.output().at(-1).appId,'1091500','new game remains selected');f.host.stop();});
+await run('published playback derivative is adopted on reselection without a mid-play replacement',async()=>{
+ const original=pairedEntry();
+ const reduced:GameMediaEntry={...original,asset:{...original.asset!,id:'derived-720p30',revision:'derived',reducedPlayback:true},url:'http://fixture/derived-720p30'};
+ let available=original;
+ const f=fixture({lookup:async target=>target.appId===570?available:pairedEntry(target.appId)});
+ try{
+  f.context('570',1);await settle();
+  same(f.output().at(-1).entry.assetId,original.asset!.id,'original is ready before conversion');
+  const before=f.output().length;
+  available=reduced;
+  f.change('wallpaper-playback',original.key);
+  await settle();
+  same(f.output().length,before,'derivative publication keeps current playback');
+  same(f.timers.size,0,'publication does not require a playback timer');
+  f.context('730',2);await settle();
+  f.context('570',3);await settle();
+  const frame=f.output().at(-1);
+  same([frame.contextSeq,frame.entry.assetId,frame.entry.reducedPlayback,frame.entry.bindingRevision],[3,'derived-720p30',true,original.bindingRevision],'reselection delivers the new source without changing its editor binding');
+  same(f.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[570,730,570],'reselection reads the current store once');
+ }finally{f.host.stop();}
+});
+await run('same selection adopts the first verified derivative with or without a poster',async()=>{
+ for(const poster of [false,true]){
+  const base=pairedEntry();
+  const reduced:GameMediaEntry={...base,asset:{...base.asset!,id:'derived-720p30',revision:'derived',reducedPlayback:true},url:'http://fixture/derived-720p30'};
+  let available:GameMediaEntry={...base,wallpaper30Limited:true,ready:poster,asset:poster?{...base.asset!,id:'poster',kind:'image'}:undefined,url:poster?'http://fixture/poster':undefined};
+  const f=fixture({lookup:async()=>available});
+  try{
+   f.context();await settle();
+   same(f.output().at(-1).entry?.assetId??null,poster?'poster':null,'original 60 FPS is not exposed');
+   f.change('wallpaper-playback','steam-730');await settle();
+   same(f.calls.filter(c=>c.command==='lookup').length,1,'unrelated video does not read the selection');
+   available=reduced;
+   f.change('wallpaper-playback',base.key);await settle();
+   const frame=f.output().at(-1);
+   same([frame.contextSeq,frame.entry?.assetId,frame.entry?.reducedPlayback],[1,'derived-720p30',true],'same context becomes playable');
+   same(f.calls.filter(c=>c.command==='lookup').length,2,'one authoritative read on publication');
+   same(f.calls.filter(c=>c.command==='ensure').length,0,'cached pair does not redownload');
+   same(f.timers.size,0,'no polling');
+  }finally{f.host.stop();}
+ }
+});
 await run('YMCC switch off clears media and prevents preparation',async()=>{const f=fixture();f.context();await settle();f.enable(false);f.change('settings');await settle();const count=f.calls.filter(c=>c.command==='ensure').length;same(f.output().at(-1).entry,null,'off releases frame');f.context('1091500',2);await settle();same(f.calls.filter(c=>c.command==='ensure').length,count,'off never prepares');same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,false,'switch signal delivered');f.host.stop();});
 await run('playback failure requires the exact delivered revision and selection',async()=>{
  const valid={contextSeq:1,appId:'570',assetId:'asset-570',bindingRevision:1,status:'playback-failed'};
@@ -81,7 +197,45 @@ await run('playback failure requires the exact delivered revision and selection'
   same(image.timers.size,0,'image failure starts no retry');
  }finally{image.host.stop();}
 });
-await run('appearance changes update same asset without duplicate ready announcement',async()=>{const f=fixture();f.context();await settle();const ready=f.frames.filter(m=>m.type==='wallpaper-ready').length;f.appearance(.4);f.change('settings');await settle();same(f.output().at(-1).opacity,.4,'appearance republished');same(f.frames.filter(m=>m.type==='wallpaper-ready').length,ready,'ready only sent on transition');f.host.stop();});
+await run('appearance changes update same asset without duplicate ready announcement',async()=>{
+ const gate=deferred();let hold=false,asset=pairedEntry(570,1);
+ const f=fixture({lookup:async()=>hold?gate.promise as Promise<GameMediaEntry>:asset});
+ const mediaCalls=()=>f.calls.filter(c=>['lookup','ensure','inventory','foreground-read','gameMedia.shortcut'].includes(c.command)).length;
+ try{
+  f.context();await settle();const ready=f.frames.filter(m=>m.type==='wallpaper-ready').length;
+  const before=mediaCalls(),beforeFrames=f.output().length;
+  const stringify=JSON.stringify;
+  let bodyEncodes=0,wireEncodes=0;
+  JSON.stringify=((value:unknown,...args:any[])=>{
+   const message=value as {type?:string;entry?:{assetId?:string};stateOwner?:string}|null;
+   if(message?.type==='wallpaper'&&message.entry?.assetId==='asset-570'){
+    if(message.stateOwner)++wireEncodes;else ++bodyEncodes;
+   }
+   return Reflect.apply(stringify,JSON,[value,...args]);
+  }) as typeof JSON.stringify;
+  try{for(let i=0;i<24;i++){f.appearance(i===23?.4:(i+1)/100);f.change('settings');await settle();}}
+  finally{JSON.stringify=stringify;}
+  const frameEncodes={bodyEncodes,wireEncodes,frames:f.output().length-beforeFrames};
+  console.log('WALLPAPER_FRAME_ENCODINGS '+JSON.stringify(frameEncodes));
+  same(frameEncodes,{bodyEncodes:0,wireEncodes:24,frames:24},'each sent frame computes one full envelope signature');
+  const latest=f.output().at(-1),styleMediaCalls=mediaCalls()-before;
+  console.log('WALLPAPER_APPEARANCE_WORK '+JSON.stringify({updates:24,styleMediaCalls,revision:latest.entry.revision}));
+  same([latest.opacity,latest.entry.revision],[.4,'1'],'appearance republished with the original asset');
+  same(f.frames.filter(m=>m.type==='wallpaper-ready').length,ready,'ready only sent on transition');
+  same(styleMediaCalls,0,'style-only changes do not access the media owner');
+  hold=true;f.change('asset','steam-570');await settle();
+  const started=mediaCalls();f.appearance(.7);f.change('settings');await settle();
+  same([mediaCalls(),f.output().at(-1).opacity,f.output().at(-1).entry.revision],[started,.7,'1'],'current frame can repaint while a real cache read is in flight');
+  asset=pairedEntry(570,2);hold=false;gate.resolve(asset);await settle();
+  same([mediaCalls(),f.output().at(-1).opacity,f.output().at(-1).entry.revision],[started,.7,'2'],'real publication settles once with latest appearance');
+  f.context('570',2,false);await settle();const hidden=mediaCalls();f.appearance(.6);f.change('settings');await settle();
+  same([mediaCalls(),f.output().at(-1).entry],[hidden,null],'style cannot revive a hidden asset');
+  f.context('570',3,true);await settle();const visible=mediaCalls();f.enable(false);f.appearance(.3);f.change('settings');await settle();
+  same([mediaCalls(),f.output().at(-1).enabled,f.output().at(-1).entry],[visible,false,null],'combined OFF and appearance update revokes the frame');
+  f.enable(true);f.change('settings');await settle();same([f.output().at(-1).entry.revision,f.output().at(-1).opacity],['2',.3],'ON still uses fresh foreground and media proof');
+  same(f.timers.size,0,'appearance never owns a timer');
+ }finally{f.host.stop();gate.resolve(asset);await settle();}
+});
 await run('shortcut IDs and unavailable mapping never fall back to title guesses',async()=>{const calls:any[]=[];const call=(async(command:string,args:any)=>{calls.push({command,args});return {};}) as any;same(await resolveWallpaperTarget('0','game',call),null,'zero rejected');same(await resolveWallpaperTarget('18446744073709551616','game',call),null,'overflow rejected');same(await resolveWallpaperTarget('4131894616','game',call),null,'unknown shortcut unresolved');same(calls.length,1,'only real VDF lookup');
  let mapping:any={};const f=fixture({shortcutRead:async()=>mapping});
  try{
@@ -98,7 +252,23 @@ await run('shortcut IDs and unavailable mapping never fall back to title guesses
   same(f.timers.size,0,'recovered mapping has no polling');
  }finally{f.host.stop();}
 });
-await run('card selection does not rescan inventory; return from hidden or reconnect does',async()=>{const f=fixture();f.context('570',1);await settle();const initial=f.calls.filter(call=>call.command==='inventory').length;f.context('1091500',2);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial,'card changes do not enumerate the library');f.context('1091500',3,false);f.context('1091500',4,true);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+1,'visible return refreshes known shortcuts');f.connect();await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+1,'reconnect without a visible context does no scan');f.context('1091500',1);await settle();same(f.calls.filter(call=>call.command==='inventory').length,initial+2,'new visible peer context rechecks current inventory');f.host.stop();});
+await run('card selection does not rescan inventory; return from hidden or reconnect does',async()=>{
+ const f=fixture();const count=(command:string)=>f.calls.filter(call=>call.command===command).length;
+ try{
+  f.context('570',1);await settle();const initial=count('inventory');
+  f.context('1091500',2);await settle();same(count('inventory'),initial,'card changes do not enumerate the library');
+  f.context('1091500',3,false);f.context('1091500',4,true);await settle();same(count('inventory'),initial+1,'visible return refreshes known shortcuts');
+  const foregroundReads=count('foreground-read');
+  f.connect();f.context('1091500',1);await settle();
+  same([count('inventory'),count('foreground-read')],[initial+1,foregroundReads],'duplicate attach keeps current context and ignores an old sequence');
+  const peer={...f.peer,connection:'2',connectionRevision:2};
+  f.connect(peer);await settle();same(count('inventory'),initial+1,'reconnect without a visible context does no scan');
+  same(count('foreground-read'),foregroundReads,'reconnect without visibility does not request foreground');
+  f.context('1091500',1,true,peer);await settle();
+  same(count('inventory'),initial+2,'new visible peer context rechecks current inventory');
+  same(count('foreground-read'),foregroundReads+1,'new visible peer requests foreground without a passive native event');
+ }finally{f.host.stop();}
+});
 await run('unrelated UI settings do not query selected media',async()=>{const f=fixture();f.context();await settle();const count=f.calls.length;f.change('settings');f.change('settings');await settle();same(f.calls.length,count,'unchanged wallpaper settings do no native reads');f.host.stop();});
 
 await run('selected shortcut reads existing launcher wallpaper without preparing it',async()=>{
@@ -168,6 +338,49 @@ await run('actual IPC committed power event reaches production host and is detac
   emit(fact(4,2));emit(fact(4,2));await settle();same(f.calls.length,before,'healthy duplicate and metadata-only Ready are idle');
   f.host.stop();const count=f.calls.length;emit(fact(5,3));await settle();same(f.calls.length,count,'public listener detached on stop');
  }finally{f.host.stop();(globalThis as any).window=previous;}
+});
+
+await run('coalesced same-generation suspend scope revokes wallpaper over public IPC',async()=>{
+ const previous=(globalThis as any).window;(globalThis as any).window=new EventTarget();
+ let revision=0,ordinary=0;
+ const publish=(suspendSerial?:number)=>window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{
+  phase:'ready',generation:9,known:true,hardwareWritesAllowed:true,notificationPending:false,
+  observedNotificationSequence:++revision,publicationRevision:revision,...(suspendSerial===undefined?{}:{suspendSerial}),
+ }}));
+ const nested=onSharedPowerLifecycle(state=>{if(state.suspendSerial===2)publish(3);},{observeSuspendSerial:true});
+ const offOrdinary=onSharedPowerLifecycle(()=>{++ordinary;});
+ const observed:Array<number|undefined>=[];
+ const offObserved=onSharedPowerLifecycle(state=>observed.push(state.suspendSerial),{observeSuspendSerial:true});
+ const f=fixture({nativePower:true});
+ const count=(command:string)=>f.calls.filter(c=>c.command===command).length;
+ try{
+  publish(1);await settle();f.context();await settle();
+  const demand=f.calls.find(c=>c.command==='lookup').demand;
+  same(demand.current(),true,'initial visible demand is current');
+  const before=[count('foreground-read'),count('lookup'),count('ensure')];
+  const normal=ordinary;
+  publish(2);
+  same(demand.current(),false,'coalesced Ready revokes old demand synchronously');
+  same(observed,[1,3],'nested delivery skips the superseded scope and delivers the current one once');
+  await settle();
+  same(f.output().at(-1).entry,null,'coalesced Ready clears the decoder');
+  same(f.frames.filter(x=>x.type==='wallpaper-ready'&&x.requestContext).length,2,'initial and coalesced Ready both request fresh visibility');
+  same([count('foreground-read'),count('lookup'),count('ensure')],before,'Ready alone performs no read');
+  f.context('570',1,true);await settle();
+  same([count('foreground-read'),count('lookup'),count('ensure')],before,'old context cannot restore playback');
+  f.context('570',2,true);await settle();
+  same(f.output().at(-1).entry.assetId,'asset-570','fresh context restores playback');
+  same(count('foreground-read'),before[0]+1,'fresh context reads foreground once');
+  same(count('lookup'),before[1]+1,'fresh context reads media once');
+  const current=f.calls.filter(c=>c.command==='lookup').at(-1).demand;
+  const stable=f.calls.length;
+  publish(3);publish();publish(2);await settle();
+  same(getSharedPowerLifecycle()?.suspendSerial,3,'duplicates, old envelopes and absent metadata cannot rewind the scope');
+  same(getSharedPowerLifecycle()?.publicationRevision,5,'an out-of-order scope cannot advance ordering watermarks');
+  same(current.current(),true,'current demand survives repeated and old facts');
+  same(f.calls.length,stable,'repeated and old facts cause no playback replay');
+  same(ordinary,normal,'ordinary subscribers do not replay on suspend-scope metadata');
+ }finally{f.host.stop();offObserved();offOrdinary();nested();(globalThis as any).window=previous;}
 });
 
 await run('actual S0 IPC Ready restores wallpaper only after fresh visibility and current generation',async()=>{
@@ -278,6 +491,34 @@ await run('temporary cache read failure does not submit a download and recovers'
 });
 await run('repeated refusals retain one timer and OFF supersedes stale video',async()=>{
  const f=fixture({reply:async msg=>{if(msg.type==='wallpaper'&&msg.entry)throw Error('lost-receipt');return true;}});try{f.context();await settle();const reads=f.calls.filter(c=>c.command==='lookup'||c.command==='ensure').length;for(let n=0;n<5;n++){same(f.timers.size,1,'one retry despite repeated throw');await f.fire();}same(f.calls.filter(c=>c.command==='lookup'||c.command==='ensure').length,reads,'five delivery retries never repeat cache work');f.enable(false);f.change('settings');await settle();same(f.timers.size,0,'OFF acknowledgement cancels obsolete source retry');same(f.output().at(-1).enabled,false,'only OFF remains as latest output');}finally{f.host.stop();}
+ // Same selection, real updated binding each time. During a refused reply
+ // only the value should change, not the delivery deadline or attempt budget.
+ const held=deferred();let recovered=false;
+ const live=fixture({reply:async msg=>{
+  if(msg.type!=='wallpaper'||!msg.entry||msg.appId!=='570'||recovered)return true;
+  if(msg.entry.bindingRevision===1)return await held.promise as boolean;
+  return false;
+ }});
+ const videoReplies=()=>live.output().filter(msg=>msg.appId==='570'&&msg.entry);
+ try{
+  live.context();await settle();same(videoReplies().length,1,'one first frame in flight');
+  live.setEntry(entry(570,2));live.change('asset','steam-570');await settle();
+  held.resolve(false);await settle();const afterRefusal=videoReplies().length;
+  const deadline=[...live.timers][0];
+  for(let i=3;i<=10;i++){live.setEntry(entry(570,i));live.change('asset','steam-570');await settle();}
+  const reads=live.calls.filter(x=>x.command==='lookup'||x.command==='ensure').length;
+  const result={afterRefusal,extraAttempts:videoReplies().length-afterRefusal,sameTimer:live.timers.get(deadline?.[0])===deadline?.[1],delays:[...live.timers.values()].map(t=>t.ms)};
+  console.log(JSON.stringify({wallpaperDeliveryBackoff:result}));
+  same(result,{afterRefusal:1,extraAttempts:0,sameTimer:true,delays:[250]},'same-selection frames retain the original backoff');
+  recovered=true;await live.fire();
+  same(videoReplies().map(x=>x.entry.bindingRevision),[1,10],'recovery sends latest frame and does not replay old bindings');
+  same(live.calls.filter(x=>x.command==='lookup'||x.command==='ensure').length,reads,'delivery retry does not look up media again');
+  same(live.timers.size,0,'successful latest frame parks recovery');
+  recovered=false;live.setEntry(entry(570,11));live.change('asset','steam-570');await settle();same(live.timers.size,1,'another real refusal arms one retry');
+  live.setEntry(entry(730,12));live.context('730',2,true);await settle();
+  same([live.output().at(-1).appId,live.output().at(-1).entry.bindingRevision],['730',12],'a new selection bypasses an old frame retry');
+  same(live.timers.size,0,'new selection supersedes the old retry');
+ }finally{held.resolve(false);live.host.stop();await settle();}
 });
 
 await run('explicit ready replay preserves saved intent without extra scans',async()=>{
@@ -309,6 +550,35 @@ await run('persistent passive refusal backs off without rescan and OFF cancels i
 });
 await run('late passive retry callback after teardown remains silent',async()=>{
  const f=fixture({reply:async()=>false});f.context();await settle();const late=[...f.timers.values()][0].fn;f.host.stop();const sent=f.frames.length;late();await settle();same(f.frames.length,sent,'late callback cannot send after owner stop');same(f.timers.size,0,'late callback cannot recreate recovery timer');
+ const outcomes=[];
+ for(const replacePeer of [true,false]){
+  let attempts=0;const live=fixture({reply:async message=>!(message.type==='wallpaper'&&message.entry&&++attempts<=2)});
+  try{
+   live.context();await settle();same(live.timers.size,1,'first refusal owns one retry');
+   const [retiredId,retired]=[...live.timers][0];
+   const peer=replacePeer?{connection:'2',runId:'b'.repeat(32)}:live.peer;
+   if(replacePeer)live.connect(peer);
+   live.setEntry(entry(730,2));live.context('730',2,true,{...peer,request:{runId:peer.runId}});await settle();
+   same(attempts,2,'replacement frame was attempted and refused');
+   same(live.timers.has(retiredId),false,'obsolete timer is cancelled');
+   same(live.timers.size,1,'current refusal owns one fresh retry');
+   const [currentId,current]=[...live.timers][0];
+   live.setEntry(entry(730,3));live.change('asset','steam-730');await settle();
+   same(attempts,2,'latest frame waits for the current retry');
+   same(live.timers.get(currentId)===current,true,'replacement frame keeps its retry deadline');
+   const reads=()=>live.calls.filter(c=>c.command==='lookup'||c.command==='ensure'||c.command==='inventory').length;
+   const beforeReads=reads();
+   retired.fn();await settle();
+   const earlyAttempts=attempts-2;
+   const sameDeadline=live.timers.get(currentId)===current;
+   await live.fire();
+   outcomes.push({replacePeer,earlyAttempts,sameDeadline,timedAttempts:attempts-2-earlyAttempts,
+    revisions:live.output().filter(x=>x.entry).map(x=>x.entry.bindingRevision),extraReads:reads()-beforeReads,remainingTimers:live.timers.size});
+  }finally{live.host.stop();}
+ }
+ console.log(JSON.stringify({wallpaperRetryOwnership:outcomes}));
+ same(outcomes,[true,false].map(replacePeer=>({replacePeer,earlyAttempts:0,sameDeadline:true,timedAttempts:1,
+  revisions:[1,2,3],extraReads:0,remainingTimers:0})),'cancelled callbacks cannot spend either replacement retry');
 });
 // Repeated same-shortcut account changes interleaved with committed wake,
 // rejected ready delivery, pending old-account reads and replaced peers.
@@ -385,7 +655,6 @@ await run('unavailable cache rechecks never authorize failure writes',async()=>{
 });
 // Hold real Promises across normal event-loop turns. These tests never replay
 // a cancelled timer; f.fire() consumes only the currently owned one-shot timer.
-const pairedEntry=(id=570,revision=1):GameMediaEntry=>({...entry(id,revision),staticReady:true,dynamicReady:true});
 await run('unexposed wallpaper clears the old frame and cannot own playback failure',async()=>{
  for(const source of ['lookup','ensure']){
   const pending=deferred();let cached=source==='lookup'?pairedEntry():entry();
@@ -411,28 +680,60 @@ await run('unexposed wallpaper clears the old frame and cannot own playback fail
   }finally{f.host.stop();pending.resolve(pairedEntry());await settle();}
  }
 });
+await run('complement transport refusal does not revoke a current cached frame',async()=>{
+ for(const outcome of ['timeout','unexposed','off','replacement']){
+  const pending=deferred();let attempts=0;
+  const f=fixture({lookup:async target=>target.appId===570?entry():pairedEntry(target.appId),ensure:async()=>{++attempts;return pending.promise as Promise<GameMediaEntry>;}});
+  try{
+   f.context();await settle();
+   same(f.output().at(-1).entry.assetId,'asset-570','the approved cached video is exposed before complement');
+   same(attempts,1,'one held complement request');
+   if(outcome==='off'){f.enable(false);f.change('settings');}
+   if(outcome==='replacement')f.context('730',2,true);
+   await settle();const published=f.output().length;
+   if(outcome==='unexposed')pending.resolve({...pairedEntry(570,2),url:''});
+   else pending.reject(Error('fixture complement transport timeout'));
+   await settle();const selected=f.output().at(-1);
+   if(outcome==='unexposed')same([selected.entry,selected.status],[null,'media-url-unavailable'],'explicit unavailable delivery still clears the old video');
+   else{
+    same(f.output().length,published,'rejected complement emits no replacement frame: '+outcome);
+    same([selected.entry?.assetId,selected.enabled,selected.contextSeq],outcome==='off'?[undefined,false,1]:outcome==='replacement'?['asset-730',true,2]:['asset-570',true,1],'a rejected request cannot revoke or revive another selection');
+   }
+   same(f.timers.size,0,'no new retry scheduler for optional preparation');
+   same(f.failures.length,0,'optional preparation failure is not decode failure');
+  }finally{pending.resolve(pairedEntry());f.host.stop();await settle();}
+ }
+});
 await run('32 cross-task same-key changes coalesce into one fresh trailing lookup',async()=>{
- const head=deferred();let reads=0,pending=0,peakPending=0,latest=pairedEntry();
- const f=fixture({lookup:async()=>{++reads;++pending;peakPending=Math.max(peakPending,pending);try{return await(reads===1?head.promise as Promise<GameMediaEntry>:Promise.resolve(latest));}finally{--pending;}}});
+ const head=deferred(),tail=deferred();let reads=0,pending=0,peakPending=0,latest=pairedEntry();
+ const f=fixture({lookup:async()=>{++reads;++pending;peakPending=Math.max(peakPending,pending);try{return await((reads===1?head.promise:tail.promise) as Promise<GameMediaEntry>);}finally{--pending;}}});
  try{
   f.context();await settle();same(reads,1,'initial selected lookup is pending');
   for(let n=0;n<32;n++){latest=pairedEntry(570,n+2);f.change('asset','steam-570');await settle();}
   same(reads,1,'32 notifications cannot submit 32 obsolete native reads');same(f.output().length,0,'dirty pending result is not a fresh cache');
-  head.resolve(pairedEntry());await settle();same(reads,2,'one trailing lookup reads the current cache');same(f.output().at(-1).entry.revision,'33','asset changes between initial and trailing reads survive');same(f.output().length,1,'only current cache is published');
+  head.resolve(entry());await settle();same(reads,2,'one trailing lookup reads the current cache');
+  const waiting={frames:f.output().length,ensures:f.calls.filter(c=>c.command==='ensure').length};
+  console.log('WALLPAPER_OBSOLETE_LOOKUP '+JSON.stringify(waiting));
+  same(waiting,{frames:0,ensures:0},'a dirty lookup must not publish or start preparation while the trailing read is pending');
+  tail.resolve(latest);await settle();same(f.output().at(-1).entry.revision,'33','asset changes between initial and trailing reads survive');same(f.output().length,1,'only current cache is published');
   same(peakPending,1,'same context never owns two pending lookups');same(pending,0,'both initial and trailing lookup actually settled');
   console.log('WALLPAPER_STORM_METRICS '+JSON.stringify({notifications:32,lookupsDuringNotifications:1,totalLookups:reads,trailingLookups:reads-1,peakPendingLookups:peakPending,pendingLookupsAtEnd:pending,finalAssetRevision:f.output().at(-1).entry.revision}));
   same(f.calls.filter(c=>c.command==='ensure').length,0,'complete fresh cache needs no preparation');same(f.calls.filter(c=>c.command==='inventory').length,1,'notifications do not rescan');same(f.timers.size,0,'coalescing has no timer');
- }finally{f.host.stop();head.resolve(pairedEntry());await settle();}
+ }finally{f.host.stop();head.resolve(pairedEntry());tail.resolve(latest);await settle();}
 });
 await run('32 cross-task changes during ensure revalidate before any further preparation',async()=>{
- const preparing=deferred();let cached=entry(),reads=0,prepares=0;
- const f=fixture({lookup:async()=>{reads++;return cached;},ensure:async()=>{prepares++;return preparing.promise as Promise<GameMediaEntry>;}});
+ const preparing=deferred(),tail=deferred();let cached=entry(),reads=0,prepares=0;
+ const f=fixture({lookup:async()=>++reads===1?cached:tail.promise as Promise<GameMediaEntry>,ensure:async()=>{prepares++;return preparing.promise as Promise<GameMediaEntry>;}});
  try{
   f.context();await settle();same(reads,1,'initial cache read completed');same(prepares,1,'one original ensure is pending');
   for(let n=0;n<32;n++){cached=pairedEntry(570,n+2);f.change('asset','steam-570');await settle();}
   same(reads,1,'ensure owns the same publication chain');same(prepares,1,'notifications do not repeat an unconfirmed preparation');
-  preparing.resolve(entry());await settle();same(reads,2,'ensure settlement is followed by a real fresh lookup');same(prepares,1,'fresh complete cache prevents another ensure');same(f.output().at(-1).entry.revision,'33','stale ensure result cannot stand in for current cache');same(f.timers.size,0,'no polling or new deadline');
- }finally{f.host.stop();preparing.resolve(entry());await settle();}
+  preparing.resolve(entry(570,2));await settle();same(reads,2,'ensure settlement is followed by a real fresh lookup');
+  const waiting=f.output().map(message=>message.entry?.revision);
+  console.log('WALLPAPER_OBSOLETE_ENSURE '+JSON.stringify({revisions:waiting,ensures:prepares}));
+  same(waiting,['1'],'keep the last verified asset while the trailing read is pending');
+  tail.resolve(cached);await settle();same(prepares,1,'fresh complete cache prevents another ensure');same(f.output().at(-1).entry.revision,'33','stale ensure result cannot stand in for current cache');same(f.timers.size,0,'no polling or new deadline');
+ }finally{f.host.stop();preparing.resolve(entry());tail.resolve(cached);await settle();}
 });
 await run('a new context bypasses an old hung lookup and its dirty tail',async()=>{
  const old=deferred();let reads=0;
@@ -442,6 +743,52 @@ await run('a new context bypasses an old hung lookup and its dirty tail',async()
   f.context('1091500',2);await settle();same(reads,2,'new selection reads without awaiting the old lookup');same(f.output().at(-1).appId,'1091500','new selected game is displayed while old read is hung');
   const calls=f.calls.length;old.resolve(pairedEntry(570,99));await settle();same(f.calls.length,calls,'old settlement cannot run its dirty tail');same(f.output().at(-1).entry.revision,'7','old cache cannot overwrite new context');same(f.timers.size,0,'revoked tail is dormant');
  }finally{f.host.stop();old.resolve(pairedEntry());await settle();}
+ for(const stage of ['asset','foreground','settings'] as const){
+ const pending=deferred(),proof=deferred();let holdForeground=false;
+ const nextSeq=stage==='foreground'?3:2;
+ const timers=new Map<number,{run:()=>void;ms:number}>();let seq=0,socketCount=0,closed=false,hudSent=0,ackPresented=0;
+ const events=new Map<string,(event?:any)=>void>();
+ const receive=(message:any)=>events.get('message')?.({data:JSON.stringify({...message,runId:live.peer.runId})});
+ const live=fixture({startReady:stage!=='settings',foregroundRead:async()=>holdForeground?proof.promise:nativeProof(),lookup:async target=>target.appId===570?pairedEntry():pending.promise as Promise<GameMediaEntry>,reply:async message=>{
+  if(message.type==='wallpaper-context-accepted'){
+   receive({...message,appId:'999'});receive({...message,contextSeq:1});
+   same([...timers.values()].map(t=>t.ms),[10000],'wrong app or stale selection cannot certify the current lease');
+  }
+  receive(message);return true;
+ }});
+ const socket={readyState:1,addEventListener:(name:string,fn:(event?:any)=>void)=>events.set(name,fn),close:()=>{closed=true;socket.readyState=3;events.get('close')?.();},send:(wire:string)=>{
+  const request=JSON.parse(wire);
+  if(request.command==='wallpaper.context')live.context(request.appId,request.contextSeq,request.visible,{request});
+  else if(request.command==='hud.status')hudSent++;
+ }};
+ const mirror=new MirrorClient({clientId:'wallpaper-host-test',bootstrap:()=>({endpoint:'ws://127.0.0.1:12345/mirror',token:'TEST-ONLY',runId:live.peer.runId,wallpaperProtocol:1,hudProtocol:1}),socket:()=>{socketCount++;return socket as unknown as WebSocket;},schedule:((run:()=>void,ms:number)=>{timers.set(++seq,{run,ms});return seq;}) as any,cancel:((id:number)=>timers.delete(id)) as any});
+ const off=mirror.subscribeExtra(message=>{if((message as any)?.type==='wallpaper-context-accepted')ackPresented++;});
+ try{
+  mirror.setPassiveDemand('wallpaper',true);mirror.setPassiveDemand('hud',true);events.get('open')?.();
+  same(mirror.sendWallpaper('wallpaper.context',{contextSeq:1,appId:'570',visible:true,requestReady:true}),true,'established request accepted');await settle();
+  if(stage==='settings')same(live.frames.filter(m=>m.type==='wallpaper-ready').at(-1)?.enabled,false,'unloaded settings cannot enable wallpaper');
+  else same(live.output().at(-1)?.entry?.assetId,'asset-570','initial media proved on the shared connection');
+  if(stage==='foreground'){
+   holdForeground=true;
+   same(mirror.sendWallpaper('wallpaper.context',{contextSeq:2,appId:'570',visible:false}),true,'a hidden route withdraws its foreground proof');await settle();
+  }
+  same(mirror.sendWallpaper('wallpaper.context',{contextSeq:nextSeq,appId:'1091500',visible:true}),true,'changed card is sent');await settle();
+  const expiry=[...timers].find(([,t])=>t.ms===10000);if(expiry){timers.delete(expiry[0]);expiry[1].run();}
+  const waiting={closed,socketCount,hudAvailable:mirror.sendHud('hud.status',{}),foregroundReads:live.calls.filter(c=>c.command==='foreground-read').length,pendingLookup:live.calls.filter(c=>c.command==='lookup').length,acks:live.frames.filter(f=>f.type==='wallpaper-context-accepted').map(f=>[f.contextSeq,f.appId,f.foreground]),newFrames:live.output().filter(f=>f.contextSeq===nextSeq).length};
+  console.log('WALLPAPER_SLOW_CARD '+JSON.stringify({stage,...waiting}));
+  same(waiting,{closed:false,socketCount:1,hudAvailable:true,foregroundReads:stage==='settings'?0:stage==='foreground'?2:1,pendingLookup:stage==='settings'?0:stage==='foreground'?1:2,acks:[[nextSeq,'1091500',stage==='asset']],newFrames:0},'a slow wallpaper dependency must not close the shared socket or authorize a frame');
+  same(ackPresented,0,'transport acknowledgement never reaches a render consumer');same(hudSent,1,'HUD still works before media resolves');
+  if(stage==='settings'){
+   same(live.calls.filter(c=>['inventory','gameMedia.shortcut','ensure'].includes(c.command)).length,0,'waiting for settings has no media side effects');
+   live.host.ready();await settle();
+   same(live.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[1091500],'ready only reads the latest retained card');
+  }
+  proof.resolve(nativeProof());await settle();
+  pending.resolve(pairedEntry(1091500,7));await settle();same(live.output().at(-1).entry.assetId,'asset-1091500','slow current selection still publishes when ready');
+  same(timers.size,0,'the recovered selection leaves no connection retry or deadline');
+ }finally{off();mirror.dispose();live.host.stop();proof.resolve(null);pending.resolve(pairedEntry(1091500));await settle();}
+ same(timers.size,0,'client disposal owns all deadlines');
+ }
 });
 await run('a rejected trailing lookup retains only the original slow recovery deadline',async()=>{
  const head=deferred(),tail=deferred();let reads=0;
@@ -485,13 +832,152 @@ await run('OFF then ON in the same context bypasses either kind of old pending p
  }
 });
 
-await run('R18 recovery: foreground transport failure retries same live demand without a native event',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('one native timeout');return nativeProof();}});try{f.context();await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'failed proof never grants media');same(f.timers.size,1,'one bounded proof repair belongs to visible demand');same([...f.timers.values()][0].ms,1000,'first repair is delayed');await f.fire();same(reads,2,'same peer retries actual reader without another WinEvent');same(f.output().at(-1).entry.assetId,'asset-570','current proof recovers current selection');same(f.timers.size,0,'successful foreground leaves no proof poll');}finally{f.host.stop();}});
-await run('R18 recovery: repeated transport failure exhausts a finite budget without an asset-event loop',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{reads++;throw Error('reader offline');}});try{f.context();await settle();for(const delay of [1000,5000,20000]){same(f.timers.size,1,'only one repair timer');same([...f.timers.values()][0].ms,delay,'bounded original recovery delays');for(let n=0;n<32;n++)f.change('asset');await settle();const before=reads;await f.fire();same(reads,before+1,'one actual read at one retry');}same(reads,4,'initial plus three repairs only');same(f.timers.size,0,'exhausted demand stops retry timers');for(let n=0;n<64;n++)f.change('asset');await settle();same(reads,4,'asset notifications cannot restart exhausted transport');same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'exhaustion never authorizes media');}finally{f.host.stop();}});
+// Match Authority::observe's exact negative reply when a native revision
+// changes between opening its ticket and committing its foreground proof.
+const racedForeground=nativeProof({known:false,foreground:false,current:false,mode:'unknown',pid:0,birth:'0',window:'0',reason:'foreground-changed-during-read'});
+await run('R18 recovery: foreground transport failure retries same live demand without a native event',async()=>{
+ for(const mode of ['timeout','revision-race','revision-race-then-blur']){
+  let reads=0;
+  const f=fixture({foregroundRead:async()=>{
+   if(++reads===1){if(mode==='timeout')throw Error('one native timeout');return racedForeground;}
+   return nativeProof();
+  },lookup:async target=>entry(target.appId),ensure:async target=>entry(target.appId)});
+  try{
+   f.context();await settle();
+   same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'failed proof never grants media: '+mode);
+   same(f.timers.size,1,'one bounded proof repair belongs to visible demand: '+mode);
+   same([...f.timers.values()][0].ms,1000,'first repair is delayed');
+   if(mode!=='timeout'){
+    const race='foreground-changed-during-read';
+    same(f.output().at(-1).status,race,'a raced read is labeled separately from a transport timeout');
+    f.context('730',2,true);await settle();
+    same([reads,f.output().at(-1).contextSeq,f.output().at(-1).status],[1,2,race],'card change acknowledges latest selection without refilling the race budget');
+   }
+   if(mode==='revision-race-then-blur'){
+    const late=[...f.timers.values()][0].fn;
+    f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur',revision:2}));await settle();late();await settle();
+    same([reads,f.timers.size,f.calls.filter(c=>c.command==='lookup').length],[1,0,0],'authoritative blur wins over queued repair');continue;
+   }
+   await f.fire();same(reads,2,'same peer retries actual reader without another WinEvent');
+   same(f.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[mode==='timeout'?570:730],'only the latest card is read after repair');
+   same(f.output().at(-1).entry.assetId,mode==='timeout'?'asset-570':'asset-730','current proof recovers current selection');
+   same(f.timers.size,0,'successful foreground leaves no proof poll');
+  }finally{f.host.stop();}
+ }
+ const proof=nativeProof({ownerEpoch:'focus-2',revision:2});
+ const notice={...racedForeground,ownerEpoch:proof.ownerEpoch,revision:proof.revision};
+ const queryCount=(f:ReturnType<typeof fixture>)=>f.calls.filter(c=>c.command==='foreground-read').length;
+ const mediaCount=(f:ReturnType<typeof fixture>)=>f.calls.filter(c=>['lookup','ensure','inventory'].includes(c.command)).length;
+ {
+  const initial=deferred();let reads=0;
+  const f=fixture({foregroundRead:()=>++reads===1?initial.promise:Promise.resolve(proof),lookup:async target=>entry(target.appId),ensure:async target=>entry(target.appId)});
+  try{
+   f.context();await settle();f.foreground(notice);f.context('730',2);await settle();
+   same([queryCount(f),mediaCount(f),f.output().at(-1).status],[1,0,'foreground-changed-during-read'],'raced notice keeps the current read alive and acknowledges the latest card');
+   initial.resolve(nativeProof());await settle();
+   same([mediaCount(f),[...f.timers.values()].map(t=>t.ms)],[0,[1000]],'a pre-notice proof cannot authorize media; original retry repairs the race');
+   for(let n=0;n<32;n++)f.foreground(notice);await settle();
+   same([queryCount(f),f.timers.size],[1,1],'raced notice burst cannot refill or interrupt the scheduled retry');
+   await f.fire();
+   same([queryCount(f),f.output().at(-1).entry.assetId,f.timers.size],[2,'asset-730',0],'same peer recovers only the latest card from confirmed proof');
+  }finally{f.host.stop();initial.resolve(null);}
+ }
+ {
+  const newer=deferred();let reads=0;
+  const f=fixture({foregroundRead:()=>++reads===1?Promise.resolve(nativeProof()):newer.promise});
+  try{
+   f.context();await settle();const before=f.frames.length,media=mediaCount(f);
+   for(let n=0;n<32;n++)f.foreground(racedForeground);await settle();
+   same([queryCount(f),mediaCount(f),f.frames.length],[1,media,before],'read race at an already confirmed revision neither stops video nor reads again');
+   f.foreground(notice);await settle();
+   same([queryCount(f),mediaCount(f),f.output().at(-1).entry,f.output().at(-1).foreground],[2,media,null,false],'a newer unconfirmed revision retires the old frame and starts one proof read');
+   for(let n=0;n<32;n++)f.foreground(notice);await settle();
+   same([queryCount(f),f.timers.size],[2,0],'raced notification burst shares one in-flight read');
+   f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'focus-3',revision:3}));
+   newer.resolve(proof);await settle();
+   same([queryCount(f),mediaCount(f),f.output().at(-1).entry,f.timers.size],[2,media,null,0],'a real newer blur retires the raced proof and any recovery');
+  }finally{f.host.stop();newer.resolve(null);}
+ }
+});
+await run('R18 recovery: repeated transport failure exhausts a finite budget without an asset-event loop',async()=>{
+ let reads=0,seq=1,release!:()=>void;
+ const f=fixture({foregroundRead:async()=>{if(++reads===2)await new Promise<void>(resolve=>release=resolve);throw Error('reader offline');}});
+ const move=()=>{for(let n=0;n<32;n++){f.change('asset');f.context(n%2?'730':'570',++seq);}};
+ try{
+  f.context();await settle();
+  for(const delay of [1000,5000,20000]){
+   same(f.timers.size,1,'only one repair timer');const [id,queued]=[...f.timers][0];same(queued.ms,delay,'bounded original recovery delays');
+   const before=reads;move();await settle();same(reads,before,'visible card changes cannot bypass backoff');same(f.timers.get(id),queued,'keeps the original timeout and owner');
+   const ack=f.output().at(-1);
+   same([ack?.contextSeq,ack?.appId,ack?.enabled,ack?.foreground,ack?.entry,ack?.status],
+    [seq,'730',true,false,null,'foreground-transport-unavailable'],'latest card must get a non-playing reply during proof backoff');
+   await f.fire();same(reads,before+1,'one actual read at one retry');
+   if(delay===1000){move();await settle();same(reads,2,'card changes share the in-flight retry');release();await settle();}
+  }
+  same(reads,4,'initial plus three repairs only');same(f.timers.size,0,'exhausted demand stops retry timers');
+  move();move();await settle();same(reads,4,'card and asset notifications cannot restart exhausted transport');
+  const exhausted=f.output().at(-1);
+  same([exhausted?.contextSeq,exhausted?.appId,exhausted?.foreground,exhausted?.entry],
+   [seq,'730',false,null],'exhausted proof still acknowledges the latest selection');
+  const sent=f.frames.length;for(let n=0;n<32;n++)f.change('asset');await settle();
+  same(f.frames.length,sent,'unchanged unavailable replies are not republished');
+  same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'exhaustion never authorizes media');
+  f.context('730',++seq,false);f.context('730',++seq,true);await settle();
+  same(reads,5,'actual return to visible owns a fresh read');same([...f.timers.values()][0].ms,1000,'new visible interval has its own budget');
+ }finally{f.host.stop();}
+});
 await run('R18 recovery: authoritative false or unknown never schedules transport repair',async()=>{for(const proof of [null,nativeProof({foreground:false}),nativeProof({known:false,current:false})]){const f=fixture({foreground:proof});try{f.context();await settle();for(let n=0;n<32;n++)f.change('asset');await settle();same(f.timers.size,0,'actual native veto is not a transport fault');same(f.calls.filter(c=>c.command==='foreground-read').length,1,'no recurring native veto reads');same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'native veto stays denied');}finally{f.host.stop();}}});
 for(const cause of ['off','hidden','peer','power','stop'] as const)await run('R18 recovery: queued proof repair is cancelled by '+cause,async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('one failure');return nativeProof();}});try{f.context();await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'failed reader needs an owned repair');if(cause==='off'){f.enable(false);f.change('settings');}else if(cause==='hidden')f.context('570',2,false);else if(cause==='peer')f.connect({connection:'2',runId:'b'.repeat(32)});else if(cause==='power')f.resume(2);else f.host.stop();await settle();const count=f.calls.length;late();await settle();same(f.calls.length,count,'late repair cannot read a withdrawn owner');same(f.timers.size,0,'withdrawal cancels the repair');}finally{f.host.stop();}});
-await run('R18 recovery: a new context owns recovery and a queued old context stays inert',async()=>{let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first context fails');return nativeProof();}});try{f.context();await settle();const late=[...f.timers.values()][0]?.fn;assert.ok(late,'old context owns one timer');f.context('730',2,true);await settle();same(f.output().at(-1).appId,'730','new visible selection can recheck proof');const count=f.calls.length;late();await settle();same(f.calls.length,count,'old selection repair cannot replace current output');same(f.timers.size,0,'new success cancels old selection work');}finally{f.host.stop();}});
+await run('R18 recovery: a new context owns recovery and a queued old context stays inert',async()=>{
+ let reads=0;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first context fails');return nativeProof();}});
+ try{
+  f.context();await settle();const retry=[...f.timers.values()][0]?.fn;assert.ok(retry,'visible peer owns one timer');
+  f.context('730',2,true);await settle();same(reads,1,'visible selection carries the existing foreground retry');
+  same(f.calls.filter(c=>c.command==='lookup').length,0,'new card waits for proof');
+  await f.fire();same(f.output().at(-1).appId,'730','one retry grants proof only to the latest visible selection');
+  same(f.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[730],'the old card is never read');
+  const count=f.calls.length;retry();await settle();same(f.calls.length,count,'consumed callback cannot replace current output');
+  same(f.timers.size,0,'new success leaves no scheduled read');
+ }finally{f.host.stop();}
+});
 await run('R18 recovery: late repaired proof cannot grant playback after native blur',async()=>{let reads=0,release!:(v:any)=>void;const f=fixture({foregroundRead:async()=>{if(++reads===1)throw Error('first read failed');return new Promise(r=>release=r);}});try{f.context();await settle();await f.fire();f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur-new',revision:2}));release(nativeProof());await settle();same(f.calls.filter(c=>['lookup','ensure'].includes(c.command)).length,0,'old positive transport receipt cannot override new native blur');same(f.timers.size,0,'native veto cancels repair work');}finally{f.host.stop();}});
 await run('R18 recovery: retry notifications route only current native-ticket Steam selection',async()=>{const f=fixture();try{f.context();await settle();const before=f.calls.filter(c=>c.command==='ensure').length;f.change('retry');await settle();same(f.calls.filter(c=>c.command==='ensure').length,before+1,'current owner receives one retry');const attempt=f.calls.filter(c=>c.command==='ensure').at(-1);same(attempt.target.appId,570,'retry uses selected game');same([attempt.demand.demandConsumer,attempt.demand.demandEpoch,attempt.demand.demandRevision],['steam','focus-1',1],'retry retains actual current native proof');f.foreground(nativeProof({foreground:false,current:false,ownerEpoch:'blur',revision:2}));const queries=()=>f.calls.filter(c=>['lookup','ensure','foreground-read'].includes(c.command)).length;const count=queries();f.change('retry');await settle();same(queries(),count,'blurred selection cannot retry');f.enable(false);f.change('settings');const off=queries();f.change('retry');await settle();same(queries(),off,'OFF cannot retry');}finally{f.host.stop();}});
+await run('R18 recovery: pending foreground read follows only the latest visible selection',async()=>{
+ for(const outcome of ['proof','failure','hidden','off','peer','power'] as const){
+  const attempts:ReturnType<typeof deferred>[]=[];
+  const f=fixture({foregroundRead:()=>{const work=deferred();attempts.push(work);return work.promise;}});
+  try{
+   f.context('570',1);await settle();
+   for(let seq=2;seq<=64;seq++)f.context(String(1000+seq),seq);
+   same(attempts.length,1,'visible selection storm must share exactly one pending foreground read');
+   same(f.calls.filter(c=>c.command==='lookup'||c.command==='ensure'||c.command==='inventory').length,0,'no media work before proof');
+   if(outcome==='proof'){
+    attempts[0].resolve(nativeProof());await settle();
+    same(f.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[1064],'proof runs the latest selection only');
+    same([f.output().at(-1).contextSeq,f.output().at(-1).appId],[64,'1064'],'only the latest context receives the proof result');
+    same(f.timers.size,0,'success owns no repair timer');
+   }else if(outcome==='failure'){
+    attempts[0].reject(Error('held foreground read failed'));await settle();
+    const failure=f.output().at(-1);
+    same([failure.contextSeq,failure.appId,failure.status],[64,'1064','foreground-transport-unavailable'],'failure acknowledges the latest context');
+    same([...f.timers.values()].map(t=>t.ms),[1000],'failure retains one original retry');
+    await f.fire();same(attempts.length,2,'retry starts only after original delay');
+    attempts[1].resolve(nativeProof());await settle();
+    same(f.calls.filter(c=>c.command==='lookup').map(c=>c.target.appId),[1064],'repaired proof still reads latest media only');
+   }else{
+    if(outcome==='hidden')f.context('1064',65,false);
+    if(outcome==='off'){f.enable(false);f.change('settings');}
+    if(outcome==='peer')f.connect({connection:'2',runId:'b'.repeat(32)});
+    if(outcome==='power')f.resume(2);
+    await settle();const before=f.frames.length;
+    attempts[0].resolve(nativeProof());await settle();
+    same(f.frames.length,before,'withdrawal retires the reused proof: '+outcome);
+    same(f.calls.filter(c=>c.command==='lookup'||c.command==='ensure').length,0,'retired proof cannot read media: '+outcome);
+    same(f.timers.size,0,'retired proof cannot start a retry: '+outcome);
+   }
+  }finally{f.host.stop();for(const attempt of attempts)attempt.resolve(null);await settle();}
+ }
+});
 if(exactCase!==null)assert.equal(cases,1,'exact case must select one original case');
 const stabilityOk=!stabilityRecoveryOnly||stabilityRecoveryRows.length>0&&stabilityRecoveryRows.every(x=>x.ok);if(!stabilityOk)process.exitCode=1;
 console.log(JSON.stringify({ok:stabilityOk,selection:exactCase??(stabilityRecoveryOnly?'stability-recovery':'default'),stabilityRecoveryRows,cases,checks,scope:'production Steam wallpaper host; injected IPC/media ports, no installed Steam mutation'}));

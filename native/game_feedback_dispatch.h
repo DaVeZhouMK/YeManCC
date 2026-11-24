@@ -16,7 +16,7 @@ private:
     bool stop_=false,manualActive_=false;
     static bool sameContext(const SourceBoundCommand& a,const SourceBoundCommand& b) noexcept {
         return a.ticket.host==b.ticket.host&&a.ticket.power==b.ticket.power&&a.ticket.intent==b.ticket.intent&&
-            a.motors.generation==b.motors.generation&&a.source==b.source;
+            a.motors.generation==b.motors.generation&&a.source==b.source&&a.powerScope==b.powerScope;
     }
     static bool sameMotors(const SourceBoundCommand& a,const SourceBoundCommand& b) noexcept {
         return sameContext(a,b)&&a.motors.left==b.motors.left&&a.motors.right==b.motors.right;

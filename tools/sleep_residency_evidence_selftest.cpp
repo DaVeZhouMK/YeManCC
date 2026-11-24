@@ -4,6 +4,9 @@
 #endif
 #include "sleep_residency_evidence.h"
 #include "sleep_export_diagnostics.h"
+#if __has_include("sleep_power_revocation.h")
+#include "sleep_power_revocation.h" // Static-wake companion, before fixture globals.
+#endif
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -29,10 +32,12 @@ static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long,unsign
 #else
 static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long,unsigned long long,int) noexcept;
 #endif
-static void productionCapture(bool leaving, const std::string& xml, unsigned long long eventFileTime=123456789,
+static bool productionCapture(bool leaving, const std::string& xml, unsigned long long eventFileTime=123456789,
                               unsigned long long callbackGeneration=771,int reason=5) {
     const unsigned long long recordedFileTime = eventFileTime;
+    const auto observe=[](const char*,auto&& observation){observation();};
 #include "production_capture_hook.inc"
+    return s0Exit;
 }
 #if !defined(YMCC_SLEEP_TIMEOUT_ONLY) && !defined(YMCC_SLEEP_LATE_WAKE_ONLY)
 #include "abnormal_native_harness.inc"

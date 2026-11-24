@@ -118,7 +118,7 @@ async function fixture(options = {}) {
     '@/views/ControllerShortcutEditorView.vue': { __esModule:true,default:editor },
     '@/components/InlineIcon.vue': { __esModule:true,default:icon },
     '@/bridge/settingsRepository': repository,
-    '@/bridge/ipc': { on(name, cb) { nativeEvents.set(name,cb);return()=>nativeEvents.delete(name); },async invoke(command){if(command==='input.shortcutRuntime.clear')nativeEvents.get('input.shortcutRuntime')?.({active:false});return {active:false};} }, '@/bridge/api':{shell:{open:async()=>{}}},
+    '@/bridge/ipc': { setGyroTelemetryInterest(){}, on(name, cb) { nativeEvents.set(name,cb);return()=>nativeEvents.delete(name); },async invoke(command){if(command==='input.shortcutRuntime.clear')nativeEvents.get('input.shortcutRuntime')?.({active:false});return {active:false};} }, '@/bridge/api':{shell:{open:async()=>{}}},
     '@/bridge/gameInputOverride': { getGameInputOverrideState:()=>locked,subscribeGameInputOverrideState(cb){lockListener=cb;cb(locked);return()=>{lockListener=null;};} },
     '@/bridge/gameproc': { closeJoyxoffIfRunning:async()=>{joyCalls++;} }, '@/bridge/virtualOutputStatus': outputStatus,
   }, globals);

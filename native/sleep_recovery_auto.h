@@ -906,9 +906,21 @@ gen=state.generation;epoch=state.configEpoch;
 }
 static bool sleepSteamWakeOperationAllows(unsigned long long generation,unsigned long long configEpoch){return SleepRecoveryAuto::wakeOperationAllows(generation,configEpoch);}
 static void sleepRecoveryAutoCloseSuspendEpisode(){SleepSteamRecovery::closeSuspendEpisode();}
-static void sleepRecoveryAutoPrepareSuspend(){SleepSteamRecovery::prepareSuspend();}
+static void sleepRecoveryAutoPrepareSuspend(ULONGLONG originalBoundary=0){SleepSteamRecovery::prepareSuspend(originalBoundary);}
 static void sleepRecoveryAutoCancelPreparedSuspend(){SleepSteamRecovery::cancelPreparedSuspend();}
-static void sleepRecoveryAutoCaptureSuspend(unsigned long long generation){SleepSteamRecovery::captureSuspend(generation);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoverySuspend(generation);}
+static void sleepRecoveryAutoCaptureSuspend(unsigned long long generation,ULONGLONG originalBoundary=0) noexcept {
+    // Steam capture may already have accepted work when it fails. Let the
+    // remaining consumers and the shared Suspend queue continue without replay.
+    const auto consume=[generation](const char* name,auto&& run) noexcept {
+        try{run();}catch(...){try{
+            sgRecordFact("sleep-suspend-consumer-failed",{{"consumer",name},{"generation",generation},
+                {"businessCompletionProved",false},{"automaticReplay",false}});
+        }catch(...){} }
+    };
+    consume("steam-original-capture",[&]{SleepSteamRecovery::captureSuspend(generation,{},originalBoundary);});
+    consume("steam-wake-fact-join",[&]{SleepRecoveryAuto::captureReady(generation);});
+    consume("steam-original-recovery",[&]{steamOriginalRecoverySuspend(generation);});
+}
 static void sleepRecoveryAutoArm(unsigned long long generation){SleepSteamRecovery::closeSuspendEpisode();SleepRecoveryAuto::arm(generation);steamOriginalRecoveryWake(generation);}
 static void sleepRecoveryAutoRecordKernelWake(unsigned long long generation,int eventId,int reason,int targetState,ULONGLONG eventFileTime){SleepRecoveryAuto::recordKernelWake(generation,eventId,reason,targetState,eventFileTime);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoveryPowerReady(generation);}
 static void sleepRecoveryAutoInteractiveResume(unsigned long long generation,int code,ULONGLONG receiptTick){SleepRecoveryAuto::recordInteractiveResume(generation,code,receiptTick);SleepRecoveryAuto::captureReady(generation);steamOriginalRecoveryPowerReady(generation);}

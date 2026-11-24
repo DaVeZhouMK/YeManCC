@@ -1,0 +1,4 @@
+<Project><Target Name="ExcludeOriginalWorkspaceBuildOutputs" BeforeTargets="CoreCompile"><ItemGroup>
+<Compile Remove="$(MSBuildProjectDirectory)\bin\**\*.cs" />
+<Compile Remove="$(MSBuildProjectDirectory)\obj\**\*.cs" />
+</ItemGroup></Target></Project>

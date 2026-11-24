@@ -9,7 +9,7 @@ _extract=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_extrac
 sha=lambda b:hashlib.sha256(b).hexdigest()
 PATTERNS={
  'resolver':rb'^static ComPtr<ICoreWebView2> ipc_view_for_child\(int childId\) \{',
- 'post':rb'^static void ipc_post_json\(int childId, const json& message(?:, const std::string& command = \{\})?(?:,\s+std::optional<std::wstring>\* preparedEventWire = nullptr)?\)(?: noexcept)? \{',
+ 'post':rb'^static (?:void|bool) ipc_post_json\(int childId, const json& message(?:, const std::string& command = \{\})?(?:,\s+std::optional<std::wstring>\* preparedEventWire = nullptr)?\)(?: noexcept)? \{',
  'generic':rb'^static void ipc_emit\(const std::string& ev, const json& data = \{\}\) \{',
  'gyro':rb'^static void ipc_emit_owned_gyro_telemetry\(std::string ev, json data\) \{',
  'utf16':rb'^static std::wstring U2W\(const std::string& s\) \{',

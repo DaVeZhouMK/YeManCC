@@ -16,7 +16,7 @@ export function subscribeGameMediaResume(handler:(event:MediaResumeEvent)=>void,
 export interface MediaPreparationSnapshot {blockedReason?:string;batterySaver?:boolean;lowBattery?:boolean;}
 interface Ports {
   read:()=>Promise<MediaPreparationSnapshot>;
-  apply:(state:{backgroundBlocked:boolean;storageBlocked:boolean;reason:string})=>void;
+  apply:(state:{backgroundBlocked:boolean;storageBlocked:boolean;reason:string;playback30Idle:boolean})=>void;
   queued:()=>number;
   enabled?:()=>boolean;
   recheck?:()=>Promise<void>;
@@ -27,11 +27,15 @@ interface Ports {
 // it repairs lost game/power/progress notifications without polling an idle owner.
 export class GameMediaPreparationPolicy {
   private port:Ports;
-  private stopped=false;private suspended=false;private gameRunning=false;private snapshot:MediaPreparationSnapshot={};
+  private stopped=false;private suspended=false;private gameRunning:boolean|null=null;private snapshot:MediaPreparationSnapshot={};
   private epoch=0;private known=false;private reading:number|null=null;private recovering:number|null=null;private again=false;
   private timer:ReturnType<typeof setTimeout>|null=null;private retry:ReturnType<typeof setTimeout>|null=null;
   constructor(port:Omit<Ports,'schedule'|'cancel'>&Partial<Pick<Ports,'schedule'|'cancel'>>){this.port={schedule:(...args)=>globalThis.setTimeout(...args),cancel:(timer)=>globalThis.clearTimeout(timer),...port};this.apply();}
-  private apply(){if(!this.stopped)this.port.apply({backgroundBlocked:this.gameRunning||this.snapshot.batterySaver===true||this.snapshot.lowBattery===true,storageBlocked:this.suspended||!this.known||!!this.snapshot.blockedReason,reason:this.suspended?'media-power-transition':!this.known?'capacity-unavailable':this.snapshot.blockedReason|| (this.snapshot.batterySaver?'battery-saver':this.snapshot.lowBattery?'low-battery':this.gameRunning?'game-running':'')});}
+  private apply(){if(!this.stopped){
+    const reason=this.suspended?'media-power-transition':!this.known?'capacity-unavailable':this.snapshot.blockedReason|| (this.snapshot.batterySaver?'battery-saver':this.snapshot.lowBattery?'low-battery':this.gameRunning?'game-running':'');
+    this.port.apply({backgroundBlocked:this.gameRunning===true||this.snapshot.batterySaver===true||this.snapshot.lowBattery===true,
+      storageBlocked:this.suspended||!this.known||!!this.snapshot.blockedReason,reason,playback30Idle:!reason&&this.gameRunning===false});
+  }}
   game(running:boolean){if(this.stopped||this.gameRunning===running)return;this.gameRunning=running;this.apply();}
   private current(epoch:number){return !this.stopped&&!this.suspended&&epoch===this.epoch;}
   private retirePending(){

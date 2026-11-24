@@ -8,7 +8,7 @@ let toolScope;try{toolScope=beginRadialHostTools(root,process.argv[2]);}catch(er
 const {build}=require(toolScope.authority.compilerEntry);
 const development=process.argv.includes('--exercise-development');
 const sleepOnly=process.argv.includes('--sleep-lifecycle-only'),sleepBoundary=process.argv.find(value=>value.startsWith('--sleep-boundary='))?.slice('--sleep-boundary='.length)||'';
-const state={handlers:new Map(),calls:[],revision:0,generation:1,power:1,ready:true,hardwareWritesAllowed:true,notificationPending:false,known:true,publicationRevision:1,capable:true,ack:false,writes:[],results:[],created:[],closed:[],windows:[],model:null,delay:null};
+const state={handlers:new Map(),calls:[],revision:0,generation:1,power:1,suspendSerial:0,ready:true,hardwareWritesAllowed:true,notificationPending:false,known:true,publicationRevision:1,capable:true,ack:false,writes:[],results:[],created:[],closed:[],windows:[],model:null,delay:null};
 globalThis.__radialHostFixture=state;globalThis.window=new EventTarget();
 // Keep original production host/actions. Only its interval clock is virtual;
 // the native transport remains the existing explicit memory terminal.
@@ -64,10 +64,10 @@ state.model.pages[0].items[6]={id:'tdp',label:'TDP',action:'tdp',enabled:true};s
 state.model.pages[0].items[4]={id:'settings',label:'设置',action:'page.settings',enabled:true};
 const inputPage=defaultRadialSettings().pages[0];inputPage.id='input-test';inputPage.items.forEach(item=>{if(!item.action.startsWith('input.'))item.id='input-fixture-'+item.id;item.children?.forEach(child=>child.id='input-fixture-'+child.id)});state.model.pages.push(inputPage);state.model.pages[0].items[2]={id:'monitor',label:'监控',action:'page.monitor',enabled:true};
 const utilityPage=defaultRadialSettings().pages[0];utilityPage.id='utility-test';utilityPage.items.forEach(item=>{item.id='utility-'+item.id;item.children?.forEach(child=>child.id='utility-'+child.id)});state.model.pages.push(utilityPage);
-state.nativePower=()=>({phase:state.ready?'ready':'suspending',generation:state.power,inputReady:state.ready,hardwareWritesAllowed:state.hardwareWritesAllowed,notificationPending:state.notificationPending,known:state.known,publicationRevision:state.publicationRevision,observedNotificationSequence:state.publicationRevision});
+state.nativePower=()=>({phase:state.ready?'ready':'suspending',generation:state.power,suspendSerial:state.suspendSerial,inputReady:state.ready,hardwareWritesAllowed:state.hardwareWritesAllowed,notificationPending:state.notificationPending,known:state.known,publicationRevision:state.publicationRevision,observedNotificationSequence:state.publicationRevision});
 state.invoke=async(cmd,args)=>{if(cmd==='power.lifecycle')return state.nativePower();if(cmd==='radial.testing.configure'){state.testingRequests.push(structuredClone(args));return {ok:!args.enabled||state.testingAck,enabled:!!args.enabled&&state.testingAck,reason:'fixture native admission refused'};}state.calls.push({cmd,args});if(cmd==='radial.create'){const receipt={id:state.created.length+1,nonce:args.nonce};state.created.push({receipt,args});if(state.delay)await state.delay.promise;return receipt;}if(cmd==='radial.result'){state.results.push(args);return true;}if(cmd==='radial.close'){state.closed.push(args);return true;}return true;};
 const nativePowerTransition=ready=>{state.ready=ready;state.hardwareWritesAllowed=ready;state.notificationPending=false;state.publicationRevision++;emit('power.lifecycleChanged',state.nativePower());};
-const emit=(event,data)=>{if(event==='radial.summon-request')data={issuedAt:Date.now(),expiresAt:Date.now()+4000,powerGeneration:state.power,...data};for(const cb of state.handlers.get(event)||[])cb(data);};
+const emit=(event,data)=>{if(event==='radial.summon-request')data={issuedAt:Date.now(),expiresAt:Date.now()+4000,powerGeneration:state.power,powerSuspendSerial:state.suspendSerial,...data};for(const cb of state.handlers.get(event)||[])cb(data);};
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,2));}throw Error('Radial owner did not settle');}
 let host=startRadialHost({push:async route=>state.windows.push(route)});
 const check=(v)=>{assert.ok(v);checks++;};
@@ -146,9 +146,16 @@ async function exerciseSleepBoundaries(){
  let requestId=0;
  const sendIntent=(current,itemId)=>{const now=Date.now();emit('radial.intent',{...current,intent:{requestId:'sleep-'+(++requestId),itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+4000}});};
  for(const name of selected){
-  phase='sleep-'+name;let held=null;
+  phase='sleep-'+name;let held=null,heldFrame,refuseFrame;
+  const invoke=state.invoke;
   try{
    ready();host=startRadialHost({push:async route=>state.windows.push(route)});await sleepFlush();
+   if(name==='duplicate-ready'){
+    state.invoke=(cmd,args,...rest)=>{
+     if(!heldFrame&&cmd==='radial.frame')return heldFrame=new Promise((_,reject)=>{refuseFrame=reject;});
+     return invoke(cmd,args,...rest);
+    };
+   }
    let current=await summon();assert.equal(heartbeatTimers.size,1);
    const createdBefore=state.created.length,writesBefore=state.writes.length,windowsBefore=state.windows.length;
    if(name==='pending-active'){
@@ -185,7 +192,21 @@ async function exerciseSleepBoundaries(){
     assert.equal(isClosed(current),true);assert.equal(heartbeatTimers.size,0);
    }else{
     const fact=ready(),before=state.created.length;for(let n=0;n<100;n++)emit('power.lifecycleChanged',fact);await sleepFlush();
-    assert.equal(state.created.length,before,'duplicate Ready must not recreate a wheel');assert.equal(isClosed(current),false);assert.equal(heartbeatTimers.size,1);await closeCurrent(current);
+    assert.equal(state.created.length,before,'duplicate Ready must not recreate a wheel');assert.equal(isClosed(current),false);assert.equal(heartbeatTimers.size,1);
+    await until(()=>heldFrame);state.invoke=invoke;
+    const previousSerial=state.suspendSerial;
+    publish({suspendSerial:previousSerial+1});await sleepFlush();
+    assert.equal(isClosed(current),true,'coalesced same-generation Ready must retire the previous wheel');
+    assert.equal(heartbeatTimers.size,0);
+    emit('radial.summon-request',{source:'shortcut',powerSuspendSerial:previousSerial});await sleepFlush();
+    assert.equal(state.created.length,before,'an old queued summon must never create a wheel in a new period');
+    current=await summon('settings');
+    refuseFrame(Error('old wheel frame returned after wake'));
+    emit('radial.summon-request',{source:'shortcut',powerSuspendSerial:previousSerial});
+    emit('power.lifecycleChanged',fact);await sleepFlush();
+    assert.equal(isClosed(current),false,'old frame failure, old summon and old Ready cannot close a new wheel');
+    assert.equal(state.created.at(-1).args.powerSuspendSerial,state.suspendSerial,'create must carry the current suspend serial');
+    await closeCurrent(current);
    }
    assert.equal(state.writes.length,writesBefore,'retired sleep work must not issue a performance write');
    current=await summon('settings');assert.equal(heartbeatTimers.size,1,'fresh explicit summon works after same-generation Ready');
@@ -193,6 +214,7 @@ async function exerciseSleepBoundaries(){
    assert.equal(heartbeatTimers.size,0);assert.equal(isClosed(current),true);
    sleepResults.push({name,passed:true,sameGeneration:state.power,newExplicitSummon:true,oldPerformanceWrites:state.writes.length-writesBefore});checks++;
   }finally{
+   state.invoke=invoke;refuseFrame?.(Error('fixture returned old frame'));
    held?.resolve(state.nativePower());state.powerRead=state.settingsRead=state.delay=null;host.stop();await sleepFlush();
    assert.equal(heartbeatTimers.size,0);assert.equal(powerRetryTimers.size,0);assert.equal(getSharedPowerLifecycleDiagnostics().subscriberCount,0);
   }

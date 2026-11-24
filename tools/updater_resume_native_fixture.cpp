@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <map>
 #include <set>
@@ -233,8 +234,21 @@ static json fixtureTransaction=json::object();
 static json updateStateReadWithTransaction(){return fixtureTransaction.empty()?(progressEvents.empty()?json::object():progressEvents.back()):fixtureTransaction;}
 static std::map<std::string,std::function<json(const json&)>> policyHandlers;
 static void ipc_on(const std::string& name,std::function<json(const json&)> handler) { policyHandlers[name]=std::move(handler); }
+static std::atomic<int> manifestHttpCalls{0};
+static std::promise<void> manifestEntered,manifestRelease;
+static json httpGet(const std::string& url) {
+    ++manifestHttpCalls;
+    if(url=="fixture-held") {
+        manifestEntered.set_value();
+        if(manifestRelease.get_future().wait_for(std::chrono::seconds(5))!=std::future_status::ready)
+            throw std::runtime_error("fixture terminal did not release the old HTTP request");
+    }
+    if(url=="fixture-failure")throw std::runtime_error("fixture HTTP failure");
+    return {{"source",url}};
+}
 static void fixtureRegisterPredownload() {
 //__PRODUCTION_PREDOWNLOAD_REGISTRATION__
+//__PRODUCTION_MANIFEST_REGISTRATION__
 //__PRODUCTION_CACHE_REGISTRATION__
 }
 static json fixtureDownloadUpdate(const json& a) {
@@ -284,6 +298,30 @@ static int updaterConfigStorm(const std::string& selected = {}) {
     test("failed repaired policy write restores damaged original",[&]{reset("storm-repair-fault",{});putPolicy("{broken");auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;failMetadataWrite=metadataWrites+1;bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}failMetadataWrite=0;check(refused&&policyFile()=="{broken","failed repair lost original or reported success");updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"repair did not retry after release");});
     test("removed update target remains absent after save",[&]{reset("storm-target-remove",{});auto p=valid;p["targetVersion"]="0.0.99";p["targetSha256"]=std::string(64,'a');putPolicy(p.dump());auto policy=updatePredownloadPolicyRead();policy.erase("targetVersion");policy.erase("targetSha256");updatePredownloadPolicyWrite(policy);check(!updatePredownloadPolicyRead().contains("targetVersion"),"merge resurrected explicitly retired target");});
     test("protected unfinished receipt overrides lost progress",[&]{reset("storm-protected-open",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");fixtureRecoveryJournal={{"schema",1},{"owner","YMCC.FullInstall"},{"operationId","protected-op"},{"phase","applying"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"exePath",ymcc::updaterecovery::utf8(fixtureExe)},{"powerControl",ymcc::updaterecovery::utf8(POWER_CONTROL_DIR)}};const auto value=fixtureActualStateRead();check(value.at("repairAuthorized")==true&&value.at("phase")=="interrupted"&&value.at("version")=="0.0.99","trusted unfinished transaction lost to bad diagnostics");});
+    test("repair preserves only matching install failure",[&]{
+        reset("storm-protected-failure",{});
+        fixtureRecoveryJournal={{"schema",1},{"owner","YMCC.FullInstall"},{"operationId","protected-op"},{"phase","repair-required"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"exePath",ymcc::updaterecovery::utf8(fixtureExe)},{"powerControl",ymcc::updaterecovery::utf8(POWER_CONTROL_DIR)}};
+        const json failure={{"phase","failed"},{"stage","install"},{"operationId","protected-op"},{"version","0.0.99"},{"sha256",std::string(64,'A')},{"error","startup did not finish"}};
+        g_updateProgress=failure;
+        const auto value=fixtureActualStateRead();
+        check(value.at("repairAuthorized")==true&&value.at("phase")=="interrupted"&&value.at("error")==failure.at("error"),"same transaction lost its failure detail");
+        for(const auto& [key,other]:std::initializer_list<std::pair<const char*,std::string>>{{"operationId","other-op"},{"version","0.0.98"},{"sha256",std::string(64,'b')},{"stage","download"}}){
+            g_updateProgress=failure;g_updateProgress[key]=other;
+            check(fixtureActualStateRead().at("error")=="","unrelated diagnostic leaked into a trusted repair");
+        }
+    });
+    test("ordinary export allows only fixed update evidence",[&]{
+        using ymcc::updateconfig::exportEvidence;
+        const json progress={{"stage","download"},{"phase","downloading"},{"version","0.0.99"},{"downloadedBytes",7},{"attempt",2},
+            {"lastError","HTTP 502: https://example.invalid/private?token=secret"},{"url","https://example.invalid/private"},{"operationId","secret-op"}};
+        const json state={{"phase","rolled-back"},{"version","0.0.99"},{"token","secret-handshake"},{"error","new YeManCC process did not complete startup handshake"}};
+        const json journal={{"phase","repair-required"},{"version","0.0.99"},{"exePath","C:\\private\\YeManCC.exe"},{"sha256",std::string(64,'a')}};
+        const auto evidence=exportEvidence(progress,state,journal);const auto raw=evidence.dump();
+        check(evidence.at("progress").at("httpStatus")==502&&evidence.at("progress").at("downloadedBytes")==7&&evidence.at("progress").at("version")=="0.0.99","download evidence lost");
+        check(evidence.at("helperState").at("errorKind")=="startup-handshake"&&evidence.at("protectedJournal").at("phase")=="repair-required","helper or journal evidence lost");
+        for(const auto* secret:{"private","secret","sha256","operationId","token"})check(raw.find(secret)==std::string::npos,"private update data exported");
+        check(!exportEvidence(json::object(),{{"phase",123}},json::object()).at("helperState").at("present").get<bool>(),"invalid helper record claimed present");
+    });
     test("protected committed receipt is the completion authority",[&]{reset("storm-protected-complete",{});g_updateProgress=json::object();fixtureRecoveryJournal={{"schema",1},{"owner","YMCC.FullInstall"},{"operationId","protected-op"},{"phase","committed"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"exePath",ymcc::updaterecovery::utf8(fixtureExe)},{"powerControl",ymcc::updaterecovery::utf8(POWER_CONTROL_DIR)}};const auto value=fixtureActualStateRead();check(value.at("phase")=="completed"&&value.at("percent")==100&&!value.at("repairAuthorized").get<bool>(),"trusted committed transaction could not complete safely");});
     test("protected commit for different version cannot complete current job",[&]{reset("storm-protected-wrong-version",{});progressFile({{"phase","installing"},{"version","0.0.99"}});fixtureRecoveryJournal={{"phase","committed"},{"version","0.0.98"}};check(fixtureActualStateRead().at("phase")!="completed","other version receipt completed current operation");});
     test("actual progress writer replaces corrupt snapshot without archive dependency",[&]{reset("storm-progress-write",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");const auto old=archives(updateProgressPath());fixtureActualProgressPost({{"phase","downloading"},{"version","0.0.99"},{"percent",10}});check(json::parse(readText(updateProgressPath())).at("percent")==10,"valid new diagnostic snapshot blocked by old bytes or archive dependency");check(fixtureActualProgressRead().at("percent")==10,"runtime progress not retained after persistence");});
@@ -354,9 +392,32 @@ static int updaterWeakNetwork(){
  writeText(fixtureRoot/"weak-network.json",report.dump(2));std::cout<<"UPDATER_WEAK_NETWORK "<<report.dump()<<"\n";return 0;
 }
 
+static int updaterManifestSerialization(){
+    reset("manifest-serialization",{});fixtureRegisterPredownload();
+    const auto probe=policyHandlers.at("app.checkUpdate");
+    auto entered=manifestEntered.get_future();
+    json first;
+    std::exception_ptr firstError;
+    std::jthread old([&]{try{first=probe({{"url","fixture-held"},{"background",true}});}catch(...){firstError=std::current_exception();}});
+    const bool started=entered.wait_for(std::chrono::seconds(3))==std::future_status::ready;
+    bool declined=false;
+    if(started){try{probe({{"url","fixture-parallel"}});}catch(const std::exception& e){declined=std::string(e.what())=="Update manifest check already running";}}
+    const int heldCalls=manifestHttpCalls.load();
+    manifestRelease.set_value();old.join();
+    check(started&&!firstError&&first.value("source",std::string{})=="fixture-held","background manifest completes after explicit release");
+    check(declined&&heldCalls==1,"foreground and background callers share one native manifest slot");
+    bool failed=false;try{probe({{"url","fixture-failure"}});}catch(const std::exception& e){failed=std::string(e.what())=="fixture HTTP failure";}
+    check(failed,"native slot allows another request after old completion");
+    check(probe({{"url","fixture-current"},{"background",true}}).value("source",std::string{})=="fixture-current"&&manifestHttpCalls==3,
+        "HTTP error returns the native slot and next admitted request succeeds");
+    const json report={{"status","PASS"},{"checks",checks},{"httpCalls",manifestHttpCalls.load()},{"realNetwork",false},{"actualCheckUpdateHandler",true}};
+    writeText(fixtureRoot/"manifest-serialization.json",report.dump(2));
+    std::cout<<"UPDATER_MANIFEST_SERIALIZATION "<<report.dump()<<"\n";return 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc<2 || argc>4 || (argc>=3 && std::wstring(argv[2])!=L"--config-storm" && !(argc==3&&std::wstring(argv[2])==L"--weak-network")))
+        if (argc<2 || argc>4 || (argc>=3 && std::wstring(argv[2])!=L"--config-storm" && !(argc==3&&(std::wstring(argv[2])==L"--weak-network"||std::wstring(argv[2])==L"--manifest-serialization"))))
             throw std::runtime_error("UNIQUE_FIXTURE_ROOT_REQUIRED");
         fixtureRoot = fspath::absolute(argv[1]);
         wchar_t ownExe[32768]{};if(!GetModuleFileNameW(nullptr,ownExe,32768))throw std::runtime_error("FIXTURE_EXE_IDENTITY_MISSING");fixtureExe=ownExe;
@@ -364,6 +425,7 @@ int wmain(int argc, wchar_t** argv) {
         fspath::create_directories(fixtureRoot);
         if((argc==3||argc==4)&&std::wstring(argv[2])==L"--config-storm")return updaterConfigStorm(argc==4?W2U(argv[3]):std::string{});
         if(argc==3&&std::wstring(argv[2])==L"--weak-network")return updaterWeakNetwork();
+        if(argc==3&&std::wstring(argv[2])==L"--manifest-serialization")return updaterManifestSerialization();
         using namespace ymcc::update_download;
         uint64_t number = 0;
         check(parseUnsigned64("4294967297",number) && number == 4294967297ULL,"64-bit length above 4 GiB");

@@ -32,11 +32,16 @@ struct CollectionReadPace {
 struct ScanDelay {
     using U64=std::uint64_t;
     static constexpr U64 delayMs=60000;
-    U64 due=0,lastWake=0;bool pending=false,startupSeen=false;
+    U64 due=0,lastWakeGeneration=0,lastWakeSuspendSerial=0;bool pending=false,startupSeen=false;
     void cancel(){pending=false;due=0;}
-    bool arm(U64 now,bool startup,U64 wakeGeneration=0) {
+    bool arm(U64 now,bool startup,U64 wakeGeneration=0,U64 wakeSuspendSerial=0) {
         if(startup){if(startupSeen)return false;startupSeen=true;}
-        else if(wakeGeneration){if(wakeGeneration==lastWake)return false;lastWake=wakeGeneration;}
+        else if(wakeGeneration){
+            // A new suspend can commit Ready again without changing generation.
+            if(wakeGeneration<lastWakeGeneration ||
+               (wakeGeneration==lastWakeGeneration&&wakeSuspendSerial<=lastWakeSuspendSerial))return false;
+            lastWakeGeneration=wakeGeneration;lastWakeSuspendSerial=wakeSuspendSerial;
+        }
         if(now>std::numeric_limits<U64>::max()-delayMs)return false;
         due=now+delayMs;pending=true;return true;
     }

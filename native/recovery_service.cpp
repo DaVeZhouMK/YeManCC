@@ -217,28 +217,33 @@ static std::atomic<ULONGLONG> g_lastWakeTick{0};
 static std::atomic<ULONGLONG> g_lastSuspendTick{0};
 static SRWLOCK g_recoveryPowerObservationLock=SRWLOCK_INIT;
 static std::atomic<std::uint64_t> g_recoveryPowerObservationSerial{0};
+static std::uint64_t g_recoveryPowerAppliedSerial=0; // Protected by the observation lock.
 static HPOWERNOTIFY g_powerNotify = nullptr;
 // 唤醒恢复 grace：主进程 UI 泵在唤醒后需要时间恢复（实测 5-6s），此窗口内不判死。
 constexpr DWORD kWakeGraceMs = 15000;
 
 static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /*setting*/) {
+    if(type!=PBT_APMSUSPEND&&type!=PBT_APMRESUMEAUTOMATIC&&type!=PBT_APMRESUMESUSPEND&&type!=PBT_APMRESUMECRITICAL)return 0;
+    // Capture the receipt before waiting for a watchdog operation. Pending
+    // receipts retire existing permits even while that operation owns the lock.
+    constexpr auto exhausted=(std::numeric_limits<std::uint64_t>::max)();
+    auto previous=g_recoveryPowerObservationSerial.load(std::memory_order_relaxed);
+    do {
+        if(previous==exhausted)return 0;
+    } while(!g_recoveryPowerObservationSerial.compare_exchange_weak(previous,previous+1,std::memory_order_acq_rel,std::memory_order_relaxed));
+    const auto serial=previous+1;
+    if(serial==exhausted)return 0;
+    const auto tick=GetTickCount64();
     AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
-    switch (type) {
-    case PBT_APMSUSPEND:
-        // 系统进入睡眠：先于进程冻结置位，唤醒后判死闸即可拦截。
-        g_lastSuspendTick.store(GetTickCount64(),std::memory_order_release);
-        g_systemSleeping.store(true, std::memory_order_release);
-        break;
-    case PBT_APMRESUMEAUTOMATIC:
-    case PBT_APMRESUMESUSPEND:
-    case PBT_APMRESUMECRITICAL:
-        g_systemSleeping.store(false, std::memory_order_release);
-        g_lastWakeTick.store(GetTickCount64(), std::memory_order_release);
-        break;
-    }
-    if(type==PBT_APMSUSPEND||type==PBT_APMRESUMEAUTOMATIC||type==PBT_APMRESUMESUSPEND||type==PBT_APMRESUMECRITICAL){
-        const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_relaxed);
-        if(serial!=(std::numeric_limits<std::uint64_t>::max)())g_recoveryPowerObservationSerial.store(serial+1,std::memory_order_release);
+    if(serial>g_recoveryPowerAppliedSerial){
+        if(type==PBT_APMSUSPEND){
+            g_lastSuspendTick.store(tick,std::memory_order_release);
+            g_systemSleeping.store(true,std::memory_order_release);
+        }else{
+            g_lastWakeTick.store(tick,std::memory_order_release);
+            g_systemSleeping.store(false,std::memory_order_release);
+        }
+        g_recoveryPowerAppliedSerial=serial;
     }
     ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
     return 0;
@@ -256,8 +261,11 @@ static bool powerDeferKill(const std::wstring& log,const ymcc::sleeppower::Recov
     const auto now=GetTickCount64();
     bool reconciled=false;
     AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
+    const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
+    const bool exhausted=serial==(std::numeric_limits<std::uint64_t>::max)();
+    const bool pending=serial!=g_recoveryPowerAppliedSerial;
     const bool wasSleeping=g_systemSleeping.load(std::memory_order_acquire);
-    if(observed&&(wasSleeping||observed->boundary.required)&&(wasSleeping||observed->projection.committedTick>g_lastWakeTick.load(std::memory_order_acquire))&&
+    if(!pending&&!exhausted&&observed&&(wasSleeping||observed->boundary.required)&&(wasSleeping||observed->projection.committedTick>g_lastWakeTick.load(std::memory_order_acquire))&&
        ymcc::sleeppower::freshRecoveryWake(*observed,g_lastSuspendTick.load(std::memory_order_acquire),now,wasSleeping?kHeartbeatStaleMs:(std::numeric_limits<std::uint64_t>::max)(),wasSleeping,wasSleeping)){
         g_systemSleeping.store(false,std::memory_order_release);
         g_lastWakeTick.store(observed->projection.committedTick,std::memory_order_release);
@@ -265,13 +273,12 @@ static bool powerDeferKill(const std::wstring& log,const ymcc::sleeppower::Recov
     }
     const bool sleeping=g_systemSleeping.load(std::memory_order_acquire);
     const auto lastWake=g_lastWakeTick.load(std::memory_order_acquire);
-    const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
-    const bool exhausted=serial==(std::numeric_limits<std::uint64_t>::max)();
-    if(permit){permit->notificationSequence=serial;permit->accepted=!sleeping&&!exhausted&&(!lastWake||(now>=lastWake&&now-lastWake>=kWakeGraceMs));}
+    if(permit){permit->notificationSequence=serial;permit->accepted=!pending&&!sleeping&&!exhausted&&(!lastWake||(now>=lastWake&&now-lastWake>=kWakeGraceMs));}
     ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
     if(permit&&observed)permit->boundary=observed->boundary;
     if(reconciled){try{writeLog(log,"sleep-observation-reconciled","\"source\":\"shared-native-commit\",\"generation\":"+std::to_string(observed->projection.power.generation)+",\"committedTick\":"+std::to_string(observed->projection.committedTick));}catch(...) {}}
     if(exhausted){try{writeLog(log,"confirmation-deferred-sleep","\"reason\":\"notification-sequence-exhausted\"");}catch(...) {}return true;}
+    if(pending){writeLog(log,"confirmation-deferred-sleep","\"reason\":\"local-notification-pending\"");return true;}
     if (sleeping) {
         writeLog(log, "confirmation-deferred-sleep", "\"reason\":\"system-sleeping\"");
         return true;
@@ -291,10 +298,12 @@ static RecoveryTerminationAttempt guardedRecoveryTerminate(HANDLE process,ymcc::
     const auto wake=g_lastWakeTick.load(std::memory_order_acquire);
     const bool accepted=permit.accepted;
     permit.accepted=false;
-    if(accepted&&permit.notificationSequence==g_recoveryPowerObservationSerial.load(std::memory_order_acquire)&&
+    if(accepted&&permit.notificationSequence==g_recoveryPowerAppliedSerial&&
+       permit.notificationSequence==g_recoveryPowerObservationSerial.load(std::memory_order_acquire)&&
        permit.notificationSequence!=(std::numeric_limits<std::uint64_t>::max)()&&
        !g_systemSleeping.load(std::memory_order_acquire)&&(!wake||(now>=wake&&now-wake>=kWakeGraceMs))&&
-       process&&permit.targetPid&&permit.targetStartKey&&GetProcessId(process)==permit.targetPid&&processStartKeyOf(process)==permit.targetStartKey&&permit.boundary.current()){
+       process&&permit.targetPid&&permit.targetStartKey&&GetProcessId(process)==permit.targetPid&&processStartKeyOf(process)==permit.targetStartKey&&permit.boundary.current()&&
+       permit.notificationSequence==g_recoveryPowerObservationSerial.load(std::memory_order_acquire)){
         result.attempted=true;
         result.ok=TerminateProcess(process,0xE001)!=FALSE;
         if(!result.ok)result.error=GetLastError();

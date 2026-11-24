@@ -89,7 +89,7 @@ for(const fail of ['throwCreate','throwAcquire','throwRead']){
  h.owner.dispose();check('Owned child cleanup also removes TDP binding and pending timers',()=>{assert.equal(h.tdpUsers(),0);assert.equal(h.timers.size,0)});
 }
 const app=fs.readFileSync('src/App.vue','utf8'),main=fs.readFileSync('src/main.ts','utf8'),child=fs.readFileSync('src/views/MonitorHudPreviewView.vue','utf8');
-check('Preview route skips main shell hardware/gamepad/autostart startup and sidebar preloads',()=>{assert(app.includes("['/button-mapping/shortcuts', '/monitor/hud-preview']"));assert(main.includes("['button-mapping-shortcuts', 'monitor-hud-preview']"))});
+check('Preview route skips main shell hardware, gamepad and autostart startup',()=>{assert(app.includes("['/button-mapping/shortcuts', '/monitor/hud-preview']"));assert(!main.includes('preloadStartupRoutes'))});
 check('Child source has no collector, snapshot polling, main-window close or fixture fallback',()=>{assert(!child.includes('makeHudFixture'));assert(!child.includes('readMonitorSnapshot'));assert(!child.includes('acquireMonitorDemand'));assert(!child.includes("'window.close'"));assert(child.includes('windowApi.closeChild(childId)'));assert(child.includes("raw.data?.source !== 'ymcc-uniform'"))});
 // Exercise passive subscription through the actual singleton wrapper as well.
 globalThis.__previewHubTest={calls:[],now:Date.now(),available:true};

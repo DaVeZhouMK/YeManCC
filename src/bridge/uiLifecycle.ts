@@ -10,6 +10,7 @@ export interface UiVisibilityState {
   powerGeneration: number;
 }
 const UI_VISIBILITY_EVENT = 'ui:visibility';
+type UiVisibilitySource = 'initial' | 'document' | 'window' | 'power';
 let nativeWindowVisible = true;
 let powerReady = true;
 let powerGeneration = 0;
@@ -37,12 +38,12 @@ export function isUiVisible(): boolean { return documentVisible() && nativeWindo
 export function isUiPowerReady(state: SharedPowerLifecycleSnapshot | null | undefined): boolean {
   return !!state && state.known !== false && state.phase === 'ready' && state.notificationPending !== true;
 }
-function emitIfChanged(force = false): void {
+function emitIfChanged(source: UiVisibilitySource, force = false): void {
   if (typeof window === 'undefined') return;
   const state = getUiVisibilityState();
   if (!force && lastVisible === state.visible) return;
   lastVisible = state.visible;
-  window.dispatchEvent(new CustomEvent(UI_VISIBILITY_EVENT, { detail: state }));
+  window.dispatchEvent(new CustomEvent(UI_VISIBILITY_EVENT, { detail: { ...state, source } }));
 }
 // A hidden/recreated WebView can miss the one-shot resumed event. Reconcile
 // only on existing lifecycle/show/focus edges, using the native read-only state.
@@ -54,36 +55,34 @@ function initialize(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
   document.addEventListener('visibilitychange', () => {
-    emitIfChanged();
+    emitIfChanged('document');
     if (documentVisible() && !powerReady) requestNativePowerSnapshot();
   });
   for (const name of ['ipc:window.hidden', 'ipc:window.minimized']) {
-    window.addEventListener(name, () => { nativeWindowVisible = false; emitIfChanged(); });
+    window.addEventListener(name, () => { nativeWindowVisible = false; emitIfChanged('window'); });
   }
   for (const name of ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned']) {
     window.addEventListener(name, () => {
       nativeWindowVisible = true;
-      emitIfChanged();
+      emitIfChanged('window');
       if (!powerReady) requestNativePowerSnapshot();
     });
   }
   window.addEventListener('ipc:window.focus', () => { if (!powerReady) requestNativePowerSnapshot(); });
-  // resume-ready alone is not a commit; ask the existing native owner.
-  window.addEventListener('ipc:power.resume-ready', requestNativePowerSnapshot);
-  emitIfChanged(true);
+  emitIfChanged('initial', true);
   requestNativePowerSnapshot();
 }
 initialize();
 export function setNativeWindowVisible(visible: boolean): void {
-  initialize(); nativeWindowVisible = visible; emitIfChanged();
+  initialize(); nativeWindowVisible = visible; emitIfChanged('window');
   if (visible && !powerReady) requestNativePowerSnapshot();
 }
-export function onUiVisibilityChange(handler: (state: UiVisibilityState) => void): () => void {
+export function onUiVisibilityChange(handler: (state: UiVisibilityState, source: UiVisibilitySource) => void): () => void {
   initialize();
   if (typeof window === 'undefined') return () => {};
-  const listener = ((event: CustomEvent<UiVisibilityState>) => handler(event.detail)) as EventListener;
+  const listener = ((event: CustomEvent<UiVisibilityState & { source: UiVisibilitySource }>) => handler(event.detail, event.detail.source)) as EventListener;
   window.addEventListener(UI_VISIBILITY_EVENT, listener);
-  handler(getUiVisibilityState());
+  handler(getUiVisibilityState(), 'initial');
   return () => window.removeEventListener(UI_VISIBILITY_EVENT, listener);
 }
 
@@ -105,7 +104,7 @@ export function startUiPowerReconciliation(
     powerGeneration = state.generation;
     // Presentation follows system Ready; device input readiness is not a UI gate.
     powerReady = isUiPowerReady(state);
-    emitIfChanged();
+    emitIfChanged('power');
   });
   function reconcile(): void {
     if (!stopped) requestSharedPowerLifecycleReconcile('ui-lifecycle');

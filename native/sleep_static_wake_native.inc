@@ -147,19 +147,31 @@ inline std::wstring property(HDEVINFO list,SP_DEVINFO_DATA& dev,DWORD prop) {
     case SPDRP_DEVICEDESC: cmProperty=CM_DRP_DEVICEDESC;break;
     default: break;
     }
-    const auto query=[&](DWORD* type,BYTE* data,DWORD capacity,DWORD* required) {
-        if(!cmProperty)return SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,type,data,capacity,required)!=FALSE;
+    const auto query=[&](DWORD* type,BYTE* data,DWORD capacity,DWORD* required) -> CONFIGRET {
+        if(!cmProperty) {
+            if(SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,type,data,capacity,required))return CR_SUCCESS;
+            return GetLastError()==ERROR_INSUFFICIENT_BUFFER?CR_BUFFER_SMALL:CR_FAILURE;
+        }
         ULONG length=capacity,kind=0;
         const auto result=CM_Get_DevNode_Registry_PropertyW(dev.DevInst,cmProperty,&kind,data,&length,0);
         *type=kind;if(required)*required=length;
-        return result==CR_SUCCESS;
+        return result;
     };
-    DWORD type=0,bytes=0;
-    query(&type,nullptr,0,&bytes);
-    if(!bytes||bytes>131072)return {};
-    std::vector<BYTE> buffer(bytes+sizeof(wchar_t)*2,0);
-    if(!query(&type,buffer.data(),bytes,nullptr)||(type!=REG_SZ&&type!=REG_MULTI_SZ&&type!=REG_EXPAND_SZ))return {};
-    const auto* w=reinterpret_cast<const wchar_t*>(buffer.data());
+    constexpr DWORD smallBytes=512,maxBytes=131072;
+    wchar_t inlineBuffer[smallBytes/sizeof(wchar_t)+2]{};
+    auto* w=inlineBuffer;
+    DWORD type=0,bytes=0,capacity=smallBytes;
+    auto result=query(&type,reinterpret_cast<BYTE*>(w),capacity,&bytes);
+    std::vector<wchar_t> large;
+    if(result==CR_BUFFER_SMALL&&bytes>capacity&&bytes<=maxBytes) {
+        capacity=bytes;
+        large.resize((capacity+sizeof(wchar_t)-1)/sizeof(wchar_t)+2);
+        w=large.data();
+        result=query(&type,reinterpret_cast<BYTE*>(w),capacity,&bytes);
+    }
+    if(result!=CR_SUCCESS||!bytes||bytes>capacity||(type!=REG_SZ&&type!=REG_MULTI_SZ&&type!=REG_EXPAND_SZ))return {};
+    // Keep the former zero padding for unterminated property strings.
+    w[(bytes+sizeof(wchar_t)-1)/sizeof(wchar_t)]=L'\0';
     if(type!=REG_MULTI_SZ)return w;
     std::wstring all;
     for(std::size_t i=0;i<bytes/sizeof(wchar_t)&&w[i];) {const std::wstring v=w+i;all+=v+L";";i+=v.size()+1;}
@@ -196,12 +208,36 @@ inline bool trustedJournalSecurity(PSECURITY_DESCRIPTOR sd) {
     return true;
 }
 struct DeviceObservation {Inventory inventory;std::set<std::string> armedNames;};
+inline constexpr wchar_t overrideRegistryPath[]=L"SYSTEM\\CurrentControlSet\\Control\\Power\\PowerRequestOverride";
+class OverrideChangeWatch {
+    HKEY key_=nullptr;
+    HANDLE event_=nullptr;
+public:
+    OverrideChangeWatch()=default;
+    OverrideChangeWatch(const OverrideChangeWatch&)=delete;
+    OverrideChangeWatch& operator=(const OverrideChangeWatch&)=delete;
+    ~OverrideChangeWatch(){reset();}
+    void reset() noexcept {
+        if(key_){RegCloseKey(key_);key_=nullptr;}
+        if(event_){CloseHandle(event_);event_=nullptr;}
+    }
+    void arm(HKEY hive=HKEY_LOCAL_MACHINE,const wchar_t* path=overrideRegistryPath) noexcept {
+        reset();
+        if(RegOpenKeyExW(hive,path,0,KEY_NOTIFY|KEY_WOW64_64KEY,&key_)!=ERROR_SUCCESS)return;
+        event_=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        if(!event_||RegNotifyChangeKeyValue(key_,TRUE,REG_NOTIFY_CHANGE_NAME|REG_NOTIFY_CHANGE_LAST_SET|
+            REG_NOTIFY_THREAD_AGNOSTIC,event_,TRUE)!=ERROR_SUCCESS)reset();
+    }
+    bool armed() const noexcept {return event_!=nullptr;}
+    bool unchanged() const noexcept {return event_&&WaitForSingleObject(event_,0)==WAIT_TIMEOUT;}
+};
 struct Native {
     using Overrides=std::map<std::string,Json>;
     ObservationCache<Overrides> softwareObservation;
+    OverrideChangeWatch softwareWatch;
     SoftwareSnapshotCircuit softwareCircuit; // reset ONLY at independent operation boundary
     ObservationCache<DeviceObservation> deviceObservation;
-    void invalidateObservations() {softwareObservation.invalidate();deviceObservation.invalidate();}
+    void invalidateObservations() {softwareWatch.reset();softwareObservation.invalidate();deviceObservation.invalidate();}
     CollectionReadPace collectionReadPace;
     bool pacingCollection=false;
     bool paceCollectionRead(std::string& e) {
@@ -268,7 +304,7 @@ struct Native {
         // A changed/missing layout cannot grant permission: complete CLI/name
         // agreement is mandatory. No registry value is decoded or modified.
         HKEY root=nullptr;
-        const auto code=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SYSTEM\\CurrentControlSet\\Control\\Power\\PowerRequestOverride",0,KEY_READ|KEY_WOW64_64KEY,&root);
+        const auto code=RegOpenKeyExW(HKEY_LOCAL_MACHINE,overrideRegistryPath,0,KEY_READ|KEY_WOW64_64KEY,&root);
         if(code==ERROR_FILE_NOT_FOUND||code==ERROR_PATH_NOT_FOUND)return true;
         if(code!=ERROR_SUCCESS){e="override-name-registry-open:"+std::to_string(code);return false;}
         bool ok=true;
@@ -475,18 +511,34 @@ struct Native {
         const auto kind=item.value("kind",std::string{});const auto& target=item["target"];
         if(kind=="software") {
             const auto type=target.value("type",std::string{}),name=target.value("name",std::string{});
-            if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)||item["key"]!=type+"\n"+keyName(name)){e="invalid-software-target";return false;}
+            const auto key=type+"\n"+keyName(name);
+            if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)||item["key"]!=key){e="invalid-software-target";return false;}
             if(type=="PROCESS"&&fanHostProcessName(name)){e="protected-ymcc-fanhost-owner";return false;}
             SoftwareSnapshotFailure failure;
             if(softwareCircuit.failure(failure)){e=failure.error;return false;}
-            const auto load=[this](Overrides& map,std::string& error) {
+            bool extend=false;
+            if(observation&&softwareWatch.armed()) {
+                if(!softwareWatch.unchanged()) {
+                    softwareWatch.reset();softwareObservation.invalidate();
+                } else {
+                    // Only a known no-op can use the longer planning window.
+                    // A missing or differing value cannot extend its baseline age.
+                    const auto& prior=softwareObservation.value();
+                    const auto found=prior.find(key);
+                    extend=found!=prior.end()&&found->second==item["expected"];
+                }
+            }
+            const auto load=[this,observation](Overrides& map,std::string& error) {
+                if(observation)softwareWatch.arm();else softwareWatch.reset();
                 return softwareCircuit.query([&](std::string& why){return overrides(map,why);},error);
             };
             const auto now=GetTickCount64();
-            const bool ok=observation?softwareObservation.observe(now,load,e):softwareObservation.refresh(now,load,e);
+            using Cache=ObservationCache<Overrides>;
+            const bool ok=observation?softwareObservation.observe(now,load,e,extend?4000:Cache::maxAgeMs,
+                extend?256:Cache::maxUses):softwareObservation.refresh(now,load,e);
             if(!ok||!time(e))return false;
             const auto& map=softwareObservation.value();
-            const auto it=map.find(type+"\n"+keyName(name));value=it==map.end()?Json::array():it->second;return true;
+            const auto it=map.find(key);value=it==map.end()?Json::array():it->second;return true;
         }
         if(kind=="timers") {
             GUID scheme{};const auto mode=target.value("mode",std::string{});
@@ -508,8 +560,8 @@ struct Native {
     }
     bool read(const Json& item,Json& value,std::string& e) {return sample(item,value,e,false);}
     bool observe(const Json& item,Json& value,std::string& e) {
-        // Yield between planning candidates, never within a snapshot load: its
-        // existing 1-second cache age starts before loading and must not be stretched.
+        // Yield between planning candidates, never within a snapshot load. Its
+        // age is measured from before loading, including when notification is armed.
         {
             struct RestorePacing {bool& flag;bool previous;~RestorePacing(){flag=previous;}} restore{pacingCollection,pacingCollection};
             pacingCollection=true;

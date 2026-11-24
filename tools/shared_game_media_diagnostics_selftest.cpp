@@ -236,7 +236,34 @@ static int retryQueue(const fs::path& root){
  std::cout<<Json{{"ok",true},{"checks",checks}}.dump()<<std::endl;return 0;
 }
 
+static int inventoryProjection(const fs::path& root){
+ const auto scan=root/L"state"/L"library-scan.json",config=root/L"config"/L"library-config.json";
+ const auto game=[&](const wchar_t* name){return utf8((root.parent_path()/L"inert-executables"/name).wstring());};
+ const auto local=game(L"Local.exe"),blocked=game(L"Blocked.exe"),dupe=normalized(local);
+ const auto excluded=game(L"Another.exe"),folder=game(L"Excluded-Folder");
+ const auto row=[](const std::string& exe,const char* name){return Json{{"primaryExecutable",exe},{"directoryName",name}};};
+ auto folderBlocked=row(excluded,"folder blocked");folderBlocked["gameDirectory"]=folder;
+ const Json state={{"games",Json::array({nullptr,row(local,"local"),row(dupe,"duplicate"),row(blocked,"blocked"),folderBlocked,row(game(L"RTSSHooksLoader64.exe"),"excluded by prefix"),row(game(L"Explorer.exe"),"excluded by name"),row(game(L"LibraryOnly.exe"),"library only")})}};
+ const Json settings={{"manualBuckets",{{normalized(blocked),{{"bucket","non-game"}}},{normalized(folder),{{"bucket","non-game"}}}}}};
+ bytes(scan,state.dump());bytes(config,settings.dump());
+ const auto shortcut=[](const std::string& path,const char* name,const char* id){return Json{{"executable",path},{"name",name},{"shortcutAppId",id},{"steamAccount","17"}};};
+ const auto shortcuts=Json::array({shortcut(dupe,"overlap","2147483649"),shortcut(game(L"ShortcutOnly.exe"),"shortcut only","2147483650"),shortcut(blocked,"still blocked","2147483651"),shortcut(game(L"Explorer.exe"),"still excluded","2147483652"),nullptr});
+ const Store store(root);const auto result=store.inventory(shortcuts);
+ check(result.size()==3,"exact/prefix blacklist, manual exclusions, and duplicates stay excluded");
+ check(result[0]["executable"]==local&&result[0]["name"]=="local"&&result[0]["catalogSource"]=="steam-shortcut"&&result[0]["steamAccount"]=="17","overlap keeps first confirmed spelling and shortcut provenance");
+ check(result[1]["name"]=="library only"&&result[1]["catalogSource"]=="ymcc-confirmed"&&result[2]["name"]=="shortcut only"&&result[2]["shortcutAppId"]=="2147483650","confirmed rows precede shortcut-only rows in source order");
+ check(std::none_of(result.begin(),result.end(),[](const Json& item){return item.value("verified",true);}),"unverified inputs cannot acquire an identity");
+ check(content(scan)==state.dump()&&content(config)==settings.dump(),"projection leaves all input files unchanged");
+ bytes(scan,Json{{"games",false}}.dump());const auto shortcutOnly=store.inventory(shortcuts);
+ check(shortcutOnly.size()==2&&shortcutOnly[0]["name"]=="overlap","non-array library records still allow admitted shortcut rows");
+ const Json receipt={{"ok",true},{"checks",checks},{"rows",result},{"shortcutOnly",shortcutOnly}};
+ atomicWrite(root/L"result.json",receipt);std::cout<<receipt.dump()<<'\n';return 0;
+}
 int wmain(int argc,wchar_t**argv){try{
+ if(argc==3&&std::wstring_view(argv[2])==L"inventory-projection"){
+  const auto root=fs::absolute(argv[1]);if(fs::exists(root))throw std::runtime_error("fresh fixture root required");
+  fs::create_directories(root);return inventoryProjection(root);
+ }
  if(argc==3){const auto mode=std::wstring_view(argv[2]);if(mode!=L"package-identity"&&mode!=L"host-records"&&mode!=L"ui-errors"&&mode!=L"cached-library-state"&&mode!=L"root-records"&&mode!=L"retry-queue")throw std::runtime_error("unknown explicit diagnostics selection");const auto root=fs::absolute(argv[1]);if(fs::exists(root))throw std::runtime_error("fresh fixture root required");fs::create_directories(root);return mode==L"retry-queue"?retryQueue(root):mode==L"package-identity"?packageIdentity(root):mode==L"root-records"?rootRecords(root):mode==L"cached-library-state"?cachedLibraryState(root):mode==L"ui-errors"?uiErrors(root):hostRecords(root);}
  if(argc!=2)throw std::runtime_error("fresh fixture root required");const auto root=fs::absolute(argv[1]);if(fs::exists(root))throw std::runtime_error("fresh fixture root required");fs::create_directories(root);
  auto missing=observeShortcutInventory(root/L"missing.vdf",17,[]{return 17u;});check(!missing.value("available",true)&&missing["reason"]=="shortcut-file-missing","missing VDF is explicit and never promoted to success");check(!fs::exists(root/L"missing.vdf"),"diagnostic does not create a missing Steam file");

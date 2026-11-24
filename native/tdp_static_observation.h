@@ -30,7 +30,23 @@ inline bool successfulFloatingDetail(const char* event, const Json& detail) {
     return !(rc != detail.end() && rc->is_number_integer() && *rc != 0) &&
         !(ok != detail.end() && ok->is_boolean() && !ok->get<bool>());
 }
+inline bool plainAsciiDiagnostic(std::string_view value) {
+    for (unsigned char c : value) if (c >= 0x80) return false;
+    // Each redactor requires one of these literals. Keep the full ordered
+    // redaction path for any possible match and all non-ASCII input.
+    constexpr std::string_view markers[]{"users", "authorization", "bearer", "sessiontoken", "pipesecret", "password", "secret"};
+    const auto equalFolded = [](unsigned char c, char lower) {
+        return c == lower || c == lower - ('a' - 'A');
+    };
+    for (auto marker : markers)
+        if (std::search(value.begin(), value.end(), marker.begin(), marker.end(), equalFolded) != value.end()) return false;
+    return true;
+}
 inline std::string boundedText(std::string value, size_t limit = 4096) {
+    if (plainAsciiDiagnostic(value)) {
+        if (value.size() > limit) value.resize(limit);
+        return value;
+    }
     try {
         // Broken/bootstrap stderr may end in an incomplete UTF-8 sequence.
         // Preserve it with replacement markers rather than losing the entire JSON row.

@@ -184,6 +184,44 @@ Invoke-YmccFullReleaseFixtureStage -ProjectRoot '${q(repo)}' -Stage Package -Wor
  const run=()=>spawnSync('pwsh.exe',['-NoProfile','-File',harness],{encoding:'utf8',timeout:12000,windowsHide:true});const first=run();assert.equal(first.status,0,first.stderr+first.stdout);
  const arguments_=json(output);assert.equal(arguments_[arguments_.indexOf('--session')+1],file);assert.equal(arguments_[arguments_.indexOf('--stage')+1],'Package');
  fs.unlinkSync(output);fs.writeFileSync(receipt,JSON.stringify({passed:true}));const missing=run();assert.notEqual(missing.status,0);assert.match(missing.stdout+missing.stderr,/FULL_RELEASE_BUILD_SESSION_REQUIRED/);assert.equal(fs.existsSync(output),false);
+ const verify=path.join(own,'package-verify-harness.ps1'),verifyResults=path.join(own,'package-verify-result.json');
+ fs.writeFileSync(verify,`$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile('${q(path.join(repo,'tools/decky_update_release_gate.ps1'))}',[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'gate parse failure'}
+$verifyBranch=$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.ElseClause -and $n.ElseClause.Extent.Text.Contains('DECKY_UPDATE_RELEASE_PACKAGE_CHANGED')},$true)
+if($verifyBranch.Count -ne 1){throw 'Verify source branch missing or ambiguous'}
+$block=$verifyBranch[0].ElseClause.Extent.Text
+$body=[scriptblock]::Create($block.Substring(1,$block.Length-2))
+function Assert-BuildReceipt {} # Build is independently tested; execute the actual Package part of Verify.
+$WorkspaceRoot='${q(target)}'
+$gateRoot=Join-Path $WorkspaceRoot 'Build/Validation/DeckyUpdate'
+$sourceDigest='current-source'
+$env:YMCC_RELEASE_FIXTURE_SESSION='${q(path.join(own,'inert-active-session.json'))}'
+$packageFile=Join-Path $WorkspaceRoot 'Release/Packages/YeManCC.zip'
+New-Item -ItemType Directory -Path (Split-Path -Parent $packageFile)|Out-Null
+$attempt=@{id='package-current';stage='Package';status='ORIGINAL_GATE_EXITED';exitCode=0}
+$results=@{}
+foreach($scenario in 'current','different-session','different-attempt','not-run','failed','different-digest','different-zip'){
+ Set-Content -LiteralPath $packageFile -Value 'same package bytes' -Encoding UTF8
+ $row=@{passed=$true;sourceDigest=$sourceDigest;packageSha256=(Get-FileHash -LiteralPath $packageFile).Hash;fixtureBudgetSession=$env:YMCC_RELEASE_FIXTURE_SESSION;fixtureBudgetAttempt=$attempt.id}
+ $attempts=@($attempt)
+ switch($scenario){
+  'different-session' {$row.fixtureBudgetSession+='-previous'}
+  'different-attempt' {$row.fixtureBudgetAttempt='package-previous'}
+  'not-run' {$attempts=@()}
+  'failed' {$bad=$attempt.Clone();$bad.exitCode=7;$attempts=@($bad)}
+  'different-digest' {$row.sourceDigest='old-source'}
+  'different-zip' { Set-Content -LiteralPath $packageFile -Value 'other package bytes' -Encoding UTF8 }
+ }
+ @{attempts=$attempts}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $env:YMCC_RELEASE_FIXTURE_SESSION -Encoding UTF8
+ $row|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $gateRoot 'PACKAGE.json') -Encoding UTF8
+ try{& $body;$results[$scenario]='accepted'}catch{$results[$scenario]=$_.Exception.Message}
+}
+$results|ConvertTo-Json|Set-Content -LiteralPath '${q(verifyResults)}' -Encoding UTF8
+`);
+ const checked=spawnSync('pwsh.exe',['-NoProfile','-File',verify],{encoding:'utf8',timeout:6000,windowsHide:true});assert.equal(checked.status,0,checked.stderr+checked.stdout);
+ assert.deepEqual(json(verifyResults),{current:'accepted','different-session':'DECKY_UPDATE_PACKAGE_SESSION_CHANGED','different-attempt':'DECKY_UPDATE_PACKAGE_SESSION_CHANGED','not-run':'DECKY_UPDATE_PACKAGE_SESSION_CHANGED',failed:'DECKY_UPDATE_PACKAGE_SESSION_CHANGED','different-digest':'DECKY_UPDATE_PACKAGE_RECEIPT_STALE','different-zip':'DECKY_UPDATE_RELEASE_PACKAGE_CHANGED'});
 });
 test('the original lighting Run function forwards its exact command once through the shared session',{timeout:15000},()=>{
  const target=path.join(own,'lighting-workspace'),candidate=path.join(target,'candidate'),fake=path.join(own,'lighting-project'),entry=path.join(fake,'tools/ymcc_sim/optimization/release-full-budget.mjs');fs.mkdirSync(candidate,{recursive:true});fs.mkdirSync(path.dirname(entry),{recursive:true});

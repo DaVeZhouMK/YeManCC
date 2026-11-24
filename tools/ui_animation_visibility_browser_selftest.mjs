@@ -28,7 +28,7 @@ for(const style of descriptor.styles){
  const result=compileStyle({source:style.content,filename:appPath,id:scope,scoped:style.scoped});
  assert.equal(result.errors.length,0);css.push(result.code);
 }
-for(const file of ['src/components/NavRail.vue','src/components/TopMonitorBar.vue']){
+for(const file of ['src/components/NavRail.vue','src/components/TopMonitorBar.vue','src/views/ControllerShortcutEditorView.vue']){
  const {descriptor:component}=parse(readFileSync(resolve(repo,file),'utf8'));
  for(const style of component.styles){const result=compileStyle({source:style.content,filename:file,id:'test',scoped:false});assert.equal(result.errors.length,0);css.push(result.code);}
 }
@@ -40,22 +40,38 @@ const uiVisible=ref(isUiVisible());
 const scalerStyle={width:'720px',height:'420px',zoom:1,position:'static'};
 let stopUiVisibility: (()=>void)|null=null;
 window.__listenerUpdates=0;
-onMounted(()=>{stopUiVisibility=onUiVisibilityChange(({visible})=>{uiVisible.value=visible;window.__listenerUpdates++;});});
+onMounted(()=>{stopUiVisibility=onUiVisibilityChange(({visible})=>{uiVisible.value=visible;window.__listenerUpdates++;});powerReader=startUiPowerReconciliation();});
 onUnmounted(()=>{stopUiVisibility?.();stopUiVisibility=null;});
 let powerReader=null;
-window.__fixture={flush:nextTick,startReadTest:()=>{window.__powerSnapshot={phase:'ready',generation:1,inputReady:true,hardwareWritesAllowed:true};powerReader=startUiPowerReconciliation(async()=>({...window.__powerSnapshot}));}};
+window.__fixture={flush:nextTick};
 onUnmounted(()=>powerReader?.stop());
 </script><template>${rootTag}
  <span class="nav-icon"><svg class="spinning" width="24" height="24"><path d="M2 2L20 20"/></svg></span>
- <div class="pseudo-test"></div>
+ <div class="pseudo-test rule-row creating"></div>
 </div></template>`;
 const {descriptor:fixtureDescriptor}=parse(fixture,{filename:'ui-fixture.vue'});
 let fixtureScript=compileScript(fixtureDescriptor,{id:scope,inlineTemplate:true}).content;
 fixtureScript=fixtureScript.replace('export default','const __sfc__ =')+`\n__sfc__.__scopeId=${JSON.stringify(scope)}; export default __sfc__;`;
 const bundle=await build({stdin:{contents:`import {createApp} from 'vue';import Component from 'ui-test-component';window.__app=createApp(Component);window.__app.mount('#app');`,loader:'js',resolveDir:repo},bundle:true,write:false,platform:'browser',format:'iife',define:{'process.env.NODE_ENV':'"production"'},alias:{'@':resolve(repo,'src')},plugins:[{name:'production-style-fixture',setup(b){b.onResolve({filter:/^ui-test-component$/},()=>({path:'ui-test-component',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:fixtureScript,loader:'ts',resolveDir:repo}));}}]});
-css.push('.pseudo-test::before {content:""; display:block; width:10px; height:10px; animation:nav-fan-spin 1.1s linear infinite;}');
 const html=`<!doctype html><meta charset="utf-8"><style>${css.join('\n')}</style><div id="app"></div><script src="/fixture.js"></script>`;
-const server=createServer((request,response)=>{response.setHeader('Content-Type',request.url==='/fixture.js'?'text/javascript':'text/html');response.end(request.url==='/fixture.js'?bundle.outputFiles[0].text:html);});
+// Feed the current native facts through the production WebView IPC consumer.
+const nativeBridge=String(function(){
+  const webview=new EventTarget();
+  window.chrome.webview=webview;
+  let revision=0, snapshot;
+  const deliver=data=>webview.dispatchEvent(new MessageEvent('message',{data}));
+  window.__nativeEvent=(event,data)=>deliver({event,data});
+  window.__setPower=(phase,generation,publish=true)=>{
+    snapshot={phase,generation,known:true,publicationRevision:++revision,observedNotificationSequence:revision,
+      notificationPending:false,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready'};
+    if(publish)window.__nativeEvent('power.lifecycleChanged',snapshot);
+  };
+  window.__setPower('ready',1,false);
+  webview.postMessage=({id,cmd})=>{
+    if(cmd==='power.lifecycle')queueMicrotask(()=>deliver({id,result:{...snapshot}}));
+  };
+});
+const server=createServer((request,response)=>{response.setHeader('Content-Type',request.url==='/fixture.js'?'text/javascript':'text/html');response.end(request.url==='/fixture.js'?bundle.outputFiles[0].text:html.replace('<script src','<script>('+nativeBridge+')();</script><script src'));});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const checks=[],errors=[];let browser;
 const output=resolve(process.env.YMCC_UI_ANIMATION_OUT || resolve(repo,'Build/Validation/CPU-Frontend-20261003'));mkdirSync(output,{recursive:true});
@@ -65,20 +81,20 @@ try{
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.waitForFunction(()=>window.__fixture);await page.waitForTimeout(100);
  const read=()=>page.evaluate(()=>({documentVisible:document.visibilityState==='visible',visible:document.querySelector('.app-stage').dataset.uiVisible,icon:getComputedStyle(document.querySelector('.spinning')).animationPlayState,pseudo:getComputedStyle(document.querySelector('.pseudo-test'),'::before').animationPlayState,times:document.querySelector('.app-stage').getAnimations({subtree:true}).map(a=>Number(a.currentTime)),updates:window.__listenerUpdates}));
  const send=async(name)=>{await page.evaluate(async(name)=>{window.dispatchEvent(new CustomEvent(name));await window.__fixture.flush();},name);await page.waitForTimeout(30);};
+ const power=(phase,generation,publish=true)=>page.evaluate(async(args)=>{window.__setPower(...args);await window.__fixture.flush();},[phase,generation,publish]);
  let state=await read();assert.equal(state.visible,'true');assert.equal(state.icon,'running');assert.equal(state.pseudo,'running');assert.ok(state.times.length>=2);checks.push('initial-visible-animation-running');
  await send('ipc:window.hidden');state=await read();assert.equal(state.documentVisible,true);assert.equal(state.visible,'false');assert.equal(state.icon,'paused');assert.equal(state.pseudo,'paused');
  const paused=state.times;await page.waitForTimeout(300);const stopped=await read();assert.equal(stopped.times.length,paused.length);for(let i=0;i<paused.length;i++)assert.ok(Math.abs(stopped.times[i]-paused[i])<1,'hidden animation clock must stop');checks.push('native-hidden-pauses-svg-and-pseudo-with-document-still-visible');
  await send('ipc:window.shown');await page.waitForTimeout(120);state=await read();assert.equal(state.icon,'running');for(let i=0;i<paused.length;i++)assert.ok(state.times[i]>paused[i]+50,'resume must continue old clock, not restart');checks.push('native-shown-resumes-original-phase');
  for(const [off,on] of [['ipc:window.minimized','ipc:window.restored'],['ipc:window.hidden','ipc:window.maximized'],['ipc:window.hidden','ipc:window.summoned']]){await send(off);assert.equal((await read()).icon,'paused');await send(on);assert.equal((await read()).icon,'running');checks.push(off+'->'+on);}
- await send('ipc:power.suspending');assert.equal((await read()).icon,'paused');await send('ipc:window.shown');assert.equal((await read()).icon,'paused');await send('ipc:power.resuming');assert.equal((await read()).icon,'paused');await send('ipc:power.resumed');assert.equal((await read()).icon,'running');checks.push('power-not-ready-cannot-resume-from-window-shown');
+ await power('suspending',2);assert.equal((await read()).icon,'paused');await send('ipc:window.shown');assert.equal((await read()).icon,'paused');await power('resuming',2);assert.equal((await read()).icon,'paused');await power('ready',2);assert.equal((await read()).icon,'running');checks.push('power-not-ready-cannot-resume-from-window-shown');
  await page.evaluate(async()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>window.__docVisibility});window.__docVisibility='hidden';document.dispatchEvent(new Event('visibilitychange'));await window.__fixture.flush();});assert.equal((await read()).icon,'paused');
  await page.evaluate(async()=>{window.__docVisibility='visible';document.dispatchEvent(new Event('visibilitychange'));await window.__fixture.flush();});assert.equal((await read()).icon,'running');checks.push('document-hidden-and-visible');
  // Same native-Ready/frontend-closed split observed in the G3E export.
- await page.evaluate(()=>window.__fixture.startReadTest());await page.waitForTimeout(30);
- await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:2}})));assert.equal((await read()).icon,'paused');
- await page.evaluate(()=>{window.__powerSnapshot={phase:'ready',generation:2,inputReady:true,hardwareWritesAllowed:true};window.dispatchEvent(new Event('ipc:window.shown'));});
+ await power('suspending',3);assert.equal((await read()).icon,'paused');
+ await power('ready',3,false);await send('ipc:window.shown');
  await page.waitForFunction(()=>document.querySelector('.app-stage').dataset.uiVisible==='true');state=await read();assert.equal(state.icon,'running');assert.equal(state.pseudo,'running');checks.push('G3E-missed-final-commit-read-resumes-production-fan-and-pseudo-animations');
- await page.evaluate(()=>{window.__powerSnapshot={phase:'suspended',generation:3,inputReady:false,hardwareWritesAllowed:false};window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:3}}));window.dispatchEvent(new Event('ipc:window.shown'));});await page.waitForTimeout(40);assert.equal((await read()).icon,'paused');checks.push('G3E-next-real-sleep-keeps-fan-animations-paused');
+ await power('suspended',4);await send('ipc:window.shown');assert.equal((await read()).icon,'paused');checks.push('G3E-next-real-sleep-keeps-fan-animations-paused');
  await page.evaluate(()=>window.__app.unmount());const updates=await page.evaluate(()=>window.__listenerUpdates);await send('ipc:window.hidden');await send('ipc:window.shown');assert.equal(await page.evaluate(()=>window.__listenerUpdates),updates);checks.push('disposed-component-does-not-receive-visibility-updates');assert.deepEqual(errors,[]);
  const evidence={status:'PASS',capturedAtUtc:new Date().toISOString(),scope:'real uiLifecycle + production App/NavRail CSS + source wiring checks in a minimal Vue fixture; not whole YMCC or CPU measurement',browserVersion:browser.version(),appSha256:createHash('sha256').update(app).digest('hex'),checks,errors};
  writeFileSync(resolve(output,'ui-animation-visibility-evidence.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));

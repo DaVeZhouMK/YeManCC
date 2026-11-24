@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Out)
+param([Parameter(Mandatory=$true)][string]$Out,[switch]$DesktopResume)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $Out=[IO.Path]::GetFullPath($Out);New-Item -ItemType Directory -Path $Out -Force|Out-Null
@@ -7,11 +7,13 @@ $node='G:\YeManCC-Work\Environment\Toolchains\nodejs\node-v22.14.0-win-x64\node.
 if($LASTEXITCODE -ne 0){throw 'Production Ready extraction failed'}
 $recipe=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'steam_cssloader_use_selftest.ps1') -Raw
 $recipe=$recipe.Substring($recipe.IndexOf('@"')+3);$recipe=$recipe.Substring(0,$recipe.IndexOf('"@'))
-$recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments',('"'+$Out+'"'))
+$arguments=if($DesktopResume){'--desktop-resume "'+$Out+'"'}else{'"'+$Out+'"'}
+$recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments',$arguments)
 $recipe=$recipe.Replace('$root',$repo).Replace('$OutputDirectory',$Out).Replace('steam_cssloader_use_selftest.cpp','steam_cssloader_resume_selftest.cpp').Replace(' /I"'+$repo+'\native"',' /I"'+$Out+'" /I"'+$repo+'\native" /I"'+$repo+'\deps\json"')
 $cmd=Join-Path $Out 'compile.cmd';[IO.File]::WriteAllText($cmd,$recipe,[Text.Encoding]::ASCII)
 & $cmd 2>&1|Tee-Object -FilePath (Join-Path $Out 'result.log')
 if($LASTEXITCODE -ne 0){throw 'CSS committed resume regression failed'}
+if($DesktopResume){return}
 
 # Semantic negative: keep the exact compiled callback but suppress its CSS
 # recovery dispatch. It must fail at the named Ready admission assertion.

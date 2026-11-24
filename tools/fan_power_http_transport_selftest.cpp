@@ -99,7 +99,7 @@ void fixtureObserveLifecycle(const char* name){
 bool fanHostPowerMayWrite(){return sharedPowerKnown.load()&&!sharedPowerPending.load();}
 bool fanHostPowerMayResume(){return fanHostPowerMayWrite();}
 bool fanActivityIntentPresent(){return fixtureIntent.load();}
-struct FanResumeScheduleResult {bool registered=false;unsigned long long manualOperation=0;};
+#include "FanResumeScheduleResult.inc"
 static FanResumeScheduleResult fanHostScheduleFanResume(unsigned long long,bool=false,unsigned long long=0);
 void fanLeaseKeepaliveArm(const std::string&,const char*,ULONGLONG=0){++leaseArms;}
 struct FixtureDisplay{ULONGLONG epoch(){return 1;}} g_monitorFanDisplay;
@@ -217,6 +217,7 @@ static int businessMain(int argc,char** argv) try {
  std::vector<json> settlements,replies;
  {
   NativeProvider provider(&readSharedSystemPower,g_sharedPowerRevocations);NativeRemoteTransport transport(provider);fixtureTransport=&transport;fixtureProvider=&provider;
+  if(fixtureCase=="business-scheduler-zero-action")fixtureFailCreate=true;
   fanHostScheduleFanResume(1);fixtureJoin();
   if(fixtureCase=="business-awaiting-old-superseded"){
    fixtureRegisterManual();g_resumeReadyGeneration=1;
@@ -231,7 +232,7 @@ static int businessMain(int argc,char** argv) try {
   }transport.stop();fixtureTransport=nullptr;fixtureProvider=nullptr;
  }
  const bool closed=CloseHandle(fixtureThreadGate)!=FALSE;
- std::cout<<json{{"kind",fixtureCase},{"created",fixtureCreated.load()},{"returned",fixtureReturned.load()},{"gateClosed",closed},{"captures",formalCaptures},{"tickets",fixtureTickets},{"leaseArms",leaseArms},{"lifecycle",lifecycle},{"settlements",settlements},{"replies",replies},{"manualToken",g_fanResumeManualOperation.load()},{"fixtureClaims",fixtureBusinessClaims},{"actualHostImporter",false},{"controlledOriginalNativeClockOnly",true},{"clockAdvancedAfterObservationSleeps",fixtureObservationSleeps.load()}}.dump()<<"\n";return 0;
+ std::cout<<json{{"kind",fixtureCase},{"constructed",fixtureConstructed.load()},{"created",fixtureCreated.load()},{"returned",fixtureReturned.load()},{"gateClosed",closed},{"captures",formalCaptures},{"tickets",fixtureTickets},{"leaseArms",leaseArms},{"lifecycle",lifecycle},{"settlements",settlements},{"replies",replies},{"manualToken",g_fanResumeManualOperation.load()},{"fixtureClaims",fixtureBusinessClaims},{"actualHostImporter",false},{"controlledOriginalNativeClockOnly",true},{"clockAdvancedAfterObservationSleeps",fixtureObservationSleeps.load()}}.dump()<<"\n";return 0;
 } catch (const std::exception& error) {
  std::cerr<<error.what()<<"\n";
  return 10;

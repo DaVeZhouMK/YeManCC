@@ -367,19 +367,19 @@ export async function restoreBackgroundTarget(next: UpdateInfo): Promise<void> {
 }
 /** Read-only manifest probing is allowed during a background transfer. It never
  * changes a user-owned install or bypasses the download/cache ownership lease. */
-export function probeBackgroundSuccessor(): Promise<void> {
+export function probeBackgroundSuccessor(admissionCurrent?: () => boolean): Promise<void> {
   if (successorProbe) return successorProbe;
-  if (updateCacheState.busy || backgroundGamePaused || installRequested || !backgroundAllowed || !updateInfo.value ||
-      !['downloading', 'validating'].includes(updateSnapshot.phase)) return Promise.resolve();
   const generation = backgroundGeneration;
+  const current = () => !updateCacheState.busy && !backgroundGamePaused && !installRequested &&
+    generation === backgroundGeneration && backgroundAllowed && (admissionCurrent?.() ?? true);
+  if (!current() || !updateInfo.value || !['downloading', 'validating'].includes(updateSnapshot.phase)) return Promise.resolve();
   const task = (async () => {
     const next = await checkUpdate(UPDATE_MANIFEST_URL, true);
-    if (backgroundGamePaused || installRequested || generation !== backgroundGeneration || !backgroundAllowed ||
-        !updateInfo.value || !isSuccessor(next, updateInfo.value) || (pendingTarget && !isSuccessor(next, pendingTarget))) return;
-    await invoke('app.updatePredownloadTarget', { version: next.version, sha256: next.sha256 }, { timeoutMs: 5000 });
+    if (!current() || !updateInfo.value || !isSuccessor(next, updateInfo.value) || (pendingTarget && !isSuccessor(next, pendingTarget))) return;
+    const saved = await invoke<boolean>('app.updatePredownloadTarget', { version: next.version, sha256: next.sha256 }, { timeoutMs: 5000 });
     // Saving the hint must precede cancellation: a crash in the handoff may not
     // bring an obsolete package back as a fresh ready notification.
-    if (backgroundGamePaused || installRequested || generation !== backgroundGeneration || !backgroundAllowed) return;
+    if (saved !== true || !current()) return;
     await restoreBackgroundTarget(next);
   })();
   successorProbe = task;
@@ -387,12 +387,19 @@ export function probeBackgroundSuccessor(): Promise<void> {
   return task;
 }
 
-/** Refresh only an adopted native download; do not overwrite a manifest check. */
-export async function refreshAdoptedUpdate(): Promise<void> {
+/** Refresh an adopted native operation while its original observation is current. */
+export async function refreshAdoptedUpdate(admissionCurrent?: () => boolean): Promise<void> {
+  const generation = maintenanceGeneration, operation = activeOperation;
+  const { operationId, phase, installerActive } = updateSnapshot;
+  const current = () => generation === maintenanceGeneration && !updateCacheState.busy && !installRequested &&
+    activeOperation === operation && updateSnapshot.operationId === operationId &&
+    updateSnapshot.phase === phase && updateSnapshot.installerActive === installerActive && (admissionCurrent?.() ?? true);
+  if (!current()) return;
   // Reuse the service's bounded refresh opportunity, including while automatic
   // downloads are disabled or paused for a game. This never launches an install.
-  if (!updateCacheState.busy && !installRequested && updateSnapshot.installerActive === true) {
+  if (installerActive === true) {
     const saved = await readNativeUpdateState();
+    if (!current() || (saved.operationId && saved.operationId !== operationId)) return;
     activeOperation = saved.operationId || '';
     restoreSavedUpdateInfo(saved);
     merge(saved);
@@ -400,9 +407,9 @@ export async function refreshAdoptedUpdate(): Promise<void> {
         ['completed', 'failed', 'interrupted'].includes(saved.phase || '')) selectPendingTarget();
     return;
   }
-  if (updateCacheState.busy || downloadTask || !['downloading', 'validating'].includes(updateSnapshot.phase)) return;
+  if (downloadTask || !['downloading', 'validating'].includes(phase)) return;
   const saved = await readNativeUpdateState();
-  if (saved.operationId !== activeOperation) return;
+  if (!current() || downloadTask || saved.operationId !== operation) return;
   merge(saved);
   if (saved.downloadActive === false && saved.phase !== 'downloaded' && updateSnapshot.backgroundPaused) { updateSnapshot.phase='interrupted';updateSnapshot.stage='download'; }
   if (saved.downloadActive === false && pendingTarget && !backgroundGamePaused) { selectPendingTarget(); return; }

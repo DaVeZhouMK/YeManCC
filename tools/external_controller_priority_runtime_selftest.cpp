@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include "../native/external_controller_priority_ledger.h"
 #include "../native/external_controller_priority_policy.h"
+#include "../native/monitor_game_rule_notify.h"
 using json = nlohmann::json;
 namespace fspath = std::filesystem;
 namespace ep = ymcc::externalpad;
@@ -87,6 +88,7 @@ struct World {
     int resolves = 0, snapshots = 0, saves = 0, launches = 0, stops = 0, refreshes = 0, resets = 0, reprobes = 0;
     int loads = 0, pnpQueries = 0, settingsReads = 0; bool settingsThrow = false;
     int metadataReads = 0; bool metadataKnown = true, freezeMetadata = false;
+    ymcc::monitorGameRules::Notice settingsNotice = ymcc::monitorGameRules::Notice::Unavailable;
     std::string queryRoot; std::vector<std::string> events; std::vector<json> logs;
     std::vector<HubOpen> hubOpens; std::vector<HubQuery> hubQueries;
     bool hubOpen = false; DWORD hubDesiredAccess = 0; int hubCloses = 0;
@@ -223,6 +225,9 @@ json ymSettingsInactiveField(const char* section, const char* field,
         if (!knownFalseStamp.empty() && knownFalseStamp == stamp) { unchanged = true; return nullptr; }
     }
     return ymSettingsField(section, field);
+}
+static ymcc::monitorGameRules::Notice ymSettingsInactiveNotice(ULONGLONG) noexcept {
+    return offline::w.settingsNotice;
 }
 std::uint64_t currentPowerGeneration() {
     const auto overridePower = g_offlinePowerOverride.load();
@@ -477,6 +482,26 @@ int main() {
         externalPrioritySettingsChanged(); step(2000);
         CHECK(w.settingsReads == 3); CHECK(g_externalPriority.enabled);
         CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(w.launches == 0);
+    });
+    run("quiet OFF notification skips metadata and dirty notification reads even with identical stamps", [] {
+        using ymcc::monitorGameRules::Notice;
+        reset(false); w.freezeMetadata = true; w.settingsNotice = Notice::Dirty;
+        step(1000); step(1500);
+        const int metadata = w.metadataReads;
+        w.settingsNotice = Notice::Quiet; step(2000); step(2500);
+        CHECK(w.metadataReads == metadata); CHECK(w.settingsReads == 2); CHECK(noMutations());
+        w.settings["ownership"]["externalControllerPriority"] = true;
+        w.settingsNotice = Notice::Dirty; step(3000);
+        CHECK(w.metadataReads == metadata+1); CHECK(w.settingsReads == 3);
+        CHECK(g_externalPriority.enabled); CHECK(!g_externalPriority.disabledPolicyKnown); CHECK(w.launches == 0);
+    });
+    run("quiet OFF notification cannot extend the 30-second current-byte bound", [] {
+        using ymcc::monitorGameRules::Notice;
+        reset(false); w.freezeMetadata = true; w.settingsNotice = Notice::Dirty;
+        step(1000); step(1500);
+        w.settings["ownership"]["externalControllerPriority"] = true;
+        w.settingsNotice = Notice::Quiet; step(31000); CHECK(w.settingsReads == 2);
+        step(31500); CHECK(w.settingsReads == 3); CHECK(g_externalPriority.enabled); CHECK(w.launches == 0);
     });
     run("quiet OFF metadata change observes policy before fallback", [] {
         reset(false); step(1000); step(1500);

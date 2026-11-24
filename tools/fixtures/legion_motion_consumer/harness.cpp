@@ -122,6 +122,7 @@ static std::atomic<bool> g_inputCaptureStop{false}, g_gmSessionResetRequested{fa
 static bool g_inputCaptureReady = true;
 static std::atomic<bool> g_legionRawInputSubscribed{true};
 static bool g_rawInputRegistered = true;
+static std::atomic<bool> g_gpStateFallbackTimerArmed{false};
 static std::atomic<bool> g_keyboardModifierRawSubscribed{true};
 static HWND g_hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(0x33330000));
 static bool vendorRegistrationResult = true, baseRegistrationResult = true, keyboardRegistrationResult = true;

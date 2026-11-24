@@ -251,9 +251,16 @@ function Run-Helper([string]$caseRoot,[string]$install,[string]$template,[string
     if(!$legacy){
       $aclPort='function Assert-FixtureRecoveryAcl([string]$Path) { $full=[IO.Path]::GetFullPath($Path); if($full -ine $script:FixtureRecoveryRoot -and !$full.StartsWith($script:FixtureRecoveryRoot+"\",[StringComparison]::OrdinalIgnoreCase)){throw "FIXTURE_RECOVERY_PATH_ESCAPED"}; if((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw "FIXTURE_RECOVERY_LINK"} }'+"`n"
       $aclPort='$script:FixtureRecoveryRoot = '+("'"+$data.Replace("'","''")+"'")+"`n"+$aclPort
-      $text=$text.Replace('    Assert-YmccRecoveryAcl ','    Assert-FixtureRecoveryAcl ').Replace('        Assert-YmccRecoveryAcl ','        Assert-FixtureRecoveryAcl ')
-      $text=$text.Replace("try {`n  `$moduleLease = Enter-YmccModuleMaintenance",$aclPort+"try {`n  `$moduleLease = Enter-YmccModuleMaintenance")
-      $text=$text.Replace('Set-Acl -LiteralPath $temporary -AclObject $acl -ErrorAction Stop','# privileged ACL writer is an inert fixture port')
+      $aclCalls=[regex]'(?m)(?<=[ ;])Assert-YmccRecoveryAcl (?=[($])'
+      $aclWrite='Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop;'
+      Need ($aclCalls.Matches($text).Count -eq 3 -and [regex]::Matches($text,[regex]::Escape($aclWrite)).Count -eq 1) 'Current recovery ACL isolation ports changed'
+      # The reader checks the parent and leaf; the writer checks its new file.
+      # Keep all journal IO and the real caller flow, but never write OS ACLs.
+      $text=$aclCalls.Replace($text,'Assert-FixtureRecoveryAcl ')
+      $text=$text.Replace($aclWrite,'')
+      $aclAnchor="try {`n  `$moduleLease = Enter-YmccModuleMaintenance"
+      Need ([regex]::Matches($text,[regex]::Escape($aclAnchor)).Count -eq 1) 'Current recovery ACL fixture scope changed'
+      $text=$text.Replace($aclAnchor,$aclPort+$aclAnchor)
     }
     $text=$text.Replace('$isElevated = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)','$isElevated = $true # inert isolated fixture token')
     $inventory=@'
@@ -284,6 +291,12 @@ function Get-Process {
     }
 
     $text=$text.Replace("(Join-Path `$rollbackRoot 'DeckySnapshot')", "(Join-Path `$rollbackRoot 'DeckySnapshot') -BackendPort 0").Replace('Restore-YmccDeckyPackage $deckyTransaction','Restore-YmccDeckyPackage $deckyTransaction -BackendPort 0')
+    if(!$legacy){
+      $text=$text.Replace(' -PreparationLease ([ref]$deckyPreparationLease)',' -BackendPort 0 -PreparationLease ([ref]$deckyPreparationLease)')
+      $productMutex='Global\YeManCC.ModuleMaintenance'
+      Need ([regex]::Matches($text,[regex]::Escape($productMutex)).Count -eq 1) 'Current helper maintenance mutex scope changed'
+      $text=$text.Replace($productMutex, ('Local\YMCC-Updater-Cycle-'+[guid]::NewGuid().ToString('N')))
+    }
     $text=$text.Replace('Start-Process -FilePath $exePath','Start-Process -WindowStyle Hidden -FilePath $exePath')
     # Observation is inserted at actual function entry; no debugger or new
     # command owner is involved. Keep the original outer timeout unchanged.
@@ -296,7 +309,10 @@ function Get-Process {
       foreach($function in $traceFunctions){
         $literal="'"+$tracePath.Replace("'","''")+"'"
         $line="`n  if (!(Test-Path -LiteralPath "+$literal+") -or (Get-Item -LiteralPath "+$literal+").Length -lt 65536) { [IO.File]::AppendAllText("+$literal+",([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()+' "+$function.Name+" '+[string]`$source+' '+[string]`$message+[Environment]::NewLine)) }`n"
-        $offset=$function.Body.Extent.StartOffset+1;$text=$text.Insert($offset,$line)
+        # Advanced functions require attributes and param() before statements.
+        $parameters=$function.Body.ParamBlock
+        $offset=if($parameters){$parameters.Extent.EndOffset}else{$function.Body.Extent.StartOffset+1}
+        $text=$text.Insert($offset,$line)
       }
     }
     if(!$legacy){

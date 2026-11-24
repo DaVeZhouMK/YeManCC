@@ -145,6 +145,30 @@ static void clientStateDiagnosticCases(){
 }
 #endif
 #ifndef YMCC_READINESS_BASELINE
+static void tdpOwnerSettlementDiagnosticCases(){
+ using deckydiag::Json;
+ const std::string event="tdp-owner-settled";
+ const auto valid=[&](const Json& row){return deckydiag::frontendRecord(row)==row&&deckydiag::record(event,row)==row;};
+ const auto invalid=[&](const Json& row){return deckydiag::frontendRecord(row).is_null()&&deckydiag::record(event,row)==Json{{"event",event}};};
+ const Json confirmed={{"event",event},{"generation",42u},{"requestedW",23u},{"outcome","write-ack"}};
+ check(valid(confirmed),"Owner write acknowledgment survives both native filters");
+ auto saved=confirmed;saved["outcome"]="saved-unconfirmed";saved["requestedW"]=22.5;
+ check(valid(saved),"Saved-only report survives without an apply claim");
+ for(const auto* field:{"event","generation","requestedW","outcome"}){
+  auto row=confirmed;row.erase(field);check(invalid(row),"Incomplete TDP settlement is rejected");
+ }
+ for(const auto* field:{"requestId","account","path","error"}){
+  auto row=confirmed;row[field]="PRIVATE";check(invalid(row),"Private field cannot enter a TDP settlement");
+ }
+ for(const auto& value:std::vector<Json>{0u,151u,true,"55",Json::object()}){
+  auto row=confirmed;row["requestedW"]=value;check(invalid(row),"TDP wattage must be finite and within the diagnostic range");
+ }
+ for(const auto& value:std::vector<Json>{-1,9007199254740992ull,"42",true}){
+  auto row=confirmed;row["generation"]=value;check(invalid(row),"TDP generation must be a bounded unsigned integer");
+ }
+ auto unknown=confirmed;unknown["outcome"]="readback";check(invalid(unknown),"An owner settlement cannot claim hardware readback");
+ check(deckydiag::record("runtime",confirmed)==deckydiag::record("runtime",{{"generation",42u}}),"TDP-only fields do not widen other events or suppress the existing generation");
+}
 static void sourceChangeDiagnosticCases(){
  const std::vector<std::string> labels={"audio","monitor","input","touchpads","frames","schedule","profile","game","power","fan","controller","steam","trainer","speed","lossless","action","unspecified","multiple"};
  for(const auto& label:labels){
@@ -158,6 +182,22 @@ static void sourceChangeDiagnosticCases(){
  }
  const deckydiag::Json other={{"event","snapshot-read-start"},{"invalidatedBy","monitor"}};
  check(!deckydiag::frontendRecord(other).contains("invalidatedBy")&&!deckydiag::record("runtime",other).contains("invalidatedBy"),"Source category cannot widen unrelated event scopes");
+ const deckydiag::Json sources={"monitor","power","snapshot-request"};
+ auto multiple=deckydiag::Json{{"event","snapshot-read-finished"},{"invalidatedBy","multiple"},{"discarded",true},{"discardReason","source-changed"},{"invalidatedBySources",sources}};
+ const auto sanitized=deckydiag::frontendRecord(multiple);
+ check(sanitized==multiple&&deckydiag::record("snapshot-read-finished",sanitized)==multiple,"Multiple distinct categories flow through both original native filters");
+ for(const auto& bad:std::vector<deckydiag::Json>{"monitor",{{"power",true}},{"power"},{"power","power"},{"power","C:/PRIVATE"},{"power","multiple"},{"power",true}}){
+  auto row=multiple;row["invalidatedBySources"]=bad;
+  check(!deckydiag::frontendRecord(row).contains("invalidatedBySources")&&!deckydiag::record("snapshot-read-finished",row).contains("invalidatedBySources"),"Only distinct fixed diagnostic categories are accepted");
+ }
+ for(const auto* unrelated:{"snapshot-read-start","runtime"}){
+  auto row=multiple;row["event"]=unrelated;
+  check(!deckydiag::frontendRecord(row).contains("invalidatedBySources")&&!deckydiag::record(unrelated,row).contains("invalidatedBySources"),"Category list cannot widen unrelated event scopes");
+ }
+ for(const auto* reason:{"peer-changed","demand-changed"}){
+  auto row=multiple;row["discardReason"]=reason;
+  check(!deckydiag::frontendRecord(row).contains("invalidatedBySources")&&!deckydiag::record("snapshot-read-finished",row).contains("invalidatedBySources"),"A retired peer or demand has priority over the source list");
+ }
  auto full=deckydiag::Json::parse(R"({"event":"snapshot-read-finished","readId":1,"demandEpoch":2,"elapsedMs":5,"ok":false,"stage":"partial","ready":true,"discarded":true,"failureKind":"owner-read","failureStage":"monitor","discardReason":"source-changed"})");
  for(const auto* field:{"powerMs","powerSourceMs","scheduleMs","performanceMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs","audioMs","profileMs","performanceScheduleMs","performanceGameConfigMs","performancePowerModeMs","performanceGameMs","performanceCoreMs","performanceTdpCapabilityMs","performanceCpuProfilesMs","performanceFrameRatesMs"})full[field]=1u;
  check(full.size()==32&&deckydiag::frontendRecord(full).size()==32,"Original32-field complete timing envelope remains accepted");
@@ -172,6 +212,10 @@ static void sourceChangeDiagnosticCases(){
  const auto withTimings=deckydiag::frontendRecord(full);
  check(full.size()==34&&withTimings==full&&deckydiag::record("snapshot-read-finished",withTimings)==full,"Qualified profile timing survives both filters with the maximum old envelope");
  full["extra"]=1u;check(deckydiag::frontendRecord(full).is_null(),"The profile timing grants only one extra field");full.erase("extra");
+ auto withSources=full;withSources["invalidatedBy"]="multiple";withSources["invalidatedBySources"]=sources;
+ check(deckydiag::frontendRecord(withSources)==withSources,"The validated source list adds only one field to the old full envelope");
+ withSources["extra"]=1u;check(deckydiag::frontendRecord(withSources).is_null(),"The source list does not allow unrelated extra fields");withSources.erase("extra");
+ withSources["invalidatedBy"]="monitor";check(deckydiag::frontendRecord(withSources).is_null(),"A single source cannot grant the additional list slot");
  const deckydiag::Json part={{"queue",155u},{"main",2000u}};
  check(deckydiag::frontendRecord({{"event","snapshot-read-finished"},{"profileReadMs",part}}).at("profileReadMs")==part,"Unreached profile stages stay absent");
  for(const auto& bad:std::vector<deckydiag::Json>{deckydiag::Json::object(),{{"queue",0u},{"path","PRIVATE"}},{{"main",-1}},{{"main",true}},{{"backup",3600001u}}}){
@@ -317,9 +361,21 @@ int main(int argc,char** argv){try{
    auto future=raw;future["socketOpenMs"]=4525;check(deckydiag::clientStartupRecord(future).is_null(),"Impossible socket duration is not a timing fact");
    auto excessive=raw;excessive["retryCount"]=1000001;check(deckydiag::clientStartupRecord(excessive).is_null(),"Timing counters are bounded");
    check(!deckydiag::record("runtime",{{"clientStartup",raw}}).contains("clientStartup"),"Client timing does not widen unrelated event schemas");
+   for(const auto* source:{"socket-open","socket-open-probe","demand-start","demand-stop","connection-probe","hud-peer-ready","hidden-snapshot","operation-timeout"}){
+     const Json packet={{"command","snapshot"},{"requestSource",source},{"probeId","probe:PRIVATE:1"},{"token","PRIVATE"}};
+     Json fields=Json::object();deckydiag::attachSnapshotRequestSource(fields,packet);
+     const Json expected={{"requestSource",source}};
+     check(fields==expected&&deckydiag::record("mirror-snapshot-request",fields)==Json({{"event","mirror-snapshot-request"},{"requestSource",source}}),"Only fixed snapshot request provenance is attached and logged");
+     check(!deckydiag::record("snapshot-read-start",fields).contains("requestSource"),"Request provenance does not leak into non-request events");
+   }
+   for(const Json& packet:std::vector<Json>{Json::object(),Json(),{{"requestSource","C:/PRIVATE"}},{{"requestSource","socket-open-extra"}},{{"requestSource",true}},{{"requestSource",1}},{{"requestSource",Json::array({"socket-open"})}},{{"requestSource",Json::object()}}}){
+     Json fields=Json::object();deckydiag::attachSnapshotRequestSource(fields,packet);
+     check(fields.empty()&&!deckydiag::record("mirror-snapshot-request",packet).contains("requestSource"),"Legacy, unknown and malformed provenance is omitted at both boundaries");
+   }
    std::cout<<"DECKY_STARTUP_PHASE_DIAGNOSTICS_OK passed="<<passed<<" realSteam=0\n";return 0;
  }
 #ifndef YMCC_READINESS_BASELINE
+ if(argc==2&&std::string(argv[1])=="--tdp-owner-settlement-only"){tdpOwnerSettlementDiagnosticCases();std::cout<<"DECKY_TDP_OWNER_SETTLEMENT_OK passed="<<passed<<" realSteam=0\n";return 0;}
  if(argc==2&&std::string(argv[1])=="--source-change-diagnostics-only"){sourceChangeDiagnosticCases();std::cout<<"DECKY_SOURCE_CHANGE_DIAGNOSTICS_OK passed="<<passed<<" realSteam=0\n";return 0;}
 #endif
 
@@ -373,6 +429,7 @@ int main(int argc,char** argv){try{
  observer.setDemand(steamui::ModeConsumer::Decky,false);const auto atStop=reads.load();Sleep(240);check(reads==atStop,"Disabled demand leaves no recurring UI reader");decky.shutdown();observer.shutdown();
 #ifndef YMCC_READINESS_BASELINE
  sourceChangeDiagnosticCases();
+ tdpOwnerSettlementDiagnosticCases();
  const auto input=deckydiag::Json::parse(R"({"event":"snapshot-read-finished","readId":4,"demandEpoch":2,"elapsedMs":500,"powerMs":2,"monitorMs":490,"ok":true,"stage":"settled","discarded":false,"token":"SECRET","game":"PRIVATE"})");
  const auto clean=deckydiag::frontendRecord(input),record=deckydiag::record("snapshot-read-finished",clean);
  check(clean.value("elapsedMs",0)==500&&record.value("monitorMs",0)==490,"Numeric stage timings survive both native allowlists");

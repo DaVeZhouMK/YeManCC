@@ -47,6 +47,7 @@ def main():
     source = (REPO / 'native/main.cpp').read_text('utf-8-sig')
     names = ['sgBaseName', 'focusFileTimeTicks', 'focusKnownOverlayName', 'focusBackgroundMonitorName',
              'focusWindowProcessName', 'focusIsKnownOverlayWindow', 'focusIsBackgroundMonitorWindow',
+             'focusIsolationSharedPowerChanged', 'focusSessionPowerAllowsAction',
              'focusTargetIdentityMatches', 'focusIsRestorableExactWindow', 'focusResolveTarget',
              'resolvePreviousFocusWindow', 'focusForegroundMatchesTarget', 'refocusPreviousWindow',
              'focusReleaseOwnedTopmost', 'focusClearSession', 'focusPrepareSummonSession',
@@ -61,20 +62,30 @@ def main():
     ipc_body = braced(source, ipc_start) + ');'
     tick_start = source.index('if (w == RETURN_GAME_FOCUS_TIMER_ID) {')
     timer_body = braced(source, tick_start)
+    view_anchor = 'if (w == RETURN_GAME_FOCUS_TIMER_ID && taskViewFocusHandoffPaused()) {'
+    view_body = braced(source, source.index(view_anchor))
+    def task_view_admission_tail(text):
+        start = text.index('args["_nativeTaskViewFocusToken"]=focusToken;')
+        end = text.index('\n        }', start)
+        return text[text.index('\n', start):end]
+    view_admission = task_view_admission_tail(source)
     power_start = source.index('case WM_POWERBROADCAST: {')
-    power_match = re.search(r'if \(w == PBT_APMSUSPEND[^;]+focusLosslessReturnCancel\(\);', source[power_start:])
-    assert power_match, 'missing production power cancellation'
-    power_body = power_match.group()
-    assert 'focusLosslessReturnCancel();' in function(source, 'beginAsyncExit')
+    power_anchor = 'if(w==PBT_APMSUSPEND && suspendAdmission.privateIsolationRequired()){'
+    power_body = braced(source, source.index(power_anchor, power_start))
+    assert 'focusClearSession();' in power_body, 'missing production power cancellation'
+    assert 'focusClearSession();' in function(source, 'beginAsyncExit')
     assert 'focusLosslessReturnInvalidate();' in function(source, 'nativeValveCommitLocked')
     assert 'focusLosslessReturnInvalidate();' in function(source, 'nativeValveClearLocked')
     prefix = '\n'.join(blocks[n] for n in names[:-2])
     production = prefix + '\n#include "lossless_return_focus.h"\n' + blocks[names[-2]] + '\n' + blocks[names[-1]]
     production += '\nstatic void registerLosslessIpc(){\n' + ipc_body + '\n}\n'
-    production += '\nstatic void dispatchReturnTimer(){const WPARAM w=RETURN_GAME_FOCUS_TIMER_ID;\n' + timer_body + '\n}\n'
-    production += '\nstatic void dispatchPowerCancel(WPARAM w){\n' + power_body + '\n}\n'
+    production += '\nstatic LRESULT dispatchReturnTimer(WPARAM w=RETURN_GAME_FOCUS_TIMER_ID){\n' + timer_body + '\nreturn 0;\n}\n'
+    production += '\nstatic LRESULT dispatchTaskViewCancellation(WPARAM w=RETURN_GAME_FOCUS_TIMER_ID){\n' + view_body + '\nreturn 0;\n}\n'
+    production += '\nstatic void dispatchTaskViewAdmission(){\n' + view_admission + '\n}\n'
+    production += '\nstatic void dispatchPowerCancel(WPARAM w, FixtureSuspendAdmission suspendAdmission={true}){\n' + power_body + '\n}\n'
     (out / 'production_focus.inc').write_text(production, 'utf-8')
     inputs = ['native/lossless_return_focus.h', 'native/resume_focus.h', 'native/monitor_identity.h', 'native/process_inventory.h',
+              'native/sleep_power_observation.h', 'native/sleep_power_state.h',
               'tools/lossless_return_focus_selftest.cpp', 'tools/lossless_return_focus_selftest.py', 'deps/json/json.hpp',
               'tools/fixtures/hc_reviewed_calibration/toolchain.mjs']
     snapshots = {p: (REPO / p).read_bytes() for p in inputs}
@@ -122,6 +133,14 @@ def main():
          '(void)now;', 'double-B overrides LS snapshot'),
         ('without-three-request-limit', 'lossless_return_focus.h', 'state.attempts >= kLosslessReturnMaxAttempts',
          'false', 'denied foreground requests spend exactly three attempts'),
+        ('without-public-lossless-retirement', 'production_focus.inc',
+         '    if (!retireIsolation && !retireSession) return focusLosslessSharedPowerChanged(power);',
+         '    if (!retireIsolation && !retireSession) return true;', 'coalesced Ready retires independently armed Lossless target'),
+        ('without-lossless-suspend-serial', 'lossless_return_focus.h', ' || power.suspendSerial > entered.suspendSerial;',
+         ';', 'new suspend serial retires return before deferred public delivery'),
+        ('without-task-view-lossless-release', 'lossless_return_focus.h',
+         '    if (!g_losslessReturnFocus.returning) return;\n    focusLosslessReturnCancel();\n    g_focusSession.target = {};',
+         '    return;', 'Task View supersession cannot leave a returning Lossless target after stopping its timer'),
     ]:
         control = out / name
         control.mkdir()
@@ -149,13 +168,16 @@ def main():
     assert all(function(current, name) == body for name, body in blocks.items()), 'consumed main.cpp functions changed during run'
     assert braced(current, current.index('ipc_on("game.losslessReturnTarget",')) + ');' == ipc_body, 'IPC entry changed during run'
     assert braced(current, current.index('if (w == RETURN_GAME_FOCUS_TIMER_ID) {')) == timer_body, 'timer entry changed during run'
+    assert braced(current, current.index(view_anchor)) == view_body, 'Task View timer entry changed during run'
+    assert task_view_admission_tail(current) == view_admission, 'Task View admission changed during run'
     assert power_body in current[current.index('case WM_POWERBROADCAST: {'):], 'power entry changed during run'
     assert all((REPO / p).read_bytes() == data for p, data in snapshots.items()), 'consumed source changed during run'
     receipt = {'pass': True, 'classification': 'one-shot',
                'classificationReason': 'static identity until return/cancel; timer exists only for a maximum 10-second return episode',
                'sourceHashes': {p: sha(data) for p, data in snapshots.items()},
                'functionHashes': {name: sha(body.encode()) for name, body in blocks.items()},
-               'entryHashes': {'ipc': sha(ipc_body.encode()), 'timer': sha(timer_body.encode()), 'power': sha(power_body.encode())},
+               'entryHashes': {'ipc': sha(ipc_body.encode()), 'timer': sha(timer_body.encode()), 'power': sha(power_body.encode()),
+                               'taskViewTimerCancel': sha(view_body.encode()), 'taskViewAdmission': sha(view_admission.encode())},
                'profiles': results, 'negativeControls': controls, 'realApplicationsOrHardwareRun': False}
     (out / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n', 'utf-8')
     (args.output.resolve() / 'latest.json').write_text(json.dumps({'pass': True, 'run': str(out)}, indent=2) + '\n', 'utf-8')

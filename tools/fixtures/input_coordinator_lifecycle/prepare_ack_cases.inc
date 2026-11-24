@@ -13,8 +13,17 @@ static void fullPipePrepareAckLostCase(const std::string& family,bool offWhileHe
  fixturePrepareAckLoss=true;const bool started=inputHostStart();fixturePrepareAckLoss=false;
  check(!started&&fixturePrepareAckLossConsumed&&fullPipeSpawnCount==spawns+1,"actual owned managed PREPARE succeeds while only its native ACK read is lost");
  check(fixturePrepareAckOriginal.is_object()&&fixturePrepareAckOriginal.value("command","")=="PREPARE_TARGET"&&fixturePrepareAckOriginal.value("status","")=="target-prepared","captured actual PREPARE ACK proves the real child created its target before receipt loss");
- json hold;const auto holdPath=fullPipeReceipts.back()+L".hold.json";{std::ifstream input{fspath::path(holdPath)};if(input)input>>hold;}
- const auto childHandle=fullPipeChildObservers.back();const bool childAlive=WaitForSingleObject(childHandle,0)==WAIT_TIMEOUT;
+ const auto childHandle=fullPipeChildObservers.back();const auto holdPath=fullPipeReceipts.back()+L".hold.json";
+ // Quarantine can return before the disconnected child reaches its SDK gate.
+ // Wait only for the original marker while the exact child remains live.
+ json hold;const auto holdStarted=GetTickCount64();constexpr DWORD holdObservationBudgetMs=2000;
+ while(WaitForSingleObject(childHandle,0)==WAIT_TIMEOUT){
+  std::ifstream input{fspath::path(holdPath)};
+  if(input){input>>hold;break;}
+  const auto elapsed=GetTickCount64()-holdStarted;
+  if(elapsed>=holdObservationBudgetMs||WaitForSingleObject(childHandle,static_cast<DWORD>(std::min<ULONGLONG>(10,holdObservationBudgetMs-elapsed)))!=WAIT_TIMEOUT)break;
+ }
+ const bool childAlive=WaitForSingleObject(childHandle,0)==WAIT_TIMEOUT;
  check(childAlive&&hold.is_object()&&hold.value("hasController",false)&&hold.value("hasContext",false)&&hold.value("lastCommand","")=="PREPARE_TARGET"&&hold.value("processId",0u)==GetProcessId(childHandle),"real owned child remains alive at its bounded fake SDK cleanup gate after native stop wait");
  const auto beforeGate=state();
  check(restoreCalls()==restores,"lost PREPARE ACK must not restore physical visibility while actual target cleanup is still unproven");

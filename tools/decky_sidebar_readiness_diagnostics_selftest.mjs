@@ -127,13 +127,20 @@ await check('complete read failure records failed and preserves the original not
  // SOURCE_CHANGE_DIAGNOSTIC_BEGIN
  {
   const findings=[];
-  for(const [events,expected] of [[['input'],'input'],[['game','game'],'game'],[['power','monitor'],'multiple'],[['C:/PRIVATE'],'unspecified']]){
+  for(const [events,expected,sources] of [[['input'],'input'],[['game','game'],'game'],[['power','monitor','monitor'],'multiple',['monitor','power']],[['C:/PRIVATE'],'unspecified'],[['power','C:/PRIVATE'],'multiple',['power','unspecified']],[['power','probe'],'multiple',['power','snapshot-request']]]){
    const gate=defer();let calls=0;const f=relayFixture(async()=>{if(++calls===1)await gate.promise;return data();});
-   try{const opening=f.open();await flush();for(const source of events)f.relay.invalidate(source);gate.resolve();await opening;await flush();
+   try{const opening=f.open();await flush();let probe;
+    for(const source of events){
+     if(source==='probe')probe=f.relay.request({...peer,request:{command:'snapshot',runId,probeId:'probe:win5:1'}});
+     else f.relay.invalidate(source);
+    }
+    gate.resolve();await opening;await probe;await flush();
     const retired=f.logs.find(row=>row.event==='snapshot-read-finished'&&row.discarded);assert.equal(retired.discardReason,'source-changed');
     assert.equal(retired.invalidatedBy,expected,'A discarded read must identify its fixed notification source');
-    const current=f.logs.find(row=>row.event==='snapshot-read-finished'&&!row.discarded);assert.equal(current.invalidatedBy,undefined,'Accepted retry cannot inherit a retired read cause');assert.equal(f.timers.size,0);assert(!JSON.stringify(f.logs).includes('PRIVATE'));
-    findings.push({events:events[0].includes('PRIVATE')?['unrecognized']:events,invalidatedBy:retired.invalidatedBy,acceptedRetryTagged:false});
+    assert.deepEqual(retired.invalidatedBySources,sources,'Only multiple distinct fixed sources are expanded');
+    const current=f.logs.find(row=>row.event==='snapshot-read-finished'&&!row.discarded);assert.equal(current.invalidatedBy,undefined,'Accepted retry cannot inherit a retired read cause');assert.equal(current.invalidatedBySources,undefined);assert.equal(f.reads,2);assert.equal(f.timers.size,0);assert(!JSON.stringify(f.logs).includes('PRIVATE'));
+    if(probe)assert(f.replies.some(row=>row.probeId==='probe:win5:1'&&row.snapshot.ready));
+    findings.push({events:events.map(source=>source.includes('PRIVATE')?'unrecognized':source),invalidatedBy:retired.invalidatedBy,invalidatedBySources:retired.invalidatedBySources,acceptedRetryTagged:false});
    }finally{gate.resolve();f.dispose();}
   }
   {
@@ -259,8 +266,9 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
    assert(initial?.ready);assert.equal(initial.losslessProgram.known,false);assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});
    const boundary=snapshots(f).length;f.state.losslessProgram={known:true,running:true};program.resolve();await flush();
    const updates=snapshots(f).slice(boundary);assert.equal(updates.length,1,'Completion after a published pending view must refresh it once');
-   assert.deepEqual(updates[0].losslessProgram,{known:true,running:true});assert.deepEqual(counts(f),{input:2,frames:2,monitor:2});assert.equal(programReads,1);
-   await flush();assert.deepEqual(counts(f),{input:2,frames:2,monitor:2});assert.equal(f.counts.saves,0);assert.equal(f.counts.fxSoundWrites,0);
+   assert.deepEqual(updates[0],{...initial,losslessProgram:{known:true,running:true}});
+   assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});assert.equal(programReads,1);
+   await flush();assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});assert.equal(f.counts.saves,0);assert.equal(f.counts.fxSoundWrites,0);
    completionMeasurements.push({timing:'program-after-snapshot',counts:counts(f),programReads,followingSnapshots:updates.length});
   }finally{program.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
  }
@@ -273,7 +281,7 @@ await check('one no-game snapshot reuses input and schedule rather than loading 
    f.state.fxSound={...f.state.fxSound,running:true,enabled:true};f.advanceFx();await flush();assert.equal(audioReads,2,'Actual existing audio tick must complete before the blocked frames');
    assert.deepEqual(counts(f),{input:1,frames:1,monitor:1});frames.resolve();await pending;await flush();
    const views=snapshots(f);assert(views.length);assert(views.every(view=>view.ready&&view.audioOptimization.enabled===true),'An audio change after capture must discard every old admitted view');
-   assert.deepEqual(counts(f),{input:2,frames:2,monitor:2});assert.equal(audioReads,3,'Initial shared read, original tick and one current retry only');
+   assert.deepEqual(counts(f),{input:2,frames:2,monitor:2});assert.equal(audioReads,2,'The current retry consumes the same-generation tick, not a second audio read');
    assert.equal(f.counts.saves,0);assert.equal(f.counts.fxSoundWrites,0);
    completionMeasurements.push({timing:'audio-after-capture',counts:counts(f),audioReads,noStalePublication:true});
   }finally{initialAudio.resolve();frames.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
@@ -317,7 +325,8 @@ await check('settings invalidation during parallel reads retries against the lat
    assert.equal(previous.performance.controls.find(x=>x.key==='tdp')?.value,21);
    const oldRevision=previous.performance.sourceRevision;assert(oldRevision);
    const originalGame={...f.state.game},readsBefore=performanceStarts.length;
-   hold=true;f.monitorChanged();await flush();
+   // Identical preferences intentionally do not invalidate a snapshot.
+   hold=true;f.state.monitor.enabled=!f.state.monitor.enabled;f.monitorChanged();await flush();
    assert.equal(frameStarts,1,'The original frame owner must still be blocked');
    assert.equal(performanceStarts.length,readsBefore+1,'The parallel performance reader must have started on the old source');
    assert.deepEqual(performanceStarts.at(-1),{tdp:21,pid:originalGame.pid});
@@ -350,23 +359,28 @@ await check('settings invalidation during parallel reads retries against the lat
  // Keep the stable branch separate so an intentional source event cannot mask
  // an unwanted LS-completion retry caused by clearing the new peer's lease.
  for(const externalSettings of [false,true]){
-  const framesA=defer(),framesB=defer(),program=defer();let frameStarts=0,programReads=0;
-  const f=await createMirrorHostFixture({readHooks:{frames:()=>{frameStarts++;return frameStarts===1?framesA.promise:frameStarts===2?framesB.promise:Promise.resolve();},losslessProgram:()=>{programReads++;return program.promise;}}});
+  const framesA=defer(),framesB=defer(),programA=defer(),programB=defer();let frameStarts=0,programReads=0;
+  const f=await createMirrorHostFixture({readHooks:{frames:()=>{frameStarts++;return frameStarts===1?framesA.promise:frameStarts===2?framesB.promise:Promise.resolve();},losslessProgram:()=>++programReads===1?programA.promise:programB.promise}});
   try{
    f.state.game=null;f.state.schedule.controls={version:1,ac:{mode:'auto',tdp:21,tdpCeiling:55},dc:{mode:'auto',tdp:17,tdpCeiling:30}};
    f.ready();const pendingA=request(f);await flush();assert.equal(frameStarts,1);assert.equal(programReads,1);
    const currentPeer={...peer,connection:'2'};f.emit('deckySidebar.mirrorPeer',currentPeer);f.emit('deckySidebar.mirrorRequest',{...currentPeer,request:{command:'snapshot',runId}});await flush();assert.equal(frameStarts,2);
    framesA.resolve();await pendingA;await flush();assert.equal(frameStarts,2);
-   f.state.losslessProgram={known:true,running:true};program.resolve();await flush();assert.equal(frameStarts,2);
+   f.state.losslessProgram={known:true,running:false};programA.resolve();await flush();assert.equal(frameStarts,2);
    if(externalSettings){f.state.schedule.controls.ac.tdp=29;f.scheduleChanged();await flush();}
    framesB.resolve();await flush();const views=f.replies.filter(row=>row.message.type==='snapshot');assert(views.length);
    assert(views.every(row=>row.connection==='2'),'No retired-peer view may be delivered');
    assert(views.every(row=>row.message.snapshot.ready&&row.message.snapshot.performance.controls.find(control=>control.key==='tdp')?.value===(externalSettings?29:21)),'Only the current external owner source may be admitted');
-   assert.deepEqual(views.at(-1).message.snapshot.losslessProgram,{known:true,running:true});assert.equal(programReads,1);
+   assert.deepEqual(views.at(-1).message.snapshot.losslessProgram,{known:false,running:false},'Retired peer process receipt must stay unconfirmed');
+   const revision=views.at(-1).message.snapshot.revision;
+   f.state.losslessProgram={known:true,running:true};programB.resolve();await flush();
+   const final=f.replies.filter(row=>row.message.type==='snapshot').at(-1);
+   assert.equal(final.connection,'2');assert.equal(final.message.snapshot.revision,revision);
+   assert.deepEqual(final.message.snapshot.losslessProgram,{known:true,running:true});assert.equal(programReads,2);
    assert.equal(frameStarts,externalSettings?3:2,'Old finally cannot clear a newer lease; only an actual settings edge adds a retry');
    assert.equal(f.counts.inputReads,frameStarts);assert.equal(f.counts.monitorReads,frameStarts);assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);assert.equal(f.counts.fxSoundWrites,0);
    completionMeasurements.push({timing:externalSettings?'old-peer-with-settings':'old-peer-stable',controlBatches:frameStarts,programReads,currentPeerOnly:true});
-  }finally{framesA.resolve();framesB.resolve();program.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
+  }finally{framesA.resolve();framesB.resolve();programA.resolve();programB.resolve();f.stop();await flush();assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);}
  }
  // The original schedule owner may return after this demand has retired or
  // after a newer source event. That completion cannot replace the current cache
@@ -481,6 +495,47 @@ for(const boundary of ['pause-reopen','peer-change'])await check('read recovery:
   const current=[...f.timers.entries()][0],reads=f.reads;assert(current);old.fn();await flush();assert.equal(f.reads,reads);
   assert.deepEqual([...f.timers.keys()],[current[0]]);fail=false;await f.fire(250);assert.equal(f.replies.at(-1).snapshot.ready,true);assert.equal(f.timers.size,0);
  }finally{f.dispose();}
+ if(boundary!=='pause-reopen')return;
+ for(const ending of ['reopen','hide','same-demand','reopen-again']){
+  const gates=Array.from({length:4},defer);let active=0,peak=0,reads=0;
+  const x=relayFixture(async()=>{
+   const generation=++reads;peak=Math.max(peak,++active);
+   try{await gates[generation-1]?.promise;return {...data(),generation,provenance:{kind:'ymcc-native',pid:123}};}
+   finally{active--;}
+  });
+  const probeId='probe:reopen-last-read:1';
+  const reopen=()=>x.relay.request({...peer,request:{command:'snapshot',runId,probeId}});
+  const requests=[];
+  try{
+   requests.push(x.open());
+   for(let i=0;i<2;i++){
+    assert.equal(x.reads,i+1);await x.invalidate();gates[i].resolve();await flush();
+   }
+   assert.equal(x.reads,3);assert.equal(x.replies.length,0);
+   if(ending==='same-demand')await x.invalidate();
+   else{await x.pause();if(ending!=='hide')requests.push(reopen());}
+   assert.equal(x.reads,3,'A reopened sidebar must not run a second owner read concurrently');
+   gates[2].resolve();await flush();
+   const handoff=ending==='reopen'||ending==='reopen-again';
+   console.log(JSON.stringify({ending,reads:x.reads,peak,timers:[...x.timers.values()].map(timer=>timer.ms),replies:x.replies.length}));
+   assert.equal(x.reads,handoff?4:3,'A newly opened demand gets its own first read before any retry timer');
+   if(ending==='reopen-again'){await x.pause();requests.push(reopen());}
+   gates[3].resolve();await Promise.all(requests);await flush();
+   assert.equal(peak,1);
+   if(ending==='reopen'){
+    assert.deepEqual(x.replies.map(r=>[r.probeId,r.snapshot.generation,r.snapshot.ready]),[[probeId,4,true]]);
+    assert.equal(x.timers.size,0);
+   }else if(ending==='hide'){
+    assert.equal(x.replies.length,0);assert.equal(x.timers.size,0);
+   }else{
+    assert(x.replies.length>0&&x.replies.every(r=>!r.snapshot.ready&&r.snapshot.provenance?.kind==='unconfirmed'));
+    assert.deepEqual([...x.timers.values()].map(timer=>timer.ms),[250]);
+    assert.equal(x.reads,handoff?4:3,'Churn cannot extend the inline read indefinitely');
+    await x.fire(250);assert.equal(x.replies.at(-1).snapshot.ready,true);assert.equal(x.timers.size,0);
+   }
+  }finally{gates.forEach(gate=>gate.resolve());x.dispose();await Promise.all(requests);await flush();}
+  assert.equal(active,0);assert.equal(x.timers.size,0);
+ }
 });
 await check('read recovery: healthy disabled controls are not mistaken for a failed read or polled',async()=>{
  const f=relayFixture(async()=>({...data(),actions:{monitor:false,performance:false}}));try{
@@ -545,6 +600,53 @@ for(const field of ['monitor','performance'])await check('read recovery: actual 
   assert.equal(snapshot.actions[field],true);assert.equal(f.controllerTimerCount(),0);
   for(const name of ['saves','inputSaves','monitorSaves','monitorApplies','performanceUpdates','frameApplies','fanSaves'])assert.equal(f.counts[name]??0,0,name);
  }finally{f.stop();assert.equal(f.controllerTimerCount(),0);}
+});
+await check('read recovery: a held owner read cannot block Decky across same-generation sleep',async()=>{
+ const gate=defer();let hold=false,held=false;
+ const h=await createMirrorHostFixture({readHooks:{performance:async()=>{if(hold&&!held){held=true;await gate.promise;}}}});
+ const snapshots=()=>h.replies.filter(row=>row.message.type==='snapshot');
+ const latest=()=>snapshots().at(-1)?.message.snapshot;
+ const publish=(revision,change)=>{h.state.power={...h.state.power,...change,known:true,publicationRevision:revision,observedNotificationSequence:revision};h.emit('power.lifecycleChanged',{...h.state.power});};
+ try{
+  h.state.power.suspendSerial=1;h.ready();await request(h);await flush();
+  const old=latest();assert(old?.ready);
+  hold=true;h.state.monitor.enabled=!h.state.monitor.enabled;h.monitorChanged();await flush();assert(held);
+  const id='sleep:1';
+  h.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'monitor.setEnabled',runId,id,clientId:'sleep',sequence:1,generation:old.generation,revision:old.revision,args:{enabled:old.monitor.enabled}}});
+  await flush();assert.equal(h.replies.some(row=>row.message.id===id),false,'the pre-sleep request is waiting for read admission');
+  publish(2,{suspendSerial:2,phase:'suspending',hardwareWritesAllowed:false,inputReady:false});await flush();
+  assert.equal(latest()?.ready,false,'the public suspend must close the old display without waiting for the owner read');
+  assert.equal(h.replies.find(row=>row.message.id===id)?.message.ok,false,'the pre-sleep request must receive a refusal before the old read returns');
+  publish(3,{phase:'ready',hardwareWritesAllowed:true,inputReady:true});await flush();
+  const current=latest();assert(current?.ready,'Ready must publish while the pre-sleep owner is still held');
+  assert.equal(current.generation,old.generation);assert(current.revision>old.revision);assert.equal(current.actions.performance,true);
+  const publications=snapshots().length,reads=h.counts.power;
+  gate.resolve();await flush();
+  assert.equal(snapshots().length,publications,'late owner completion cannot publish a retired snapshot');
+  assert.equal(h.counts.power,reads,'late owner completion must not start another read');
+  assert.equal(h.controllerTimerCount(),0);
+  for(const name of ['saves','inputSaves','monitorSaves','monitorApplies','performanceUpdates','frameApplies','fanSaves'])assert.equal(h.counts[name]??0,0,name);
+ }finally{gate.resolve();h.stop();await flush();assert.equal(h.sharedPowerTimerCount(),0);assert.equal(h.sharedPowerDiagnostics().subscriberCount,0);}
+});
+await check('read recovery: mirror follows suspend scope and ignores a delayed derived pending event',async()=>{
+ const h=await createMirrorHostFixture();
+ const latest=()=>h.replies.filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;
+ const publish=(revision,change)=>{h.state.power={...h.state.power,...change,known:true,publicationRevision:revision,observedNotificationSequence:revision};h.emit('power.lifecycleChanged',{...h.state.power});};
+ try{
+  h.state.power.suspendSerial=1;h.ready();await request(h);await flush();assert(latest()?.ready);
+  const reads=h.counts.power;
+  h.emit('power.pending',{generation:1,suspendSerial:0,publicationRevision:0});await flush();
+  assert.equal(h.counts.power,reads,'a delayed derived event cannot retire settled Ready');
+  const previous=latest().revision;
+  publish(2,{suspendSerial:2});await flush();
+  assert(latest().ready);assert(latest().revision>previous,'same-generation suspend scope retires the old mirror read');
+  const before={input:h.counts.inputReads,frames:h.counts.frameReads,monitor:h.counts.monitorReads};
+  publish(3,{notificationPending:true});await flush();
+  assert.equal(latest().ready,false);assert.equal(latest().actions.game,false);
+  assert.deepEqual({input:h.counts.inputReads,frames:h.counts.frameReads,monitor:h.counts.monitorReads},before);
+  publish(4,{notificationPending:false});await flush();assert(latest().ready);
+  assert.equal(h.counts.saves,0);assert.equal(h.counts.performanceUpdates??0,0);
+ }finally{h.stop();assert.equal(h.sharedPowerTimerCount(),0);assert.equal(h.sharedPowerDiagnostics().subscriberCount,0);}
 });
 await check('read recovery: missed Ready notification refreshes native facts without replaying a control write',async()=>{
  const f=await createMirrorHostFixture();try{f.ready();await request(f);await flush();
@@ -1058,7 +1160,8 @@ async function jointDisplayFixture({automatic=false,readHooks={},defaultEvents=f
  const getSlots=()=>slots.filter(slot=>slot.command==='gameSteam.context.get'),warmCount=()=>slots.filter(slot=>slot.command==='gameSteam.context.refresh').length;
  const invalidate=()=>{for(const callback of [...sourceListeners])callback();};
  const finish=async()=>{f.stop();reader.dispose();injectedReader.dispose();await flush();assert.equal(eventListeners.size,0);assert.equal(readinessListeners.size,0);assert.equal(active.size,0);assert.equal(uiSubscriptions,0);assert.equal(sourceListeners.size,0);assert.equal(f.controllerTimerCount(),0);assert.equal(f.fxTimerCount(),0);assert.equal(f.sharedPowerTimerCount(),0);assert(Object.values(f.observerStats()).every(value=>value===0));};
- return {f,reader,latest,request,getSlots,warmCount,invalidate,wire,active,uiSubscriptions:()=>uiSubscriptions,eventSource,finish};
+ const gameReadiness=current=>{f.setGameReadiness(current);for(const callback of [...readinessListeners])callback(current);};
+ return {f,reader,latest,request,getSlots,warmCount,invalidate,wire,active,uiSubscriptions:()=>uiSubscriptions,eventSource,gameReadiness,finish};
 }
 await check('optional shared Steam metadata never blocks controls or replays an explicit monitor intent',async()=>{
  const x=await jointDisplayFixture();try{
@@ -1079,33 +1182,143 @@ await check('optional shared metadata completes the same fast snapshot and never
   assert.equal(x.getSlots().length,1);const reads=x.f.counts.frameReads,warms=x.warmCount(),snapshots=x.f.replies.filter(row=>row.message.type==='snapshot').length;
   await flush();await flush();assert.equal(x.getSlots().length,1);assert.equal(x.warmCount(),warms);assert.equal(x.f.counts.frameReads,reads);assert.equal(x.f.replies.filter(row=>row.message.type==='snapshot').length,snapshots);
  }finally{await x.finish();}
+ // Win5 wake replay: a Steam metadata notification lands while the first
+ // profile read still owns the requested control snapshot.
+ for(const event of ['gameSteam.context.changed','steam.uiStateChanged']){
+  const profile=defer();let profileReads=0;
+  const x=await jointDisplayFixture({automatic:true,defaultEvents:true,readHooks:{profileReturn:async()=>{if(++profileReads===1)await profile.promise;}}});
+  try{
+   x.f.state.power.generation=8400;x.f.ready();x.request();await flush();
+   assert.equal(profileReads,1);assert.equal(x.latest(),undefined);
+   x.eventSource.emit(event,{pid:x.f.state.game.pid,identityGeneration:1});await flush();
+   profile.resolve();await flush();
+   const view=x.latest();assert(view?.ready&&view.actions.monitor);assert.equal(view.generation,8400);
+   const state={event,profileReads,frameReads:x.f.counts.frameReads,discarded:x.f.diagnostics.filter(row=>row.event==='snapshot-read-finished'&&row.discarded).length};
+   console.log(JSON.stringify({win5WakeMetadata:state}));
+   assert.deepEqual(state,{event,profileReads:1,frameReads:1,discarded:0});
+   assert.equal(x.f.counts.saves,0);assert.equal(x.f.counts.inputSaves,0);assert.equal(x.f.counts.monitorSaves,0);
+  }finally{profile.resolve();await x.finish();}
+ }
 });
 await check('late optional shared metadata repaints once through the existing display without another query',async()=>{
- const x=await jointDisplayFixture();try{
+ const x=await jointDisplayFixture(),browser=clientFixture('a'.repeat(64));try{
   x.f.ready();x.request();await flush();assert(x.latest()?.ready);const slot=x.getSlots()[0],reads=x.f.counts.frameReads,warms=x.warmCount(),initial=structuredClone(x.latest()),inputReads=x.f.counts.inputReads,monitorReads=x.f.counts.monitorReads,powerReads=x.f.counts.power;
   slot.resolve(slot.wire());await flush();const snapshot=x.latest();assert.equal(snapshot.gameSteam?.game.pid,x.f.state.game.pid);assert.equal(snapshot.gameSteam?.steam.gameId,String(400+x.f.state.game.pid));
+  const snapshots=x.f.replies.filter(row=>row.message.type==='snapshot');
+  assert.equal(snapshots[0].message.displayOnly,undefined,'Initial offer must be a full snapshot');
+  assert.equal(snapshots.at(-1).message.displayOnly,true,'Late cosmetic fields must be sent as a repaint');
+  assert.equal(snapshots.at(-1).message.probeId,undefined);
+  const first=snapshots[0].message,repaint=snapshots.at(-1).message;
+  browser.client.setVisible(true);browser.handlers.get('open')();
+  const receive=message=>browser.handlers.get('message')({data:JSON.stringify(message)});
+  receive(first);
+  const control=browser.client.snapshot().snapshot;
+  assert(control?.ready&&control.actions.monitor);
+  const checking=browser.client.testConnection().catch(error=>error),nonce=browser.sent.at(-1).probeId;
+  assert(nonce);
+  // No control fields are needed to repaint the existing accepted revision.
+  receive({...repaint,probeId:nonce});
+  const shown=browser.client.snapshot();
+  assert.deepEqual(shown.snapshot,{...control,gameSteam:structuredClone(repaint.snapshot.gameSteam),losslessProgram:structuredClone(control.losslessProgram)});
+  assert.equal(shown.connectionTest.pending,true);
+  receive({...repaint,snapshot:{...repaint.snapshot,gameSteam:undefined}});
+  assert.equal(browser.client.snapshot().snapshot.gameSteam,undefined,'A display packet can still clear obsolete game metadata');
+  assert.deepEqual(browser.client.snapshot().snapshot.actions,control.actions);
+  assert.equal(browser.client.snapshot().connectionTest.pending,true);
+  receive({...first,probeId:nonce,snapshot:{...first.snapshot,provenance:{kind:'ymcc-native',pid:123}}});
+  assert.equal(browser.client.snapshot().connectionTest.pending,false);
+  assert.equal((await checking).revision,initial.revision);
+  const bytes=value=>Buffer.byteLength(JSON.stringify(value));
+  console.log(JSON.stringify({displayWireBytes:{full:bytes(first),repaint:bytes(repaint),fields:Object.keys(repaint.snapshot).sort()}}));
+  assert.deepEqual(Object.keys(repaint.snapshot).sort(),['gameSteam','generation','losslessProgram','revision','runId'],
+    'A display repaint must not reserialize full business controls');
   assert.equal(x.getSlots().length,1);assert.equal(x.warmCount(),warms);assert.equal(x.f.counts.frameReads,reads,'Late optional metadata must not repeat business-owner reads');
   const count=x.f.replies.length;await flush();await flush();assert.equal(x.f.replies.length,count);assert.equal(x.getSlots().length,1);
   // Metadata completion retains the original rendered control receipt. An
   // explicit command from it is still validated/applied by the original owner.
-  assert.equal(snapshot.revision,initial.revision);assert.equal(snapshot.generation,initial.generation);assert.deepEqual(snapshot.actions,initial.actions);
+  assert.equal(snapshot.revision,initial.revision);assert.equal(snapshot.generation,initial.generation);assert.deepEqual(shown.snapshot.actions,control.actions);
   assert.equal(x.f.counts.inputReads,inputReads);assert.equal(x.f.counts.monitorReads,monitorReads);assert.equal(x.f.counts.power,powerReads);
   x.f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'monitor.setEnabled',runId,id:'display:1',clientId:'display',sequence:1,generation:initial.generation,revision:initial.revision,args:{enabled:!initial.monitor.enabled}}});await flush();
   const reply=x.f.replies.filter(row=>row.message.type==='reply').at(-1)?.message;assert.equal(reply?.ok,true);assert.equal(x.f.counts.monitorSaves,1);assert.equal(x.f.counts.monitorApplies,1);
 
- }finally{await x.finish();}
+ }finally{browser.client.dispose();assert.equal(browser.timers.size,0);await x.finish();}
 
  // Existing full read wins over a late display completion and carries the
  // metadata itself. It must not be invalidated into a third control batch.
  {
   const hold=defer();let blocked=false;const x=await jointDisplayFixture({readHooks:{frames:async()=>{if(blocked)await hold.promise;}}});
-  try{x.f.ready();x.request();await flush();const first=x.latest();assert(first?.ready);blocked=true;x.f.monitorChanged();await flush();const reads=x.f.counts.frameReads;assert.equal(reads,2);const slot=x.getSlots()[0];slot.resolve(slot.wire());await flush();assert.equal(x.f.counts.frameReads,reads);hold.resolve();await flush();assert(x.latest()?.ready);assert(x.latest().gameSteam);assert.equal(x.f.counts.frameReads,reads);assert.equal(x.f.counts.monitorSaves,0);}
+  try{x.f.ready();x.request();await flush();const first=x.latest();assert(first?.ready);blocked=true;x.f.state.monitor={...x.f.state.monitor,enabled:!x.f.state.monitor.enabled};x.f.monitorChanged();await flush();const reads=x.f.counts.frameReads;assert.equal(reads,2);const slot=x.getSlots()[0];slot.resolve(slot.wire());await flush();assert.equal(x.f.counts.frameReads,reads);hold.resolve();await flush();assert(x.latest()?.ready);assert(x.latest().gameSteam);assert.equal(x.latest().monitor.enabled,!first.monitor.enabled);assert.equal(x.f.counts.frameReads,reads);assert.equal(x.f.counts.monitorSaves,0);}
   finally{hold.resolve();await x.finish();}
+ }
+ // Invalidation can arrive after the host assembled the view and before the
+ // relay accepted it. Retire only metadata; the first control revision wins.
+ {
+  let x,fired=false;const replies=()=>x.f.replies.filter(row=>row.message.type==='snapshot'),browser=clientFixture('a'.repeat(64));
+  x=await jointDisplayFixture({automatic:true,defaultEvents:true,readHooks:{diagnostic:row=>{
+   if(!fired&&row.event==='snapshot-read-finished'){
+    fired=true;
+    x.eventSource.emit('gameSteam.context.changed',{pid:x.f.state.game.pid,identityGeneration:1});
+   }
+  }}});
+  try{
+   x.f.ready();x.request();await flush();
+   assert.equal(fired,true);assert.equal(x.getSlots().length,2);
+   browser.client.setVisible(true);browser.handlers.get('open')();
+   for(const {message} of replies())browser.handlers.get('message')({data:JSON.stringify(message)});
+   const displayed=browser.client.snapshot().snapshot;
+   assert(displayed?.ready&&displayed.gameSteam?.game.pid===x.f.state.game.pid);
+   assert(replies().length>0&&replies().every(row=>row.message.snapshot.revision===1));
+   assert.equal(x.f.counts.power,1);assert.equal(x.f.counts.frameReads,1);assert.equal(x.f.counts.monitorSaves,0);
+  }finally{browser.client.dispose();assert.equal(browser.timers.size,0);await x.finish();}
+ }
+ // Losing the first broker send leaves no receipt for optional display.
+ {
+  const messages=[];let reads=0,running=false;
+  const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;return {generation:1,ready:true,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]},losslessProgram:{known:running,running}};},observe:()=>()=>{},reply:async(_connection,message)=>{messages.push(structuredClone(message));return messages.length>1;}});
+  try{
+   await relay.request({...peer,request:{command:'snapshot',runId}});
+   running=true;
+   assert.equal(relay.repaintLosslessProgram(1,{known:true,running:true}),true);
+   await flush();assert.equal(messages.length,1,'A repaint must not replace a rejected original delivery');assert.equal(reads,1);
+   const probeId='probe:display:1';
+   await relay.request({...peer,request:{command:'snapshot',runId,probeId}});
+   assert.equal(messages.length,2);assert.equal(reads,2);assert.equal(messages[1].displayOnly,undefined);
+   assert.equal(messages[1].probeId,probeId);assert.equal(messages[1].snapshot.losslessProgram.running,true);
+  }finally{relay.dispose();}
+ }
+ // Slow sends retain only the latest repaint. Closing the panel retires
+ // its wait without requiring the old broker acknowledgement to arrive.
+ {
+  const held=defer(),retired=defer(),messages=[];let reads=0,waiters=0;
+  class CountingPromise extends Promise{static allSettled(values){waiters++;return super.allSettled(values);}}
+  const steam=load(src('decky-plugin/src/steamRunningContext.ts'));
+  const {ReadOnlyMirrorRelay:CountedRelay}=load(src('src/bridge/deckyMirrorRelay.ts'),{'../../decky-plugin/src/steamRunningContext':steam},{Promise:CountingPromise});
+  const relay=new CountedRelay({read:async()=>{reads++;return {generation:1,ready:true,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]},losslessProgram:{known:true,running:false}};},observe:()=>()=>{},reply:async(_connection,message)=>{messages.push(structuredClone(message));if(messages.length===2)await held.promise;else if(messages.length===4)await retired.promise;return true;}});
+  const request=subscribe=>relay.request({...peer,request:{command:'snapshot',runId,subscribe}});
+  const lamp=running=>relay.repaintLosslessProgram(1,{known:true,running});
+  try{
+   await request(true);assert.equal(lamp(true),true);await flush();assert.equal(messages.length,2);assert.equal(messages[1].snapshot.losslessProgram.running,true);
+   const startingWaiters=waiters;
+   for(let i=0;i<33;i++)assert.equal(lamp(i%2===1),true);
+   const burstWaiters=waiters-startingWaiters;
+   await flush();assert.equal(messages.length,2,'Repaints may not overtake an in-flight repaint');
+   held.resolve();await flush();assert.equal(messages.length,3);assert.equal(messages[2].displayOnly,true);assert.equal(messages[2].snapshot.losslessProgram.running,false);assert.equal(reads,1);
+   assert.equal(lamp(true),true);await flush();assert.equal(messages.length,4);assert.equal(lamp(false),true);
+   await request(false);await request(true);assert.equal(messages.length,5);assert.equal(reads,2);
+   assert.equal(lamp(true),true);await flush();const beforeRetired=messages.length;
+   retired.resolve();await flush();
+   const result={burstWaiters,beforeRetired,finalMessages:messages.length,reads};
+   console.log(JSON.stringify({slowRepaint:result}));
+   assert.equal(messages[4].displayOnly,undefined);assert.equal(messages[4].snapshot.losslessProgram.running,false);
+   assert.equal(messages[5]?.displayOnly,true);assert.equal(messages[5]?.snapshot.losslessProgram.running,true);
+   assert.deepEqual({beforeRetired,finalMessages:messages.length,reads},{beforeRetired:6,finalMessages:6,reads:2},'New demand must not wait for a retired send');
+   assert(burstWaiters<=1,'Only one batch may wait for the same in-flight repaint');
+  }finally{held.resolve();retired.resolve();relay.dispose();await flush();}
  }
  // A queued display delivery may not paint over a real source/peer boundary.
  for(const boundary of ['source','pause','peer','dispose']){
   let release;const held=new Promise(resolve=>{release=resolve;});const messages=[];let reads=0;const identity='current-game';
-  const native={generation:1,ready:true,game:{label:'A',identity,fields:{}},fan:{supported:false,enabled:false,preset:'',choices:[]}};
+  const native={generation:1,ready:true,game:{label:'A',identity,fields:{}},fan:{supported:false,enabled:false,preset:'',choices:[]},losslessProgram:{known:false,running:false}};
   const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;return native;},observe:()=>()=>{},reply:async(connection,message)=>{messages.push({connection,message:structuredClone(message)});if(messages.length===1)await held;return true;}});
   try{const open=relay.request({...peer,request:{command:'snapshot',runId}});await flush();const before=reads;
    assert.equal(relay.repaintGameSteam?.(identity,1,undefined),true);
@@ -1113,8 +1326,10 @@ await check('late optional shared metadata repaints once through the existing di
    // Exact display content is opaque to action permissions; this private test
    // checks queue ownership only, separate from the real shared DTO above.
    assert.equal(relay.repaintGameSteam(identity,1,metadata),true);
+   assert.equal(relay.repaintLosslessProgram(2,{known:true,running:true}),false,'Another power generation cannot repaint');
+   assert.equal(relay.repaintLosslessProgram(1,{known:true,running:true}),true);
    if(boundary==='source')relay.invalidate();else if(boundary==='pause')await relay.request({...peer,request:{command:'snapshot',runId,subscribe:false}});else if(boundary==='peer')relay.connected({...peer,connection:'2'});else relay.dispose();
-   release();await open;await flush();assert(messages.slice(1).every(row=>!row.message.snapshot.gameSteam),'Retired display patch must not be delivered');assert.equal(reads,boundary==='source'?before+1:before);
+   release();await open;await flush();assert(messages.slice(1).every(row=>!row.message.snapshot.gameSteam&&!row.message.snapshot.losslessProgram.known),'Retired display patch must not be delivered');assert.equal(reads,boundary==='source'?before+1:before);
   }finally{release();relay.dispose();await flush();}
  }
 });
@@ -1145,8 +1360,27 @@ await check('shared client epoch and game ABA discard optional metadata from ret
    for(const patch of [{presence:-1},{presence:0},{sourceAvailable:false},{windowsSessionKnown:false,windowsSession:0},{processEpoch:'01'},{processEpoch:'18446744073709551616'},{extraAuthority:true}]){await changed('gameSteam.context.sourceChanged',{...source,...patch});await changed('gameSteam.context.sourceChanged',source);}
    await changed('gameSteam.context.sourceChanged',null);await changed('gameSteam.context.sourceChanged',source);
    const legacy={pid:900,processCreated:'987654321',processEpoch:'1',accountEpoch:'1'};await changed('gameSteam.context.sourceChanged',legacy);await changed('gameSteam.context.sourceChanged',legacy);
-   const completion={pid:x.f.state.game.pid,identityGeneration:1};await changed('gameSteam.context.changed',completion);await changed('gameSteam.context.changed',completion);
-   await changed('power.resuming',{});await changed('power.resuming',{});await changed('gameSteam.context.sourceChanged',source);
+   const completion={pid:x.f.state.game.pid,identityGeneration:1};
+   const ownerReads=()=>[x.f.counts.power,x.f.counts.frameReads,x.f.counts.inputReads,x.f.counts.monitorReads,x.f.counts.schedule];
+   await changed('gameSteam.context.sourceChanged',source);
+   await changed('gameSteam.context.changed',completion);
+   const afterCompletion=x.getSlots().at(-1),afterCompletionGets=x.getSlots().length,afterCompletionReads=ownerReads();
+   for(let i=0;i<20;i++){emit('gameSteam.context.sourceChanged',source);await flush();}
+   console.log(JSON.stringify({sourceAfterMetadataCompletion:{extraGets:x.getSlots().length-afterCompletionGets,aborted:afterCompletion.signal.aborted}}));
+   assert.equal(afterCompletion.signal.aborted,false,'Repeating the same verified source must not cancel the fresh metadata GET after completion');
+   assert.equal(x.getSlots().length,afterCompletionGets);assert.deepEqual(ownerReads(),afterCompletionReads);
+   const before=ownerReads(),revision=x.latest().revision,warmBefore=x.warmCount(),old=x.getSlots().at(-1),getsBefore=x.getSlots().length;
+   for(let i=0;i<20;i++)emit('gameSteam.context.changed',completion);
+   await flush();assert.equal(old.signal.aborted,true);assert.equal(x.getSlots().length,getsBefore+1);
+   old.resolve(old.wire());await flush();assert.equal(x.latest().gameSteam,undefined);
+   await changed('gameSteam.context.changed',completion);
+   assert.deepEqual(ownerReads(),before);assert.equal(x.latest().revision,revision);
+   assert.equal(x.warmCount(),warmBefore);assert.equal(x.f.counts.saves,0);assert.equal(x.f.counts.monitorSaves,0);
+   const current=x.getSlots().at(-1),beforePower=x.getSlots().length;
+   emit('power.resuming',{});emit('power.resuming',{});await flush();
+   assert.equal(current.signal.aborted,false);assert.equal(x.getSlots().length,beforePower);
+   x.gameReadiness(false);await flush();assert.equal(current.signal.aborted,true);
+   x.gameReadiness(true);await flush();await changed('gameSteam.context.sourceChanged',source);
    const final=x.getSlots().at(-1);final.resolve(final.wire());await flush();assert(x.latest().gameSteam);
   }finally{await x.finish();}
  }

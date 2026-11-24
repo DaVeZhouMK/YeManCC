@@ -93,7 +93,7 @@ export interface MonitorSnapshotView {
 }
 
 export interface MonitorHubDeps {
-  invoke: (cmd: string, args?: object, options?: { timeoutMs?: number }) => Promise<unknown>;
+  invoke: (cmd: string, args?: object, options?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<unknown>;
   readTextFile: (path: string, maxBytes?: number) => Promise<string>;
   now: () => number;
   /** 测试注入：默认全局 setTimeout/clearTimeout（仅用于有界收尾重试，不建高频轮询） */
@@ -302,6 +302,7 @@ function isUnknownCommand(err: unknown): boolean {
 export interface MonitorDataHub {
   admitDisplayPublication: (raw:unknown) => MonitorSnapshotView | null | undefined;
   read: () => Promise<MonitorSnapshotView | null>;
+  retireReads: () => void;
   acquire: (owner: string, need: MonitorDemandNeed) => () => void;
   transport: () => MonitorTransportMode;
   /** 已确认（ok 回执或读回观察到活跃）的需求标志（测试/诊断） */
@@ -350,6 +351,8 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
 
   let transport: MonitorTransportMode = 'unknown';
   let inflight: Promise<MonitorSnapshotView | null> | null = null;
+  let readOwner: AbortController | null = null;
+  let readRevision = 0;
   let pendingReadCount = 0;
   const snapshotBudget = createMonitorSnapshotBudget();
   // RTSS curve packets often repeat the 1Hz top payload byte-for-byte. Parse
@@ -848,9 +851,10 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
     return view;
   }
 
-  async function readViaSnapshot(doneEpoch: number): Promise<MonitorSnapshotView | null> {
+  async function readViaSnapshot(doneEpoch: number, signal: AbortSignal): Promise<MonitorSnapshotView | null> {
     const sessionAtRead = expectedSession;
-    const res = await deps.invoke('monitor.snapshot', {}, { timeoutMs: 2000 });
+    const res = await deps.invoke('monitor.snapshot', {}, { timeoutMs: 2000, signal });
+    if (signal.aborted) return null;
     if (!res || typeof res !== 'object' || Array.isArray(res)) return null;
     const raw = res as Record<string, unknown>;
     if (Number(raw.schema) !== SNAPSHOT_SCHEMA) return null;
@@ -871,7 +875,7 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
   }
 
   // 兼容通路：旧 native 无快照命令时按原四文件读取，字段语义不变。
-  async function readViaFiles(): Promise<MonitorSnapshotView | null> {
+  async function readViaFiles(signal: AbortSignal): Promise<MonitorSnapshotView | null> {
     const readSafe = async (path: string, maxBytes: number): Promise<string | null> => {
       try {
         return await deps.readTextFile(path, maxBytes);
@@ -884,6 +888,7 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
       readSafe(pcDir + '\\topmon.json', 8192), readSafe(pcDir + '\\fps-status.json', 8192),
       readSafe(pcDir + '\\fps-monitor.hb', 512), readSafe(pcDir + '\\hwinfo-ok', 64),
     ]);
+    if (signal.aborted) return null;
     const top = topRaw ? decodeTop(topRaw) : null;
     const fps = fpsRaw ? decodeFps(fpsRaw) : null;
     const proofNow = deps.now();
@@ -978,24 +983,39 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
     });
     return copy;
   }
+  function retireReads(): void {
+    const owner = readOwner;
+    ++readRevision; readOwner = null; inflight = null;
+    owner?.abort();
+  }
   async function read(): Promise<MonitorSnapshotView | null> {
-    if (inflight) return cloneReadResult(await inflight);
+    const revision = readRevision;
+    if (inflight) {
+      const result = await inflight;
+      return revision === readRevision ? cloneReadResult(result) : null;
+    }
     // 199：先捕获"读取版本"再让 pump 可能同步发出命令——本读回只校准版本不晚于它的命令。
     const doneEpoch = intentEpoch;
     // 读取=仅按退避推进未决工作（不绕退避耗预算）；真正的新意图由 acquire/release 立即推进。
     void pump('poll');
+    if (revision !== readRevision) return null;
+    const owner = new AbortController();
+    readOwner = owner;
+    const { signal } = owner;
     pendingReadCount += 1;
-    inflight = (async () => {
+    const task = (async () => {
       try {
-        if (transport === 'files') return await readViaFiles();
+        if (transport === 'files') return await readViaFiles(signal);
         try {
-          const view = await readViaSnapshot(doneEpoch);
+          const view = await readViaSnapshot(doneEpoch, signal);
+          if (signal.aborted) return null;
           if (transport === 'unknown') transport = 'snapshot';
           return view;
         } catch (err) {
+          if (signal.aborted) return null;
           if (transport === 'unknown' && isUnknownCommand(err)) {
             transport = 'files';
-            return await readViaFiles();
+            return await readViaFiles(signal);
           }
           // 已确认支持快照但超时/失效（或未知 schema）⇒ 返回不可用，不偷偷回读残留文件。
           return null;
@@ -1004,10 +1024,12 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
         return null;
       } finally {
         pendingReadCount -= 1;
-        inflight = null;
+        if (readOwner === owner) { readOwner = null; inflight = null; }
       }
     })();
-    return cloneReadResult(await inflight);
+    if (readOwner === owner) inflight = task;
+    const result = await task;
+    return revision === readRevision ? cloneReadResult(result) : null;
   }
 
   // 需求登记：同 owner 每次登记独立 token；旧 disposer 只释放自己的登记。
@@ -1097,6 +1119,7 @@ function createMonitorDataHubOwner(deps: MonitorHubDeps,
     takeover: () => takeoverState,
     attempts: () => ({ ...attempts }),
     pendingReads: () => pendingReadCount,
+    retireReads,
   };
 }
 
@@ -1199,13 +1222,19 @@ export function acceptPublishedMonitorSnapshot(raw:unknown):void {
   }
   displayFeed.advance();hudDisplayFeed.advance();advanceMonitorTdpDisplay();
 }
-export const readMonitorSnapshot = async (): Promise<MonitorSnapshotView | null> => {
+export const readMonitorSnapshot = async (powerSignal?: AbortSignal): Promise<MonitorSnapshotView | null> => {
+  if (powerSignal?.aborted) return null;
+  const retire = () => { ++publicationVersion; productionHub.retireReads(); };
   const version=publicationVersion;
-  const snapshot = await productionHub.read();
+  powerSignal?.addEventListener('abort', retire, { once: true });
+  let snapshot: MonitorSnapshotView | null;
+  try { snapshot = await productionHub.read(); }
+  finally { powerSignal?.removeEventListener('abort', retire); }
   // Reuse this read's private source, never the caller's mutable copy or a
   // sequence-only cache match. Drop the receipt even if a newer push won.
   const receipt = snapshot ? readDisplaySources.get(snapshot) : undefined;
   if (snapshot) readDisplaySources.delete(snapshot);
+  if (powerSignal?.aborted) return null;
   const display = version === publicationVersion;
   // Finish even if a newer publication won: the control copy must also respect
   // a stop issued during the final promise handoff. Receipt cleanup stays first.

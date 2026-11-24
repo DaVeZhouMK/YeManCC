@@ -52,7 +52,7 @@ class Owner {
     bool attempted_=false, stopped_=false;
     std::shared_ptr<State> state_;
     std::thread thread_;
-    static void run(const std::shared_ptr<State>& state,const fs::path& executable,ULONGLONG started,Limits limits,bool explicitOpen=false) noexcept {
+    static void run(const std::shared_ptr<State>& state,const fs::path& executable,ULONGLONG started,Limits limits,bool explicitOpen=false,const fs::path& selected={}) noexcept {
         struct Finish{State& state;~Finish(){state.childPid.store(0);state.finished.store(true);SetEvent(state.done.value);}}finish{*state};
         try {
             SetThreadPriority(GetCurrentThread(),THREAD_MODE_BACKGROUND_BEGIN);
@@ -81,6 +81,7 @@ class Owner {
             std::wstring command=quote(executable)+(explicitOpen?L" --opti-catalog-prepare ":L" --opti-startup ")+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(parent.value))+L" "+
                 std::to_wstring(reinterpret_cast<ULONG_PTR>(signal.value))+L" "+identity;
+            if(!selected.empty())command+=L" "+quote(selected);
             STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof startup;startup.StartupInfo.dwFlags=STARTF_USESHOWWINDOW;
             startup.StartupInfo.wShowWindow=SW_HIDE;startup.lpAttributeList=attributes;PROCESS_INFORMATION child{};
             if(WaitForSingleObject(state->stop.value,0)!=WAIT_TIMEOUT)return;
@@ -113,7 +114,7 @@ public:
     }
     // Called on the IPC worker only. Duplicate explicit requests do not queue
     // more passes. An outstanding automatic pass is cancelled and joined first.
-    DWORD prepareForOpen(const fs::path& executable,Limits limits={0,workerBudgetMs}) noexcept {
+    DWORD prepareForOpen(const fs::path& executable,Limits limits={0,workerBudgetMs},const fs::path& selected={}) noexcept {
         std::unique_lock request(requestGate_,std::try_to_lock);
         if(!request.owns_lock())return ERROR_BUSY;
         std::shared_ptr<State> state;
@@ -130,7 +131,7 @@ public:
                 state=std::make_shared<State>();
                 if(!state->stop.value||!state->done.value)return 15;
                 state_=state;limits.delay=0;
-                thread_=std::thread([state,executable,limits]{run(state,executable,GetTickCount64(),limits,true);});
+                thread_=std::thread([state,executable,limits,selected]{run(state,executable,GetTickCount64(),limits,true,selected);});
             }
             if(WaitForSingleObject(state->done.value,INFINITE)!=WAIT_OBJECT_0)return 15;
             std::lock_guard lock(gate_);
@@ -149,7 +150,7 @@ public:
     unsigned launches()const noexcept{std::lock_guard lock(gate_);return state_?state_->launches.load():0;}
     DWORD childPid()const noexcept{std::lock_guard lock(gate_);return state_?state_->childPid.load():0;}
 };
-inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function<void(const std::function<bool()>&)>& operation,bool* explicitOpen=nullptr){
+inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function<void(const std::function<bool()>&)>& operation,bool* explicitOpen=nullptr,fs::path* selected=nullptr){
     int count=0;auto* args=CommandLineToArgvW(GetCommandLineW(),&count);if(!args)return 10;
     struct Free{wchar_t** value;~Free(){LocalFree(value);}}free{args};
     if(count<2)return std::nullopt;
@@ -157,7 +158,7 @@ inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function
     if(!requested&&std::wstring_view(args[1])!=L"--opti-startup")return std::nullopt;
     // A child failure is a silent process exit, including crash/error reporting.
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
-    if(count!=5)return 10;
+    if(count!=5 && !(requested&&selected&&count==6&&*args[5]))return 10;
     auto parse=[](const wchar_t* value)->HANDLE{
         if(!value||!*value||wcsspn(value,L"0123456789")!=wcslen(value))return nullptr;
         wchar_t* end=nullptr;const auto n=_wcstoui64(value,&end,10);
@@ -170,6 +171,7 @@ inline std::optional<int> entrypoint(const fs::path& appRoot,const std::function
     if(actual.empty()||_wcsicmp(actual.c_str(),expected.c_str())!=0)return 11;
     const std::function<bool()> stopped=[&]{return WaitForSingleObject(parent.value,0)!=WAIT_TIMEOUT||WaitForSingleObject(cancel.value,0)!=WAIT_TIMEOUT;};
     if(explicitOpen)*explicitOpen=requested;
+    if(selected)*selected=count==6?fs::path(args[5]):fs::path{};
     try{if(!stopped())operation(stopped);return stopped()?12:0;}catch(...){return 15;}
 }
 } // namespace ymcc::optiStartup

@@ -57,8 +57,8 @@ const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 // These inert nodes do not rerun that probe or establish the original error cause.
 const tmntIncident={key:'steam-1361510',pid:80708,executable:'TMNT.exe',assetId:'3b507d102803210fd2601475605a7275',bindingRevision:6,bytes:23996804,firstError:'UNKNOWN',metadata:{width:1280,height:720,duration:77},probePositions:[8,38.5,75],frame:{contextSeq:6,appId:'1361510',entry:{assetId:'3b507d102803210fd2601475605a7275',revision:'3b507d102803210fd2601475605a7275',bindingRevision:6,kind:'video',url:'http://127.0.0.1:13140/asset/3b507d102803210fd2601475605a7275.mp4?token='+'a'.repeat(64),playback:{start:8,end:38,fit:'cover'}}}};
 type PlayMode='normal'|'pending'|'reject'|'abort'|'throw';
-function faultFixture(mode:PlayMode='normal',selectedFrame:any=frame,metadata={duration:120,width:1920,height:1080}){
- let clock=1000,id=0,admit=true,focus=true,playCount=0,playMode=mode;const timers=new Map<number,{run:()=>void;due:number;delay:number}>(),media:any[]=[],failed:any[]=[];
+function faultFixture(mode:PlayMode='normal',selectedFrame:any=frame,metadata={duration:120,width:1920,height:1080},composition?:Pick<NonNullable<ConstructorParameters<typeof WallpaperPlayers>[2]>,'observeComposition'|'composited'>,acceptFailure?:(value:typeof frame)=>boolean){
+ let clock=1000,id=0,admit=true,focus=true,playCount=0,playMode=mode;const timers=new Map<number,{run:()=>void;due:number;delay:number}>(),media:any[]=[],failed:any[]=[],temporaryFailures:boolean[]=[];
  const doc:any={visibilityState:'visible',hasFocus:()=>focus,defaultView:null,createElement:()=>{
   const handlers=new Map<string,Array<()=>void>>(),attrs=new Map<string,string>();
   const node:any={ownerDocument:doc,style:{},dataset:{},duration:metadata.duration,videoWidth:metadata.width,videoHeight:metadata.height,currentTime:0,readyState:0,seeking:false,paused:true,parentNode:null,error:null,rejectPlay:null,
@@ -68,17 +68,91 @@ function faultFixture(mode:PlayMode='normal',selectedFrame:any=frame,metadata={d
   Object.defineProperty(node,'src',{get:()=>attrs.get('src'),set:(v:string)=>attrs.set('src',v)});media.push(node);return node;
  }};
  const attrs=new Map<string,string>(),target:any={setAttribute:(k:string,v:string)=>attrs.set(k,v),removeAttribute:(k:string)=>attrs.delete(k),getAttribute:(k:string)=>attrs.get(k)},container:any={parentElement:target,appendChild:(n:any)=>n.parentNode=container};
- const pool=new WallpaperPlayers(doc,value=>failed.push(value),{allowed:()=>admit,now:()=>clock,schedule:((run:()=>void,delay:number)=>{timers.set(++id,{run,delay,due:clock+delay});return id;}) as any,cancel:((id:number)=>timers.delete(id)) as any});
+ const pool=new WallpaperPlayers(doc,(value,temporary)=>{if(acceptFailure&&!acceptFailure(value))return false;failed.push(value);temporaryFailures.push(temporary===true);},{...composition,allowed:()=>admit,now:()=>clock,schedule:((run:()=>void,delay:number)=>{timers.set(++id,{run,delay,due:clock+delay});return id;}) as any,cancel:((id:number)=>timers.delete(id)) as any});
  const advance=async(ms:number)=>{const end=clock+ms;let guard=0;for(;;){const due=[...timers].filter(([,t])=>t.due<=end).sort((a,b)=>a[1].due-b[1].due)[0];if(!due)break;assert.ok(++guard<100,'unbounded deadline loop');clock=due[1].due;timers.delete(due[0]);due[1].run();await flush();}clock=end;await flush();};
  const ready=()=>{const n=media.at(-1);n.readyState=2;n.fire('loadedmetadata');n.fire('canplay');return n;};
- return{pool,timers,media,failed,advance,ready,target,show:(seq=selectedFrame.contextSeq,key=selectedFrame.entry.assetId)=>pool.show(container,{...selectedFrame,contextSeq:seq,entry:{...selectedFrame.entry,assetId:key}}),plays:()=>playCount,created:()=>media.length,setPlayMode:(v:PlayMode)=>playMode=v,setAllowed:(v:boolean)=>admit=v,setFocus:(v:boolean)=>focus=v,doc,error:(code:number|null=null)=>{const n=media.at(-1);n.error=code===null?null:{code};n.fire('error');return n;}};
+ return{pool,timers,media,failed,temporaryFailures,advance,ready,target,container,show:(seq=selectedFrame.contextSeq,key=selectedFrame.entry.assetId)=>pool.show(container,{...selectedFrame,contextSeq:seq,entry:{...selectedFrame.entry,assetId:key}}),plays:()=>playCount,created:()=>media.length,scheduled:()=>id,setPlayMode:(v:PlayMode)=>playMode=v,setAllowed:(v:boolean)=>admit=v,setFocus:(v:boolean)=>focus=v,doc,error:(code:number|null=null)=>{const n=media.at(-1);n.error=code===null?null:{code};n.fire('error');return n;}};
 }
 async function fault(name:string,run:()=>Promise<void>){try{await run();faultResults.push({name,ok:true});}catch(e){faultResults.push({name,ok:false,error:String(e instanceof Error?e.message:e)});}}
+function compositionSignals(node:any,throws=false){
+ let callback:VideoFrameRequestCallback|undefined,requests=0;const cancelled:number[]=[];
+ Object.defineProperty(node,'isConnected',{get:()=>!!node.parentNode});
+ node.requestVideoFrameCallback=(run:VideoFrameRequestCallback)=>{++requests;if(throws)throw Error('inert frame callback refusal');callback=run;return 0;};
+ node.cancelVideoFrameCallback=(id:number)=>cancelled.push(id);
+ return {requests:()=>requests,cancelled,deliver:(presentationTime=1025,presentedFrames=3)=>callback?.(1100,{presentationTime,presentedFrames} as VideoFrameCallbackMetadata)};
+}
+await fault('video-compositor-observation-is-one-shot-without-a-new-watch',async()=>{
+ const reports:any[]=[];let allowed=0;
+ const f=faultFixture('normal',frame,undefined,{observeComposition:()=>++allowed===1,composited:(shown,detail)=>reports.push({appId:shown.appId,seq:shown.contextSeq,...detail})});try{
+  f.show();const s=compositionSignals(f.media[0]);const n=f.ready();await flush();
+  check(allowed===1&&s.requests()===1&&reports.length===0&&!n.paused,'reveal is not composition and never waits for the callback to play');
+  const timer=[...f.timers.keys()][0];for(let i=0;i<200;i++){n.fire('canplay');n.fire('timeupdate');f.show();}
+  check(allowed===1&&s.requests()===1&&f.timers.size===1&&f.timers.has(timer),'ready/event/render storm adds neither registrations nor watches');
+  s.deliver();s.deliver(1050,4);
+  check(reports.length===1&&reports[0].sinceRevealMs===25&&reports[0].presentedFrames===3&&reports[0].appId===frame.appId&&reports[0].seq===frame.contextSeq,'only the first submission for the captured selection is logged');
+  f.pool.stop();check(s.cancelled.length===0&&f.timers.size===0,'delivered observer is not pending after shutdown');
+  f.show();const exhausted=compositionSignals(f.media.at(-1));check(!f.ready().paused&&exhausted.requests()===0,'observation budget exhausted still allows playback');
+ }finally{f.pool.stop();}
+});
+await fault('video-compositor-callback-cannot-escape-owner-or-off',async()=>{
+ for(const edge of ['off','focus','context','replacement','recovery','stale-submission']){
+  let reports=0;const f=faultFixture('normal',frame,undefined,{observeComposition:()=>true,composited:()=>{++reports;}});try{
+   f.show();const s=compositionSignals(f.media[0]);const n=f.ready();
+   if(edge==='off')f.pool.stop();else if(edge==='focus')f.setFocus(false);else if(edge==='context')f.show(frame.contextSeq+1);else if(edge==='replacement')f.show(frame.contextSeq+1,'replacement');else if(edge==='recovery')f.error(2);
+   s.deliver(edge==='stale-submission'?999:1025);
+   check(reports===0,'late or pre-reveal frame must not log: '+edge);
+   if(edge==='off'||edge==='replacement'||edge==='recovery')check(s.cancelled.length===1&&s.cancelled[0]===0&&!n.src&&n.paused,'pending id (including zero) is cancelled with decoder release: '+edge);
+  }finally{f.pool.stop();}
+ }
+});
+await fault('video-compositor-observation-refusal-never-changes-playback',async()=>{
+ for(const edge of ['unsupported','missing-cancel','registration-throws','sink-throws']){
+  let allowed=0;const f=faultFixture('normal',frame,undefined,{observeComposition:()=>{++allowed;return true;},composited:()=>{throw Error('inert sink refusal');}});try{
+   f.show();const n=f.media[0];const s=edge==='unsupported'?null:compositionSignals(n,edge==='registration-throws');if(edge==='missing-cancel')delete n.cancelVideoFrameCallback;
+   f.ready();s?.deliver();await flush();
+   check(!n.paused&&!!n.src&&f.failed.length===0&&f.timers.size===1,'optional diagnostic cannot change media outcome: '+edge);
+   check(allowed===Number(edge==='registration-throws'||edge==='sink-throws'),'unsupported browsers do not spend the installation budget: '+edge);
+  }finally{f.pool.stop();}
+ }
+});
 await fault('no-metadata-hang-reopens-locally-with-bounded-budget',async()=>{const f=faultFixture();try{
  f.show();const old=f.media[0];await f.advance(15000);check(!old.src&&old.paused,'load deadline must release a silent hung source');check(f.failed.length===0&&f.timers.size===1,'one local retry precedes asset failure');await f.advance(500);check(f.created()===2,'first load hang retries once locally');
  await f.advance(15000+2000+15000);check(f.created()===3&&f.failed.length===0&&f.timers.size===1,'persistent metadata hang must not declare a shared asset corrupt');const timer=[...f.timers.keys()][0];for(let i=0;i<100;i++)f.show(i+2);check(f.created()===3&&f.failed.length===0&&[...f.timers.keys()][0]===timer&&[...f.timers.values()][0].delay===60000,'unrelated rerenders cannot refill quick retries or rearm the one minute retry');
  }finally{f.pool.stop();}});
-await fault('post-ready-silent-freeze-releases-decoder-and-recovers',async()=>{const f=faultFixture();try{f.show();const old=f.ready();await flush();old.currentTime=70;old.fire('timeupdate');await f.advance(15000);check(!old.src,'no-progress deadline must release a silently frozen decoder');await f.advance(500);const next=f.ready();check(Math.abs(next.currentTime-70)<.1,'local reopen preserves confirmed playback position');await flush();check(!next.paused&&!!next.src&&f.failed.length===0,'transient freeze recovers before invalidating cache');}finally{f.pool.stop();}});
+await fault('post-ready-silent-freeze-releases-decoder-and-recovers',async()=>{const f=faultFixture();try{f.show();const old=f.ready();await flush();old.currentTime=70;old.fire('timeupdate');await f.advance(15000);check(!old.src,'no-progress deadline must release a silently frozen decoder');await f.advance(500);const next=f.ready();check(Math.abs(next.currentTime-70)<.1,'local reopen preserves confirmed playback position');await flush();check(!next.paused&&!!next.src&&f.failed.length===0,'transient freeze recovers before invalidating cache');}finally{f.pool.stop();}
+ const slow=faultFixture();try{
+  slow.show();const pending=[...slow.timers.keys()][0];await slow.advance(14999);
+  const n=slow.ready();check(slow.timers.size===1&&slow.timers.has(pending)&&slow.plays()===1,'first ready reuses the outstanding load watch');
+  await slow.advance(1);check(!!n.src&&slow.timers.size===1&&slow.created()===1,'cold deadline reopens a video that just became ready');
+  await slow.advance(14998);check(!!n.src&&slow.failed.length===0,'first ready gets the original playback progress window');
+  n.fire('loadeddata');n.fire('canplay');n.fire('seeked');await slow.advance(1);
+  check(!n.src&&slow.timers.size===1&&[...slow.timers.values()][0].delay===500&&slow.failed.length===0,'duplicate readiness cannot extend the actual no-progress deadline');
+  await slow.advance(500);check(slow.created()===2,'confirmed post-ready freeze still reopens exactly once');
+ }finally{slow.pool.stop();}
+ const readyMarker='data-ymcc-wallpaper-ready';
+ const outcomes=[];
+ for(const boundary of ['detached-error','detached-stop','reparented-error'] as const){
+  const f=faultFixture(),other=faultFixture();try{
+   f.show();const n=f.ready();await flush();
+   check(f.target.getAttribute(readyMarker)==='true','only a revealed video suppresses the native background');
+   if(boundary==='reparented-error'){
+    f.container.parentElement=other.target;f.show();
+    check(other.target.getAttribute(readyMarker)==='true'&&f.created()===1&&f.plays()===1,'same selected decoder follows the reparented surface');
+   }
+   const originalBeforeRelease=f.target.getAttribute(readyMarker)==='true';
+   f.container.parentElement=null;
+   if(boundary==='detached-stop')f.pool.stop();else f.error(2);
+   for(const event of ['loadeddata','seeked','canplay','error'])n.fire(event);
+   await flush();
+   check(!n.src&&n.paused&&f.failed.length===0&&f.timers.size===(boundary==='detached-stop'?0:1),'release keeps the original source and retry policy');
+   outcomes.push({boundary,originalBeforeRelease,originalAfterRelease:f.target.getAttribute(readyMarker)==='true',replacementAfterRelease:other.target.getAttribute(readyMarker)==='true'});
+  }finally{f.pool.stop();other.pool.stop();}
+ }
+ for(const row of outcomes){
+  check(row.boundary!=='reparented-error'||!row.originalBeforeRelease,'moving the same video restores the former card background: '+JSON.stringify(outcomes));
+  check(!row.originalAfterRelease&&!row.replacementAfterRelease,'release restores the exact previous background even after detachment: '+JSON.stringify(outcomes));
+ }
+});
 // Win5 2026-11-17: RE2 shortcut 3219175393, cached 720p/51,378,432 bytes.
 // The same context had ready records at 9,738 / 18,115 / 26,843ms, but
 // no interruption reason. Inject browser stall signals, not a guessed cause.
@@ -88,10 +162,27 @@ await fault('win5-post-ready-waiting-confirms-stall-without-fifteen-second-wait'
  await f.advance(2499);check(!!old.src,'short buffering gets time to recover without tearing down video');await f.advance(1);check(!old.src&&old.paused&&f.failed.length===0,'confirmed no-progress stall releases only the local decoder');
  await f.advance(500);const next=f.ready();check(f.created()===2&&Math.abs(next.currentTime-70)<.1&&!next.paused,'local recovery retains position after a three-second event-to-reopen budget');
  }finally{f.pool.stop();}});
+let mixedStallWatch:{pairs:number;timerReplacementsBeforeCheck:number;decoderRestartsBeforeCheck:number;localRetryMs:number}|undefined;
 await fault('win5-stall-storm-keeps-original-confirmation-deadline',async()=>{const f=faultFixture();try{
  f.show();const n=f.ready();await flush();n.fire('stalled');const timer=[...f.timers.keys()][0];await f.advance(2000);for(let i=0;i<200;i++){n.fire('waiting');n.fire('stalled');}
  check(f.timers.size===1&&[...f.timers.keys()][0]===timer,'event storms neither multiply nor postpone the confirmation');await f.advance(500);check(!n.src&&f.failed.length===0,'original confirmation still expires under repeated stall signals');
- }finally{f.pool.stop();}});
+ }finally{f.pool.stop();}
+ const mixed=faultFixture();try{
+  mixed.show();const n=mixed.ready();await flush();n.currentTime=40;n.fire('timeupdate');n.fire('stalled');
+  const original=[...mixed.timers.keys()][0],before=mixed.scheduled(),pairs=200;
+  for(let i=1;i<=pairs;i++){await mixed.advance(10);n.currentTime=40+i*.04;n.fire('timeupdate');n.fire(i%2?'waiting':'stalled');}
+  const timerReplacementsBeforeCheck=mixed.scheduled()-before,decoderRestartsBeforeCheck=mixed.created()-1;
+  check(timerReplacementsBeforeCheck===0&&mixed.timers.size===1&&mixed.timers.has(original),'progress/stall pairs replaced existing earlier timer '+timerReplacementsBeforeCheck+' times');
+  check(decoderRestartsBeforeCheck===0&&!!n.src,'mixed event storm never replaces the active decoder');
+  await mixed.advance(500);check(!!n.src&&mixed.timers.size===1,'an earlier wake rechecks the latest interruption without a premature reopen');
+  await mixed.advance(1999);check(!!n.src,'latest real interruption still has one millisecond to recover');
+  await mixed.advance(1);const localRetryMs=[...mixed.timers.values()][0]?.delay;
+  check(!n.src&&mixed.failed.length===0&&mixed.timers.size===1&&localRetryMs===500,'actual no-progress window still releases and schedules the original retry');
+  await mixed.advance(500);check(mixed.created()===2,'confirmed interruption reopens exactly once');
+  mixedStallWatch={pairs,timerReplacementsBeforeCheck,decoderRestartsBeforeCheck,localRetryMs};
+ }finally{mixed.pool.stop();}
+ check(mixed.timers.size===0,'retiring the player leaves no timer');
+});
 await fault('win5-short-recovery-retains-the-existing-transient-retry-budget',async()=>{const f=faultFixture();try{
  f.show();for(let attempt=0;attempt<3;attempt++){const n=f.ready();await flush();n.fire('waiting');await f.advance(2500);check(!n.src&&f.failed.length===0&&f.timers.size===1,'warm stall releases one decoder without invalidating cached bytes');if(attempt<2)await f.advance([500,2000][attempt]);}
  const timer=[...f.timers.keys()][0];check([...f.timers.values()][0].delay===60000,'repeated short recoveries retain the existing slow cooldown');for(let i=0;i<50;i++)f.show(100+i);check([...f.timers.keys()][0]===timer,'same-asset renders cannot bypass or postpone exhausted retry budget');await f.advance(60000);check(f.created()===4&&f.failed.length===0,'one selected-foreground reopen occurs after the slow cooldown');
@@ -159,6 +250,49 @@ await fault('tmnt-source-rejected-backoff-cannot-resurrect-in-background',async(
   check(f.timers.size===0&&f.created()===3&&f.media.every(n=>!n.src&&n.paused),'hidden route cancels backoff and even a queued callback cannot reopen the video');
  }finally{f.pool.stop();}
 });
+await fault('generated-source-rejection-requests-original-after-bounded-reopens',async()=>{
+ const generated={...frame,entry:{...frame.entry,assetId:'generated',reducedPlayback:true}};
+ const f=faultFixture('normal',generated);try{
+  f.show();f.error(4);await f.advance(500);f.error(4);await f.advance(2000);f.error(4);
+  check(f.failed.length===1&&f.failed[0].entry.assetId==='generated'&&f.timers.size===0&&!f.temporaryFailures[0],'legacy host uses the existing failure report');
+  check(f.media.every(n=>!n.src&&n.paused),'failed generated source retains no decoder');
+  f.show(2,'original');await f.advance(200);const next=f.ready();
+  check(!!next.src&&!next.paused&&f.media.filter(n=>!!n.src).length===1,'original can resume on the same selection with one decoder');
+ }finally{f.pool.stop();}
+});
+await fault('cold-generated-read-failure-requests-original-without-reopening',async()=>{
+ const generated={...frame,entry:{...frame.entry,assetId:'generated',reducedPlayback:true,recoverOriginal:true}};
+ const original={...frame,entry:{...frame.entry,assetId:'original',url:'http://fixture/original.webm'}};
+ for(const code of [2,4]){
+  const f=faultFixture('normal',generated);try{
+   f.show();const old=f.error(code);for(let i=0;i<40;i++)old.fire('error');
+   check(f.failed.length===1&&f.temporaryFailures[0]&&f.failed[0].entry.assetId==='generated','cold read failure reports one temporary fallback immediately');
+   check(f.created()===1&&!old.src&&old.paused&&f.timers.size===0,'cold read failure releases the decoder and schedules no reopen');
+   f.show();await f.advance(2200);check(f.created()===1&&f.failed.length===1,'repeated temporary-failure context cannot restart the derivative');
+   f.pool.show(f.container,{...original,contextSeq:generated.contextSeq});const next=f.ready();await flush();
+   check(next.src===original.entry.url&&!next.paused&&f.media.filter(n=>!!n.src).length===1,'same context plays the original with one decoder');
+  }finally{f.pool.stop();}
+ }
+ for(const edge of ['hidden','blur','off'] as const){
+  const f=faultFixture('normal',generated);try{
+   f.show();if(edge==='hidden')f.doc.visibilityState='hidden';else if(edge==='blur')f.setFocus(false);else f.setAllowed(false);
+   const n=f.error(4);check(!n.src&&n.paused&&f.failed.length===0&&f.timers.size===0,'cold read failure cannot request the original after '+edge);
+  }finally{f.pool.stop();}
+ }
+});
+await fault('warm-generated-seek-hang-requests-one-temporary-original',async()=>{
+ const f=faultFixture('normal',{...frame,entry:{...frame.entry,reducedPlayback:true,recoverOriginal:true}});
+ try{
+  f.show();let n=f.ready();n.seeking=true;n.fire('seeking');
+  await f.advance(1000);n.seeking=false;n.currentTime+=1;n.fire('timeupdate');
+  await f.advance(4000);check(!!n.src&&!f.failed.length,'completed seek does not reopen');
+  n.seeking=true;n.fire('seeking');await f.advance(4999);
+  check(!!n.src&&f.timers.size===1,'warm seek retains one bounded watchdog');
+  await f.advance(1);check(!n.src&&f.timers.size===1,'stalled seek releases its decoder');
+  await f.advance(500);n=f.error(4);
+  check(f.temporaryFailures.length===1&&f.temporaryFailures[0]&&!n.src&&f.timers.size===0,'reopen refusal requests transient original exactly once');
+ }finally{f.pool.stop();}
+});
 await fault('tmnt-current-mediaerror-3-reports-once-with-latest-tuple',async()=>{
  const f=faultFixture('normal',tmntIncident.frame,tmntIncident.metadata);try{
   f.show();for(let attempt=0;attempt<3;attempt++){f.ready();if(attempt===2)f.show(99);const n=f.error(3);for(let i=0;i<100;i++)n.fire('error');await flush();if(attempt<2){check(f.failed.length===0&&f.timers.size===1,'hard media errors also get both local reopen attempts');await f.advance([500,2000][attempt]);}}
@@ -167,6 +301,28 @@ await fault('tmnt-current-mediaerror-3-reports-once-with-latest-tuple',async()=>
   for(let i=0;i<100;i++){f.show(100+i);for(const n of f.media)n.fire('error');}check(f.failed.length===1&&f.created()===3,'same terminal hard-error tuple never reports twice');
   await f.advance(200);f.show(300,'another-asset');await f.advance(200);f.show(301);check(f.created()===5&&!!f.media.at(-1).src,'leaving and later reselecting the same game can open it again');
  }finally{f.pool.stop();}
+});
+await fault('terminal-decode-during-revalidation-reports-on-fresh-same-binding-only',async()=>{
+ for(const outcome of ['same-binding','changed-binding','changed-app','off'] as const){
+  let acceptedSeq=1;const attempts:number[]=[];
+  const f=faultFixture('normal',frame,undefined,undefined,value=>{attempts.push(value.contextSeq);return value.contextSeq===acceptedSeq;});
+  try{
+   f.show();f.error(3);await f.advance(500);f.error(3);await f.advance(2000);f.ready();await flush();
+   acceptedSeq=2;const old=f.error(3);
+   for(let i=0;i<30;i++){f.show(1);old.fire('error');}
+   check(attempts.join(',')==='1'&&f.failed.length===0&&f.timers.size===0&&f.media.every(n=>!n.src&&n.paused),'stale failure leaves native fallback without reopening or resending');
+   if(outcome==='off'){f.setAllowed(false);f.pool.stop();}
+   if(outcome==='changed-binding'||outcome==='changed-app'){
+    const replacement={...frame,contextSeq:2,appId:outcome==='changed-app'?'1091500':frame.appId,entry:{...frame.entry,bindingRevision:outcome==='changed-binding'?2:1}};
+    f.pool.show(f.container,replacement);
+   }else f.show(2);
+   if(outcome==='same-binding'){
+    for(let i=0;i<30;i++)f.show(2+i);
+    check(attempts.join(',')==='1,2'&&f.failed[0]?.contextSeq===2&&f.failed[0]?.entry.bindingRevision===1,'only the renewed exact binding receives the deferred terminal report');
+    check(f.created()===3&&f.timers.size===0,'the deferred report opens no decoder or timer');
+   }else check(attempts.join(',')==='1'&&f.failed.length===0,'superseded or disabled selection cannot report a deferred failure: '+outcome);
+  }finally{f.pool.stop();}
+ }
 });
 await fault('transient-cooldown-repeats-at-one-minute-without-refilling-fast-budget',async()=>{
  const f=faultFixture('normal',tmntIncident.frame,tmntIncident.metadata);try{
@@ -180,6 +336,15 @@ await fault('cooldown-requires-thirty-seconds-of-real-progress-to-reset-fast-bud
   f.show();for(let i=0;i<3;i++){f.error(2);if(i<2)await f.advance([500,2000][i]);}await f.advance(60000);let n=f.ready();await flush();n.currentTime=10;n.fire('timeupdate');
   for(let i=1;i<=5;i++){await f.advance(5000);n.currentTime=10+i;n.fire('timeupdate');}await f.advance(4999);n.currentTime=16;n.fire('timeupdate');f.error(2);
   check([...f.timers.values()][0].delay===60000&&f.failed.length===0,'29.999 seconds of observed progress cannot refill quick retries');
+  await f.advance(60000);n=f.ready();await flush();n.currentTime=10;n.fire('timeupdate');
+  const created=f.created();
+  for(let i=1;i<=6;i++){
+   await f.advance(3500);n.fire('waiting');await f.advance(1500);n.currentTime=10+i;n.fire('timeupdate');
+   check(f.created()===created&&!!n.src&&f.timers.size===1,'short recovered stalls keep the current decoder and one watch');
+  }
+  f.error(2);check(f.timers.size===1&&f.failed.length===0,'transient error retains one retry');
+  const delayAfterStalls=[...f.timers.values()][0].delay;
+  assert.equal(delayAfterStalls,60000,'short interruptions cannot refill quick retries from pre-stall time; actual delay '+delayAfterStalls+'ms');
   await f.advance(60000);n=f.ready();await flush();n.currentTime=10;n.fire('timeupdate');for(let i=1;i<=6;i++){await f.advance(5000);n.currentTime=10+i;n.fire('timeupdate');}
   f.error(2);check(f.timers.size===1&&[...f.timers.values()][0].delay===500&&f.failed.length===0,'thirty seconds of real progress alone restores the first quick retry');
  }finally{f.pool.stop();}
@@ -215,12 +380,18 @@ const win:any=new TrackedEvents();win.closed=false;
 const pageDoc:any=new TrackedEvents();pageDoc.defaultView=win;pageDoc.visibilityState='visible';pageDoc.hasFocus=()=>true;
 const foreground=new WallpaperForeground(pageDoc);let updates=0;let detach=foreground.subscribe(()=>updates++);
 check(!foreground.allowed(),'visible DOM focus without current native proof must stay denied');check(foreground.localAllowed(),'local DOM focus may request native proof');foreground.confirmNative(true);check(foreground.allowed(),'current native Big Picture proof admits the visible page');const registrations=win.count()+pageDoc.count();
+let focusReads=0;pageDoc.hasFocus=()=>{focusReads++;return true;};
+check(foreground.localVeto()===null&&foreground.nativeAdmitted&&focusReads===1,'visibility decision and native proof share a single document focus read');
+pageDoc.hasFocus=()=>false;check(foreground.localVeto()==='document-unfocused'&&!foreground.allowed(),'focused window with no document focus retains the local veto');pageDoc.hasFocus=()=>true;
 detach();win.dispatchEvent(new Event('blur'));detach=foreground.subscribe(()=>updates++);check(!foreground.allowed(),'new route subscription preserves a blur recorded with no routes');
+check(foreground.localVeto()==='window-blurred'&&!foreground.nativeAdmitted,'window blur has a separate reason and revokes native admission');
 win.dispatchEvent(new Event('focus'));check(!foreground.allowed(),'window focus alone cannot restore a retired native proof');foreground.confirmNative(true);check(foreground.allowed(),'fresh native proof restores document admission');
 pageDoc.dispatchEvent(new Event('freeze'));detach();detach=foreground.subscribe(()=>updates++);check(!foreground.allowed(),'remount cannot erase a document freeze');
+check(foreground.localVeto()==='document-suspended','a frozen document reports suspension');
 win.dispatchEvent(new Event('focus'));check(!foreground.allowed(),'window focus does not thaw a frozen document');pageDoc.dispatchEvent(new Event('resume'));check(!foreground.allowed(),'resume requires a new native proof');foreground.confirmNative(true);check(foreground.allowed(),'new native proof restores the foreground route');
 for(let i=0;i<100;i++){detach();detach=foreground.subscribe(()=>updates++);}check(win.count()+pageDoc.count()===registrations,'one event owner survives repeated route subscriptions');
 pageDoc.visibilityState='hidden';pageDoc.dispatchEvent(new Event('visibilitychange'));check(!foreground.allowed(),'hidden document remains blocked with a focused snapshot');pageDoc.visibilityState='visible';pageDoc.dispatchEvent(new Event('visibilitychange'));check(!foreground.allowed(),'visible document cannot reuse hidden-page proof');foreground.confirmNative(true);check(foreground.allowed(),'visible foreground document recovers with current native proof');
+pageDoc.visibilityState='hidden';check(foreground.localVeto()==='document-hidden','document hidden is distinct from an unconfirmed native proof');pageDoc.visibilityState='visible';
 win.dispatchEvent(new Event('pagehide'));detach();win.dispatchEvent(new Event('pageshow'));check(!foreground.allowed(),'page transition cannot restore an expired proof');foreground.confirmNative(true);check(foreground.allowed(),'current native proof resumes after page transition');
 win.dispatchEvent(new Event('blur'));foreground.revalidateFocus(new Event('focusin'));check(!foreground.allowed(),'synthetic controller focus cannot override background blur');
 pageDoc.hasFocus=()=>false;foreground.revalidateFocus({isTrusted:true} as Event);check(!foreground.allowed(),'trusted DOM selection without document focus stays paused');
@@ -229,4 +400,4 @@ win.dispatchEvent(new Event('blur'));pageDoc.visibilityState='hidden';foreground
 pageDoc.visibilityState='visible';pageDoc.dispatchEvent(new Event('freeze'));foreground.revalidateFocus({isTrusted:true} as Event);check(!foreground.allowed(),'trusted focus cannot thaw a frozen document');pageDoc.dispatchEvent(new Event('resume'));foreground.revalidateFocus({isTrusted:true} as Event);check(!foreground.allowed(),'trusted resumed selection still requires native proof');foreground.confirmNative(true);check(foreground.allowed(),'current native proof recovers after document resume');
 const stableUpdates=updates;for(let n=0;n<100;n++)foreground.confirmNative(true);check(updates===stableUpdates,'stable native foreground does not republish or restart player');foreground.confirmNative(false);check(!foreground.allowed(),'native blur vetoes stale affirmative document focus');foreground.confirmNative(true);
 const last=updates;foreground.stop();foreground.stop();win.dispatchEvent(new Event('focus'));pageDoc.dispatchEvent(new Event('resume'));check(updates===last&&!foreground.allowed(),'stopped event owner cannot publish or authorize playback');check(win.count()+pageDoc.count()===0,'disposal unregisters all document and window callbacks');
-console.log(JSON.stringify({ok:true,canonicalId:'plugins.wallpaper-background',checks,incident:tmntIncident,faultCases:faultResults,scope:'production full-video range, foreground guard and bounded player fault recovery with virtual time/inert media events; no network or Steam'}));
+console.log(JSON.stringify({ok:true,canonicalId:'plugins.wallpaper-background',checks,incident:tmntIncident,faultCases:faultResults,mixedStallWatch,scope:'production full-video range, foreground guard and bounded player fault recovery with virtual time/inert media events; no network or Steam'}));

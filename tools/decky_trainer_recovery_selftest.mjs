@@ -21,7 +21,9 @@ const runId='b'.repeat(32),peer={connection:'1',runId,connected:true};
 export function prepareTrainerRecoveryAdmission(selected){
  const snapshots=new Map(),require=createRequire(import.meta.url);
  const read=relative=>{const file=path.resolve(root,relative);if(!snapshots.has(file))snapshots.set(file,fs.readFileSync(file));return snapshots.get(file).toString('utf8');};
- for(const relative of ['src/bridge/gameTrainer.ts','src/bridge/trainerLifecycle.ts','src/bridge/powerLifecycleState.ts','src/bridge/gameTrainerRecovery.ts','src/bridge/gameTrainerAuto.ts','tools/decky_trainer_recovery_selftest.mjs','tools/fixtures/game_trainer_recovery_fixture.mjs','tools/fixtures/trainer_ready_tmnt_20261022.json','tsconfig.json','package.json','node_modules/esbuild/lib/main.js','node_modules/@esbuild/win32-x64/esbuild.exe'])read(relative);
+ const esbuildEntry=require.resolve('esbuild');
+ const esbuildBinary=process.env.ESBUILD_BINARY_PATH||createRequire(esbuildEntry).resolve('@esbuild/win32-x64/esbuild.exe');
+ for(const relative of ['src/bridge/gameTrainer.ts','src/bridge/trainerLifecycle.ts','src/bridge/powerLifecycleState.ts','src/bridge/gameTrainerRecovery.ts','src/bridge/gameTrainerAuto.ts','tools/decky_trainer_recovery_selftest.mjs','tools/fixtures/game_trainer_recovery_fixture.mjs','tools/fixtures/trainer_ready_tmnt_20261022.json','tsconfig.json','package.json',esbuildEntry,esbuildBinary])read(relative);
  const prepared=new Map();for(const item of selected)if(item.prepare)prepared.set(item,item.prepare(read));
  if(selected.some(item=>item.realGameDetection))for(const relative of ['src/bridge/gamedetect.ts','src/bridge/gamePolicyTarget.ts','src/bridge/gamePolicyHysteresis.ts','PowerControl/GameTitlePolicy.json'])read(relative);
  if(selected.some(item=>item.mirror)){
@@ -748,6 +750,41 @@ export async function trainerRecoveryTests(out,{caseFilter=null}={}){
    const stop=f.auto.startGameTrainerAutoPrepare();await flush();await f.fx.advance(30000);assert.equal(f.fx.workers.length,1);assert(finish);stop();finish();await flush();
    assert.equal(f.fx.timers.size,0);assert.equal(f.fx.listeners.size,0);assert([...f.fx.events.values()].every(s=>s.size===0));await f.fx.advance(86400000);assert.equal(f.fx.workers.length,1);
   }finally{f.fx.dispose();}
+ });
+ await check('catalog: first open defers a due refresh and its receipt survives a renderer restart',async()=>{
+  const storage=new Map();
+  const start=async (storageForInstance=storage)=>{
+   const f=await createTrainerRecoveryFixture({separatePowerClock:true,storage:storageForInstance});
+   f.fx.game=null;f.fx.autoEnabled=true;
+   f.fx.put(f.fx.powerDir+'\\YeManTrainerPrepare.ps1','inert worker');
+   return f;
+  };
+  const a=await start(),nextCheckAt=a.fx.now+120000;
+  const worker=f=>async(_p,args)=>{
+   assert.equal(args[args.indexOf('-Mode')+1],'RefreshData');
+   const next=Math.max(nextCheckAt,f.fx.now+60000);
+   f.fx.put(args[args.indexOf('-ResultPath')+1],JSON.stringify(f.fx.requestReceipt(args,{ok:true,state:'ready',gameName:'YMCC Trainer Catalog',catalog:{available:true,nextCheckAt:next},retryAfter:next})));
+   return {ok:true};
+  };
+  a.fx.workerHook=worker(a);
+  const stopA=a.auto.startGameTrainerAutoPrepare();
+  try{
+   await flush();await a.fx.advance(28000);a.fx.emit('ipc:window.shown');
+   await a.fx.advance(2000);assert.equal(a.fx.workers.length,0);
+   await a.fx.advance(7999);assert.equal(a.fx.workers.length,0);
+   await a.fx.advance(1);assert.equal(a.fx.workers.length,1);
+   assert.equal(a.fx.launches.length,0);
+  }finally{stopA();a.fx.dispose();}
+  // Separate branches both consume the actual previous renderer's receipt.
+  for(const restartAt of [a.fx.now+1000,nextCheckAt-5000]){
+   const b=await start(new Map(storage));b.fx.now=restartAt;b.fx.workerHook=worker(b);
+   const stopB=b.auto.startGameTrainerAutoPrepare();
+   try{
+    await flush();const expected=Math.max(nextCheckAt,restartAt+30000);
+    await b.fx.advance(expected-restartAt-1);assert.equal(b.fx.workers.length,0);
+    await b.fx.advance(1);assert.equal(b.fx.workers.length,1);
+   }finally{stopB();b.fx.dispose();}
+  }
  });
  await check('lifecycle: a lost preparation dispatch acknowledgement retains its pending identity and cancellation',async()=>{
   for(const fault of ['ack','ack-timeout']){

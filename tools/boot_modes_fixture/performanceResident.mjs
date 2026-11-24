@@ -5,7 +5,7 @@ export async function runPerformanceResidentOwners({out,buildFixture,savedPerfor
  const kinds=['partial-auto','partial-manual','completed-manual','suspended','restart-suspended','inflight-stop','inflight-game','forged-completion','generation-reuse','sleep-boundaries'];
  const lateProofKinds=['late-tdp-frame-read-retry','late-tdp-held-proof'];
  const lateKinds=["late-tdp-once","late-tdp-no-receipt","late-tdp-false","late-tdp-stop","late-tdp-generation","late-tdp-config","late-tdp-frames","late-tdp-game","late-tdp-owner-cancel","late-tdp-cpu-unconfirmed","late-tdp-windows","late-tdp-auto-no-float","late-tdp-wake"].concat(lateProofKinds);
- const argument=process.argv.find(value=>value.startsWith('--boot-performance-resident-case=')),selected=argument?.split('=')[1];const continuationKinds=['held-read-wake','held-read-restart','held-read-sequence','held-read-finally','held-read-game'];assert(!argument||kinds.includes(selected)||continuationKinds.includes(selected)||lateKinds.includes(selected)||selected==='late-tdp-boundaries'||selected==='late-tdp-proof-boundaries'||selected==='held-read-boundaries','Unknown original resident performance case');
+ const argument=process.argv.find(value=>value.startsWith('--boot-performance-resident-case=')),selected=argument?.split('=')[1];const continuationKinds=['held-read-wake','held-read-restart','held-read-sequence','held-read-finally','held-read-game','held-read-suspend-serial'];assert(!argument||kinds.includes(selected)||continuationKinds.includes(selected)||lateKinds.includes(selected)||selected==='late-tdp-boundaries'||selected==='late-tdp-proof-boundaries'||selected==='held-read-boundaries'||selected==='held-frame-read-wake','Unknown original resident performance case');
  const candidateArgument=process.argv.indexOf('--policy-runtime-source'),runtimeSource=candidateArgument<0?path.resolve('src/bridge/gamePolicyRuntime.ts'):process.argv[candidateArgument+1];assert(path.isAbsolute(runtimeSource),'Explicit absolute resident runtime source');
  const observations=path.join(out,'resident-observations.jsonl');fs.closeSync(fs.openSync(observations,'wx'));const rows=[];
  for(const mode of ['global','xbox','steam','xbox-steam'])for(const kind of selected==='late-tdp-proof-boundaries'?lateProofKinds:selected==='late-tdp-boundaries'?lateKinds:selected==='held-read-boundaries'?continuationKinds:selected?[selected]:kinds){
@@ -30,20 +30,36 @@ export async function runPerformanceResidentOwners({out,buildFixture,savedPerfor
   const powerModule=evaluate(path.resolve('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:()=>{throw Error('Unexpected singleton power read');},on:()=>()=>{}}},{queueMicrotask});
   const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>({...nativePower}),listen:(name,listener)=>{if(!powerListeners.has(name))powerListeners.set(name,new Set());powerListeners.get(name).add(listener);return()=>powerListeners.get(name).delete(listener);},clock:{setTimeout:(callback,ms)=>{const id=++powerTimerId;powerTimers.set(id,{callback:()=>{powerTimers.delete(id);callback();},ms});return id;},clearTimeout:id=>powerTimers.delete(id)}});
   const stopPowerProbe=sharedPower.onSharedPowerLifecycle(()=>{});
+  let readyGame=true;
+  const gameReadiness=ready=>{readyGame=ready;for(const listener of readyListeners)listener(ready);};
+  const stopGameReadiness=kind==='held-read-sequence'?sharedPower.onSharedPowerLifecycle(power=>{
+   if(power.observedNotificationSequence>2)gameReadiness(false);
+  },{observeNotificationSequence:true}):()=>{};
   const broadcastPower=state=>{nativePower={...state};for(const listener of [...(powerListeners.get('power.lifecycleChanged')||[])])listener({...state});};
   const powerTick=async()=>{for(let n=0;n<60;n++)await Promise.resolve();};
   class ResidentDate extends Date {static now(){return runtimeNow;}}
   const monitorListeners=new Set();const monitorSignals=evaluate(path.resolve('src/bridge/monitorSnapshotSignals.ts'),{'./monitorFrameTime':evaluate(path.resolve('src/bridge/monitorFrameTime.ts')),'./monitorCoreTiles':evaluate(path.resolve('src/bridge/monitorCoreTiles.ts'))});
+  const gamePort={isGameStatusCurrent:()=>readyGame,isCurrentGameTarget:target.isPolicyTargetCurrent,subscribeGameTargetReadiness:listener=>{readyListeners.add(listener);return()=>readyListeners.delete(listener);}};
+  const targetPort={...target,isPolicyGameInitialized:()=>true,subscribePolicyGameStatus:listener=>{gameListeners.add(listener);return()=>gameListeners.delete(listener);}};
+  const powerPort={...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted};
+  const apiPort={powerLifecycle:{get:async()=>powerReadHook?powerReadHook():({...nativePower})}};
+  let enterFrameRead,releaseFrameRead,frameReads=0,actualFps=75;
+  const frameWrites=[],frameEntered=new Promise(resolve=>enterFrameRead=resolve),frameHeld=new Promise(resolve=>releaseFrameRead=resolve);
+  const actualFrames=kind==='held-frame-read-wake'?evaluate(path.resolve('src/bridge/frameRateLimits.ts'),{
+   './settingsRepository':repository,'./frameRateModel':frameModel,'./gamedetect':gamePort,'./gamePolicyTarget':targetPort,'./performanceSchedule':service,
+   './api':apiPort,'./powerLifecycleState':powerPort,'./powerSource':{powerSourceMode:source},
+   './autofloat':{setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),isContinuousFloat:()=>false},
+   './yeman':{...yeman,readRtssLimit:async()=>{if(++frameReads===1){enterFrameRead();await frameHeld;return 75;}return actualFps;},setRtssLimit:async(fps,current)=>{assert(current());actualFps=fps;frameWrites.push(fps);}},
+  }):null;
   const runtime=evaluate(runtimeSource,{
    vue:{watch:(_source,listener)=>{sourceListeners.add(listener);return()=>sourceListeners.delete(listener);}},'./performanceControls':models,
-   './gamedetect':{isGameStatusCurrent:()=>true,isCurrentGameTarget:target.isPolicyTargetCurrent,subscribeGameTargetReadiness:listener=>{readyListeners.add(listener);return()=>readyListeners.delete(listener);}},
-   './gamePolicyTarget':{...target,isPolicyGameInitialized:()=>true,subscribePolicyGameStatus:listener=>{gameListeners.add(listener);return()=>gameListeners.delete(listener);}},'./powerSource':{powerSourceMode:source},'./yeman':yeman,
-   './frameRateLimits':{...frameModel,loadGlobalFrameRates:frameService.ensureGlobalFrameRates,applyIndependentFrameRates:frameService.applyIndependentFrameRates,onFrameRatesChanged:listener=>{frameListeners.add(listener);return()=>frameListeners.delete(listener);}},
+   './gamedetect':gamePort,'./gamePolicyTarget':targetPort,'./powerSource':{powerSourceMode:source},'./yeman':yeman,
+   './frameRateLimits':actualFrames??{...frameModel,loadGlobalFrameRates:frameService.ensureGlobalFrameRates,applyIndependentFrameRates:frameService.applyIndependentFrameRates,onFrameRatesChanged:listener=>{frameListeners.add(listener);return()=>frameListeners.delete(listener);}},
    './performanceSchedule':{...service,onPerformanceScheduleChanged:subscribe(service.onPerformanceScheduleChanged),onGameCustomConfigChanged:subscribe(service.onGameCustomConfigChanged),onContinuousPerformanceApplied:subscribe(service.onContinuousPerformanceApplied),restorePerformanceScheduleIfConfigured:async(...args)=>{const row={options:structuredClone(args[1])};restoreRows.push(row);row.result=await service.restorePerformanceScheduleIfConfigured(...args);return row.result;}},
-   './powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},
+   './powerLifecycleState':powerPort,
    './powerResume':evaluate(path.resolve('src/bridge/powerResume.ts')),
    './monitorData':{subscribeMonitorSnapshot:listener=>{monitorListeners.add(listener);return()=>monitorListeners.delete(listener);}},'./monitorSnapshotSignals':monitorSignals,
-   './autofloat':{setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false})},'./api':{powerLifecycle:{get:async()=>powerReadHook?powerReadHook():({...nativePower})}},'./quickActionLock':{isQuickActionBusy:()=>false},
+   './autofloat':{setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false})},'./api':apiPort,'./quickActionLock':{isQuickActionBusy:()=>false},
    './gameCorePolicy':{detectGameCorePolicy:async()=>({smtAvailable:true}),clearGameCorePolicy:async()=>{coreDecisions++;return true;},applyGameCorePolicy:async()=>{coreDecisions++;return {ok:true,applied:true};}},
    '@/scheduler':{registerScheduledTask:(name,ms,run,options)=>{assert.equal(name,'game-policy-runtime-retry');assert.equal(ms,2000);assert.equal(options.pauseWhenHidden,false);assert(!scheduled.has(name),'duplicate original retry');const task={run,ms,options};scheduled.set(name,task);registrations.push({name,ms,options});return()=>{if(scheduled.get(name)===task)scheduled.delete(name);};}},
   },{Date:ResidentDate},'export const __residentState=()=>({active,running,dirty,appliedPerformance,tdpPending,powerHeld:typeof powerHeld==="undefined"?false:powerHeld});');
@@ -52,6 +68,23 @@ export async function runPerformanceResidentOwners({out,buildFixture,savedPerfor
   const finishOriginalTdpChecks=async()=>{for(let n=0;n<4;n++){runtimeNow+=12000;await run();}};
   const oldTdp=yeman.setTdp,oldScheme=yeman.getActiveScheme,oldSwitch=yeman.switchScheme,oldBal=yeman.PW.WIN_BAL;let scheme='test-yeman';yeman.getActiveScheme=async()=>scheme;yeman.PW.WIN_BAL='test-bal';yeman.switchScheme=async value=>{assert.equal(value,'bal');scheme='test-bal';};let release,pending;
   try{
+   if(actualFrames){
+    release=releaseFrameRead;await powerTick();configureTdp();
+    const expected=(await actualFrames.loadGlobalFrameRates()).ac.fps;assert.notEqual(expected,75);
+    runtime.startGamePolicyRuntime();await powerTick();pending=scheduled.get('game-policy-runtime-retry')?.run();
+    let entryTimer;
+    try{await Promise.race([frameEntered,new Promise((_,reject)=>entryTimer=setTimeout(()=>reject(Error('Original resident did not enter held RTSS read')),1500))]);}finally{clearTimeout(entryTimer);}
+    const suspended={...nativePower,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2};
+    broadcastPower(suspended);gameReadiness(false);assert.deepEqual(frameWrites,[]);
+    nativePower={...suspended,phase:'ready',generation:101,hardwareWritesAllowed:true,publicationRevision:3};
+    assert.equal(powerTimers.size,1);[...powerTimers.values()][0].callback();await powerTick();await settle();assert.deepEqual(frameWrites,[]);
+    gameReadiness(true);await settle();
+    assert.deepEqual(frameWrites,[expected],'Ready and game revalidation did not resume the original resident before the old read returned');
+    release();await pending;pending=null;await finishOriginalTdpChecks();assert.equal(scheduled.size,0);
+    broadcastPower(nativePower);await powerTick();assert.deepEqual(frameWrites,[expected]);
+    assert.equal(frameReads,2);assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,2);
+    rows.push({mode,residentKind:kind,actualResident:true,actualFrameService:true,actualSharedPowerSource:true,missingReadyPush:true,heldOldReadBypassed:true,frameReads,frameWrites,finalState:runtime.__residentState()});continue;
+   }
    if(lateKinds.includes(kind)){
     await powerTick();const completions=[],stopProbe=service.onContinuousPerformanceApplied((signature,context)=>completions.push({signature,context}));
     const oldCpu=yeman.applyManualPowerParams,oldFrameRead=frameService.loadGlobalFrameRates;
@@ -111,22 +144,47 @@ export async function runPerformanceResidentOwners({out,buildFixture,savedPerfor
    }
    if(continuationKinds.includes(kind)){
     await powerTick();configureTdp();
+    if(kind==='held-read-wake'){
+     const config=await service.loadPerformanceSchedule(),controls=structuredClone(requested.controls);
+     controls.ac.tdp=19;controls.ac.mode='manual';
+     await service.saveGameCustomConfig({version:1,entries:{'resident.exe':{enabled:true,controls,ac:config.profiles.ac.eco,dc:config.profiles.dc.eco}},rtss:{}});
+    }
     let readCount=0,releaseOld,releaseNew;const oldHold=new Promise(resolve=>releaseOld=resolve),newHold=new Promise(resolve=>releaseNew=resolve),oldReady={...nativePower};
     release=()=>{releaseOld();releaseNew();};
     powerReadHook=async()=>{const index=++readCount;if(index===1){await oldHold;return oldReady;}if(index===2&&kind==='held-read-finally')await newHold;return {...nativePower};};
     const before=hardwareWrites().length;runtime.startGamePolicyRuntime();await powerTick();pending=scheduled.get('game-policy-runtime-retry').run();await powerTick();assert.equal(readCount,1,'original held read was not entered');
     if(kind==='held-read-restart'){runtime.stopGamePolicyRuntime();assert.equal(runtime.__residentState().running,false,'stop retained its retired running owner');runtime.startGamePolicyRuntime();await powerTick();void scheduled.get('game-policy-runtime-retry')?.run();}
     else if(kind==='held-read-sequence'){broadcastPower({...nativePower,publicationRevision:2,observedNotificationSequence:2});await powerTick();}
+    else if(kind==='held-read-suspend-serial'){broadcastPower({...nativePower,publicationRevision:2,suspendSerial:1});await powerTick();}
     else if(kind==='held-read-game'){await f.setPolicyGame({...game,pid:1902,processCreated:'1902'});for(const listener of gameListeners)listener(target.getPolicyGame());}
-    else {broadcastPower({...nativePower,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});assert.equal(hardwareWrites().length,before);broadcastPower({...nativePower,phase:'ready',generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});}
+    else {
+     broadcastPower({...nativePower,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});
+     if(kind==='held-read-wake')gameReadiness(false);
+     assert.equal(hardwareWrites().length,before);
+     broadcastPower({...nativePower,phase:'ready',generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+    }
     for(let n=0;n<2000;n++)await Promise.resolve();
     assert(readCount>=2,'later admitted resident work remained blocked behind old read');
+    if(kind==='held-read-wake'){
+     await settle();assert.equal(hardwareWrites().length,before,'unknown dedicated target allowed an early write');
+     assert(runtime.__residentState().tdpPending,'wake recovery was lost while waiting for target admission');
+     gameReadiness(true);await settle();
+     assert(hardwareWrites().slice(before).some(row=>row.kind==='tdp'&&row.w===19),'dedicated TDP did not resume on the first valid target');
+    }
     if(kind==='held-read-finally'){
       assert.equal(runtime.__residentState().running,true);releaseOld();await pending;pending=null;await powerTick();assert.equal(runtime.__residentState().running,true,'retired finally cleared the successor running owner');const count=readCount;void scheduled.get('game-policy-runtime-retry')?.run();await powerTick();assert.equal(readCount,count,'retired finally admitted a duplicate successor');releaseNew();
     }else{assert(hardwareWrites().length>before,'new admitted owner did not make progress before old read returned');releaseOld();await pending;pending=null;}
     await settle();const afterOld=hardwareWrites().length;await powerTick();assert.equal(hardwareWrites().length,afterOld,'retired read replayed hardware');
     for(let n=0;n<4;n++){runtimeNow+=12000;await run();}assert.equal(scheduled.size,0,'new owner stranded original bounded retry');
-    const healthy=hardwareWrites().length;for(let n=0;n<10;n++){broadcastPower(kind==='held-read-sequence'?{...nativePower,publicationRevision:nativePower.publicationRevision+1,observedNotificationSequence:nativePower.observedNotificationSequence+1}:{...nativePower});await powerTick();await run();}assert.equal(hardwareWrites().length,healthy,'duplicate or metadata Ready replayed healthy owner');
+    if(kind==='held-read-sequence'){
+     const baseline=hardwareWrites().length;
+     broadcastPower({...nativePower,publicationRevision:3,observedNotificationSequence:3});
+     await powerTick();await settle();
+     gameReadiness(true);await powerTick();await settle();await finishOriginalTdpChecks();
+     assert.equal(hardwareWrites().length,baseline,'same-generation game revalidation replenished settled TDP checks');
+     assert.equal(scheduled.size,0,'same-game revalidation stranded resident retry');
+    }
+    const healthy=hardwareWrites().length;for(let n=0;n<10;n++){broadcastPower(kind==='held-read-sequence'?{...nativePower,publicationRevision:nativePower.publicationRevision+1,observedNotificationSequence:nativePower.observedNotificationSequence+1}:kind==='held-read-suspend-serial'?{...nativePower,publicationRevision:nativePower.publicationRevision+1,suspendSerial:nativePower.suspendSerial+1}:{...nativePower});await powerTick();await run();}assert.equal(hardwareWrites().length,healthy,'duplicate or metadata Ready replayed healthy owner');
     rows.push({mode,residentKind:kind,actualResident:true,actualService:true,actualRepository:true,actualSharedPowerSource:true,heldOldReadBypassed:true,oldFinallyOwnerIsolated:kind==='held-read-finally',readCount,originalRetryMs:2000,finalState:runtime.__residentState()});continue;
    }
    if(kind==='sleep-boundaries'){
@@ -201,7 +259,7 @@ export async function runPerformanceResidentOwners({out,buildFixture,savedPerfor
     await run();assert.equal(scheduled.size,0);assert.equal(runtime.__residentState().appliedPerformance,'');assert(!initial.hardware.some(row=>row.kind==='cpu'),'cancelled resident result derived CPU writes');
    }else{configureTdp();await run();await finishOriginalTdpChecks();assert.equal(scheduled.size,0);assert.equal(f.document().extensions.bootModesStartupResult.modules.performance.state,'active');}
    rows.push({mode,residentKind:kind,initialState:initial.state,finalState:runtime.__residentState(),originalRetryMs:2000,restoreRows:structuredClone(restoreRows),finalReceipt:structuredClone(f.document().extensions.bootModesStartupResult),actualService:true,actualResident:true,actualBootObserver:true,registrations});
-  }finally{release?.();if(pending)await pending.catch(()=>{});const late=[...scheduled.values()];runtime.stopGamePolicyRuntime();runtime.stopGamePolicyRuntime();const stoppedWrites=hardwareWrites().length;for(const task of late)await task.run();stopBoot();if(actualFloat){await actualFloat.runtime.disableFloat();configureFloat(null);}await context.drainBootQueue();assert.equal(hardwareWrites().length,stoppedWrites,'stopped resident retry revived hardware work');yeman.setTdp=oldTdp;yeman.getActiveScheme=oldScheme;yeman.switchScheme=oldSwitch;yeman.PW.WIN_BAL=oldBal;configureTdp();assert.equal(scheduled.size,0);assert.equal(subscribers,0);assert.equal(gameListeners.size+readyListeners.size+frameListeners.size+sourceListeners.size,0);assert.equal(monitorListeners.size,0);stopPowerProbe();assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(powerTimers.size,0);assert.equal([...powerListeners.values()].reduce((n,listeners)=>n+listeners.size,0),0);}
+  }finally{release?.();if(pending)await pending.catch(()=>{});const late=[...scheduled.values()];runtime.stopGamePolicyRuntime();runtime.stopGamePolicyRuntime();const stoppedWrites=hardwareWrites().length;for(const task of late)await task.run();stopBoot();if(actualFloat){await actualFloat.runtime.disableFloat();configureFloat(null);}await context.drainBootQueue();assert.equal(hardwareWrites().length,stoppedWrites,'stopped resident retry revived hardware work');yeman.setTdp=oldTdp;yeman.getActiveScheme=oldScheme;yeman.switchScheme=oldSwitch;yeman.PW.WIN_BAL=oldBal;configureTdp();assert.equal(scheduled.size,0);assert.equal(subscribers,0);assert.equal(gameListeners.size+readyListeners.size+frameListeners.size+sourceListeners.size,0);assert.equal(monitorListeners.size,0);stopGameReadiness();stopPowerProbe();assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);assert.equal(powerTimers.size,0);assert.equal([...powerListeners.values()].reduce((n,listeners)=>n+listeners.size,0),0);}
  }
  const report={pass:true,selection:'resident-only',default173:'NOT_RUN_EXPLICIT_COST_BOUNDARY',rows,runtimeSource,scope:'Actual performance service, original resident runtime and boot observer/repository. Only original scheduler/game/power/hardware terminals controlled; state getter appended to the evaluated module for observation.'};fs.writeFileSync(path.join(out,'performance-preferences.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});return report;
 }

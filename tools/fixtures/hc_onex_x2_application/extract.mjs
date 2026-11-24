@@ -46,6 +46,7 @@ export function extract(main,before){
   const submit=take('nativeYmccShortcutSubmit'),dispatch=take('nativeKeyboardShortcutDispatch');
   const clickMatch=take('nativeKeyboardShortcutClickMatches'),home=take('nativeOnexX2HomeDispatch'),drain=take('nativeOemProducerDrain');
   const evaluator=take('nativeKeyboardShortcutsEvaluate'),recordingMask=take('gamepadShortcutRecordingMask');
+  const oemDemand=main.match(/^static bool g_nativeShortcutNeedsLiveOem.*?;/m)?.[0];
   const maskEntries=text=>{const start=text.indexOf('kOemProducerMasks = {');if(start<0)throw Error('Mask catalog missing');const open=text.indexOf('{',start);return text.slice(open+1,closeAt(text,open,'{','}')).split(',').map(s=>s.replace(/\s+/g,'')).filter(Boolean);};
   const oldMasks=maskEntries(before),newMasks=maskEntries(main);
   if(oldMasks.length!==6||newMasks.length!==8||JSON.stringify(oldMasks)!==JSON.stringify(newMasks.slice(0,6)))throw Error('Old producer masks changed');
@@ -72,12 +73,13 @@ export function extract(main,before){
   const beforeStop=shutdown.slice(0,stop).replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,' ');
   if(stop<0||/\breturn\b/.test(beforeStop))throw Error('OwnerStop missing or preceded by early return');
   const powerFunction=take('currentPowerGeneration');
-  return {env,keys:keys.join('\n'),profiles,ledger,owner,ownerPrefix,ownerTick,ownerStop,masks,rule,inactivePolicy,submit,dispatch,clickMatch,home,drain,evaluator,recordingMask,powerFunction,
+  return {env,keys:keys.join('\n'),profiles,ledger,owner,ownerPrefix,ownerTick,ownerStop,masks,rule,inactivePolicy,submit,dispatch,clickMatch,home,drain,evaluator,recordingMask,powerFunction,oemDemand,
     evidence:{ranges:ranges.map(({name,start,end,text,staticOnly})=>({name,start,end,startLine:main.slice(0,start).split('\n').length,endLine:main.slice(0,end).split('\n').length,sha256:sha(text),staticOnly:!!staticOnly})),
     staticWiring,oldProducerMasks:{entries:oldMasks,unchanged:true},oldModelKeyboardProfiles:{sha256:sha(newProfiles),beforeSha256:sha(oldProfiles),unchanged:false,existingSubset:{sha256:sha(existingProfiles),beforeSha256:sha(oldProfiles),unchanged:true},reviewedAppend:{profile:'OneXX3',rules:'kP_OneXX1',ruleCount:2,reason:'f2e58468 OXP3 held Home/G-Key replaces inherited mouse OEM4'}},rogDispatch:{currentSha256:sha(rog.text),beforeSha256:sha(oldRog.text),unchanged:false,reviewedExpressions:['nativeKeyboardShortcutClickMatches','merge-current-independent-producer-tokens'],stubScope:'observe wrong OneX route only; does not certify changed ROG behavior'},bitRange:{start:bitStart,end:bitEnd}}};
 }
 export function generated(parts,slots){
   return ['// Production bodies below are byte-for-byte source slices. See source-bindings.json.',parts.env,slots.environment,parts.powerFunction,parts.keys,slots.forward,
     parts.profiles,parts.ledger,parts.ownerPrefix,slots.ownerObservation,'#define onexX2RevokeSources appObserveRealRevoke',parts.ownerTick,'#undef onexX2RevokeSources',parts.ownerStop,parts.masks,parts.rule,parts.inactivePolicy,'static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;',
+    parts.oemDemand ? '#define YMCC_FIXTURE_OEM_DEMAND\n'+parts.oemDemand : '',
     parts.submit,slots.action,parts.dispatch,slots.ui,parts.recordingMask,parts.clickMatch,parts.evaluator,slots.observation,parts.home,'#define nativeKeyboardShortcutsEvaluate appObserveRealEvaluation',parts.drain,'#undef nativeKeyboardShortcutsEvaluate'].join('\n\n')+'\n';
 }

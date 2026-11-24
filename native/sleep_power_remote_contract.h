@@ -7,7 +7,8 @@ namespace ymcc::sleeppower::remote {
 // Candidate data contract only. No provider/transport is installed by including
 // this file. Fan's existing Native purpose gate must mint each descriptor.
 inline constexpr std::uint32_t kVersion=1;
-enum class Purpose : std::uint32_t { Observation=1, FanResume=2, FanWrite=3 };
+enum class Purpose : std::uint32_t { Observation=1, FanResume=2, FanWrite=3, InputLifecycle=4, InputFrame=5 };
+inline constexpr bool inputPurpose(Purpose p) noexcept{return p==Purpose::InputLifecycle||p==Purpose::InputFrame;}
 struct Key128 {
     std::uint64_t low=0,high=0;
 };
@@ -34,12 +35,12 @@ static_assert(offsetof(DescriptorV1,purpose)==72);
 static_assert(offsetof(DescriptorV1,captured)==80);
 
 enum class SettlementOutcome : std::uint32_t {
-    Unknown=0, Returned=1, RetainedResources=2
+    Unknown=0, Returned=1, RetainedResources=2, InputOperationReturned=3
 };
 enum SettlementFlags : std::uint32_t {
     WorkerStopped=1, BorrowersReturned=2, OwnedOccupancyLeaseSettled=4,
     NoOutstandingDeviceCall=8, OwnedSdkResourcesReturned=16,
-    AllReturned=31
+    AllReturned=31, InputOperationFinished=BorrowersReturned|NoOutstandingDeviceCall
 };
 struct SettlementV1 {
     std::uint32_t size=sizeof(SettlementV1),version=kVersion;
@@ -50,6 +51,9 @@ struct SettlementV1 {
 };
 static_assert(sizeof(SettlementV1)==80);
 static_assert(offsetof(SettlementV1,outcome)==72);
+inline constexpr bool terminalSettlement(SettlementOutcome outcome) noexcept {
+    return outcome==SettlementOutcome::Returned||outcome==SettlementOutcome::InputOperationReturned;
+}
 
 // These values are identity/cancellation metadata, never permission on their
 // own. Observation cannot be upgraded to FanResume/FanWrite by a consumer.

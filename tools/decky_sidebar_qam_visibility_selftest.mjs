@@ -26,6 +26,7 @@ function harness({navPresent=false,documentHidden=false,visible=false,apiMissing
     useState:initial=>{const index=cursor++;if(!(index in slots))slots[index]=typeof initial==='function'?initial():initial;return [slots[index],value=>{slots[index]=typeof value==='function'?value(slots[index]):value;}];},
     useEffect:(callback,deps)=>{const index=cursor++,old=effects[index];if(!old||deps.length!==old.deps.length||deps.some((value,i)=>!Object.is(value,old.deps[i])))effects[index]={callback,deps,cleanup:old?.cleanup,pending:true};}
   };
+  React.useLayoutEffect=React.useEffect;
   const document={hidden:documentHidden};
   const quickWindow={document,addEventListener:()=>{documentListeners++;},removeEventListener:()=>{documentListeners--;}};
   const evaluate=(source,extra)=>{const module={exports:{}};vm.runInNewContext(source,{module,exports:module.exports,SP_REACT:React,console:{error:value=>errors.push(String(value)),warn:value=>errors.push(String(value)),log:()=>{}},...extra});return module.exports;};

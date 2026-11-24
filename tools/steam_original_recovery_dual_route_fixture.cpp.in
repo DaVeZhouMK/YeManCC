@@ -176,7 +176,7 @@ const std::function<bool()>& historicalStartupHandoffCurrent){
 // commit bodies below are the exact formal consumers, not reimplemented code.
 unsigned closeEpisodeCalls=0,armProducerCalls=0,captureProducerCalls=0,captureReadyCalls=0,gateOpenCalls=0,postResumeMessages=0;
 U64 producerGeneration=0;
-namespace SleepSteamRecovery {void closeSuspendEpisode(){++closeEpisodeCalls;}void captureSuspend(U64 g){++captureProducerCalls;producerGeneration=g;}}
+namespace SleepSteamRecovery {void closeSuspendEpisode(){++closeEpisodeCalls;}void captureSuspend(U64 g,const std::shared_ptr<void>&,U64){++captureProducerCalls;producerGeneration=g;}}
 namespace SleepRecoveryAuto {void arm(U64 g){++armProducerCalls;producerGeneration=g;}void captureReady(U64 g){++captureReadyCalls;producerGeneration=g;}void powerReady(U64){}}
 std::atomic<U64> g_resumeReadyGeneration{7},g_lastPowerResumeCommitTick{0},g_lastPowerResumeCommitGeneration{0};
 std::atomic<bool> g_inputReady{true};

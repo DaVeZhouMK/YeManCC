@@ -11,6 +11,7 @@ void check(const char* name,bool ok){++checks;if(!ok)++failures;std::cout<<(ok?"
 #ifdef YMCC_FAN_PHYSICAL_WAKE_NATIVE_CALLERS
 #include <cstdint>
 #include "../native/sleep_power_observation.h"
+#include <algorithm>
 #include <deque>
 #include <functional>
 #include <initializer_list>
@@ -44,6 +45,30 @@ constexpr unsigned ES_CONTINUOUS=1,ES_SYSTEM_REQUIRED=2,WM_FAN_PHYSICAL_WAKE_REA
 int g_hwnd=1,disarms=0,workerStarts=0,readyPosts=0,readyLogs=0,wakeLogs=0,sharedWakeOffers=0;
 bool active=false,failThread=false,sleepRetry=false,throwSuspend=false;
 bool failSuspendNotification=false,failClosePost=false;
+bool failCloseTrace=false;
+unsigned closeTraceFailures=0,writeCancels=0;
+bool dropFanWakeEvents=false,failFanWakeTimer=false;
+unsigned fanWakeDrops=0;
+using HWND=int;
+using UINT=unsigned;
+using UINT_PTR=::std::uintptr_t;
+using DWORD=unsigned long;
+#define CALLBACK
+using FanFixtureTimer=void (*)(HWND,UINT,UINT_PTR,DWORD);
+static FanFixtureTimer fanWakeTimer=nullptr;
+static UINT_PTR fanWakeTimerId=0;
+static ::std::uint64_t fanWakeTimerDue=0,fanWakeIntentRevision=1;
+[[maybe_unused]] static UINT_PTR SetTimer(HWND,UINT_PTR id,UINT delay,FanFixtureTimer callback){
+ if(failFanWakeTimer)return 0;
+ fanWakeTimer=callback;fanWakeTimerId=id;fanWakeTimerDue=fakeTick+delay;return id;
+}
+[[maybe_unused]] static bool KillTimer(HWND,UINT_PTR id){
+ if(id!=fanWakeTimerId)return false;
+ fanWakeTimer=nullptr;return true;
+}
+static void fireFanWakeTimer(){if(const auto callback=fanWakeTimer){fakeTick=fanWakeTimerDue;callback(g_hwnd,0,fanWakeTimerId,0);}}
+const char* failWakeLog=nullptr;
+unsigned failedWakeLogs=0;
 using ULONGLONG=unsigned long long;
 enum class SgWork { WakeHibernate };
 ULONGLONG g_sgAcceptedS4WakeFileTime=0;
@@ -59,6 +84,7 @@ static struct { bool active() const {return false;} void shutdown(){} } g_radial
 ::std::atomic<::ymcc::sleeprequest::Mode> g_sgAutomaticSleepTarget;
 bool g_sgModernStandbyActive=false,renewS4=true;
 unsigned s4CommonWake=0;
+static S4SleepBoundary s4IngressDuringAbort;
 static ULONGLONG sgNowFileTime(){return fakeTick;}
 static void sgRecordFact(const char*,const json&){}
 static bool sgRenewCancellationReady(ULONGLONG){return renewS4;}
@@ -68,7 +94,10 @@ static void sgCompleteSharedWakeClassification(ULONGLONG){}
 static void sgSleepTimeoutStop(const char*){}
 static void sgClearInternalSleepRequest(const char*){g_sgInternalSleepRequest={};}
 static void sgClearUnexpectedWake(const char*,bool){}
-static void sgAbortSleepIntent(const char*,ULONGLONG){sleepRetry=false;}
+static void sgAbortSleepIntent(const char*,ULONGLONG){
+ sleepRetry=false;
+ if(s4IngressDuringAbort)g_sleepPowerDispatch.boundary=s4IngressDuringAbort;
+}
 static void handlePowerResumeNotification(SgWork,const char*){++s4CommonWake;}
 static void sleepRecoveryAutoArm(ULONGLONG){}
 unsigned executionThread=0;
@@ -83,6 +112,7 @@ unsigned long long sharedGeneration=2;
 static unsigned long long currentPowerGeneration(){return sharedGeneration;}
 static unsigned long long currentFanPowerGeneration(){return g_fanPhysicalWake.generation(sharedGeneration);}
 static bool fanActivityIntentPresent(){return active;}
+[[maybe_unused]] static bool fanResumeActivityRevision(::std::uint64_t& revision){revision=fanWakeIntentRevision;return active;}
 static bool sgSleepRetryActive(){return sleepRetry;}
 static void publishSharedPowerLifecycle(const char*){++sharedWakeOffers;}
 // The provider owns its registry; these caller tests observe no real consumers.
@@ -114,13 +144,28 @@ static bool commitPowerResume(unsigned long long g,const char*){
  if(g_powerLifecycle.load()!=PowerLifecycle::Resuming||g_resumeReadyGeneration.load()!=g)return false;
  g_powerLifecycle.store(PowerLifecycle::Ready);hardwareGate=true;return true;
 }
-static void fanLeaseKeepaliveDisarm(const char*){++disarms;}
+static ::std::mutex g_fanLeaseKeepaliveMx;
+static ::std::string g_fanLeaseId;
+static ::std::atomic<bool> g_fanLeaseKeepaliveArmed{false};
+static ::std::atomic<unsigned> g_fanKeepaliveRendererEpoch{0};
+static unsigned g_fanKeepaliveRendererGraceUntil=0,g_fanKeepaliveRendererEpochSnapshot=0;
+static int g_fanLeaseKeepaliveWake=0;
+static struct { void invalidate() noexcept {++disarms;} } g_monitorFanDisplay;
+static void fanWritePowerCancel() noexcept {++writeCancels;}
+static void SetEvent(int) {}
 static void ipc_emit(const char* event,const json& detail){
+ if(dropFanWakeEvents&&(::std::strcmp(event,"power.lifecycleChanged")==0||::std::strcmp(event,"fan.resume-ready")==0)){
+  ++fanWakeDrops;return; // Both posts return normally, but neither reaches the observer.
+ }
  if(::std::strcmp(event,"power.lifecycleChanged")==0){projectedPowerEvents.push_back(detail);return;}
  if(failSuspendNotification&&::std::strcmp(event,"fan.suspending")==0)throw ::std::runtime_error("fixture-suspend-notification-failed");
  events.emplace_back(event);eventDetails.push_back(detail);
 }
-static void appendFanLifecycleLog(const char* event,const json&){if(::std::string(event)=="fan-physical-wake-ready")++readyLogs;else if(::std::string(event)=="fan-physical-wake-observed")++wakeLogs;}
+static void appendFanLifecycleLog(const char* event,const json&){
+ if(failWakeLog&&::std::strcmp(event,failWakeLog)==0){++failedWakeLogs;throw ::std::bad_alloc{};}
+ if(::std::strcmp(event,"fan-physical-wake-ready")==0)++readyLogs;
+ else if(::std::strcmp(event,"fan-physical-wake-observed")==0)++wakeLogs;
+}
 struct FanResumeScheduleResult {
  bool registered=false;unsigned long long manualOperation=0;bool awaitingPower=false;
  const char* disposition() const noexcept {return registered?"registered":awaitingPower?"awaiting-power":"not-registered";}
@@ -135,17 +180,25 @@ static FanResumeScheduleResult fanHostScheduleFanResume(unsigned long long g,boo
 static bool fanHostEmergencySuspend(const char*,unsigned long long g){closes.push_back(g);executionRequestsOwned=executionRequestsOwned&&executionThread!=0&&executionStates[0]==0&&(executionStates.at(executionThread)&ES_SYSTEM_REQUIRED)!=0;if(throwSuspend)throw ::std::runtime_error("fixture-suspend-failed");return true;}
 static unsigned SetThreadExecutionState(unsigned state){const auto previous=executionStates.at(executionThread);executionStates.at(executionThread)=state&ES_SYSTEM_REQUIRED;return previous;}
 static bool PostMessageW(int,unsigned,WPARAM,int){++readyPosts;return !failClosePost;}
-static void traceLog(const char*,...){}
-static void traceLogTry(const char*,...) noexcept {}
+static bool failThisTrace(const char* format) noexcept {
+ if(!failCloseTrace||::std::strncmp(format,"fan Host async sleep",20)!=0)return false;
+ ++closeTraceFailures;return true;
+}
+static void traceLog(const char* format,...){if(failThisTrace(format))throw ::std::bad_alloc{};}
+static void traceLogTry(const char* format,...) noexcept {(void)failThisTrace(format);}
 // Resolve only the extracted functions' std::thread to this deterministic
 // scheduler. detach retains the real worker body; drain explicitly opens its
 // Close waiting gate. The original concurrent header test uses real std::thread.
 namespace controlled_std {
+using ::std::atomic;
 using ::std::move;
 using ::std::string;
 using ::std::unique_ptr;
+using ::std::mutex;
+using ::std::lock_guard;
 using ::std::memory_order_acquire;
 using ::std::memory_order_release;
+using ::std::uint64_t;
 class thread {
  ::std::function<void()> work_;
 public:
@@ -179,14 +232,35 @@ static void reset(){
  g_powerLifecycle.store(PowerLifecycle::Ready);g_exitRequested.store(false);
  g_fanSleepCleanupInFlight.store(false);g_fanSleepCleanupGeneration.store(0);
   disarms=workerStarts=readyPosts=readyLogs=wakeLogs=sharedWakeOffers=0;active=failThread=sleepRetry=throwSuspend=failSuspendNotification=failClosePost=false;sharedGeneration=2;
+  failWakeLog=nullptr;failedWakeLogs=0;
+  failCloseTrace=false;closeTraceFailures=writeCancels=0;g_fanLeaseId.clear();g_fanLeaseKeepaliveArmed=false;
   executionThread=0;executionStates.assign(1,0);executionRequestsOwned=true;
  events.clear();eventDetails.clear();projectedPowerEvents.clear();closes.clear();resumes.clear();
+ dropFanWakeEvents=failFanWakeTimer=false;fanWakeDrops=0;fanWakeTimer=nullptr;fanWakeTimerId=0;fanWakeTimerDue=0;++fanWakeIntentRevision;
  g_resumeReadyGeneration.store(sharedGeneration);g_inputReady.store(false);g_resumeReadyTick=0;fakeTick=1000;lastCommitGeneration=0;hardwareGate=true;commitCalls=0;
  g_sgAcceptedS4WakeFileTime=0;g_sleepPowerDispatch.boundary={};g_sgLastPowerButtonSleepIntentFileTime=0;
- g_sgLatestUserSleepEntryFileTime=0;g_sgInternalSleepRequest={};renewS4=true;s4CommonWake=0;
+ g_sgLatestUserSleepEntryFileTime=0;g_sgLatestSleepEntryFileTime=0;g_sgInternalSleepRequest={};renewS4=true;s4CommonWake=0;
+ s4IngressDuringAbort={};
 }
 static void drain(){
   while(!workers.empty()){auto work=::std::move(workers.front());workers.pop_front();const auto caller=executionThread;executionThread=static_cast<unsigned>(executionStates.size());executionStates.push_back(0);try{work();}catch(...){executionThread=caller;throw;}executionThread=caller;}
+}
+static void testWakeDiagnostics(){
+ for(const auto* stage:{"fan-physical-wake-observed","fan-physical-wake-ready"}){
+  reset();active=true;dispatchFact(506,100);drain();
+  const auto generation=currentFanPowerGeneration();
+  failWakeLog=stage;
+  bool escaped=false;
+  try{dispatchFact(507,110);}catch(const ::std::bad_alloc&){escaped=true;}
+  const auto readyCount=[](){return ::std::count(events.begin(),events.end(),"fan.resume-ready");};
+  const auto recoveryDelivered=[&](){return resumes.size()==1&&resumes.front()==generation&&readyCount()==1;};
+  check(stage,failedWakeLogs==1&&!escaped&&recoveryDelivered());
+  const auto offers=resumes.size();const auto notices=readyCount();
+  failWakeLog=nullptr;
+  dispatchFact(507,110);
+  check("wake diagnostics do not duplicate a completed physical wake",
+      resumes.size()==offers&&readyCount()==notices&&closes.size()==1&&commitCalls==0);
+ }
 }
 static void testSharedFanProjection(){
  reset();active=true;
@@ -213,8 +287,47 @@ static void testSharedFanProjection(){
  --sharedGeneration;dispatchFact(506,120);drain();
  check("new physical sleep retires the old projected Fan wake",projected()==0);
 }
+static void testSharedFanProjectionRedelivery(){
+ const auto loseBoth=[] {
+  active=dropFanWakeEvents=true;
+  dispatchFact(506,100);dispatchFact(507,110);drain();
+  const auto wake=currentFanPowerGeneration();
+  fanCloseWake(wake);
+  check("both Fan wake messages can be lost after one real claim",fanWakeDrops==2&&projectedPowerEvents.empty()&&
+      ::std::count(events.begin(),events.end(),"fan.resume-ready")==0&&closes.size()==1&&resumes.size()==1);
+  dropFanWakeEvents=false;
+  return wake;
+ };
+ reset();
+ const auto shared=currentPowerGeneration(),wake=loseBoth();
+ const auto offers=sharedWakeOffers;
+ fireFanWakeTimer();
+ check("no new hint or focus: coordinator redelivers the retained Fan-only fact",projectedPowerEvents.size()==1&&
+     projectedPowerEvents.front().value("fanWakeOnly",false)&&projectedPowerEvents.front().value("generation",0ULL)==shared&&
+     projectedPowerEvents.front().value("fanWakeGeneration",0ULL)==wake&&wake!=shared);
+ fireFanWakeTimer();fireFanWakeTimer();fireFanWakeTimer();
+ check("Fan redelivery is bounded and does not repeat Close, resume, or public consumers",
+     projectedPowerEvents.size()==3&&!fanWakeTimer&&closes.size()==1&&resumes.size()==1&&sharedWakeOffers==offers&&commitCalls==0);
+ reset();loseBoth();sharedPowerKnown=false;fireFanWakeTimer();sharedPowerKnown=true;fireFanWakeTimer();
+ check("temporarily unavailable shared snapshot is not emitted and the next tick can deliver",projectedPowerEvents.size()==1);
+ for(const auto* edge:{"off","off-on","new-sleep","new-shared-generation","exit","timer-refused"}){
+  reset();
+  if(::std::strcmp(edge,"timer-refused")==0)failFanWakeTimer=true;
+  loseBoth();
+  if(::std::strcmp(edge,"off")==0)active=false;
+  if(::std::strcmp(edge,"off-on")==0)++fanWakeIntentRevision;
+  if(::std::strcmp(edge,"new-sleep")==0){dispatchFact(506,120);drain();}
+  if(::std::strcmp(edge,"new-shared-generation")==0)++sharedGeneration;
+  if(::std::strcmp(edge,"exit")==0)g_exitRequested=true;
+  fireFanWakeTimer();
+  check(edge,projectedPowerEvents.empty()&&!fanWakeTimer&&resumes.size()==1);
+ }
+ reset();loseBoth();sharedPowerPending=true;fireFanWakeTimer();
+ check("pending shared ingress cannot redeliver a prior Fan claim",projectedPowerEvents.empty());
+}
 static void testSharedPower(){
  testSharedFanProjection();
+ testSharedFanProjectionRedelivery();
  reset();auto value=fanLifecycleSnapshot({});
  check("shared coherent cold snapshot is known",value.value("known",false)&&value.value("hardwareWritesAllowed",false));
  check("shared current metadata retained",value.value("observedNotificationSequence",0u)==4&&value.value("suspendSerial",0u)==3&&value.value("sharedGeneration",0ULL)==sharedGeneration);
@@ -250,6 +363,35 @@ static void testCallers(){
  check("late506 below early507 cannot revoke already Ready Fan",currentFanPowerGeneration()==beforeEarlyWake&&g_fanPhysicalWake.ready(beforeEarlyWake)&&!g_fanPhysicalWake.awaitingWake(beforeEarlyWake)&&workers.empty()&&events.empty()&&disarms==0);
  drain();fanHostPublishPhysicalWake(currentFanPowerGeneration());
  check("late506 after early507 creates no Close or recovery",closes.empty()&&resumes.empty()&&readyLogs==0&&events.empty()&&executionStates[0]==0);
+ // Public suspend owns the same cycle. Run the reversed pair on both sides
+ // of Close return, losing the completion message in the outstanding case.
+ for(bool closeReturned : {false,true}) {
+  reset();active=true;g_powerLifecycle.store(PowerLifecycle::Suspended);
+  const auto cycle=g_fanPhysicalWake.confirmedSuspend(sharedGeneration,90);
+  fanHostQueueSuspend("suspend-broadcast",cycle);
+  if(closeReturned)drain();
+  dispatchFact(507,200);dispatchFact(506,80);
+  check("public suspend rejects a 506 from before its boundary",g_fanPhysicalWake.awaitingWake(cycle)&&resumes.empty());
+  if(closeReturned)sharedPowerPending=true;
+  dispatchFact(506,100);
+  check("reverse pair keeps its public generation and waits for Close or admission",currentFanPowerGeneration()==cycle&&
+      g_fanPhysicalWake.physical(cycle)&&!fanHostPowerMayWrite()&&resumes.empty()&&workerStarts==1);
+  if(closeReturned)sharedPowerPending=false;
+  else {failClosePost=true;drain();}
+  check("reverse pair requests public delivery after Close or pending admission",sharedWakeOffers==1&&closes.size()==1);
+  if(sharedWakeOffers)fanHostPublishPhysicalWake(cycle,true);
+  dispatchFact(506,100);dispatchFact(507,200);fanCloseWake(cycle);
+  check("reverse pair resumes once after public readmission with no shared commit",resumes==::std::vector<unsigned long long>{cycle}&&
+      closes==resumes&&readyLogs==1&&fanHostPowerMayWrite()&&commitCalls==0&&g_powerLifecycle.load()==PowerLifecycle::Suspended);
+  const auto click=fanManualWake(json{{"generation",cycle},{"continueReadyOnly",true}});
+  check("first manual click can join the reordered wake",click.value("resumeScheduled",false)&&commitCalls==0&&closes.size()==1);
+ }
+ reset();active=true;g_powerLifecycle.store(PowerLifecycle::Suspended);
+ const auto retryCycle=g_fanPhysicalWake.confirmedSuspend(sharedGeneration,90);
+ fanHostQueueSuspend("suspend-broadcast",retryCycle);drain();dispatchFact(507,200);
+ g_fanPhysicalWake.retryBoundary(sharedGeneration,210);dispatchFact(506,100);
+ check("retry cutoff prevents pairing a retired early 507",g_fanPhysicalWake.awaitingWake(retryCycle)&&
+      !g_fanPhysicalWake.physical(retryCycle)&&!fanHostPowerMayWrite()&&resumes.empty());
  reset();active=true;const auto beforeNewSleep=currentFanPowerGeneration();
  dispatchFact(507,200);dispatchFact(506,300);const auto actualNewSleep=currentFanPowerGeneration();
  check("genuinely newer506 after early507 still admits one Close",actualNewSleep>beforeNewSleep&&!g_fanPhysicalWake.ready(actualNewSleep)&&g_fanPhysicalWake.awaitingWake(actualNewSleep)&&workerStarts==1&&disarms==1&&workers.size()==1);
@@ -481,6 +623,26 @@ static void testCallers(){
  check("first lost suspend notification resumes once after its original Close",
        closes==::std::vector<unsigned long long>{firstAfterLoss}&&resumes==closes&&readyLogs==1&&commitCalls==0);
  reset();active=true;g_powerLifecycle.store(PowerLifecycle::Suspended);
+ g_fanLeaseId="lease-before-sleep";g_fanLeaseKeepaliveArmed=true;
+ failWakeLog="native-lease-keepalive-stopped";bool disarmLogEscaped=false;
+ try{dispatchFact(506,100);}catch(...){disarmLogEscaped=true;}
+ const auto afterDisarmLog=currentFanPowerGeneration();
+ check("disarm journal failure still cancels the old lease and installs its Close worker",
+       !disarmLogEscaped&&failedWakeLogs==1&&writeCancels==1&&g_fanLeaseId.empty()&&
+       !g_fanLeaseKeepaliveArmed&&workers.size()==1&&!g_fanPhysicalWake.ready(afterDisarmLog));
+ dispatchFact(507,200);drain();fanHostPublishPhysicalWake(afterDisarmLog);fanHostPublishPhysicalWake(afterDisarmLog);
+ check("wake after disarm journal failure receives the original Close and resumes once",
+       closes==::std::vector<unsigned long long>{afterDisarmLog}&&resumes==closes&&workers.empty()&&
+       !g_fanSleepCleanupInFlight.load()&&commitCalls==0);
+ reset();active=true;g_powerLifecycle.store(PowerLifecycle::Suspended);failCloseTrace=true;
+ dispatchFact(506,100);const auto afterTrace=currentFanPowerGeneration();
+ dispatchFact(507,200);bool closeTraceEscaped=false;
+ try{drain();}catch(...){closeTraceEscaped=true;}
+ fanHostPublishPhysicalWake(afterTrace);
+ check("worker trace failure cannot strand the Close owner or block the wake",
+       !closeTraceEscaped&&closeTraceFailures==1&&closes==::std::vector<unsigned long long>{afterTrace}&&
+       resumes==closes&&workers.empty()&&!g_fanSleepCleanupInFlight.load()&&commitCalls==0);
+ reset();active=true;g_powerLifecycle.store(PowerLifecycle::Suspended);
  dispatchFact(506,100);const auto priorClose=currentFanPowerGeneration();
  failSuspendNotification=true;bool queuedNotifyEscaped=false;
  try{dispatchFact(506,300);}catch(...){queuedNotifyEscaped=true;}
@@ -598,6 +760,19 @@ static void testCallers(){
   if(!resumes.empty())fanCloseWake(closePostCycle);
   check("a late duplicate Close completion cannot repeat the S4 recovery",resumes.size()<=1&&closes.size()==1);
 
+  reset();active=true;dispatchFact(506,100);drain();
+  g_sleepPowerDispatch.boundary={100,3};renewS4=false;
+  fanSharedS4(sharedGeneration,200);
+  renewS4=true;fanSharedS4(sharedGeneration,200);fanSharedS4(sharedGeneration,200);
+  check("same S4 can join Fan recovery once after a denied renewal",
+      s4CommonWake==1&&sharedWakeOffers==1&&g_sgAcceptedS4WakeFileTime==200);
+
+  reset();active=true;dispatchFact(506,100);drain();
+  g_sleepPowerDispatch.boundary={100,3};sleepRetry=true;s4IngressDuringAbort={300,4};
+  fanSharedS4(sharedGeneration,200);
+  check("new suspend during retry cancellation vetoes old S4 Fan and common recovery",
+      s4CommonWake==0&&sharedWakeOffers==0&&resumes.empty());
+
   reset();active=true;dispatchFact(506,100);failClosePost=true;drain();
   check("failed Close post without an observed wake does not request another Ready delivery",
       readyPosts==1&&sharedWakeOffers==0&&resumes.empty()&&closes.size()==1);
@@ -607,19 +782,22 @@ static void testCallers(){
 int main(int argc,char** argv){
  const bool callersOnly=argc==2&&::std::strcmp(argv[1],"--callers-only")==0;
  const bool sharedPowerOnly=argc==2&&::std::strcmp(argv[1],"--shared-power-only")==0;
- if(argc>2||(argc==2&&!callersOnly&&!sharedPowerOnly)){
-  ::std::cerr<<"ERROR unknown or extra arguments; expected no arguments or --callers-only; selected_suite=invalid checks=0 failures=1\n";
+ const bool wakeDiagnosticsOnly=argc==2&&::std::strcmp(argv[1],"--wake-diagnostics-only")==0;
+ if(argc>2||(argc==2&&!callersOnly&&!sharedPowerOnly&&!wakeDiagnosticsOnly)){
+  ::std::cerr<<"ERROR unknown or extra arguments; selected_suite=invalid checks=0 failures=1\n";
   return 2;
  }
 #ifdef YMCC_FAN_PHYSICAL_WAKE_NATIVE_CALLERS
  if(sharedPowerOnly){native_fixture::testSharedPower();::std::cout<<"checks="<<checks<<" failures="<<failures<<" selected_suite=shared-power-only scope=original-Fan-native-public-power-consumer-no-hardware\n";return failures?1:0;}
+ if(wakeDiagnosticsOnly){native_fixture::testWakeDiagnostics();::std::cout<<"checks="<<checks<<" failures="<<failures<<" selected_suite=wake-diagnostics-only scope=production-Fan-physical-wake-diagnostics-no-hardware\n";return failures?1:0;}
  if(callersOnly){
   native_fixture::testCallers();
+  native_fixture::testWakeDiagnostics();
   ::std::cout<<"checks="<<checks<<" failures="<<failures<<" selected_suite=callers-only scope=selected-original-native-callers-no-hardware\n";
   return failures?1:0;
  }
 #else
- if(callersOnly||sharedPowerOnly){
+ if(callersOnly||sharedPowerOnly||wakeDiagnosticsOnly){
   ::std::cerr<<"ERROR callers-only requires production source extraction; selected_suite=callers-only checks=0 failures=1\n";
   return 2;
  }
@@ -707,6 +885,8 @@ int main(int argc,char** argv){
 #ifdef YMCC_FAN_PHYSICAL_WAKE_NATIVE_CALLERS
  native_fixture::testCallers();
  native_fixture::testSharedFanProjection();
+ native_fixture::testSharedFanProjectionRedelivery();
+ native_fixture::testWakeDiagnostics();
 #else
  check("production native caller extraction must be supplied by original runner",false);
 #endif

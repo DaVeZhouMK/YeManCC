@@ -111,6 +111,31 @@ static Reply postLoad(const Packet* packet) {
         return Reply::SdkException;
     }
 }
+static Reply setOsdVisible(bool visible) {
+    __try {
+        // Match RTSS's HotkeyHandler: the x86 host owns the shared flags.
+        HMODULE hooks = GetModuleHandleW(L"RTSSHooks.dll");
+        using SetFlagsFn = DWORD (*)(DWORD, DWORD);
+        auto setFlags = hooks ? reinterpret_cast<SetFlagsFn>(GetProcAddress(hooks, "SetFlags")) : nullptr;
+        if (!setFlags) return Reply::ProfileUnavailable;
+        constexpr DWORD osdVisible = 1;
+        const DWORD flags = setFlags(~osdVisible, visible ? osdVisible : 0);
+        if (((flags & osdVisible) != 0) != visible) return Reply::OsdStateUnconfirmed;
+        const wchar_t* titles[] = {L"RTSS", L"RivaTuner Statistics Server"};
+        for (auto title : titles) {
+            HWND ui = nullptr;
+            while ((ui = FindWindowExW(nullptr, ui, nullptr, title))) {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(ui, &pid);
+                if (pid == GetCurrentProcessId()) {
+                    PostMessageW(ui, WM_APP + 100, 0, 0); // WM_RTSS_UPDATESETTINGS
+                    return Reply::Complete;
+                }
+            }
+        }
+        return Reply::Complete; // The SDK already applied the flag even without the settings window.
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return Reply::SdkException; }
+}
 static LRESULT CALLBACK bridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_COPYDATA) {
         auto data = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
@@ -120,6 +145,12 @@ static LRESULT CALLBACK bridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         std::memcpy(&packet, data->lpData, sizeof(packet));
         if (packet.version != kVersion) return static_cast<LRESULT>(Reply::Invalid);
         if (packet.command == Command::Ping) return static_cast<LRESULT>(Reply::Complete);
+        if (packet.command == Command::HideOsd || packet.command == Command::ShowOsd) {
+            if (packet.requestId || packet.layout[0]) return static_cast<LRESULT>(Reply::Invalid);
+            if (packet.command == Command::ShowOsd && g_reply == Reply::Accepted)
+                return static_cast<LRESULT>(Reply::Busy);
+            return static_cast<LRESULT>(setOsdVisible(packet.command == Command::ShowOsd));
+        }
         if (packet.command == Command::Status)
             return static_cast<LRESULT>(packet.requestId == g_pending.requestId ? g_reply : Reply::UnknownRequest);
         if (packet.command != Command::Load || !packet.requestId || !allowedLayout(packet.layout))

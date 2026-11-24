@@ -7,11 +7,12 @@ namespace ymcc::rtss {
 inline constexpr wchar_t kWindowClass[] = L"YMCC.RTSS.OverlayBridge.v1";
 inline constexpr ULONG_PTR kCopyDataTag = 0x594d5254;
 inline constexpr std::uint32_t kVersion = 1;
-enum class Command : std::uint32_t { Ping = 1, Load = 2, Status = 3 };
+enum class Command : std::uint32_t { Ping = 1, Load = 2, Status = 3, HideOsd = 4, ShowOsd = 5 };
 enum class Reply : std::uint32_t {
     Accepted = 1, Complete = 2, Invalid = 10, Busy = 11,
     EditorUnavailable = 12, TemplateMissing = 13, PersistFailed = 14,
-    QueueFailed = 15, SdkException = 16, UnknownRequest = 17, ProfileUnavailable = 18
+    QueueFailed = 15, SdkException = 16, UnknownRequest = 17, ProfileUnavailable = 18,
+    OsdStateUnconfirmed = 19
 };
 struct Packet {
     std::uint32_t version = kVersion;

@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 namespace ymcc::desktophud {
@@ -66,6 +67,17 @@ class Carrier {
  static constexpr UINT_PTR holdTimer=65047;
  static constexpr UINT_PTR radialFadeTimer=65048;
  static constexpr UINT_PTR leaseTimer=0x5948;
+ struct Viewport {
+   int id=0;
+   LONG width=0,height=0,left=0,top=0,workWidth=0,workHeight=0;
+   bool available=false;
+   bool operator==(const Viewport&)const noexcept=default;
+   Json message()const{
+     if(!available)return Json::object();
+     return {{"id",id},{"width",width},{"height",height},
+       {"workArea",{{"left",left},{"top",top},{"width",workWidth},{"height",workHeight}}}};
+   }
+ };
  struct State {
    Carrier* owner=nullptr;int id=0;unsigned long long noticeLease=0;std::string nonce;std::shared_ptr<Target> target;bool global=false,notice=false;HMONITOR monitor=nullptr;
    std::function<bool()> pendingOwner; // Released by the first valid prepared/painted receipt.
@@ -78,7 +90,8 @@ class Carrier {
    int width=0,height=0,position=1;unsigned long long seq=0,expires=0;
    DWORD policyGamePid=0;hudvisibility::Mode visibility=hudvisibility::Mode::Always;bool policyWaiting=false;unsigned long long visibilityRevision=0;
    Json inputWithdrawal; // Last actual input withdrawal only; no periodic collection.
-   std::string url,reason="creating",layoutKey,viewportKey;unsigned long long paintedSeq=0;
+   std::string url,reason="creating",layoutKey;unsigned long long paintedSeq=0;
+   std::optional<Viewport> lastViewport;
  };
  std::shared_ptr<State> current;
  ComPtr<ICoreWebView2Environment> environment;
@@ -103,11 +116,6 @@ class Carrier {
    }
    return r.right>r.left&&r.bottom>r.top;
  }
- static bool monitorArea(const State& s,RECT& r){
-   MONITORINFO info{sizeof(info)};const auto monitor=s.monitor?s.monitor:MonitorFromWindow(nullptr,MONITOR_DEFAULTTOPRIMARY);
-   if(!GetMonitorInfoW(monitor,&info)&&!GetMonitorInfoW(MonitorFromWindow(nullptr,MONITOR_DEFAULTTOPRIMARY),&info))return false;
-   r=info.rcWork;return r.right>r.left&&r.bottom>r.top;
- }
  static bool screenRects(const State& s,RECT& full,RECT& work){
    MONITORINFO info{sizeof(info)};
    const auto monitor=s.global?s.monitor:MonitorFromWindow(s.target?s.target->window:nullptr,MONITOR_DEFAULTTOPRIMARY);
@@ -119,10 +127,16 @@ class Carrier {
    if(s.crosshair){RECT work{};if(!screenRects(s,expected,work))return false;}
    return s.hwnd&&GetWindowRect(s.hwnd,&actual)&&EqualRect(&actual,&expected);
  }
- static Json viewportInfo(const State& s){
-   RECT full{},work{};if(!screenRects(s,full,work))return Json::object();
-   return {{"id",s.id},{"width",full.right-full.left},{"height",full.bottom-full.top},
-     {"workArea",{{"left",work.left-full.left},{"top",work.top-full.top},{"width",work.right-work.left},{"height",work.bottom-work.top}}}};
+  static bool readViewport(const State& s,RECT& full,RECT& work,Viewport& viewport){
+    if(!screenRects(s,full,work)){viewport={};return false;}
+    viewport={s.id,full.right-full.left,full.bottom-full.top,work.left-full.left,work.top-full.top,
+      work.right-work.left,work.bottom-work.top,true};
+    return true;
+  }
+  static Viewport readViewport(const State& s){
+    RECT full{},work{};Viewport viewport;
+    readViewport(s,full,work,viewport);
+    return viewport;
  }
  static bool clientArea(const State& s,RECT& r){
    if(s.global){
@@ -500,18 +514,26 @@ class Carrier {
      if(!s->policyWaiting&&(!s->pendingOwner||s->ready&&s->armed)){s->policyWaiting=true;++s->visibilityRevision;emit(s,"desktopHud.prepared");s->pendingOwner={};}
      return;
    }
+   RECT screen{},work{};
+   bool screenKnown=false;
    if(s->ready){
-     const auto viewport=viewportInfo(*s);const auto key=viewport.dump();
-     if(key!=s->viewportKey){s->viewportKey=key;s->layout=false;hideOutput(s.get(),!s->armed);send(s,{{"event","desktopHud.viewport"},{"data",viewport}});return;}
+     Viewport viewport;
+     screenKnown=readViewport(*s,screen,work,viewport);
+     if(s->lastViewport!=viewport){
+       auto data=viewport.message();s->lastViewport=viewport;s->layout=false;hideOutput(s.get(),!s->armed);
+       send(s,{{"event","desktopHud.viewport"},{"data",std::move(data)}});return;
+     }
    }
-   RECT r{};
-   const bool eligible=s->ready&&s->armed&&s->layout&&s->expires>wallNow()&&clientArea(*s,r)&&
+   // Freeze display geometry for this layout pass. After moving the HWND,
+   // displayPlacementMatches still checks the live screen/placement for input.
+   RECT r=s->global?work:RECT{};
+   const bool eligible=s->ready&&s->armed&&s->layout&&s->expires>wallNow()&&
+     (s->global ? screenKnown&&r.right>r.left&&r.bottom>r.top : clientArea(*s,r))&&
      (s->global||foreground==s->target->window||GetAncestor(foreground,GA_ROOT)==s->target->window);
    if(!eligible){hideOutput(s.get(),!s->ready||!s->armed||s->expires<=wallNow());return;}
    const bool resumed=s->policyWaiting;s->policyWaiting=false;s->reason="active";
-   RECT monitor=r;if(s->global&&!monitorArea(*s,monitor))return;
    const auto area=[](const RECT& v){return hudplacement::Area{static_cast<int>(v.left),static_cast<int>(v.top),static_cast<int>(v.right),static_cast<int>(v.bottom)};};
-   auto p=hudplacement::place(area(r),area(monitor),!s->global,s->width,s->height,s->position);
+   auto p=hudplacement::place(area(r),area(r),!s->global,s->width,s->height,s->position);
    if(s->global&&!s->notice&&!s->drag.position.placed){
      RECT reserved{};if(summonArea(reserved))p=hudplacement::avoidInitialOverlap(p,area(reserved),s->width,s->height);
    }
@@ -576,7 +598,8 @@ class Carrier {
      if(!pendingCurrent(s))return;
      if(cmd=="desktopHud.ready"){
        s->ready=true;s->reason="renderer-ready";RECT r{};clientArea(*s,r);if(s->notice){s->crosshair=true;KillTimer(s->hwnd,leaseTimer);}
-       response["result"]=viewportInfo(*s);s->viewportKey=response["result"].dump();
+       const auto viewport=readViewport(*s);
+       response["result"]=viewport.message();s->lastViewport=viewport;
        emit(s,"desktopHud.ready");
      }else if(cmd=="desktopHud.layout"){
        const double w=a.value("width",0.0),h=a.value("height",0.0);const int p=a.value("position",1);
@@ -848,27 +871,35 @@ public:
    if(expires<=now||expires>now+7000||seq<=s->seq||payload.value("nonce",std::string{})!=nonce||payload.value("hudId",0)!=id||
       !payload.contains("data")||payload["data"].value("source",std::string{})!="ymcc-uniform")return false;
    if(!alive(*s)){s->armed=false;hideOutput(s.get());s->reason="target-exited";emit(s,"desktopHud.unavailable");return false;}
-   const auto preferences=payload.value("preferences",Json::object());
-   // Borrow only from this frame's owned, immutable preferences snapshot.
-   const Json emptyAppearance=Json::object();
-   if(!preferences.is_object())(void)preferences.value("ymcc",emptyAppearance);
-   const auto appearanceIt=preferences.find("ymcc");
-   const Json& appearance=appearanceIt==preferences.end()?emptyAppearance:*appearanceIt;
-   huddrag::Position drag;drag.locked=appearance.value("dragLocked",false);drag.revision=appearance.value("dragRevision",0ULL);
-   if(appearance.contains("dragX")&&appearance.contains("dragY")&&appearance["dragX"].is_number()&&appearance["dragY"].is_number()){
-     drag.x=appearance["dragX"].get<double>();drag.y=appearance["dragY"].get<double>();drag.placed=std::isfinite(drag.x)&&std::isfinite(drag.y)&&drag.x>=0&&drag.x<=1&&drag.y>=0&&drag.y<=1;
+   static const Json emptyObject=Json::object();
+   const auto preferencesIt=payload.find("preferences");
+   const Json* preferences=preferencesIt==payload.end()?&emptyObject:&*preferencesIt;
+   if(!preferences->is_object())(void)preferences->value("ymcc",emptyObject);
+   const auto appearanceOf=[](const Json& prefs)->const Json&{
+     const auto it=prefs.find("ymcc");return it==prefs.end()?emptyObject:*it;
+   };
+   const Json* appearance=&appearanceOf(*preferences);
+   huddrag::Position drag;drag.locked=appearance->value("dragLocked",false);drag.revision=appearance->value("dragRevision",0ULL);
+   if(appearance->contains("dragX")&&appearance->contains("dragY")&&(*appearance)["dragX"].is_number()&&(*appearance)["dragY"].is_number()){
+     drag.x=(*appearance)["dragX"].get<double>();drag.y=(*appearance)["dragY"].get<double>();drag.placed=std::isfinite(drag.x)&&std::isfinite(drag.y)&&drag.x>=0&&drag.x<=1&&drag.y>=0&&drag.y<=1;
    }
-   // An explicit lock from the settings page cancels any current contact.
-   if(drag.locked&&drag.revision>s->drag.position.revision)stopInteraction(s);
+   std::optional<Json> reentryPreferences;
+   if(drag.locked&&drag.revision>s->drag.position.revision){
+     // Input cancellation can synchronously reenter the caller. Keep the
+     // pre-callback preferences for the rest of this frame.
+     reentryPreferences.emplace(*preferences);
+     preferences=&*reentryPreferences;appearance=&appearanceOf(*preferences);
+     stopInteraction(s);
+   }
    s->drag.adopt(drag);
-   const auto templateRevision=preferences.value("ymccTemplateRevision",0ULL);
-   if(templateRevision>=s->templateRevision){s->templateRevision=templateRevision;s->activeTemplate=preferences.value("ymccTemplate",std::string{"A"})=="B"?"B":"A";}
-   s->visibility=hudvisibility::mode(appearance.value("visibility",std::string{"always"}));
+   const auto templateRevision=preferences->value("ymccTemplateRevision",0ULL);
+   if(templateRevision>=s->templateRevision){s->templateRevision=templateRevision;s->activeTemplate=preferences->value("ymccTemplate",std::string{"A"})=="B"?"B":"A";}
+   s->visibility=hudvisibility::mode(appearance->value("visibility",std::string{"always"}));
    s->policyGamePid=s->visibility==hudvisibility::Mode::Always?0:hudvisibility::policyGamePid(payload);
-   const auto crosshair=appearance.value("crosshair",std::string{"none"});
+   const auto crosshair=appearance->value("crosshair",std::string{"none"});
    s->crosshair=crosshair=="dot"||crosshair=="cross"||crosshair=="gap"||crosshair=="ring"||crosshair=="ring-dot";
-   const auto shape=Json{{"crosshair",s->crosshair},{"layout",appearance.value("layout",std::string{})},{"scale",appearance.value("scale",1.0)},{"gap",appearance.value("gap",8)},
-     {"fields",appearance.value("fields",Json::object())}}.dump();
+   const auto shape=Json{{"crosshair",s->crosshair},{"layout",appearance->value("layout",std::string{})},{"scale",appearance->value("scale",1.0)},{"gap",appearance->value("gap",8)},
+     {"fields",appearance->value("fields",Json::object())}}.dump();
    if(shape!=s->layoutKey){s->layoutKey=shape;s->layout=false;hideOutput(s.get());RECT r{};if(clientArea(*s,r))SetWindowPos(s->hwnd,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_NOZORDER);}
    if(!pendingCurrent(s)||!requestCurrent(owner))return false;
    s->seq=seq;s->expires=expires;s->armed=payload.value("show",false);s->reason=s->armed?"active":"hidden";

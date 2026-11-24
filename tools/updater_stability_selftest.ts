@@ -12,11 +12,13 @@ const originals={setTimeout,clearTimeout,now:Date.now};
 (globalThis as any).setTimeout=(fn:any,ms:number)=>{timers.set(++seq,{fn,at:now+ms});return seq;};
 (globalThis as any).clearTimeout=(id:number)=>timers.delete(id);Date.now=()=>now;
 (globalThis as any).CustomEvent=class extends Event {detail:any;constructor(name:string,init:any){super(name);this.detail=init.detail;}};
+Object.assign(globalThis,{document:Object.assign(new EventTarget(),{visibilityState:'visible',createElement:()=>({content:{}})})});
 const win:any=new EventTarget();
 win.chrome={webview:{addEventListener(_name:string,cb:any){receive=cb;},postMessage(req:any){
  if(typeof req.id!=='number')return;calls.push(req);queueMicrotask(()=>{
  const reply=(value:any)=>receive({data:{id:req.id,result:value}});
  switch(req.cmd){
+ case 'power.lifecycle':reply({phase:'ready',generation:1,known:true,hardwareWritesAllowed:true});break;
  case 'app.updateState':if(mode==='late-initialize'&&!initializationRequest){initializationRequest=req;break;}reply({...state});break;
  case 'app.checkUpdate':if(mode==='late-check'||holdProbe){manifestRequest=req;break;}reply(info);break;
  case 'app.downloadUpdate':pending=req;if(mode!=='missing-start')state={...req.args,phase:'downloading',stage:'download',downloadActive:true,activeDownloadOperation:req.args.operationId,downloadedBytes:1,attempt:1};break;

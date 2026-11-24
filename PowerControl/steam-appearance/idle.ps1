@@ -62,13 +62,14 @@ function Stop-AppearanceIdle([int]$Code,[string]$Message) {
     throw $Message
 }
 # Compatibility entry: Idle now confirms a resident backend and never closes it.
-function Invoke-AppearanceIdle([uint32]$ExpectedPid=0,[string]$ExpectedBirth='',[string]$ExpectedRevision='',[string]$ExpectedTarget='',[switch]$DeferDomMismatch,[switch]$RequireSettledTransaction,[switch]$UseScopedStatusIdentity) {
+function Invoke-AppearanceIdle([uint32]$ExpectedPid=0,[string]$ExpectedBirth='',[string]$ExpectedRevision='',[string]$ExpectedTarget='',[switch]$DeferDomMismatch,[switch]$RequireSettledTransaction,[switch]$UseScopedStatusIdentity,[hashtable]$AutomaticPlanMemo) {
     Assert-CssDesktopNotEditing
     $script:AppearanceHelperPhase=3
     if($UseScopedStatusIdentity -and $RequireSettledTransaction -and $script:AppearanceObservationOnly){
-        # The status read owns admission and returns its fresh pre-DOM identity.
+        # Admission, files, CSS flags and the DOM must still be read afresh.
+        # Only pure plans may be reused after rechecking their input bytes.
         $identity=@{pid=$ExpectedPid;birth=$ExpectedBirth;session=$null}
-        $status=Get-AppearanceStatus -FinalIdleIdentity $identity
+        $status=Get-AppearanceStatus -FinalIdleIdentity $identity -AutomaticPlanMemo $AutomaticPlanMemo
         $session=$identity.session
     }else{
         $session=Get-AppearanceSteamSession
@@ -79,21 +80,18 @@ function Invoke-AppearanceIdle([uint32]$ExpectedPid=0,[string]$ExpectedBirth='',
     if(!$status.backendReady -or !$status.configuredMatchesBackend -or $status.packPrepared -eq $false -or $status.packRepairRequired -or $status.backendReloadRequired -or $status.packError -or $status.foreignActiveCount){Stop-AppearanceIdle 3 'Appearance loading unconfirmed; CSS remains resident'}
     $contentIndexStamp=$script:AppearanceContentIndexStamp
     if(($ExpectedRevision -and $status.revision -ne $ExpectedRevision) -or ($ExpectedTarget -and $status.targetId -ne $ExpectedTarget)){Stop-AppearanceIdle 4 'Appearance changed; CSS remains resident'}
-    if($RequireSettledTransaction){
-        $journal=Assert-PresetStateTarget (Join-Path (Get-PresetStateDir) 'transaction.json')
-        if(Test-Path -LiteralPath $journal -ErrorAction Stop){Stop-AppearanceIdle 3 'Appearance transaction unfinished; CSS remains resident'}
-    }
+    if($RequireSettledTransaction -and (Test-PresetTransactionPending)){Stop-AppearanceIdle 3 'Appearance transaction unfinished; CSS remains resident'}
     $script:AppearanceHelperFlags=3
     $script:AppearanceHelperPhase=5
     if($DeferDomMismatch){
-        $render=Get-AppearanceRenderedStatus $session $status
+        $render=Get-AppearanceRenderedStatus $session $status $AutomaticPlanMemo
         # Lost transport can recheck only the gated, read-only final snapshot.
         if(!$render.confirmed -and (($render.checked -and $render.reason -ceq 'render-theme-receipts-mismatch') -or
            (!$render.checked -and (Test-AppearanceDocumentRecheck $render.reason -FinalReadOnly:($RequireSettledTransaction -and $script:AppearanceObservationOnly))))){
             return [pscustomobject]@{ok=$false;retryDom=$true}
         }
         $confirmed=$render.confirmed
-    }else{$confirmed=Test-AppearanceRendered $session $status}
+    }else{$confirmed=Test-AppearanceRendered $session $status $AutomaticPlanMemo}
     # The page proof must refer to the same content index as the status plans.
     if($script:AppearanceContentIndexStamp -cne $contentIndexStamp){Stop-AppearanceIdle 9 'Appearance content index changed during DOM confirmation'}
     if(!$confirmed){Stop-AppearanceIdle 6 'Steam bigpicture CSS DOM not confirmed; CSS remains resident'}
@@ -146,7 +144,8 @@ function Get-AppearanceContentIndex {
         if([IO.Path]::GetExtension($entry.path) -ine '.css'){continue}
         $parts=$entry.path.Replace('\','/').Split('/',2)
         if($parts.Count -ne 2){throw 'render-content-index-path-invalid'}
-        $null=Get-AppearanceFileReceipt $parts[0] $parts[1]
+        # The index only needs a valid path; the plan computes its file receipt.
+        Get-AppearanceFileReceipt $parts[0] $parts[1] -ValidateOnly
         if($result.ContainsKey($entry.path) -or $entry.contentProperty -cnotmatch '^--ymcc-content-[0-9a-f]{16}$' -or $properties.ContainsKey($entry.contentProperty)){throw 'render-content-index-duplicate-or-invalid'}
         $result[$entry.path]=[string]$entry.contentProperty;$properties[$entry.contentProperty]=$true
     }
@@ -156,11 +155,14 @@ function Get-AppearanceContentIndex {
     $script:AppearanceContentIndex=$result;$script:AppearanceContentIndexStamp=$stamp
     return $result
 }
-function Get-AppearanceFileReceipt([string]$Name,[string]$Relative) {
+function Get-AppearanceFileReceipt([string]$Name,[string]$Relative,[switch]$ValidateOnly) {
     $relativePath=$Relative.Replace('\','/')
     if($Name -notin @('Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details') -or
-       $relativePath -notmatch '^[A-Za-z0-9][A-Za-z0-9_./ -]{0,127}\.css$' -or
-       @($relativePath.Split('/')|Where-Object {$_ -in @('','..','.')}).Count){throw 'render-file-path-invalid'}
+       $relativePath -notmatch '^[A-Za-z0-9][A-Za-z0-9_./ -]{0,127}\.css$'){throw 'render-file-path-invalid'}
+    foreach($part in $relativePath.Split('/')){
+        if($part -in @('','..','.')){throw 'render-file-path-invalid'}
+    }
+    if($ValidateOnly){return}
     $sha=[Security.Cryptography.SHA256]::Create()
     try {
         $bytes=[Text.Encoding]::UTF8.GetBytes(($Name+'/'+$relativePath).ToLowerInvariant())
@@ -205,64 +207,116 @@ function ConvertTo-AppearanceVariableValue([string]$Value) {
     }
     return $value
 }
-function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP') {
+function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP',[switch]$ValidateOnly) {
     if($Target -cnotin @('SP','MainMenu','QuickAccess')){throw 'render-plan-target-invalid'}
     if(!$Manifest -or $Manifest.name -cne $Name -or !$Config -or $Config.active -isnot [bool]){throw 'render-plan-source-invalid'}
     if(!$ContentIndex){$ContentIndex=Get-AppearanceContentIndex}
-    $files=@{};$fileReceipts=@{};$defaults=Get-AppearanceVariableDefaults $Name;$variables=@{};$variableTargets=@{};$chosen=@{}
-    $collect={param($Map,[bool]$Enabled)
-        if($Map -isnot [pscustomobject]){throw 'render-inject-map-invalid'}
-        if(@($Map.PSObject.Properties).Count -gt 128){throw 'render-inject-map-too-large'}
-        foreach($entry in $Map.PSObject.Properties){
-            if($entry.Name.StartsWith('--')){
-                $property=[string]$entry.Name
-                if($property -cnotmatch '^--[a-z][a-z0-9-]{0,79}$' -or !$defaults.ContainsKey($property) -or $entry.Value -isnot [Array] -or $entry.Value.Count -lt 2 -or $entry.Value.Count -gt 16){throw 'render-variable-definition-invalid'}
-                foreach($definitionPart in $entry.Value){if($definitionPart -isnot [string]){throw 'render-variable-definition-invalid'}}
-                $null=ConvertTo-AppearanceVariableValue $entry.Value[0]
-                if(!$variables.ContainsKey($property)){$variables[$property]='';$variableTargets[$property]=$false}
-                $targetsCurrent=$false
-                for($targetIndex=1;$targetIndex -lt $entry.Value.Count;$targetIndex++){if($Target -ceq $entry.Value[$targetIndex]){$targetsCurrent=$true;break}}
-                if(!$targetsCurrent){continue}
-                if(!$variableTargets[$property]){$variables[$property]=if($Config.active){[string]$defaults[$property]}else{''};$variableTargets[$property]=$true}
-                if($Enabled){
-                    if($chosen.ContainsKey($property) -and $chosen[$property] -cne [string]$entry.Value[0]){throw 'render-variable-selection-conflict'}
-                    $chosen[$property]=[string]$entry.Value[0];$variables[$property]=[string]$entry.Value[0]
-                }
-                continue
-            }
-            if($entry.Value -isnot [Array] -or @($entry.Value).Count -gt 16){throw 'render-inject-targets-invalid'}
-            foreach($injectionTarget in $entry.Value){if($injectionTarget -isnot [string]){throw 'render-inject-targets-invalid'}}
-            $applies=$Target -cin @($entry.Value)
-            $file=([string]$entry.Name).Replace('\','/')
-            # The name/path hash is pure. Validate each distinct normalized file
-            # once in this plan; all options still validate their target arrays.
-            if(!$files.ContainsKey($file)){$fileReceipts[$file]=Get-AppearanceFileReceipt $Name $file;$files[$file]=$false}
-            if($Enabled -and $applies){$files[$file]=$true}
-            if($files.Count -gt 128){throw 'render-plan-too-large'}
-        }
+    # These values depend on the theme and exact normalized path, not the target.
+    $fileReceipts=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    $defaults=Get-AppearanceVariableDefaults $Name
+    if($ValidateOnly){
+        Get-AppearanceTargetRenderPlan $Name $Manifest $Config $ContentIndex $Target $fileReceipts $defaults -ValidateOnly
+        return
     }
-    & $collect $Manifest.inject ([bool]$Config.active)
-    if($Manifest.patches){
-        if($Manifest.patches -isnot [pscustomobject] -or @($Manifest.patches.PSObject.Properties).Count -gt 64){throw 'render-patch-map-invalid'}
-        foreach($patch in $Manifest.patches.PSObject.Properties){
+    Get-AppearanceTargetRenderPlan $Name $Manifest $Config $ContentIndex $Target $fileReceipts $defaults
+}
+function Get-AppearanceTargetRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex,[string]$Target,[Collections.Generic.Dictionary[string,string]]$FileReceipts,$Defaults,[switch]$ValidateOnly) {
+    $files=@{};$variables=@{};$variableTargets=@{};$chosen=@{}
+    $projectMenus=!$ValidateOnly -and $Target -ceq 'SP'
+    $otherSelections=if($Target -ceq 'SP'){@{}}
+    if($projectMenus){$otherFiles=@{};$otherVariableTargets=@{}}
+    # Validate the base injection before any patches; visit each option in
+    # order without creating a PowerShell scope for each injection map.
+    $patches=@()
+    for($patchIndex=-1;$patchIndex -lt $patches.Count;$patchIndex++){
+        if($patchIndex -lt 0){$options=@($null)}
+        else{
+            $patch=$patches[$patchIndex]
             $values=$patch.Value.values
-            if($values -isnot [pscustomobject] -or @($values.PSObject.Properties).Count -gt 256){throw 'render-patch-values-invalid'}
+            if($values -isnot [pscustomobject]){throw 'render-patch-values-invalid'}
+            $options=@($values.PSObject.Properties)
+            if($options.Count -gt 256){throw 'render-patch-values-invalid'}
             $configured=$Config.PSObject.Properties[$patch.Name]
             $selected=if($configured){$configured.Value}else{$patch.Value.default}
             if($selected -isnot [string]){throw 'render-patch-selection-invalid'}
             $selectionMatches=0
-            foreach($selectionOption in $values.PSObject.Properties){if($selectionOption.Name -ceq $selected){$selectionMatches++}}
+            foreach($selectionOption in $options){if($selectionOption.Name -ceq $selected){$selectionMatches++}}
             if($selectionMatches -ne 1){throw 'render-patch-selection-invalid'}
-            foreach($option in $values.PSObject.Properties){& $collect $option.Value ([bool]($Config.active -and $option.Name -ceq $selected))}
+        }
+        foreach($option in $options){
+            if($null -eq $option){$map=$Manifest.inject;$enabled=$Config.active}
+            else{$map=$option.Value;$enabled=$Config.active -and $option.Name -ceq $selected}
+            if($map -isnot [pscustomobject]){throw 'render-inject-map-invalid'}
+            $entries=@($map.PSObject.Properties)
+            if($entries.Count -gt 128){throw 'render-inject-map-too-large'}
+            foreach($entry in $entries){
+                $definition=$entry.Value
+                if($entry.Name.StartsWith('--')){
+                    $property=[string]$entry.Name
+                    if($property -cnotmatch '^--[a-z][a-z0-9-]{0,79}$' -or !$defaults.ContainsKey($property) -or $definition -isnot [Array] -or $definition.Length -lt 2 -or $definition.Length -gt 16){throw 'render-variable-definition-invalid'}
+                    $value=$definition[0]
+                    if($value -isnot [string]){throw 'render-variable-definition-invalid'}
+                    $targetsCurrent=$false
+                    for($i=1;$i -lt $definition.Length;$i++){
+                        $destination=$definition[$i]
+                        if($destination -isnot [string]){throw 'render-variable-definition-invalid'}
+                        if($Target -ceq $destination){$targetsCurrent=$true}
+                    }
+                    $null=ConvertTo-AppearanceVariableValue $value
+                    if(!$variables.ContainsKey($property)){$variables[$property]='';$variableTargets[$property]=$false}
+                    # Only selection conflicts depend on the document. Keep the
+                    # home page's validation order, then report menu conflicts.
+                    if($null -ne $otherSelections -and ($enabled -or $projectMenus)){
+                        for($i=1;$i -lt $definition.Length;$i++){
+                            $other=$definition[$i]
+                            if($other -cne 'MainMenu' -and $other -cne 'QuickAccess'){continue}
+                            $key=$other+'/'+$property
+                            if($projectMenus){$otherVariableTargets[$key]=$true}
+                            if($enabled){
+                                if($otherSelections.ContainsKey($key) -and $otherSelections[$key] -cne $value){$otherSelections.conflict=$true}
+                                $otherSelections[$key]=$value
+                            }
+                        }
+                    }
+                    if(!$targetsCurrent){continue}
+                    if(!$variableTargets[$property]){$variables[$property]=if($Config.active){[string]$defaults[$property]}else{''};$variableTargets[$property]=$true}
+                    if($enabled){
+                        if($chosen.ContainsKey($property) -and $chosen[$property] -cne $value){throw 'render-variable-selection-conflict'}
+                        $chosen[$property]=$value;$variables[$property]=$value
+                    }
+                    continue
+                }
+                if($definition -isnot [Array] -or $definition.Length -gt 16){throw 'render-inject-targets-invalid'}
+                $file=([string]$entry.Name).Replace('\','/')
+                $applies=$false
+                foreach($injectionTarget in $definition){
+                    if($injectionTarget -isnot [string]){throw 'render-inject-targets-invalid'}
+                    if($injectionTarget -ceq $Target){$applies=$true}
+                    if($projectMenus -and $enabled -and ($injectionTarget -ceq 'MainMenu' -or $injectionTarget -ceq 'QuickAccess')){$otherFiles[$injectionTarget+'/'+$file]=$true}
+                }
+                if(!$files.ContainsKey($file)){
+                    if(!$FileReceipts.ContainsKey($file)){$FileReceipts.Add($file,(Get-AppearanceFileReceipt $Name $file))}
+                    $files[$file]=$false
+                }
+                if($enabled -and $applies){$files[$file]=$true}
+                if($files.Count -gt 128){throw 'render-plan-too-large'}
+            }
+        }
+        if($patchIndex -lt 0 -and $Manifest.patches){
+            if($Manifest.patches -isnot [pscustomobject]){throw 'render-patch-map-invalid'}
+            $patches=@($Manifest.patches.PSObject.Properties)
+            if($patches.Count -gt 64){throw 'render-patch-map-invalid'}
         }
     }
     if(!$files.ContainsKey('shared.css')){throw 'render-shared-file-missing'}
     $rows=@(foreach($file in @($files.Keys|Sort-Object -CaseSensitive)){
         $contentProperty=$ContentIndex[$Name+'/'+$file]
         if($contentProperty -cnotmatch '^--ymcc-content-[0-9a-f]{16}$'){throw 'render-content-file-not-managed'}
-        [pscustomobject]@{path=$file;property=$fileReceipts[$file];contentProperty=$contentProperty;enabled=[bool]$files[$file]}
+        if(!$ValidateOnly){[pscustomobject]@{path=$file;property=$FileReceipts[$file];contentProperty=$contentProperty;enabled=[bool]$files[$file]}}
     })
     if($variables.Count -ne $defaults.Count){throw 'render-variable-definitions-incomplete'}
+    if($otherSelections -and $otherSelections.conflict){throw 'render-variable-selection-conflict'}
+    if($ValidateOnly){return}
     $variableRows=@(foreach($property in @($variables.Keys|Sort-Object -CaseSensitive)){
         # Shared CSS can define a default even when the selected dynamic patch
         # only targets SP. Other documents must retain that static fallback.
@@ -270,14 +324,23 @@ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentI
         $value=if(!$variableTargets[$property] -and $enabled){[string]$defaults[$property]}else{[string]$variables[$property]}
         [pscustomobject]@{property=$property;enabled=$enabled;value=$value}
     })
-    $result=[pscustomobject]@{protocol=4;files=$rows;variables=$variableRows}
-    if($Target -ceq 'SP'){
-        $contexts=[ordered]@{}
-        foreach($context in @('MainMenu','QuickAccess')){$contexts[$context]=Get-AppearanceThemeRenderPlan $Name $Manifest $Config $ContentIndex $context}
-        $result|Add-Member -NotePropertyName contextProtocol -NotePropertyValue 1
-        $result|Add-Member -NotePropertyName contexts -NotePropertyValue ([pscustomobject]$contexts)
+    if(!$projectMenus){return [pscustomobject]@{protocol=4;files=$rows;variables=$variableRows}}
+    # The menus use the same validated and sorted resource set with independent selections.
+    $contexts=[ordered]@{}
+    foreach($context in 'MainMenu','QuickAccess'){
+        $contextFiles=@(foreach($row in $rows){
+            [pscustomobject]@{path=$row.path;property=$row.property;contentProperty=$row.contentProperty;enabled=$otherFiles.ContainsKey($context+'/'+$row.path)}
+        })
+        $shared=$otherFiles.ContainsKey($context+'/shared.css')
+        $contextVariables=@(foreach($row in $variableRows){
+            $property=$row.property;$key=$context+'/'+$property
+            $enabled=[bool]($Config.active -and ($shared -or $otherVariableTargets.ContainsKey($key)))
+            $value=if(!$enabled){''}elseif($otherSelections.ContainsKey($key)){[string]$otherSelections[$key]}else{[string]$defaults[$property]}
+            [pscustomobject]@{property=$property;enabled=$enabled;value=$value}
+        })
+        $contexts[$context]=[pscustomobject]@{protocol=4;files=$contextFiles;variables=$contextVariables}
     }
-    $result
+    [pscustomobject]@{protocol=4;files=$rows;variables=$variableRows;contextProtocol=1;contexts=[pscustomobject]$contexts}
 }
 function Get-AppearanceRenderExpectation($Status,[string]$Target='SP',[Collections.Generic.Dictionary[string,string]]$FileReceipts=$null,[hashtable]$ContentIndex=$null) {
     if($Target -cnotin @('SP','MainMenu','QuickAccess')){throw 'render-expectation-target-invalid'}
@@ -286,9 +349,15 @@ function Get-AppearanceRenderExpectation($Status,[string]$Target='SP',[Collectio
     $rows=@($Status.themes);$count=0;$properties=@{}
     if($rows.Count -ne $names.Count){throw 'render-snapshot-incomplete'}
     foreach($name in $names){
-        $found=@($rows|Where-Object {$_.name -ceq $name})
-        if($found.Count -ne 1 -or $found[0].installed -isnot [bool] -or !$found[0].installed -or $found[0].configured -isnot [bool] -or $found[0].error){throw 'render-snapshot-invalid'}
-        $row=$found[0];$plan=$row.renderPlan
+        $row=$null
+        foreach($candidate in $rows){
+            if($candidate.name -ceq $name){
+                if($null -ne $row){throw 'render-snapshot-invalid'}
+                $row=$candidate
+            }
+        }
+        if($null -eq $row -or $row.installed -isnot [bool] -or !$row.installed -or $row.configured -isnot [bool] -or $row.error){throw 'render-snapshot-invalid'}
+        $plan=$row.renderPlan
         if($Target -cne 'SP'){
             if(!$plan -or !(Test-AppearanceReceiptInteger $plan.contextProtocol 1 1) -or $plan.contexts -isnot [pscustomobject] -or @($plan.contexts.PSObject.Properties).Count -ne 2 -or !$plan.contexts.PSObject.Properties[$Target]){throw 'render-context-plan-unavailable'}
             $plan=$plan.contexts.PSObject.Properties[$Target].Value
@@ -297,15 +366,16 @@ function Get-AppearanceRenderExpectation($Status,[string]$Target='SP',[Collectio
         $paths=@{}
         foreach($file in $plan.files){
             if($file -isnot [pscustomobject] -or $file.path -isnot [string] -or $file.property -isnot [string] -or $file.enabled -isnot [bool]){throw 'render-plan-file-invalid'}
+            $key=$name+'/'+$file.path
             if($null -ne $FileReceipts){
-                $key=$name+'/'+$file.path;$property=''
+                $property=''
                 if(!$FileReceipts.TryGetValue($key,[ref]$property)){
                     $property=Get-AppearanceFileReceipt $name $file.path
                     $FileReceipts.Add($key,$property)
                 }
             }else{$property=Get-AppearanceFileReceipt $name $file.path}
             if($property -cne $file.property -or $properties.ContainsKey($property) -or $paths.ContainsKey($file.path) -or (!$row.configured -and $file.enabled)){throw 'render-plan-file-invalid'}
-            if($file.contentProperty -isnot [string] -or $file.contentProperty -cnotmatch '^--ymcc-content-[0-9a-f]{16}$' -or $contentIndex[$name+'/'+$file.path] -cne $file.contentProperty -or $properties.ContainsKey($file.contentProperty)){throw 'render-plan-content-invalid'}
+            if($file.contentProperty -isnot [string] -or $file.contentProperty -cnotmatch '^--ymcc-content-[0-9a-f]{16}$' -or $contentIndex[$key] -cne $file.contentProperty -or $properties.ContainsKey($file.contentProperty)){throw 'render-plan-content-invalid'}
             $properties[$property]=$true;$properties[$file.contentProperty]=$true;$paths[$file.path]=$true;$count+=2
             if($count -gt 256){throw 'render-plan-too-large'}
             [pscustomobject]@{name=$name;property=$property;contentProperty=$file.contentProperty;enabled=[bool]$file.enabled;path=$file.path;kind='file';value=$(if($file.enabled){'1'}else{''})}
@@ -323,46 +393,78 @@ function Get-AppearanceRenderExpectation($Status,[string]$Target='SP',[Collectio
     }
 }
 
-function Get-AppearanceRenderedStatus($Session,$Status) {
+function Get-AppearanceDocumentPlan($Status,$ContentIndex,[hashtable]$AutomaticPlanMemo) {
+    $plansFromFreshBytes=$null -ne $AutomaticPlanMemo -and $Status.revision -and $Status.targetId
+    if($plansFromFreshBytes){
+        # Only reuse the unmodified plan objects published by Get-ThemeRows
+        # after matching fresh manifest/config bytes. Never memoize a receipt.
+        $themes=@($Status.themes)
+        $entry=$AutomaticPlanMemo[':document-expectations']
+        $hit=$entry -and [object]::ReferenceEquals($entry.index,$ContentIndex) -and $entry.target -ceq $Status.targetId -and $entry.revision -ceq $Status.revision -and $entry.rows.Count -eq $themes.Count
+        for($i=0;$i -lt $themes.Count;$i++){
+            $theme=$themes[$i]
+            if($theme.name -isnot [string] -or !$theme.name -or $theme.installed -isnot [bool] -or !$theme.installed -or $theme.configured -isnot [bool] -or $theme.error){$plansFromFreshBytes=$false;break}
+            $source=$AutomaticPlanMemo[$theme.name]
+            if(!$source -or !$theme.renderPlan -or ![object]::ReferenceEquals($source.index,$ContentIndex) -or ![object]::ReferenceEquals($source.plan,$theme.renderPlan)){$plansFromFreshBytes=$false;break}
+            if($hit -and ($entry.rows[$i].name -cne $theme.name -or $entry.rows[$i].configured -ne $theme.configured -or ![object]::ReferenceEquals($entry.rows[$i].plan,$theme.renderPlan))){$hit=$false}
+        }
+        if($plansFromFreshBytes -and $hit){return $entry.document}
+    }
+    $expectations=@{};$plans=@{}
+    $fileReceipts=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    foreach($target in @('SP','MainMenu','QuickAccess')){
+        $expected=@(Get-AppearanceRenderExpectation $Status $target $fileReceipts $ContentIndex)
+        $properties=[string[]]::new($expected.Count)
+        $files=[Collections.Generic.List[object]]::new()
+        $fileProperties=[Collections.Generic.List[string]]::new()
+        for($i=0;$i -lt $expected.Count;$i++){
+            $row=$expected[$i];$properties[$i]=$row.property
+            if($row.kind -eq 'file'){$files.Add($row);$fileProperties.Add($row.property)}
+        }
+        $expectations[$target]=@{rows=$expected;files=$files.ToArray()}
+        $plans[$target]=@{properties=$properties;fileCounts=$fileProperties.ToArray()}
+    }
+    $document=@{expectations=$expectations;plans=$plans}
+    if($plansFromFreshBytes){
+        $AutomaticPlanMemo[':document-expectations']=@{index=$ContentIndex;target=$Status.targetId;revision=$Status.revision;document=$document;
+            rows=@(foreach($theme in $themes){@{name=$theme.name;configured=$theme.configured;plan=$theme.renderPlan}})}
+    }
+    return $document
+}
+
+function Get-AppearanceRenderedStatus($Session,$Status,[hashtable]$AutomaticPlanMemo) {
     $probe=[pscustomobject]@{checked=$false;confirmed=$false;reason='render-unconfirmed';mismatched=@();pages=0;mainPages=0;contextPages=0;contextProtocol=1;contextComplete=$false;sequential=$true}
     try {
         if(!$Session -or !$Session.pid -or !$Session.birth -or !$Session.root -or !$Session.processEpoch -or !$Session.accountEpoch -or !$Session.powerGeneration){throw 'render-session-unconfirmed'}
-        $expectations=@{};$plans=@{}
-        # Build all three plans from the same validated index for this document observation.
         $contentIndex=Get-AppearanceContentIndex
-        $fileReceipts=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-        foreach($target in @('SP','MainMenu','QuickAccess')){
-            $expected=@(Get-AppearanceRenderExpectation $Status $target $fileReceipts $contentIndex)
-            $properties=[string[]]::new($expected.Count)
-            $files=[Collections.Generic.List[object]]::new()
-            $fileProperties=[Collections.Generic.List[string]]::new()
-            for($i=0;$i -lt $expected.Count;$i++){
-                $row=$expected[$i];$properties[$i]=$row.property
-                if($row.kind -eq 'file'){$files.Add($row);$fileProperties.Add($row.property)}
-            }
-            $expectations[$target]=@{rows=$expected;files=$files.ToArray()}
-            $plans[$target]=@{properties=$properties;fileCounts=$fileProperties.ToArray()}
-        }
+        $compiled=Get-AppearanceDocumentPlan $Status $contentIndex $AutomaticPlanMemo
+        $expectations=$compiled.expectations;$plans=$compiled.plans
         $observed=Invoke-AppearanceSharedSteam @{operation='documents';identity=$Session;plans=$plans}
         if($observed.protocol -ne 1 -or $observed.sequential -ne $true -or $observed.complete -isnot [bool] -or $observed.documents -isnot [Array] -or !$observed.documents.Count -or $observed.documents.Count -gt 12){throw 'render-shared-receipt-invalid'}
-        $bad=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        $bad=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $ids=@{}
         foreach($document in $observed.documents){
             $target=[string]$document.kind
             if(!$expectations.ContainsKey($target) -or $document.id -isnot [string] -or $document.id -cnotmatch '^[A-Za-z0-9_-]{1,128}$' -or $ids.ContainsKey($document.id)){throw 'render-target-id-invalid'}
             $ids[$document.id]=$true;$expected=$expectations[$target].rows;$fileRows=$expectations[$target].files;$reply=$document.value
             if(!$reply -or $reply.documentKey -isnot [string] -or !$reply.documentKey.Length -or $reply.documentKey.Length -gt 96 -or !(Test-AppearanceReceiptInteger $reply.protocol 4 4) -or $reply.ready -isnot [bool] -or !$reply.ready -or !(Test-AppearanceReceiptInteger $reply.styles 0 16384) -or $reply.values -isnot [Array] -or $reply.values.Count -ne $expected.Count){throw 'render-receipt-invalid'}
+            $values=$reply.values
             for($index=0;$index -lt $expected.Count;$index++){
-                $value=$reply.values[$index]
+                $row=$expected[$index];$value=$values[$index]
                 if($value -isnot [string] -or $value.Length -gt 96){throw 'render-receipt-value-invalid'}
-                $ok=if($expected[$index].kind -eq 'variable'){(ConvertTo-AppearanceVariableValue $value) -ceq $expected[$index].normalizedValue}elseif($expected[$index].enabled){$value -ceq '1'}else{$value.Length -eq 0}
-                if(!$ok){$null=$bad.Add([string]$expected[$index].name)}
+                if($row.kind -eq 'variable'){
+                    # The plan already normalized the exact expected string.
+                    $matchesExpectation=[string]::Equals($value,$row.value,[StringComparison]::Ordinal) -or
+                        (ConvertTo-AppearanceVariableValue $value) -ceq $row.normalizedValue
+                }elseif($row.enabled){$matchesExpectation=$value -ceq '1'}else{$matchesExpectation=$value.Length -eq 0}
+                if(!$matchesExpectation){$null=$bad.Add([string]$row.name)}
             }
-            if($reply.fileCounts -isnot [Array] -or $reply.fileCounts.Count -ne $fileRows.Count){throw 'render-content-counts-invalid'}
+            $fileCounts=$reply.fileCounts
+            if($fileCounts -isnot [Array] -or $fileCounts.Count -ne $fileRows.Count){throw 'render-content-counts-invalid'}
             for($i=0;$i -lt $fileRows.Count;$i++){
-                $copies=$reply.fileCounts[$i]
-                if(!(Test-AppearanceReceiptInteger $copies 0 16384)){throw 'render-content-count-invalid'}
-                if($copies -ne $(if($fileRows[$i].enabled){1}else{0})){$null=$bad.Add([string]$fileRows[$i].name)}
+                $copies=$fileCounts[$i];$row=$fileRows[$i]
+                if(($copies -isnot [int] -and $copies -isnot [long]) -or $copies -lt 0 -or $copies -gt 16384){throw 'render-content-count-invalid'}
+                if($copies -ne [int]$row.enabled){$null=$bad.Add([string]$row.name)}
             }
             if($reply.styles -eq 0){foreach($row in $expected){if($row.enabled){$null=$bad.Add([string]$row.name)}}}
             $probe.pages++
@@ -370,7 +472,8 @@ function Get-AppearanceRenderedStatus($Session,$Status) {
         }
         if(!$probe.mainPages -or $probe.mainPages -gt 4 -or $probe.contextPages -gt 8){throw 'render-main-target-unconfirmed'}
         $probe.contextComplete=$observed.complete
-        $probe.checked=$true;$probe.mismatched=@($Status.themes|Where-Object {$bad.Contains([string]$_.name)}|ForEach-Object name|Select-Object -Unique)
+        $probe.checked=$true
+        $probe.mismatched=@(foreach($row in $Status.themes){if($bad.Remove([string]$row.name)){$row.name}})
         $probe.confirmed=$probe.mismatched.Count -eq 0
         $probe.reason=if(!$probe.confirmed){'render-theme-receipts-mismatch'}elseif($observed.complete){'render-receipts-confirmed'}else{'render-observed-documents-confirmed-contexts-partial'}
     }catch {
@@ -379,6 +482,6 @@ function Get-AppearanceRenderedStatus($Session,$Status) {
     }
     return $probe
 }
-function Test-AppearanceRendered($Session,$Status) {
-    return [bool](Get-AppearanceRenderedStatus $Session $Status).confirmed
+function Test-AppearanceRendered($Session,$Status,[hashtable]$AutomaticPlanMemo) {
+    return [bool](Get-AppearanceRenderedStatus $Session $Status $AutomaticPlanMemo).confirmed
 }

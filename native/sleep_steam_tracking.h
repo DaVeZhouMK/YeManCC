@@ -13,13 +13,13 @@
 #include "json.hpp"
 namespace ymcc::sleepsteam {
 using Json=nlohmann::json;
-inline bool unsignedDecimal(const std::string& s,std::uint64_t& value) {
+inline bool unsignedDecimal(std::string_view s,std::uint64_t& value) {
     if(s.empty())return false;value=0;
     for(const auto c:s){if(c<'0'||c>'9')return false;const auto digit=static_cast<unsigned>(c-'0');
         if(value>(std::numeric_limits<std::uint64_t>::max()-digit)/10)return false;value=value*10+digit;}
     return true;
 }
-inline bool appId(const std::string& raw,std::uint32_t& id) {
+inline bool appId(std::string_view raw,std::uint32_t& id) {
     if(raw.empty())return false;std::uint64_t n=0;
     if(raw[0]=='-') {
         if(!unsignedDecimal(raw.substr(1),n)||!n||n>0x80000000ULL)return false;
@@ -39,15 +39,15 @@ inline std::string pathKey(std::string s) {
     else if(s.rfind("\\\\?\\",0)==0)s=s.substr(4);
     return s;
 }
-inline std::string commandExe(const std::string& raw) {
+inline std::string commandExe(std::string_view raw) {
     size_t start=raw.find_first_not_of(" \t");if(start==std::string::npos)return {};
     if(raw[start]=='"') {
         while(start<raw.size()&&raw[start]=='"')++start;
-        const auto end=raw.find('"',start);return end==std::string::npos?std::string():raw.substr(start,end-start);
+        const auto end=raw.find('"',start);return end==std::string_view::npos?std::string():std::string(raw.substr(start,end-start));
     }
-    const auto end=raw.find_first_of(" \t",start);return raw.substr(start,end==std::string::npos?raw.size()-start:end-start);
+    const auto end=raw.find_first_of(" \t",start);return std::string(raw.substr(start,end==std::string_view::npos?raw.size()-start:end-start));
 }
-inline bool timestamp(const std::string& line,std::string& at) {
+inline bool timestampView(std::string_view line,std::string_view& at) {
     if(line.size()<22||line[0]!='['||line[20]!=']'||line[21]!=' ')return false;
     at=line.substr(1,19);
     for(size_t i=0;i<at.size();++i){const bool sep=i==4||i==7||i==10||i==13||i==16;
@@ -55,10 +55,17 @@ inline bool timestamp(const std::string& line,std::string& at) {
     return at.substr(5,2)>="01"&&at.substr(5,2)<="12"&&at.substr(8,2)>="01"&&at.substr(8,2)<="31"&&
         at.substr(11,2)<="23"&&at.substr(14,2)<="59"&&at.substr(17,2)<="59";
 }
+inline bool timestamp(std::string_view line,std::string& at) {
+    std::string_view view;
+    const bool valid=timestampView(line,view);
+    if(!view.empty())at=view;
+    return valid;
+}
 // Match readTail's existing 2 MiB complete-snapshot budget. A row-count cap
 // can reject dense but complete logs before their final drop/client-reset row.
 inline constexpr std::size_t trackerMaximumBytes=2*1024*1024;
-inline bool trackerLinesWithinBudget(const std::vector<std::string>& lines) {
+template <typename Line>
+inline bool trackerLinesWithinBudgetImpl(const std::vector<Line>& lines) {
     std::size_t bytes=0;
     for(std::size_t i=0;i<lines.size();++i){
         const std::size_t separator=i?1:0;
@@ -66,6 +73,9 @@ inline bool trackerLinesWithinBudget(const std::vector<std::string>& lines) {
         bytes+=separator+lines[i].size();
     }
     return true;
+}
+inline bool trackerLinesWithinBudget(const std::vector<std::string>& lines) {
+    return trackerLinesWithinBudgetImpl(lines);
 }
 // UI running-list changes and explicit process lifetime changes are different
 // observations. Recovery still requires the native original record/primary;

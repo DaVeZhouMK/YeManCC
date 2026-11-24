@@ -10,14 +10,15 @@ With the project's reviewed x64 MSVC/SDK environment, compile the source using
 C++20, EHsc, MT, W3/WX and include roots `native` and `deps/json`. Keep object,
 executable, source-dependency output and logs in a new caller-owned evidence
 directory. Run the resulting executable with `all`, `timing` or `export`.
-Unknown selections fail. `all` runs 11 diagnostic boundaries. The optional
+Unknown selections fail. The optional
 `YMCC_ORIGINAL_DISPATCH_CASES` definition is only valid when the exact existing
 `verifySharedPowerDispatch` body has been provided by its original fixture.
 It preserves those five assertions without copying another permanent model.
 
 Timing cases cover delayed older delivery, queue/execution separation, duplicate
 completion, fixed eight-row retention, overflow without admission restriction,
-latest replay and unknown timestamps. Export cases cover unknown native state,
+latest replay, observation-only queries interleaved with real deliveries, and
+unknown timestamps. Export cases cover unknown native state,
 renderer non-authority, bounded field filtering, invalid types and old renderers.
 
 Required semantic controls restore the older-receipt tick loss and replace

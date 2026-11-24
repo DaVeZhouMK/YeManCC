@@ -174,6 +174,28 @@ static json nativeRtssMissingBridge(const std::wstring& dir) {
     return json{{"ok", false}, {"error", detail}, {"errorCode", "RTSS_BRIDGE_UNAVAILABLE"},
         {"bridgeState", state}, {"bridgeInstalled", installed}, {"bridgeEnabled", enabled}};
 }
+static json nativeRtssSetOsdVisible(const std::wstring& dir, bool visible, const std::function<bool()>& current = {}) {
+    using namespace ymcc::rtss;
+    nativeRtssRequireCurrent(current);
+    std::lock_guard<std::mutex> lock(g_rtssBridgeMx);
+    nativeRtssRequireCurrent(current);
+    if (!fspath::path(dir).is_absolute() || !file_exists((fspath::path(dir) / L"RTSS.exe").wstring()))
+        return json{{"ok", false}, {"error", "RTSS 安装路径无效"}};
+    RtssBridgeSearch search{dir};
+    EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
+    if (!search.window) return nativeRtssMissingBridge(dir);
+    Packet packet{};
+    packet.command = visible ? Command::ShowOsd : Command::HideOsd;
+    DWORD_PTR reply = 0;
+    nativeRtssRequireCurrent(current);
+    if (!nativeRtssBridgeMessage(search.window, packet, reply))
+        return nativeRtssBridgeTransportFailure(GetLastError());
+    nativeRtssRequireCurrent(current);
+    if (reply == static_cast<DWORD_PTR>(Reply::Complete)) return json{{"ok", true}};
+    if (reply == static_cast<DWORD_PTR>(Reply::Invalid))
+        return json{{"ok", false}, {"error", "运行中的 RTSS 插件版本过旧；退出游戏后请通过 YMCC 关闭并重新启动 RTSS，以更新插件"}, {"errorCode", "RTSS_OSD_BRIDGE_UPDATE_REQUIRED"}};
+    return json{{"ok", false}, {"error", "RTSS 实时 OSD 显示开关未确认"}, {"bridgeCode", reply}};
+}
 static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& layout, const std::function<bool()>& current = {}) {
     nativeRtssRequireCurrent(current);
     using namespace ymcc::rtss;

@@ -1,6 +1,6 @@
 // Browser IO is a closed memory boundary. Actual Vue controls and gamepad engine stay intact.
 export * from './runtimePorts';
-import {calls,record,copy,settings,state} from './runtimePorts';
+import {calls,record,copy,settings,state,invoke as invokeRuntimePort} from './runtimePorts';
 // The page begins after the separately exercised startup pass has disabled the shortcut.
 state.gameBarControllerWindows=0;
 export const registry={
@@ -59,6 +59,18 @@ export const isCurrentGameTarget=()=>false;
 export const validateGameTarget=async()=>null;
 // Actual PowerView's common-startup ports: every read/write is isolated and journalled.
 export const BOOT_MIRROR_CHANGED_EVENT='boot-mirror-changed-fixture';
+let networkTaskPresent=1,networkTaskEnabled=1;
+export async function createTask(name:string){
+ if(name!=='Steamcommunity_302'||networkTaskPresent)throw Error('Unexpected network task creation');
+ record('common.write.networkTask.create',name);networkTaskPresent=networkTaskEnabled=2;return true;
+}
+export async function invoke(command:string,args:any){
+ if(command!=='updateAccel.bootTask')return invokeRuntimePort(command,args);
+ if('enabled' in args){record('common.write.networkTask',args);networkTaskEnabled=args.enabled?(networkTaskPresent&1||networkTaskPresent&2):0;}
+ else if('restore' in args){if(args.expectedPresent!==networkTaskPresent||args.expectedEnabled!==networkTaskEnabled)return {ok:false};record('common.write.networkTask',args);networkTaskEnabled=args.restore;}
+ else record('common.read.networkTask');
+ return {ok:true,present:networkTaskPresent,enabled:networkTaskEnabled};
+}
 export async function taskExists(name:string){record('common.read.taskExists',name);return name==='桌面模式-开机设置为桌面模式'&&state.legacyDesktop===true;}
 export async function searchState(){record('common.read.searchState');return 'full';}
 export async function readBootMirrorState(){record('common.read.bootMirror');return false;}

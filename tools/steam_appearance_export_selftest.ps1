@@ -1,7 +1,49 @@
-﻿param([string]$Out='G:\YeManCC-Work\Build\Validation\SteamPresetChain-20261013-172935\export',[ValidateSet('All','ManifestPairing','InitializationGate')][string]$Case='All')
+﻿param([string]$Out='G:\YeManCC-Work\Build\Validation\SteamPresetChain-20261013-172935\export',[ValidateSet('All','ManifestPairing','InitializationGate','InteropExport')][string]$Case='All')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
 $source=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl'
+if($Case -ceq 'InteropExport'){
+ $packageBuildRoot=Join-Path $Out ('interop-'+[guid]::NewGuid().ToString('N'))
+ $stagingPowerControl=Join-Path $packageBuildRoot 'PowerControl'
+ $sourcePowerControl=$source
+ foreach($relative in @(Get-SteamAppearanceExportFiles $source)){
+  $destination=Join-Path $stagingPowerControl $relative
+  $null=[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))
+  [IO.File]::Copy((Join-Path $source $relative),$destination)
+ }
+ $relative='steam-appearance\resident.ps1'
+ $sourceFile=Join-Path $source $relative;$resident=Join-Path $stagingPowerControl $relative
+ $before=Get-SteamAppearanceFileHash $sourceFile
+ $tokens=$null;$errors=$null
+ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'package-release.ps1'),[ref]$tokens,[ref]$errors)
+ $prod=@($ast.FindAll({param($n)
+  ($n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Extent.Text -clike '$appearanceInterop = New-SteamAppearanceInteropExport *') -or
+  ($n -is [Management.Automation.Language.PipelineAst] -and $n.Extent.Text -clike 'Assert-SteamAppearanceExport *')
+ },$true))
+ if($errors.Count -or $prod.Count -ne 2){throw 'Expected the two package interop stages'}
+ . ([scriptblock]::Create(($prod.Extent.Text -join "`n")))
+ $stagedBytes=[IO.File]::ReadAllBytes($resident)
+ $receipt=Assert-SteamAppearanceExport $source $stagingPowerControl $appearanceInterop
+ if($receipt.files -ne 66 -or $receipt.defaultsEnabled -ne 7 -or (Get-SteamAppearanceFileHash $sourceFile) -cne $before){throw 'Staging changed source or the 7/7 contract'}
+ $stagedText=[IO.File]::ReadAllText($resident)
+ $emptySlot=[regex]::Replace($stagedText,'(?m)^(    \$compiledInterop=)''[A-Za-z0-9+/=]+''(?= # YMCC staged interop)',"`$1''")
+ if($stagedText -ceq $emptySlot -or $emptySlot -cne [IO.File]::ReadAllText($sourceFile)){throw 'Staging changed more than the interop image slot'}
+ [IO.File]::AppendAllText($resident,"`n# Tampered staged script`n")
+ $rejected=$false
+ try{Assert-SteamAppearanceExport $source $stagingPowerControl $appearanceInterop|Out-Null}catch{$rejected=$_.Exception.Message -like '*mixed or incomplete*resident.ps1'}
+ if(!$rejected){throw 'Tampered staged interop script was accepted'}
+ [IO.File]::Copy($sourceFile,$resident,$true)
+ $rejected=$false
+ try{Assert-SteamAppearanceExport $source $stagingPowerControl $appearanceInterop|Out-Null}catch{$rejected=$_.Exception.Message -like '*mixed or incomplete*resident.ps1'}
+ if(!$rejected){throw 'Source-only fallback script was accepted as the generated export'}
+ [IO.File]::WriteAllBytes($resident,$stagedBytes)
+ $rejected=$false
+ try{New-SteamAppearanceInteropExport $source $stagingPowerControl $packageBuildRoot|Out-Null}catch{$rejected=$_.Exception.Message -like '*staging input does not match source*'}
+ if(!$rejected){throw 'Reusing stale staging content was accepted'}
+ [pscustomobject]@{ok=$true;passed=5;case=$Case;receipt=$receipt;binding=$appearanceInterop;stagedResident=$resident;realSteamOperations=0}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+ Write-Output 'PASS: 5 appearance interop export checks'
+ return
+}
 if($Case -in @('ManifestPairing','InitializationGate')){
  New-Item -ItemType Directory -Path $Out -Force|Out-Null
  $pairTarget=Join-Path $Out 'PowerControl'

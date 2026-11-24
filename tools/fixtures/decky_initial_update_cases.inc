@@ -149,13 +149,113 @@ inline Json retainedOfficialBackend(const std::filesystem::path& output,const st
  const auto began=GetTickCount64();need(h.runtime.setEnabled(true),"backend-retained-enable");
  need(waitFor([&]{return h.healthyGeneration.load()>=1&&h.runtime.snapshot().phase=="frontend-attached";},3000),"backend-retained-real-binding");
  const auto publish=[] {++actual::g_steamModeObserver.controlledPublication;
-  actual::g_steamModeObserver.controlledObservationTick=actual::fixedTick?actual::fixedTick.load():GetTickCount64();};
+  actual::g_steamModeObserver.controlledObservationTick=actual::fixedTick?actual::fixedTick.load():GetTickCount64();
+  actual::g_steamModeObserver.controlledPeerRevision=actual::g_deckyMirrorBroker.authRevision.load();};
  Json checks=Json::array();bool behavior=false,settled=false;ULONGLONG faultAt=0;
  if(boundaries){
   std::lock_guard lock(gate);actual::fixedTick=100000;
   const auto check=[&](const char* name,bool connected,bool paused){const auto v=health();
    checks.push_back({{"name",name},{"passed",v.connected==connected&&v.paused==paused},{"connected",v.connected},{"paused",v.paused},{"reason",v.reason}});};
   check("initial-connecting-preserves-verified-mirror",true,false);
+  {
+   const auto savedMode=actual::observedMode;const auto savedTick=actual::fixedTick.load();
+   const auto savedObservation=actual::g_steamModeObserver.controlledObservationTick;
+    const auto savedRevision=actual::g_deckyMirrorBroker.authRevision.load();
+   auto peerHealth=actual::actualConnectionHealth();Window peerRecovery;
+   actual::fixedTick=700000;actual::observedMode["deckyBackendConnected"]=true;publish();
+   actual::g_deckyMirrorBroker.connected=false;
+   const auto repair=peerRecovery.observe(actual::fixedTick,peerHealth());
+   actual::fixedTick+=100;actual::g_deckyMirrorBroker.connected=true;
+    // Equal timestamps do not let the prior connection's proof cross the boundary.
+    actual::g_deckyMirrorBroker.pinnedAuthTick=actual::g_steamModeObserver.controlledObservationTick;
+    ++actual::g_deckyMirrorBroker.authRevision;
+   const auto stale=peerHealth();const auto staleAction=peerRecovery.observe(actual::fixedTick,stale);
+   const auto reads=actual::refreshes;
+   for(unsigned n=0;n<1000;++n)(void)peerHealth();
+   checks.push_back({{"name","old-positive-mode-cannot-confirm-replacement-peer"},
+     {"passed",repair==Action::reconnect&&!stale.connected&&stale.paused&&staleAction==Action::none&&actual::refreshes==reads},
+     {"connected",stale.connected},{"paused",stale.paused},{"reportedRecovered",staleAction==Action::recovered},
+     {"duplicateRefreshes",actual::refreshes-reads}});
+   const auto firstDeadline=*actual::g_deckyMirrorBroker.pinnedAuthTick+Window::transportGraceMs;
+   // Another accepted publication may still have been dispatched to a peer
+   // that just retired. It is not progress and cannot renew the same hold.
+   actual::fixedTick=firstDeadline-100;
+   publish();
+   actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+   ++actual::g_deckyMirrorBroker.authRevision;
+   const auto lateAgain=peerHealth();
+   checks.push_back({{"name","successive-stale-publication-cannot-refill-peer-proof-grace"},
+    {"passed",lateAgain.paused&&!lateAgain.connected&&lateAgain.pausedReadDue==firstDeadline&&
+      peerRecovery.observe(actual::fixedTick,lateAgain)==Action::none},
+    {"paused",lateAgain.paused},{"originalDeadline",firstDeadline},{"readDue",lateAgain.pausedReadDue}});
+   actual::fixedTick=firstDeadline;
+   actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+    ++actual::g_deckyMirrorBroker.authRevision;
+   const auto expired=peerHealth();
+   const auto expiredAction=peerRecovery.observe(actual::fixedTick,expired);
+   checks.push_back({{"name","old-positive-mode-wait-is-bounded"},
+     {"passed",!expired.connected&&!expired.paused&&expiredAction==Action::recycle},{"resumedOriginalRecovery",expiredAction==Action::recycle}});
+   publish();const auto confirmed=peerHealth();
+   checks.push_back({{"name","current-mode-can-confirm-replacement-peer"},
+     {"passed",confirmed.connected&&!confirmed.paused&&peerRecovery.observe(actual::fixedTick,confirmed)==Action::recovered}});
+   actual::fixedTick+=100;
+   actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+   ++actual::g_deckyMirrorBroker.authRevision;
+   const auto nextEpisode=peerHealth();
+   checks.push_back({{"name","fresh-peer-proof-rearms-for-a-later-real-loss"},
+    {"passed",nextEpisode.paused&&!nextEpisode.connected&&nextEpisode.pausedReadDue>actual::fixedTick}});
+   const auto power=actual::fixturePower.load();
+   actual::fixedTick+=Window::transportGraceMs;
+   actual::fixturePower=power+1;
+   actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+   ++actual::g_deckyMirrorBroker.authRevision;
+   const auto newReady=peerHealth();
+   checks.push_back({{"name","new-ready-scope-does-not-inherit-spent-peer-proof-grace"},
+    {"passed",newReady.paused&&!newReady.connected&&newReady.pausedReadDue>actual::fixedTick}});
+   actual::fixturePower=power;
+   actual::g_deckyMirrorBroker.authRevision=savedRevision;actual::g_steamModeObserver.controlledPeerRevision=savedRevision;
+   actual::g_steamModeObserver.controlledObservationTick=0;auto untimedHealth=actual::actualConnectionHealth();
+   const auto untimed=untimedHealth();
+   checks.push_back({{"name","untimed-mode-keeps-existing-health-contract"},{"passed",untimed.connected&&!untimed.paused}});
+   actual::g_steamModeObserver.controlledObservationTick=savedObservation;
+    actual::g_steamModeObserver.controlledPeerRevision=savedRevision;actual::g_deckyMirrorBroker.authRevision=savedRevision;
+   actual::g_deckyMirrorBroker.pinnedAuthTick.reset();actual::observedMode=savedMode;actual::fixedTick=savedTick;
+  }
+  {
+   const auto savedMode=actual::observedMode;const auto savedTick=actual::fixedTick.load();
+   const auto savedObservation=actual::g_steamModeObserver.controlledObservationTick;
+    const auto savedRevision=actual::g_deckyMirrorBroker.authRevision.load();
+   auto peerHealth=actual::actualConnectionHealth();Window peerRecovery;
+   actual::fixedTick=800000;actual::observedMode["deckyBackendConnected"]=true;
+   actual::observedMode["deckyBackendState"]="socket-open";
+   actual::observedMode["deckyClientConnected"]=false;actual::observedMode["deckyClientVerified"]=false;
+   actual::observedMode["deckyClientChecking"]=false;publish();
+   actual::fixedTick+=100;actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+    ++actual::g_deckyMirrorBroker.authRevision;
+   const auto stale=peerHealth();const auto staleAction=peerRecovery.observe(actual::fixedTick,stale);
+   const auto reads=actual::refreshes;
+   for(unsigned n=0;n<1000;++n)(void)peerHealth();
+   checks.push_back({{"name","old-client-down-cannot-recycle-replacement-peer"},
+     {"passed",stale.required&&stale.transportConnected&&!stale.connected&&stale.paused&&staleAction==Action::none&&actual::refreshes==reads},
+     {"paused",stale.paused},{"wouldRecycle",staleAction==Action::recycle},{"duplicateRefreshes",actual::refreshes-reads}});
+   actual::fixedTick+=Window::transportGraceMs;actual::g_deckyMirrorBroker.pinnedAuthTick=actual::fixedTick.load();
+    ++actual::g_deckyMirrorBroker.authRevision;
+   const auto expired=peerHealth();Window atDeadline;
+   checks.push_back({{"name","old-client-down-wait-is-bounded-across-peer-replacement"},
+     {"passed",!expired.connected&&!expired.paused&&atDeadline.observe(actual::fixedTick,expired)==Action::recycle}});
+   auto currentHealth=actual::actualConnectionHealth();Window currentRecovery;
+   // A fresh failure need not wait out a hold started by a prior receipt.
+   (void)currentHealth();publish();const auto current=currentHealth();
+   checks.push_back({{"name","current-client-down-can-recycle-without-extra-wait"},
+     {"passed",!current.connected&&!current.paused&&currentRecovery.observe(actual::fixedTick,current)==Action::recycle}});
+   actual::observedMode["deckyClientConnected"]=true;actual::observedMode["deckyClientVerified"]=true;publish();
+   const auto returned=currentHealth();
+   checks.push_back({{"name","current-client-up-confirms-without-extra-wait"},
+     {"passed",returned.connected&&!returned.paused&&currentRecovery.observe(actual::fixedTick,returned)==Action::recovered}});
+   actual::g_steamModeObserver.controlledObservationTick=savedObservation;
+    actual::g_steamModeObserver.controlledPeerRevision=savedRevision;actual::g_deckyMirrorBroker.authRevision=savedRevision;
+   actual::g_deckyMirrorBroker.pinnedAuthTick.reset();actual::observedMode=savedMode;actual::fixedTick=savedTick;
+  }
   actual::observedMode["deckyBackendState"]="socket-closed";publish();check("explicit-closed-starts-original-grace",false,true);
   for(unsigned n=0;n<1000;++n)(void)health();
   actual::fixedTick=106999;check("duplicates-never-postpone-original-grace",false,true);
@@ -276,7 +376,7 @@ inline Json retainedOfficialBackend(const std::filesystem::path& output,const st
   scopeCheck("new-power-rejects-old-mode-refresh",[&]{++actual::fixturePower;});
   scopeCheck("new-steam-account-rejects-old-mode-refresh",[&]{++actual::observedSession.account;});
   actual::observedMode=usable;actual::observedMode["deckyBackendConnected"]=true;
-  actual::observedMode["deckyBackendState"]="socket-open";
+  actual::observedMode["deckyBackendState"]="socket-open";publish();
   const auto returned=modeHealth();
   checks.push_back({{"name","fresh-mode-health-eligible-before-timer"},{"passed",returned.required&&returned.connected&&!returned.paused}});
   actual::observedMode["modeEpoch"]="distinct-boundary-doc:1";
@@ -297,7 +397,41 @@ inline Json retainedOfficialBackend(const std::filesystem::path& output,const st
   publish();const auto fresh=agedHealth();Window confirmed;
   checks.push_back({{"name","post-grace-observation-confirms-fault"},
     {"passed",!fresh.paused&&!fresh.connected&&confirmed.observe(actual::fixedTick,fresh)==Action::recycle}});
-  behavior=checks.size()==40&&std::all_of(checks.begin(),checks.end(),[](const Json& r){return r.value("passed",false);});
+  // Keep the Steam process, account, power and document; only an accepted
+  // desktop publication retires the old Big Picture observation.
+  for(const bool publishedDesktop:{false,true}){
+   auto reentryHealth=actual::actualConnectionHealth();
+   actual::fixedTick+=100000;actual::observedMode=usable;
+   actual::observedMode["modeEpoch"]="reentry-document:1";
+   actual::observedMode["deckyBackendConnected"]=false;
+   actual::observedMode["deckyBackendState"]="socket-closed";publish();
+   const auto beforeExit=reentryHealth();
+   actual::fixedTick+=Window::transportGraceMs+1;
+   actual::observedMode["mode"]="desktop";
+   publish();const auto desktopPublication=actual::g_steamModeObserver.controlledPublication;
+   if(!publishedDesktop)actual::g_steamModeObserver.controlledPublication=0;
+   const auto onDesktop=reentryHealth();
+   actual::g_steamModeObserver.controlledPublication=desktopPublication;
+   actual::observedMode["mode"]="bigpicture";actual::observedMode["modeEpoch"]="reentry-document:2";
+   actual::observedMode["deckyBackendState"]="socket-connecting";++actual::fixedTick;publish();
+   const auto entered=reentryHealth();Window onEntry;
+   const auto outcome=onEntry.observe(actual::fixedTick,entered);
+   checks.push_back({{"name",publishedDesktop?"confirmed-desktop-reentry-does-not-recycle-on-old-fault":"unpublished-desktop-does-not-clear-old-fault"},
+     {"passed",beforeExit.paused&&!onDesktop.required&&!onDesktop.connected&&entered.required&&!entered.paused&&
+       entered.connected==publishedDesktop&&outcome==(publishedDesktop?Action::none:Action::recycle)},
+     {"wouldRecycle",outcome==Action::recycle},{"reason",entered.reason}});
+   if(!publishedDesktop)continue;
+   actual::observedMode["deckyBackendState"]="socket-closed";++actual::fixedTick;publish();
+   const auto reclosed=reentryHealth();actual::fixedTick+=Window::transportGraceMs-1;
+   actual::observedMode["deckyBackendState"]="socket-connecting";publish();
+   const auto beforeNewDeadline=reentryHealth();
+   checks.push_back({{"name","new-close-after-desktop-gets-original-grace"},
+     {"passed",reclosed.required&&reclosed.paused&&beforeNewDeadline.paused&&!beforeNewDeadline.connected}});
+   ++actual::fixedTick;publish();const auto stuck=reentryHealth();Window stuckWindow;
+   checks.push_back({{"name","new-persistent-outage-after-desktop-still-recycles"},
+     {"passed",stuck.required&&!stuck.paused&&!stuck.connected&&stuckWindow.observe(actual::fixedTick,stuck)==Action::recycle}});
+  }
+  behavior=checks.size()==55&&std::all_of(checks.begin(),checks.end(),[](const Json& r){return r.value("passed",false);});
  }else{
   h.runtime.requestConnectionCheck();need(waitFor([&]{return lastHealthConnected.load();},1500),"initial-connecting-native-ready-must-be-usable");
    const bool checkTerminal=variant=="backend-outage"||sidebarOnly;
@@ -334,14 +468,24 @@ inline Json retainedOfficialBackend(const std::filesystem::path& output,const st
  const auto after=handles();const bool resources=returned.fullyDestroyed&&returned.handles==0&&returned.pendingIo==0&&after==baseline&&context.alive();
  Json terminalRows=Json::array();bool recoveryStagePassed=true;
  if(variant=="backend-outage"||sidebarOnly){
-  unsigned long long pageEpisode=0;
-  for(const auto& row:h.globalRecoveryLog)if(row.value("stage",std::string{})=="rebuild-ui-document")
+  unsigned long long pageEpisode=0;bool verifiedAtPage=false;
+  for(const auto& row:h.globalRecoveryLog)if(row.value("stage",std::string{})=="rebuild-ui-document"){
    pageEpisode=row.value("recoveryEpisode",0ULL);
+   const auto log=ymcc::deckydiag::record("connection-recovery",row);
+   verifiedAtPage=log.value("sidebarVerifiedDuringBackendOutage",false);
+  }
   for(const auto& row:h.globalRecoveryLog)if(pageEpisode&&row.value("recoveryEpisode",0ULL)==pageEpisode&&row.value("recoveryPhase",std::string{})=="connected")
    terminalRows.push_back(ymcc::deckydiag::record("connection-recovery",row));
-  recoveryStagePassed=terminalRows.size()==1&&terminalRows[0].value("connected",false)&&
+  recoveryStagePassed=verifiedAtPage&&terminalRows.size()==1&&terminalRows[0].value("connected",false)&&
    terminalRows[0].value("stage",std::string{})==(sidebarOnly?"decky-sidebar-only":"decky-channels")&&
    terminalRows[0].value("reason",std::string{})==(sidebarOnly?"sidebar-native-confirmed-official-backend-unavailable":"decky-channels-connected");
+  const Json field={{"scope","global-connection"},{"stage","rebuild-ui-document"},{"reason","official-backend-unavailable"},{"sidebarVerifiedDuringBackendOutage",false}};
+  auto malformed=field;malformed["sidebarVerifiedDuringBackendOutage"]="true";
+  auto unrelated=field;unrelated["stage"]="reconnect";
+  const auto log=ymcc::deckydiag::record("connection-recovery",field);
+  recoveryStagePassed=recoveryStagePassed&&log.contains("sidebarVerifiedDuringBackendOutage")&&log["sidebarVerifiedDuringBackendOutage"]==false&&
+   !ymcc::deckydiag::record("connection-recovery",malformed).contains("sidebarVerifiedDuringBackendOutage")&&
+   !ymcc::deckydiag::record("connection-recovery",unrelated).contains("sidebarVerifiedDuringBackendOutage");
  }
  Json result{{"passed",behavior&&resources&&recoveryStagePassed},{"variant",variant},{"actualRuntime",true},{"actualMainAdmissionAndHealth",true},{"actualRecovery",true},
   {"managedContinuationGranted",false},{"updateGrantGranted",false},{"sameInstalledFrontend",true},{"elapsedMs",GetTickCount64()-began},
@@ -357,7 +501,7 @@ inline Json retainedOfficialBackend(const std::filesystem::path& output,const st
 
 // Parameter of the original typed-ready/rebind case. The shared reader and
 // Native stable callback are real; UI facts and the page dispatch stay inert.
-inline Json retainedBackendNotification(const std::filesystem::path& output){
+inline Json retainedBackendNotification(const std::filesystem::path& output,const std::string& variant){
  namespace actual=offlineConsumer;
  using Window=ymcc::deckysidebar::ConnectionRecoveryWindow;
  using Action=Window::Action;
@@ -378,7 +522,11 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
  std::mutex gate;
  std::atomic<unsigned> healthReads{0},admissionReads{0},modeReads{0},changes{0},acceptedChanges{0},stable{0},rebuilds{0},reopens{0};
  std::atomic<bool> connected{false},pending{false},modePaused{false};
- std::atomic<ULONGLONG> firstPending{0};
+ std::atomic<bool> holdModeRead{false},modeReadHeld{false},invalidateClientFault{false},faultCacheCleared{false};
+ std::atomic<ULONGLONG> firstPending{0},firstClientFault{0};
+ std::atomic<ULONGLONG> returnedPeerPublicationAt{0},returnedPeerAttachAt{0};
+ std::atomic<bool> recordReturnedPeerWake{false},returnedPeerWakeAccepted{false};
+ std::string returnedPeerWakePhase,returnedPeerRoute;
  Json healthRows=Json::array(),checks=Json::array();
  std::uint64_t firstClosedPublication=0;
  Json firstClosedMode;
@@ -389,6 +537,9 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
   modePaused=value.paused&&value.reason=="steam-bigpicture-unconfirmed";
   if(value.reason=="official-backend-reconnect-pending"){
    pending=true;ULONGLONG zero=0;firstPending.compare_exchange_strong(zero,GetTickCount64());
+  }
+  if(value.reason==(variant=="backend-notify-closed-client"?"authenticated-peer-missing":"frontend-client-disconnected")){
+   ULONGLONG zero=0;firstClientFault.compare_exchange_strong(zero,GetTickCount64());
   }
   if(healthRows.size()<64)healthRows.push_back({{"at",GetTickCount64()},{"connected",value.connected},
    {"paused",value.paused},{"reason",value.reason}});
@@ -411,15 +562,34 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
   std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=true;
   actual::observedMode["deckyClientConnected"]=true;actual::observedMode["deckyClientVerified"]=true;
   if(actual::realModeObserver)shared.requestRefresh(actual::observedSession,false);
- },{},{},{},readHealth,step);
+ },{},{},{},readHealth,step,{},[&](const auto& state){
+  if(variant!="backend-notify-closed-client"||!firstClientFault.load()||
+     state.phase!="frontend-attached"||state.reason!="retained-frontend-connected")return;
+  std::lock_guard lock(gate);actual::actualRuntimeChanged(state);
+  returnedPeerAttachAt=GetTickCount64();
+ });
  actual::runtime=&h.runtime;
  struct Clear{~Clear(){actual::runtime=nullptr;actual::realModeObserver=nullptr;actual::retainedConsent=false;}}clear;
  const auto began=GetTickCount64();need(h.runtime.setEnabled(true),"notification-enable-original-runtime");
  need(waitFor([&]{return h.healthyGeneration>=1&&h.runtime.snapshot().phase=="frontend-attached";},3000),"notification-original-retained-binding");
  auto stableCallback=actual::actualStableBigPicture();
  ymcc::steamui::ModeObserverConfig config;config.debounceMs=1;config.minimumGapMs=1;config.failureGapMs=80;
- config.read=[&](const auto&){std::lock_guard lock(gate);++modeReads;return actual::observedMode;};
- config.changed=[&](const auto&,const auto&){++changes;if(actual::runtime&&actual::runtime->requestConnectionCheck())++acceptedChanges;};
+  actual::stampModeReader(config);
+ config.read=[&](const auto&){
+  if(holdModeRead){modeReadHeld=true;waitFor([&]{return !holdModeRead.load();},2000);}
+  std::lock_guard lock(gate);++modeReads;return actual::observedMode;
+ };
+ config.changed=[&](const auto& session,const auto& mode){
+  if(mode.value("deckyClientState",std::string{})=="opening-reply-missing"&&invalidateClientFault.exchange(false)){
+   // A second accepted hint overtakes the first result before Runtime reads it.
+   holdModeRead=true;
+   faultCacheCleared=shared.requestConnectionRefresh(session);
+  }
+  const bool record=recordReturnedPeerWake&&!returnedPeerPublicationAt&&mode.value("deckyClientVerified",false);
+  if(record){std::lock_guard lock(gate);returnedPeerWakePhase=h.runtime.snapshot().phase;returnedPeerRoute="changed";}
+  ++changes;const bool accepted=actual::runtime&&actual::runtime->requestConnectionCheck();if(accepted)++acceptedChanges;
+  if(record){returnedPeerWakeAccepted=accepted;returnedPeerPublicationAt=GetTickCount64();}
+ };
  config.cssBigPicturePublished=[](const auto& session,const auto& mode,const auto& timing,bool stable){
   ymcc::steamcss::ModeSample sample{ymcc::steamcss::UiMode::BigPicture,mode.value("modeEpoch",std::string{})};
   sample.timing=timing;actual::g_steamCssGuard.observeMode(session,sample,stable);
@@ -436,9 +606,12 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
     checks.push_back({{"name","identical-shared-read-publishes-new-receipt"},{"passed",publication>firstClosedPublication&&mode==firstClosedMode}});
    }
   }
+  const bool record=recordReturnedPeerWake&&!returnedPeerPublicationAt&&mode.value("deckyClientVerified",false);
+  if(record){returnedPeerWakePhase=h.runtime.snapshot().phase;returnedPeerRoute="stable";}
   stableCallback(session);++stable;
+  if(record)returnedPeerPublicationAt=GetTickCount64();
  };
- need(shared.initialize(std::move(config)),"notification-original-shared-reader-start");
+ need(shared.initialize(config),"notification-original-shared-reader-start");
  shared.setDemand(ymcc::steamui::ModeConsumer::Decky,true);shared.observeSteam(actual::observedSession);
  need(waitFor([&]{return changes==1&&shared.snapshot(actual::observedSession).value("deckyClientVerified",false);},1500),"notification-original-opening-read");
  {std::lock_guard lock(gate);actual::realModeObserver=&shared;}
@@ -481,8 +654,51 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
    controlRows.push_back({{"name","completed-unknown-to-identical-mode-notifies-runtime"},
     {"passed",paused&&notified&&actual::stableCssHints>priorCss&&rebuilds==1&&reopens==0},
     {"paused",paused},{"notified",notified},{"independentCssPublication",actual::stableCssHints>priorCss}});
+   // Cache invalidation leaves the prior delivered state intact. The exact
+   // same positive publication must wake the parked Runtime via stable only.
+   holdModeRead=true;
+   const auto changesBeforeStable=changes.load(),stableBefore=stable.load();
+   const bool readHeld=shared.requestConnectionRefresh(actual::observedSession)&&
+       waitFor([&]{return modeReadHeld.load();},1000);
+   const auto beforeMissingHealth=healthReads.load();
+   const bool parked=readHeld&&h.runtime.requestConnectionCheck()&&
+       waitFor([&]{return healthReads>beforeMissingHealth&&modePaused.load();},1000);
+   const auto parkedReads=healthReads.load();
+   const auto stableReleasedAt=GetTickCount64();
+   holdModeRead=false;
+   const bool resumed=parked&&waitFor([&]{return stable>stableBefore&&healthReads>parkedReads&&connected.load()&&!modePaused.load();},1000);
+   controlRows.push_back({{"name","unchanged-positive-publication-wakes-parked-runtime"},
+    {"passed",resumed&&changes==changesBeforeStable&&rebuilds==1&&reopens==0},
+    {"parked",parked},{"resumed",resumed},{"elapsedMs",GetTickCount64()-stableReleasedAt},
+    {"stableCallbacks",stable.load()-stableBefore},{"changedCallbacks",changes.load()-changesBeforeStable}});
+   // The official socket is still connecting, but the current client already
+   // independently proved YMCC. A cache miss must not lose that completion.
+   Json officialReady;
+   {std::lock_guard lock(gate);officialReady=actual::observedMode;
+    actual::observedMode["deckyBackendConnected"]=false;
+    actual::observedMode["deckyBackendState"]="socket-connecting";}
+   const auto priorIndependentChange=acceptedChanges.load(),priorIndependentRead=healthReads.load();
+   const bool independent=shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{
+    return acceptedChanges>priorIndependentChange&&healthReads>priorIndependentRead&&connected.load()&&!modePaused.load();
+   },1000);
+   holdModeRead=true;modeReadHeld=false;
+   const auto independentStable=stable.load(),independentChanges=changes.load(),independentReads=healthReads.load();
+   const bool independentParked=independent&&shared.requestConnectionRefresh(actual::observedSession)&&
+    waitFor([&]{return modeReadHeld.load();},1000)&&h.runtime.requestConnectionCheck()&&
+    waitFor([&]{return healthReads>independentReads&&modePaused.load();},1000);
+   const auto parkedIndependentReads=healthReads.load();
+   const auto independentReleased=GetTickCount64();
+   holdModeRead=false;
+   const bool independentResumed=independentParked&&waitFor([&]{
+    return stable>independentStable&&healthReads>parkedIndependentReads&&connected.load()&&!modePaused.load();
+   },1000);
+   controlRows.push_back({{"name","unchanged-native-verified-mirror-wakes-while-official-connecting"},
+    {"passed",independentResumed&&changes==independentChanges&&rebuilds==1&&reopens==0},
+    {"independentlyUsable",independent},{"parked",independentParked},{"resumed",independentResumed},
+    {"stableCallbacks",stable.load()-independentStable},{"changedCallbacks",changes.load()-independentChanges},
+    {"elapsedMs",GetTickCount64()-independentReleased}});
    shared.shutdown();
-   {std::lock_guard lock(gate);actual::realModeObserver=nullptr;}
+   {std::lock_guard lock(gate);actual::realModeObserver=nullptr;actual::observedMode=std::move(officialReady);}
    const auto row=[&](const char* label,Json mode,bool expectHealth){
     const auto prior=healthReads.load();
     {std::lock_guard lock(gate);auto saved=actual::observedMode;actual::observedMode=std::move(mode);
@@ -532,6 +748,79 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
    auto foreign=actual::observedSession;++foreign.created;
    {std::lock_guard lock(gate);stableCallback(foreign);}Sleep(25);
    controlRows.push_back({{"name","foreign-session-original-guard-keeps-no-health-request"},{"passed",healthReads==healthBeforeExit}});
+   // Run the hard failure last. Its legitimate recovery can tear down the
+   // retained fixture binding; the original idle controls need that binding.
+   need(shared.initialize(std::move(config)),"client-fault-restart-shared-reader");
+   {std::lock_guard lock(gate);actual::realModeObserver=&shared;}
+   const auto priorReseedHealth=healthReads.load();
+   shared.observeSteam(actual::observedSession);
+   need(waitFor([&]{return healthReads>priorReseedHealth&&connected.load()&&!modePaused.load();},1500),
+    "client-fault-reseed-attached-runtime");
+   const auto priorFaultStable=stable.load(),priorFaultChanges=changes.load(),priorFaultHealth=healthReads.load();
+   firstClientFault=0;modeReadHeld=false;invalidateClientFault=true;
+   {std::lock_guard lock(gate);
+    actual::observedMode["deckyClientConnected"]=false;actual::observedMode["deckyClientVerified"]=false;
+    actual::observedMode["deckyClientState"]="opening-reply-missing";}
+   const bool faultParked=shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{
+    return faultCacheCleared.load()&&modeReadHeld.load()&&healthReads>priorFaultHealth&&modePaused.load();
+   },1000);
+    const auto parkedFaultChanges=changes.load();
+    auto faultStable=priorFaultStable;
+    bool faultQueued=faultParked;
+    auto faultReleasedAt=GetTickCount64();
+    if(variant=="backend-notify-closed-client"){
+     // Keep the same flags; first publish a nonterminal client observation.
+     {std::lock_guard lock(gate);actual::observedMode["deckyClientState"]="socket-connecting";}
+     const auto heldHealth=healthReads.load();holdModeRead=false;
+     const bool intermediate=faultParked&&waitFor([&]{return stable>priorFaultStable&&
+        shared.snapshot(actual::observedSession).value("deckyClientState",std::string{})=="socket-connecting";},1000);
+     Sleep(75);
+     controlRows.push_back({{"name","unchanged-client-connecting-keeps-health-parked"},
+        {"passed",intermediate&&healthReads==heldHealth&&modePaused.load()&&firstClientFault==0}});
+     const auto connectingStable=stable.load();
+     {std::lock_guard lock(gate);actual::observedMode["deckyClientState"]="socket-closed";}
+     const bool closedWithPeer=intermediate&&shared.requestRefresh(actual::observedSession,false)&&waitFor([&]{
+         return stable>connectingStable&&shared.snapshot(actual::observedSession).value("deckyClientState",std::string{})=="socket-closed";
+     },1000);
+     Sleep(75);
+     controlRows.push_back({{"name","unchanged-client-closed-with-peer-keeps-health-parked"},
+        {"passed",closedWithPeer&&healthReads==heldHealth&&modePaused.load()&&rebuilds==1&&reopens==0}});
+     faultStable=stable.load();
+     {std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=false;}
+     faultReleasedAt=GetTickCount64();faultQueued=closedWithPeer&&shared.requestRefresh(actual::observedSession,false);
+    }else holdModeRead=false;
+    const bool faultDelivered=faultQueued&&waitFor([&]{return stable>faultStable&&firstClientFault.load()>=faultReleasedAt;},1000);
+   const auto faultAtMs=firstClientFault.load();
+   controlRows.push_back({{"name","unchanged-definite-client-failure-wakes-parked-runtime"},
+     {"passed",faultDelivered&&parkedFaultChanges==priorFaultChanges+1&&reopens==0},
+    {"parked",faultParked},{"delivered",faultDelivered},{"waitMs",GetTickCount64()-faultReleasedAt},
+    {"readDelayMs",faultAtMs>=faultReleasedAt?faultAtMs-faultReleasedAt:0},
+    {"stableCallbacks",stable.load()-priorFaultStable},{"changedCallbacksBeforeRelease",parkedFaultChanges-priorFaultChanges}});
+    if(variant=="backend-notify-closed-client"){
+     // Reconnect ownership stays with the existing watch. Model a successful
+     // browser retry as fresh peer/UI facts, not a synthetic binding receipt.
+     {std::lock_guard lock(gate);actual::g_deckyMirrorBroker.connected=true;
+      actual::observedMode["deckyClientConnected"]=true;actual::observedMode["deckyClientVerified"]=true;
+      actual::observedMode["deckyClientState"]="connected";}
+     const auto peerReturnAt=GetTickCount64();
+     recordReturnedPeerWake=true;
+     const bool peerProofPublished=faultDelivered&&shared.requestRefresh(actual::observedSession,false)&&
+         waitFor([&]{return shared.snapshot(actual::observedSession).value("deckyClientVerified",false);},1000);
+     const bool peerWakeCompleted=peerProofPublished&&waitFor([&]{return returnedPeerPublicationAt.load()!=0;},1000);
+     const bool immediatePeerReceipt=peerWakeCompleted&&waitFor([&]{
+         return returnedPeerAttachAt.load()!=0&&connected.load()&&!modePaused.load();},1000);
+     std::string peerWakePhase,peerRoute;{std::lock_guard lock(gate);peerWakePhase=returnedPeerWakePhase;peerRoute=returnedPeerRoute;}
+     controlRows.push_back({{"name","returned-peer-publication-health-handoff"},
+        {"passed",immediatePeerReceipt},{"notificationCompleted",peerWakeCompleted},
+        {"accepted",peerRoute=="changed"?Json(returnedPeerWakeAccepted.load()):Json{}},{"route",peerRoute},
+        {"phase",peerWakePhase},{"runtimeAttachCallbackReached",returnedPeerAttachAt.load()!=0},
+        {"publicationDelayMs",peerWakeCompleted?returnedPeerPublicationAt.load()-peerReturnAt:0}});
+     const bool closedClientResumed=peerProofPublished&&
+         waitFor([&]{return connected.load()&&!modePaused.load();},Window::evidenceIntervalMs+1000);
+     controlRows.push_back({{"name","closed-client-peer-return-restores-health-without-page-effect"},
+        {"passed",closedClientResumed&&rebuilds==1&&reopens==0},{"resumed",closedClientResumed},{"published",peerProofPublished},
+        {"waitMs",GetTickCount64()-peerReturnAt},{"rebuilds",rebuilds.load()},{"reopens",reopens.load()}});
+    }
   }
  }
  h.runtime.shutdown();shared.shutdown();lease={};
@@ -539,10 +828,51 @@ inline Json retainedBackendNotification(const std::filesystem::path& output){
  actual::runtime=nullptr;actual::realModeObserver=nullptr;actual::retainedConsent=false;
  const auto after=handles();
  const bool resources=returned.fullyDestroyed&&returned.handles==0&&returned.pendingIo==0&&baseline==after&&context.alive();
+ if(variant=="backend-notify-closed-client"){
+  unsigned long long episode=0;bool recoveredPeer=false,extraPage=false;
+  for(const auto& row:h.globalRecoveryLog){
+   const auto stage=row.value("stage",std::string{}),reason=row.value("reason",std::string{});
+   if(stage=="reconnect"&&reason=="authenticated-peer-missing"){
+    episode=row.value("recoveryEpisode",0ULL);recoveredPeer=false;
+   }else if(episode&&row.value("recoveryEpisode",0ULL)==episode){
+    if(stage=="rebuild-ui-document"||stage=="reopen-bigpicture")extraPage=true;
+    if(stage=="decky-channels"&&row.value("recoveryPhase",std::string{})=="connected")recoveredPeer=true;
+   }
+  }
+  controlRows.push_back({{"name","closed-client-confirmed-original-reconnect-rung"},
+    {"passed",episode>2&&recoveredPeer&&!extraPage},{"episode",episode},{"recovered",recoveredPeer},{"extraPage",extraPage}});
+ }
+ bool recoveredPeerAge=false,unexpectedPeerAge=false,recoveredModeAge=false,unexpectedModeAge=false;
+ for(auto row:h.globalRecoveryLog){
+  const auto filtered=ymcc::deckydiag::record("connection-recovery",row);
+  if(row.value("recoveryPhase",std::string{})=="connected"){
+   const auto age=filtered.find("authenticatedPeerAgeMs");
+   if(age!=filtered.end()&&age->is_number_unsigned()&&age->get<ULONGLONG>()>=64)recoveredPeerAge=true;
+   const auto modeAge=filtered.find("sharedModeObservationAgeMs");
+   if(modeAge!=filtered.end()&&modeAge->is_number_unsigned())recoveredModeAge=true;
+  }else{
+   if(row.contains("authenticatedPeerAgeMs"))unexpectedPeerAge=true;
+   if(row.contains("sharedModeObservationAgeMs"))unexpectedModeAge=true;
+  }
+ }
+ const Json rejectedPeerAge={{"scope","global-connection"},{"recoveryPhase","connected"},{"authenticatedPeerAgeMs","64"}};
+ const bool peerAgeFiltered=!ymcc::deckydiag::record("connection-recovery",rejectedPeerAge).contains("authenticatedPeerAgeMs");
+ controlRows.push_back({{"name","recovered-authenticated-peer-age-is-typed-and-scoped"},
+  {"passed",recoveredPeerAge&&!unexpectedPeerAge&&peerAgeFiltered},
+  {"observed",recoveredPeerAge},{"unexpected",unexpectedPeerAge},{"filteredMalformed",peerAgeFiltered}});
+ const Json proofAge={{"scope","global-connection"},{"recoveryPhase","connected"},{"sharedModeObservationAgeMs",0ULL}};
+ auto wrongType=proofAge;wrongType["sharedModeObservationAgeMs"]="0";
+ auto wrongPhase=proofAge;wrongPhase["recoveryPhase"]="recovering";
+ auto wrongScope=proofAge;wrongScope["scope"]="admission";
+ const auto filteredAge=[](const Json& row){return ymcc::deckydiag::record("connection-recovery",row).value("sharedModeObservationAgeMs",Json{});};
+ const bool modeAgeScope=filteredAge(proofAge)==0&&filteredAge(wrongType).is_null()&&filteredAge(wrongPhase).is_null()&&filteredAge(wrongScope).is_null();
+ controlRows.push_back({{"name","recovered-shared-mode-age-is-typed-and-scoped"},
+  {"passed",recoveredModeAge&&!unexpectedModeAge&&modeAgeScope},
+  {"observed",recoveredModeAge},{"unexpected",unexpectedModeAge},{"scopeChecksPassed",modeAgeScope}});
  const bool controlsOkay=std::all_of(controlRows.begin(),controlRows.end(),[](const Json& row){return row.value("passed",false);});
  const bool distinct=checks.size()==2&&std::all_of(checks.begin(),checks.end(),[](const Json& row){return row.value("passed",false);});
  const bool passed=sameBooleanSuppressedChanged&&preservedGrace&&recovered&&controlsOkay&&resources&&distinct;
- Json result{{"passed",passed},{"variant","backend-notify"},{"actualRuntime",true},{"actualSharedModeObserver",true},
+ Json result{{"passed",passed},{"variant",variant},{"actualRuntime",true},{"actualSharedModeObserver",true},
   {"actualMainStableCallback",true},{"actualMainHealth",true},{"actualRecovery",true},
   {"sameBooleanSuppressedChanged",sameBooleanSuppressedChanged},{"originalOwnerObserved",originalOwnerObserved},
   {"publicationChecks",checks},

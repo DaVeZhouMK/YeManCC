@@ -12,7 +12,7 @@
 namespace ymcc::sleepexport {
 
 using KernelHistoryJson = nlohmann::json;
-inline constexpr unsigned kernelHistoryLookbackMs = 3 * 60 * 60 * 1000;
+inline constexpr unsigned kernelHistoryLookbackMs = 24 * 60 * 60 * 1000;
 inline constexpr unsigned kernelHistoryMaxEvents = 64;
 inline constexpr unsigned kernelHistoryMaxXmlBytes = 32 * 1024;
 inline constexpr unsigned kernelHistoryMaxTotalXmlBytes = 256 * 1024;

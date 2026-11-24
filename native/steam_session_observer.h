@@ -153,6 +153,7 @@ class RetryWindow {
     size_t next = offsets.size();
 public:
     void begin(ULONGLONG now) { opened = now; next = 0; }
+    bool pending() const noexcept { return next < offsets.size(); }
     DWORD timeout(ULONGLONG now) const {
         if (next == offsets.size()) return INFINITE;
         const auto due = opened + offsets[next];
@@ -253,6 +254,7 @@ class Observer {
     const std::wstring registryPath; // Alternate key is used by isolated Win32 tests only.
     std::mutex lifecycle;
     HANDLE stopEvent = nullptr, pokeEvent = nullptr;
+    std::atomic<bool> stopRequested{false};
     SourceOwner sourceOwner;
     std::mutex exitFinish;
     std::atomic<bool> sourceRunning{false};
@@ -334,6 +336,44 @@ class Observer {
     // not consent to write registry state or a recurring process scan.
     inline static thread_local Observer* windowObserver = nullptr;
     inline static thread_local const StartupWindowFact* startupWindowCallback=nullptr;
+    struct WindowNameHooks {
+        struct Hook { DWORD pid = 0; HWINEVENTHOOK value = nullptr; };
+        std::array<Hook, 32> scoped{};
+        HWINEVENTHOOK global = nullptr;
+
+        static HWINEVENTHOOK subscribe(DWORD pid) noexcept {
+            return SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, nullptr,
+                windowEvent, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        }
+        bool armGlobal() noexcept {
+            if (!global) global = subscribe(0);
+            return global != nullptr;
+        }
+        bool clearScoped() noexcept {
+            bool cleared = true;
+            for (auto& h : scoped) if (h.value) {
+                if (UnhookWinEvent(h.value)) h = {};
+                else cleared = false;
+            }
+            return cleared;
+        }
+        void fallback() noexcept { if (armGlobal()) clearScoped(); }
+        bool add(DWORD pid) noexcept {
+            if (!pid) return false;
+            Hook* vacant = nullptr;
+            for (auto& h : scoped) {
+                if (h.pid == pid) return true;
+                if (!h.value && !vacant) vacant = &h;
+            }
+            if (!vacant) return false;
+            if (const auto hook = subscribe(pid)) { *vacant = {pid, hook}; return true; }
+            return false;
+        }
+        void closeGlobal() noexcept {
+            if (global && UnhookWinEvent(global)) global = nullptr;
+        }
+        void close() noexcept { clearScoped(); closeGlobal(); }
+    } windowNames;
     static bool windowPathPartEquals(std::wstring_view path, std::wstring_view expected) noexcept {
         if (path.size() != expected.size()) return false;
         for (size_t i = 0; i < path.size(); ++i) {
@@ -341,19 +381,10 @@ class Observer {
         }
         return true;
     }
-    static void CALLBACK windowEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
-        try {
-        auto* self = windowObserver;
-        if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window) return;
-        const auto identity = self->identitySnapshot();
-        if (!identity) return;
-        const auto& session = identity->session;
+    unsigned classifyWindowPid(DWORD pid, const Session& session, ULONGLONG now) {
         const auto& root = session.root;
-        if (root.empty()) return; // Registry subscription initializes root; no per-window registry search.
-        if (root != self->windowRoot) { self->windowRoot = root; self->windowPids.clear(); self->windowPoked = false; }
-        DWORD pid = 0; GetWindowThreadProcessId(window, &pid); if (!pid) return;
-        const auto now = GetTickCount64(); unsigned kind = pid == session.pid ? 1 : 0;
-        if (!kind) kind = self->windowPids.classifyHeld(pid, now, [&](std::wstring_view path, HANDLE process) -> unsigned {
+        if (pid == session.pid) return 1;
+        return windowPids.classifyHeld(pid, now, [&](std::wstring_view path, HANDLE process) -> unsigned {
             constexpr std::wstring_view steam = L"\\steam.exe", cef = L"\\bin\\cef\\", helper = L"\\steamwebhelper.exe";
             if (path.size() < root.size()) return 0;
             const auto relative = path.substr(root.size());
@@ -363,20 +394,63 @@ class Observer {
                 FILETIME birth{}, exit{}, kernel{}, user{};
                 if (GetProcessTimes(process, &birth, &exit, &kernel, &user) &&
                     WaitForSingleObject(process, 0) == WAIT_TIMEOUT) return 1;
-            } else if (self->uiChanged && relative.size() >= helper.size() &&
+            } else if (uiChanged && relative.size() >= helper.size() &&
                 windowPathPartEquals(relative.substr(relative.size() - helper.size()), helper) &&
                 windowPathPartEquals(relative.substr(0, cef.size()), cef) &&
                 windowPathPartEquals(path.substr(0, root.size()), root)) return 2;
             return 0;
         });
+    }
+    void scopeWindowNames(const Session& session, bool lifecycleHook) noexcept {
+        if (!uiChanged) return;
+        // Keep broad coverage throughout bootstrap and on ambiguous or failed discovery.
+        windowNames.armGlobal();
+        if (!windowNames.clearScoped() || !session.pid || session.root.empty() || !lifecycleHook) return;
+        try {
+            // Snapshot after the lifecycle hook is active. A prior shared
+            // table could miss a helper whose first window already exists.
+            const auto topology = processInventory::read(processInventory::resolveQuery(), processInventory::currentTime, 0);
+            if (!topology || topology->status != processInventory::Status::Complete) return;
+            if (!windowNames.add(session.pid)) return windowNames.fallback();
+            const auto now = GetTickCount64();
+            for (const auto& row : topology->rows) {
+                if (row.pid == session.pid || (_wcsicmp(row.name.c_str(), L"steam.exe") &&
+                        _wcsicmp(row.name.c_str(), L"steamwebhelper.exe"))) continue;
+                if (!classifyWindowPid(row.pid, session, now) || !windowNames.add(row.pid))
+                    return windowNames.fallback();
+            }
+            windowNames.closeGlobal();
+        } catch (...) { windowNames.fallback(); }
+    }
+    static void CALLBACK windowEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
+        try {
+        auto* self = windowObserver;
+        if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window) return;
+        // OUTOFCONTEXT callbacks run on the publishing observer thread.
+        // Other threads retire this receipt only after joining the observer.
+        const auto& identity = self->cachedIdentity;
+        if (!identity) return;
+        const auto& session = identity->session;
+        const auto& root = session.root;
+        if (root.empty()) return; // Registry subscription initializes root; no per-window registry search.
+        if (root != self->windowRoot) { self->windowRoot = root; self->windowPids.clear(); self->windowPoked = false; }
+        DWORD pid = 0; GetWindowThreadProcessId(window, &pid); if (!pid) return;
+        const auto now = GetTickCount64();
+        const auto kind = self->classifyWindowPid(pid, session, now);
         // This cache admits NOTIFICATIONS only. All actions still verify the
         // session/process birth/owner. No token/image query for every name event.
         if (!kind) {
+            if (event != EVENT_OBJECT_CREATE) return;
             const auto* callback=startupWindowCallback;
-            if(event==EVENT_OBJECT_CREATE)ymcc::steamgamefacts::startupdiagnostic::ledger().note(pid,ymcc::steamgamefacts::startupdiagnostic::Stage::Observer,callback&&*callback?"create-callback-present":"create-callback-missing");
+            ymcc::steamgamefacts::startupdiagnostic::ledger().note(pid,ymcc::steamgamefacts::startupdiagnostic::Stage::Observer,callback&&*callback?"create-callback-present":"create-callback-missing");
             if(callback&&*callback)self->windowPids.knownCreate(pid,event,[&](const std::wstring& image){(*callback)(self->windowPids,pid,event,image,identity);});
             return;
         }
+        // The lifecycle hint also covers changes queued before a new PID's
+        // name hook could be installed. Existing callbacks still prove HWND and owner.
+        if (self->uiChanged && !self->windowNames.global &&
+                (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) && !self->windowNames.add(pid))
+            self->windowNames.fallback();
         if (kind == 2) {
             std::lock_guard lock(self->sessionMutex);
             if (self->cachedSession == session) {
@@ -400,17 +474,16 @@ class Observer {
         }
     }
     struct WindowSubscription {
-        HWINEVENTHOOK hook = nullptr, names = nullptr;
+        HWINEVENTHOOK hook = nullptr;
         Observer* owner;
         explicit WindowSubscription(Observer* value,const StartupWindowFact& fact) : owner(value) {
             startupWindowCallback=&fact;
             windowObserver = owner; owner->uiHints.clear(); owner->windowPids.clear(); owner->windowRegistryBacked = false;
             hook = SetWinEventHook(EVENT_OBJECT_CREATE, owner->uiChanged ? EVENT_OBJECT_HIDE : EVENT_OBJECT_SHOW, nullptr, windowEvent,
                 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-            if (owner->uiChanged) names = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE,
-                nullptr, windowEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            if (owner->uiChanged) owner->windowNames.armGlobal();
         }
-        ~WindowSubscription() { if (names) UnhookWinEvent(names); if (hook) UnhookWinEvent(hook); owner->uiHints.clear(); owner->windowPids.clear(); owner->windowRegistryBacked = false; windowObserver = nullptr; startupWindowCallback=nullptr; }
+        ~WindowSubscription() { owner->windowNames.close(); if (hook) UnhookWinEvent(hook); owner->uiHints.clear(); owner->windowPids.clear(); owner->windowRegistryBacked = false; windowObserver = nullptr; startupWindowCallback=nullptr; }
     };
     void dropRunProcess(HANDLE& process) noexcept {
         if (!process) return;
@@ -454,6 +527,7 @@ class Observer {
             // Existing inspect events can retry the same immutable cached publication.
             try { onIdentityPublished(receipt); lastSuccessfullyNotified = receipt; } catch (...) {}
         };
+        WindowSubscription windows(this,onStartupWindowFact); // Its callbacks run only on this existing observer thread.
         auto inspect = [&](bool force = false) {
             LSTATUS rootError = ERROR_NOT_READY, accountError = ERROR_NOT_READY, pidError = ERROR_NOT_READY;
             std::wstring registryRoot;
@@ -501,9 +575,12 @@ class Observer {
             publishIdentity(next, process ? 1 : probeSteamPresence(scanned), registeredPid, rootError, pidError, accountError, process, registryRoot);
             const auto receipt = identitySnapshot();
             if (!havePrevious || !(next == previous)) {
+                const bool rebindNames = !havePrevious || next.root != previous.root ||
+                    next.pid != previous.pid || next.created != previous.created;
                 previous = next; havePrevious = true;
                 { std::lock_guard lock(sessionMutex); cachedUiWindow = {}; }
                 windowPids.clear(); // Same-install PID/birth/account changes invalidate event classification too.
+                if (rebindNames) scopeWindowNames(next, windows.hook != nullptr);
                 retries.begin(GetTickCount64());
                 try { changed(true); } catch (...) {}
                 notifyIdentity(receipt);
@@ -512,17 +589,17 @@ class Observer {
             notifyIdentity(receipt);
             return false;
         };
-        WindowSubscription windows(this,onStartupWindowFact); // Its callbacks run only on this existing observer thread.
         rootNames.arm();
         activeWatch.arm();
         // Keep combined/recursive coverage when a narrower registration is unavailable.
         armRootFallback();
         inspect(true);
         for (;;) {
-            // A busy message stream must not starve stop, pending hints or retries.
-            if (WaitForSingleObject(stopEvent, 0) != WAIT_TIMEOUT) break;
-            if (uiHints.take(GetTickCount64()) && uiChanged) { try { uiChanged(); } catch (...) {} }
-            if (retries.take(GetTickCount64()) && needsRetry()) {
+            // Windows messages can keep the wait returning queue readiness.
+            // Check cancellation in memory before each bounded batch.
+            if (stopRequested.load(std::memory_order_acquire)) break;
+            if (uiHints.pending() && uiHints.take(GetTickCount64()) && uiChanged) { try { uiChanged(); } catch (...) {} }
+            if (retries.pending() && retries.take(GetTickCount64()) && needsRetry()) {
                 // Re-probe once even if Windows messages keep the queue busy.
                 if (!inspect(true)) { try { changed(false); } catch (...) {} }
             }
@@ -537,7 +614,9 @@ class Observer {
             const DWORD processIndex = process ? count++ : MAXDWORD;
             if (process) handles[processIndex] = process;
             windowRegistryBacked = process && rootWatch.exactArmed() && activeWatch.exactArmed();
-            const DWORD result = MsgWaitForMultipleObjectsEx(count, handles, (std::min)(retries.timeout(GetTickCount64()), uiHints.timeout(GetTickCount64())), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            const DWORD retryWait = retries.pending() ? retries.timeout(GetTickCount64()) : INFINITE;
+            const DWORD uiWait = uiHints.pending() ? uiHints.timeout(GetTickCount64()) : INFINITE;
+            const DWORD result = MsgWaitForMultipleObjectsEx(count, handles, (std::min)(retryWait, uiWait), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             if (result == WAIT_OBJECT_0 + count) {
                 MSG message{};
                 for (unsigned dispatched = 0; dispatched < 64 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++dispatched) {
@@ -607,6 +686,7 @@ public:
         }
         if(!factReads.resume()){closeRunEvents();return false;}
         sourceOwner.resumeReads();
+        stopRequested.store(false,std::memory_order_release);
         sourceRunning.store(true,std::memory_order_release);
         try { thread = std::thread([this, changed = std::move(changed), needsRetry = std::move(needsRetry),
             onIdentityPublished = std::move(onIdentityPublished),onStartupWindowFact=std::move(onStartupWindowFact)] {
@@ -728,6 +808,7 @@ public:
         sourceOwner.suspendReads();
         sourceRunning.store(false,std::memory_order_release);
         factReads.suspend();
+        stopRequested.store(true,std::memory_order_release);
         if (stopEvent) SetEvent(stopEvent);
         if (thread.joinable()) thread.join();
         closeRunEvents(); openWindow.store(false);

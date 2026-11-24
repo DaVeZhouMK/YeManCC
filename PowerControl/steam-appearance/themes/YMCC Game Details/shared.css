@@ -28,10 +28,24 @@
     will-change: auto!important;
 }
 
+/* Skip the native artwork fade, not Steam's transform or Decky's wallpaper. */
+.BasicUI .appdetails_Header_2gZXh .sharedappdetailsheader_TopCapsule_2meE3 .sharedappdetailsheader_HeaderBackgroundImage_1sarA:not([data-ymcc-wallpaper-target]) {
+    transition-property: transform!important;
+}
+
+/* Steam's separate reflected artwork can be an image or a canvas.
+   Keep its box for the native hero and scroll layout, but do not paint it. */
+.BasicUI .appdetails_Header_2gZXh .sharedappdetailsheader_TopCapsule_2meE3 .sharedappdetailsheader_ImgBlurBackdrop_ooM_c {
+    visibility: hidden!important;
+    filter: none!important;
+    -webkit-mask-image: none!important;
+    mask-image: none!important;
+}
+
 /* YMCC: observe this theme file without changing layout or input. */
 :root { --ymcc-receipt-ymcc-game-details: 1; }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-7a458641a648f242: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-6559ccaed176dc47: 1; }
+:root { --ymcc-content-1600ea7e89521bab: 1; }

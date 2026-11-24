@@ -14,6 +14,7 @@
 #include <functional>
 #include <array>
 #include <optional>
+#include <string_view>
 namespace ymcc::deckyrepair {
 using Json=nlohmann::json;
 enum class Origin { Manual, Automatic, FinalCleanup, ReopenBigPicture };
@@ -48,16 +49,22 @@ inline bool cleanupDocumentAvailable(const Json& document,const steamsession::Se
 }
 // A retained bridge only proves YMCC transport. With no owned Loader it cannot
 // certify the official backend/store; an explicit click may repair that state.
+inline bool retainedRepairable(std::string_view phase,std::string_view reason,bool steamPresent) noexcept {
+    return (phase=="waiting-manual-steam"&&reason=="decky-context-already-loaded")||
+        (phase=="frontend-attached"&&reason=="retained-frontend-connected")||
+        // A rejected retained rebind revokes the old transport, not manual repair.
+        (phase=="unavailable"&&reason=="mirror-bootstrap-session-changed"&&steamPresent);
+}
 inline bool repairable(const Json& runtime){
-    try{return runtime.at("enabled")==true&&
-        ((runtime.at("pid").is_number_unsigned()&&runtime.at("pid").get<unsigned long long>()>0&&runtime.at("phase")=="loader-started")||
-        (runtime.at("pid")==0&&
-        ((runtime.at("phase")=="waiting-manual-steam"&&runtime.at("reason")=="decky-context-already-loaded")||
-         (runtime.at("phase")=="frontend-attached"&&runtime.at("reason")=="retained-frontend-connected")||
-         // A rejected retained rebind revokes the old transport, not the user's
-         // manual repair entry. request() must freshly verify session/context.
-         (runtime.at("phase")=="unavailable"&&runtime.at("reason")=="mirror-bootstrap-session-changed"&&
-          runtime.value("steamKnown",false)&&runtime.value("steamRunning",false)))));
+    try{
+        if(runtime.at("enabled")!=true)return false;
+        const auto& pid=runtime.at("pid");const auto& phase=runtime.at("phase");
+        if(pid.is_number_unsigned()&&pid.get<unsigned long long>()>0)return phase=="loader-started";
+        if(pid!=0)return false;
+        const auto& reason=runtime.at("reason");
+        const bool steamPresent=phase=="unavailable"&&reason=="mirror-bootstrap-session-changed"&&
+            runtime.value("steamKnown",false)&&runtime.value("steamRunning",false);
+        return retainedRepairable(phase.get_ref<const std::string&>(),reason.get_ref<const std::string&>(),steamPresent);
     }catch(...){return false;}
 }
 // A live owned backend is kept running. A manual request only refreshes the
@@ -179,6 +186,7 @@ struct Dependencies {
     // Normal parent composition always supplies this. Legacy inert callers and
     // the already-reserved authenticated child keep their original dependency shape.
     std::function<std::shared_ptr<steamcommand::Reservation>(const steamsession::Session&,Origin)> reserveOperation;
+    std::function<bool(const steamsession::Session&)> cleanupAlreadySpent; // Private child; a negative-only shortcut.
 };
 class ManualRepair {
     AttemptBudget budget_;
@@ -257,10 +265,15 @@ public:
             if(cleanup){
                 const auto epoch=args.value("modeEpoch",std::string{});
                 if(epoch.empty()||mode.value("modeEpoch",std::string{})!=epoch)return refuse("decky-cleanup-context-changed");
+                if(reopen&&bigpicture::readyBeforeClose(mode))return refuse(bigpicture::alreadyHealthy);
                 action.erase("userInitiated");action["cleanupAuthorized"]=true;
                 action["operation"]="decky.cleanupConnection";action["expectedModeEpoch"]=epoch;
                 if(!session.account)return refuse("decky-cleanup-account-unconfirmed");
                 action["expectedAccount"]=session.account;
+                if(deps.cleanupAlreadySpent&&deps.cleanupAlreadySpent(session)){
+                    cleanupNotStarted=false; // Preserve the original spent-budget retry policy.
+                    return refuse("decky-cleanup-budget-unavailable");
+                }
             }
             const auto failure=deps.preflight();if(!failure.empty())return refuse(failure);
             if(!budget_.reserve(session,deps.now(),origin))return refuse("decky-repair-wait");

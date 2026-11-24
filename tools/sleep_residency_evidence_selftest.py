@@ -25,9 +25,9 @@ def capture_507_binding(source):
     """Exact original constructor and ordinary emission, with journal IO omitted."""
     callback=source.index('static DWORD WINAPI sgKernelPowerEventCallback(')
     prepare='    json residency;\n    if (leaving) {'
-    prepare_end='    if (hibernateWake) {\n        sgRecordFact("kernel-power-107", {'
-    emit='    if (leaving && residency.is_object()) {\n        // Preserve the OS\'s completed-session accounting in ordinary exports.'
-    emit_end='    traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
+    prepare_end='    // Observation failures must not prevent the original wake from reaching the window.'
+    emit='    if (leaving && residency.is_object()) observe("residency-journal", [&] {'
+    emit_end='    observe("trace", [&] { traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
     assert all(source.count(anchor)==1 for anchor in [prepare,prepare_end,emit,emit_end]),'native507capture boundary changed'
     first,last=source.index(prepare,callback),source.index(prepare_end,callback)
     emission,finish=source.index(emit,callback),source.index(emit_end,callback)
@@ -71,7 +71,11 @@ cpp=project/'tools/sleep_residency_evidence_selftest.cpp'
 # Export-only helper and actual adapter are compiled in both scopes, same execution.
 export_inputs=[project/'native/sleep_export_diagnostics.h',project/'native/sleep_export_diagnostics_native.inc',project/'tools/fixtures/sleep_residency/sleep_export_harness.inc']
 export_inputs += [project/name for name in ['native/log_ai_index.h', 'native/log_export_evidence.h', 'native/buffered_domain_log.h', 'native/log_jsonl_boundary.h', 'tools/input_pipe_test_allocation_fault.h']]
-export_inputs += [project/'native'/name for name in ('gamepad_backend_cost_json.h','gamepad_backend_cost.h','ui_gamepad_cycle_log.h','input_idle_scope.h')]
+export_inputs += [project/'native'/name for name in (
+    'gamepad_backend_cost_json.h','gamepad_backend_cost.h','ui_gamepad_cycle_log.h','input_idle_scope.h',
+    'input_signal_activity_log_scope.h','input_edge_log_scope.h','input_source_readback_log_scope.h',
+    'virtual_adaptation_journal_scope.h','common_frame_log_scope.h','native_process_cost.h','monitor_detail_log.h',
+    'virtual_signal_evidence.h','native_signal_window_log_scope.h','input_capture_recipe_log.h','input_callback_cost.h')]
 # Identity is bound in every mutation; only none copies/compiles this independent group.
 activity_inputs=[project/'native/sleep_activity_evidence.h',project/'native/sleep_activity_evidence_native.inc',project/'native/sleep_notification_evidence.h',project/'tools/fixtures/sleep_residency/sleep_activity_native_harness.inc']
 timeout_inputs=[project/'native/sleep_timeout_policy.h',project/'native/sleep_timeout_native.inc',project/'native/sleep_kernel_cycle.h',project/'native/sleep_kernel_cycle_native.inc',project/'tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc',project/'native/sleep_power_state.h',project/'native/sleep_power_observation.h',project/'native/sleep_power_dispatch.h']
@@ -128,7 +132,20 @@ if late_enabled:
         checked.append({'id':case['id'],'origin':case['origin'],'sourceId':case['sourceId'],'entryLine':case['entryLine'],'exitLine':case['exitLine'],'residencyLine':case['residencyLine'],'rawReason':exit['reason'],'rawDurationUs':values['DurationInUs'],'elapsedFromOriginalEventTimesMs':elapsed,'acAtDispatch':case['acAtDispatch'],'wholeSleepAc':'UNKNOWN'})
     assert len(checked)==3
     late_provenance={'payloadPath':str(late_payload.relative_to(project)).replace('\\','/'),'payloadSha256':source_hashes[late_payload],'factRecordsChecked':59,'archiveExtraction':'payload fact records previously hash-verified by owner; no repeated unzip or archive replay','cases':checked}
-for f in copy_paths:(out/f.name).write_bytes(f.read_bytes())
+export_layout=args.mutation=='none' and args.component_scope not in ['timeout','late-wake']
+def fixture_path(f):
+    return out/'native'/f.name if export_layout and f.name=='monitor_detail_log.h' else out/f.name
+for f in copy_paths:
+    target=fixture_path(f)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.write_bytes(f.read_bytes())
+layout_inputs=[]
+if export_layout:
+    # The original monitor header uses ../deps/json/json.hpp. Keep its bytes
+    # intact and resolve that include entirely inside this run's directory.
+    layout_inputs=[out/'deps/json/json.hpp']
+    layout_inputs[0].parent.mkdir(parents=True)
+    layout_inputs[0].write_bytes((out/'json.hpp').read_bytes())
 if args.component_scope!='all':
     text=(out/cpp.name).read_text('utf-8-sig').replace('#include "static_wake_harness.inc"','// Static-wake companion explicitly NOT_RUN in this partial execution.')
     text=text.replace('const auto staticWakeChecks=staticWakePolicyTests();','const unsigned staticWakeChecks=0;').replace('check(staticWakeChecks>0,"static wake harness executes nonzero checks");','')
@@ -175,9 +192,13 @@ def timeout_slices(filename,names,kind,artifacts=None):
                 assert source[begin:end].count('if (w == 1)')==1
             else:
                 cb=source.index('static DWORD WINAPI sgKernelPowerEventCallback(')
-                begin=source.index('    if(leaving&&reason1) {',cb)
-                end=source.index('\n    }',begin)+6
-                assert end<source.index('sgRecordFact(',cb)<source.index('PostMessageW(',cb),'manual callback highwater must precede log and UI'
+                if name=='manual507-time-qualification':
+                    begin=source.index('    const ULONGLONG observedAt = sgNowFileTime();',cb)
+                    end=source.index(';',source.index('    const bool originalTimeValid = ',begin))+1
+                else:
+                    begin=source.index('    if(leaving&&reason1) {',cb)
+                    end=source.index('\n    }',begin)+6
+                    assert end<source.index('sgRecordFact(',cb)<source.index('PostMessageW(',cb),'manual callback highwater must precede log and UI'
         elif kind=='late-declaration':
             matches=list(re.finditer(r'^static [^\n]*\b'+re.escape(name)+r'\b[^;]*;',source,re.M))
             assert len(matches)==1,'late declaration missing or nonunique: '+name
@@ -218,14 +239,14 @@ def timeout_slices(filename,names,kind,artifacts=None):
     artifacts.append({'path':filename,'sha256':hashlib.sha256(payload).hexdigest(),'prefix':prefix,'separator':'\n\n','suffix':'\n','slices':records})
     if args.mutation=='none' or late_enabled:(out/filename).write_bytes(payload)
 timeout_slices('production_timeout_types.inc',['SgSleepMode','SgRetryKind','SgSystemSleepRequestResult','SgSleepRetryFailureScope','g_sgRetrySleepTimeout','SG_ENTRY_RETRY_DELAYS_MS','SG_PAUSE_READY_WAIT_MAX_MS','SG_PAUSE_READY_POLL_MS','SG_MAX_ENTRY_RETRIES','SG_NON_USER_WAKE_CLASSIFY_MS','SG_S0_ENTRY_FAILURE_WINDOW_MS'],'declaration')
-timeout_slices('production_timeout_bindings.inc',['sgPublishSleepEventTime','sgAutomaticClassicSleepPending','sgUserWakeCancelsSleepIntent','sgPowerButtonSleepMode','sgRetryKindName','sgRequestSystemSleep','sgArmSleepRetryTimer','sgScheduleNextSleepRetry','sgDispatchSameModeRetry','sgStartSleepRetry','sgObserveUnattributedSleepRetryFailure'],'function')
+timeout_slices('production_timeout_bindings.inc',['sgPublishSleepEventTime','sgAutomaticClassicSleepPending','sgUserWakeCancelsSleepIntent','sgPowerButtonSleepMode','sgRetryKindName','sgMarkInternalSleepRequest','sgRequestSystemSleep','sgArmSleepRetryTimer','sgScheduleNextSleepRetry','sgDispatchSameModeRetry','sgStartSleepRetry','sgObserveUnattributedSleepRetryFailure'],'function')
 timeout_slices('production_timeout_s4_hook.inc',['hibernateWake','original107-success-before-log'],'s4-callback')
 timeout_binding={'entryObservationScope':'No entry observation episode in this companion; Present/Held/Join false, RememberExit inert, Interrupt hard refusal; actual observation/handoff predicates are selected only by joined non-user consumer','sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':timeout_artifacts}
 late_artifacts=[]
 timeout_slices('production_late_wake_types.inc',['SG_USER_STANDBY_DEVICE_DELAY_MS','SG_INTERNAL_SLEEP_506_WINDOW_MS','SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS','g_sgFactMonitorEnabled'],'late-declaration',late_artifacts)
 timeout_slices('production_late_wake_bindings.inc',['sgInternalSleepRequestMatches506','sgSleepTriggerOrigin','sgRefreshSleepTriggerOrigin','sgNonUserWakeGuardEnabled','sgExternalDeviceWakeIntentAge','sgClearUnexpectedWake','sgArmNonUserWakeGuard','sgEvaluateExternalDeviceWake','sgObserveNonUserWake','sgNoteExternalDeviceNodeChange','sgNoteExternalDeviceAcDcChange','sgNoteExternalDeviceKernel507Reason5','sgNoteExternalDeviceKernel507Reason7','sgEntryFailureWindowEligible','sgS0EntryFailureEligible','sgRenewCancellationReady'],'function',late_artifacts)
 timeout_slices('production_late_wake_message.inc',['WM_SG_S0_WAKE-complete-body'],'late-message',late_artifacts)
-timeout_slices('production_late_wake_manual_callback.inc',['manual507-callback-before-log-UI'],'late-manual',late_artifacts)
+timeout_slices('production_late_wake_manual_callback.inc',['manual507-time-qualification','manual507-callback-before-log-UI'],'late-manual',late_artifacts)
 late_binding={'sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':late_artifacts}
 if late_enabled:
     decision_names=['sgNonUserWakeGuardEnabled','sgExternalDeviceWakeIntentAge','sgObserveNonUserWake','sgEvaluateExternalDeviceWake','sgRequestSystemSleep']
@@ -340,7 +361,8 @@ if args.export_phase=="query-finalization":export_define+=" /DYMCC_SLEEP_EXPORT_
 if late_enabled:export_define+=" /DYMCC_SLEEP_LATE_WAKE_ENABLE=1"
 if args.component_scope=="late-wake":export_define=" /DYMCC_SLEEP_LATE_WAKE_ENABLE=1 /DYMCC_SLEEP_LATE_WAKE_ONLY=1"
 if args.mutation=="late-wake-monitor-sender":export_define+=" /DYMCC_SLEEP_LATE_WAKE_MONITOR_MUTATION=1 /wd4505" # Exact one-case negative leaves other original static helpers unused; keep /WX and semantic checks.
-bat.write_text(toolchain.stdout+identity_commands+f'cl /nologo {export_define} /std:c++20 /utf-8 /EHsc /W4 /WX /MT /sourceDependencies "dependencies.json" /I"." "{cpp.name}" /Fo"selftest.obj" /Fe"selftest.exe" /link /VERBOSE:LIB\n',encoding='ascii')
+include_layout=' /I"native"' if export_layout else ''
+bat.write_text(toolchain.stdout+identity_commands+f'cl /nologo {export_define} /std:c++20 /utf-8 /EHsc /W4 /WX /MT /sourceDependencies "dependencies.json" /I"."{include_layout} "{cpp.name}" /Fo"selftest.obj" /Fe"selftest.exe" /link /VERBOSE:LIB\n',encoding='ascii')
 prepared=time.perf_counter()
 compile_run=subprocess.run([os.environ.get('COMSPEC','cmd.exe'),'/d','/c',str(bat)],cwd=out,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace')
 (out/'compile.log').write_text(compile_run.stdout,encoding='utf-8');compiled=time.perf_counter()
@@ -383,7 +405,7 @@ if run.returncode==0 and (args.mutation=='none' or late_enabled):
         receipt['sleepActivityEvidence']['checks']=native_result['sleepActivityNativeChecks']
         assert receipt['sleepActivityEvidence']['checks']>0,'ACTIVITY_COMPANION_NOT_EXECUTED'
 receipt['sourceInputs']=[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':value} for f,value in source_hashes.items()]
-receipt['compiledInputs']=[{'path':f.name,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()} for f in [out/'production_capture_hook.inc',out/'sleep_residency_evidence.h',*([out/'production_activity_fact_hook.inc'] if args.mutation=='none' else []),*([out/row['path'] for row in timeout_artifacts] if args.mutation=='none' or late_enabled else []),*([out/row['path'] for row in late_artifacts] if late_enabled else []),*[out/f.name for f in copy_paths],*([out/'static_wake_parser_binding.inc'] if args.component_scope=='all' else [])]]
+receipt['compiledInputs']=[{'path':f.relative_to(out).as_posix(),'sha256':hashlib.sha256(f.read_bytes()).hexdigest()} for f in [out/'production_capture_hook.inc',out/'sleep_residency_evidence.h',*([out/'production_activity_fact_hook.inc'] if args.mutation=='none' else []),*([out/row['path'] for row in timeout_artifacts] if args.mutation=='none' or late_enabled else []),*([out/row['path'] for row in late_artifacts] if late_enabled else []),*[fixture_path(f) for f in copy_paths],*layout_inputs,*([out/'static_wake_parser_binding.inc'] if args.component_scope=='all' else [])]]
 dependencies=json.loads((out/'dependencies.json').read_text('utf-8-sig'))['Data']['Includes']
 receipt['discoveredDependencies']=[{'path':str(f),'sha256':hashlib.sha256(f.read_bytes()).hexdigest()} for f in map(Path,dependencies)]
 tools=[Path(sys.base_prefix)/'python.exe',Path(os.environ.get('COMSPEC','C:/Windows/System32/cmd.exe')),Path(shutil.which('node'))]

@@ -1,6 +1,16 @@
 #include "actual_pipe_leaves.hpp"
 #include "input_host_exit_retirement.h"
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+#define inputHostRequestLocked fixturePriorRequest
+#define hidHideCaptureVisibilitySnapshot fixturePriorReadback
+#define HidHideVisibilitySnapshot FixtureLegacyVisibilitySnapshot
+#endif
 #include "environment.hpp"
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+#undef inputHostRequestLocked
+#undef hidHideCaptureVisibilitySnapshot
+#undef HidHideVisibilitySnapshot
+#endif
 #undef WaitForSingleObject
 #undef CloseHandle
 #undef TerminateProcess
@@ -14,6 +24,55 @@
 #include "log_snapshot_state.h"
 #include "input_host_shared_power.h"
 #include "virtual_recovery_intent.h"
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+@@VISIBILITY_TYPE@@
+static bool fixtureRejectShutdown=false,fixtureLateRetire=false,t_inputHostOneXStartWrite=false;
+static HANDLE fixtureOriginalProcess=nullptr,fixtureOriginalPipe=nullptr;
+static unsigned fixtureQueries=0,fixtureCliReads=0;
+static json fixtureCommands=json::array(),fixtureCaptureCommands=json::array(),fixtureReadback=json::array();
+static bool fixtureEnteredStop=false;
+static std::wstring U2W(const std::string& value){
+    need(value.empty(),"nonempty device paths outside this request-port control");return {};
+}
+static bool hidHideContainsPath(const std::vector<std::wstring>& paths,const std::string&){
+    need(paths.empty(),"device paths outside this request-port control");return false;
+}
+static bool inputHostRequestLocked(const char* command,const json& body,const char* expected,DWORD timeout,json* receipt=nullptr){
+    (fixtureEnteredStop?fixtureCommands:fixtureCaptureCommands).push_back(command);
+    if(std::strcmp(command,"HIDHIDE_QUERY")==0){
+        ++fixtureQueries;
+        need(receipt&&g_inputHostPipeConnected&&g_inputHostServerPipe==fixtureOriginalPipe&&g_inputHostProcess==fixtureOriginalProcess&&
+            !g_inputHostPipeRetired&&!g_inputHostTransportFault,"query must observe the original usable transport");
+        *receipt={{"detail",R"({"ok":true,"cloakOn":false,"hidden":[],"applications":[]})"}};
+        return true;
+    }
+    if(fixtureRejectShutdown&&std::strcmp(command,"SHUTDOWN")==0){
+        need(g_inputHostProcess==fixtureOriginalProcess&&g_inputHostServerPipe==fixtureOriginalPipe&&g_inputHostPipeConnected&&
+             !g_inputHostTransportFault&&!g_inputHostPipeRetired,"shutdown application rejection must preserve the usable original transport");
+        if(receipt)*receipt=json::object();
+        return false;
+    }
+    return fixturePriorRequest(command,body,expected,timeout,receipt);
+}
+static bool hidHideCaptureVisibilitySnapshotViaCli(HidHideVisibilitySnapshot& snapshot){
+    ++fixtureCliReads;snapshot={};return false;
+}
+@@VISIBILITY_FUNCTIONS@@
+static bool fixtureObserveVisibilityReadback(HidHideVisibilitySnapshot& snapshot){
+    const bool sameProcess=g_inputHostProcess==fixtureOriginalProcess;
+    json observation={{"sameProcess",sameProcess},
+        {"processStillLive",sameProcess&&::WaitForSingleObject(fixtureOriginalProcess,0)==WAIT_TIMEOUT},
+        {"retired",g_inputHostPipeRetired},{"connected",g_inputHostPipeConnected},
+        {"pipePresent",g_inputHostServerPipe!=nullptr},{"transportFault",g_inputHostTransportFault},
+        {"runtimeReadable",ymcc::inputHost::pipeTransport::processRuntime().snapshot().available}};
+    const auto queries=fixtureQueries,cli=fixtureCliReads;
+    const bool accepted=hidHideCaptureVisibilitySnapshot(snapshot);
+    observation["queryCalls"]=fixtureQueries-queries;
+    observation["inertCliCalls"]=fixtureCliReads-cli;
+    fixtureReadback.push_back(std::move(observation));
+    return accepted;
+}
+#endif
 namespace ymcc::screenpads {
 @@TRANSPORT_REASON@@
 inline void observeNativeTransport(ULONGLONG,bool,NativeTransportReason){}
@@ -185,7 +244,13 @@ static bool inputHostTargetReturnSdRestorePendingLocked(){return false;}
 static bool inputHostRuntimeMsiReturnRequiredLocked(){need(!ports.msi,"MSI return is outside this local-owner fixture");return false;}
 static bool inputHostRuntimeMsiReturnPrepareLocked(){return false;}
 static bool inputHostRuntimeMsiReturnProofCurrentLocked(){return false;}
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+#define hidHideCaptureVisibilitySnapshot fixtureObserveVisibilityReadback
+#endif
 @@PRODUCTION@@
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+#undef hidHideCaptureVisibilitySnapshot
+#endif
 #undef GetTickCount64
 #undef Sleep
 #undef IsWindow
@@ -569,7 +634,13 @@ int wmain(int argc,wchar_t** argv){
         need(argc==2,"explicit current scenario required");const std::wstring scenario=argv[1];
         if(scenario==L"coordinator-observer-close"){result=coordinatorObserverCloseCase();std::cout<<result.dump()<<"\n";return 0;}
         const bool protectedDebt=scenario==L"protected-primary-pipe",healthy=scenario==L"healthy-ordinary";
-        need(healthy||protectedDebt||scenario==L"unprotected-uncooperative"||isR8Case(scenario)||scenario==L"busy-pipe-independent-force","unknown scenario");
+        bool shutdownRejected=false;
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+        fixtureLateRetire=scenario==L"shutdown-late-retire-control";
+        shutdownRejected=fixtureLateRetire||scenario==L"shutdown-rejected-readback";
+        fixtureRejectShutdown=shutdownRejected;
+#endif
+        need(healthy||protectedDebt||shutdownRejected||scenario==L"unprotected-uncooperative"||isR8Case(scenario)||scenario==L"busy-pipe-independent-force","unknown scenario");
         const bool managedMode=managedChildRequested();need(!managedMode||scenario==L"unprotected-uncooperative","managed bridge only existing unprotected scenario");
         Child child;const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release;
         HANDLE processOracle=nullptr,primaryOracle=nullptr;
@@ -580,7 +651,7 @@ int wmain(int argc,wchar_t** argv){
         HANDLE pipe=memoryApi::source();DWORD error=0;bool taken=false;
         need(runtime.adopt(pipe,L"exit-owned-private-pipe",error,&taken)&&taken,"real Runtime private handle admission");
         if(protectedDebt)memoryApi::failRoles=memoryApi::Original;
-        ports=Ports{};ports.ack=healthy;ports.shutdownExits=healthy;ports.endpointAbsent=healthy;ports.childRelease=releaseEvent;
+        ports=Ports{};ports.ack=healthy||shutdownRejected;ports.shutdownExits=healthy;ports.endpointAbsent=healthy;ports.childRelease=releaseEvent;
         g_inputHostProcess=originalProcess;g_inputHostPrimaryThread=originalPrimary;g_inputHostServerPipe=pipe;
         g_inputHostCreatedIdentity=ymcc::inputHost::exitRetirement::identity(originalProcess);need(g_inputHostCreatedIdentity.valid,"real creation identity");
         g_inputHostExitForceSpent=false;g_inputHostExitOrdinaryStopAttempted=false;g_inputHostExitLocalReturned=false;
@@ -589,6 +660,9 @@ int wmain(int argc,wchar_t** argv){
         g_inputHostBoundPersona="steamdeck";g_inputHostHello=true;g_inputHostPrepared=true;g_inputHostPrepareMayHaveReachedHost=true;
         g_inputHostActive=true;g_inputHostNeutralized=true;g_hidHideVisibilityJournal.active=true;g_realStickTest.virtualTargetEnabled=true;
         g_inputHostTransportFault=false;g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+        fixtureOriginalProcess=originalProcess;fixtureOriginalPipe=pipe;g_inputHostPipeConnected=true;
+#endif
         g_exitSessionId="native-exit-owned-current";g_exitRequested=true;g_inputHostExitFence=true;g_captureExitReleased=false;
         g_inputCaptureStop=true;g_captureGeneration=7;g_captureMmTimerRetired=true;
         g_hwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
@@ -648,13 +722,43 @@ int wmain(int argc,wchar_t** argv){
         need(forceReceipts==(healthy?0u:1u),"force budget not expected zero/once");
         const auto lastOwned=logData("input-host-exit-ownership");
         const auto managedProof=managedMode?result.at("managedRetainedOwnerProof"):json(nullptr);
-        result={{"scopedLocalOwnerPass",true},{"scenario",healthy?"healthy-ordinary":protectedDebt?"protected-primary-pipe":"unprotected-uncooperative"},
+        const char* scenarioName=healthy?"healthy-ordinary":protectedDebt?"protected-primary-pipe":"unprotected-uncooperative";
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+        if(shutdownRejected)scenarioName=fixtureLateRetire?"shutdown-late-retire-control":"shutdown-rejected-readback";
+#endif
+        result={{"scopedLocalOwnerPass",true},{"scenario",scenarioName},
           {"beforeFixtureFaultRelief",beforeRelief},{"actualExitCleanup",{{"stage",g_exitCleanupStage.load()},{"readyPosts",readyPosts.load()},{"cleanupCode",workerCode},{"cleanupCompleted",g_exitCleanupCompleted}}},
           {"actualEnsure",{{"returned",true},{"actualLocalGetter",inputHostExitLocalOwnershipReleased()},{"wholeMainAndWmAppReadyExecuted",false}}},
           {"productionResourceProof",{{"processExitedAndJoined",true},{"primaryExitedAndJoined",true},{"processExitCode",processCode},{"allFourLocalOwnersNull",true},{"pipeRuntime",pipeSnapshot()},{"pipeLiveHandleOracle",memoryApi::live.size()},{"forceAttempts",forceReceipts},{"forceBudgetSpent",g_inputHostExitForceSpent},{"childReleaseEventUnsignaled",!healthy},{"healthyExitUsesExplicitShutdownProtocolLeaf",healthy}}},
           {"businessOwned",inputHostOwnedCleanupProvenLocked()},{"businessDutyRetained",g_inputHostReleaseQuarantined||g_hidHideVisibilityJournal.active},{"endpointAndPhysicalReleaseProven",false},
           {"lastExitOwnershipReceipt",lastOwned},{"actualLogs",ports.logs},{"noncontrollerMemoryLeaves",memoryLeaves},
           {"permanentOsBlockStatus","UNKNOWN; fixture fault relief is conditional progress, not permanent fault destruction"}};
+#ifdef YMCC_EXIT_SHUTDOWN_ORDER
+        auto exactCommands=healthy||shutdownRejected?json::array({"QUIESCE","SUBMIT_NEUTRAL","RELEASE_TARGET","SHUTDOWN"}):json::array({"QUIESCE"});
+        if(fixtureLateRetire)exactCommands.push_back("HIDHIDE_QUERY");
+        const auto captureCommands=healthy||shutdownRejected?json::array({"QUIESCE","SUBMIT_NEUTRAL"}):json::array({"QUIESCE"});
+        result["shutdownOrderingObserved"]={{"captureCommands",fixtureCaptureCommands},{"stopCommands",fixtureCommands},{"readbacks",fixtureReadback},{"queryCalls",fixtureQueries},{"inertCliCalls",fixtureCliReads}};
+        need(fixtureCaptureCommands==captureCommands,"exact capture preparation command membership");
+        need(fixtureCommands==exactCommands&&fixtureReadback.size()==2,"exact ordered command/readback membership");
+        const auto& observation=fixtureReadback.at(0);
+        const auto& postAudit=fixtureReadback.at(1);
+        need(observation.at("sameProcess")==true&&observation.at("transportFault")==false&&observation.at("runtimeReadable")==true,"readback must not be protected by process removal or wire fault");
+        if(shutdownRejected)need(observation.at("processStillLive")==true,"rejected SHUTDOWN must keep the process live through diagnostic readback");
+        need(postAudit.at("queryCalls")==0&&postAudit.at("inertCliCalls")==1,"post-stop audit must not query the retired endpoint");
+        const bool retiredBeforeReadback=observation.at("retired")==true&&observation.at("queryCalls")==0;
+        const bool closedBeforeReadback=observation.at("connected")==false&&observation.at("pipePresent")==false;
+        if(fixtureLateRetire){
+            need(!retiredBeforeReadback&&!closedBeforeReadback&&observation.at("retired")==false&&observation.at("connected")==true&&observation.at("pipePresent")==true&&observation.at("queryCalls")==1&&observation.at("inertCliCalls")==0,"late-close mutation must be rejected by an actual query");
+        }else{
+            need(retiredBeforeReadback&&(healthy||closedBeforeReadback)&&observation.at("inertCliCalls")==1,"readback must not query the retired endpoint");
+        }
+        const auto readback=logData("input-host-release-visibility");
+        need(readback.at("localReleaseAck")==static_cast<bool>(healthy||shutdownRejected)&&readback.at("shutdownAck")==healthy,"application-rejection/ACK trace must match the original Stop result");
+        result["shutdownOrdering"]={{"commands",fixtureCommands},{"observation",observation},{"postAudit",postAudit},
+            {"shutdownOutcome",healthy?"ACK":shutdownRejected?"APPLICATION_REJECTED":"NOT_SENT"},
+            {"retirementOrderAccepted",retiredBeforeReadback&&(healthy||closedBeforeReadback)},{"lateRetirementControlRejected",fixtureLateRetire},
+            {"peerEofObserved",false},{"physicalAcceptance",false}};
+#endif
         if(managedMode){
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION account{};
             const auto jobWaitStarted=::GetTickCount64();

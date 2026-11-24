@@ -1,8 +1,14 @@
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2],churn=process.argv.includes('--churn'),activation=process.argv.includes('--activation'),backgroundBefore=process.argv.includes('--background-before'),remountBefore=process.argv.includes('--remount-before'),powerProbe=process.argv.includes('--power'),hostChain=process.argv.includes('--host-chain'),staticFallback=process.argv.includes('--static-fallback'),nativeForeground=process.argv.includes('--native-foreground'),backgroundIdle=process.argv.includes('--background-idle'),stallRecovery=process.argv.includes('--stall-recovery'),before=process.argv.includes('--before'),wakeBefore=process.argv.includes('--wake-before');if(!out)throw Error('evidence directory required');fs.mkdirSync(out,{recursive:true});const {build}=createRequire(root+'/package.json')('esbuild'),{chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json')('playwright');
-const knownFlags=new Set(['--4k','--churn','--activation','--background-before','--remount-before','--power','--host-chain','--before','--wake-before','--offline-wan','--static-fallback','--native-foreground','--background-idle','--stall-recovery']);for(const flag of process.argv.slice(3))if(!knownFlags.has(flag))throw Error('Unknown visibility fixture flag: '+flag);
+const knownFlags=new Set(['--4k','--churn','--activation','--background-before','--remount-before','--power','--host-chain','--before','--wake-before','--offline-wan','--static-fallback','--native-foreground','--background-idle','--stall-recovery','--composition','--terminal-revalidation','--owner-wake-handoff']);for(const flag of process.argv.slice(3))if(!knownFlags.has(flag))throw Error('Unknown visibility fixture flag: '+flag);
+const ownerWakeHandoff=process.argv.includes('--owner-wake-handoff');
+if(ownerWakeHandoff&&(!hostChain||!activation||process.argv.slice(3).some(flag=>!['--owner-wake-handoff','--host-chain','--activation','--offline-wan'].includes(flag))))throw Error('--owner-wake-handoff requires --host-chain --activation and excludes other scenes');
+const observeComposition=process.argv.includes('--composition');
+if(observeComposition&&(!hostChain||!nativeForeground))throw Error('--composition requires --host-chain --native-foreground');
 if(backgroundIdle&&(!hostChain||process.argv.slice(3).some(flag=>!['--background-idle','--host-chain','--offline-wan','--4k'].includes(flag))))throw Error('--background-idle requires --host-chain and excludes other scene selectors');
-if(stallRecovery&&(!hostChain||process.argv.slice(3).some(flag=>!['--stall-recovery','--host-chain','--offline-wan'].includes(flag))))throw Error('--stall-recovery requires --host-chain and excludes other scene selectors');
+const terminalRevalidation=process.argv.includes('--terminal-revalidation');
+if(terminalRevalidation&&!stallRecovery)throw Error('--terminal-revalidation requires --stall-recovery');
+if(stallRecovery&&(!hostChain||process.argv.slice(3).some(flag=>!['--stall-recovery','--host-chain','--offline-wan','--terminal-revalidation'].includes(flag))))throw Error('--stall-recovery requires --host-chain and excludes other scene selectors');
 const bundled=await build({metafile:backgroundIdle,...(hostChain?{stdin:{contents:"export {installSteamWallpaper} from './decky-plugin/src/steamWallpaper';export {startSteamWallpaperHost} from './src/bridge/steamWallpaperHost';",resolveDir:root,loader:'ts'}}:{entryPoints:[root+'/decky-plugin/src/steamWallpaper.tsx']}),bundle:true,platform:'browser',format:'iife',globalName:'YMCCWallpaper',outfile:out+((backgroundBefore||remountBefore)?'/visibility-before-plugin.js':'/visibility-plugin.js'),plugins:(before||wakeBefore||backgroundBefore||remountBefore)?[{name:'before',setup(api){api.onLoad({filter:(backgroundBefore||remountBefore)?/decky-plugin[\\/]src[\\/](steamWallpaper\.tsx|wallpaperPlayers\.ts)$/:/decky-plugin[\\/]src[\\/]steamWallpaper\.tsx$/},args=>({contents:fs.readFileSync((backgroundBefore||remountBefore)?path.join(out,'before',path.relative(root,args.path)):out+'/before/decky-plugin/src/steamWallpaper.tsx','utf8'),loader:args.path.endsWith('.tsx')?'tsx':'ts'}));}}]:[]});
 const sourceInputs=()=>Object.keys(bundled.metafile?.inputs||{}).filter(file=>file!=='<stdin>').map(file=>({file,sha256:createHash('sha256').update(fs.readFileSync(path.resolve(root,file))).digest('hex')}));
 const data='D:/YeMan/CustomSteamLibrary/data',mediaKey=process.env.YMCC_WALLPAPER_FIXTURE_MEDIA_KEY||'steam-1091500';if(!/^steam-[1-9][0-9]*$/.test(mediaKey))throw Error('fixture media key invalid');const mediaDocument=fs.readFileSync(data+'/config/game-media.json'),j=JSON.parse(mediaDocument),asset=j.entries[mediaKey]?.assets?.dynamic;if(!asset)throw Error('fixture dynamic asset missing');const file=path.join(data,'artwork/video',asset.id+'.'+asset.extension),size=fs.statSync(file).size;const {createHash}=await import('node:crypto');const mediaFixture={key:mediaKey,assetId:asset.id,bytes:size,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),indexSha256:createHash('sha256').update(mediaDocument).digest('hex'),routingScope:'original synthetic route identity preserved; selected real cached media supplied independently'};fs.writeFileSync(out+'/media-fixture.json',JSON.stringify(mediaFixture,null,2));
@@ -21,6 +27,43 @@ await (async()=>{try{await page.goto('http://127.0.0.1:'+server.address().port+'
  const Original=()=>React.createElement('main',null,React.createElement('div',{className:'native-home'},React.createElement('div',{className:'native-images'})),React.createElement('div',{style:{display:'flex'}},...['1091500','570'].map(id=>React.createElement('button',{'data-appid':id,key:id},id))));const reactRoot=ReactDOM.createRoot(document.getElementById('root'));reactRoot.render(patches.get('/library/home')({children:React.createElement(Original)}).children);extra({type:'wallpaper-ready',enabled:true});window.visibilityTest={nodes,sent,nativeCounters,nativeMessages,dropNativeReplies:value=>{dropNativeReplies=value;},droppedNativeReplies:()=>droppedNativeReplies,setNativeForeground:proof=>{foregroundProof={...proof};nativeForegroundChanged(foregroundProof);},receive:message=>extra(message),restartHost:()=>{nativeHost.stop();startNative();},lastNativeReady:()=>lastNativeReady,setting:value=>{playbackAllowed=value;nativeChanged('settings');},wake:generation=>nativeResume({generation}),dispose:()=>{dispose();nativeHost?.stop();},reactRoot,mount:appId=>reactRoot.render(patches.get('/library/home')({children:React.createElement(Original,{match:{params:{appid:appId}}})}).children),connection:state=>{connected=state.connected;if(hostChain)nativeExtension.connected({...peer,connected});connection(state);},extra:message=>{if(message.type==='wallpaper-ready')playbackAllowed=message.enabled===true;extra(message);},rotateMediaToken:value=>mediaToken=value,sourceNodes:()=>nodes.filter(n=>n.hasAttribute('src')).length};
  },{port:server.address().port,hostChain});await page.locator('[data-appid="1091500"]').focus();await page.waitForFunction(()=>document.querySelector('video')?.dataset.ymccPrepared==='true');check(await page.locator('video').evaluate(v=>!v.paused),'real selected video plays in visible Steam background');const initialTiming=await page.locator('video').evaluate(v=>({createdAt:Number(v.dataset.auditCreatedAt),metadataAt:Number(v.dataset.auditMetadataAt),playingAt:Number(v.dataset.auditPlayingAt),width:v.videoWidth,height:v.videoHeight,preload:v.preload}));fs.writeFileSync(out+'/initial-selection-timing.json',JSON.stringify({...initialTiming,metadataMs:initialTiming.metadataAt-initialTiming.createdAt,playingMs:initialTiming.playingAt-initialTiming.createdAt,scope:'Local isolated Edge source creation to media events; excludes real YMCC/Decky startup or OS focus'},null,2));await page.waitForTimeout(250);check(await page.evaluate(()=>visibilityTest.sourceNodes()===1),'selected video is the only source; no prediction');
 
+ if(terminalRevalidation){
+  // Real video/React, with only the decode failure and frame delivery order injected.
+  const armed=await page.evaluate(()=>{
+   window.decodeFault=()=>{const video=document.querySelector('video');Object.defineProperty(video,'error',{configurable:true,value:{code:3}});video.dispatchEvent(new Event('error'));};
+   const v=document.querySelector('video');return {initialSrc:v.src,initialSeq:visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).at(-1).contextSeq};
+  });
+  for(let i=0;i<2;i++){
+   await page.evaluate(()=>{window.previousDecodeNode=document.querySelector('video');decodeFault();});
+   await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v!==previousDecodeNode&&v.dataset.ymccPrepared==='true'&&!v.paused;},null,{timeout:6500});
+   check(await page.evaluate(()=>!previousDecodeNode.hasAttribute('src')&&visibilityTest.sourceNodes()===1),'each original local retry releases the previous decoder');
+  }
+  const renewed=await page.evaluate(()=>{
+   window.terminalDecodeNode=document.querySelector('video');
+   visibilityTest.dropNativeReplies(true);visibilityTest.receive({type:'wallpaper-ready',enabled:true,requestContext:true});
+   return visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).at(-1).contextSeq;
+  });
+  check(renewed>armed.initialSeq,'same-route Ready recheck starts a new sequence');
+  await page.waitForFunction(seq=>visibilityTest.nativeMessages.some(m=>m.type==='wallpaper'&&m.contextSeq===seq&&m.entry),renewed,{timeout:5000});
+  check(await page.evaluate(()=>document.querySelector('video')===terminalDecodeNode),'old decoder is retained until the renewed frame arrives');
+  await page.evaluate(()=>decodeFault());
+  const waiting=await page.evaluate(()=>({sources:visibilityTest.sourceNodes(),decoders:visibilityTest.nodes.length,statuses:visibilityTest.sent.filter(m=>m.command==='wallpaper.status').length,nativeVisible:!document.querySelector('.native-home').hasAttribute('data-ymcc-wallpaper-ready')}));
+  check(waiting.sources===0&&waiting.statuses===0&&waiting.nativeVisible,'stale terminal failure releases the decoder but sends no stale write');
+  await page.evaluate(({seq,url})=>{
+   const fresh=visibilityTest.nativeMessages.findLast(m=>m.type==='wallpaper'&&m.contextSeq===seq&&m.entry);
+   visibilityTest.dropNativeReplies(false);
+   visibilityTest.receive({...fresh,entry:{...fresh.entry,revision:'1',bindingRevision:1,kind:'video',url,playback:{start:8,end:38,fit:'cover'}}});
+  },{seq:renewed,url:armed.initialSrc});
+  await page.waitForFunction(seq=>visibilityTest.nativeMessages.some(m=>m.type==='wallpaper'&&m.contextSeq===seq&&m.status==='playback-failed'),renewed,{timeout:5000});
+  await page.evaluate(()=>{for(let i=0;i<30;i++)terminalDecodeNode.dispatchEvent(new Event('error'));});
+  const settled=await page.evaluate(()=>({statuses:visibilityTest.sent.filter(m=>m.command==='wallpaper.status').map(({contextSeq,appId,assetId,bindingRevision,status})=>({contextSeq,appId,assetId,bindingRevision,status})),sources:visibilityTest.sourceNodes(),decoders:visibilityTest.nodes.length}));
+  assert.deepEqual(settled.statuses,[{contextSeq:renewed,appId:'1091500',assetId:'real-1091500',bindingRevision:1,status:'playback-failed'}]);
+  check(settled.sources===0&&settled.decoders===waiting.decoders&&waiting.decoders===3,'one current status is accepted without starting another decoder');
+  await page.evaluate(()=>{visibilityTest.dispose();visibilityTest.reactRoot.unmount();});
+  check(errors.length===0,'terminal recovery handoff produces no browser exception');
+  const result={ok:true,case:'terminal-decode-during-revalidation-reports-on-fresh-same-binding-only',checks,initialSeq:armed.initialSeq,renewed,waiting,settled,errors,offlineWAN,blockedExternalRequests,scope:'Isolated Edge/React with real cached video; induced code 3 and held host reply; no installed Steam or native Store mutation.'};
+  fs.writeFileSync(out+'/terminal-revalidation-results.json',JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify(result));return;
+ }
  if(stallRecovery){
   // Actual H264, production Host/Surface/Players. An induced pause proves the
   // new recovery boundary, not the unknown cause of Win5's original freeze.
@@ -38,10 +81,36 @@ await (async()=>{try{await page.goto('http://127.0.0.1:'+server.address().port+'
   await page.waitForTimeout(350);const progress=await page.locator('video').evaluate(video=>({position:video.currentTime,frames:video.getVideoPlaybackQuality().totalVideoFrames}));
   check(progress.position>resumed.position&&progress.frames>resumed.frames,'replacement really advances media time and decoded frames');
   check(await page.evaluate(()=>visibilityTest.nativeCounters.ensures===0),'a local interruption does not download or invalidate shared media');
+  const videoRecoveryReceipts=()=>records().filter(x=>x.stage==='video-recovery-ready');
+  check(videoRecoveryReceipts().length===0,'local decoder retry is not a power recovery');
+  await page.evaluate(()=>{window.beforeRecoveryWake=document.querySelector('video');visibilityTest.wake(100);});
+  await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v!==beforeRecoveryWake&&v.dataset.ymccPrepared==='true'&&!v.paused;},null,{timeout:5000});
+  const wakeReceipt=videoRecoveryReceipts()[0];
+  check(videoRecoveryReceipts().length===1&&wakeReceipt?.cause==='power-ready'&&wakeReceipt.revealAfterMs>=0,'a late power recovery records one current decoder reveal after ordinary history fills');
+  await page.evaluate(()=>{const message=visibilityTest.nativeMessages.findLast(m=>m.type==='wallpaper-ready'&&m.resumeGeneration===100);for(let i=0;i<40;i++)visibilityTest.receive(message);});
+  check(videoRecoveryReceipts().length===1,'repeated wake hints emit no new reveal proof');
+  // The current power protocol uses Ready/requestContext instead of generation.
+  for(const cancel of [false,true]){
+   await page.evaluate(cancel=>{
+    window.beforeRecoveryWake=document.querySelector('video');
+    const {stateOwner,stateRevision}=visibilityTest.lastNativeReady();
+    const sequence=()=>visibilityTest.sent.findLast(m=>m.command==='wallpaper.context'&&m.visible).contextSeq;
+    if(cancel)visibilityTest.dropNativeReplies(true);
+    visibilityTest.receive({type:'wallpaper-ready',enabled:true,foreground:false,requestContext:true,stateOwner,stateRevision,contextSeq:sequence()});
+    if(cancel){
+     visibilityTest.receive({type:'wallpaper',enabled:false,foreground:false,stateOwner,stateRevision,contextSeq:sequence(),entry:null});
+     visibilityTest.dropNativeReplies(false);
+     visibilityTest.receive({type:'wallpaper-ready',enabled:true,foreground:false,stateOwner,stateRevision});
+    }
+   },cancel);
+   await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v!==beforeRecoveryWake&&v.dataset.ymccPrepared==='true'&&!v.paused;},null,{timeout:5000});
+   check(videoRecoveryReceipts().length===2,cancel?'OFF before reveal retires the sample; the following ON does not report recovery':'current power Ready records one fresh video reveal');
+  }
+  check(await page.evaluate(()=>visibilityTest.sourceNodes()===1&&visibilityTest.nativeCounters.ensures===0),'power recovery uses a single decoder and reuses cached media');
   await page.evaluate(()=>visibilityTest.dispose());await page.waitForTimeout(100);
   check(await page.evaluate(()=>visibilityTest.sourceNodes()===0&&visibilityTest.nodes.every(n=>n.paused&&!n.hasAttribute('src'))),'dispose releases every old and replacement source');
   check(errors.length===0,'no browser exception during late recovery');
-  fs.writeFileSync(out+'/stall-recovery-results.json',JSON.stringify({ok:true,checks,paused,resumed,progress,eventToPlaybackMs:resumed.at-paused.at,recovery,mediaFixture,errors,scope:'Production Host/Surface/Players with real cached H264 in isolated Edge. Browser pause induced; original Win5 freeze cause, real Steam performance and power remain unproven.'},null,2));
+  fs.writeFileSync(out+'/stall-recovery-results.json',JSON.stringify({ok:true,checks,paused,resumed,progress,eventToPlaybackMs:resumed.at-paused.at,recovery,wakeReceipts:videoRecoveryReceipts(),mediaFixture,errors,scope:'Production Host/Surface/Players with real cached H264 in isolated Edge. Browser pause, legacy wake and injected current-power IPC; no Win5 freeze cause, real Steam performance or power proof.'},null,2),{flag:'wx'});
   console.log('WALLPAPER_STALL_RECOVERY_OK '+checks);return;
  }
 
@@ -120,19 +189,34 @@ await (async()=>{try{await page.goto('http://127.0.0.1:'+server.address().port+'
  }
  if(nativeForeground){
   if(!hostChain)throw Error('--native-foreground requires --host-chain');
+  const wallRecords=()=>browserConsole.filter(l=>l.startsWith('[YMCC:Wallpaper] ')).map(l=>JSON.parse(l.slice('[YMCC:Wallpaper] '.length)));
+  const submissions=()=>wallRecords().filter(r=>r.stage==='video-compositor-submit');
+  const confirmSubmission=async(previous)=>{
+   if(submissions().length===previous)await page.waitForEvent('console',{predicate:m=>m.text().startsWith('[YMCC:Wallpaper] ')&&m.text().includes('"stage":"video-compositor-submit"'),timeout:5000});
+   const current=submissions(),r=current.at(-1),ready=wallRecords().find(x=>x.stage==='video-ready'&&x.appId===r?.appId&&x.seq===r?.seq);
+   check(current.length===previous+1&&r.ordinal===previous+1,'one real compositor submission receipt for this decoder');
+   check(r.appId==='1091500'&&ready&&r.sinceInstallMs>=ready.sinceInstallMs&&Number.isInteger(r.sinceRevealMs)&&r.sinceRevealMs>=0&&Number.isSafeInteger(r.presentedFrames)&&r.presentedFrames>0,'submission follows reveal for the selected app and context');
+   check(!Object.keys(r).some(k=>/url|token|asset/i.test(k)),'submission receipt lacks source or credentials');
+  };
+  if(observeComposition)await confirmSubmission(0);
   const initial=await page.evaluate(()=>({counters:{...visibilityTest.nativeCounters},contexts:visibilityTest.sent.filter(x=>x.command==='wallpaper.context').length}));
   await page.evaluate(()=>{for(let n=0;n<100;n++)visibilityTest.setNativeForeground({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'native-focus-1',revision:1});});
   await page.waitForTimeout(120);check(await page.evaluate(n=>visibilityTest.nativeCounters.lookups===n,initial.counters.lookups),'stable verified native foreground does not requery or restart');
   const states=[{known:true,foreground:false,current:true,mode:'bigpicture',reason:'minimized'},{known:true,foreground:false,current:true,mode:'bigpicture',reason:'overlay'},{known:true,foreground:true,current:true,mode:'desktop',reason:'desktop Steam'},{known:false,foreground:true,current:true,mode:'unknown',reason:'unknown'},{known:true,foreground:true,current:false,mode:'bigpicture',reason:'stale'}];
   for(let index=0;index<states.length;index++){
+   const beforeDenial=observeComposition?submissions().length:0;
    await page.evaluate(({state,index})=>{window.beforeNativeBlur=document.querySelector('video');visibilityTest.setNativeForeground({source:'native-steam-bigpicture-foreground',pid:77,birth:'12345',window:'789',ownerEpoch:'denied-'+index,revision:index*2+2,...state});},{state:states[index],index});
    await page.waitForFunction(()=>visibilityTest.sourceNodes()===0);check(await page.evaluate(()=>!beforeNativeBlur||beforeNativeBlur.paused&&!beforeNativeBlur.hasAttribute('src')),'native denial releases the existing real decoder');
    const blocked=await page.evaluate(()=>({...visibilityTest.nativeCounters}));await page.waitForTimeout(100);const steady=await page.evaluate(()=>({...visibilityTest.nativeCounters}));check(steady.lookups===blocked.lookups&&steady.ensures===blocked.ensures,'native denial has no media query or preparation');
+   if(observeComposition)check(submissions().length===beforeDenial,'native denial admits no additional compositor receipt');
    await page.evaluate(index=>visibilityTest.setNativeForeground({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'restored-'+index,revision:index*2+3}),index);
    try{await page.waitForFunction(()=>document.querySelector('video')?.dataset.ymccPrepared==='true',{},{timeout:5000});}catch(error){fs.writeFileSync(out+'/native-foreground-failure.json',JSON.stringify({index,browserConsole,state:await page.evaluate(()=>({counters:visibilityTest.nativeCounters,sent:visibilityTest.sent.slice(-15),sources:visibilityTest.sourceNodes(),body:document.body.innerHTML.slice(-2500)}))},null,2));throw error;}check(await page.locator('video').evaluate(v=>!v.paused),'restored native foreground plays current real cache');check(await page.evaluate(n=>visibilityTest.nativeCounters.lookups===n+1,blocked.lookups),'one foreground return performs one current media read');
+   if(observeComposition)await confirmSubmission(beforeDenial);
   }
+  const beforeOff=observeComposition?submissions().length:0;
   await page.evaluate(()=>visibilityTest.setting(false));await page.waitForFunction(()=>visibilityTest.sourceNodes()===0);const off=await page.evaluate(()=>({...visibilityTest.nativeCounters}));await page.evaluate(()=>visibilityTest.setNativeForeground({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'off-cannot-revive',revision:99}));await page.waitForTimeout(100);check(await page.evaluate(n=>visibilityTest.sourceNodes()===0&&visibilityTest.nativeCounters.lookups===n,off.lookups),'native focus never revives user OFF');
-  await page.evaluate(()=>visibilityTest.dispose());const result={ok:true,checks,errors,scope:'production Host/Surface/Players in isolated Edge with real cached H264; native proof/IPC boundary injected, no OS-window classifier or installed Steam acceptance'};fs.writeFileSync(out+'/native-foreground-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));return;
+  if(observeComposition)check(submissions().length===beforeOff,'user OFF does not admit additional compositor receipts');
+  await page.evaluate(()=>visibilityTest.dispose());const result={ok:true,checks,errors,...(observeComposition?{compositorSubmissions:submissions()}:{}),scope:'production Host/Surface/Players in isolated Edge with real cached H264; native proof/IPC boundary injected, no OS-window classifier or installed Steam acceptance'};fs.writeFileSync(out+'/native-foreground-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));return;
  }
  if(staticFallback){
   // Use the actual Surface with controlled media output. This branch verifies
@@ -193,6 +277,44 @@ check(await page.locator('.native-images').evaluate(n=>getComputedStyle(n).trans
   const after=await page.evaluate(()=>({nodes:visibilityTest.nodes.length,contexts:visibilityTest.sent.filter(m=>m.command==='wallpaper.context').length,sources:visibilityTest.sourceNodes()}));
   const result={before,after,created:after.nodes-before.nodes,bytesRead:servedBytes-bytesBefore,requests:assetRequests-requestsBefore,scope:'Actual Surface/host/player with 12 rapid trusted card focus changes, not standalone scheduler'};fs.writeFileSync(out+'/rapid-selection.json',JSON.stringify(result,null,2));
   check(after.contexts-before.contexts>=12,'rapid focus exercise reaches actual selection reports');check(result.created<=4,'rapid Surface selection coalesces intermediate source creation');check(after.sources===1,'rapid navigation leaves exactly the final selected source');
+ }
+ const verifyOwnerWakeHandoff=async()=>{
+  await page.evaluate(()=>{window.beforeOwnerWake=document.querySelector('video');visibilityTest.wake(50);});
+  await page.waitForFunction(()=>document.querySelector('video')!==beforeOwnerWake&&document.querySelector('video')?.dataset.ymccPrepared==='true'&&!document.querySelector('video').paused);
+  const known=await page.evaluate(()=>{
+   const prior=visibilityTest.nativeMessages.findLast(m=>m.type==='wallpaper-ready'&&m.resumeGeneration===50);
+   const visible=()=>visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible);
+   const before=visible().length;
+   window.oldWallpaperWake=prior;window.oldWallpaperVideo=document.querySelector('video');
+   visibilityTest.dropNativeReplies(true);visibilityTest.rotateMediaToken('b');visibilityTest.restartHost();visibilityTest.wake(1);
+   return {owner:prior.stateOwner,generation:prior.resumeGeneration,visibleCount:before,dropped:visibilityTest.droppedNativeReplies()};
+  });
+  await page.waitForFunction(()=>visibilityTest.nativeMessages.some(m=>m.type==='wallpaper-ready'&&m.resumeGeneration===1&&m.stateOwner!==oldWallpaperWake.stateOwner));
+  const edge=await page.evaluate(()=>{
+   const next=visibilityTest.nativeMessages.findLast(m=>m.type==='wallpaper-ready'&&m.resumeGeneration===1);
+   const dropped=visibilityTest.droppedNativeReplies();visibilityTest.dropNativeReplies(false);
+   visibilityTest.receive(next);
+   return {owner:next.stateOwner,generation:next.resumeGeneration,dropped,visible:visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).slice(-2)};
+  });
+  check(edge.owner!==known.owner&&edge.generation===1&&known.generation===50&&edge.dropped>known.dropped,'new real Host wake is the first reply delivered after replacement');
+  const requested=edge.visible.filter(m=>m.requestReady).at(-1);
+  const count=await page.evaluate(()=>visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).length);
+  check(count===known.visibleCount+1&&requested?.accepted===true,'lower owner generation must trigger exactly one fresh acceptance request: '+JSON.stringify({before:known.visibleCount,after:count,oldGeneration:known.generation,newGeneration:edge.generation}));
+  const seq=requested.contextSeq;
+  await page.waitForFunction(({owner,seq})=>{const video=document.querySelector('video');return visibilityTest.nativeMessages.some(m=>m.type==='wallpaper-ready'&&m.stateOwner===owner&&m.contextSeq===seq)&&video&&video!==oldWallpaperVideo&&new URL(video.src).searchParams.get('token')==='b'.repeat(64)&&video.dataset.ymccPrepared==='true'&&!video.paused;},{owner:edge.owner,seq});
+  check(await page.evaluate(()=>visibilityTest.sourceNodes()===1&&visibilityTest.nativeCounters.ensures===0),'correlated new owner resumes one cached decoder');
+  await page.evaluate(()=>{visibilityTest.setting(false);});await page.waitForFunction(owner=>visibilityTest.sourceNodes()===0&&visibilityTest.lastNativeReady()?.stateOwner===owner&&visibilityTest.lastNativeReady()?.enabled===false,edge.owner);
+  const offCount=await page.evaluate(()=>visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).length);
+  await page.evaluate(()=>visibilityTest.receive(oldWallpaperWake));
+  await page.waitForTimeout(75);
+  const afterStale=await page.evaluate(()=>({sources:visibilityTest.sourceNodes(),visibleCount:visibilityTest.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).length}));
+  check(afterStale.sources===0&&afterStale.visibleCount===offCount,'late old owner wake must not revive saved OFF or send another request: '+JSON.stringify({offCount,afterStale}));
+  check(errors.length===0,'handoff and OFF raise no browser errors');
+  return {case:'current-host-replaced-first-legacy-wake-hint',known,edge:{owner:edge.owner,generation:edge.generation,dropped:edge.dropped},newVisibleRequests:count-known.visibleCount,seq,afterStale,offCount,checks,offlineWAN,blockedExternalRequests,errors};
+ };
+ if(ownerWakeHandoff){
+  const result={ok:true,...await verifyOwnerWakeHandoff(),scope:'Isolated Edge with real Host/Surface, legacy resume adapter, same loopback session and real cached H264; first Host replies withheld'};
+  fs.writeFileSync(out+'/owner-wake-handoff-results.json',JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify(result));return;
  }
  if(activation){
   // CEF/controller focus can return without a second window-focus event.

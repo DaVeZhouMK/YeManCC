@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Out,[string]$ComponentRoot='',[ValidateSet('All','ControlLock','InitialOwnedStatus','StatusIdentity','AutomaticIdentity','FinalRevision','FinalIdleDom','FinalMainUnavailable','BackupStatusCost','CorrectionRevision','CorrectionReadRace','CorrectionScope','CorrectionBusy','CorrectionMainUnavailable','CorrectionAlreadyMatched','CorrectionResultScope','CorrectionAdmission','PostCorrectionBackendDrift','PostCorrectionPresetDrift','ReloadEditor','PrepareEditor','ReloadRevision','ReloadCoalesced','InvalidSelection','ReloadFinalScope','OverdueSlots','EnsureRevisionOnly')][string]$Case='All',
+param([Parameter(Mandatory=$true)][string]$Out,[string]$ComponentRoot='',[ValidateSet('All','ControlLock','InitialOwnedStatus','StatusIdentity','AutomaticIdentity','FinalRevision','FinalIdleDom','FinalMainUnavailable','BackupStatusCost','BundleProjection','CorrectionRevision','CorrectionReadRace','CorrectionScope','CorrectionBusy','CorrectionMainUnavailable','CorrectionAlreadyMatched','CorrectionResultScope','CorrectionAdmission','PostCorrectionBackendDrift','PostCorrectionPresetDrift','ReloadEditor','PrepareEditor','ReloadRevision','ReloadCoalesced','InvalidSelection','ReloadFinalScope','OverdueSlots','EnsureRevisionOnly','ManualRefreshRevision','ApplyRenderReceipt','ScopedApply','AutomaticPendingStatus')][string]$Case='All',
  [ValidateSet('document-main-unavailable','document-replaced','document-transport-unavailable','document-targets-refreshed')][string]$DocumentInterruption='document-main-unavailable')
 $ErrorActionPreference='Stop'
 if($DocumentInterruption -ceq 'document-replaced' -and $Case -cnotin @('CorrectionMainUnavailable','FinalMainUnavailable')){throw 'DocumentInterruption requires a document recheck case'}
@@ -54,6 +54,18 @@ function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
 }
 $cases=New-Object Collections.Generic.List[string]
 function Assert($Value,[string]$Label){if(!$Value){throw $Label};$cases.Add($Label)}
+function Test-FixtureThemePagePlans($Themes){
+ if(@($Themes).Count -ne 7){return $false}
+ foreach($theme in $Themes){
+  $sp=$theme.renderPlan;$menu=$sp.contexts.MainMenu;$quick=$sp.contexts.QuickAccess
+  if($sp.contextProtocol -ne 1 -or !$sp.files.Count -or $sp.protocol -ne 4 -or $menu.protocol -ne 4 -or $quick.protocol -ne 4){return $false}
+  if($menu.files.Count -ne $sp.files.Count -or $quick.files.Count -ne $sp.files.Count -or
+     $menu.variables.Count -ne $sp.variables.Count -or $quick.variables.Count -ne $sp.variables.Count -or
+     [object]::ReferenceEquals($sp.files,$menu.files) -or [object]::ReferenceEquals($sp.files,$quick.files) -or
+     [object]::ReferenceEquals($menu.files,$quick.files)){return $false}
+ }
+ return $true
+}
 function Reject([scriptblock]$Work){try{& $Work|Out-Null;return $false}catch{return $true}}
 if($Case -eq 'All'){
 Invoke-PresetPrepare|Out-Null;$script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}});Complete-PresetReload
@@ -130,6 +142,474 @@ $script:MissingStyles=@('Mini Carousel');$script:KeepMissing=$true;$script:Appli
 Assert (Reject {Invoke-AutomaticAppearanceRefresh}) 'External configuration changes after the one correction stop all later automatic mutations'
 Assert ($script:Applied -eq 1 -and !([IO.File]::ReadAllText($roundPath)|ConvertFrom-Json).active) 'An external user OFF choice survives the late verification and is never overwritten with the old revision'
 }
+if($Case -eq 'ManualRefreshRevision'){& {
+ $script:AppearanceContentManifestFile=Join-Path $Out 'content-index.json'
+ Copy-Item -LiteralPath (Join-Path $ComponentRoot 'steam-appearance/manifest.json') -Destination $script:AppearanceContentManifestFile
+ Invoke-PresetPrepare|Out-Null;Complete-PresetReload;$script:Live=$true
+ $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $round=Join-Path $script:ThemeRoot 'Round/config_USER.json';$manifest=Join-Path $script:ThemeRoot 'Round/theme.json'
+ $oldConfig=[IO.File]::ReadAllBytes($round);$oldManifest=[IO.File]::ReadAllBytes($manifest);$oldIndex=[IO.File]::ReadAllBytes($script:AppearanceContentManifestFile)
+ $script:RefreshOriginalRows=${function:Get-ThemeRows};$script:RefreshOriginalParse=${function:Read-AppearanceThemeConfig}
+ $script:RefreshOriginalHash=${function:Get-ConfigHash}
+ function Read-AppearanceThemeConfig([string]$Path,[switch]$Manifest){
+  if($script:RefreshRowCalls -eq 2){$script:RefreshParses++}
+  & $script:RefreshOriginalParse @PSBoundParameters
+ }
+ function Get-ConfigHash([string]$Path,[long]$MaximumBytes=0,$ObservedLength=$null){
+  if($script:RefreshRowCalls -eq 2 -and $MaximumBytes -eq 262144){$script:RefreshHashes++}
+  & $script:RefreshOriginalHash @PSBoundParameters
+ }
+ function Get-ThemeRows {
+  param([switch]$RevisionOnly,[switch]$DigestOnly,[hashtable]$AutomaticPlanMemo,[switch]$ValidateRenderOnly,[switch]$ReadOnlyProjection)
+  $script:RefreshRowCalls++
+  if($script:RefreshRowCalls -eq 2){
+   if($script:RefreshFault -ceq 'config'){[IO.File]::WriteAllText($round,'{"active":false,"Intensity":"30px"}')}
+   if($script:RefreshFault -ceq 'manifest'){[IO.File]::AppendAllText($manifest,' ')}
+   if($script:RefreshFault -ceq 'index'){[IO.File]::AppendAllText($script:AppearanceContentManifestFile,' ')}
+   if($script:RefreshFault -ceq 'locked'){$script:RefreshLocked=[IO.File]::Open($round,'Open','ReadWrite','None')}
+   if($script:RefreshFault -ceq 'missing'){[IO.File]::Delete($round)}
+  }
+  if($script:RefreshRowCalls -eq 3){
+   if($script:RefreshFault -ceq 'final-config'){[IO.File]::WriteAllText($round,'{"active":false,"Intensity":"30px"}')}
+   if($script:RefreshFault -ceq 'final-manifest'){[IO.File]::AppendAllText($manifest,' ')}
+  }
+  & $script:RefreshOriginalRows @PSBoundParameters
+ }
+ function Reset-ManualRefresh([string]$Fault=''){
+  [IO.File]::WriteAllBytes($round,$oldConfig);[IO.File]::WriteAllBytes($manifest,$oldManifest)
+  [IO.File]::WriteAllBytes($script:AppearanceContentManifestFile,$oldIndex)
+  $script:RefreshFault=$Fault;$script:RefreshRowCalls=0;$script:RefreshParses=0;$script:RefreshHashes=0
+  $script:Applied=0;$script:RenderSamples=0;$script:RefreshLocked=$null
+ }
+ Reset-ManualRefresh
+ $result=Invoke-AppearanceControl 'Refresh'
+ [pscustomobject]@{parses=$script:RefreshParses;digests=$script:RefreshHashes;rowReads=$script:RefreshRowCalls;writes=$script:Applied;renderReads=$script:RenderSamples;result=$result}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $Out 'manual-refresh-cost.json') -Encoding UTF8
+ Assert ($result.ok -and $result.renderConfirmed -and $script:RefreshRowCalls -eq 3 -and $script:Applied -eq 7 -and $script:RenderSamples -eq 1) 'Manual refresh still writes the requested seven theme states and uses an independent final DOM receipt'
+ Assert ($script:RefreshParses -eq 0 -and $script:RefreshHashes -eq 14) 'The second read should hash fourteen files without decoding validated JSON a second time'
+ foreach($fault in 'config','manifest','index','locked','missing'){
+  Reset-ManualRefresh $fault
+  $reason=''
+  try{Invoke-AppearanceControl 'Refresh'|Out-Null}catch{$reason=$_.Exception.Message}
+  finally{if($script:RefreshLocked){$script:RefreshLocked.Dispose()}}
+  Assert ($reason -like '*changed before refresh*' -and $script:Applied -eq 0 -and $script:RenderSamples -eq 0) ('Stale or unreadable pre-write bytes never submit an old state: '+$fault)
+  if($fault -ceq 'config'){Assert ((Get-Content -LiteralPath $round -Raw|ConvertFrom-Json).Intensity -ceq '30px') 'External config edit is preserved on rejected refresh'}
+ }
+ Reset-ManualRefresh;$script:MissingStyles=@('Mini Carousel');$script:KeepMissing=$true
+ $result=Invoke-AppearanceControl 'Refresh'
+ Assert (!$result.ok -and !$result.renderConfirmed -and $result.saved -and $script:RenderSamples -eq 1) 'Applying existing state does not hide a missing final DOM receipt'
+ $renderRefresh=${function:Get-AppearanceRenderedStatus}
+ function Get-AppearanceRenderedStatus($Session,$Status){
+  $script:RefreshSawFullPlans=Test-FixtureThemePagePlans $Status.themes
+  $render=& $renderRefresh $Session $Status
+  $render|Add-Member -NotePropertyName contextComplete -NotePropertyValue ($mode -notin @('partial','unconfirmed'))
+  $render
+ }
+ $summaryJson='{"profile":"ui-summary-v1"}'
+ $Action='Refresh'
+ foreach($mode in 'legacy','summary','partial','unconfirmed','wrong-case','array','internal'){
+  Reset-ManualRefresh
+  $script:RefreshSawFullPlans=$false
+  $lean=$mode -in @('summary','partial','unconfirmed')
+  $script:MissingStyles=if($mode -eq 'unconfirmed'){@('Mini Carousel')}else{@()}
+  $script:KeepMissing=$mode -eq 'unconfirmed'
+  $Action=if($mode -eq 'internal'){'Automatic'}else{'Refresh'}
+  $profile=switch($mode){legacy{''};array{'['+$summaryJson+']'};'wrong-case'{'{"profile":"UI-summary-v1"}'};default{$summaryJson}}
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($profile))
+  $wire=Invoke-AppearanceControl 'Refresh'
+  Assert ($script:RefreshSawFullPlans -and $script:Applied -eq 7 -and $script:RenderSamples -eq 1 -and $wire.saved -and
+    $wire.ok -eq ($mode -ne 'unconfirmed') -and $wire.renderConfirmed -eq $wire.ok) ('Refresh still submits and independently validates full page plans: '+$mode)
+  Assert ($wire.renderContextsComplete -is [bool] -and $wire.renderContextsComplete -eq ($mode -notin @('partial','unconfirmed'))) ('Refresh only reports complete contexts from actual render evidence: '+$mode)
+  $withPlan=@($wire.snapshot.themes|Where-Object {$_.PSObject.Properties['renderPlan']}).Count
+  Assert ($wire.snapshot.themes.Count -eq 7 -and $withPlan -eq (7*[int](!$lean))) ('Refresh omits only unused wire plans for an opted-in caller: '+$mode)
+  if($mode -eq 'legacy' -or $mode -eq 'summary'){
+   $stdout=[IO.StringWriter]::new();$console=[Console]::Out
+   try{[Console]::SetOut($stdout);Write-JsonResult $wire}finally{[Console]::SetOut($console);$stdout.Dispose()}
+   [IO.File]::WriteAllText((Join-Path $Out ('refresh-'+$mode+'.json')),$stdout.ToString())
+  }
+ }
+ $Action='Status';$Payload=''
+ $observed=(Invoke-AppearanceControl 'Status').snapshot
+ Assert ($observed.refreshScopeProtocol -eq 1) 'Status advertises the scope-checking Refresh action'
+ $scope=$observed.targetId;$BackendPath=$script:BackendExe
+ $script:ScopedRpc=${function:Invoke-LoaderRpc}
+ $script:ScopedPathReads=0;$script:ScopedMoveAt=0;$script:ScopedEditBeforeReset=$false
+ function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
+  if($Method -ceq 'fetch_theme_path'){
+   $script:ScopedPathReads++
+   if($script:ScopedMoveAt -gt 0 -and $script:ScopedPathReads -ge $script:ScopedMoveAt){return (Join-Path $Out 'different/themes')}
+   if($script:ScopedEditBeforeReset -and $script:ScopedPathReads -eq 2){
+    $text=[IO.File]::ReadAllText($round)
+    $updated=$text.Replace('"10px"','"30px"')
+    $length=[IO.FileInfo]::new($round).Length
+    $stamp=[IO.File]::GetLastWriteTimeUtc($round)
+    [IO.File]::WriteAllText($round,$updated,[Text.UTF8Encoding]::new($false))
+    [IO.File]::SetLastWriteTimeUtc($round,$stamp)
+    $script:ScopedEditApplied=$text -cne $updated -and [IO.FileInfo]::new($round).Length -eq $length -and [IO.File]::GetLastWriteTimeUtc($round) -eq $stamp
+   }
+  }
+  & $script:ScopedRpc $Method $Arguments
+ }
+ function Invoke-ScopedFixture([string]$Target=$scope){
+  $Action='ScopedRefresh'
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{profile='ui-summary-v1';targetId=$Target}|ConvertTo-Json -Compress)))
+  $script:ScopedPathReads=0
+  Invoke-AppearanceControl 'ScopedRefresh'
+ }
+ Reset-ManualRefresh;$mode='summary';$script:MissingStyles=@();$script:KeepMissing=$false
+ [IO.File]::WriteAllText($round,'{"active":false,"Intensity":"30px"}')
+ $result=Invoke-ScopedFixture
+ Assert ($result.ok -and $result.renderConfirmed -and $result.snapshot.targetId -eq $scope -and $result.snapshot.revision -ne $observed.revision -and
+   $script:Applied -eq 7 -and $script:RenderSamples -eq 1 -and !$result.snapshot.themes.Where({$_.name -ceq 'Round'})[0].configured -and
+   !$script:Rows.Where({$_.name -ceq 'Round'})[0].enabled) 'Scoped refresh uses the current disk choice regardless of the UI revision'
+ foreach($fault in 'wrong-target','moved-before-status','moved-after-status','changed-config','malformed'){
+  Reset-ManualRefresh $(if($fault -eq 'changed-config'){'config'}else{''})
+  $script:ScopedMoveAt=switch($fault){'moved-before-status'{1};'moved-after-status'{2};default{0}}
+  $targetToSend=switch($fault){'wrong-target'{'0123456789abcdef'};malformed{'unknown'};default{$scope}}
+  Assert ((Reject {Invoke-ScopedFixture $targetToSend}) -and !$script:Applied -and !$script:RenderSamples) ('Scoped refresh rejects an invalid or changed write scope: '+$fault)
+ }
+ Reset-ManualRefresh;$script:ScopedMoveAt=3
+ Assert ((Reject {Invoke-ScopedFixture}) -and $script:Applied -eq 7 -and !$script:RenderSamples) 'A target that moves after submission cannot return a confirmed scoped receipt'
+ Reset-ManualRefresh;$script:ScopedMoveAt=0;$script:Live=$false
+ $declined=Invoke-ScopedFixture
+ Assert (!$declined.ok -and $declined.refreshPreparationRequired -eq $true -and !$declined.snapshot -and !$declined.refreshReload -and !$script:Applied -and !$script:RenderSamples) 'An absent backend produces only a pre-write decline receipt'
+ $script:Live=$true
+ $journal=Join-Path (Get-PresetStateDir) 'transaction.json'
+ [IO.File]::WriteAllText($journal,'untouched fixture marker')
+ Assert ((Reject {Invoke-ScopedFixture}) -and !$script:Applied -and !$script:RenderSamples -and [IO.File]::ReadAllText($journal) -ceq 'untouched fixture marker') 'An unfinished transaction is neither recovered nor accepted by scoped refresh'
+ Assert ($script:Starts -eq 0 -and $script:Resets -eq 0) 'No backend startup or global reset is necessary'
+ # The real batch reader is used only for these post-submission cases; the
+ # earlier assertions intentionally exercise the per-file compatibility path.
+ Move-Item -LiteralPath $journal -Destination (Join-Path $Out 'untouched-transaction-marker')
+ function Set-FixturePendingReload {
+  $owner=Read-PresetState;$owner.pendingReload=$true;Save-PresetState $owner
+ }
+ function Invoke-FixtureScopedReload($Receipt,[string]$Profile='ui-summary-v1'){
+  $Action='ScopedReload'
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{profile=$Profile;targetId=$Receipt.targetId;expectedRevision=$Receipt.revision}|ConvertTo-Json -Compress)))
+  $script:ScopedPathReads=0
+  Invoke-AppearanceControl 'ScopedReload'
+ }
+ Reset-ManualRefresh;Set-FixturePendingReload
+ $script:Resets=0
+ $declined=Invoke-ScopedFixture
+ $receipt=$declined.refreshReload
+ Assert (!$declined.ok -and !$declined.snapshot -and $declined.refreshPreparationRequired -and $receipt.targetId -ceq $scope -and
+   $receipt.revision -match '^[a-f0-9]{64}$' -and $receipt.steamPid -eq $SessionPid -and $receipt.steamBirth -ceq $SessionBirth -and
+   !$script:Resets -and !$script:Applied -and !$script:RenderSamples) 'A pending reload returns exactly scoped fresh identities before any write'
+ foreach($fault in 'editor','different-directory','changed-revision','journal','invalid-profile'){
+  $script:Editing=$fault -ceq 'editor';$script:ScopedMoveAt=if($fault -ceq 'different-directory'){2}else{0}
+  if($fault -ceq 'changed-revision'){[IO.File]::WriteAllText($round,'{"active":false,"Intensity":"30px"}')}
+  if($fault -ceq 'journal'){[IO.File]::WriteAllText($journal,'unfinished reload fixture')}
+  Assert ((Reject {Invoke-FixtureScopedReload $receipt $(if($fault -ceq 'invalid-profile'){'unknown'}else{'ui-summary-v1'})}) -and
+    !$script:Resets -and !$script:Applied -and !$script:RenderSamples -and (Read-PresetState).pendingReload) ('Scoped reload stops before writing: '+$fault)
+  if($fault -ceq 'journal'){
+   Assert ([IO.File]::ReadAllText($journal) -ceq 'unfinished reload fixture') 'Scoped reload does not recover the observed unfinished transaction'
+   Move-Item -LiteralPath $journal -Destination (Join-Path $Out 'untouched-reload-marker')
+  }
+  Reset-ManualRefresh
+ }
+ $script:Editing=$false;$script:ScopedMoveAt=0
+ $script:ScopedEditBeforeReset=$true;$script:ScopedEditApplied=$false;$reloadRejected=''
+ try{Invoke-FixtureScopedReload $receipt|Out-Null}catch{$reloadRejected=$_.Exception.Message}
+ finally{$script:ScopedEditBeforeReset=$false}
+ Assert ($script:ScopedEditApplied -and $reloadRejected -like '*settings or target changed*' -and !$script:Resets -and !$script:Applied -and
+   !$script:RenderSamples -and (Read-PresetState).pendingReload -and ([IO.File]::ReadAllText($round)|ConvertFrom-Json).Intensity -ceq '30px') 'An equal-size, same-stamp edit during final target read stops before reset and keeps the new setting'
+ Reset-ManualRefresh
+ $loaded=Invoke-FixtureScopedReload $receipt
+ Assert ($loaded.ok -and $loaded.reloaded -and $loaded.snapshot.targetId -ceq $scope -and $loaded.previousRevision -ceq $receipt.revision -and
+   !$loaded.snapshot.backendReloadRequired -and $script:Resets -eq 1 -and !$script:RenderSamples -and !(Read-PresetState).pendingReload) 'Scoped reload only rereads the verified resident and does not claim rendering confirmation'
+ $already=Invoke-FixtureScopedReload $receipt
+ Assert ($already.ok -and !$already.reloaded -and $script:Resets -eq 1) 'An independently completed reload does not repeat the loader reset'
+ Reset-ManualRefresh
+ $reapplied=Invoke-ScopedFixture
+ Assert ($reapplied.ok -and $reapplied.renderConfirmed -and $script:Applied -eq 7 -and $script:RenderSamples -eq 1) 'After scoped reload, final refresh still forces the explicit request and reads the page once'
+ Initialize-ResidentAppearanceInterop
+ Reset-ManualRefresh 'final-config'
+ $result=Invoke-ScopedFixture
+ $roundResult=$result.snapshot.themes.Where({$_.name -ceq 'Round'})[0]
+ Assert ($result.saved -and !$result.ok -and !$result.snapshot.configuredMatchesBackend -and !$roundResult.configured -and $roundResult.backendEnabled -and
+  $script:Applied -eq 7 -and $script:RenderSamples -eq 1) 'Final batch must read an external config change after sync instead of confirming old flags'
+ Reset-ManualRefresh 'final-manifest'
+ $result=Invoke-ScopedFixture
+ Assert ($result.snapshot.packPrepared -eq $false -and $result.snapshot.packRepairRequired -and $script:Applied -eq 7 -and $script:RenderSamples -eq 1) 'Final installed validation must report manifest drift despite reusing bundle schema'
+}}
+if($Case -eq 'ApplyRenderReceipt'){& {
+ Invoke-PresetPrepare|Out-Null;Complete-PresetReload;$script:Live=$true
+ $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $applyBackupPath=(Read-PresetState).originalBackup;$readApplyBackup=${function:Read-PresetBackup}
+ function Read-PresetBackup([string]$Directory){
+  if($Directory -ieq $applyBackupPath){$script:ApplyBackupReads++}
+  & $readApplyBackup $Directory
+ }
+ function Get-AppearanceRenderedStatus($Session,$Status){
+  $script:RenderSamples++
+  Assert (Test-FixtureThemePagePlans $Status.themes) 'Apply supplies full plans to the independent DOM verifier'
+  [pscustomobject]@{checked=$true;confirmed=$confirmed;contextComplete=$complete;reason='fixture-render-receipts';mismatched=@()}
+ }
+ $Action='Apply'
+ foreach($mode in 'complete','partial','mismatch'){
+  $confirmed=$mode -ne 'mismatch';$complete=$mode -ne 'partial'
+  $old=Get-AppearanceStatus;$enabled=!($old.themes|Where-Object name -eq 'Round').configured
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{profile='ui-summary-v1';expectedRevision=$old.revision;states=@{Round=$enabled}}|ConvertTo-Json -Compress)))
+  $script:Applied=0;$script:RenderSamples=0;$script:ApplyBackupReads=0
+  $result=Invoke-AppearanceControl 'Apply'
+  Assert ($result.saved -and $result.ok -eq $confirmed -and $result.renderConfirmed -is [bool] -and $result.renderConfirmed -eq $confirmed -and $result.renderContextsComplete -is [bool] -and $result.renderContextsComplete -eq $complete) ('Apply returns distinct rendered and complete evidence: '+$mode)
+  Assert ($script:Applied -eq 1 -and $script:RenderSamples -eq 1) ('Apply keeps one switch mutation and one final DOM read: '+$mode)
+  Assert ($script:ApplyBackupReads -eq 2) ('Apply validates the original backup before writing and once in the final online snapshot: '+$mode)
+  Assert (@($result.snapshot.themes|Where-Object {$_.PSObject.Properties['renderPlan']}).Count -eq 0) ('Apply does not send used render plans to the opted-in UI: '+$mode)
+ }
+ $applyPlan=${function:Get-AppearanceThemeRenderPlan}
+ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex,[string]$Target='SP',[switch]$ValidateOnly){
+  if($ValidateOnly){$script:ApplyValidatePlans++}else{$script:ApplyFullPlans++}
+  & $applyPlan @PSBoundParameters
+ }
+ foreach($mode in 'offline','backend-failure','legacy-offline'){
+  $script:Live=$mode -eq 'backend-failure';$script:FailApply=$script:Live
+  # Retain a deliberately unsupported parameter: lean paths still validate it.
+  $configPath=Join-Path $script:ThemeRoot 'Round/config_USER.json'
+  [IO.File]::WriteAllText($configPath,'{"active":true,"Intensity":"unsupported"}')
+  $old=Get-AppearanceStatus -RevisionOnly
+  $body=@{expectedRevision=$old.revision;states=@{'Art Hero'=$false}}
+  if($mode -ne 'legacy-offline'){$body.profile='ui-summary-v1'}
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Compress)))
+  $script:ApplyValidatePlans=0;$script:ApplyFullPlans=0;$script:RenderSamples=0
+  $result=Invoke-AppearanceControl 'Apply'
+  $round=$result.snapshot.themes|Where-Object name -eq 'Round'
+  Assert ($result.saved -and $result.ok -eq !$script:Live -and !$script:RenderSamples -and $round.error -ceq 'render-patch-selection-invalid') ('Settled Apply still validates a bad saved option without claiming a DOM receipt: '+$mode)
+  $legacy=$mode -eq 'legacy-offline'
+  Assert ($script:ApplyFullPlans -eq (7*[int]$legacy) -and $script:ApplyValidatePlans -eq (7*[int](!$legacy)) -and
+    @($result.snapshot.themes|Where-Object {$_.PSObject.Properties['renderPlan']}).Count -eq (7*[int]$legacy)) ('Only legacy Apply builds wire plans when no page will be read: '+$mode)
+  [IO.File]::WriteAllText($configPath,'{"active":true,"Intensity":"10px"}')
+ }
+ $script:Live=$true;$script:FailApply=$false
+ $script:Rows=@(Get-ThemeRows -RevisionOnly|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $old=Get-AppearanceStatus;$round=$old.themes|Where-Object name -eq 'Round'
+ $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{expectedRevision=$old.revision;states=@{Round=!$round.configured}}|ConvertTo-Json -Compress)))
+ $configPath=Join-Path $script:ThemeRoot 'Round/config_USER.json';$beforeConfig=Get-ConfigHash $configPath
+ $originalApplyRoot=$script:ThemeRoot;$otherApplyRoot=Join-Path $Out 'other-themes'
+ $invokeApplyRpc=${function:Invoke-LoaderRpc}
+ function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
+  if($script:ChangeApplyTarget -and $Method -ceq 'fetch_theme_path' -and ++$script:ApplyTargetFetches -eq 2){return $otherApplyRoot}
+  & $invokeApplyRpc @PSBoundParameters
+ }
+ $script:ApplyTargetFetches=0;$script:Applied=0;$script:RenderSamples=0;$targetError='';$script:ChangeApplyTarget=$true
+ try{Invoke-AppearanceControl 'Apply'|Out-Null}catch{$targetError=$_.Exception.Message}finally{$script:ChangeApplyTarget=$false}
+ $marker=Join-Path (Get-PresetStateDir) 'transaction.json'
+ Assert ($targetError -like '*target changed*' -and !$script:Applied -and !$script:RenderSamples -and $script:ThemeRoot -ieq $originalApplyRoot -and (Test-Path -LiteralPath $marker)) 'Apply does not synchronize to a changed target or misplace the original transaction'
+ Recover-PresetTransaction -Force
+ Assert ((Get-ConfigHash $configPath) -ceq $beforeConfig -and !(Test-Path -LiteralPath $marker)) 'Interrupted Apply can restore the original target'
+ $journal=Join-Path $applyBackupPath 'journal.json';$beforeJournal=[IO.File]::ReadAllBytes($journal)
+ $assertApplyReady=${function:Assert-AppearanceApplyReady}
+ function Assert-AppearanceApplyReady($Current){
+  & $assertApplyReady $Current
+  if($Current.packPrepared){[IO.File]::WriteAllText($journal,'{}');$script:ApplyTampered=$true}
+ }
+ $newApplyBackup=${function:New-PresetBackup}
+ function New-PresetBackup($Paths,[switch]$VerifyAtTransactionStart){$script:ApplyNewBackups++;& $newApplyBackup @PSBoundParameters}
+ $script:Applied=0;$script:RenderSamples=0;$script:ApplyBackupReads=0;$script:ApplyNewBackups=0;$script:ApplyTampered=$false;$rejected=$false
+ try{Invoke-AppearanceControl 'Apply'|Out-Null}catch{$rejected=$true}
+ finally{[IO.File]::WriteAllBytes($journal,$beforeJournal)}
+ Assert ($rejected -and $script:ApplyTampered -and $script:ApplyBackupReads -eq 1 -and $script:ApplyNewBackups -eq 0 -and $script:Applied -eq 0 -and $script:RenderSamples -eq 0 -and (Get-ConfigHash $configPath) -ceq $beforeConfig) 'Apply refuses a backup that becomes invalid after preflight, before creating a transaction or writing settings'
+ $manifestPath=Join-Path $script:ThemeRoot 'Round/theme.json'
+ $indexSource=$script:AppearanceContentManifestFile
+ $script:AppearanceContentManifestFile=Join-Path $Out 'apply-content-index.json'
+ [IO.File]::Copy($indexSource,$script:AppearanceContentManifestFile)
+ [IO.File]::AppendAllText($configPath,"`n")
+ $script:ApplyDriftHandle=$null
+ function Assert-AppearanceApplyReady($Current){
+  & $assertApplyReady $Current
+  $script:ApplyDriftInjected=$true
+  switch($drift){
+   {$_ -in 'config','manifest'} {[IO.File]::WriteAllBytes($driftPath,$driftBytes);[IO.File]::SetLastWriteTimeUtc($driftPath,$driftTime)}
+   invalid {[IO.File]::WriteAllText($driftPath,'{"active":"true"}')}
+   missing {[IO.File]::Delete($driftPath)}
+   locked {$script:ApplyDriftHandle=[IO.File]::Open($driftPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)}
+   index {[IO.File]::AppendAllText($driftPath,' ')}
+   target {$script:ThemeRoot=$otherApplyRoot}
+  }
+ }
+ foreach($drift in 'config','manifest','invalid','missing','locked','index','target'){
+  $driftPath=switch($drift){manifest{$manifestPath} index{$script:AppearanceContentManifestFile} default{$configPath}}
+  $originalBytes=[IO.File]::ReadAllBytes($driftPath);$driftTime=[IO.File]::GetLastWriteTimeUtc($driftPath)
+  $driftBytes=[byte[]]$originalBytes.Clone()
+  # Toggle an insignificant whitespace byte at the end. Same valid JSON,
+  # length and write time, but a different on-disk revision.
+  if($drift -in 'config','manifest'){
+   $last=$driftBytes.Length-1
+   Assert ($driftBytes[$last] -in 10,13,32) 'Fixture JSON needs trailing whitespace'
+   $driftBytes[$last]=9
+  }
+  $old=Get-AppearanceStatus
+  Assert ($old.packPrepared -and $old.backendReady) ('Apply drift fixture starts prepared: '+$drift)
+  $enabled=!($old.themes|Where-Object name -eq 'Round').configured
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{expectedRevision=$old.revision;states=@{Round=$enabled}}|ConvertTo-Json -Compress)))
+  $script:Applied=0;$script:RenderSamples=0;$script:ApplyNewBackups=0;$script:ApplyDriftInjected=$false
+  try{
+   $rejected=Reject {Invoke-AppearanceControl 'Apply'}
+   Assert ($rejected -and $script:ApplyDriftInjected -and !$script:ApplyNewBackups -and !$script:Applied -and !$script:RenderSamples -and !(Test-Path -LiteralPath $marker)) ('Apply refuses post-admission drift before writes: '+$drift)
+   if($drift -in 'config','manifest'){
+    Assert ([IO.File]::GetLastWriteTimeUtc($driftPath) -eq $driftTime -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($driftPath))) -ceq ([Convert]::ToBase64String($driftBytes))) ('Apply leaves the concurrent same-timestamp edit intact: '+$drift)
+   }
+  }finally{
+   if($script:ApplyDriftHandle){$script:ApplyDriftHandle.Dispose();$script:ApplyDriftHandle=$null}
+   $script:ThemeRoot=$originalApplyRoot
+   [IO.File]::WriteAllBytes($driftPath,$originalBytes);[IO.File]::SetLastWriteTimeUtc($driftPath,$driftTime)
+  }
+ }
+ $script:AppearanceContentManifestFile=$indexSource
+ Assert ($script:Starts -eq 0 -and $script:Resets -eq 0) 'Apply receipt does not start anything or reset the CSS engine'
+}}
+if($Case -eq 'ScopedApply'){& {
+ Invoke-PresetPrepare|Out-Null;Complete-PresetReload;$script:Live=$true
+ $script:Rows=@(Get-ThemeRows -RevisionOnly|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $Action='Status';$state=Invoke-AppearanceControl 'Status';$target=$state.snapshot.targetId;$rev=$state.snapshot.revision
+ Assert ($state.snapshot.applyScopeProtocol -eq 1) 'Status advertises scoped draft support'
+ $Action='ScopedApply';$BackendPath=$script:BackendExe
+ function Scoped([string]$Target=$target,[string]$Revision=$rev,$States=@{Round=$false}){
+  $body=@{profile='ui-summary-v1';targetId=$Target;expectedRevision=$Revision;states=$States}|ConvertTo-Json -Compress
+  $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($body))
+  Invoke-AppearanceControl 'ScopedApply'
+ }
+ $config=Join-Path $script:ThemeRoot 'Round/config_USER.json';$hash=Get-ConfigHash $config
+ $journal=Join-Path (Get-PresetStateDir) 'transaction.json'
+ $stale=Scoped -Revision ('e'*64)
+ Assert (!$stale.ok -and $stale.applyPreflightChanged -eq $true -and !$stale.snapshot -and !$stale.saved) 'Fresh revision drift returns an explicit no-write receipt'
+ Assert (Reject {Scoped -Target ('f'*16)}) 'Wrong directory never grants fallback'
+ Assert (Reject {Scoped -States @{Round='false'}}) 'Scoped apply validates literal boolean switches'
+ [IO.File]::WriteAllText($journal,'{}');$journalHash=Get-ConfigHash $journal
+ Assert ((Reject {Scoped}) -and (Get-ConfigHash $journal) -ceq $journalHash) 'Pending transaction is refused, not recovered or overwritten'
+ Remove-Item -LiteralPath $journal -ErrorAction Stop
+ $script:Editing=$true
+ Assert (Reject {Scoped -Revision ('e'*64)}) 'Open Desktop editor blocks even the preflight retry receipt'
+ $script:Editing=$false
+ Assert ((Get-ConfigHash $config) -ceq $hash -and !$script:Applied -and !$script:RenderSamples -and !(Test-Path -LiteralPath $journal)) 'Refusal and stale paths do not write any switch or request a page read'
+ $rpc=${function:Invoke-LoaderRpc}
+ function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
+  if($Method -ceq 'fetch_theme_path' -and $script:ScopedApplyRace -and ++$script:ScopedPathReads -eq 2){
+   if($script:ScopedApplyRace -eq 'target'){return (Join-Path $Out 'other-themes')}
+   if($script:ScopedApplyRace -eq 'editor'){$script:Editing=$true}
+  }
+  & $rpc @PSBoundParameters
+ }
+ foreach($race in 'target','editor'){
+  $script:ScopedPathReads=0;$script:ScopedApplyRace=$race
+  try{
+   Assert ((Reject {Scoped}) -and $script:ScopedPathReads -eq 2 -and (Get-ConfigHash $config) -ceq $hash -and
+     !$script:Applied -and !$script:RenderSamples -and !(Test-Path -LiteralPath $journal)) ('Last prewrite guard refuses late '+$race+' change')
+  }finally{$script:ScopedApplyRace='';$script:Editing=$false}
+ }
+ $script:Applied=0;$script:RenderSamples=0
+ $done=Scoped
+ Assert ($done.ok -and $done.saved -and $done.renderConfirmed -and $done.snapshot.targetId -ceq $target -and $done.snapshot.steamPid -eq $SessionPid -and $done.snapshot.steamBirth -ceq $SessionBirth) 'Ready scoped Apply returns bound saved and DOM confirmation'
+ Assert ($script:Applied -eq 1 -and $script:RenderSamples -eq 1 -and !(Test-Path -LiteralPath $journal) -and
+   !($done.snapshot.themes|Where-Object name -eq 'Round').configured -and
+   !@($done.snapshot.themes|Where-Object {$_.PSObject.Properties['renderPlan']}).Count) 'Ready Apply makes exactly one switch submission, verifies independently and closes the transaction'
+ $script:Unverifiable=$true;$script:Applied=0;$script:RenderSamples=0
+ $unconfirmed=Scoped -Revision $done.snapshot.revision -States @{Round=$true}
+ Assert (!$unconfirmed.ok -and $unconfirmed.saved -and !$unconfirmed.renderConfirmed -and !$unconfirmed.applyPreflightChanged -and
+   ($unconfirmed.snapshot.themes|Where-Object name -eq 'Round').configured -and $script:Applied -eq 1 -and $script:RenderSamples -eq 1 -and !(Test-Path -LiteralPath $journal)) 'Already saved but unconfirmed page is never represented as a no-write retry'
+ Assert (!$script:Starts -and !$script:Resets) 'Scoped Apply never starts CSS or resets its engine'
+}}
+if($Case -eq 'AutomaticPendingStatus'){& {
+ Invoke-PresetPrepare|Out-Null;Complete-PresetReload;$script:Live=$true;$script:Rendered=$true
+ $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $script:PendingRowsSource=${function:Get-ThemeRows};$script:PendingMetaSource=${function:Get-PresetMetadata};$script:PendingRpcSource=${function:Invoke-LoaderRpc}
+ $script:PendingBackupSource=${function:Read-PresetBackup}
+ $script:PendingRoot=$script:ThemeRoot
+ function Get-ThemeRows {
+  param([switch]$RevisionOnly,[switch]$DigestOnly,[hashtable]$AutomaticPlanMemo,[switch]$ValidateRenderOnly,[switch]$ReadOnlyProjection)
+  if($script:Pending){$script:PendingRows++}else{$script:ReadyRows++}
+  & $script:PendingRowsSource @PSBoundParameters
+ }
+ function Get-PresetMetadata($Rows,$BackendThemes=@(),[switch]$OwnedUpdateOnly,$ObservedOwner,[hashtable]$AutomaticPlanMemo,[switch]$DeferObservationBackup){
+  if($script:Pending){$script:PendingMeta++}else{$script:ReadyMeta++}
+  & $script:PendingMetaSource @PSBoundParameters
+ }
+ function Read-PresetBackup([string]$Directory){
+  if($script:Pending){$script:PendingBackup++}else{$script:ReadyBackup++}
+  & $script:PendingBackupSource @PSBoundParameters
+ }
+ function Get-BackendProcesses {if(!$script:Pending -or $script:PendingRpc){[pscustomobject]@{Id=42;Path=$script:BackendExe}}}
+ function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
+  if($script:Pending -and $Method -ceq 'get_themes'){throw 'Fixture loader socket not ready'}
+  if($script:WrongRoot -and $Method -ceq 'fetch_theme_path'){return (Join-Path $Out 'other/themes')}
+  & $script:PendingRpcSource @PSBoundParameters
+ }
+ function Start-Sleep {param($Milliseconds,$Seconds)
+  $script:Delay+=$Milliseconds
+  if($script:Delay.Count -ge $script:PendingWaits){$script:Pending=$false}
+ }
+ function Get-AppearanceSteamSession {
+  $script:PendingIdentityReads++
+  if($script:PendingRejectAt -and $script:PendingIdentityReads -eq $script:PendingRejectAt){throw 'Fixture shared identity changed'}
+  [pscustomobject]@{pid=$script:CurrentPid;birth=$script:CurrentBirth;root='C:\fixture-steam';backendExe=$script:BackendExe}
+ }
+ function Reset-Pending([int]$Waits=2,[bool]$HasProcess=$false){
+  $script:Pending=$true;$script:PendingRpc=$HasProcess;$script:PendingWaits=$Waits
+  $script:PendingRows=0;$script:PendingMeta=0;$script:ReadyRows=0;$script:ReadyMeta=0
+  $script:PendingBackup=0;$script:ReadyBackup=0
+  $script:PendingIdentityReads=0;$script:PendingRejectAt=0;$script:WrongRoot=$false;$script:Delay=@()
+  $script:Applied=0;$script:RenderSamples=0;$script:ThemeRoot=$script:PendingRoot
+ }
+ $metrics=@(foreach($hasProcess in $false,$true){
+  Reset-Pending 2 $hasProcess
+  $result=Invoke-AutomaticAppearanceRefresh
+  Assert ($result.ok -and $result.snapshot.backendReady -and $script:ReadyRows -eq 1 -and $script:ReadyMeta -eq 1 -and $script:RenderSamples -eq 1) 'Ready slot runs the original complete status and one DOM read'
+  Assert ($script:Delay.Count -eq 2 -and $script:AppearanceRenderAttempts -eq 3 -and $script:Applied -eq 0 -and $script:PendingIdentityReads -eq 9) 'Two unready slots preserve bounded waits, identity checks and no theme writes'
+  [pscustomobject]@{backendPresent=$hasProcess;pendingRows=$script:PendingRows;pendingMetadata=$script:PendingMeta;readyRows=$script:ReadyRows;readyMetadata=$script:ReadyMeta;identityReads=$script:PendingIdentityReads;renderReads=$script:RenderSamples;writes=$script:Applied}
+ })
+ $metrics|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'pending-cost.json') -Encoding UTF8
+ Assert (!($metrics|Where-Object {$_.pendingRows -ne 0 -or $_.pendingMetadata -ne 0})) 'Automatic unready slots do not inspect themes or backups'
+ Reset-Pending 99 $true
+ Assert ((Reject {Invoke-AutomaticAppearanceRefresh}) -and $script:Delay.Count -eq 4 -and $script:AppearanceRenderAttempts -eq 5 -and $script:AppearanceHelperBackendCount -eq 1 -and $script:PendingRows -eq 0 -and $script:RenderSamples -eq 0 -and $script:Applied -eq 0) 'Unavailable backend terminates on the original five-slot bound with live process count and no theme work'
+ Reset-Pending
+ $script:PendingRejectAt=3
+ Assert ((Reject {Invoke-AutomaticAppearanceRefresh}) -and $script:Delay.Count -eq 0 -and $script:Applied -eq 0) 'The final Steam identity read remains mandatory even for an unready backend'
+ Reset-Pending 2 $true
+ $offline=(Invoke-AppearanceControl 'Status').snapshot
+ Assert (!$offline.backendReady -and $offline.themes.Count -eq 7 -and $offline.canRestore -and $script:PendingRows -eq 1 -and $script:PendingMeta -eq 1) 'Normal Status still reads all seven themes and verifies restore metadata while CSS is offline'
+ Reset-Pending 1 $true
+ $first=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources
+ Assert ($first.ok -and $first.snapshot.canRestore -and $script:PendingRows -eq 1 -and $script:PendingBackup -eq 0 -and $script:ReadyBackup -eq 1 -and $script:RenderSamples -eq 1 -and $script:Delay.Count -eq 1) 'Initial prepared unready status retains owned resource checks but defers backup until ready'
+ Reset-Pending
+ $script:ThemeRoot=Join-Path (Split-Path -Parent $script:PendingRoot) 'unowned'
+ $ownedStateBase=$script:PresetStateBase
+ try{
+  # The preceding ready probe saved an active-target hint for the owned root.
+  $script:PresetStateBase=Join-Path $Out 'unowned-states'
+  $unowned=Invoke-AppearanceControl 'UpdateOwnedResources' -AutomaticPlanMemo @{}
+ }finally{$script:PresetStateBase=$ownedStateBase}
+ Assert ($unowned.ok -and !$unowned.saved -and !$unowned.snapshot.backendReady -and !$unowned.snapshot.packOwned -and $script:PendingRows -eq 0 -and $script:PendingBackup -eq 0 -and !$script:RenderSamples) 'Initial unowned unready status cannot take ownership or inspect unused theme rows'
+ Reset-Pending 2 $true
+ $script:WrongRoot=$true
+ Assert ((Reject {Invoke-AppearanceControl 'Status' -CorrectionObservationRoot $script:PendingRoot -AutomaticPlanMemo @{} -AutomaticReadiness}) -and $script:PendingRows -eq 0 -and $script:Applied -eq 0) 'Unready correction observation still rejects a different loaded target before theme work'
+ Reset-Pending 1 $true
+ $journal=Join-Path (Read-PresetState).originalBackup 'journal.json'
+ $journalBytes=[IO.File]::ReadAllBytes($journal)
+ try{
+  [IO.File]::WriteAllText($journal,'{}')
+  $reason='';try{Invoke-AutomaticAppearanceRefresh|Out-Null}catch{$reason=$_.Exception.Message}
+  Assert ($reason -like '*Invalid preset backup*' -and $script:Delay.Count -eq 1 -and $script:PendingMeta -eq 0 -and
+          $script:ReadyMeta -eq 1 -and $script:Applied -eq 0 -and $script:RenderSamples -eq 0) 'First ready slot rejects a damaged takeover backup before DOM or CSS writes'
+ }finally{[IO.File]::WriteAllBytes($journal,$journalBytes)}
+ function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1 -or $Processes[0].Id -ne 42){throw 'OWNED_BACKEND_FAMILY_REQUIRED'}}
+ function Get-AppearanceRenderedStatus($Session,$Status){
+  $script:RenderSamples++
+  if($script:RenderSamples -eq 1){return [pscustomobject]@{checked=$false;confirmed=$false;reason=$script:PendingDocumentReason;mismatched=@()}}
+  [pscustomobject]@{checked=$true;confirmed=$true;reason='render-receipts-confirmed';mismatched=@()}
+ }
+ foreach($documentReason in 'render-shared-steam-live-busy','render-shared-steam-document-main-unavailable','render-receipt-invalid'){
+  Reset-Pending 0 $true;$script:Pending=$false;$script:PendingDocumentReason=$documentReason;$memo=@{}
+  $observed=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo
+  $nonTransient=$documentReason -ceq 'render-receipt-invalid'
+  Assert ($observed.ok -and $observed.snapshot.canRestore -eq $nonTransient -and $script:ReadyBackup -eq [int]$nonTransient -and
+          $script:Delay.Count -eq 1 -and $script:RenderSamples -eq 2) "Only known transient document retries defer backup validation: $documentReason"
+  $final=Invoke-AutomaticAppearanceIdle $observed.snapshot -AutomaticPlanMemo $memo
+  Assert ($final.ok -and $final.resident -and $script:ReadyBackup -eq (1+[int]$nonTransient) -and $script:AppearanceHelperFlags -eq 31 -and
+          $script:RenderSamples -eq 3 -and $script:Applied -eq 0) "Final Idle independently validates backup and document: $documentReason"
+ }
+ Assert ($script:Starts -eq 0 -and $script:Resets -eq 0) 'No process startup or global backend reset'
+}}
 if($Case -in @('All','ControlLock')){
 & {
  $script:ContentionCalls=0
@@ -166,6 +646,33 @@ if($Case -in @('All','ControlLock')){
  $script:LockAdmit=$false;$before=$script:IdleCalls
  Assert (Reject {Invoke-AppearanceControl 'Idle'}) 'An unavailable final confirmation lock still ends with an explicit bounded failure'
  Assert ($script:IdleCalls -eq $before -and $script:LockDisposals -eq 3 -and $script:LockReleases -eq 2 -and $script:AppearanceFailureCode -eq 11) 'Failed lock acquisition disposes its handle and never runs confirmation or releases an unowned mutex'
+}
+& {
+ $script:LockWaits=@();$script:LockDisposals=0;$script:LockReleases=0;$script:LockAdmit=$false;$script:StatusReads=0
+ function New-AppearanceMutex($Purpose) {
+  $mutex=New-Object PSObject
+  $mutex|Add-Member ScriptMethod WaitOne {param($Timeout) $script:LockWaits+=,[int]$Timeout;return $script:LockAdmit}
+  $mutex|Add-Member ScriptMethod ReleaseMutex {$script:LockReleases++}
+  $mutex|Add-Member ScriptMethod Dispose {$script:LockDisposals++}
+  return $mutex
+ }
+ function Initialize-PresetTargetHint {param($KeepBackendPath) if(!$script:LockAdmit){throw 'Target read before admission'}}
+ function Get-AppearanceStatus {param([switch]$OmitRenderPlans) $script:StatusReads++;[pscustomobject]@{summary=[bool]$OmitRenderPlans}}
+ function Encode-LockProfile([string]$Text){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Text))}
+ $Action='Status';$single='{"profile":"ui-summary-v1","lockWait":"single-v1"}';$Payload=Encode-LockProfile $single
+ $result=Invoke-AppearanceControl 'Status'
+ Assert (!$result.ok -and $result.statusLockTimedOut -eq $true -and !$result.snapshot -and $script:AppearanceFailureCode -eq 11 -and $script:LockWaits[-1] -eq 8000 -and !$script:StatusReads -and $script:LockDisposals -eq 1 -and !$script:LockReleases) 'Negotiated Status timeout emits a terminal receipt and never reads before acquisition'
+ $script:LockAdmit=$true;$result=Invoke-AppearanceControl 'Status'
+ Assert ($result.ok -and $result.snapshot.summary -and $script:LockWaits[-1] -eq 8000 -and $script:StatusReads -eq 1 -and $script:LockDisposals -eq 2 -and $script:LockReleases -eq 1) 'Negotiated Status reads exactly once after acquisition and keeps the summary profile'
+ $script:LockAdmit=$false
+ foreach($profile in @('{"profile":"ui-summary-v1"}',('{"profile":"ui-summary-v1","lockWait":["single-v1"]}'),('['+$single+']'),('{"profile":"other","lockWait":"single-v1"}'),('{"profile":"ui-summary-v1","lockWait":"SINGLE-v1"}'),(' '*260+$single))){
+  $Payload=Encode-LockProfile $profile
+  Assert ((Reject {Invoke-AppearanceControl 'Status'}) -and $script:LockWaits[-1] -eq 3000) ('Unnegotiated Status keeps standard wait: '+$profile)
+ }
+ $Payload=Encode-LockProfile $single;$Action='Automatic'
+ Assert ((Reject {Invoke-AppearanceControl 'Status'}) -and $script:LockWaits[-1] -eq 3000) 'Native automatic Status never uses the card lock wait'
+ $Action='Status'
+ Assert ((Reject {Invoke-AppearanceControl 'Prepare'}) -and $script:LockWaits[-1] -eq 3000) 'Mutation lock wait is never extended by a Status payload'
 }
 }
 if($Case -eq 'InitialOwnedStatus'){& {
@@ -231,13 +738,13 @@ if($Case -eq 'FinalRevision'){& {
  Invoke-PresetPrepare|Out-Null
  $script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}});Complete-PresetReload
  $script:Rendered=$true;$script:MissingStyles=@()
- $script:RevisionPlanOriginal=(Get-Item Function:\Get-AppearanceThemeRenderPlan).ScriptBlock
+ $script:RevisionPlanOriginal=(Get-Item Function:\Get-AppearanceTargetRenderPlan).ScriptBlock
  $script:RevisionRowsOriginal=(Get-Item Function:\Get-ThemeRows).ScriptBlock
  $script:RevisionReadOriginal=(Get-Item Function:\Read-AppearanceThemeConfig).ScriptBlock
  $script:RevisionHashOriginal=(Get-Item Function:\Get-ConfigHash).ScriptBlock
  $script:RevisionPlans=0;$script:RevisionFullReads=0;$script:RevisionShortReads=0
- function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP'){
-  $script:RevisionPlans++;&$script:RevisionPlanOriginal $Name $Manifest $Config $ContentIndex $Target
+ function Get-AppearanceTargetRenderPlan($Name,$Manifest,$Config,$ContentIndex,$Target,$FileReceipts,$Defaults,[switch]$ValidateOnly){
+  $script:RevisionPlans++;&$script:RevisionPlanOriginal @PSBoundParameters
  }
  function Get-ThemeRows {
   param([switch]$RevisionOnly,[switch]$DigestOnly)
@@ -263,7 +770,7 @@ if($Case -eq 'FinalRevision'){& {
  $shortShape=@($short|Select-Object name,installed,configured,hash,manifestHash,parameterCount,error,path,raw,config)|ConvertTo-Json -Depth 16 -Compress
  Assert ($fullShape -ceq $shortShape) 'Revision-only mode preserves every non-plan row field and exact config bytes'
  $again=@(Get-ThemeRows)
- Assert ($script:RevisionPlans -gt 0 -and @($again|Where-Object {$_.renderPlan.protocol -eq 4 -and $_.renderPlan.contexts.MainMenu -and $_.renderPlan.contexts.QuickAccess}).Count -eq 7) 'Default status callers still build all seven SP and menu render plans after a revision-only read'
+ Assert ($script:RevisionPlans -eq 7 -and (Test-FixtureThemePagePlans $again)) 'Default status builds 21 independent page plans in seven traversals after a revision-only read'
 
  function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1 -or $Processes[0].Id -ne 42){throw 'OWNED_BACKEND_FAMILY_REQUIRED'}}
  $script:RevisionFault='';$script:RevisionHeld=$null
@@ -289,6 +796,7 @@ if($Case -eq 'FinalRevision'){& {
   if($file.Length -ne $length -or $file.CreationTimeUtc -ne $created -or $file.LastWriteTimeUtc -ne $written){throw 'Fixture index metadata changed'}
  }
  function Test-AppearanceRendered($Session,$Status){
+  if(!$script:RevisionFault -and !(Test-FixtureThemePagePlans $Status.themes)){throw 'Final DOM check needs all 21 independent page plans'}
   switch($script:RevisionFault){
    config {
     $value=[IO.File]::ReadAllText($script:RevisionConfig)|ConvertFrom-Json
@@ -330,7 +838,7 @@ if($Case -eq 'FinalRevision'){& {
   Reset-FinalRevision
   $result=Invoke-AppearanceControl 'Idle'
   Assert ($result.ok -and $result.resident -and $script:AppearanceHelperFlags -eq 31) 'Actual final Idle control still confirms the resident backend with all original flags'
-  Assert ($script:RevisionFullReads -eq 1 -and $script:RevisionShortReads -eq 1 -and $script:RevisionPlans -eq 21) 'Actual final Idle builds plans once for status and performs one separate fresh revision-only read after DOM'
+  Assert ($script:RevisionFullReads -eq 1 -and $script:RevisionShortReads -eq 1 -and $script:RevisionPlans -eq 7) 'Actual final Idle traverses each theme once for status and performs one separate fresh revision-only read after DOM'
   Assert ($script:RevisionFinalDecodes -eq 0 -and $script:RevisionFinalDigests -eq 14) 'Prepared final confirmation read all fourteen bounded digests with zero repeated JSON decoding'
   foreach($fault in @('config','locked','missing','oversized','session','manifest','invalidManifest')){
    Reset-FinalRevision;$script:RevisionFault=$fault
@@ -353,6 +861,7 @@ if($Case -eq 'FinalRevision'){& {
 
 if($Case -eq 'StatusIdentity'){& {
  Invoke-PresetPrepare|Out-Null;$script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}});Complete-PresetReload
+ $SessionBirth='133334445556667778'
  $idleAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $ComponentRoot 'steam-appearance/idle.ps1'),[ref]$null,[ref]$null)
  $sessionReader=$idleAst.EndBlock.Statements|Where-Object {$_.Name -eq 'Get-AppearanceSteamSession'}
  if(!$sessionReader){throw 'Production identity reader unavailable'}
@@ -366,7 +875,7 @@ if($Case -eq 'StatusIdentity'){& {
   $script:StatusEvents.Add('identity');$script:StatusIdentityCalls++
   if($script:StatusFault -ceq 'denied'){throw 'Expired shared identity'}
   $changed=$script:StatusIdentityCalls -gt 1
-  [pscustomobject]@{protocol=1;presence=[int]($script:StatusFault -cne 'absent');pid=123;birth='456';root='C:\fixture-steam';
+  [pscustomobject]@{protocol=1;presence=[int]($script:StatusFault -cne 'absent');pid=123;birth='133334445556667778';root='C:\fixture-steam';
    processEpoch='12';accountEpoch=$(if($script:StatusFault -ceq 'already-retired' -or ($changed -and $script:StatusFault -ceq 'account')){'21'}else{'20'});
    powerGeneration=$(if($changed -and $script:StatusFault -ceq 'power'){'32'}else{'31'})}
  }
@@ -380,6 +889,8 @@ if($Case -eq 'StatusIdentity'){& {
   Assert ($value.ok -and $value.snapshot.backendReady -and $value.snapshot.configuredMatchesBackend -and $value.snapshot.steamRunning -and
           ($script:StatusEvents -join ',') -ceq $expected) ('Status entry must remove one redundant public identity request: '+$action+' observed='+($script:StatusEvents -join ','))
  }
+ $statusReceipt=$value.snapshot|ConvertTo-Json -Depth 10 -Compress|ConvertFrom-Json
+ Assert ($statusReceipt.steamPid -eq 123 -and $statusReceipt.steamBirth -is [string] -and $statusReceipt.steamBirth -ceq $SessionBirth) 'Status reuses the existing shared PID and exact decimal birth in its JSON receipt'
  foreach($mode in 'account','power'){
   Reset-StatusIdentity $mode
   Assert ((Reject {Invoke-AppearanceControl 'UpdateOwnedResources'}) -and ($script:StatusEvents -join ',') -ceq 'hint,identity,backend,identity') ('Final status must reject '+$mode+' change before resource update')
@@ -420,7 +931,9 @@ if($Case -eq 'StatusIdentity'){& {
  }
  Reset-StatusIdentity 'absent'
  $SessionPid=0;$SessionBirth=''
- Assert ((Invoke-AppearanceControl 'Status').snapshot.steamRunning -eq $false -and $script:StatusIdentityCalls -eq 2) 'Offline Status reports absent, without using a cached Steam identity'
+ $offline=(Invoke-AppearanceControl 'Status').snapshot
+ Assert ($offline.steamRunning -eq $false -and $script:StatusIdentityCalls -eq 2) 'Offline Status reports absent, without using a cached Steam identity'
+ Assert (!$offline.PSObject.Properties['steamPid'] -and !$offline.PSObject.Properties['steamBirth']) 'Absent Status carries no stale Steam session identity'
  Reset-StatusIdentity
  $script:AppearanceObservationOnly=$true
  try{Assert ((Invoke-AppearanceControl 'Status').ok -and ($script:StatusEvents -join ',') -ceq 'hint,identity,backend,identity') 'Read-only Status still performs both public identity boundaries'}
@@ -458,22 +971,34 @@ if($Case -eq 'AutomaticIdentity'){& {
   [pscustomobject]@{checked=$valid;confirmed=$valid;reason='fixture-receipts';mismatched=@()}
  }
  Reset-AutomaticIdentity
- $first=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources
+ $memo=@{}
+ $first=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo
  $firstTrace=$script:IdentityEvents -join ','
  $script:IdentityEvents.Clear()
- $final=Invoke-AutomaticAppearanceIdle $first.snapshot
+ $final=Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo
  $finalTrace=$script:IdentityEvents -join ','
  Write-Output ('First='+$firstTrace+'; Final='+$finalTrace)
  Assert ($first.ok -and $firstTrace -ceq 'identity,hint,identity,backend,identity,dom') 'First automatic pass needs admission, both status checks and a DOM read, not a second adjacent admission'
  Assert ($final.ok -and $final.resident -and $script:AppearanceHelperFlags -eq 31 -and $finalTrace -ceq 'hint,editor,identity,backend,identity,dom,backend,editor,identity') 'Final automatic Idle needs one identity before backend, one before DOM and one after DOM'
+ $sharedPlans=@($final.snapshot.themes|Where-Object {$_.renderPlan -and [object]::ReferenceEquals($_.renderPlan,$memo[$_.name].plan)})
+ $planKeys=@($memo.Keys|Where-Object {$_ -cne ':bundle-schema'})
+ Assert ($planKeys.Count -eq 7 -and $sharedPlans.Count -eq 7) 'Scoped final reuses all seven unchanged plans without skipping fresh identity, backend or DOM checks'
  Reset-AutomaticIdentity
  $normal=Invoke-AppearanceControl 'Idle'
  $legacyIdleTrace='identity,hint,editor,identity,identity,backend,identity,dom,backend,editor,identity'
  Assert ($normal.ok -and ($script:IdentityEvents -join ',') -ceq $legacyIdleTrace) 'Manual Idle retains its original trace'
  Reset-AutomaticIdentity
  $script:AppearanceObservationOnly=$true
- try{$verified=Invoke-AppearanceControl 'Idle'}finally{$script:AppearanceObservationOnly=$false}
- Assert ($verified.ok -and ($script:IdentityEvents -join ',') -ceq $legacyIdleTrace) 'VerifyOnly Idle retains its original trace'
+ try{
+  $verified=Invoke-AppearanceControl 'Idle'
+  $verifyTrace='identity,hint,editor,identity,backend,identity,dom,backend,editor,identity'
+  Assert ($verified.ok -and $verified.resident -and $script:AppearanceHelperFlags -eq 31 -and ($script:IdentityEvents -join ',') -ceq $verifyTrace) 'VerifyOnly retains pre-hint admission and both DOM boundaries without two consecutive identity reads'
+  Reset-AutomaticIdentity 'root-after-backend'
+  $script:AppearanceHelperFlags=0
+  Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and ($script:IdentityEvents -join ',') -ceq 'identity,hint,editor,identity,backend,identity' -and $script:AppearanceHelperFlags -eq 0) 'VerifyOnly rejects a changed Steam root before reading the DOM'
+  Reset-AutomaticIdentity 'after-dom'
+  Assert ((Reject {Invoke-AppearanceControl 'Idle'}) -and ($script:IdentityEvents -join ',') -ceq $verifyTrace -and $script:AppearanceHelperFlags -ne 31) 'VerifyOnly still rejects a power scope change after reading the DOM'
+ }finally{$script:AppearanceObservationOnly=$false}
  Reset-AutomaticIdentity 'denied'
  Assert ((Reject {Invoke-AutomaticAppearanceRefresh}) -and ($script:IdentityEvents -join ',') -ceq 'identity') 'Initial automatic admission failure stops before any other operation'
  Reset-AutomaticIdentity 'before-status'
@@ -481,19 +1006,19 @@ if($Case -eq 'AutomaticIdentity'){& {
  Reset-AutomaticIdentity 'during-wait'
  Assert ((Reject {Invoke-AutomaticAppearanceRefresh}) -and ($script:IdentityEvents -join ',') -ceq 'identity,hint,identity,backend,identity,dom,wait,identity') 'Later slots reread identity immediately after waiting and reject a changed power scope'
  Reset-AutomaticIdentity 'denied'
- Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity') 'Final admission failure stops before backend or DOM'
+ Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity') 'Final admission failure stops before backend or DOM even with cached plans'
  foreach($fault in 'missing','unknown'){
   Reset-AutomaticIdentity $fault
-  Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity') "Final $fault identity blocks backend and DOM reads"
+  Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity') "Final $fault identity blocks backend and DOM reads"
  }
  foreach($fault in 'after-backend','root-after-backend'){
   Reset-AutomaticIdentity $fault
-  Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity,backend,identity') "Final $fault change blocks the DOM read"
+  Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor,identity,backend,identity') "Final $fault change blocks the DOM read"
  }
  Reset-AutomaticIdentity 'after-dom'
- Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot}) -and ($script:IdentityEvents -join ',') -ceq $finalTrace -and $script:AppearanceHelperFlags -ne 31) 'Scope changing during DOM cannot be reported as successful'
+ Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo}) -and ($script:IdentityEvents -join ',') -ceq $finalTrace -and $script:AppearanceHelperFlags -ne 31) 'Scope changing during DOM cannot be reported as successful'
  Reset-AutomaticIdentity 'editor'
- Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor') 'Desktop editor still blocks final backend work'
+ Assert ((Reject {Invoke-AutomaticAppearanceIdle $first.snapshot -AutomaticPlanMemo $memo}) -and ($script:IdentityEvents -join ',') -ceq 'hint,editor') 'Desktop editor still blocks final backend work'
  Assert ($script:Starts -eq 0 -and $script:Resets -eq 0 -and $script:Applied -eq 0) 'Identity reduction neither starts nor resets CSS and performs no theme RPC write'
 }}
 
@@ -557,6 +1082,29 @@ if($Case -eq 'FinalIdleDom'){& {
   $value=Invoke-FixtureAutomaticIdle $scope
   Assert ($value.ok -and ($script:IdleReadOnly -join ',') -ceq 'True' -and ![IO.File]::Exists($hint) -and !$script:AppearanceObservationOnly) 'Healthy final observation does not regenerate the mutable target hint'
  }finally{[IO.File]::WriteAllBytes($hint,$hintBytes)}
+ # Observe the actual final-idle control path, not just the marker helper.
+ $markerProviderReads=& {
+  $script:FinalMarkerProviderReads=0
+  function Test-Path {
+   [CmdletBinding(DefaultParameterSetName='Path')]
+   param([Parameter(ParameterSetName='Path',Position=0)][string[]]$Path,
+         [Parameter(ParameterSetName='LiteralPath')][string[]]$LiteralPath,
+         [Microsoft.PowerShell.Commands.TestPathType]$PathType)
+   if($LiteralPath -contains $marker){$script:FinalMarkerProviderReads++}
+   Microsoft.PowerShell.Management\Test-Path @PSBoundParameters
+  }
+  Set-IdleDocuments @($healthy)
+  $value=Invoke-FixtureAutomaticIdle $scope
+  if(!$value.ok -or $script:IdleDocuments.Count -ne 0){throw 'Expected final observation to confirm a missing transaction marker'}
+  $script:FinalMarkerProviderReads
+ }
+ Assert ($markerProviderReads -eq 0) ('Final observation reuses live marker attributes without a provider existence check; calls='+$markerProviderReads)
+ $null=[IO.Directory]::CreateDirectory($marker)
+ try {
+  Set-IdleDocuments @($healthy)
+  Assert ((Reject {Invoke-FixtureAutomaticIdle $scope}) -and $script:AppearanceFailureCode -eq 3 -and
+   $script:IdleDocuments.Count -eq 1 -and [IO.Directory]::Exists($marker)) 'Final observation refuses a directory at the marker path and leaves it intact'
+ }finally{[IO.Directory]::Delete($marker)}
  Set-IdleDocuments @($missing,$healthy)
  $final=$null;$failure='';try{$final=Invoke-FixtureAutomaticIdle $scope}catch{$failure=$_.Exception.Message}
  Assert ($final.ok -and !$failure -and $final.resident -and $script:Delay.Count -eq 1 -and $script:Delay[0].milliseconds -eq 500 -and ($script:IdleReadOnly -join ',') -ceq 'True,True' -and $script:AppearanceHelperFlags -eq 31 -and !$script:AppearanceObservationOnly) ('Final DOM mismatch recovers with one independent read-only observation: '+$failure)
@@ -735,10 +1283,10 @@ if($Case -in @('All','CorrectionRevision')){& {
  $original=[IO.File]::ReadAllBytes($configPath)
  $manifestPath=Join-Path $script:ThemeRoot 'Round\theme.json'
  $originalManifest=[IO.File]::ReadAllBytes($manifestPath)
- $originalPlan=${function:Get-AppearanceThemeRenderPlan}
- function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP'){
+ $originalPlan=${function:Get-AppearanceTargetRenderPlan}
+ function Get-AppearanceTargetRenderPlan($Name,$Manifest,$Config,$ContentIndex,$Target,$FileReceipts,$Defaults,[switch]$ValidateOnly){
   $script:CorrectionPlans++
-  & $originalPlan $Name $Manifest $Config $ContentIndex $Target
+  & $originalPlan @PSBoundParameters
  }
  $script:CorrectionRevisionProbe='';$script:CorrectionRevisionSamples=0
  $script:CorrectionRevisionEditHash=''
@@ -766,6 +1314,7 @@ if($Case -in @('All','CorrectionRevision')){& {
  }
  function Get-AppearanceRenderedStatus($Session,$Status){
   $script:CorrectionRevisionSamples++
+  if($script:CorrectionRevisionProbe -eq 'unchanged' -and !(Test-FixtureThemePagePlans $Status.themes)){throw 'Correction DOM checks need all 21 independent page plans'}
   if(($script:CorrectionRevisionProbe -eq 'before-control' -and $script:CorrectionRevisionSamples -eq 1) -or
      ($script:CorrectionRevisionProbe -in @('before-write','manifest-before-write') -and $script:CorrectionRevisionSamples -eq 2)){
    Write-CorrectionFixtureEdit
@@ -782,7 +1331,7 @@ if($Case -in @('All','CorrectionRevision')){& {
    if($step -eq 'unchanged'){
     $value=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources
     Assert ($value.ok -and $script:Applied -eq 1 -and $script:CorrectionRevisionSamples -eq 3) 'Matching revision still permits exactly one targeted correction with both DOM checks'
-    Assert ($script:CorrectionPlans -eq 63) ('One correction builds only the three observed plans for seven themes and three contexts each; no fourth plan before writes (plans='+$script:CorrectionPlans+')')
+    Assert ($script:CorrectionPlans -eq 7) ('An unchanged automatic correction retains 21 page plans from seven traversals across three independent DOM observations (traversals='+$script:CorrectionPlans+')')
    }else{
     $failure=''
     try{Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources|Out-Null}catch{$failure=$_.Exception.Message}
@@ -861,6 +1410,21 @@ if($Case -eq 'CorrectionResultScope'){& {
   }
   Assert ($row.writes -eq 1 -and !$row.waits -and $row.savedBytes) ('No second submission, retry or file overwrite: '+$message)
  }
+ # A memo can know the new bytes, but the result comparison still needs the
+ # actual config object for anything that differs from the pre-write digests.
+ $script:PostMode='unchanged';$script:Applied=0
+ $beforeHashes=@{};foreach($entry in Get-ThemeRows -RevisionOnly){$beforeHashes[$entry.name]=$entry.hash}
+ $changed=[IO.File]::ReadAllText($config)|ConvertFrom-Json
+ $changed.Intensity='25px'
+ try{
+  [IO.File]::WriteAllText($config,($changed|ConvertTo-Json -Depth 32 -Compress))
+  $memo=@{};$null=Get-ThemeRows -AutomaticPlanMemo $memo
+  $captured=$null
+  $null=Get-AppearanceStatus -ExpectedCorrectionRoot $beforeRoot -CapturedRows ([ref]$captured) -AutomaticPlanMemo $memo -UnchangedConfigHashes $beforeHashes
+  $changedRow=$captured|Where-Object name -eq 'Round'
+  $unchangedRow=$captured|Where-Object name -eq 'Mini Carousel'
+  Assert ($changedRow.hash -cne $beforeHashes.Round -and $changedRow.config.Intensity -ceq '25px' -and $null -eq $unchangedRow.config -and $unchangedRow.hash -ceq $beforeHashes['Mini Carousel']) 'Captured rows project only unchanged configs, even when the memo knows the changed row'
+ }finally{[IO.File]::WriteAllBytes($config,$originalConfig)}
  Assert (!$script:Starts -and !$script:Resets) 'Scope checking does not launch, restart or globally reload anything'
 }}
 
@@ -1320,10 +1884,23 @@ namespace Ymcc {
 }}
 
 if($Case -eq 'CorrectionAlreadyMatched'){& {
+ $script:AppearanceContentManifestFile=Join-Path $Out 'content-index.json'
+ Copy-Item -LiteralPath (Join-Path $script:PackRoot 'manifest.json') -Destination $script:AppearanceContentManifestFile
  Invoke-PresetPrepare|Out-Null;$script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}});Complete-PresetReload
  $config=Join-Path $script:ThemeRoot 'Round\config_USER.json';$original=[IO.File]::ReadAllBytes($config)
+ $themeManifest=Join-Path $script:ThemeRoot 'Round\theme.json';$originalManifest=[IO.File]::ReadAllBytes($themeManifest)
+ $originalIndex=[IO.File]::ReadAllBytes($script:AppearanceContentManifestFile)
  $originalStatus=${function:Get-AppearanceStatus};$originalRpc=${function:Invoke-LoaderRpc}
+ $originalRows=${function:Get-ThemeRows};$originalConfigRead=${function:Read-AppearanceThemeConfig}
  function Get-AppearanceStatus {$script:AlreadyStatusReads++;& $originalStatus}
+ function Get-ThemeRows([switch]$RevisionOnly,[switch]$DigestOnly,[hashtable]$AutomaticPlanMemo,[switch]$ValidateRenderOnly,[switch]$ReadOnlyProjection,[hashtable]$UnchangedConfigHashes){
+  if($script:AlreadyTrackReads -and $DigestOnly){$script:AlreadyDigestPasses++}
+  & $originalRows @PSBoundParameters
+ }
+ function Read-AppearanceThemeConfig([string]$Path,[switch]$Manifest){
+  if($script:AlreadyTrackReads){$script:AlreadyDecoded++}
+  & $originalConfigRead @PSBoundParameters
+ }
  function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
   if($Method -eq 'get_themes'){$script:AlreadyGetThemes++}
   & $originalRpc $Method $Arguments
@@ -1338,35 +1915,46 @@ if($Case -eq 'CorrectionAlreadyMatched'){& {
   if($script:AlreadyDomReads -eq 2){
    switch($script:AlreadyScenario){
     'config-change' {$next=[IO.File]::ReadAllText($config)|ConvertFrom-Json;$next.active=!$next.active;Write-ThemeConfigAtomic $config ($next|ConvertTo-Json -Compress)}
+    'manifest-change' {[IO.File]::AppendAllText($themeManifest,"`n")}
+    'index-change' {[IO.File]::AppendAllText($script:AppearanceContentManifestFile,"`n")}
+    'locked-config' {$script:AlreadyHeldConfig=[IO.File]::Open($config,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
     'desktop-open' {$script:Editing=$true}
    }
+   $script:AlreadyTrackReads=$true
   }
   $missing=($script:AlreadyDomReads -eq 1 -and $script:AlreadyScenario -ne 'manual') -or ($script:AlreadyScenario -eq 'final-mismatch' -and $script:AlreadyDomReads -eq 3)
   [pscustomobject]@{checked=$true;confirmed=!$missing;reason='fixture-render-receipts';mismatched=@(if($missing){'Mini Carousel'})}
  }
  function Reset-AlreadyMatched([string]$Scenario){
+  if($script:AlreadyHeldConfig){$script:AlreadyHeldConfig.Dispose();$script:AlreadyHeldConfig=$null}
   [IO.File]::WriteAllBytes($config,$original)
+  [IO.File]::WriteAllBytes($themeManifest,$originalManifest)
+  [IO.File]::WriteAllBytes($script:AppearanceContentManifestFile,$originalIndex)
   $script:AlreadyScenario=$Scenario;$script:AlreadyDomReads=0;$script:AlreadyStatusReads=0;$script:AlreadyGetThemes=0
+  $script:AlreadyTrackReads=$false;$script:AlreadyDigestPasses=0;$script:AlreadyDecoded=0
   $script:Editing=$false;$script:Applied=0;$script:Resets=0;$script:Delay=@()
  }
  try{
   Reset-AlreadyMatched 'healthy'
   $automatic=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources
   Assert ($automatic.ok -and $automatic.renderConfirmed -and $script:Applied -eq 0 -and $script:AlreadyDomReads -eq 2 -and $script:AlreadyStatusReads -eq 2 -and $script:AlreadyGetThemes -eq 2 -and $script:Delay.Count -eq 0) ('A fresh match inside automatic reconciliation needs no sync or third verification before Ready; DOM='+$script:AlreadyDomReads+' status='+$script:AlreadyStatusReads+' get_themes='+$script:AlreadyGetThemes)
+  [pscustomobject]@{digestPasses=$script:AlreadyDigestPasses;decoded=$script:AlreadyDecoded;domBeforeReady=$script:AlreadyDomReads;writes=$script:Applied}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Out 'matched-work.json') -Encoding UTF8
+  Assert ($script:AlreadyDigestPasses -eq 1 -and $script:AlreadyDecoded -eq 0) 'An already matched correction rechecks bytes without decoding theme files'
   $final=Invoke-AppearanceControl 'Idle'
   Assert ($final.ok -and $final.resident -and $script:AppearanceHelperFlags -eq 31 -and $script:AlreadyDomReads -eq 3 -and $script:AlreadyStatusReads -eq 3) 'Final Idle still performs a fresh independent status and DOM confirmation'
   Reset-AlreadyMatched 'final-mismatch'
   $automatic=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources
   Assert ($automatic.ok -and (Reject {Invoke-AppearanceControl 'Idle'}) -and $script:AppearanceFailureCode -eq 6 -and $script:Applied -eq 0) 'An early match cannot acknowledge a subsequently mismatched final page'
-  foreach($scenario in 'config-change','desktop-open','identity-change'){
+  foreach($scenario in 'config-change','manifest-change','index-change','locked-config','desktop-open','identity-change'){
    Reset-AlreadyMatched $scenario
    $failure='';try{Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources|Out-Null}catch{$failure=$_.Exception.Message}
-   $expected=@{'config-change'='Appearance changed during DOM verification*';'desktop-open'='CSSLoader Desktop is open*';'identity-change'='Shared Steam identity changed*'}[$scenario]
+   $expected=@{'config-change'='Appearance changed during DOM verification*';'manifest-change'='Appearance changed during DOM verification*';'index-change'='Appearance changed during DOM verification*';'locked-config'='Appearance changed during DOM verification*';'desktop-open'='CSSLoader Desktop is open*';'identity-change'='Shared Steam identity changed*'}[$scenario]
    Assert ($failure -like $expected -and $script:Applied -eq 0 -and $script:AlreadyDomReads -eq 2) ('Fresh match does not bypass '+$scenario+': '+$failure)
   }
   Reset-AlreadyMatched 'manual'
   $manual=Invoke-AppearanceControl 'Reconcile'
   Assert ($manual.ok -and $script:AlreadyDomReads -eq 2 -and $script:AlreadyStatusReads -eq 2 -and $script:AlreadyGetThemes -eq 3 -and $script:Applied -eq 0) 'Manual reconciliation keeps its original explicit check sequence'
+  Assert ($script:AlreadyDigestPasses -eq 0) 'Explicit reconciliation does not use the automatic no-write check'
   Assert ($script:Starts -eq 0 -and $script:Resets -eq 0) 'Assistants never start or globally reload CSS on an already matched document'
  }finally{Reset-AlreadyMatched 'finished'}
 }}
@@ -1665,6 +2253,8 @@ if($Case -eq 'OverdueSlots'){& {
 }}
 
 if($Case -eq 'ReloadFinalScope'){& {
+ $script:AppearanceContentManifestFile=Join-Path $Out 'content-index.json'
+ Copy-Item -LiteralPath (Join-Path $script:PackRoot 'manifest.json') -Destination $script:AppearanceContentManifestFile
  $primary=Join-Path $script:ThemeRoot 'primary'
  $alternate=Join-Path $script:ThemeRoot 'alternate'
  foreach($dir in @($primary,$alternate)){
@@ -1674,20 +2264,36 @@ if($Case -eq 'ReloadFinalScope'){& {
  }
  $css=Join-Path $primary 'Round/shared.css'
  $config=Join-Path $primary 'Round/config_USER.json'
+ $themeManifest=Join-Path $primary 'Round/theme.json'
  $foreign=Join-Path $primary 'Fixture Foreign'
  New-Item -ItemType Directory -Path $foreign -Force|Out-Null
  [IO.File]::WriteAllText((Join-Path $foreign 'theme.json'),'{"name":"Fixture Foreign","manifest_version":1,"inject":{}}')
  $foreignConfig=Join-Path $foreign 'config_USER.json'
  $original=[IO.File]::ReadAllBytes($css)
  $originalConfig=[IO.File]::ReadAllBytes($config)
+ $originalManifest=[IO.File]::ReadAllBytes($themeManifest)
+ $originalIndex=[IO.File]::ReadAllBytes($script:AppearanceContentManifestFile)
  $completeOriginal=${function:Complete-PresetReload}
  $statusOriginal=${function:Get-AppearanceStatus}
  $rowsOriginal=${function:Get-ThemeRows}
  $rpcOriginal=${function:Invoke-LoaderRpc}
+ $readOriginal=${function:Read-AppearanceThemeConfig}
+  $canonicalOriginal=${function:Get-AppearanceConfigValue}
+  function Get-AppearanceConfigValue($Value,[int]$Depth=0){
+   if($Depth -eq 0){$script:ReloadCanonicalCalls++}
+   & $canonicalOriginal $Value $Depth
+  }
+ function Read-AppearanceThemeConfig([string]$Path,[switch]$Manifest){
+  if($script:ReloadCheckClock -and $script:ReloadCheckClock.IsRunning){$script:ReloadDecoded++}
+  & $readOriginal @PSBoundParameters
+ }
  function Invoke-LoaderRpc([string]$Method,$Arguments=@{}){
   $reply=& $rpcOriginal $Method $Arguments
   if($Method -ceq 'reset'){
    $script:ReloadCheckClock=[Diagnostics.Stopwatch]::StartNew()
+   if($scenario -ceq 'reset-format-only'){
+    [IO.File]::WriteAllText($config,("`n"+[IO.File]::ReadAllText($config)),[Text.UTF8Encoding]::new($false))
+   }
    if($scenario -cin @('reset-resource-drift','reset-foreign-drift')){
     ($script:Rows|Where-Object name -eq 'Round').enabled=$false
     if($scenario -ceq 'reset-resource-drift'){[IO.File]::AppendAllText($css,'/* changed during reset */')}
@@ -1696,17 +2302,33 @@ if($Case -eq 'ReloadFinalScope'){& {
   }
   return $reply
  }
- function Get-ThemeRows([switch]$RevisionOnly){
-  $rows=@(& $rowsOriginal -RevisionOnly:$RevisionOnly)
-  if($script:ReloadCheckClock -and $script:ReloadCheckClock.IsRunning){$script:ReloadPlanTrace.Add(@($rows|Where-Object {$null -ne $_.renderPlan}).Count)}
+ function Get-ThemeRows([switch]$RevisionOnly,[hashtable]$AutomaticPlanMemo,[switch]$ValidateRenderOnly,[switch]$ReadOnlyProjection,[hashtable]$UnchangedConfigHashes){
+  $decodedBefore=$script:ReloadDecoded
+  $rows=@(& $rowsOriginal @PSBoundParameters)
+  if($script:ReloadCheckClock -and $script:ReloadCheckClock.IsRunning){
+   $script:ReloadPlanTrace.Add(@($rows|Where-Object {$null -ne $_.renderPlan}).Count)
+   $script:ReloadConfigTrace.Add(@($rows|Where-Object {$null -ne $_.config}).Count)
+   $script:ReloadDecodeTrace.Add($script:ReloadDecoded-$decodedBefore)
+  }
   return $rows
  }
- function Get-AppearanceStatus([string]$ExpectedCorrectionRoot='',[ref]$CapturedRows,[switch]$RevisionOnly){
+ function Get-AppearanceStatus([string]$ExpectedCorrectionRoot='',[ref]$CapturedRows,[switch]$RevisionOnly,[hashtable]$AutomaticPlanMemo){
   $status=& $statusOriginal @PSBoundParameters
-  if($scenario -ceq 'after-status-config' -and $script:ReloadCheckClock -and $script:ReloadCheckClock.IsRunning -and !$script:ReloadInjectedConfig){
-   $cfg=[IO.File]::ReadAllText($config,[Text.Encoding]::UTF8)|ConvertFrom-Json
-   $cfg.active=$false
-   Write-ThemeConfigAtomic $config ($cfg|ConvertTo-Json -Compress)
+  if($scenario -clike 'after-status-*' -and $script:ReloadCheckClock -and $script:ReloadCheckClock.IsRunning -and !$script:ReloadInjectedConfig){
+   switch -CaseSensitive ($scenario){
+    'after-status-config' {
+     $cfg=[IO.File]::ReadAllText($config,[Text.Encoding]::UTF8)|ConvertFrom-Json;$cfg.active=$false
+     Write-ThemeConfigAtomic $config ($cfg|ConvertTo-Json -Compress)
+    }
+    'after-status-format' {[IO.File]::AppendAllText($config,"`n")}
+     'after-status-reordered' {[IO.File]::WriteAllText($config,'{"Custom":{"a":null,"z":[1,false,"x"]},"Outlines":"Round","Intensity":"10px","active":true}')}
+     'after-status-options' {[IO.File]::WriteAllText($config,'{"active":true,"Intensity":"30px","Outlines":"Round"}')}
+     'after-status-too-deep' {[IO.File]::WriteAllText($config,$deepInvalid)}
+    'after-status-invalid' {[IO.File]::WriteAllText($config,'{"active":"true"}')}
+    'after-status-locked' {$script:ReloadHeldConfig=[IO.File]::Open($config,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
+    'after-status-manifest' {[IO.File]::AppendAllText($themeManifest,"`n")}
+    'after-status-index' {[IO.File]::AppendAllText($script:AppearanceContentManifestFile,"`n")}
+   }
    $script:ReloadInjectedConfig=$true
   }
   return $status
@@ -1720,20 +2342,31 @@ if($Case -eq 'ReloadFinalScope'){& {
   }
  }
  $script:Live=$true;$script:Rendered=$true;$script:MissingStyles=@()
+  $nested='{"active":true,"Intensity":"10px","Outlines":"Round","Custom":{"z":[1,false,"x"],"a":null}}'
+  $deepValid='{"active":true,"Intensity":"10px","Outlines":"Round","Custom":'+('['*63)+'0'+(']'*63)+'}'
+  $deepInvalid='{"active":true,"Intensity":"10px","Outlines":"Round","Custom":'+('['*64)+'0'+(']'*64)+'}'
  $observed=@(foreach($channel in 'automatic','manual'){
-  foreach($scenario in 'late-drift','late-target','unchanged','after-status-config','reset-resource-drift','reset-foreign-drift'){
+   foreach($scenario in 'late-drift','late-target','unchanged','reset-format-only','after-status-config','after-status-format','after-status-invalid','after-status-locked','after-status-manifest','after-status-index','reset-resource-drift','reset-foreign-drift','after-status-reordered','after-status-options','after-status-too-deep','depth-limit','depth-overflow'){
    $script:ThemeRoot=$primary
    [IO.File]::WriteAllBytes($css,$original)
    [IO.File]::WriteAllBytes($config,$originalConfig)
+    if($scenario -ceq 'after-status-reordered'){[IO.File]::WriteAllText($config,$nested)}
+    if($scenario -ceq 'depth-limit'){[IO.File]::WriteAllText($config,$deepValid)}
+    if($scenario -ceq 'depth-overflow'){[IO.File]::WriteAllText($config,$deepInvalid)}
+   [IO.File]::WriteAllBytes($themeManifest,$originalManifest)
+   [IO.File]::WriteAllBytes($script:AppearanceContentManifestFile,$originalIndex)
    [IO.File]::WriteAllText($foreignConfig,'{"active":false}')
    $owner=Read-PresetState;$owner.pendingReload=$true;Save-PresetState $owner
    $before=Get-AppearanceStatus
    $hash=Get-ConfigHash $config
    $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
    $script:Delay=@();$script:Resets=0;$script:Applied=0;$script:RenderSamples=0;$script:Starts=0;$script:AppearanceFailureCode=0
-   $script:ReloadCheckClock=$null;$script:ReloadPlanTrace=New-Object 'Collections.Generic.List[int]';$script:ReloadInjectedConfig=$false
+   $script:ReloadCheckClock=$null;$script:ReloadPlanTrace=New-Object 'Collections.Generic.List[int]';$script:ReloadConfigTrace=New-Object 'Collections.Generic.List[int]';$script:ReloadInjectedConfig=$false
+   $script:ReloadDecodeTrace=New-Object 'Collections.Generic.List[int]';$script:ReloadDecoded=0
+    $script:ReloadCanonicalCalls=0
    $result=$null;$failure=''
    try{$result=if($channel -ceq 'automatic'){Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources}else{Invoke-AppearanceControl 'Reload'}}catch{$failure=$_.Exception.Message}
+   finally{if($script:ReloadHeldConfig){$script:ReloadHeldConfig.Dispose();$script:ReloadHeldConfig=$null}}
    if($script:ReloadCheckClock){$script:ReloadCheckClock.Stop()}
    $after=Get-AppearanceStatus
    [pscustomobject]@{
@@ -1743,7 +2376,9 @@ if($Case -eq 'ReloadFinalScope'){& {
     renders=$script:RenderSamples;resets=$script:Resets;sets=$script:Applied;waits=$script:Delay.Count;starts=$script:Starts
     sameConfig=(Get-ConfigHash $config) -ceq $hash
     savedOff=($after.themes|Where-Object name -eq Round).configured -eq $false
-    afterResetPlanRows=$script:ReloadPlanTrace.ToArray();afterResetMs=$script:ReloadCheckClock.Elapsed.TotalMilliseconds
+     afterResetPlanRows=$script:ReloadPlanTrace.ToArray();afterResetParsedConfigs=$script:ReloadConfigTrace.ToArray();afterResetMs=$script:ReloadCheckClock.Elapsed.TotalMilliseconds
+     canonicalCalls=$script:ReloadCanonicalCalls;option=(Get-Content -LiteralPath $config -Raw -ErrorAction Stop|ForEach-Object {try{($_|ConvertFrom-Json).Intensity}catch{}})
+    afterResetDecodes=$script:ReloadDecodeTrace.ToArray()
     fullResultPlans=@($result.snapshot.themes|Where-Object {$_.renderPlan.contexts.MainMenu -and $_.renderPlan.contexts.QuickAccess}).Count
    }
   }
@@ -1751,25 +2386,47 @@ if($Case -eq 'ReloadFinalScope'){& {
  $observed|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'reload-final-scope.json') -Encoding UTF8
  foreach($item in $observed){
   $label=$item.channel+'/'+$item.scenario
+   if($item.scenario -ceq 'depth-overflow'){
+    Assert (!$item.ok -and $item.reason -eq 'Theme config is too deeply nested' -and $item.pending -and $item.sameConfig -and !$item.resets -and !$item.sets -and !$item.renders -and !$item.starts) ('Reject excessive nesting before sending reset: '+$label)
+    continue
+   }
   Assert ($item.resets -eq 1 -and !$item.sets -and !$item.waits -and !$item.starts) ('Only the authorized reset; no additional work: '+$label)
   if($item.scenario -cin @('reset-resource-drift','reset-foreign-drift')){
    Assert (($item.afterResetPlanRows -join ',') -ceq '0') ('Invalid preset stops after the existing first post-reset check: '+$label)
+   Assert (($item.afterResetParsedConfigs -join ',') -ceq '0') ('Fresh resource or foreign drift is still seen when managed config bytes match: '+$label)
    Assert (!$item.ok -and $item.code -eq 3 -and !$item.renders -and $item.pending -and $item.sameConfig -and $item.sameTarget) ('Known drift retains the pending marker and configuration: '+$label)
    Assert ((($item.scenario -ceq 'reset-resource-drift') -and $item.repair -and !$item.prepared) -or
        (($item.scenario -ceq 'reset-foreign-drift') -and $item.prepared -and $item.foreignCount -eq 1)) ('Original preset fault observed without altering it: '+$label)
    continue
   }
   Assert (($item.afterResetPlanRows -join ',') -ceq '0,0') ('No discarded page plans in either fresh post-reset check: '+$label)
-  if($item.scenario -cne 'after-status-config'){
+  $expectedProjection=[int]($item.scenario -ceq 'reset-format-only')
+  if($item.scenario -cin @('late-drift','late-target','unchanged','reset-format-only','after-status-config','after-status-format')){
+   $expectedLateParses=[int]($item.scenario -cin @('after-status-config','after-status-format','reset-format-only'))
+   Assert (($item.afterResetParsedConfigs -join ',') -ceq "$expectedProjection,$expectedLateParses" -and ($item.afterResetDecodes -join ',') -ceq "$($expectedProjection*2),$($expectedLateParses*2)") ('Reopen all files but decode only changed config/manifest pairs: '+$label)
+  }
+  if($item.scenario -cnotlike 'after-status-*' -and $item.scenario -cne 'reset-format-only'){
    Assert ($item.flagsMatched -and $item.sameConfig) ('Backend state and user config are retained: '+$label)
   }
   switch -CaseSensitive ($item.scenario){
    'late-drift' {Assert ($item.repair -and !$item.prepared -and $item.sameTarget -and !$item.ok -and $item.code -eq 3 -and !$item.renders) ('Reject final resource drift before DOM work: '+$label)}
    'late-target' {Assert (!$item.sameTarget -and $item.prepared -and !$item.ok -and $item.code -eq 4 -and !$item.renders) ('Reject an otherwise healthy different target: '+$label)}
-   'unchanged' {Assert ($item.ok -and $item.sameTarget -and $item.prepared -and $item.fullResultPlans -eq 7 -and $item.renders -eq [int]($item.channel -ceq 'automatic')) ('Unchanged scope retains its full confirmation path: '+$label)}
-   'after-status-config' {Assert (!$item.ok -and $item.reason -like 'Theme settings changed during reload*' -and $item.savedOff -and !$item.sameConfig -and !$item.renders) ('A later user edit survives and blocks the reload result: '+$label)}
+    {$_ -cin @('unchanged','depth-limit')} {Assert ($item.ok -and $item.sameTarget -and $item.prepared -and $item.fullResultPlans -eq 7 -and $item.renders -eq [int]($item.channel -ceq 'automatic')) ('Unchanged scope retains its full confirmation path: '+$label)}
+   'reset-format-only' {Assert ($item.ok -and !$item.sameConfig -and $item.flagsMatched -and !$item.savedOff -and !$item.pending -and $item.fullResultPlans -eq 7 -and $item.renders -eq [int]($item.channel -ceq 'automatic')) ('Different JSON bytes with the same choices retain full confirmation: '+$label)}
+   'after-status-format' {Assert ($item.ok -and !$item.sameConfig -and !$item.savedOff -and !$item.pending -and $item.fullResultPlans -eq 7) ('Formatting after the earlier snapshot remains allowed: '+$label)}
+    'after-status-reordered' {Assert ($item.ok -and !$item.sameConfig -and !$item.savedOff -and !$item.pending -and $item.fullResultPlans -eq 7) ('Nested key order is not a change to user choices: '+$label)}
+    'after-status-options' {Assert (!$item.ok -and $item.reason -like 'Theme settings changed during reload*' -and !$item.savedOff -and $item.option -ceq '30px' -and !$item.renders -and $item.pending) ('A later option change with matching flags is preserved: '+$label)}
+    'after-status-too-deep' {Assert (!$item.ok -and $item.reason -eq 'Theme config is too deeply nested' -and !$item.renders -and $item.pending) ('Deep late input remains rejected: '+$label)}
+   'after-status-config' {Assert (!$item.ok -and $item.reason -like 'Theme settings changed during reload*' -and $item.savedOff -and !$item.sameConfig -and !$item.renders -and $item.pending) ('A later user edit survives and blocks the reload result: '+$label)}
+   {$_ -cin @('after-status-invalid','after-status-locked','after-status-manifest','after-status-index')} {
+    Assert (!$item.ok -and $item.reason -like 'Theme settings changed during reload*' -and !$item.renders -and $item.pending) ('Fresh boundary rejects invalid, locked, or changed inputs before sync: '+$label)
+   }
   }
  }
+  foreach($item in $observed){
+   $expected=if($item.scenario -cin @('reset-format-only','after-status-config','after-status-format','after-status-reordered','after-status-options','after-status-too-deep')){2}else{0}
+   Assert ($item.canonicalCalls -eq $expected) ('Canonicalize only when bytes changed: '+$item.channel+'/'+$item.scenario)
+  }
 }}
 
 if($Case -eq 'InvalidSelection'){
@@ -1825,11 +2482,11 @@ if($Case -eq 'EnsureRevisionOnly'){& {
  New-Item -ItemType Directory -Path $script:ThemeRoot -Force|Out-Null
  foreach($dir in Get-ChildItem -LiteralPath (Join-Path $ComponentRoot 'steam-appearance/themes') -Directory){Copy-Item -LiteralPath $dir.FullName -Destination $script:ThemeRoot -Recurse}
  Invoke-PresetPrepare|Out-Null;Complete-PresetReload
- $script:EnsureOriginalPlan=${function:Get-AppearanceThemeRenderPlan}
+ $script:EnsureOriginalPlan=${function:Get-AppearanceTargetRenderPlan}
  $script:EnsureOriginalUpdate=${function:Invoke-OwnedPresetResourceUpdate}
  $script:EnsurePlans=0;$script:EnsureSnapshot=$null
- function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP'){
-  $script:EnsurePlans++;& $script:EnsureOriginalPlan $Name $Manifest $Config $ContentIndex $Target
+ function Get-AppearanceTargetRenderPlan($Name,$Manifest,$Config,$ContentIndex,$Target,$FileReceipts,$Defaults,[switch]$ValidateOnly){
+  $script:EnsurePlans++;& $script:EnsureOriginalPlan @PSBoundParameters
  }
  function Invoke-OwnedPresetResourceUpdate($Current){$script:EnsureSnapshot=$Current;& $script:EnsureOriginalUpdate $Current}
  function Start-AppearanceBackend {$script:Starts++;[pscustomobject]@{ok=$true;boundary='inert-launch-port'}}
@@ -1838,11 +2495,11 @@ if($Case -eq 'EnsureRevisionOnly'){& {
  $timer=[Diagnostics.Stopwatch]::StartNew();$result=Invoke-AppearanceControl 'Ensure';$timer.Stop()
  $ensurePlans=$script:EnsurePlans;$snapshot=$script:EnsureSnapshot
  [pscustomobject]@{elapsedMs=$timer.Elapsed.TotalMilliseconds;renderPlans=$ensurePlans;backendReady=$snapshot.backendReady;prepared=$snapshot.packPrepared;restorable=$snapshot.canRestore;launchPortCalls=$script:Starts}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Out 'ensure-cost.json') -Encoding UTF8
- Assert ($result.ok -and !$snapshot.backendReady -and $snapshot.packPrepared -and $snapshot.canRestore -and $script:Starts -eq 1) 'Cold Ensure retains the real owned preset checks before the inert launch port'
+ Assert ($result.ok -and !$snapshot.backendReady -and $snapshot.packPrepared -and !$snapshot.canRestore -and $script:Starts -eq 1) 'Cold Ensure checks prepared resources without claiming the deferred backup is restorable'
  Assert ($ensurePlans -eq 0 -and @($snapshot.themes|Where-Object {$null -ne $_.renderPlan}).Count -eq 0) 'Cold Ensure does not build discarded page plans'
  $script:EnsurePlans=0;$full=Invoke-AppearanceControl 'Status';$fullSnapshot=$full.snapshot
- Assert ($full.ok -and $script:EnsurePlans -eq 21 -and @($fullSnapshot.themes|Where-Object {$_.renderPlan.contexts.MainMenu -and $_.renderPlan.contexts.QuickAccess}).Count -eq 7) 'The full status still builds each SP and menu plan for independent page checks'
- Assert ($fullSnapshot.revision -ceq $snapshot.revision -and $fullSnapshot.targetId -ceq $snapshot.targetId -and $fullSnapshot.packPrepared -eq $snapshot.packPrepared) 'Ensure and full status agree on the exact settings revision, target, and preset state'
+ Assert ($full.ok -and $script:EnsurePlans -eq 7 -and (Test-FixtureThemePagePlans $fullSnapshot.themes)) 'The full status builds all 21 independent page plans in seven theme traversals'
+ Assert ($fullSnapshot.revision -ceq $snapshot.revision -and $fullSnapshot.targetId -ceq $snapshot.targetId -and $fullSnapshot.packPrepared -eq $snapshot.packPrepared -and $fullSnapshot.canRestore) 'Independent full status still verifies the backup and agrees on settings, target, and prepared resources'
  $round=Join-Path $script:ThemeRoot 'Round\config_USER.json'
  $cfg=[IO.File]::ReadAllText($round)|ConvertFrom-Json;$cfg.Intensity='unsupported-ensure-fixture-choice';Write-ThemeConfigAtomic $round ($cfg|ConvertTo-Json -Compress)
  $result=Invoke-AppearanceControl 'Ensure';$bad=Invoke-AppearanceControl 'Status'
@@ -1860,13 +2517,151 @@ if($Case -eq 'BackupStatusCost'){
  $owner=Read-PresetState;$backup=Read-PresetBackup $owner.originalBackup;$blobCount=@($backup.journal.entries|Where-Object existed).Count
  $script:PresetResourceHashes=@{} # Equal first-use resource validation for both arms.
  $handlesBefore=[Diagnostics.Process]::GetCurrentProcess().HandleCount
- $timer=[Diagnostics.Stopwatch]::StartNew();$automatic=Invoke-AutomaticAppearanceRefresh;$automaticMs=$timer.Elapsed.TotalMilliseconds;$idle=Invoke-AppearanceControl 'Idle';$timer.Stop()
+ $memo=@{}
+ $timer=[Diagnostics.Stopwatch]::StartNew();$automatic=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo;$automaticMs=$timer.Elapsed.TotalMilliseconds;$idle=Invoke-AutomaticAppearanceIdle $automatic.snapshot -AutomaticPlanMemo $memo;$timer.Stop()
  $handlesAfter=[Diagnostics.Process]::GetCurrentProcess().HandleCount
  Assert ($automatic.ok -and $idle.ok -and $idle.resident -and $script:AppearanceHelperFlags -eq 31) 'Full healthy Automatic and final Idle confirm all resident flags'
  Assert ($script:Applied -eq 0 -and $script:Resets -eq 0 -and $script:Starts -eq 0 -and $script:Delay.Count -eq 0) 'Healthy status pipeline adds no theme write/process/reset/wait'
  Assert ($blobCount -ge 14 -and @($idle.snapshot.themes|Where-Object configured).Count -eq 7) 'Cost scope includes a real populated original backup and seven enabled themes'
+ Assert (!$automatic.snapshot.canRestore -and $idle.snapshot.canRestore -and $script:RenderSamples -eq 2) 'First observation does not claim restore readiness and final Idle independently confirms the backup and page'
  [pscustomobject]@{elapsedMs=$timer.Elapsed.TotalMilliseconds;automaticMs=$automaticMs;idleMs=($timer.Elapsed.TotalMilliseconds-$automaticMs);blobCount=$blobCount;renderReads=$script:RenderSamples;handlesBefore=$handlesBefore;handlesAfter=$handlesAfter;backendFlags=31;fullAutomaticAndIdle=$true;externalIO='explicit inert Steam/CSS transport leaves'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'cost.json') -Encoding UTF8
+ $blob=Join-Path $owner.originalBackup ('files/'+(@($backup.journal.entries|Where-Object existed)[0]).blob)
+ $bytes=[IO.File]::ReadAllBytes($blob);[byte[]]$bad=$bytes.Clone();$bad[0]=$bad[0] -bxor 1
+ try{
+  $script:RenderSamples=0;$memo=@{}
+  $observed=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo
+  [IO.File]::WriteAllBytes($blob,$bad)
+  Assert ((Reject {Invoke-AutomaticAppearanceIdle $observed.snapshot -AutomaticPlanMemo $memo}) -and $script:RenderSamples -eq 1 -and $script:AppearanceFailureCode -eq 3 -and $script:AppearanceHelperFlags -ne 31) 'Final Idle refuses backup bytes changed since the preliminary page read'
+  $script:RenderSamples=0;$script:MissingStyles=@('Round');$memo=@{}
+  Assert ((Reject {Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo}) -and $script:RenderSamples -eq 1 -and !$script:Applied -and !$script:Resets -and !$script:Starts) 'Automatic correction may observe the page, but never writes with an invalid current backup'
+ }finally{[IO.File]::WriteAllBytes($blob,$bytes)}
+
+ # Cross the 2s offset during correction without a real five-slot wait.
+ # Control, status, preset and final Idle still use production code.
+ $clockLeaf='$clock=[Diagnostics.Stopwatch]::StartNew()'
+ $refresh=${function:Invoke-AutomaticAppearanceRefresh}.ToString()
+ Assert ([regex]::Matches($refresh,[regex]::Escape($clockLeaf)).Count -eq 1) 'Correction cost fixture replaces only the refresh clock'
+ Set-Item Function:Invoke-AutomaticAppearanceRefresh ([scriptblock]::Create($refresh.Replace($clockLeaf,'$clock=$script:CorrectionCostClock')))
+ $readBackup=${function:Read-PresetBackup}
+ function Read-PresetBackup([string]$Directory){
+  $script:CorrectionCostBackups++
+  & $readBackup $Directory
+ }
+ function Start-Sleep {param([int]$Milliseconds)
+  $script:Delay+=$Milliseconds
+  $script:CorrectionCostClock.Elapsed.TotalMilliseconds+=$Milliseconds
+ }
+ function Get-AppearanceRenderedStatus($Session,$Status,[hashtable]$AutomaticPlanMemo){
+  $null=Get-AppearanceDocumentPlan $Status (Get-AppearanceContentIndex) $AutomaticPlanMemo
+  $script:RenderSamples++
+  if($script:RenderSamples -eq 2){$script:CorrectionCostClock.Elapsed.TotalMilliseconds=1940}
+  if($script:RenderSamples -eq 3){$script:CorrectionCostClock.Elapsed.TotalMilliseconds=2260}
+  $script:CorrectionCostTimeline.Add([int]$script:CorrectionCostClock.Elapsed.TotalMilliseconds)
+  $script:CorrectionCostBackupTrace.Add([int]$script:CorrectionCostBackups)
+  # Alter the restore bytes after the post-write status read.
+  if($script:RenderSamples -eq 3 -and $scenario -ceq 'corrupt-backup'){[IO.File]::WriteAllBytes($blob,$bad)}
+  if($script:RenderSamples -eq 4 -and $scenario -ceq 'desktop'){$script:Editing=$true}
+  $readyAt=if($scenario -ceq 'later-style'){5}else{4}
+  $ready=$script:Applied -gt 0 -and $script:RenderSamples -ge $readyAt -and $scenario -cne 'never-ready'
+  [pscustomobject]@{checked=$true;confirmed=$ready;reason='fixture-receipts';mismatched=@(if(!$ready){'Round'})}
+ }
+ $costProcess=[Diagnostics.Process]::GetCurrentProcess()
+ try{
+  $observations=@(foreach($scenario in 'immediate-style','later-style','never-ready','corrupt-backup','desktop'){
+   $script:CorrectionCostBackups=0;$script:CorrectionCostBackupTrace=[Collections.Generic.List[int]]::new()
+   $script:CorrectionCostTimeline=[Collections.Generic.List[int]]::new()
+   $script:CorrectionCostClock=[pscustomobject]@{Elapsed=[pscustomobject]@{TotalMilliseconds=0}}
+   $script:Applied=0;$script:RenderSamples=0;$script:Delay=@();$script:Editing=$false
+   $script:AppearanceObservationOnly=$false;$script:AppearanceFailureCode=0;$script:AppearanceHelperFlags=0
+   $result=$null;$final=$null;$memo=@{}
+   $costProcess.Refresh();$cpuStart=$costProcess.TotalProcessorTime
+   $watch=[Diagnostics.Stopwatch]::StartNew()
+   $refreshTime=-1;$message=''
+   try{
+    $result=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo
+    $refreshTime=$watch.Elapsed.TotalMilliseconds
+    $final=Invoke-AutomaticAppearanceIdle $result.snapshot -AutomaticPlanMemo $memo
+   }catch{$message=$_.Exception.Message}
+   $watch.Stop();$costProcess.Refresh();$cpu=($costProcess.TotalProcessorTime-$cpuStart).TotalMilliseconds
+   [pscustomobject]@{scenario=$scenario;render=[bool]$result.ok;final=[bool]$final.ok;writes=$script:Applied;resets=$script:Resets;starts=$script:Starts;code=$script:AppearanceFailureCode;message=$message;
+    reads=$script:CorrectionCostTimeline.ToArray();backupTrace=$script:CorrectionCostBackupTrace.ToArray();backupChecks=$script:CorrectionCostBackups;backupBlobs=$blobCount;
+    waits=$script:Delay;refreshMs=$refreshTime;totalMs=$watch.Elapsed.TotalMilliseconds;cpuMs=$cpu}
+   if($scenario -ceq 'corrupt-backup'){[IO.File]::WriteAllBytes($blob,$bytes)}
+  })
+ }finally{$costProcess.Dispose();[IO.File]::WriteAllBytes($blob,$bytes);$script:Editing=$false}
+ ConvertTo-Json -InputObject $observations -Depth 6 | Set-Content -LiteralPath (Join-Path $Out 'post-correction-backup-cost.json') -Encoding UTF8
+ $instant,$later,$never,$corrupt,$editor=$observations
+ Assert (@($observations|Where-Object {$_.writes -ne 1 -or $_.resets -or $_.starts}).Count -eq 0) 'No correction retry can write twice, reset the backend or start a process'
+ Assert ($instant.final -and ($instant.reads -join ',') -ceq '0,1940,2260,2260,2260' -and !$instant.waits.Count) 'When styles arrive just after the write, the overdue check and independent final Idle confirm without waiting'
+ Assert ($later.final -and ($later.reads -join ',') -ceq '0,1940,2260,2260,7000,7000' -and ($later.waits -join ',') -ceq '4740') 'When styles arrive later, original retry offsets and independent final Idle are retained'
+ Assert (!$never.final -and $never.code -eq 6 -and ($never.reads -join ',') -ceq '0,1940,2260,2260,7000,15000,24000') 'Persistent DOM mismatch retains the last scheduled page read'
+ Assert ($instant.backupTrace[2] -gt 0 -and $instant.backupTrace[3] -eq $instant.backupTrace[2] -and $instant.backupTrace[4] -eq ($instant.backupTrace[3]+1)) 'Backup is checked at correction and final Idle, not at the immediate read-only retry'
+ Assert ($later.backupTrace[4] -eq $later.backupTrace[2] -and $later.backupTrace[5] -eq ($later.backupTrace[4]+1) -and $never.backupTrace[-1] -eq ($never.backupTrace[-2]+1)) 'Additional intermediate retries defer the backup, but the last slot still checks it'
+ Assert ($corrupt.render -and !$corrupt.final -and $corrupt.code -eq 3 -and $corrupt.reads.Count -eq 4 -and $corrupt.backupChecks -eq ($corrupt.backupTrace[-1]+1)) 'Final Idle rejects corrupted restore bytes even after an intermediate page match'
+ Assert ($editor.render -and !$editor.final -and $editor.code -eq 15 -and $editor.reads.Count -eq 4 -and $editor.backupChecks -eq $editor.backupTrace[-1]) 'Final Idle still yields immediately to CSSLoader Desktop'
 }
+
+if($Case -eq 'BundleProjection'){& {
+ $originalPack=$script:PackRoot
+ $script:PackRoot=Join-Path $Out 'pack'
+ Copy-Item -LiteralPath $originalPack -Destination $script:PackRoot -Recurse
+ $script:AppearanceContentManifestFile=Join-Path $script:PackRoot 'manifest.json'
+ $script:AppearanceContentIndex=$null;$script:AppearanceContentIndexStamp=''
+ $null=New-Item -ItemType Directory -Path $script:ThemeRoot -Force
+ foreach($dir in Get-ChildItem -LiteralPath (Join-Path $script:PackRoot 'themes') -Directory){Copy-Item -LiteralPath $dir.FullName -Destination $script:ThemeRoot -Recurse}
+ Invoke-PresetPrepare|Out-Null;Complete-PresetReload
+ function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1 -or $Processes[0].Id -ne 42){throw 'OWNED_BACKEND_FAMILY_REQUIRED'}}
+ $resource=${function:Get-PresetResourceHash}
+ function Get-PresetResourceHash([string]$Path,[string]$InvalidFileMessage='',[switch]$InstalledTarget,[ref]$Raw,[switch]$SchemaDigestOnly){
+  if($InstalledTarget){$script:ProjectionInstalled++}else{$script:ProjectionBundled++}
+  & $resource @PSBoundParameters
+ }
+ $script:Live=$true;$script:Rendered=$true;$script:KeepMissing=$false;$script:MissingStyles=@()
+ $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
+ $script:ProjectionBundled=0;$script:ProjectionInstalled=0;$memo=@{}
+ $observed=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $memo
+ $first=[pscustomobject]@{bundled=$script:ProjectionBundled;installed=$script:ProjectionInstalled}
+ $cachedAfterFirst=$memo.ContainsKey(':bundle-schema')
+ $final=Invoke-AutomaticAppearanceIdle $observed.snapshot -AutomaticPlanMemo $memo
+ $complete=[pscustomobject]@{bundled=$script:ProjectionBundled;installed=$script:ProjectionInstalled}
+ $manifestBytes=[IO.File]::ReadAllBytes($script:AppearanceContentManifestFile)
+ $manifestText=[IO.File]::ReadAllText($script:AppearanceContentManifestFile)
+ $manifest=$manifestText|ConvertFrom-Json
+ $entry=@($manifest.files|Where-Object {$_.path -ceq 'Round/shared.css'})[0]
+ $bundlePath=Join-Path (Join-Path $script:PackRoot 'themes') $entry.path
+ $installedPath=Join-Path $script:ThemeRoot $entry.path
+ $asset=[IO.File]::ReadAllBytes($bundlePath);[byte[]]$badAsset=$asset.Clone();$badAsset[0]=$badAsset[0] -bxor 1
+ $writeCount=$script:Applied
+ try{
+  # A proof may observe a healthy install with a damaged source; its final gate must fail.
+  [IO.File]::WriteAllBytes($bundlePath,$badAsset)
+  $late=$null;$lateMemo=@{}
+  try{$late=Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources -AutomaticPlanMemo $lateMemo}catch{}
+  $finalRejected=$late.ok -and (Reject {Invoke-AutomaticAppearanceIdle $late.snapshot -AutomaticPlanMemo $lateMemo}) -and $script:AppearanceFailureCode -eq 3
+  $normal=(Invoke-AppearanceControl 'Status').snapshot
+  $script:MissingStyles=@('Round')
+  $writeRejected=Reject {Invoke-AutomaticAppearanceRefresh -UpdateOwnedResources}
+  $script:MissingStyles=@()
+ }finally{[IO.File]::WriteAllBytes($bundlePath,$asset)}
+ try{
+  [IO.File]::WriteAllBytes($installedPath,$badAsset)
+  $script:ProjectionBundled=0;$script:ProjectionInstalled=0
+  $drift=(Invoke-AppearanceControl 'Status' -AutomaticReadiness -DeferObservationBackup).snapshot
+  $driftChecks=$script:ProjectionBundled
+ }finally{[IO.File]::WriteAllBytes($installedPath,$asset)}
+ try{
+  [IO.File]::WriteAllText($script:AppearanceContentManifestFile,($manifestText+"`n"),[Text.UTF8Encoding]::new($false))
+  $script:ProjectionBundled=0;$script:ProjectionInstalled=0
+  $replacement=(Invoke-AppearanceControl 'Status' -AutomaticReadiness -DeferObservationBackup).snapshot
+  $replacementChecks=$script:ProjectionBundled
+ }finally{[IO.File]::WriteAllBytes($script:AppearanceContentManifestFile,$manifestBytes)}
+ [pscustomobject]@{preliminary=$first;complete=$complete;bundledAssets=@($manifest.files).Count;firstCachedSchema=$cachedAfterFirst;finalRejected=[bool]$finalRejected;writeRejected=$writeRejected;driftChecks=$driftChecks;replacementChecks=$replacementChecks}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'bundle-projection.json') -Encoding UTF8
+ Assert ($observed.ok -and $final.ok -and $first.installed -eq 53 -and $complete.installed -eq 106) 'Preliminary and final phases still validate the currently installed resource bytes'
+ Assert (!$first.bundled -and $complete.bundled -eq @($manifest.files).Count -and !$cachedAfterFirst -and $memo.ContainsKey(':bundle-schema')) 'Only the final confirmation reads source files and publishes validated source schema'
+ Assert ($finalRejected -and $normal.packError -and $writeRejected -and $script:Applied -eq $writeCount -and !$script:Starts -and !$script:Resets) 'Damaged source never grants final success or authorizes correction, and ordinary status reports it'
+ Assert ($drift.packRepairRequired -and $driftChecks -eq @($manifest.files).Count) 'Installed drift returns to the full source admission path'
+ Assert ($replacement.packUpdateAvailable -and $replacementChecks -eq @($manifest.files).Count) 'A new manifest digest is never treated as owned and fully validates source assets'
+}}
 
 [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);selectedCase=$Case;realSteamOperations=0;realCssLaunches=0;realUserConfigWrites=0;fixtureInitialization=$script:AppearanceFixtureInitialization}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) automatic appearance Refresh consumer checks"

@@ -6,6 +6,7 @@
 #include <mutex>
 #include <new>
 #include <utility>
+#include <vector>
 #include "sleep_power_state.h"
 #include "sleep_power_observation.h"
 
@@ -13,11 +14,26 @@ namespace ymcc::sleeppower {
 // Only cancellation mirrors of the existing Native owner. This class cannot
 // change power generation/phase, permit IO, open a gate or revive an old event.
 class RevocationMirrors {
+public:
+    // One-way borrowed-event mirror. The owned duplicate survives every
+    // concurrent signal; its destruction cannot cancel the source registration.
+    class CancellationLink final {
+        HANDLE event_=nullptr;
+    public:
+        explicit CancellationLink(HANDLE owned) noexcept:event_(owned){}
+        CancellationLink(const CancellationLink&)=delete;
+        CancellationLink& operator=(const CancellationLink&)=delete;
+        ~CancellationLink(){if(event_)CloseHandle(event_);}
+        void signal() const noexcept {if(event_)SetEvent(event_);}
+    };
+private:
     struct Node {
         HANDLE event=nullptr;
         Node* previous=nullptr;
         Node* next=nullptr;
         std::atomic<bool> revoked{false};
+        std::mutex linksMutex;
+        std::vector<std::weak_ptr<CancellationLink>> links;
         explicit Node(HANDLE value) noexcept:event(value){}
         ~Node(){if(event)CloseHandle(event);}
     };
@@ -37,6 +53,11 @@ class RevocationMirrors {
         // cancellation must finish its own idempotent event signal.
         node.revoked.store(true,std::memory_order_release);
         if(node.event)SetEvent(node.event);
+        // No callback, allocation or source read. Every completed repeated
+        // cancel also finishes signaling links admitted before its traversal.
+        try{std::lock_guard<std::mutex> lock(node.linksMutex);
+            for(const auto& weak:node.links)if(auto link=weak.lock())link->signal();
+        }catch(...){/* Source remains sticky-revoked; current() still refuses. */}
     }
 public:
     class Registration {
@@ -66,6 +87,26 @@ public:
         // move/reset/destruction, callers serialize changes to this object's
         // lifetime; Native registry revocation can run concurrently.
         void cancel() noexcept {if(node_)signal(*node_);}
+        std::shared_ptr<CancellationLink> linkEvent(HANDLE borrowed) noexcept {
+            if(!node_||!state_||!borrowed||borrowed==INVALID_HANDLE_VALUE)return {};
+            HANDLE duplicate=nullptr;
+            if(!DuplicateHandle(GetCurrentProcess(),borrowed,GetCurrentProcess(),&duplicate,
+                    EVENT_MODIFY_STATE|SYNCHRONIZE,FALSE,0))return {};
+            std::shared_ptr<CancellationLink> link;
+            try{link=std::make_shared<CancellationLink>(duplicate);duplicate=nullptr;
+                std::lock_guard<std::mutex> lock(node_->linksMutex);
+                // Expired links are progress metadata, never retained handles.
+                auto& links=node_->links;
+                for(auto i=links.begin();i!=links.end();)if(i->expired())i=links.erase(i);else ++i;
+                if(cancelled()){link->signal();return link;}
+                if(links.size()>=64)return {}; // Explicit bounded borrowers per original registration.
+                links.push_back(link);
+                // Source cancel sets its sticky bit before taking linksMutex.
+                // Publication alone never gets here and cannot signal a link.
+                if(cancelled())link->signal();
+                return link;
+            }catch(...){if(duplicate)CloseHandle(duplicate);return {};}
+        }
         bool cancelled() const noexcept {
             return !state_||!node_||state_->closed.load(std::memory_order_acquire)||
                 node_->revoked.load(std::memory_order_acquire)||

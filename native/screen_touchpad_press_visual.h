@@ -24,7 +24,7 @@ inline DWORD pressGlowPixel(int x,int y,int width,int height,int padding) noexce
     const double radius=std::min(10.0,std::min(width,height)/2.0-2.0);
     const double qx=std::abs(x+.5-width/2.0)-(width/2.0-1.5-radius);
     const double qy=std::abs(y+.5-height/2.0)-(height/2.0-1.5-radius);
-    const double distance=std::hypot(std::max(qx,0.0),std::max(qy,0.0))+std::min(std::max(qx,qy),0.0)-radius;
+    const double distance=(qx>0.0 && qy>0.0?std::hypot(qx,qy):std::max(qx,qy))-radius;
     if(distance<0 || distance>=padding)return 0;
     const double fade=1-distance/padding;const DWORD a=(DWORD)std::lround(210*fade*fade);
     return (a<<24)|(a<<16)|(a<<8)|a;
@@ -40,12 +40,15 @@ inline bool buildPressFrame(const OutlineBitmap& artwork,OutlineBitmap& frame,in
     const int width=artwork.width,height=artwork.height,w=width+2*padding,h=height+2*padding;
     if(frame.dc && frame.width==w && frame.height==h)return true;
     if(!allocatePressBitmap(frame,w,h))return false;
-    for(int y=0;y<h;++y)for(int x=0;x<w;++x){
+    // The allocation has already cleared the padding. Copy each artwork row once.
+    for(int y=0;y<height;++y)
+        std::copy_n(artwork.pixels+(size_t)y*width,width,frame.pixels+(size_t)(y+padding)*w+padding);
+    if(pressed)for(int y=0;y<h;++y)for(int x=0;x<w;++x){
         const int sx=x-padding,sy=y-padding;
-        const DWORD base=sx>=0 && sy>=0 && sx<width && sy<height?artwork.pixels[(size_t)sy*width+sx]:0;
-        const DWORD glow=pressed?(circular?pressCircleGlowPixel(sx,sy,width,height,padding):pressGlowPixel(sx,sy,width,height,padding)):0;
+        const DWORD glow=circular?pressCircleGlowPixel(sx,sy,width,height,padding):pressGlowPixel(sx,sy,width,height,padding);
+        if(!glow)continue;
         // Premultiplied source-over. Border/glyph pixels retain their original shape.
-        frame.pixels[(size_t)y*w+x]=base+scalePressPixel(glow,255-(base>>24));
+        auto& base=frame.pixels[(size_t)y*w+x];base+=scalePressPixel(glow,255-(base>>24));
     }
     ++pressFrameBuilds;return true;
 }

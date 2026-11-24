@@ -122,7 +122,8 @@ export function createSleepPowerUiFixture(owner){
  const script=fs.readFileSync(viewFile,'utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1];
  const ref=value=>({value}),busy=ref(false),msg=ref(''),acBtnIdx=ref(2),dcBtnIdx=ref(2),hibSize=ref(null),hibernateOn=ref(owner.state.enabled),hibernateSupported=ref(true),confirmOff=ref(false),sleepPreferenceWarnings={};
  const refreshHibernateState=async()=>{const result=await owner.api.readHibernateState();hibernateOn.value=result.enabledKnown?result.enabled:null;return hibernateOn.value;};
- const wanted=['showSleepPreferenceResult','onPwrBtn','onHibernate','confirmHibernateOff','onHibSize'];
+ const wanted=['onPwrBtn','onHibernate','confirmHibernateOff','onHibSize'];
+ if(script.includes('function showSleepPreferenceResult('))wanted.push('showSleepPreferenceResult');
  const functions=evaluate(select(script,wanted),{busy,msg,acBtnIdx,dcBtnIdx,hibSize,hibernateOn,hibernateSupported,confirmOff,sleepPreferenceWarnings,refreshHibernateState,
   setPowerBtnIdx:owner.api.setPowerBtnIdx,getPowerBtnIdx:owner.api.getPowerBtnIdx,setHibernate:owner.api.setHibernate,setHibernateSize:owner.api.setHibernateSize,readHibernateSize:owner.api.readHibernateSize,
   captureSleepPowerWrite:owner.api.captureSleepPowerWrite,schedulePwrActivate:()=>{},nextTick:async()=>{},document:{querySelector:()=>null},focusGamepadElement:()=>{}});
@@ -155,16 +156,16 @@ export async function runSleepStaticBootPreferences(out,args=[],options={}){
     const data=clone(seed);data.sleep.staticWakeAutoScanEnabled=s.enabled;disk.writeRaw(data);r.clearSettingsCache();const before=await r.loadSettings();Object.assign(q.settings,clone(before));
     delete q.settings.sleep.staticWakeAutoScanEnabled; // Native guard status does not own this durable preference.
     const captured=await a.boot.captureBootModeSnapshot(),after=disk.read(),reopened=await disk.moduleAt('capture-reopen-'+rows.length),loaded=await reopened.repository.loadSettings();
-    rows.push({key:s.key,before,after,reopened:clone(loaded),captured:captured.sleep.config.staticWakeAutoScanEnabled,writes:[],error:null});
-    assert.equal(captured.sleep.config.staticWakeAutoScanEnabled,s.enabled,'Guard status omission must not erase durable preference '+s.key);
+    rows.push({key:s.key,before,after,reopened:clone(loaded),captured:captured.sleep??null,writes:[],error:null});
+    assert.equal(captured.sleep,undefined,'Shared sleep must not be captured '+s.key);
     assert.deepEqual(after,before);assert.equal(loaded.sleep.staticWakeAutoScanEnabled,s.enabled);continue;
    }
    const input=await r.loadSettings();Object.assign(q.settings,clone(input));
    const doc=a.model.createBootModeDocument(await a.boot.captureBootModeSnapshot());
    doc.current=s.mode;doc.boot=s.mode;doc.bootEnabled=true;
    for(const scene of Object.values(doc.scenes))delete scene.overrides.sleep;
-   const rootValue=s.kind==='ordinary'?s.enabled:!s.enabled;
-   doc.global.sleep.config.staticWakeAutoScanEnabled=!s.enabled;
+   const rootValue=!s.enabled;
+   doc.global.sleep={config:{staticWakeAutoScanEnabled:!s.enabled}};
    if(s.kind==='apply'||s.kind==='unrelated'||s.kind.startsWith('stale-')){
     if(s.mode==='global')doc.global.sleep.config.staticWakeAutoScanEnabled=s.enabled;
     else doc.scenes[s.mode].overrides.sleep={...clone(doc.global.sleep),config:{...clone(doc.global.sleep.config),staticWakeAutoScanEnabled:s.enabled}};
@@ -175,56 +176,26 @@ export async function runSleepStaticBootPreferences(out,args=[],options={}){
    data.gameProfiles={...data.gameProfiles,'C:/fixture/retain-static-game.exe':{sentinel:'dedicated-retained'}};
    disk.writeRaw(data);r.clearSettingsCache();const before=await r.loadSettings();Object.assign(q.settings,clone(before));
    const setter=evaluate(selectedSetter,{saveSettingsSection:r.saveSettingsSection});
-   const writes=[];let boundary=null;
-   q.hooks.sleepStaticWrite=async(enabled,origin)=>{
-    writes.push({enabled,origin:clone(origin)});
-    if(s.kind==='stale-input-native'||s.kind==='stale-mode-native'){
-     disk.faults.holdWrite=true;const pending=setter.setStaticWakeAutoScanEnabled(enabled,origin).then(()=>({ok:true}),error=>({error}));
-     const deadline=Date.now()+1500;while(!disk.faults.releaseWrite){assert(Date.now()<deadline,'Static preference did not reach final native boundary');await new Promise(resolve=>setImmediate(resolve));}
-     const peer=await disk.moduleAt('late-peer-'+rows.length),repo=peer.repository;await repo.loadSettings();
-     try{
-      if(s.kind==='stale-input-native'){const current=await repo.loadSettings(),cas=await repo.compareAndSwapInputSettings(current.input.revision,{gyroMotion:{gyroWeight:current.input.gyroMotion.gyroWeight+.25}},undefined,{origin:'runtime'});assert(cas.ok);}
-      else await repo.updateSettings(current=>{current.extensions.bootModes.revision++;current.extensions.bootModes.current=s.mode==='global'?'steam':'global';},{origin:'runtime'});
-      boundary=disk.read();
-     }finally{disk.faults.releaseWrite();}
-     const reply=await pending;if(reply.error)throw reply.error;return;
-    }
-    if(s.kind==='stale-input'){
-     const now=await r.loadSettings(),cas=await r.compareAndSwapInputSettings(now.input.revision,{gyroMotion:{gyroWeight:now.input.gyroMotion.gyroWeight+.25}},undefined,{origin:'runtime'});assert(cas.ok);
-    }else if(s.kind==='stale-mode')await r.updateSettings(current=>{current.extensions.bootModes.revision++;current.extensions.bootModes.current=s.mode==='global'?'steam':'global';},{origin:'runtime'});
-    else if(s.kind==='unrelated')await r.saveSettingsSection('startupDesired',{fanControl:!before.startupDesired.fanControl});
-    boundary=disk.read();await setter.setStaticWakeAutoScanEnabled(enabled,origin);
-    Object.assign(q.settings,clone(await r.loadSettings()));
-   };
-   let result,error;
+   const writes=[];
+   q.hooks.sleepStaticWrite=async(enabled,origin)=>{writes.push({enabled,origin:clone(origin)});};
+   let result;
    if(s.kind==='ordinary')await setter.setStaticWakeAutoScanEnabled(s.enabled);
-   else if(s.kind==='invalid'){
-    try{a.model.normalizeBootModeDocument(doc,doc.global);}catch(failure){error=String(failure);}
-   }else{
-    try{result=await a.boot.applyBootMode(s.mode,doc,{startup:true});}catch(failure){error=String(failure);}
+   else{
+    if(s.kind==='unrelated'){
+     await r.saveSettingsSection('startupDesired',{fanControl:!before.startupDesired.fanControl});
+     Object.assign(q.settings,clone(await r.loadSettings()));
+    }
+    result=await a.boot.applyBootMode(s.mode,doc,{startup:true});
    }
    const after=disk.read(),reopened=await disk.moduleAt('reopen-'+rows.length),loaded=await reopened.repository.loadSettings();
-   const row={key:s.key,before:clone(before),after:clone(after),reopened:clone(loaded),writes,boundary,
-    error:error??null,receipt:result?.receipt??null,activeSnapshot:result?.document.activeSnapshot.sleep??null};rows.push(row);
-   if(s.kind==='invalid'){
-    assert(error&&/staticWakeAutoScanEnabled/.test(error),'Known static sleep field must reject non-boolean values '+s.key);
-    assert.deepEqual(after,before);assert.equal(writes.length,0);
-   }else if(s.kind.startsWith('stale-')){
-    assert(error,'Late owner must invalidate old mode publication '+s.key);assert.equal(writes.length,1);
-    assert.equal(after.sleep.staticWakeAutoScanEnabled,rootValue,'Stale static preference reached disk '+s.key);
-    assert.deepEqual(after,boundary,'Late owner was overwritten '+s.key);
-   }else if(s.kind==='ordinary'){
+   rows.push({key:s.key,before:clone(before),after:clone(after),reopened:clone(loaded),writes,receipt:result?.receipt??null});
+   assert.deepEqual(writes,[],'Four modes reached the retired static wake writer '+s.key);
+   if(s.kind==='ordinary'){
     assert.equal(after.sleep.staticWakeAutoScanEnabled,s.enabled);
-    assert.equal(after.extensions.bootModes.global.sleep.config.staticWakeAutoScanEnabled,s.enabled,'Explicit ordinary choice must update saved global '+s.key);
-    assert.deepEqual(after.extensions.bootModes.scenes,before.extensions.bootModes.scenes);assert.deepEqual(after.extensions.bootModes.presets,before.extensions.bootModes.presets);
+    assert.deepEqual(after.extensions.bootModes,before.extensions.bootModes,'Shared setting modified mode data '+s.key);
    }else{
-    assert.equal(error,undefined,'Current static sleep configuration failed '+s.key);
-    const expected=s.kind==='absent'?rootValue:s.enabled;
-    assert.equal(after.sleep.staticWakeAutoScanEnabled,expected,'Saved mode static wake preference did not reach the real configuration '+s.key);
-    assert.equal(writes.length,s.kind==='absent'?0:1,'Unexpected static setting writes '+s.key);
-    if(writes.length){assert.equal(writes[0].origin.origin,'boot-mode');assert(writes[0].origin.bootContext);assert.equal(result.receipt.modules.sleep.state,'saved');}
-    assert.deepEqual(after.extensions.bootModes.global,before.extensions.bootModes.global,'Mode restore contaminated global '+s.key);
-    assert.deepEqual(after.extensions.bootModes.scenes,before.extensions.bootModes.scenes);
+    assert.equal(after.sleep.staticWakeAutoScanEnabled,rootValue,'Legacy mode changed shared sleep '+s.key);
+    assert.equal(result.document.activeSnapshot.sleep,undefined);assert.equal(result.receipt.modules.sleep,undefined);
     if(s.kind==='unrelated')assert.equal(after.startupDesired.fanControl,!before.startupDesired.fanControl,'Common fan edit was lost');
    }
    assert.equal(loaded.sleep.staticWakeAutoScanEnabled,after.sleep.staticWakeAutoScanEnabled);

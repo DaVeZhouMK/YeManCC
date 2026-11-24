@@ -32,8 +32,8 @@ export function startControllerShortcutRuntime() {
     observeCapability:allowed=>recordFanHandshake(allowed),
   });
   const ready=async(context:ShortcutExecutionContext)=>{
-    await context.verify();const power=await powerLifecycle.get();context.checkpoint();
-    if(power.generation!==context.request.powerGeneration||power.phase!=='ready'||!power.hardwareWritesAllowed)throw Error('SHORTCUT_POWER_CHANGED');
+    await context.verify();const power=await context.read(()=>powerLifecycle.get());
+    if(power.generation!==context.request.powerGeneration||power.phase!=='ready'||!power.hardwareWritesAllowed||power.notificationPending===true)throw Error('SHORTCUT_POWER_CHANGED');
   };
   const locked=async(context:ShortcutExecutionContext,run:()=>Promise<ShortcutActionOutcome>)=>{
     const release=tryAcquireQuickAction('controller-shortcut:'+context.request.actionId);
@@ -79,7 +79,7 @@ export function startControllerShortcutRuntime() {
       }),
       'fan.switchPreset':(params,context)=>locked(context,async()=>{
         if(!fanFeatureEnabled.value)throw Error('SHORTCUT_FAN_NOT_READY');
-        fanSource=await readSettingsSection('fan');context.checkpoint();
+        const source=await readSettingsSection('fan');context.checkpoint();fanSource=source;
         const presets:FanPreset[]=['soft','balanced','aggressive'];
         const current=presets.includes(fanSource.preset as FanPreset)?fanSource.preset as FanPreset:'balanced';
         const preset=params.preset==='next'?presets[(presets.indexOf(current)+1)%presets.length]:params.preset as FanPreset;
@@ -101,11 +101,11 @@ export function startControllerShortcutRuntime() {
     },
   });
   let observedPower='';
-  const stops=[on('input.shortcutAction',actions.enqueue),on('power.pending',()=>actions.invalidate()),onSharedPowerLifecycle(snapshot=>{
+  const stops=[on('input.shortcutAction',actions.enqueue),onSharedPowerLifecycle(snapshot=>{
     if(ended)return;
-    const next=JSON.stringify([snapshot.generation,snapshot.phase,snapshot.known!==false,snapshot.inputReady,snapshot.hardwareWritesAllowed]);
+    const next=JSON.stringify([snapshot.generation,snapshot.suspendSerial,snapshot.phase,snapshot.known!==false,snapshot.inputReady,snapshot.hardwareWritesAllowed,snapshot.notificationPending===true]);
     if(next===observedPower)return;
     observedPower=next;actions.invalidate();
-  })];
+  },{observeSuspendSerial:true})];
   return {stop(){ended=true;actions.stop();fanActions.stop();for(const stop of stops)stop()},idle:actions.idle};
 }

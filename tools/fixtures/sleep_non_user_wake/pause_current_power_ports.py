@@ -93,4 +93,10 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,
     for name in ['sgSleepTimeoutObservationCurrent','sgSleepTimeoutObservationHeld','sgSleepTimeoutClassificationComplete']:
         prefix+=function(name,timeout,'native/sleep_timeout_native.inc')+'\n'
     prefix+=function('sgStopResumeClassificationWait',classifier,'native/sleep_resume_classification_native.inc')+'\n'
+    purposes=list(re.finditer(r'^enum class SgDirectoryResumePurpose\s*\{[^{}]+\};',c['mask'](source),re.M))
+    if purposes:
+        assert len(purposes)==1
+        body=source[purposes[0].start():purposes[0].end()]
+        c['extracted'].append({'origin':'native/main.cpp','name':'SgDirectoryResumePurpose','sha256':c['hashlib'].sha256(body.encode()).hexdigest(),'verbatim':True})
+        prefix+='\n'+body+'\n'
     return prefix

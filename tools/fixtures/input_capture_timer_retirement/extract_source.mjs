@@ -12,11 +12,14 @@ export function freeze(repo,out){
  const interval=/^static constexpr UINT32 kInputCaptureGamepadPublishIntervalMs = 8;/m.exec(text);assert(interval);
  assert(callback.includes('std::unique_lock<std::mutex> tickLock(g_inputCaptureBusTickMx, std::try_to_lock);'));
  assert(!/tickLock\.(unlock|release)\s*\(/.test(callback),'Do not invent successful-lock early unlock');
- assert(callback.indexOf('if (event) SetEvent(event);')>callback.indexOf('std::unique_lock<std::mutex> tickLock'));
+ assert(callback.indexOf('if (wakeOwner && event) SetEvent(event);')>callback.indexOf('std::unique_lock<std::mutex> tickLock'));
+ assert(callback.indexOf('wakeOwner = inputCaptureOwnerNeedsWake();')>callback.indexOf('inputCaptureBusTick();'));
+ assert(worker.includes('multimediaTimer ? kInputCaptureOwnerIdleWaitMs : 100'));
  assert(fault.includes('inputCaptureAppend(record);')&&fault.includes('writeLog(')&&!fault.includes('g_inputCaptureStop'),'WorkerFault has no direct stop access/store');
  const killSites=[...worker.matchAll(/timeKillEvent\(captureTimerId\);/g)];assert.equal(killSites.length,4);
  const paths=[...worker.matchAll(/timeKillEvent\(captureTimerId\);[\s\S]*?std::lock_guard<std::mutex> tickLock\(g_inputCaptureBusTickMx\);[\s\S]*?inputCaptureShutdown\(\)/g)];assert.equal(paths.length,3);
- assert(worker.includes('CloseHandle(captureTimer);'));
+ assert(worker.includes('if(!CloseHandle(captureTimer))inputCaptureRetainEvent(captureTimer);'));
+ assert(worker.includes('if(multimediaTimer&&!g_captureMmTimerRetired.load(std::memory_order_acquire))inputCaptureRetainEvent(captureTimer);'));
  const entries=functions.map(({code,...e})=>e);
  const region=(symbol,code,base=0)=>{const start=text.indexOf(code,base);assert(start>=0);return {symbol,code,sha256:sha(code),startLine:text.slice(0,start).split('\n').length,startUtf8Byte:Buffer.byteLength(text.slice(0,start)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,start+code.length))};};
  const anchors=[region('timer-creation-periodic-synchronous-retirement',creation[0]),region('source-period-8ms',interval[0])];

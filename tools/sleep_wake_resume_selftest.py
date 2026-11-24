@@ -11,7 +11,7 @@ parser.add_argument('--p0-case', choices=['multi-target', 'per-nt', 'readiness',
 a = parser.parse_args(); out = a.output.resolve(); out.mkdir(parents=True, exist_ok=True)
 r = Path.cwd(); source = (r/'native/main.cpp').read_text('utf-8-sig')
 h = (r/'native/wake_game_recovery.h').read_text('utf-8')
-assert 'sgBeginWakeGameRecovery(expectedGeneration);' in source
+assert 'sgBeginWakeGameRecovery(expectedGeneration,delivery);' in source
 wake = source[source.index('static void sgRealWake('):source.index('static SgSleepMode sgPowerButtonSleepMode()')]
 user = wake[wake.index('if (strcmp(src, "resume_suspend") == 0)'):wake.index('if (!hadSleepCycle)')]
 assert 'sgResumeSleepTarget(' not in user and 'sgBeginWakeGameRecovery' in user
@@ -60,7 +60,6 @@ std::atomic<bool> g_inputReady{true},g_exitRequested{false},g_sgWakeRecoveryPend
 // Inactive fixture input; actual Kernel publication is exercised by the owned cancellation fixture.
 std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{0};
 std::atomic<DWORD> g_manualPausedPid{0};
-std::atomic<unsigned long long> g_sgExplicitGameWakeGeneration{0},g_sgExplicitGameWakePauseFence{0};
 std::mutex g_sgOpMtx,g_gameRulesMx;
 std::condition_variable g_sgWorkCv;
 enum class SgWork : uint8_t { Suspend, WakeAutomatic, WakeSuspend, WakeHibernate };
@@ -111,14 +110,26 @@ int fixtureOpenHandles=0;
 std::vector<DWORD> fixtureNtDispatches;
 ULONGLONG currentPowerGeneration(){return generation;}
 static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{0};
+static bool fixtureAdvanceSuspendOnPowerRead=false;
+static SgWorkItem fixtureWakeDelivery(ULONGLONG gen,uint64_t fence=0){
+ SgWorkItem item{SgWork::WakeSuspend,gen};
+ item.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+ item.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();
+ item.wakeManualPauseFence=fence;
+ return item;
+}
+static bool fixturePublicGameWakeAllowed=true;
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output,uint32_t size) noexcept {
  if(!output||size!=sizeof(*output)||g_exitRequested)return 0;
  *output={};output->generation=currentPowerGeneration();
  output->phase=static_cast<uint32_t>(g_powerLifecycle.load());
+ output->suspendSerial=g_sharedPowerSuspendSerial.load();
  output->observedNotificationSequence=g_sleepPowerDispatch.observedSequence();
  output->flags=ymcc::sleeppower::kKnown;
- if(output->phase==0)output->flags|=ymcc::sleeppower::kHardwareAllowed;
+ if(output->phase==0&&fixturePublicGameWakeAllowed)output->flags|=ymcc::sleeppower::kHardwareAllowed;
  if(g_sleepPowerDispatch.pendingSuspend())output->flags|=ymcc::sleeppower::kNotificationPending;
+ if(std::exchange(fixtureAdvanceSuspendOnPowerRead,false))++g_sharedPowerSuspendSerial;
  return 1;
 }
 static auto fixtureSleepRepairAdmission(){
@@ -161,8 +172,14 @@ bool sgMarkerIsSuspended(const std::wstring& d,DWORD pid){return sgReadFile(d+L"
 bool sgHasMarkerFiles(const std::wstring& d){if(markerDirectoryUnknown)return true;for(auto& f:fspath::directory_iterator(d))if(f.is_regular_file())return true;return false;}
 bool sgReadSleepTarget(SgSleepTarget& t){t=owner;return owner.pid!=0;}
 void sgClearSleepTargetIfMatches(const SgSleepTarget& t){if(owner.pid==t.pid&&owner.processCreated==t.processCreated&&owner.powerGeneration==t.powerGeneration)owner={};}
-void sgRecordFact(const char* name,json data=json::object()){facts.push_back({name,data});}
-void focusSingleResumedGame(std::vector<DWORD>,ULONGLONG,const ymcc::sleeppower::SharedPowerV1& power){
+std::string fixtureThrowWakeFact;
+unsigned fixtureWakeFactThrows=0;
+void sgRecordFact(const char* name,json data=json::object()){
+ if(fixtureThrowWakeFact==name){fixtureThrowWakeFact.clear();++fixtureWakeFactThrows;throw std::runtime_error("C387 wake diagnostic injection");}
+ facts.push_back({name,data});
+}
+void focusSingleResumedGame(std::vector<DWORD>,ULONGLONG,const ymcc::sleeppower::SharedPowerV1& power,
+ std::optional<std::uint64_t> = std::nullopt){
  assert(power.generation==generation);++focusCalls;
 }
 void ipc_emit(const char*,json){++emitCalls;}
@@ -220,13 +237,14 @@ void pass(const char* n){assert(legacyEnumerationCalls==0&&fixtureOpenHandles==0
 const json& lastFact(const char* name){for(auto i=facts.rbegin();i!=facts.rend();++i)if(i->first==name)return i->second;assert(false);return facts.back().second;}
 void reset(){
  fixtureDispatch=std::make_unique<ymcc::sleeppower::Dispatch>();
+ fixturePublicGameWakeAllowed=true;fixtureAdvanceSuspendOnPowerRead=false;g_sharedPowerSuspendSerial=0;
  for(auto& dir:{SG_SLEEP_LEASE_DIR,SG_MANUAL_DIR})for(auto& f:fspath::directory_iterator(dir)){assert(f.is_regular_file());fspath::remove(f.path());}
  fspath::remove(SG_DIR+L"\\quickapp_suspended.json");
  procs.clear();enumeration.clear();blacklist.clear();facts.clear();focusCalls=emitCalls=0;
  assert(fixtureOpenHandles==0);fixtureNtDispatches.clear();markerWritesAllowed=true;onThreadQuery={};onIdentityQuery={};onProcessOpen={};onNtResume={};onHandleIdentity={};onFileReadComplete={};
  inventoryReads=legacyEnumerationCalls=0;markerDirectoryUnknown=false;ymcc::processInventory::inventoryStatus=ymcc::processInventory::Status::Complete;
- generation=7;tick=0;error=0;retry=false;owner={};g_sgExplicitGameWakeGeneration=0;g_sgExplicitGameWakePauseFence=0;g_sgWakeRecovery={};g_sgLastGameWakeGeneration=0;
- g_sgWakeRecoveryPending=false;g_exitRequested=false;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_sgInSuspend=true;g_sgGameActuallySuspended=true;g_manualPausedPid=0;g_guardEnabled=true;g_sgPauseResume=true;
+ generation=7;tick=0;error=0;retry=false;owner={};g_sgWakeRecovery={};g_sgLastGameWakeGeneration=0;
+ g_sgWakeRecoveryPending=false;g_sgWakeRecoveryParked=false;g_exitRequested=false;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_sgInSuspend=true;g_sgGameActuallySuspended=true;g_manualPausedPid=0;g_guardEnabled=true;g_sgPauseResume=true;
 }
 void marker(DWORD pid,bool manual=false){auto& p=procs[pid];sgEnsureMarkerDir(manual?SG_MANUAL_DIR:SG_SLEEP_LEASE_DIR);auto path=(manual?SG_MANUAL_DIR:SG_SLEEP_LEASE_DIR)+L"\\"+std::to_wstring(pid)+L".txt";assert(sgWriteFileAtomic(path,"pid="+std::to_string(pid)+"|created="+std::to_string(p.created)+"|state=suspended|generation=7"));if(!manual)owner={pid,p.created,7,true,true};}
 void at(ULONGLONG ms){tick=ms;sgWakeGameRecoveryTick();}
@@ -439,6 +457,31 @@ void fixtureRunCancellationControls(const std::string& selected="all"){
   assert(procs[100].ntCalls==1&&procs[100].depth==2&&exists(100)&&owner.markerOwned&&!g_sgWakeRecoveryPending);
  }
  pass("P0 actual production drain checks cancellation before each of its eight possible NT dispatches");
+ for(const bool observedNewSleep:{false,true}){
+  reset();marker(100);procs[100].depth=3;
+  const auto original=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+  assert(sgBeginWakeGameRecovery(7));
+  onNtResume=[observedNewSleep](DWORD){
+   if(observedNewSleep){
+    assert(g_sleepPowerDispatch.callback(PBT_APMSUSPEND,1,[](const auto&){return true;},100));
+    const auto delivery=g_sleepPowerDispatch.pendingReplay();assert(delivery);
+    const auto claim=g_sleepPowerDispatch.forwarded(delivery.sequence,delivery.type,2);assert(claim);
+    g_sleepPowerDispatch.complete(claim,3);
+    assert(!g_sleepPowerDispatch.pendingSuspend());
+   }else ++g_sharedPowerSuspendSerial;
+  };
+  at(0);
+  std::cout<<"WAKE_INTERRUPTED_AFTER_FIRST_NT "<<json({{"observedNewSleep",observedNewSleep},
+      {"ntCalls",procs[100].ntCalls},{"depth",procs[100].depth},{"leaseOwned",owner.markerOwned},
+      {"pending",g_sgWakeRecoveryPending.load()},{"openHandles",fixtureOpenHandles}}).dump()<<std::endl;
+  assert(procs[100].ntCalls==1&&procs[100].depth==2&&fixtureOpenHandles==0);
+  assert(!g_sgWakeRecoveryPending&&owner.markerOwned&&sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==original);
+  tick=10;assert(sgBeginWakeGameRecovery(7));at(tick);
+  assert(procs[100].ntCalls==1&&owner.markerOwned&&!g_sgWakeRecoveryPending);
+  generation=8;tick=20;assert(sgBeginWakeGameRecovery(8));at(tick);
+  assert(procs[100].ntCalls==9&&procs[100].depth==0&&!exists(100)&&!owner.markerOwned&&fixtureOpenHandles==0);
+ }
+ pass("P0 new public sleep boundary interrupts an issued drain even after notification completes; the next generation can recover");
  }
  if(selected!="all")return;
  for(unsigned gate=0;gate<2;++gate){
@@ -708,6 +751,141 @@ int fixtureRunWakeAdmissionReplay(){
   queuedFailures+=!(resumed&&healed);
  }
  if(queuedFailures)return 25;
+ for (const bool waitForInput : {false,true}) {
+  reset();marker(100);
+  const auto originalMarker=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+  if(waitForInput)g_inputReady=false;else g_powerLifecycle=PowerLifecycle::Resuming;
+  assert(sgBeginWakeGameRecovery(7));
+  at(10000);const bool idle=sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0};
+  assert(fixtureNtDispatches.empty()&&!g_sgWakeRecoveryPending&&idle&&owner.markerOwned&&
+      sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==originalMarker);
+  marker(101,true);const auto newPause=sgReadFile(SG_MANUAL_DIR+L"\\101.txt");
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;
+  const auto beforeNotify=g_sgWorkWakeRevision;sgNotifyParkedWakeGameRecovery();assert(g_sgWorkWakeRevision==beforeNotify+1);
+  at(12500);
+  const bool continued=procs[100].calls==1&&procs[100].depth==0&&!exists(100)&&!owner.markerOwned;
+  assert(procs[101].ntCalls==0&&sgReadFile(SG_MANUAL_DIR+L"\\101.txt")==newPause&&fixtureOpenHandles==0);
+  std::cout<<"WAKE_LATE_PUBLIC_READY "<<json({{"inputGate",waitForInput},{"idleAtDeadline",idle},
+      {"oldLeaseResumed",continued},{"newManualUntouched",true}}).dump()<<std::endl;
+  if(!continued)return 26;
+ }
+ for(const bool projectedOnly : {false,true})for(const bool workerObservesFirst : {false,true}) {
+  reset();marker(100);g_powerLifecycle=PowerLifecycle::Resuming;assert(sgBeginWakeGameRecovery(7));at(10000);
+  if(projectedOnly)++g_sharedPowerSuspendSerial;
+  else {const auto later=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,11000);assert(later);g_sleepPowerDispatch.complete(later,11000);}
+  g_powerLifecycle=PowerLifecycle::Ready;tick=12500;
+  if(workerObservesFirst)at(tick);
+  assert(fixtureNtDispatches.empty()&&owner.markerOwned&&exists(100));
+  assert(sgBeginWakeGameRecovery(7));at(tick);
+  assert(procs[100].calls==1&&!exists(100)&&!owner.markerOwned&&fixtureOpenHandles==0);
+  std::cout<<"WAKE_LATE_PUBLIC_READY_NEW_BOUNDARY "<<json({{"workerFirst",workerObservesFirst},{"projectedOnly",projectedOnly},{"pass",true}}).dump()<<std::endl;
+ }
+ unsigned queuedBoundaryFailures=0;
+ for(const bool projectedOnly : {false,true})for(const bool workerObservesFirst : {false,true}) {
+  reset();marker(100);g_powerLifecycle=PowerLifecycle::Resuming;assert(sgBeginWakeGameRecovery(7));
+  const auto originalMarker=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+  const auto originalBoundary=g_sgWakeRecovery.wakeSleepSequence;
+  assert(g_sgWakeRecoveryPending&&!g_sgWakeRecoveryParked&&fixtureNtDispatches.empty());
+  auto expectedBoundary=originalBoundary;
+  if(projectedOnly)++g_sharedPowerSuspendSerial;
+  else {const auto suspend=g_sleepPowerDispatch.window(PBT_APMSUSPEND,50);assert(suspend);
+    g_sleepPowerDispatch.complete(suspend,50);expectedBoundary=suspend.sequence;}
+  const auto automatic=g_sleepPowerDispatch.window(PBT_APMRESUMEAUTOMATIC,75);assert(automatic);
+  g_sleepPowerDispatch.complete(automatic,75);g_powerLifecycle=PowerLifecycle::Ready;tick=100;
+  assert((g_sleepPowerDispatch.observedSleepBoundarySequence()==originalBoundary)==projectedOnly);
+  if(workerObservesFirst)at(tick);
+  const bool held=fixtureNtDispatches.empty()&&owner.markerOwned&&
+      sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==originalMarker;
+  const auto explicitWake=g_sleepPowerDispatch.window(PBT_APMRESUMESUSPEND,100);assert(explicitWake);
+  g_sleepPowerDispatch.complete(explicitWake,100);
+  const bool continued=sgBeginWakeGameRecovery(7)&&g_sgWakeRecovery.wakeSleepSequence==expectedBoundary;
+  at(tick);
+  const bool returned=procs[100].calls==1&&procs[100].depth==0&&!exists(100)&&!owner.markerOwned;
+  assert(fixtureOpenHandles==0);
+  std::cout<<"WAKE_QUEUED_ZERO_DISPATCH_NEW_BOUNDARY "<<json({{"workerFirst",workerObservesFirst},{"projectedOnly",projectedOnly},
+      {"heldBeforeExplicitWake",held},{"continuedOnCurrentBoundary",continued},{"originalLeaseReturned",returned}}).dump()<<std::endl;
+  queuedBoundaryFailures+=!held||!continued||!returned;
+ }
+ if(queuedBoundaryFailures)return 28;
+ for(const bool projectedOnly:{false,true}){
+  reset();marker(100);const auto old=fixtureWakeDelivery(7);
+  if(projectedOnly)++g_sharedPowerSuspendSerial;
+  else {const auto suspend=g_sleepPowerDispatch.window(PBT_APMSUSPEND,50);assert(suspend);g_sleepPowerDispatch.complete(suspend,50);}
+  assert(!sgBeginWakeGameRecovery(7,&old)&&g_sgLastGameWakeGeneration==0&&
+      !sgWakeGameRecoveryHasWork()&&fixtureNtDispatches.empty()&&exists(100)&&owner.markerOwned);
+  const auto next=fixtureWakeDelivery(7);assert(sgBeginWakeGameRecovery(7,&next));at(0);
+  assert(procs[100].calls==1&&!exists(100)&&!owner.markerOwned&&fixtureOpenHandles==0);
+  std::cout<<"WAKE_STALE_DELIVERY_REJECTED "<<json({{"projectedOnly",projectedOnly},{"successorReturnedLease",true}}).dump()<<std::endl;
+ }
+ reset();marker(100);g_powerLifecycle=PowerLifecycle::Resuming;assert(sgBeginWakeGameRecovery(7));at(10000);
+ const auto parkedSerial=g_sgWakeRecovery.wakeSuspendSerial;
+ ++g_sharedPowerSuspendSerial;g_powerLifecycle=PowerLifecycle::Ready;tick=12500;at(tick);
+ assert(g_sgWakeRecovery.waitingForNextWake&&!sgWakeGameRecoveryHasWork());
+ const auto overtaken=fixtureWakeDelivery(7);fixtureAdvanceSuspendOnPowerRead=true;
+ assert(!sgBeginWakeGameRecovery(7,&overtaken)&&!fixtureAdvanceSuspendOnPowerRead&&
+     g_sgWakeRecovery.waitingForNextWake&&!sgWakeGameRecoveryHasWork()&&
+     g_sgWakeRecovery.wakeSuspendSerial==parkedSerial&&fixtureNtDispatches.empty()&&exists(100)&&owner.markerOwned);
+ const auto fresh=fixtureWakeDelivery(7);assert(sgBeginWakeGameRecovery(7,&fresh));at(tick);
+ assert(procs[100].calls==1&&!exists(100)&&!owner.markerOwned&&fixtureOpenHandles==0);
+ std::cout<<"WAKE_CONTINUATION_OVERTAKEN {\"successorReturnedLease\":true}"<<std::endl;
+ unsigned exhaustedBoundaryFailures=0;
+ for(const bool projectedOnly:{false,true})for(const bool dispatched:{false,true}){
+  reset();marker(100);
+  const auto original=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+  assert(sgBeginWakeGameRecovery(7)&&g_sgWakeRecoveryPending);
+  if(dispatched)procs[100].sticky=true;
+  else procs[100].openError=ERROR_ACCESS_DENIED;
+  window();
+  const auto spent=fixtureNtDispatches.size();
+  assert(!sgWakeGameRecoveryHasWork()&&owner.markerOwned&&exists(100)&&fixtureOpenHandles==0&&emitCalls==1);
+  assert(lastFact("sleep-game-recovery-complete")["basis"]=="attempt-window-exhausted");
+  assert(procs[100].calls==(dispatched?WakeGameResume::attemptCount:0)&&((spent!=0)==dispatched));
+  procs[100].openError=0;procs[100].sticky=false;
+  const auto rawBefore=g_sleepPowerDispatch.observedSleepBoundarySequence();
+  const auto duplicate=g_sleepPowerDispatch.window(PBT_APMRESUMESUSPEND,11000);assert(duplicate);
+  g_sleepPowerDispatch.complete(duplicate,11000);
+  tick=11000;assert(sgBeginWakeGameRecovery(7));at(tick);
+  const bool duplicateQuiet=fixtureNtDispatches.size()==spent&&emitCalls==1&&
+    owner.markerOwned&&sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==original;
+  if(projectedOnly)++g_sharedPowerSuspendSerial;
+  else {const auto suspend=g_sleepPowerDispatch.window(PBT_APMSUSPEND,12000);assert(suspend);g_sleepPowerDispatch.complete(suspend,12000);}
+  assert((g_sleepPowerDispatch.observedSleepBoundarySequence()==rawBefore)==projectedOnly);
+  sgNotifyParkedWakeGameRecovery();at(12500);
+  const bool passiveQuiet=fixtureNtDispatches.size()==spent&&owner.markerOwned&&exists(100);
+  assert(sgBeginWakeGameRecovery(7));at(tick);
+  const bool continued=fixtureNtDispatches.size()==spent+(dispatched?0:8)&&
+    exists(100)==dispatched&&owner.markerOwned==dispatched&&procs[100].depth==(dispatched?1:0)&&
+    !sgWakeGameRecoveryHasWork()&&fixtureOpenHandles==0&&inventoryReads==0;
+  std::cout<<"WAKE_EXHAUSTED_NEW_BOUNDARY "<<json({{"projectedOnly",projectedOnly},{"dispatched",dispatched},
+    {"duplicateQuiet",duplicateQuiet},{"passiveQuiet",passiveQuiet},{"continued",continued},{"priorCalls",spent}}).dump()<<std::endl;
+  exhaustedBoundaryFailures+=!duplicateQuiet||!passiveQuiet||!continued;
+ }
+ if(exhaustedBoundaryFailures)return 29;
+  for(const bool closesAtOpen:{false,true}){
+   reset();marker(100);const auto birth=owner.processCreated;
+   const auto original=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+   assert(sgBeginWakeGameRecovery(7));
+   bool opened=false;
+   if(closesAtOpen)onProcessOpen=[&](DWORD){opened=true;fixturePublicGameWakeAllowed=false;};
+   else fixturePublicGameWakeAllowed=false;
+   at(10000);onProcessOpen={};
+   const auto earlyCalls=fixtureNtDispatches.size();
+   const bool parked=opened==closesAtOpen&&g_sgWakeRecoveryParked&&!g_sgWakeRecoveryPending&&
+       sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0}&&fixtureOpenHandles==0&&
+       owner.markerOwned&&owner.processCreated==birth&&sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==original;
+   std::cout<<"WAKE_PUBLIC_GATE_BEFORE_READY "<<json({{"closesAtOpen",closesAtOpen},
+       {"localPhaseReady",g_powerLifecycle==PowerLifecycle::Ready},{"inputReady",g_inputReady.load()},
+       {"ntCalls",earlyCalls},{"parked",parked}}).dump()<<std::endl;
+   if(earlyCalls||!parked)return 27;
+   marker(101,true);const auto laterManual=sgReadFile(SG_MANUAL_DIR+L"\\101.txt");
+   fixturePublicGameWakeAllowed=true;
+   const auto beforeNotify=g_sgWorkWakeRevision;sgNotifyParkedWakeGameRecovery();at(12500);
+   const bool healed=g_sgWorkWakeRevision==beforeNotify+1&&procs[100].calls==1&&procs[100].created==birth&&
+       procs[100].depth==0&&!owner.markerOwned&&!exists(100)&&!g_sgWakeRecoveryParked&&!g_sgWakeRecoveryPending&&
+       procs[101].ntCalls==0&&sgReadFile(SG_MANUAL_DIR+L"\\101.txt")==laterManual&&fixtureOpenHandles==0;
+   std::cout<<"WAKE_PUBLIC_GATE_AFTER_READY "<<json({{"closesAtOpen",closesAtOpen},{"healed",healed}}).dump()<<std::endl;
+   if(!healed)return 28;
+  }
  reset();marker(100);retry=true;sgBeginWakeGameRecovery(7);assert(!g_sgLastGameWakeGeneration);
  retry=false;++procs[100].created;sgBeginWakeGameRecovery(7);at(0);
  const bool reuseRefused=fixtureNtDispatches.empty()&&procs[100].depth==1&&fixtureOpenHandles==0&&
@@ -759,10 +937,10 @@ int wmain(int argc,wchar_t** argv){assert(argc==2||argc==3);SG_DIR=argv[1];asser
  reset();marker(100);sgBeginWakeGameRecovery(7);at(20000);assert(procs[100].calls==1&&!exists(100)&&!g_sgWakeRecoveryPending);pass("late scheduler still performs one terminal attempt, no endless confirmation");
  reset();marker(100);sgBeginWakeGameRecovery(7);at(1000);generation=8;sgPrepareWakeRecoveryForSleep(8);assert(!exists(100)&&!owner.markerOwned&&!g_sgWakeRecoveryPending&&procs[100].calls==1);pass("new sleep clears only confirmed-running old markers before new pause capture");
  reset();marker(100,true);procs[100].known=false;sgBeginWakeGameRecovery(7);at(0);assert(!sgPrepareWakeRecoveryForPauseUnlocked(100));at(2500);assert(procs[100].calls==1&&exists(100,true));pass("unknown state cannot report false new pause or consume new user intent");
- reset();marker(100,true);g_sgExplicitGameWakeGeneration=7;g_sgExplicitGameWakePauseFence=2;auto newManual=SG_MANUAL_DIR+L"\\100.txt";sgWriteFileAtomic(newManual,sgReadFile(newManual)+"|pauseRun=runA|pauseSerial=3");enumeration={100};sgBeginWakeGameRecovery(7);assert(g_sgWakeRecovery.entries.empty()&&procs[100].calls==0&&exists(100,true));pass("manual pause after wake EVENT but before worker snapshot is not captured or rediscovered");
+ reset();marker(100,true);auto wakeReceipt=fixtureWakeDelivery(7,2);auto newManual=SG_MANUAL_DIR+L"\\100.txt";sgWriteFileAtomic(newManual,sgReadFile(newManual)+"|pauseRun=runA|pauseSerial=3");enumeration={100};sgBeginWakeGameRecovery(7,&wakeReceipt);assert(g_sgWakeRecovery.entries.empty()&&procs[100].calls==0&&exists(100,true));pass("manual pause after wake EVENT but before worker snapshot is not captured or rediscovered");
  reset();procs[100]={};enumeration={100};sgBeginWakeGameRecovery(7);blacklist={L"game.exe"};window();assert(procs[100].calls==0&&exists(100));pass("new user blacklist vetoes previously discovered orphan before each attempt");
  reset();procs[100]={};enumeration={100};sgBeginWakeGameRecovery(7);procs[100].debug=true;window();assert(procs[100].calls==0&&exists(100));pass("debugger attached after snapshot vetoes orphan recovery");
- reset();marker(100,true);g_sgExplicitGameWakeGeneration=7;g_sgExplicitGameWakePauseFence=2;auto oldRunPath=SG_MANUAL_DIR+L"\\100.txt";sgWriteFileAtomic(oldRunPath,sgReadFile(oldRunPath)+"|pauseRun=oldRun|pauseSerial=999");sgBeginWakeGameRecovery(7);window();assert(procs[100].calls==1&&!exists(100,true));pass("previous-run manual lease does not get mistaken for a new post-wake pause");
+ reset();marker(100,true);wakeReceipt=fixtureWakeDelivery(7,2);auto oldRunPath=SG_MANUAL_DIR+L"\\100.txt";sgWriteFileAtomic(oldRunPath,sgReadFile(oldRunPath)+"|pauseRun=oldRun|pauseSerial=999");sgBeginWakeGameRecovery(7,&wakeReceipt);window();assert(procs[100].calls==1&&!exists(100,true));pass("previous-run manual lease does not get mistaken for a new post-wake pause");
  reset();marker(100);sgBeginWakeGameRecovery(7);fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");window();assert(procs[100].calls==1&&!exists(100)&&procs[100].depth==0);pass("marker lost during delayed recovery is reconstructed from captured identity");
  reset();marker(100);procs[100].known=false;sgBeginWakeGameRecovery(7);at(0);procs[100].known=true;fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");at(2500);assert(procs[100].calls==1&&!owner.markerOwned);pass("missing marker on already-running process is retired without further thaw");
  reset();marker(100);sgBeginWakeGameRecovery(7);generation=8;g_powerLifecycle=PowerLifecycle::Suspending;at(1000);assert(exists(100)&&owner.markerOwned&&procs[100].calls==0&&!g_sgWakeRecoveryPending);pass("new sleep before any success preserves the still-suspended exact lease");
@@ -785,7 +963,7 @@ int wmain(int argc,wchar_t** argv){assert(argc==2||argc==3);SG_DIR=argv[1];asser
  for(int state=0;state<3;++state){reset();marker(100);procs[100].threadTotal=state==0?0:54;procs[100].suspendedThreads=state==1?1:0;procs[100].known=state!=2;sgBeginWakeGameRecovery(7);at(0);assert(exists(100)&&owner.markerOwned&&g_sgWakeRecoveryPending);window();assert(procs[100].calls==5&&exists(100)&&!g_sgWakeRecoveryPending);}pass("empty, partly suspended and unknown/changing thread sets cannot retire accepted targets");
  reset();marker(100);sgBeginWakeGameRecovery(7);g_inputReady=false;at(0);at(2500);assert(procs[100].calls==0&&g_sgWakeRecovery.nextAttempt==0&&exists(100));g_inputReady=true;at(2501);assert(procs[100].calls==1&&!exists(100)&&!g_sgWakeRecoveryPending);pass("input Ready gates zero-offset dispatch without spending attempts while waiting");
  reset();marker(100);sgBeginWakeGameRecovery(7);g_powerLifecycle=PowerLifecycle::Resuming;at(0);at(4500);assert(procs[100].calls==0&&g_sgWakeRecovery.nextAttempt==0);g_powerLifecycle=PowerLifecycle::Ready;at(4501);assert(procs[100].calls==1&&!exists(100));pass("power Ready is required in addition to input Ready for first dispatch");
- reset();marker(100);sgBeginWakeGameRecovery(7);g_powerLifecycle=PowerLifecycle::Resuming;window();assert(procs[100].calls==0&&exists(100)&&owner.markerOwned&&!g_sgWakeRecoveryPending&&lastFact("sleep-game-recovery-complete")["pendingTargets"]==1);pass("final deadline while power is not Ready retains lease without resuming");
+ reset();marker(100);sgBeginWakeGameRecovery(7);g_powerLifecycle=PowerLifecycle::Resuming;window();assert(procs[100].calls==0&&exists(100)&&owner.markerOwned&&!g_sgWakeRecoveryPending&&lastFact("sleep-game-recovery-awaiting-ready")["targets"]==1);pass("final deadline while power is not Ready parks the original lease without resuming");
  reset();marker(100);sgBeginWakeGameRecovery(7);fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");markerWritesAllowed=false;at(0);assert(procs[100].calls==0&&owner.markerOwned&&g_sgWakeRecoveryPending&&g_sgWakeRecovery.nextAttempt==1);markerWritesAllowed=true;at(2500);assert(procs[100].calls==1&&!owner.markerOwned&&!g_sgWakeRecoveryPending);pass("failed marker rebuild spends its attempt, preserves owner and retries before any resume");
  reset();marker(100);sgBeginWakeGameRecovery(7);fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");markerWritesAllowed=false;window();assert(procs[100].calls==0&&owner.markerOwned&&!g_sgWakeRecoveryPending&&lastFact("sleep-game-recovery-complete")["pendingTargets"]==1);pass("persistent marker write failure ends within the original deadline and retains exact owner");
  reset();marker(100);sgBeginWakeGameRecovery(7);auto held=holdMarker(SG_SLEEP_LEASE_DIR+L"\\100.txt");assert(held!=INVALID_HANDLE_VALUE);at(0);assert(procs[100].calls==1&&exists(100)&&owner.markerOwned&&g_sgWakeRecoveryPending&&focusCalls==0);releaseMarker(held);at(2500);assert(procs[100].calls==2&&!exists(100)&&!owner.markerOwned&&!g_sgWakeRecoveryPending&&focusCalls==1);pass("failed marker deletion cannot retire or focus a confirmed target until a later current success");
@@ -891,6 +1069,40 @@ bool sgResumeClassificationObserved(unsigned long long){return fixtureClassifica
         replay_anchor=' if(rejections)return 23;'
         assert cpp.count(replay_anchor)==1
         cpp=cpp.replace(replay_anchor,replay_anchor+r'''
+ unsigned inventoryBoundaryFailures=0;
+ for(const bool duringInventory:{true,false}){
+ reset();
+ const auto generationBefore=static_cast<unsigned long long>(generation);
+ ymcc::sleeppower::Dispatch::Receipt during{};
+ const auto manualStatePath=SG_DIR+L"\\quickapp_suspended.json";
+ const auto inject=[&]{
+  g_sleepPowerDispatch.callback(PBT_APMSUSPEND,10,[&](const auto& receipt){during=receipt;return false;});
+ };
+ if(duringInventory)onFileReadComplete=[&](const std::wstring& path,const std::string&){
+  if(path==manualStatePath&&!during)inject();
+ };
+ const bool admittedBefore=sgBeginWakeGameRecovery(generationBefore);
+ onFileReadComplete={};
+ if(!duringInventory)inject();
+ assert(during&&g_sleepPowerDispatch.pendingSuspend());
+ assert(g_sgWakeRecovery.entries.empty()&&fixtureNtDispatches.empty()&&fixtureOpenHandles==0);
+ const auto earlyGeneration=g_sgLastGameWakeGeneration;
+ const auto delivery=g_sleepPowerDispatch.pendingReplay();
+ assert(delivery.sequence==during.sequence);
+ const auto claim=g_sleepPowerDispatch.forwarded(delivery.sequence,delivery.type,11);
+ assert(claim);
+ g_sleepPowerDispatch.complete(claim,12,ymcc::sleeppower::Dispatch::SuspendDisposition::Ignored);
+ assert(!g_sleepPowerDispatch.pendingSuspend()&&generation==generationBefore);
+ marker(100);tick=20;
+ const bool admittedAfter=sgBeginWakeGameRecovery(generationBefore);
+ at(20);
+ const bool resumed=fixtureNtDispatches==std::vector<DWORD>(8,100)&&!exists(100)&&!owner.markerOwned;
+ std::cout<<"WAKE_INVENTORY_BOUNDARY "<<json({{"duringInventory",duringInventory},{"earlyAdmitted",admittedBefore},{"earlyGeneration",earlyGeneration},
+     {"laterAdmitted",admittedAfter},{"resumed",resumed},{"ntCalls",fixtureNtDispatches.size()}}).dump()<<std::endl;
+ const bool earlyExact=duringInventory?(!admittedBefore&&earlyGeneration==0):(admittedBefore&&earlyGeneration==generationBefore);
+ if(!earlyExact||!admittedAfter||!resumed)++inventoryBoundaryFailures;
+ }
+ if(inventoryBoundaryFailures)return 61;
  reset();marker(100);procs[100].threadTotal=97;retry=true;
  const auto entryMarker=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
  sgRealWake("resume_suspend",7);at(0);
@@ -947,7 +1159,134 @@ bool sgResumeClassificationObserved(unsigned long long){return fixtureClassifica
   wrong+=earlyArms!=0;
  }
  if(wrong)return 24;
+ unsigned diagnosticFailures=0;
+ for(bool continued:{false,true}){
+  reset();fixtureWakeFactThrows=0;marker(100);
+  const auto birth=owner.processCreated;
+  if(continued){
+   assert(sgBeginWakeGameRecovery(7));retry=true;at(0);retry=false;
+   assert(g_sgWakeRecovery.waitingForNextWake&&!g_sgWakeRecoveryPending&&fixtureNtDispatches.empty());
+  }
+  const auto revision=g_sgWorkWakeRevision;
+  fixtureThrowWakeFact=continued?"sleep-game-recovery-continued":"sleep-game-recovery-queued";
+  bool accepted=false,escaped=false;
+  try { accepted=sgBeginWakeGameRecovery(7); }
+  catch(const std::runtime_error& e){assert(std::string(e.what())=="C387 wake diagnostic injection");escaped=true;}
+  assert(fixtureWakeFactThrows==1&&fixtureThrowWakeFact.empty()&&fixtureNtDispatches.empty());
+  const auto notified=g_sgWorkWakeRevision-revision;
+  assert(g_sgWakeRecoveryPending&&g_sgLastGameWakeGeneration==7&&g_sgWakeRecovery.entries.size()==1&&
+         g_sgWakeRecovery.entries.front().created==birth&&exists(100));
+  assert(sgBeginWakeGameRecovery(7));
+  const auto duplicateNotified=g_sgWorkWakeRevision-revision-notified;
+  assert(duplicateNotified==0&&fixtureNtDispatches.empty());
+  if(notified==1)at(0);
+  const bool returned=!exists(100)&&!owner.markerOwned&&!g_sgWakeRecoveryPending&&procs[100].depth==0;
+  const bool pass=accepted&&!escaped&&notified==1&&returned;
+  assert(fixtureOpenHandles==0&&inventoryReads==0&&legacyEnumerationCalls==0);
+  std::cout<<"WAKE_DIAGNOSTIC_DELIVERY "<<json({{"continued",continued},{"injections",fixtureWakeFactThrows},
+     {"accepted",accepted},{"escaped",escaped},{"workerNotifications",notified},{"duplicateNotifications",duplicateNotified},
+     {"originalLeaseReturned",returned},{"ntCalls",fixtureNtDispatches.size()},{"pass",pass}}).dump()<<std::endl;
+  diagnosticFailures+=!pass;
+ }
+ if(diagnosticFailures)return 25;
+ unsigned terminalFailures=0;
+ for(bool exhaust:{false,true})for(const char* diagnostic:{"sleep-game-recovery-progress","sleep-game-recovery-complete","sleep-game-lease-state-reconciled"}){
+  if(exhaust&&std::string(diagnostic)=="sleep-game-lease-state-reconciled")continue;
+  reset();marker(100);fixtureWakeFactThrows=0;
+  procs[100].sticky=exhaust;
+  const auto birth=owner.processCreated;
+  assert(sgBeginWakeGameRecovery(7));
+  if(exhaust)for(size_t i=0;i+1<WakeGameResume::attemptCount;++i)at(WakeGameResume::attemptOffsetsMs[i]);
+  fixtureThrowWakeFact=diagnostic;
+  bool escaped=false;
+  try{at(exhaust?WakeGameResume::attemptOffsetsMs[WakeGameResume::attemptCount-1]:0);}
+  catch(const std::runtime_error& e){assert(std::string(e.what())=="C387 wake diagnostic injection");escaped=true;}
+  assert(fixtureWakeFactThrows==1&&fixtureThrowWakeFact.empty()&&fixtureOpenHandles==0);
+  const bool ownerCorrect=exhaust?exists(100)&&owner.markerOwned&&owner.processCreated==birth:
+      !exists(100)&&!owner.markerOwned&&procs[100].depth==0&&!g_sgInSuspend&&!g_sgGameActuallySuspended;
+  const auto calls=procs[100].calls;
+  const bool settled=!g_sgWakeRecoveryPending&&sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0}&&emitCalls==1;
+  bool duplicateQuiet=false;
+  if(settled){assert(sgBeginWakeGameRecovery(7));at(tick+1);duplicateQuiet=procs[100].calls==calls&&emitCalls==1;}
+  const bool pass=!escaped&&settled&&ownerCorrect&&duplicateQuiet&&calls==(exhaust?5:1);
+  std::cout<<"WAKE_TERMINAL_DIAGNOSTIC "<<json({{"event",diagnostic},{"exhausted",exhaust},{"escaped",escaped},
+     {"settled",settled},{"ownerCorrect",ownerCorrect},{"duplicateQuiet",duplicateQuiet},{"attempts",calls},{"pass",pass}}).dump()<<std::endl;
+  terminalFailures+=!pass;
+ }
+ if(terminalFailures)return 26;
+ unsigned workerFaultFailures=0;
+ for(const std::string fault:{"zero-attempt-log","confirmed-log","cancel-log","identity","after-dispatch","steam-tick"}){
+  reset();marker(100);fixtureWakeFactThrows=0;
+  if(fault=="confirmed-log")marker(101,true);
+  const auto birth=owner.processCreated;
+  const auto original=sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt");
+  assert(sgBeginWakeGameRecovery(7));
+  if(fault=="zero-attempt-log"){
+   procs[100].openError=ERROR_ACCESS_DENIED;
+   for(size_t i=0;i+1<WakeGameResume::attemptCount;++i)at(WakeGameResume::attemptOffsetsMs[i]);
+   fixtureThrowWakeFact="sleep-game-recovery-attempt";
+  }else if(fault=="confirmed-log")fixtureThrowWakeFact="sleep-game-recovery-confirmed";
+  else if(fault=="cancel-log")fixtureThrowWakeFact="sleep-game-recovery-canceled";
+  bool injected=false;
+  const auto fail=[&](DWORD){injected=true;throw std::runtime_error("wake work injection");};
+  if(fault=="identity")onHandleIdentity=fail;
+  if(fault=="after-dispatch")onThreadQuery=fail;
+  if(fault=="steam-tick")fixtureAutoTickHook=[&]{fail(0);};
+  bool escaped=false;
+  try{
+   if(fault=="cancel-log")sgCancelWakeGameRecoveryUnlocked("fixture-explicit-cancel");
+   else fixtureRunWorkerTurn(fault=="zero-attempt-log"?WakeGameResume::attemptOffsetsMs[WakeGameResume::attemptCount-1]:0);
+  }catch(const std::runtime_error&){escaped=true;}
+  assert((injected&&fixtureWakeFactThrows==0)||(!injected&&fixtureWakeFactThrows==1&&fixtureThrowWakeFact.empty()));
+  const auto leaked=fixtureOpenHandles;
+  const bool settled=!g_sgWakeRecoveryPending&&!g_sgWakeRecoveryParked&&sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0};
+  const bool zero=fault=="zero-attempt-log"||fault=="identity";
+  const auto attempts=fixtureNtDispatches;
+  const bool initiallyCorrect=zero||fault=="cancel-log"?
+      attempts.empty()&&owner.markerOwned&&owner.processCreated==birth&&sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")==original:
+      !exists(100)&&!owner.markerOwned&&procs[100].depth==0&&
+      (fault=="confirmed-log"?(attempts.size()==16&&!exists(101,true)&&procs[101].calls==1):attempts==std::vector<DWORD>(8,100));
+  bool quiet=false,laterCorrect=false;
+  if(settled){
+   procs[100].openError=0;++tick;assert(sgBeginWakeGameRecovery(7));at(tick);
+   quiet=fixtureNtDispatches==attempts&&!g_sgWakeRecoveryPending;
+   if(fault!="cancel-log"){
+    assert(g_sleepPowerDispatch.callback(PBT_APMSUSPEND,++tick,[](const auto&){return true;},100));
+    const auto pending=g_sleepPowerDispatch.pendingReplay();assert(pending);
+    const auto claim=g_sleepPowerDispatch.forwarded(pending.sequence,pending.type,++tick);assert(claim);
+    g_sleepPowerDispatch.complete(claim,tick,ymcc::sleeppower::Dispatch::SuspendDisposition::Ignored);
+    assert(!g_sleepPowerDispatch.pendingSuspend());
+    const bool admitted=sgBeginWakeGameRecovery(7);at(tick);
+    laterCorrect=admitted&&!g_sgWakeRecoveryPending&&!owner.markerOwned&&!exists(100)&&
+        fixtureNtDispatches==(zero?std::vector<DWORD>(8,100):attempts);
+   }else laterCorrect=exists(100)&&owner.markerOwned;
+  }
+  const bool pass=!escaped&&leaked==0&&fixtureOpenHandles==0&&settled&&initiallyCorrect&&quiet&&laterCorrect&&inventoryReads==0;
+  std::cout<<"WAKE_WORKER_FAULT "<<json({{"fault",fault},{"escaped",escaped},{"leaked",leaked},{"settled",settled},
+     {"initiallyCorrect",initiallyCorrect},{"duplicateQuiet",quiet},{"laterCorrect",laterCorrect},{"pass",pass}}).dump()<<std::endl;
+  workerFaultFailures+=!pass;
+  // Let the negative control run all cases after recording the leaked handle.
+  while(fixtureOpenHandles)fakeClose(nullptr);
+ }
+ if(workerFaultFailures)return 62;
 ''')
+        worker_start=source.index('static void sgWorkLoop() {')
+        worker=source[worker_start:source.index('static void sgStartWorkThread()',worker_start)]
+        wake_head=worker[worker.index('        try {\n'):worker.index('            if (item.kind == SgWork::Suspend) {')]
+        wake_catch=worker[worker.rindex('        } catch (...) {'):worker.rindex('\n    }\n}')]
+        assert 'sgWakeGameRecoveryTick();' in wake_head and 'sgCompletePauseWork(item.generation);' in wake_catch
+        cpp=cpp.replace('int passed=0;',r'''
+static std::function<void()> fixtureAutoTickHook;
+static void sleepRecoveryAutoTick(){auto hook=std::exchange(fixtureAutoTickHook,{});if(hook)hook();}
+static void sleepRecoveryAutoGameReleased(unsigned long long){}
+static void sgCompletePauseWork(unsigned long long){assert(false);}
+static void fixtureRunWorkerTurn(ULONGLONG ms){
+ tick=ms;SgWorkItem item{};
+ do{
+'''+wake_head+wake_catch+r'''
+ }while(false);
+}
+int passed=0;''')
     cpp=cpp.replace(' std::cout<<"sleep wake recovery production-header selftest:',r"""
      reset();marker(100);sgRealWake("resume_suspend",7);assert(g_sgWakeRecoveryPending&&procs[100].calls==0);sgRealWake("resume_auto",7);sgRealWake("monitor_on",7);assert(inlineResumeCalls==0&&exists(100)&&procs[100].calls==0);window();assert(procs[100].calls==1);pass("late automatic/monitor wake after explicit dispatch cannot bypass delayed batch");
      reset();marker(100);g_sgTask={};sgRealWake("resume_auto",7);assert(inlineResumeCalls==0&&procs[100].calls==0&&exists(100)&&!g_sgWakeRecoveryPending);pass("automatic wake with lost SleepTask does not authorize inline/global thaw");
@@ -989,9 +1328,6 @@ bool sgResumeClassificationObserved(unsigned long long){return fixtureClassifica
             opening=masked_text.index('{',matches[0].start());pos=opening+1;depth=1
             while depth:depth+=(masked_text[pos]=='{')-(masked_text[pos]=='}');pos+=1
             return text[matches[0].start():pos]
-        actual_item=queue_definition(source,r'\bstruct SgWorkItem\s*\{')+';'
-        original_item='struct SgWorkItem { SgWork kind; unsigned long long generation; };'
-        assert cpp.count(original_item)==1;cpp=cpp.replace(original_item,actual_item)
         cell=queue_definition(source,r'\bstruct SgRetainedWorkDelivery\s*\{')+';'
         queue_globals=[line for line in source.splitlines() if line.startswith('static std::array<SgRetainedWorkDelivery,') or line.startswith('static unsigned long long g_sgRetainedWorkOrder=')]
         assert len(queue_globals)==2
@@ -1011,6 +1347,15 @@ bool sgResumeClassificationObserved(unsigned long long){return fixtureClassifica
      reset();marker(100);sgBeginWakeGameRecovery(7);g_inputReady=false;
      assert(sgWakeGameRecoveryWaitMs(tick)==250);tick=9990;assert(sgWakeGameRecoveryWaitMs(tick)==10);tick=10000;assert(sgWakeGameRecoveryWaitMs(tick)==0);
      g_exitRequested=true;assert(sgWakeGameRecoveryWaitMs(tick)==0);sgWakeGameRecoveryTick();assert(!g_sgWakeRecoveryPending);pass("actual readiness fallback is bounded and cancellation has no polling delay");
+     reset();marker(100);g_powerLifecycle=PowerLifecycle::Resuming;assert(sgBeginWakeGameRecovery(7));at(10000);
+     assert(g_sgWakeRecoveryParked&&sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0});
+     {std::promise<void> calculated,release;auto releaseWait=release.get_future().share();
+      workDelay=[&](ULONGLONG){calculated.set_value();releaseWait.wait();return ~ULONGLONG{0};};
+      auto waiter=std::async(std::launch::async,[]{SgWorkItem item{};std::optional<ymcc::sleeppower::SharedPowerV1> startup;return sgWaitForWork(item,startup)&&!item.generation&&!startup;});
+      calculated.get_future().wait();g_powerLifecycle=PowerLifecycle::Ready;sgNotifyParkedWakeGameRecovery();release.set_value();
+      assert(waiter.wait_for(std::chrono::seconds(2))==std::future_status::ready&&waiter.get());workDelay={};}
+     at(12500);assert(procs[100].calls==1&&!exists(100)&&!sgWakeGameRecoveryHasWork());
+     pass("late public Ready wakes the actual worker without polling or losing pre-wait delivery");
      reset();g_sgWorkStop=false;g_sgWorkQ.clear();g_sgWorkWakeRevision=0;
      {std::promise<void> calculated,release;auto releaseWait=release.get_future().share();
       workDelay=[&](ULONGLONG){calculated.set_value();releaseWait.wait();return ~ULONGLONG{0};};
@@ -1093,6 +1438,10 @@ if 'userRepairPower' in h:
      }
      pass("public manual repair revocation rejects queued work and a late process-open without retiring its lease");
 '''+footer)
+item_match=re.search(r'^struct SgWorkItem \{.*?^\};',source,re.S|re.M)
+item_stub='struct SgWorkItem { SgWork kind; unsigned long long generation; };'
+assert item_match is not None and cpp.count(item_stub)==1
+cpp=cpp.replace(item_stub,item_match[0])
 cpp_path=out/'sleep_wake_resume_native_selftest.cpp'; cpp_path.write_text(cpp,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 exe=out/'sleep_wake_resume_native_selftest.exe'; cmd=out/'run-wake-recovery-selftest.cmd'

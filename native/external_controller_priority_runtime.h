@@ -47,9 +47,12 @@ static bool externalPriorityDesired(bool quietInactive=false){
     std::string stamp;
     const bool reuseFalse=quietInactive && r.disabledPolicyKnown && r.disabledPolicyEpoch==epoch &&
         now>=r.disabledPolicyReadAt && now-r.disabledPolicyReadAt<30000;
+    using ymcc::monitorGameRules::Notice;
+    const auto notice=quietInactive?ymSettingsInactiveNotice(now):Notice::Unavailable;
+    if(reuseFalse && notice==Notice::Quiet) return false;
     bool unchanged=false;
     const auto ownership=quietInactive
-        ? ymSettingsInactiveField("input","ownership",reuseFalse?r.disabledPolicyStamp:std::string{},stamp,unchanged)
+        ? ymSettingsInactiveField("input","ownership",reuseFalse&&notice==Notice::Unavailable?r.disabledPolicyStamp:std::string{},stamp,unchanged)
         : ymSettingsField("input","ownership");
     if(unchanged)return false;
     r.disabledPolicyKnown=false;

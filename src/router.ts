@@ -77,16 +77,6 @@ export const ROUTES = [
   },
 ];
 
-// Resolve the sidebar chunks while the native spinner is up. Importing a
-// component does not mount its page or invoke its hardware/lifecycle hooks.
-let startupRoutes: Promise<void> | undefined;
-export function preloadStartupRoutes(): Promise<void> {
-  return startupRoutes ??= Promise.all(ROUTES.filter((route) => !route.hidden && !('testing' in route)).map((route) => {
-    const component = route.component;
-    return typeof component === 'function' ? (component as () => Promise<unknown>)() : Promise.resolve(component);
-  })).then(() => undefined);
-}
-
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [

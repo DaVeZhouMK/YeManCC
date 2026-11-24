@@ -1,22 +1,26 @@
 #pragma once
 
+#include "sleep_power_observation.h"
+
 // Included after main.cpp's common focus helpers. A one-shot return session
 // owns only a precise game identity and the bounded common return timer.
 // The fixture compiles this same consumer with Win32 boundaries replaced.
 struct LosslessReturnFocusState {
     FocusTargetSnapshot target;
-    unsigned long long powerGeneration = 0;
+    ymcc::sleeppower::SharedPowerV1 power;
     unsigned long long identityEpoch = 0;
     ULONGLONG started = 0, deadline = 0, nextAttempt = 0;
     unsigned attempts = 0;
     bool returning = false;
 };
 static LosslessReturnFocusState g_losslessReturnFocus; // UI thread only
+static std::uint64_t g_losslessReturnSequence = 0;
 static constexpr ULONGLONG kLosslessReturnBudgetMs = 10000;
 static constexpr unsigned kLosslessReturnMaxAttempts = 3;
 static constexpr UINT kLosslessReturnTickMs = 100;
 
 static void focusLosslessReturnCancel() {
+    ++g_losslessReturnSequence;
     g_losslessReturnArmed.store(false, std::memory_order_release);
     if (g_losslessReturnFocus.returning) {
         if (g_hwnd) KillTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID);
@@ -25,6 +29,12 @@ static void focusLosslessReturnCancel() {
         g_focusSession.returnStarted = g_focusSession.returnDeadline = 0;
     }
     g_losslessReturnFocus = {};
+}
+
+static void focusLosslessReturnYieldToTaskView() {
+    if (!g_losslessReturnFocus.returning) return;
+    focusLosslessReturnCancel();
+    g_focusSession.target = {};
 }
 
 // Called under the existing game/remembered locks, including from workers.
@@ -63,10 +73,46 @@ static bool focusLosslessLiveIdentity(const FocusTargetSnapshot& target) {
 static bool focusLosslessContextMatches() {
     return g_losslessReturnFocus.target.valid &&
         !g_exitRequested.load(std::memory_order_acquire) &&
-        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
-        currentPowerGeneration() == g_losslessReturnFocus.powerGeneration &&
         g_losslessReturnIdentityEpoch.load(std::memory_order_acquire) == g_losslessReturnFocus.identityEpoch &&
         !focusGameControlBlocked() && !focusPidIsManuallyPaused(g_losslessReturnFocus.target.pid);
+}
+
+static bool focusLosslessPowerReady(const ymcc::sleeppower::SharedPowerV1& power) noexcept {
+    return power.phase == 0 && !(power.flags & ymcc::sleeppower::kNotificationPending);
+}
+
+static bool focusLosslessPowerRetired(const ymcc::sleeppower::SharedPowerV1& power) noexcept {
+    const auto& entered = g_losslessReturnFocus.power;
+    return power.phase != 0 || power.generation > entered.generation || power.suspendSerial > entered.suspendSerial;
+}
+
+static void focusLosslessReturnRetire() {
+    if (g_losslessReturnFocus.returning) focusClearSession();
+    else focusLosslessReturnCancel();
+}
+
+static bool focusLosslessSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1& power) {
+    if (!g_losslessReturnFocus.target.valid || !ymcc::sleeppower::powerObservationKnown(power) ||
+        !focusLosslessPowerRetired(power)) return true;
+    if (!ymcc::sleeppower::powerObservationCurrent(&readSharedSystemPower, power)) return false;
+    focusLosslessReturnRetire();
+    return true;
+}
+
+static bool focusLosslessMayAct(ULONGLONG now) {
+    const auto& state = g_losslessReturnFocus;
+    if (!focusLosslessContextMatches() || (state.returning && (now < state.started || now >= state.deadline))) {
+        focusLosslessReturnRetire();
+        return false;
+    }
+    ymcc::sleeppower::SharedPowerV1 power;
+    if (!ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower, power)) return false;
+    if (focusLosslessPowerRetired(power)) {
+        (void)focusLosslessSharedPowerChanged(power);
+        return false;
+    }
+    return focusLosslessPowerReady(power) && power.generation == state.power.generation &&
+        power.suspendSerial == state.power.suspendSerial;
 }
 
 enum class LosslessReturnForeground { Game, Transient, OtherApplication };
@@ -91,18 +137,15 @@ static LosslessReturnForeground focusLosslessForeground(const FocusTargetSnapsho
 // invalidation while merely armed. It cannot fall through to the LS recall.
 static bool focusLosslessReturnTimerTick(ULONGLONG now) {
     if (!g_losslessReturnFocus.target.valid) return false;
-    if (!focusLosslessContextMatches() || !focusLosslessLiveIdentity(g_losslessReturnFocus.target)) {
-        if (g_losslessReturnFocus.returning) focusClearSession();
-        else focusLosslessReturnCancel();
-        return true;
-    }
+    const auto session = g_losslessReturnSequence;
+    if (!focusLosslessMayAct(now)) return true;
+    const bool live = focusLosslessLiveIdentity(g_losslessReturnFocus.target);
+    if (session != g_losslessReturnSequence) return true;
+    if (!live) { focusLosslessReturnRetire(); return true; }
     if (!g_losslessReturnFocus.returning) return true;
-    if (now < g_losslessReturnFocus.started || now >= g_losslessReturnFocus.deadline) {
-        focusClearSession();
-        return true;
-    }
     auto& state = g_losslessReturnFocus;
     const auto foreground = focusLosslessForeground(state.target);
+    if (session != g_losslessReturnSequence) return true;
     if (foreground == LosslessReturnForeground::OtherApplication) {
         focusClearSession();
         return true;
@@ -112,26 +155,33 @@ static bool focusLosslessReturnTimerTick(ULONGLONG now) {
 
     // Reacquire an HWND only within this exact live PID/birth/path. Neither
     // focusResolveTarget nor focusRememberedGameTarget is safe here: both rebind.
-    if (!focusIsRestorableExactWindow(state.target.hwnd, state.target.pid))
-        state.target.hwnd = focusFindWindowForPid(state.target.pid, &state.target);
+    if (!focusIsRestorableExactWindow(state.target.hwnd, state.target.pid)) {
+        const auto target = state.target;
+        const auto hwnd = focusFindWindowForPid(target.pid, &target);
+        if (session != g_losslessReturnSequence) return true;
+        state.target.hwnd = hwnd;
+    }
     if (!focusIsRestorableExactWindow(state.target.hwnd, state.target.pid)) return true;
-    if (!focusLosslessContextMatches() || !focusLosslessLiveIdentity(state.target)) {
+    if (!focusLosslessMayAct(GetTickCount64())) return true;
+    const bool stillLive = focusLosslessLiveIdentity(state.target);
+    if (session != g_losslessReturnSequence) return true;
+    if (!stillLive) {
         focusClearSession();
         return true;
     }
     const auto finalForeground = focusLosslessForeground(state.target);
+    if (session != g_losslessReturnSequence) return true;
     if (finalForeground == LosslessReturnForeground::OtherApplication) {
         focusClearSession();
         return true;
     }
     if (finalForeground == LosslessReturnForeground::Game) return true;
     const ULONGLONG requestNow = GetTickCount64();
-    if (requestNow < state.started || requestNow >= state.deadline ||
-        !focusLosslessContextMatches() ||
-        !focusIsRestorableExactWindow(state.target.hwnd, state.target.pid)) {
+    if (!focusIsRestorableExactWindow(state.target.hwnd, state.target.pid)) {
         focusClearSession();
         return true;
     }
+    if (!focusLosslessMayAct(requestNow)) return true;
     // Count actual requests, including denied SetForegroundWindow. A success
     // retains unused budget until 10s so a later LS steal can be corrected.
     ++state.attempts;
@@ -142,6 +192,9 @@ static bool focusLosslessReturnTimerTick(ULONGLONG now) {
 
 static bool focusLosslessReturnBegin(ULONGLONG now) {
     if (!g_losslessReturnFocus.target.valid) return false;
+    if (taskViewFocusHandoffPaused()) return true;
+    if (!focusLosslessMayAct(now)) return true;
+    const auto session = g_losslessReturnSequence;
     auto& state = g_losslessReturnFocus;
     if (!state.returning) {
         state.returning = true;
@@ -154,9 +207,11 @@ static bool focusLosslessReturnBegin(ULONGLONG now) {
     g_focusSession.returnStarted = state.started;
     g_focusSession.returnDeadline = state.deadline;
     focusReleaseOwnedTopmost();
+    if (session != g_losslessReturnSequence) return true;
     hideWindowAnimated(g_hwnd);
+    if (session != g_losslessReturnSequence) return true;
     focusLosslessReturnTimerTick(now);
-    if (g_losslessReturnFocus.returning &&
+    if (session == g_losslessReturnSequence && g_losslessReturnFocus.returning &&
         !SetTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID, kLosslessReturnTickMs, nullptr))
         focusClearSession();
     return true;
@@ -222,26 +277,36 @@ static json focusLosslessReturnTarget(const json& args) {
         else focusLosslessReturnCancel();
         return {{"ok", true}, {"enabled", false}};
     }
-    const auto generation = currentPowerGeneration();
-    if (g_exitRequested.load(std::memory_order_acquire) ||
-        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
+    ymcc::sleeppower::SharedPowerV1 power;
+    if (!ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower, power) || !focusLosslessPowerReady(power) ||
         focusGameControlBlocked() || focusPidIsManuallyPaused(requested.pid) ||
         !focusLosslessLiveIdentity(requested))
         return {{"ok", false}, {"reason", "game-identity-unavailable"}};
     // The worker publishes only the current selection. Never wait on its game
     // enumeration mutex from the UI thread, and never run detection here.
-    std::lock_guard<std::mutex> focusLock(g_rememberedGameTargetMx);
-    if (!focusLosslessSameIdentity(requested, g_rememberedGameTarget) ||
-        GetTickCount64() > g_rememberedGameDeadline ||
-        generation != currentPowerGeneration() ||
-        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
+    FocusTargetSnapshot remembered;
+    unsigned long long epoch;
+    {
+        std::lock_guard<std::mutex> focusLock(g_rememberedGameTargetMx);
+        if (!focusLosslessSameIdentity(requested, g_rememberedGameTarget) || GetTickCount64() > g_rememberedGameDeadline)
+            return {{"ok", false}, {"reason", "game-not-currently-identified"}};
+        remembered = g_rememberedGameTarget;
+        epoch = g_losslessReturnIdentityEpoch.load(std::memory_order_acquire);
+    }
+    if (!ymcc::sleeppower::powerObservationCurrent(&readSharedSystemPower, power) ||
+        !focusIsolationSharedPowerChanged(power) ||
         g_exitRequested.load(std::memory_order_acquire))
         return {{"ok", false}, {"reason", "game-not-currently-identified"}};
     if (g_focusSession.returning) focusClearSession();
     else focusLosslessReturnCancel();
-    g_losslessReturnFocus.target = g_rememberedGameTarget;
-    g_losslessReturnFocus.powerGeneration = generation;
-    g_losslessReturnFocus.identityEpoch = g_losslessReturnIdentityEpoch.load(std::memory_order_acquire);
+    std::lock_guard<std::mutex> focusLock(g_rememberedGameTargetMx);
+    if (epoch != g_losslessReturnIdentityEpoch.load(std::memory_order_acquire) ||
+        !focusLosslessSameIdentity(remembered, g_rememberedGameTarget) || GetTickCount64() > g_rememberedGameDeadline ||
+        !ymcc::sleeppower::powerObservationCurrent(&readSharedSystemPower, power))
+        return {{"ok", false}, {"reason", "game-not-currently-identified"}};
+    g_losslessReturnFocus.target = std::move(remembered);
+    g_losslessReturnFocus.power = power;
+    g_losslessReturnFocus.identityEpoch = epoch;
     g_losslessReturnArmed.store(true, std::memory_order_release);
     return {{"ok", true}, {"enabled", true}, {"pid", requested.pid},
         {"processCreated", std::to_string(requested.processCreated)},

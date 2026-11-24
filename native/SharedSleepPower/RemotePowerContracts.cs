@@ -6,7 +6,7 @@ namespace YeManCC.SharedSleepPower;
 
 // Candidate contract paired with native/sleep_power_remote_contract.h.
 // This file supplies no provider, power source, timer, or permissive fallback.
-public enum RemotePowerPurpose : uint { Observation=1, FanResume=2, FanWrite=3 }
+public enum RemotePowerPurpose : uint { Observation=1, FanResume=2, FanWrite=3, InputLifecycle=4, InputFrame=5 }
 
 [StructLayout(LayoutKind.Sequential, Pack=8)]
 public struct RemotePowerKey128 { public ulong Low,High; }
@@ -40,14 +40,14 @@ public struct RemotePowerDescriptorV1
 
 public enum RemotePowerSettlementOutcome : uint
 {
-    Unknown=0, Returned=1, RetainedResources=2
+    Unknown=0, Returned=1, RetainedResources=2, InputOperationReturned=3
 }
 
 [Flags]
 public enum RemotePowerSettlementFlags : uint
 {
     None=0, WorkerStopped=1, BorrowersReturned=2, OwnedOccupancyLeaseSettled=4,
-    NoOutstandingDeviceCall=8, OwnedSdkResourcesReturned=16, AllReturned=31
+    NoOutstandingDeviceCall=8, OwnedSdkResourcesReturned=16, AllReturned=31, InputOperationFinished=BorrowersReturned|NoOutstandingDeviceCall
 }
 
 [StructLayout(LayoutKind.Sequential, Pack=8)]

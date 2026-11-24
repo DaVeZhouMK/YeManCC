@@ -277,7 +277,7 @@ runs:
     shell: pwsh
     run: |
       # Formal Git releases default to fast mode; complete fixtures run separately on request.
-      & tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
+      & tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease -ExpectedVersion ($env:YMCC_RELEASE_TAG.Substring(1)) -ExpectedCommit $env:YMCC_RELEASE_COMMIT
       if ($LASTEXITCODE -ne 0) { throw 'Fast release build/package failed.' }
   - name: Verify release outputs
     if: ${{ inputs.check-only != 'true' }}

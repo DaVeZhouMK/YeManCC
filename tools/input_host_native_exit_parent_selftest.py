@@ -12,7 +12,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FIX=ROOT/'tools/fixtures/input_host_native_exit_parent'
 DEFAULT_SCENARIOS=('healthy-ordinary','unprotected-uncooperative','protected-primary-pipe','capture-nonproducer-debt','capture-worker-retained','capture-timer-retained','capture-generation-mismatch','capture-stop-exception','busy-host-budget','permanent-close-budget','busy-pipe-independent-force')
-SCENARIOS=DEFAULT_SCENARIOS+('coordinator-observer-close',)
+SHUTDOWN_ORDER_SCENARIOS=('shutdown-rejected-readback','shutdown-late-retire-control')
+SCENARIOS=DEFAULT_SCENARIOS+('coordinator-observer-close',)+SHUTDOWN_ORDER_SCENARIOS
 PROCESS=ROOT/'tools/input_host_process_retirement_selftest.py'
 FIXED_BUILD_FILES=('tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json',
                    'tools/ymcc_sim/global/controller-host-exit/tool-profile.json','tools/input_host_exit_build_inputs.py')
@@ -30,13 +31,39 @@ def load_fixed_native_build(snapshot,inputs,run):
     spec=importlib.util.spec_from_file_location('host_exit_fixed_native_build',module_file)
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     return module.FixedNativeBuild(source,run)
-def function(text,name):
-    return process.block(text,r'^static[^\n;{}]*\b'+name+r'\s*\([^;{}]*\)\s*(?:noexcept\s*)?\{')
+def function(text,name,*,masked=None):
+    return process.block(text,r'^static[^\n;{}]*\b'+name+r'\s*\([^;{}]*\)\s*(?:noexcept\s*)?\{',masked=masked)
 def declaration(text,name):
     matches=list(re.finditer(r'^static[^\n;{}]*\b'+name+r'\b[^\n;]*;',text,re.M))
     need(len(matches)==1,'Actual unique global '+name)
     value=matches[0].group()
     return {'text':value,'line':text.count('\n',0,matches[0].start())+1,'sha256':sha(value.encode())}
+def main_fragment_continuity(bound_main,current_main,bindings):
+    text=current_main.decode('utf-8-sig')
+    masked=None
+    continuity={}
+    for name,bound in bindings.items():
+        if bound.get('file')!='native/main.cpp':continue
+        if name.startswith('global.'):current=declaration(text,name[7:])
+        else:
+            if masked is None:masked=helper.mask_cpp(text)
+            if bound.get('bindingKind')=='type':current=process.block(text,r'^struct '+re.escape(bound['text'].split()[1])+r'\b[^\n{]*\{',masked=masked)
+            elif bound.get('bindingKind')=='template':current=process.block(text,r'^template\s*<\s*(?:class|typename)\s+Build\s*>\s*static void '+name+r'\(',masked=masked)
+            else:current=function(text,name,masked=masked)
+        continuity[name]={'boundSha256':bound['sha256'],'currentSha256':current['sha256'],'identical':bound['text']==current['text']}
+    return {'boundMainSha256':sha(bound_main),'currentMainSha256':sha(current_main),'wholeMainIdentical':bound_main==current_main,'bindings':continuity}
+def late_retirement_control(stop):
+    eol='\r\n' if '\r\n' in stop else '\n'
+    definition='static void inputHostStopLocked('
+    early=eol.join(('    if (!shutdownAck) {','        if (g_inputHostServerPipe) {',''))
+    after=eol.join(('    if (g_inputHostProcess) {','        // '))
+    need(stop.count(definition)==1 and stop.count(early)==1,'Shutdown retirement anchors')
+    first=stop.index(early);closing=eol+'    }'+eol;end=stop.index(closing,first)+len(closing)
+    readback=stop.index('hidHideCaptureVisibilitySnapshot(releaseSnap)',end)
+    wait=stop.index(after,readback)
+    need(stop.count('hidHideCaptureVisibilitySnapshot(releaseSnap)')==1 and '"input-host-release-visibility"' in stop[readback:wait],'Shutdown readback precedes wait control')
+    return (stop[:first]+stop[end:wait]+stop[first:end]+stop[wait:]).replace(definition,'static void fixtureStopLockedLateRetire(',1)
+
 def observer_function(text):
     # The original signature has a {} default argument before its body.
     masked=helper.mask_cpp(text)
@@ -113,6 +140,10 @@ def main():
     parser.add_argument('--coordinator-observer-reference',type=Path,help='Frozen original pipe_cases.inc only for the isolated coordinator-observer-close negative; never changes product')
     args=parser.parse_args()
     observerOnly=args.scenarios==['coordinator-observer-close']
+    shutdownOrder=any(name in SHUTDOWN_ORDER_SCENARIOS for name in args.scenarios)
+    need(not shutdownOrder or not args.build_only and not args.exit_owner_reference and not args.coordinator_observer_reference and
+      set(args.scenarios)==set((*SHUTDOWN_ORDER_SCENARIOS,'healthy-ordinary','unprotected-uncooperative')) and len(args.scenarios)==4,
+      'Shutdown ordering requires the exact original/declined/late control set')
     need(not args.managed_retained_child or args.scenarios==['unprotected-uncooperative'] and not args.exit_owner_reference and not args.coordinator_observer_reference,'Managed handoff requires the exact existing unprotected scenario and current product owner')
     managedFile=args.managed_retained_child.resolve() if args.managed_retained_child else None
     need(not args.managed_toolchain_root or managedFile,'Managed toolchain override requires the actual prepared managed child')
@@ -160,6 +191,14 @@ def main():
         bindings['partialStartCleanup']={'file':'native/virtual_controller_queued_start_runtime.h',**partialScope}
         for name in ('inputHostStopRestoresVisibilityWithoutProof','inputHostStopHoldsPhysicalVisibility','inputHostOwnedCleanupProvenLocked','inputHostDisabledCleanupProvenLocked','inputHostStopLocked','inputHostStop'):
             bindings[name]={'file':'native/virtual_controller_stop_runtime.h',**function(stopText,name)}
+        visibility=''
+        if shutdownOrder:
+            names=('hidHideParseVisibilitySnapshotDetail','hidHideCaptureVisibilitySnapshotViaPipe','hidHideCaptureVisibilitySnapshot')
+            masked=helper.mask_cpp(mainText)
+            snap=process.block(mainText,r'^struct HidHideVisibilitySnapshot\s*\{',masked=masked)
+            bindings['fixture.visibilitySnapshotType']={'file':'native/main.cpp','bindingKind':'type',**snap}
+            for name in names:bindings[name]={'file':'native/main.cpp',**function(mainText,name,masked=masked)}
+            visibility='\n'.join(bindings[name]['text'] for name in names)
         hostNames=('g_inputHostCreatedIdentity','g_inputHostExitForceSpent','g_inputHostUnadoptedPipe','g_inputHostProcess','g_inputHostPrimaryThread','g_inputHostServerPipe','g_inputHostRunId','g_inputHostEpoch','g_exitSessionId','g_inputHostFrameReplyBinding','g_inputHostFaultHoldsStart')
         exitNames=('g_hwnd','g_summonQuit','g_autoCloseThread','g_exitRequested','g_exitReadyPosted','g_exitCode','g_exitCleanupThread','g_exitCleanupCompleted','g_exitCleanupStage',
           'g_exitBeginTick','g_exitCleanupWorkerFailureReported','g_recoveryExitEvent','g_captureExitReleased','g_inputHostExitFence','g_captureExitProducerReturned','g_captureExitProducerGeneration','g_inputCaptureStop','g_captureGeneration','g_captureMmTimerRetired')
@@ -224,6 +263,21 @@ def main():
         production+='\n#include "input_host_exit_owner_runtime.h"\n'
         production+='\n'.join(bindings[name]['text'] for name in ('postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureBeginExitOwner','inputCaptureEnsureExitOwner'))
         template=inputs[FIX/'suite.cpp.in'].decode('utf-8-sig')
+        if shutdownOrder:
+            stop=bindings['inputHostStopLocked']['text'];late=late_retirement_control(stop)
+            actual=stop.replace('static void inputHostStopLocked(','static void fixtureStopLockedCurrent(',1)
+            need(production.count(stop)==1,'Unique Stop definition in the directed consumer')
+            production=production.replace(stop,'static void inputHostStopLocked(const char* reason);\n'+actual+'\n'+late+'''
+static void inputHostStopLocked(const char* reason){
+    fixtureEnteredStop=true;
+    if(fixtureLateRetire)fixtureStopLockedLateRetire(reason);
+    else fixtureStopLockedCurrent(reason);
+}''',1)
+            template='#define YMCC_EXIT_SHUTDOWN_ORDER 1\n'+template
+            receipt['shutdownOrderingScope']={'port':'application rejection only; no real wire failure','explicitOnly':True,
+              'actualStopSha256':sha(stop.encode()),'lateRetireVariantSha256':sha(late.encode()),'lateRetireExpectedQueries':1,'peerEofAcceptance':False}
+        for marker,value in [('@@VISIBILITY_TYPE@@',bindings['fixture.visibilitySnapshotType']['text']+';' if shutdownOrder else ''),('@@VISIBILITY_FUNCTIONS@@',visibility)]:
+            need(template.count(marker)==1,'Fixture marker '+marker);template=template.replace(marker,value)
         for marker,value in [('@@EXIT_GLOBALS@@','\n'.join([*(bindings['global.'+name]['text'] for name in exitNames),quarantineType['text']+';',wakeType['text']+';',*(bindings['global.'+name]['text'] for name in extraNames)])),('@@TRANSPORT_REASON@@',transportReason['text']+';'),('@@PRODUCTION@@',production),('@@PRIVATE_CHILD@@',child),('@@COORDINATOR_OBSERVER_CONSUMER@@',observer['text'])]:
             need(template.count(marker)==1,'Fixture marker '+marker);template=template.replace(marker,value)
         fixture=out/'fixture.cpp';fixture.write_bytes(template.encode())
@@ -286,18 +340,11 @@ def main():
             receipt['profiles'].append({'name':profile,'binarySha256':sha(exe.read_bytes()),'scenarios':scenarios})
         if managed:
             verify_managed_inputs(managedPins);receipt['managedChild']['inputsStable']=True
-        receipt['wholeMainIdentical']=inputs[ROOT/'native/main.cpp']==(ROOT/'native/main.cpp').read_bytes()
-        continuity={}
-        for name,bound in bindings.items():
-            if bound.get('file')!='native/main.cpp':continue
-            text=(ROOT/'native/main.cpp').read_bytes().decode('utf-8-sig')
-            if name.startswith('global.'):current=declaration(text,name[7:])
-            elif bound.get('bindingKind')=='type':current=process.block(text,r'^struct '+re.escape(bound['text'].split()[1])+r'[^\n{]*\{')
-            elif bound.get('bindingKind')=='template':current=process.block(text,r'^template\s*<\s*(?:class|typename)\s+Build\s*>\s*static void '+name+r'\(')
-            else:current=function(text,name)
-            continuity[name]={'boundSha256':bound['sha256'],'currentSha256':current['sha256'],'identical':bound['text']==current['text']}
-        save(out/'main-fragment-continuity.json',{'boundMainSha256':receipt['mainSha256'],'currentMainSha256':sha((ROOT/'native/main.cpp').read_bytes()),'wholeMainIdentical':receipt['wholeMainIdentical'],'bindings':continuity})
-        receipt['boundMainFragmentsStable']=all(v['identical'] for v in continuity.values())
+        main_path=ROOT/'native/main.cpp'
+        continuity=main_fragment_continuity(inputs[main_path],main_path.read_bytes(),bindings)
+        save(out/'main-fragment-continuity.json',continuity)
+        receipt['wholeMainIdentical']=continuity['wholeMainIdentical']
+        receipt['boundMainFragmentsStable']=all(v['identical'] for v in continuity['bindings'].values())
         receipt['sourceStable']=all(path.read_bytes()==data for path,data in inputs.items() if path!=ROOT/'native/main.cpp')
         need(receipt['sourceStable'] and receipt['boundMainFragmentsStable'],'Bound product/test inputs drifted during execution; see continuity receipt')
         if args.build_only:
@@ -310,6 +357,9 @@ def main():
         if observerOnly:
             receipt['coordinatorObserverRegressionVerified']=True
             receipt['scope']='Actual original fixture fullPipeChildOutcome only. Real private pre-exited process HANDLE, protected CloseHandle refusal, exact-owner retention and same-owner successful retry. Other native exit functions compiled but not executed; controller/managed/full coordinator/device release not accepted.'
+        if shutdownOrder:
+            receipt['status']='ACTUAL_NATIVE_EXIT_SHUTDOWN_ORDER_DIRECTED_SCOPED_PASS'
+            receipt['scope']='Explicit four-case selection. Actual Stop and visibility selector with in-memory request and CLI ports. Same-build late-retirement negative. Real private process/primary and local runtime-handle return; no peer EOF, installed Host, device or full exit acceptance.'
     except Exception as exc:
         receipt['error']=str(exc);save(out/'RESULT.json',receipt);raise
     save(out/'RESULT.json',receipt)

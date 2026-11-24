@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <string_view>
 #include <vector>
 // Final context recovery borrows the existing same-image private child + Job.
 // Slow Steam, settings or disk IO never runs on the Runtime owner. The parent
@@ -83,7 +84,8 @@ inline Json dispatch(const steamsession::Session& steam,bool fromUi,const std::s
     Json result={{"ok",false},{"mutated",true},{"uncertain",true},{"reason","decky-cleanup-result-unconfirmed"}};
     if(!recoveryMs||recoveryMs>recoveryWindowMs)return {{"ok",false},{"mutated",false},{"reason","decky-cleanup-invalid-window"}};
     if(!current||!requestCurrent())return {{"ok",false},{"mutated",false},{"reason","decky-cleanup-cancelled"}};
-    if(std::string(kind)!=schema&&std::string(kind)!=lifecycleSchema)return {{"ok",false},{"mutated",false},{"reason","decky-cleanup-worker-invalid"}};
+    const bool lifecycle=std::string_view(kind)==lifecycleSchema;
+    if(!lifecycle&&std::string_view(kind)!=schema)return {{"ok",false},{"mutated",false},{"reason","decky-cleanup-worker-invalid"}};
     // Unknown is a pre-child refusal, never a reason for independent discovery.
     // Original caller revocation and child document/process checks remain live.
     if(!sharedIdentityMatches(steam,identity)||(delegation&&!delegation->matches(steam.root,steam.pid,steam.created,steam.account,identity->windowsSession,fromUi)))return {{"ok",false},{"mutated",false},
@@ -95,7 +97,7 @@ inline Json dispatch(const steamsession::Session& steam,bool fromUi,const std::s
     steamcommand::ChildRetirement commandChild(steamcommand::active);
     Owner owner;clientdetail::EventReader reader;detail::Handle child;bool replyReceived=false,childExitedObserved=false;
     require(commandChild.attach(owner.snapshot().generation),"decky-cleanup-worker-command-reservation-invalid");
-    const auto deadline=GetTickCount64()+recoveryMs;
+    const auto startedAt=GetTickCount64();const auto deadline=startedAt+recoveryMs;
     std::shared_ptr<listenerproxy::Work> listenerWork;
     struct CancelFacts {std::shared_ptr<listenerproxy::Work>& work;~CancelFacts(){if(work)work->cancel();}} cancelFacts{listenerWork};
     std::unique_ptr<Active> active;
@@ -208,11 +210,25 @@ inline Json dispatch(const steamsession::Session& steam,bool fromUi,const std::s
     }catch(const nlohmann::json::exception& error){result["protocolError"]=error.id;}
     catch(const std::exception& error){const std::string reason=error.what();if(reason.starts_with("decky-cleanup-worker-")&&reason.size()<=96)result["reason"]=reason;}
     catch(...){/* Unknown dispatch state stays uncertain; never replay it. */}
+    const auto workFinishedAt=lifecycle?GetTickCount64():0ull;
     if(listenerWork)listenerWork->cancel();
     owner.requestCancel();reader.requestCancel();const auto stopped=owner.stop(0,400);const auto readStopped=reader.stop(200);
+    // Use only the existing query handle after teardown. Do not wait for a
+    // sample or report an in-flight CPU total as the cost of the whole child.
+    FILETIME created{},exited{},kernel{},user{};
+    const bool childCpuKnown=lifecycle&&stopped.fullyDestroyed&&readStopped&&child.value&&
+        WaitForSingleObject(child.value,0)==WAIT_OBJECT_0&&GetProcessTimes(child.value,&created,&exited,&kernel,&user);
     if(child.value)CloseHandle(child.value);child.value=nullptr;
     const auto snapshot=owner.snapshot();const bool destroyed=stopped.fullyDestroyed&&readStopped&&snapshot.handles==0&&snapshot.pendingIo==0&&snapshot.jobActiveProcesses==0;
     commandChild.confirmed(destroyed);
+    if(lifecycle)try{
+        Json timing={{"workMs",workFinishedAt-startedAt},{"cleanupMs",GetTickCount64()-workFinishedAt}};
+        if(destroyed&&childCpuKnown){
+            const auto ticks=[](const FILETIME& t){return (static_cast<unsigned long long>(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+            timing["childCpuMs"]=(ticks(kernel)+ticks(user))/10000ull;
+        }
+        result["cleanupWorkerTiming"]=std::move(timing);
+    }catch(...){/* Optional observation cannot alter the recovery outcome. */}
     result["cleanupWorkerReplyReceived"]=replyReceived;
     result["cleanupWorkerDestroyed"]=destroyed;result["cleanupWorkerHandles"]=snapshot.handles;result["cleanupWorkerProcesses"]=snapshot.jobActiveProcesses;
     if(!destroyed){result["ok"]=false;result["reason"]="decky-cleanup-worker-cleanup-incomplete";result["uncertain"]=true;}

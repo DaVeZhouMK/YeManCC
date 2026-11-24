@@ -27,13 +27,85 @@ static void timingCases(){
     need(rows.size()==3&&rows[0]["dispatchWaitMs"]==1&&rows[0]["handlerElapsedMs"]==93184,"queue and elapsed clocks remain separate");++cases;
     need(state["issued"]==3&&state["completed"]==3&&!d.pendingSuspend()&&!d.hasPending(),"diagnostics leave completed public state unchanged");++cases;
     d.complete(third,99999999);need(d.snapshot()["recentDeliveries"][2]["completedTickMs"]==18952314,"duplicate completion cannot rewrite timing");++cases;
-    Dispatch overflow;Dispatch::Receipt old;
+    Dispatch overflow;Dispatch::Receipt old,oldResume;
     overflow.callback(PBT_APMSUSPEND,100,[&](auto r){old=r;return true;});
-    for(unsigned i=0;i!=64;++i)overflow.callback(PBT_APMRESUMEAUTOMATIC,200+i,[](auto){return true;});
-    auto evicted=overflow.forwarded(old.sequence,old.type,500);need(bool(evicted)&&evicted.tick==0,"diagnostic eviction must not become an admission gate");overflow.complete(evicted,501);
+    for(unsigned i=0;i!=64;++i)overflow.callback(PBT_APMRESUMEAUTOMATIC,200+i,[&](auto r){if(i==0)oldResume=r;return true;});
+    auto retained=overflow.forwarded(old.sequence,old.type,500);need(bool(retained)&&retained.tick==100,"unclaimed Suspend retains its original receipt after diagnostic eviction");overflow.complete(retained,501);
+    auto evicted=overflow.forwarded(oldResume.sequence,oldResume.type,502);need(bool(evicted)&&evicted.tick==0,"diagnostic eviction must not become an admission gate");overflow.complete(evicted,503);
     auto kept=overflow.snapshot();need(kept["recentDeliveries"].size()==8&&kept["diagnosticHistoryEvictions"]==57,"history stays bounded during storm");++cases;
-    auto replay=overflow.pendingReplay();need(replay.sequence==65,"existing latest replay is preserved");auto last=overflow.forwarded(replay.sequence,replay.type,502);overflow.complete(last,503);need(!overflow.hasPending()&&!overflow.pendingSuspend(),"overflow replay still releases public fence");++cases;
+    auto replay=overflow.pendingReplay();need(replay.sequence==65,"existing latest replay is preserved");auto last=overflow.forwarded(replay.sequence,replay.type,504);overflow.complete(last,505);need(!overflow.hasPending()&&!overflow.pendingSuspend(),"overflow replay still releases public fence");++cases;
     Dispatch unknown;auto w=unknown.window(PBT_APMRESUMEAUTOMATIC,1);unknown.complete(w);need(unknown.snapshot()["recentDeliveries"][0]["completedTickMs"].is_null(),"unobserved completion time is unknown");++cases;
+    {
+        unsigned revocations=0;
+        Dispatch d([](void* p) noexcept {++*static_cast<unsigned*>(p);},&revocations);
+        const auto outer=d.window(PBT_APMRESUMESUSPEND,1);
+        need(bool(outer)&&!d.window(PBT_APMQUERYSUSPEND,2,100),"reentrant eligible Query owns a pending fence");
+        for(unsigned i=0;i!=12;++i)
+            d.window(PBT_APMQUERYSUSPEND,3+i,200+i,Dispatch::QueryDisposition::ObserveOnly);
+        d.complete(outer,20);
+        const auto pending=d.pendingReplay();
+        need(pending.sequence==2&&pending.tick==2&&pending.fileTime100ns==100&&!pending.queryObserveOnly,
+             "ignored queries displaced a genuine pending Query after diagnostic eviction");
+        const auto state=d.snapshot();const auto& row=state["recentDeliveries"].back();
+        need(revocations==2&&d.observedSleepBoundarySequence()==2&&row["receiptSequence"]==14&&
+             row["queryObserveOnly"]==true&&row["status"]=="completed"&&row["handlerElapsedMs"]==0,
+             "each ignored query settles inline without revoking deliveries or using the timing cache for authority");
+        const auto claimed=d.forwarded(pending.sequence,pending.type,21);
+        need(claimed.sequence==2&&!claimed.queryObserveOnly&&d.pendingSuspend(),"genuine Query is claimable with its fence after the storm");
+        d.complete(claimed,22);
+        need(!d.hasPending()&&!d.pendingSuspend()&&!d.forwarded(14,PBT_APMQUERYSUSPEND,23),
+             "observations neither strand the pending fence nor replay as work");
+        const auto successor=d.window(PBT_APMSUSPEND,24);
+        need(successor.sequence==15&&d.pendingSuspend()&&d.observedSleepBoundarySequence()==15&&revocations==3,
+             "real successor uses the next receipt and immediately closes the fence");
+        d.complete(successor,25);++cases;
+    }
+    {
+        Dispatch d;Dispatch::Receipt successor;
+        for(unsigned i=0;i!=12;++i)
+            d.window(PBT_APMQUERYSUSPEND,1+i,100+i,Dispatch::QueryDisposition::ObserveOnly);
+        d.callback(PBT_APMSUSPEND,13,[&](auto r){successor=r;return false;});
+        need(!d.forwarded(1,PBT_APMQUERYSUSPEND,14)&&d.pendingReplay().sequence==successor.sequence,
+             "an evicted observation cannot bypass a newer genuine Suspend delivery");
+        d.complete(d.forwarded(successor.sequence,successor.type,15),16);
+        need(!d.pendingSuspend()&&!d.hasPending(),"newer genuine Suspend is still delivered exactly once");++cases;
+    }
+    {
+        Dispatch failed;Dispatch::Receipt suspend,resume;
+        need(!failed.callback(PBT_APMSUSPEND,10,[&](auto r){suspend=r;return false;},100),"Suspend post must fail");
+        for(unsigned i=0;i!=10;++i)
+            failed.callback(PBT_APMRESUMEAUTOMATIC,11+i,[&](auto r){resume=r;return true;},101+i);
+        need(!failed.forwarded(resume.sequence,resume.type,25),"later Resume overtook the failed Suspend post");
+        const auto pending=failed.pendingReplay();
+        need(pending.sequence==suspend.sequence&&pending.type==PBT_APMSUSPEND,"retained Suspend owns first redelivery");
+        need(!failed.forwarded(suspend.sequence,PBT_APMRESUMESUSPEND,26),"wrong type claimed retained Suspend");
+        const auto claimed=failed.forwarded(pending.sequence,pending.type,26);
+        need(claimed.tick==10&&claimed.fileTime100ns==100&&claimed.callback,"failed Suspend keeps original receipt beyond diagnostic eviction");
+        failed.complete(claimed,27);
+        need(failed.pendingSuspend()&&failed.pendingReplay().sequence==resume.sequence,"Suspend completion retains fence and arms later Resume");
+        failed.complete(failed.forwarded(resume.sequence,resume.type,28),29);
+        need(!failed.hasPending()&&!failed.pendingSuspend()&&!failed.pendingReplay(),"later Resume retires fence after both deliveries");++cases;
+    }
+    {
+        Dispatch direct;Dispatch::Receipt suspend;
+        direct.callback(PBT_APMSUSPEND,1,[&](auto r){suspend=r;return false;},100);
+        need(!direct.window(PBT_APMRESUMECRITICAL,2,200),"direct window Resume overtook the failed Suspend post");
+        const auto firstPending=direct.pendingReplay();
+        need(firstPending.sequence==suspend.sequence,"direct window schedules retained Suspend first");
+        direct.complete(direct.forwarded(firstPending.sequence,firstPending.type,3),4);
+        const auto next=direct.pendingReplay();
+        need(next.type==PBT_APMRESUMECRITICAL&&!next.callback&&next.fileTime100ns==200,"direct window Resume retains original receipt for redelivery");
+        direct.complete(direct.forwarded(next.sequence,next.type,5),6);
+        need(!direct.pendingSuspend()&&!direct.hasPending(),"direct window redelivery settles both receipts");++cases;
+    }
+    {
+        Dispatch superseded;Dispatch::Receipt oldSuspend,replacement;
+        superseded.callback(PBT_APMSUSPEND,1,[&](auto r){oldSuspend=r;return false;});
+        superseded.callback(PBT_APMSUSPEND,2,[&](auto r){replacement=r;return true;});
+        need(superseded.pendingReplay().sequence==replacement.sequence,"new Suspend supersedes undelivered same-type boundary");
+        superseded.complete(superseded.forwarded(replacement.sequence,replacement.type,3),4);
+        need(!superseded.forwarded(oldSuspend.sequence,oldSuspend.type,5)&&!superseded.hasPending()&&!superseded.pendingSuspend(),"superseded failure never replays over replacement");++cases;
+    }
 }
 static void exportCases(){
     using namespace ymcc::sleeppower;

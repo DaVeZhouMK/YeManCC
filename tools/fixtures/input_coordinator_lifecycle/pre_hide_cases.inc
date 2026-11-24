@@ -88,6 +88,35 @@ static void run(const std::string& selected){
  check(after.requestId==ticket,"wait retains original request identity");
  check(after.remainingMs<=original.remainingMs,"wait does not renew original player deadline");
  if(shape=="scope-revoked"||shape=="getter-scope")check(g_powerLifecycle==PowerLifecycle::Ready,"revoked original Scope remains revoked with same generation Ready");
+ if(positive||shape=="absent"||shape=="replacement"||shape=="getter-inherited"){
+  json rejected=json::array();unsigned admitted=0;
+  for(const auto& event:fixtureEvents){
+   if(event.value("event","")!="input-host-gpd-source-before-hide")continue;
+   const auto& detail=event.at("detail");
+   if(detail.value("stage","")=="rejected")rejected.push_back(detail);
+   if(detail.value("stage","")=="admitted")++admitted;
+  }
+  if(positive){
+   check(admitted==1&&rejected.empty(),"returned source still emits one admission and no failure");
+  }else{
+   check(admitted==0&&rejected.size()==1,"unproven pre-hide source emits one terminal receipt, not poll-rate logs");
+   if(rejected.size()==1){
+    const auto& row=rejected[0];const auto reason=row.value("reason","");
+    check(row.value("requestId",0ULL)==ticket&&row.value("epoch",0ULL)>0&&!row.value("runId","").empty()&&
+        row.value("originalDeadlineTick",0ULL)==originalDeadline&&row.value("originalDeadlineRetained",false)&&
+        !row.value("targetPrepareIssuedByWait",true),"receipt binds the original Host and unrenewed deadline before target creation");
+    if(shape=="absent")check(row.value("lastAdmissionKnown",false)&&!row.value("lastSourceAdmitted",true)&&
+        row.value("observedTick",0ULL)>=originalDeadline&&
+        (reason=="player-period-unavailable"||reason=="original-deadline-expired"||reason=="source-not-admitted-period-ended"),
+        "absent source is recorded separately from the terminal deadline");
+    if(shape=="replacement")check(reason=="host-tuple-changed"&&row.value("runId","")!="successor-tuple",
+        "replacement is not reported as an absent source or attributed to the successor");
+    if(shape=="getter-inherited")check((reason=="inherited-deadline-expired"||reason=="original-deadline-expired")&&
+        row.value("inheritedDeadlineTick",0ULL)==originalDeadline&&row.value("observedTick",0ULL)>=originalDeadline,
+        "a read crossing the inherited deadline retains that deadline witness");
+   }
+  }
+ }
  cases.back()["order"]=order;cases.back()["stateAfterStart"]=result;cases.back()["started"]=started;
  cases.back()["yields"]=yields;cases.back()["cycleCalls"]=cycles;cases.back()["elapsedMs"]=startProtectionClock-began;
  cases.back()["events"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;

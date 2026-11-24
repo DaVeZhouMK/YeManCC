@@ -49,6 +49,7 @@
 #include "custom_steam_library_identity_cache.h"
 #include "custom_steam_library_plan_receipt.h"
 #include "custom_steam_library_video_catalog.h"
+#include "custom_steam_library_console_video.h"
 #include "custom_steam_library_network_policy.h"
 #include "custom_steam_library_ymcc_whitelist.h"
 #include "../game_application_catalog.h"
@@ -1043,6 +1044,7 @@ struct HttpResponse {
     std::string networkRoute = "direct";
     std::string finalUrl;
     DWORD serverRetryAfterMs = 0;
+    std::wstring contentRange;
 };
 
 #ifdef CUSTOM_STEAM_LIBRARY_TEST_RUNTIME
@@ -1095,11 +1097,17 @@ static bool transientHttpStatus(DWORD status) {
            status == 500 || status == 502 || status == 503 || status == 504;
 }
 
-// The worker requests whole representations and never sends Range. Even a
-// parseable JSON fragment or a decodable picture in 206 must not be cached as
-// a complete search result/asset. Recover through the existing bounded retry.
-static void requireCompleteHttpStatus(DWORD status) {
-    if (status == 206)
+static bool isSegmentedConsoleVideoUrl(const std::string& url) {
+    namespace console = custom_steam_library::console_video;
+    return url == console::sentinelsPreviewUrl || url == console::botwPreviewUrl;
+}
+static bool isConsoleVideoRange(const std::string& url, const std::wstring& headers) {
+    return headers.starts_with(L"Range: bytes=") && isSegmentedConsoleVideoUrl(url);
+}
+
+// Partial data is never a complete search result or artwork asset.
+static void requireCompleteHttpStatus(DWORD status, bool requestedConsoleRange = false) {
+    if (status == 206 && !requestedConsoleRange)
         throw HttpTransportError("Unexpected partial HTTP response for a complete request",
             ERROR_WINHTTP_INVALID_SERVER_RESPONSE, true);
 }
@@ -1293,7 +1301,8 @@ static HttpResponse httpRequest(
     // the OS hosts mapping route store/CDN requests through 127.0.0.1:80/443.
     const HINTERNET session = acquireReusableHttpSession();
     setHttpTimeouts(session, deadline, acceleratorRoute);
-    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+    DWORD redirectPolicy = (url.starts_with("https://motionbgs.com/dl/hd/") || isSegmentedConsoleVideoUrl(url))
+        ? WINHTTP_OPTION_REDIRECT_POLICY_NEVER : WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     if (!WinHttpSetOption(session, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy))) {
         throwWinHttp("WinHttpSetOption(redirect)");
     }
@@ -1377,7 +1386,10 @@ static HttpResponse httpRequest(
         WINHTTP_HEADER_NAME_BY_INDEX, &response.status, &statusSize, WINHTTP_NO_HEADER_INDEX)) {
         throwWinHttp("WinHttpQueryHeaders(status)");
     }
-    requireCompleteHttpStatus(response.status);
+    const auto consoleRange = isConsoleVideoRange(url, headers);
+    requireCompleteHttpStatus(response.status, consoleRange);
+    if (consoleRange && response.status == 206)
+        response.contentRange = queryHttpHeader(request, WINHTTP_QUERY_CONTENT_RANGE);
     markSteamRouteResult(networkRoute, true);
     const auto retryAfter = queryHttpHeader(request, WINHTTP_QUERY_RETRY_AFTER);
     response.retryAfterMs = parseRetryAfterMs(retryAfter);
@@ -1612,7 +1624,7 @@ static HttpResponse httpRequestWithRetry(
                 method, requestUrl, headers, requestBody, maxBytes, imageRequest, imageReferer, deadline,
                 forcedSteamHost);
 #endif
-            requireCompleteHttpStatus(response.status);
+            requireCompleteHttpStatus(response.status, isConsoleVideoRange(requestUrl, headers));
             if (provider == "steam" && !imageRequest &&
                 !trustedSteamMetadataFinalUrl(url, response.finalUrl.empty() ? url : response.finalUrl))
                 throw HttpTransportError("Steam AppDetails redirected outside the trusted store endpoint", ERROR_INVALID_DATA, false);
@@ -16040,6 +16052,38 @@ int wmain(int argc, wchar_t** argv) {
             return 0;
         }
 
+        if (_wcsicmp(argv[1], L"--download-console-wallpaper") == 0) {
+            if (argc != 4) throw std::runtime_error("console-wallpaper-arguments-invalid");
+            namespace console = custom_steam_library::console_video;
+            const auto id = toUtf8(argv[2]);
+            const auto* offer = console::byId(id);
+            if (!offer) throw std::runtime_error("console-wallpaper-candidate-invalid");
+            const auto url = std::string(offer->url), provider = std::string(offer->provider);
+            std::vector<unsigned char> video;
+            if (offer->segmented) {
+                // Fetch one bounded segment at a time. Transport retries do
+                // not discard previously downloaded segments on a weak link.
+                ScopedIdentityNetworkBudget budget(true, 175000);
+                video.reserve(offer->bytes);
+                constexpr size_t chunk = 1024 * 1024;
+                for (size_t start = 0; start < offer->bytes; start += chunk) {
+                    const auto count = (std::min)(chunk, offer->bytes - start);
+                    const auto range = std::to_wstring(start) + L"-" + std::to_wstring(start + count - 1);
+                    const auto response = httpGet(url, L"Range: bytes=" + range + L"\r\nAccept: video/mp4\r\n", count, false, provider);
+                    if (response.status != 206 || response.contentRange != L"bytes " + range + L"/" + std::to_wstring(offer->bytes) || response.body.size() != count)
+                        throw std::runtime_error("console-wallpaper-segment-mismatch");
+                    video.insert(video.end(), response.body.begin(), response.body.end());
+                }
+            } else {
+                auto response = httpGet(url, L"Accept: video/mp4\r\n", offer->bytes, false, provider);
+                if (response.status != 200) throw std::runtime_error("console-wallpaper-source-unavailable");
+                video = std::move(response.body);
+            }
+            if (video.size() != offer->bytes || sha256(video) != offer->sha256)
+                throw std::runtime_error("console-wallpaper-source-changed");
+            writeAtomic(fs::path(argv[3]), video, false);
+            return 0;
+        }
         if (_wcsicmp(argv[1],L"--search-wallpaper-videos")==0){
             if(argc!=3)throw std::runtime_error("media-video-appid-required");
             const auto appId=parsePositiveId(argv[2],"--search-wallpaper-videos");if(appId>2147483647)throw std::runtime_error("media-video-appid-invalid");

@@ -338,7 +338,7 @@ def run_journal_failure_case(args):
         with p.open('xb') as f:f.write(b.encode('utf8') if isinstance(b,str) else b)
     def ident(p):
         b=p.read_bytes();return dict(path=str(p.resolve()),bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
-    files=[ROOT/'native'/n for n in ('model_adaptation_log.h','log_jsonl_boundary.h','sleep_fact_log_record.h')]+[ROOT/'deps/json/json.hpp',ROOT/'tools/fixtures/log_frequency_journal_failure.cpp',pathlib.Path(__file__)]
+    files=[ROOT/'native'/n for n in ('model_adaptation_log.h','log_jsonl_boundary.h','sleep_fact_log_record.h','virtual_adaptation_journal_scope.h')]+[ROOT/'deps/json/json.hpp',ROOT/'tools/fixtures/log_frequency_journal_failure.cpp',pathlib.Path(__file__)]
     if getattr(args,'journal_failure_phase',None) in ('stores','stores-control','prefix','prefix-control','prefix-faults','prefix-utf8'):
         originalStoreHeader=pathlib.Path(args.store_status_before).resolve() if getattr(args,'store_status_before',None) else ROOT/'native/model_adaptation_log.h'
         files.append(originalStoreHeader)

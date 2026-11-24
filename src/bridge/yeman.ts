@@ -12,7 +12,7 @@ import { TdpRequestSupersededError } from '../robust/repairModel';
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
 import { fs, shell, registry, proc, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type RtssReloadResult, type HibernateState, type PowerLifecycleState } from './api';
 import { invoke, on } from './ipc';
-import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
+import { readRtssSharedFlags, RTSS_OSD_VISIBLE, rtssIniValue, setRtssIniValue } from './rtssOverlay';
 import { getSettingsGeneration, assertSettingsGeneration, getSettingsRecoveryState, readSettingsSection, saveSettingsSection, setSettingsDirectory, updateSettings, loadSettings, cachedSleepPowerPlanOptimizationEnabled } from './settingsRepository';
 import { captureBootPreferenceWrite, assertBootPreferenceOwner, type BootPreferenceContext, type BootPreferenceWrite } from './bootModeGlobalPreferences';
 import { runTdpHardwareWrite, reconcileTdpPowerReady, reconcileTdpCapabilityReady, getTdpCapabilityState, resetTdpCapabilityState } from './tdpCircuitBreaker';
@@ -35,6 +35,7 @@ export function setPowerControlDir(dir: string): void {
   ++tdpDaemonEpoch;
   tdpLifecycleEpoch++; tdpLifecycleSnapshot = null; tdpLifecycleRead = null; tdpBlockedPhase = null;
   tdpDaemonNeedsResume = false; tdpPowerGeneration = 0; tdpCommittedGeneration = 0;
+  tdpPowerSuspendSerial = undefined;
   tdpExecutionCapability = null;
   ++tdpExecutionCapabilityEpoch;
   tdpExecutionCapabilityPending = null;
@@ -575,7 +576,10 @@ export async function restoreAllYemanTasks(): Promise<{ imported: number; failed
     const def = TASKS.find((t) => t.xml === fileName);
     if (!def) continue;
     try {
-      if (await createTask(def.name)) imported++;
+      if (def.name === 'Steamcommunity_302') {
+        await (await import('./networkAccelerationStartup')).setNetworkAccelerationStartup(true);
+        imported++;
+      } else if (await createTask(def.name)) imported++;
       else failed.push(def.name);
     } catch {
       failed.push(def.name);
@@ -1256,24 +1260,26 @@ let tdpBlockedPhase: string | null = null;
 let tdpDaemonNeedsResume = false;
 let tdpResumePending: { epoch: number; session: number; required: boolean; task: Promise<boolean> } | null = null;
 let tdpPowerGeneration = 0, tdpCommittedGeneration = 0;
-function tdpLifecycleKnown(state: PowerLifecycleState | null): boolean {
-  return !!state && (state as { known?: boolean }).known !== false;
-}
+let tdpPowerSuspendSerial: number | undefined;
 
 // Startup and power edges own validation. The steady-state floating path only
 // reads this immutable snapshot; native still enforces its current write lease.
-export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'resuming' | 'ready' | 'unknown', generation?: number, authoritative = false): void {
+export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'resuming' | 'ready' | 'unknown', generation?: number, authoritative = false, suspendSerial?: number): void {
+  if (suspendSerial !== undefined && tdpPowerSuspendSerial !== undefined && suspendSerial < tdpPowerSuspendSerial) return;
+  const suspendChanged = suspendSerial !== undefined && tdpPowerGeneration > 0 && suspendSerial !== tdpPowerSuspendSerial;
   const needsResume = !authoritative || phase !== 'unknown' && phase !== 'ready' ||
     Number.isSafeInteger(generation) && generation! > tdpPowerGeneration ||
     !!tdpBlockedPhase && tdpBlockedPhase !== 'unknown';
   if (Number.isSafeInteger(generation) && generation! > 0) {
     if (generation! < tdpPowerGeneration || !authoritative && phase !== 'ready' && generation! <= tdpCommittedGeneration) return;
-    if (phase === 'ready' && !tdpBlockedPhase && !tdpDaemonNeedsResume && tdpLifecycleKnown(tdpLifecycleSnapshot) &&
-      tdpLifecycleSnapshot?.generation === generation && tdpLifecycleSnapshot.phase === 'ready' && tdpLifecycleSnapshot.hardwareWritesAllowed) return;
+    if (!suspendChanged && phase === 'ready' && !tdpBlockedPhase && !tdpDaemonNeedsResume &&
+      tdpLifecycleSnapshot?.generation === generation && isSharedPowerLifecycleAdmitted(tdpLifecycleSnapshot)) return;
     tdpPowerGeneration = generation!;
   }
+  if (suspendSerial !== undefined) tdpPowerSuspendSerial = suspendSerial;
   ++tdpLifecycleEpoch; tdpLifecycleSnapshot = null; tdpLifecycleRead = null;
   tdpBlockedPhase = phase === 'ready' ? null : phase;
+  if (suspendChanged) tdpRuntimeStore.invalidatePower();
   // Context contention closes write admission; it is not itself a new sleep
   // requiring owned helper handles to be rebuilt on every unknown/Ready pair.
   if (tdpDaemonUp && needsResume) tdpDaemonNeedsResume = true;
@@ -1284,18 +1290,23 @@ async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | 
   if (tdpLifecycleRead) return tdpLifecycleRead;
   const epoch = tdpLifecycleEpoch;
   const task = powerLifecycle.get().catch(() => null).then(state => {
-    if (epoch !== tdpLifecycleEpoch || state && state.generation < tdpPowerGeneration) return null;
+    if (epoch !== tdpLifecycleEpoch || state && (state.generation < tdpPowerGeneration ||
+      tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial < tdpPowerSuspendSerial)) return null;
     if (state && Number.isSafeInteger(state.generation) && state.generation > 0) {
-      if (tdpPowerGeneration > 0 && state.generation > tdpPowerGeneration) {
+      const generationChanged = tdpPowerGeneration > 0 && state.generation > tdpPowerGeneration;
+      const suspendChanged = tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial !== tdpPowerSuspendSerial;
+      if (generationChanged || suspendChanged) {
         // Recover a boundary whose entire broadcast was missed. Old pending
         // completions cannot populate the new session; no hardware probe/write.
         ++tdpLifecycleEpoch;
         tdpRuntimeStore.invalidatePower();
-        if (tdpDaemonUp) tdpDaemonNeedsResume = true;
+        if (tdpDaemonUp && generationChanged) tdpDaemonNeedsResume = true;
       }
       tdpLifecycleSnapshot = state; tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation);
-      if (tdpLifecycleKnown(state) && state.phase === 'ready' && state.hardwareWritesAllowed) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
-      tdpBlockedPhase = !tdpLifecycleKnown(state) ? 'unknown' : state.phase === 'ready' && state.hardwareWritesAllowed ? null : state.phase;
+      if (state.suspendSerial !== undefined) tdpPowerSuspendSerial = state.suspendSerial;
+      const admitted = isSharedPowerLifecycleAdmitted(state);
+      if (admitted) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
+      tdpBlockedPhase = admitted ? null : state.known === false || state.phase === 'ready' ? 'unknown' : state.phase;
     }
     return state;
   });
@@ -1308,7 +1319,7 @@ async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | 
 export async function reconcileTdpPowerSession(retryUnsupported = false): Promise<boolean> {
   const session = tdpDaemonEpoch;
   const state = await readTdpLifecycle(true);
-  if (session !== tdpDaemonEpoch || !tdpLifecycleKnown(state) || state !== tdpLifecycleSnapshot || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (!state || session !== tdpDaemonEpoch || state !== tdpLifecycleSnapshot || !isSharedPowerLifecycleAdmitted(state)) return false;
   const epoch = tdpLifecycleEpoch;
   const unsupported = getTdpCapabilityState() === 'unsupported';
   if (tdpExecutionCapabilityError || tdpExecutionCapability?.ready === false || retryUnsupported && unsupported) {
@@ -1331,8 +1342,10 @@ export async function primeTdpSession(initial?: Promise<PowerLifecycleState | nu
   const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch;
   const state = initial ? await initial : await readTdpLifecycle();
   if (tdpDaemonStop) await tdpDaemonStop;
-  if (!current() || !tdpLifecycleKnown(state) || state.generation < tdpPowerGeneration || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (!state || !current() || !isSharedPowerLifecycleAdmitted(state) || state.generation < tdpPowerGeneration ||
+      tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial < tdpPowerSuspendSerial) return false;
   tdpLifecycleSnapshot = state; tdpBlockedPhase = null;
+  if (state.suspendSerial !== undefined) tdpPowerSuspendSerial = state.suspendSerial;
   tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation); tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
   const capability = await getTdpExecutionCapability();
   if (!current() || !capability.ready) return false;
@@ -1353,14 +1366,16 @@ if (typeof window !== 'undefined') {
   on('window.focus', recoverIfNeeded);
   let sharedPowerKey = '';
   onSharedPowerLifecycle(state => {
-    const key = `${state.generation}:${state.phase}:${state.known}:${state.hardwareWritesAllowed}`;
+    const key = `${state.generation}:${state.suspendSerial}:${state.phase}:${state.known}:${state.hardwareWritesAllowed}:${state.notificationPending === true}`;
     if (key === sharedPowerKey) return;
     sharedPowerKey = key;
     // This is a current native fact, not another independently ordered power edge.
-    invalidateTdpPowerSession(state.known === false ? 'unknown' : state.phase, state.generation, true);
-    if (state.known !== false && state.phase === 'ready' && (tdpRecoveryStop || tdpBlockedPhase || !tdpLifecycleSnapshot))
+    const admitted = isSharedPowerLifecycleAdmitted(state);
+    const phase = admitted ? 'ready' : state.known === false || state.phase === 'ready' ? 'unknown' : state.phase;
+    invalidateTdpPowerSession(phase, state.generation, true, state.suspendSerial);
+    if (admitted && (tdpRecoveryStop || tdpBlockedPhase || !tdpLifecycleSnapshot))
       void reconcileTdpPowerSession().catch(() => { queueTdpRecovery(); });
-  });
+  }, { observeSuspendSerial: true });
 }
 async function assertHardwareWriteAllowed(trace?: ReturnType<typeof beginTdpObservation>) {
   if (tdpBlockedPhase) throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${tdpBlockedPhase}）`);
@@ -1398,7 +1413,7 @@ async function resumeTdpDaemonObservedCore(required: boolean, trace: ReturnType<
   // snapshot instead of making a second IPC query on the recovery edge.
   const state = observed && current() && observed.state === tdpLifecycleSnapshot
     ? observed.state : await readTdpLifecycle(true);
-  if (!current() || !tdpLifecycleKnown(state) || state.phase !== 'ready' || !state.hardwareWritesAllowed) return false;
+  if (!state || !current() || !isSharedPowerLifecycleAdmitted(state)) return false;
   const generation = state.generation;
   const alive = await tdpDaemonAlive();
   if (!current()) return false;
@@ -2516,25 +2531,54 @@ function rtssValidatedProcessIdentities(reply: unknown, names: readonly string[]
   }
   return payload.processes as RtssProcessIdentity[];
 }
-async function resolveRtssDir(): Promise<string> {
-  if (rtssDirCache && await fs.exists(`${rtssDirCache}\\RTSS.exe`).catch(() => false)) return rtssDirCache;
+function requireRtssReadCurrent(isCurrent?: () => boolean): void {
+  if (isCurrent?.() === false) throw Error('RTSS_LIMIT_READ_RETIRED');
+}
+async function resolveRtssFromFiles(running: readonly RtssProcessIdentity[], isCurrent?: () => boolean): Promise<string | null> {
+  const images = running.map(({ path }) => path.replace(/\//g, '\\'));
+
+  const isFile = (path: string) => fs.stat(path).then(result => result?.isFile === true, () => false);
+  const find = async (candidates: readonly string[]) => {
+    for (const image of candidates) {
+      requireRtssReadCurrent(isCurrent);
+      const separator = image.lastIndexOf('\\');
+      const dir = image.slice(0, separator === 2 ? 3 : separator);
+      const found = await Promise.all([isFile(image), isFile(`${image.slice(0, separator + 1)}RTSSHooks64.dll`)]);
+      requireRtssReadCurrent(isCurrent);
+      if (found.every(Boolean)) return dir;
+    }
+    return null;
+  };
+  const active = await find(images.filter(image => /^[A-Za-z]:\\/.test(image)));
+  if (active) return active;
+
+  const roots = await Promise.all(['ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'].map(name =>
+    invoke<string | null>('env.get', { name }).catch(() => null),
+  ));
+  requireRtssReadCurrent(isCurrent);
+  if (roots.some(root => root !== null && (typeof root !== 'string' || !/^[A-Za-z]:[\\/]/.test(root)))) return null;
+  return find(roots.flatMap(root => root ? [`${root.replace(/\//g, '\\').replace(/\\+$/, '')}\\RivaTuner Statistics Server\\RTSS.exe`] : []));
+}
+async function resolveRtssDir(isCurrent?: () => boolean): Promise<string> {
+  requireRtssReadCurrent(isCurrent);
+  const cached = rtssDirCache;
+  if (cached && await fs.exists(`${cached}\\RTSS.exe`).catch(() => false)) {
+    requireRtssReadCurrent(isCurrent);
+    return cached;
+  }
+  requireRtssReadCurrent(isCurrent);
   let running: RtssProcessIdentity[] | null = null;
   try { running = rtssValidatedProcessIdentities(await proc.identities(['RTSS']), ['RTSS']); }
   catch { /* Native identity unknown; file/registry discovery remains available. */ }
-  const nativePaths = (running || []).map(identity => "'" + identity.path.replace(/'/g, "''") + "'").join(',');
-  const script = [
-    "$c=@(" + nativePaths + ")",
-    "$c+=@(\"$env:ProgramFiles\\RivaTuner Statistics Server\\RTSS.exe\",\"${env:ProgramFiles(x86)}\\RivaTuner Statistics Server\\RTSS.exe\",\"$env:LOCALAPPDATA\\RivaTuner Statistics Server\\RTSS.exe\")",
-    "$k=@('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*')",
-    "foreach($x in $k){Get-ItemProperty $x -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName -match 'RivaTuner Statistics Server|RTSS'} | ForEach-Object {if($_.InstallLocation){$c+=(Join-Path $_.InstallLocation 'RTSS.exe')}elseif($_.DisplayIcon){$c+=($_.DisplayIcon -replace ',.*$','').Trim('\\\"')}}}",
-    "foreach($x in ($c|Where-Object {$_}|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Leaf){$d=Split-Path -Parent $x;if((Test-Path -LiteralPath (Join-Path $d 'RTSS.exe') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $d 'RTSSHooks64.dll') -PathType Leaf)){Write-Output $d;break}}}"
-  ].join(';');
-  try {
-    const r = await shell.run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
-    const d = (r.stdout || '').split(/\r?\n/).map((v) => v.trim()).find((v) => v && /^[A-Za-z]:\\/.test(v));
-    if (d) { rtssDirCache = d; return d; }
-  } catch { /* handled below */ }
-  if (running === null) throw new Error('RTSS 运行路径状态待确认，请稍后重试');
+  requireRtssReadCurrent(isCurrent);
+  const fromFiles = await resolveRtssFromFiles(running || [], isCurrent);
+  requireRtssReadCurrent(isCurrent);
+  if (fromFiles) { rtssDirCache = fromFiles; return fromFiles; }
+  const discovery = await invoke<{ known: boolean; directory: string }>('rtss.findRegisteredInstall', {}, { timeoutMs: 5000 }).catch(() => null);
+  requireRtssReadCurrent(isCurrent);
+  const d = discovery?.known === true && typeof discovery.directory === 'string' && /^[A-Za-z]:\\/.test(discovery.directory) ? discovery.directory : '';
+  if (d) { rtssDirCache = d; return d; }
+  if (running === null || discovery?.known !== true || discovery.directory !== '') throw new Error('RTSS 运行路径状态待确认，请稍后重试');
   throw new RtssNotInstalledError('未找到 RTSS.exe，请先安装 RivaTuner Statistics Server');
 }
 
@@ -2580,11 +2624,14 @@ export async function hwiNfoRunning(): Promise<boolean> {
   if (!p) throw new Error('HWiNFO 运行状态待确认，请稍后重试');
   return p['HWiNFO64'];
 }
-export async function readRtssLimit(): Promise<number> {
-  const dir = await resolveRtssDir();
+export async function readRtssLimit(isCurrent?: () => boolean): Promise<number> {
+  const dir = await resolveRtssDir(isCurrent);
+  requireRtssReadCurrent(isCurrent);
   const global = `${dir}\\Profiles\\Global`;
   if (!(await fs.exists(global))) return 0;
+  requireRtssReadCurrent(isCurrent);
   const txt = await fs.readTextFile(global);
+  requireRtssReadCurrent(isCurrent);
   for (const line of txt.split(/\r?\n/)) {
     const m = line.match(/^Limit=(\d+)/);
     if (m) return parseInt(m[1], 10);
@@ -2675,17 +2722,23 @@ export async function readRtssZoom(): Promise<number> {
   const raw = rtssIniValue(text, 'OSD', 'ZoomRatio');
   return raw !== null && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 5;
 }
-async function writeRtssZoom(dir: string, ratio: number, skipMatching = false,current?:RtssOutputCurrent): Promise<void> {
+async function writeRtssOsdProfile(dir: string, enabled: boolean | undefined, ratio: number | undefined, live: boolean,current?:RtssOutputCurrent): Promise<void> {
   const global = `${dir}\\Profiles\\Global`;
   const raw = Number(ratio);
   const zoom = Number.isFinite(raw) ? Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(raw))) : 5;
+  const values: Array<[string, string]> = [];
+  if (enabled !== undefined) values.push(['EnableOSD', enabled ? '1' : '0']);
+  if (ratio !== undefined) values.push(['ZoomRatio', String(zoom)]);
   if(current)await requireRtssOutputCurrent(current);
   const exists=await fs.exists(global);if(current)await requireRtssOutputCurrent(current);
   if (!exists) throw new Error('RTSS Global 配置不存在');
   const original = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
   if(current)await requireRtssOutputCurrent(current);
-  if (!skipMatching || rtssIniValue(original, 'OSD', 'ZoomRatio') !== String(zoom)) {
-    const updated = setRtssIniValue(original, 'OSD', 'ZoomRatio', String(zoom));
+  let updated = original;
+  for (const [key, value] of values) {
+    if (rtssIniValue(updated, 'OSD', key) !== value) updated = setRtssIniValue(updated, 'OSD', key, value);
+  }
+  if (updated !== original) {
     await fs.writeTextFileAtomic(global, updated, undefined, { expectedContent: original,...rtssOutputOptions(current) });
     if(current)await requireRtssOutputCurrent(current);
   }
@@ -2693,16 +2746,14 @@ async function writeRtssZoom(dir: string, ratio: number, skipMatching = false,cu
   // on every explicit apply, even when no durable write was needed.
   // Reload only after durable write succeeds. Never use SaveProfile here:
   // it would overwrite the selected disk values with stale in-memory state.
-  await reloadRtssProfiles(dir,current);
+  if (live) await reloadRtssProfiles(dir,current);
   const persisted = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
   if(current)await requireRtssOutputCurrent(current);
-  // The public display reader defaults to 100% for a missing key. A write
-  // confirmation must instead witness the exact stored target explicitly.
-  if (rtssIniValue(persisted, 'OSD', 'ZoomRatio') !== String(zoom))
-    throw new Error('RTSS 大小读回未确认；请检查配置是否被其他程序修改。');
+  if (values.some(([key, value]) => rtssIniValue(persisted, 'OSD', key) !== value))
+    throw new Error('RTSS OSD 配置读回未确认；请检查配置是否被其他程序修改。');
 }
 export function setRtssZoom(ratio: number): Promise<void> {
-  const run = rtssConfigWriteQueue.then(async () => writeRtssZoom(await resolveRtssDir(), ratio));
+  const run = rtssConfigWriteQueue.then(async () => writeRtssOsdProfile(await resolveRtssDir(), undefined, ratio, true));
   rtssConfigWriteQueue = run.catch(() => {});
   return run;
 }
@@ -2761,7 +2812,7 @@ const OVL_W = 'YeManOBS-W-1.ovl';
 const OVL_L = 'YeManOBS-L-1.ovl';
 const OVL_J = 'YeManOBS-JJ-1.ovl';
 const OVL_EMPTY = 'Empty.ovl';
-export interface OverlaySwitchResult { mode: 'live' | 'saved' }
+export interface OverlaySwitchResult { mode: 'live' | 'saved' | 'absent' }
 function rtssFailureDetail(result: RtssReloadResult | undefined, fallback: string): string {
   let detail = result?.error || fallback;
   // Keep the native distinction between preparation, persistence/readback and
@@ -2806,15 +2857,69 @@ export async function readOverlayLayout(): Promise<string> {
   if (!(await fs.exists(cfg))) return '';
   return rtssIniValue(await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }), 'Settings', 'Layout') ?? '';
 }
+async function setRtssOsdVisibility(dir: string, visible: boolean, running: boolean, current?: RtssOutputCurrent): Promise<void> {
+  const config = `${dir}\\Profiles\\Config`;
+  const encoding = {textEncoding: 'windows-config' as const};
+  if(current)await requireRtssOutputCurrent(current);
+  if (running) {
+    // RTSS changes and persists the bit through its SDK. Don't replace its
+    // Config from outside while the host owns the live state.
+    const result = await rtss.setOsdVisible(dir, visible, rtssOutputOptions(current));
+    if(current)await requireRtssOutputCurrent(current);
+    if (!result?.ok) throw new Error(rtssFailureDetail(result, 'RTSS 实时 OSD 显示开关未确认'));
+  } else {
+    const exists = await fs.exists(config);
+    if(current)await requireRtssOutputCurrent(current);
+    const original = exists ? await fs.readTextFile(config, 1 << 20, encoding) : null;
+    if(current)await requireRtssOutputCurrent(current);
+    const flags = readRtssSharedFlags(original ?? '');
+    if (flags === null && rtssIniValue(original ?? '', 'Shared', 'Flags') !== null)
+      throw new Error('RTSS Shared Flags 格式无效，未覆盖原配置。');
+    const desired = (((flags ?? 0) & ~RTSS_OSD_VISIBLE) | (visible ? RTSS_OSD_VISIBLE : 0)) >>> 0;
+    if (desired !== flags) {
+      const value = desired.toString(16).toUpperCase().padStart(8, '0');
+      await fs.writeTextFileAtomic(config, setRtssIniValue(original ?? '', 'Shared', 'Flags', value), undefined,
+        {expectedContent: original, ...rtssOutputOptions(current)});
+      if(current)await requireRtssOutputCurrent(current);
+    }
+  }
+  const flags = readRtssSharedFlags(await fs.readTextFile(config, 1 << 20, encoding));
+  if(current)await requireRtssOutputCurrent(current);
+  if (flags === null || Boolean(flags & RTSS_OSD_VISIBLE) !== visible)
+    throw new Error('RTSS OSD 显示开关保存读回未确认。');
+}
 export function setOverlayLayout(layout: OverlayLayout, zoom?: number,current?:RtssOutputCurrent): Promise<OverlaySwitchResult> {
   const run = rtssConfigWriteQueue.then(async (): Promise<OverlaySwitchResult> => {
     if(current)await requireRtssOutputCurrent(current);
-    const dir = await resolveRtssDir();
+    let dir: string;
+    try { dir = await resolveRtssDir(); }
+    catch (error) {
+      if(current)await requireRtssOutputCurrent(current);
+      if (layout === 'off' && error instanceof RtssNotInstalledError && !await rtssRunning()) {
+        if(current)await requireRtssOutputCurrent(current);
+        return {mode: 'absent'};
+      }
+      throw error;
+    }
     if(current)await requireRtssOutputCurrent(current);
-    await prepareRtssOverlay(dir,current);
     const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
     const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
     const running=await rtssRunning();if(current)await requireRtssOutputCurrent(current);
+    if (layout === 'off') {
+      // Empty.ovl is cleanup, not a gate. A failure on one gate must not
+      // prevent closing the other while the request is still current.
+      const failures: string[] = [];
+      for (const close of [() => writeRtssOsdProfile(dir, false, undefined, running,current),
+        () => setRtssOsdVisibility(dir, false, running,current)]) {
+        try { await close(); }
+        catch (error) {
+          if(current)await requireRtssOutputCurrent(current);
+          failures.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (failures.length) throw new Error(failures.join('；'));
+    }
+    await prepareRtssOverlay(dir,current);
     if (!running) {
       const exists=await fs.exists(cfg);if(current)await requireRtssOutputCurrent(current);
       const original = exists ? await fs.readTextFile(cfg, 1 << 20, { textEncoding: 'windows-config' }) : null;
@@ -2823,6 +2928,10 @@ export function setOverlayLayout(layout: OverlayLayout, zoom?: number,current?:R
       if(current)await requireRtssOutputCurrent(current);
       const saved=await readOverlayLayout();if(current)await requireRtssOutputCurrent(current);
       if (saved !== target) throw new Error('RTSS 模板保存读回未确认；未将请求当作保存成功。');
+      if (layout !== 'off') {
+        await writeRtssOsdProfile(dir, true, zoom, false,current);
+        await setRtssOsdVisibility(dir, true, false,current);
+      }
       return { mode: 'saved' };
     }
     // The RTSS-owned plugin invokes the official Load message and only ACKs
@@ -2832,9 +2941,11 @@ export function setOverlayLayout(layout: OverlayLayout, zoom?: number,current?:R
     const result = await rtss.loadOverlay(dir, target,rtssOutputOptions(current));
     if(current)await requireRtssOutputCurrent(current);
     if (!result?.ok) throw new Error(rtssFailureDetail(result, 'RTSS 未确认模板完整加载'));
-    // Apply the saved display size in this same configuration queue. OFF
-    // leaves zoom intact; a matching explicit OSD key needs no disk write.
-    if (layout !== 'off' && zoom !== undefined) await writeRtssZoom(dir, zoom, true,current);
+    // Do not enable OSD until the bridge has finished loading the target.
+    if (layout !== 'off') {
+      await writeRtssOsdProfile(dir, true, zoom, true,current);
+      await setRtssOsdVisibility(dir, true, true,current);
+    }
     // The plugin persists Layout only after completion, so failure does not
     // turn a merely requested template into a falsely successful UI state.
     return { mode: 'live' };
@@ -2893,7 +3004,15 @@ async function restartRtss(): Promise<void> {
 }
 export async function monitorOn(): Promise<boolean> {
   const l = await readOverlayLayout();
-  return !!l && l !== '' && l !== OVL_EMPTY;
+  if (!l || l === OVL_EMPTY) return false;
+  const profiles = `${await resolveRtssDir()}\\Profiles`;
+  const global = `${profiles}\\Global`;
+  const text = await fs.readTextFile(global, 1 << 20, { textEncoding: 'windows-config' });
+  if (rtssIniValue(text, 'OSD', 'EnableOSD') === '0') return false;
+  const config = `${profiles}\\Config`;
+  if (!(await fs.exists(config))) return false;
+  const flags = readRtssSharedFlags(await fs.readTextFile(config, 1 << 20, {textEncoding: 'windows-config'}));
+  return flags !== null && Boolean(flags & RTSS_OSD_VISIBLE);
 }
 
 /* =========================================================================
@@ -3149,37 +3268,6 @@ export async function readSleepTimeouts(): Promise<SleepTimeoutSettings> {
 export interface SleepTimeoutWriteResult {
   saved: true;
   applied: boolean;
-  preferenceSaved?: boolean;
-  preferenceReason?: string;
-}
-
-async function rememberSleepPreference(patch: Record<string, unknown>, label = '睡眠'): Promise<Pick<SleepTimeoutWriteResult, 'preferenceSaved' | 'preferenceReason'>> {
-  const unchanged = new Error('No ordinary sleep preference delta');
-  const record = (value: any) => !!value && typeof value === 'object' && !Array.isArray(value);
-  try {
-    await updateSettings(settings => {
-      const mode = settings.extensions?.bootModes as any;
-      if (mode === undefined) throw unchanged;
-      if (!record(mode) || mode.schema !== 1 || !record(mode.global)) throw new Error('开机模式配置无法确认，原值已保留');
-      const sleep = mode.global.sleep === undefined ? {} : mode.global.sleep;
-      if (!record(sleep)) throw new Error('开机全局睡眠配置无效，原值已保留');
-      const timeouts = sleep.timeouts === undefined ? {} : sleep.timeouts;
-      if (patch.timeouts !== undefined && (!record(timeouts) || !record(patch.timeouts)))
-        throw new Error('开机全局睡眠配置无效，原值已保留');
-      if (Object.entries(patch).every(([key, value]) => key === 'timeouts'
-        ? Object.entries(value as Record<string, unknown>).every(([field, minutes]) => timeouts[field] === minutes)
-        : sleep[key] === value)) throw unchanged;
-      if (!Number.isSafeInteger(mode.revision) || mode.revision < 0 || !Number.isSafeInteger(mode.revision + 1))
-        throw new Error('开机模式版本号无效，原值已保留');
-      mode.global = { ...mode.global, sleep: { ...sleep, ...patch,
-        ...(patch.timeouts === undefined ? {} : { timeouts: { ...timeouts, ...(patch.timeouts as Record<string, unknown>) } }) } };
-      mode.revision++;
-    }, { origin: 'runtime' });
-    return { preferenceSaved: true };
-  } catch (error) {
-    return error === unchanged ? { preferenceSaved: true }
-      : { preferenceSaved: false, preferenceReason: `开机全局${label}偏好未保存：` + (error instanceof Error ? error.message : String(error)) };
-  }
 }
 
 /** 写入固定野蛮电源方案中的单个 Windows 11 超时（单位：分钟）。 */
@@ -3202,8 +3290,6 @@ export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, min
   if (after !== seconds) {
     throw new Error(`电源超时回读不一致：期望 ${seconds} 秒，实际 ${after === null ? '无法读取' : `${after} 秒`}`);
   }
-  const preference = origin === 'ordinary'
-    ? await rememberSleepPreference({ timeouts: { [`${ac ? 'ac' : 'dc'}${field[0].toUpperCase()}${field.slice(1)}`]: safeMinutes } }, '超时') : {};
   // A saved plan index is not the live Windows timeout until the active plan
   // is refreshed. All six AC/DC fields share this user-action-only commit.
   let applied = false;
@@ -3221,9 +3307,9 @@ export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, min
     // Inactive YeMan settings are saved for its next activation. Never switch
     // plans, or overwrite the timeout of another similarly named scheme.
   } catch (error) {
-    throw new Error(`电源超时已保存，但生效刷新未完成：${error instanceof Error ? error.message : String(error)}${preference.preferenceSaved === false ? '；' + preference.preferenceReason : ''}`);
+    throw new Error(`电源超时已保存，但生效刷新未完成：${error instanceof Error ? error.message : String(error)}`);
   }
-  return { saved: true, applied, ...preference };
+  return { saved: true, applied };
 }
 
 async function readPowerPolicyIndex(setting: string, ac: boolean): Promise<number | null> {
@@ -3238,15 +3324,17 @@ async function readPowerPolicyIndex(setting: string, ac: boolean): Promise<numbe
   }
 }
 
-export async function optimizeSleepPowerPlans(admission: StaticWakeAdmission & { isCurrent: () => boolean }): Promise<SleepPowerPlanOptimizationResult> {
+export async function optimizeSleepPowerPlans(admission: StaticWakeAdmission & { expectedPowerSuspendSerial: number; isCurrent: () => boolean }): Promise<SleepPowerPlanOptimizationResult> {
   if (!admission || typeof admission.isCurrent !== 'function')
     throw new Error('睡眠电源计划优化缺少公共任务准入');
-  const { expectedPowerGeneration, expectedPowerNotificationSequence, isCurrent } = admission;
-  const submitted = { expectedPowerGeneration, expectedPowerNotificationSequence, requireSleepPowerPlanEnabled: true } as const;
+  const { expectedPowerGeneration, expectedPowerNotificationSequence, expectedPowerSuspendSerial, isCurrent } = admission;
+  const submitted = { expectedPowerGeneration, expectedPowerNotificationSequence, expectedPowerSuspendSerial, requireSleepPowerPlanEnabled: true } as const;
   const assertCurrent = () => {
     const current = captureStaticWakeAdmission();
     if (!isCurrent() || !current || current.expectedPowerGeneration !== expectedPowerGeneration ||
-        current.expectedPowerNotificationSequence !== expectedPowerNotificationSequence)
+        current.expectedPowerNotificationSequence !== expectedPowerNotificationSequence ||
+        !Number.isSafeInteger(expectedPowerSuspendSerial) || expectedPowerSuspendSerial < 0 ||
+        getSharedPowerLifecycle()?.suspendSerial !== expectedPowerSuspendSerial)
       throw new Error('睡眠电源计划优化的公共准入已失效');
   };
   assertCurrent();
@@ -3426,11 +3514,10 @@ export async function setPowerBtnIdx(isAC: boolean, idx: PowerBtnIdx, options: S
   await assertPowerWriteOwner(submitted);
   const confirmed = await getPowerBtnIdx(isAC);
   await assertPowerWriteOwner(submitted);
-  if (confirmed !== idx) throw new Error('电源按钮回读不一致，未记录开机全局偏好');
-  const preference = origin === 'ordinary' ? await rememberSleepPreference({ [isAC ? 'acButton' : 'dcButton']: idx }) : {};
+  if (confirmed !== idx) throw new Error('电源按钮回读不一致');
   // 注意：不再此处立即激活——由前端做 2 秒防抖重新激活（与 CPU 调度调节器一致），
   // 避免快速多次切换电源按钮时反复激活导致闪烁/卡顿。
-  return { saved: true, applied: false, ...preference };
+  return { saved: true, applied: false };
 }
 
 // 系统休眠状态：由 native 使用 GetPwrCapabilities + Windows Power 注册表直读，
@@ -3471,9 +3558,8 @@ export async function setHibernate(on: boolean, options: SleepPowerWrite = {}): 
   }
   const confirmed = await readHibernateState();
   await assertPowerWriteOwner(submitted);
-  if (confirmed.enabledKnown !== true || confirmed.enabled !== on) throw new Error('系统休眠回读未确认，未记录开机全局偏好');
-  const preference = origin === 'ordinary' ? await rememberSleepPreference({ hibernate: on }) : {};
-  return { ...result, saved: true, applied: true, ...preference };
+  if (confirmed.enabledKnown !== true || confirmed.enabled !== on) throw new Error('系统休眠回读未确认');
+  return { ...result, saved: true, applied: true };
 }
 export async function readHibernateSize(): Promise<number | null> {
   try {
@@ -3504,10 +3590,9 @@ export async function setHibernateSize(pct: number, options: SleepPowerWrite = {
   const confirmed = await readHibernateState();
   await assertPowerWriteOwner(submitted);
   if (confirmed.enabledKnown !== true || !confirmed.enabled || await readHibernateSize() !== size)
-    throw new Error('休眠文件大小回读不一致，未记录开机全局偏好');
+    throw new Error('休眠文件大小回读不一致');
   await assertPowerWriteOwner(submitted);
-  const preference = origin === 'ordinary' ? await rememberSleepPreference({ hibernateSize: size }) : {};
-  return { saved: true, applied: true, ...preference };
+  return { saved: true, applied: true };
 }
 
 // 物理内存总量（GB，浮点）。用于"休眠文件大小预估 = 内存 × 休眠文件百分比"。

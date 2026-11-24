@@ -21,29 +21,32 @@ const mocks={
  export const LS_PRIMARY='C:/fixture/LS.exe',OPTISCALER_CLIENT_DIR='C:/fixture/OPT',OPTISCALER_CLIENT_EXE='OPT.exe',OPTISCALER_CLIENT_URL='about:blank';
  export const dirnameOf=p=>p.slice(0,p.lastIndexOf('\\\\'));
  export const getLosslessGameState=async()=>({enabled:false}),setLosslessScalingEnabled=async()=>({notice:'fixture'});
+ export const removeLosslessGameProfile=async()=>({}),onLosslessScalingChanged=()=>()=>{};
  export async function optiscalerAnalyze(p){window.__fixture.scans.push(p);return {ok:window.__fixture.scanComplete,scanComplete:window.__fixture.scanComplete,antiCheat:window.__fixture.antiCheat,availableBackends:['fsr','xess'],missing:window.__fixture.scanComplete?[]:['扫描不完整']}}
  export async function oneClickOptiScaler(p,u,b,o){window.__fixture.installs.push({path:p,uninstall:u,backend:b,options:o});return {ok:true,written:3,backend:b,version:'0.9.5-pre4',antiCheat:!u&&window.__fixture.antiCheat,clientSyncMessage:'已登记到 OPT 客户端（模拟）'}};
  export const optiConsoleInstalled=async()=>true,openOptiConsole=async()=>{window.__fixture.clientOpens++;return '登记已同步（模拟）'};
  `,
- '@/bridge/gamedetect': `export const detectGame=async()=>window.__fixture.game,refreshGameStatus=async()=>window.__fixture.game,detectedGameName=g=>g?.title||g?.name||'';export const subscribeGameStatus=cb=>{cb(window.__fixture.game);return ()=>{}}`,
+ '@/bridge/gamedetect': `export const getCurrentGame=()=>window.__fixture.game,detectGame=async()=>getCurrentGame(),refreshGameStatus=detectGame,refreshGameStatusStrict=detectGame,detectedGameName=g=>g?.title||g?.name||'';export const isCurrentGameTarget=g=>!!g&&getCurrentGame()?.pid===g.pid,validateGameTarget=async g=>isCurrentGameTarget(g)?getCurrentGame():null;export const subscribeGameStatus=cb=>{cb(getCurrentGame());return ()=>{}}`,
  '@/bridge/uiSettings': `export const getUiSetting=()=>true;export const loadUiSettings=async()=>{};export const setUiSettings=async()=>{};`,
- '@/bridge/gameTrainer': `export const openGameTrainerManager=async()=>{};export const cancelGameTrainerPreparation=async()=>{};export const getGameTrainerState=()=>null;export const subscribeGameTrainerState=()=>()=>{};export class GameTrainerCancelledError extends Error{};export const openOrSearchGameTrainer=async()=>({})`,
+ '@/bridge/gameTrainer': `export const openGameTrainerManager=async()=>{};export const cancelGameTrainerPreparation=async()=>{};export const getGameTrainerState=()=>null,getReadyGameTrainer=()=>null;export const subscribeGameTrainerState=()=>()=>{};export class GameTrainerCancelledError extends Error{};export const openOrSearchGameTrainer=async()=>({})`,
  '@/bridge/speedhack': `export const SPEED_PRESETS=[1,1.5,2],getGameSpeedState=()=>null,isMinecraftTarget=()=>false,applyGameSpeed=async()=>({ok:true}),clearGameSpeed=async()=>({ok:true})`,
  '@/bridge/gameproc': `export const QUICKAPP_SUSPENDED_EVENT='fixture-suspended',hasSuspendedState=async()=>({suspended:false}),waitForProcessExit=async()=>true;export const closeGame=async()=>{window.__fixture.closes++;return {ok:true}};export const resumeGame=async()=>({ok:true}),suspendGame=async()=>({ok:true}),toggleMouseMode=async()=>({ok:true})`,
- '@/bridge/gameQuickSession': `export const getLockedGameTarget=()=>window.__fixture.locked||null,lockGameTarget=g=>(window.__fixture.locked={...g,lockGeneration:1}),unlockGameTarget=()=>window.__fixture.locked=null,validateLockedGameTarget=async()=>window.__fixture.locked||null`,
+ '@/bridge/gameQuickSession': `export const getLockedGameTarget=()=>window.__fixture.locked||null,lockGameTarget=g=>(window.__fixture.locked={...g,lockGeneration:1}),unlockGameTarget=()=>{window.__fixture.locked=null;return true},validateLockedGameTarget=async()=>getLockedGameTarget(),captureAndLockGameTarget=async g=>g?lockGameTarget(g):null,isGameTargetSame=(a,b)=>!!a&&!!b&&a.pid===b.pid&&a.path===b.path&&a.processCreated===b.processCreated`,
  '@/bridge/gamePolicyTarget': `export const getPolicyGame=()=>window.__fixture.game,subscribePolicyGameStatus=cb=>{cb(window.__fixture.game);return ()=>{}}`,
  '@/bridge/gameInputOverride': `export const effectiveInputPersona=()=> 'disabled'`,
- '@/bridge/settingsRepository': `export const loadSettings=async()=>({input:{}}),readSettingsSection=async()=>({apps:[]}),saveSettingsSection=async()=>{}`,
+ '@/bridge/settingsRepository': `export const loadSettings=async()=>({input:{}}),readSettingsSection=async()=>({apps:[]}),saveSettingsSection=async()=>{},getSettingsRecoveryState=()=>({status:'ready'})`,
+ '@/bridge/losslessRuntimeState': `export const retainLosslessObservation=()=>()=>{},readLosslessProgram=async()=>({ok:true})`,
+ '@/bridge/yeman': `export const launchSteamAddon=async()=>{throw Error('Out-of-scope Steam action')}`,
  '@/bridge/quickActionLock': `export const tryAcquireQuickAction=()=>()=>{}`,
  '@/gamepad/engine': `export const isMouseModeSuppressed=()=>false`,
  '@/bridge/api': `export const fs={exists:async()=>false,getFileIcon:async()=>null},shell={execute:async(p,a)=>{window.__fixture.executions.push({path:p,args:a});return true},open:async()=>true},dialog={openFile:async()=>{window.__fixture.filePickers++;return 'D:\\\\Fixture\\\\Game.exe'}},registry={read:async()=>96,write:async()=>true},display={getModes:async()=>({modes:[]}),setMode:async()=>{},setTopology:async()=>{}},proc={terminateTree:async()=>{}},windowApi={openTaskView:async()=>{}}`,
  '@/bridge/music': `import {ref} from 'vue';export const folder=ref(''),baseUrl=ref(''),tracks=ref([]),index=ref(0),playing=ref(false),mode=ref('order'),error=ref(''),currentName=ref(''),hasFolder=ref(false),volume=ref(1),muted=ref(false);export const chooseFolder=async()=>{},scanFolder=async()=>{},togglePlay=()=>{},playNext=()=>{},playPrev=()=>{},setMode=()=>{},setVolume=()=>{},persistVolume=()=>{},toggleMute=()=>{}`,
 };
-for(const name of ['AppIcon','InlineIcon','GameCustomProfilePanel','GameRulePanel','Dropdown'])mocks[`@/components/${name}.vue`]=`import {defineComponent,h} from 'vue';export default defineComponent({setup:()=>()=>h('span')})`;
+for(const name of ['AppIcon','InlineIcon','GameCustomProfilePanel','GameRulePanel','GameTrainerMenu','GameLosslessMenu','Dropdown'])mocks[`@/components/${name}.vue`]=`import {defineComponent,h} from 'vue';export default defineComponent({setup:()=>()=>h('span')})`;
 const styles=[];
 const bundle=await build({stdin:{contents:`import {createApp} from 'vue';import Top from './src/components/GameQuickActions.vue';import View from './src/views/QuickAppView.vue';
  window.__fixture={game:{pid:4321,name:'Game.exe',title:'测试游戏',path:'D:\\\\Fixture\\\\Game.exe',ts:1,processCreated:'fixture-created'},antiCheat:true,scanComplete:true,scans:[],installs:[],executions:[],closes:0,clientOpens:0,filePickers:0};
- const component=location.search.includes('view')?View:Top;const vm=createApp(component,{game:window.__fixture.game,open:true}).mount('#app');window.__run=()=>{window.__done=false;vm.runOpti().finally(()=>window.__done=true)};`,resolveDir:root,sourcefile:'opti-browser-fixture.ts'},bundle:true,write:false,format:'esm',platform:'browser',plugins:[{name:'fixture',setup(b){
+ const component=location.search.includes('view')?View:Top;const vm=createApp(component,{game:window.__fixture.game,open:true}).mount('#app');window.__run=()=>{window.__done=false;vm.runOpti().finally(()=>window.__done=true)};`,resolveDir:root,sourcefile:'opti-browser-fixture.ts'},bundle:true,write:false,format:'esm',platform:'browser',loader:{'.png':'dataurl'},plugins:[{name:'fixture',setup(b){
  b.onResolve({filter:/^@\//},a=>mocks[a.path]?{path:a.path,namespace:'mock'}:{path:path.join(root,'src',a.path.slice(2)+(path.extname(a.path)?'':'.ts'))});
  b.onResolve({filter:/^\.\/api$/},()=>({path:'@/bridge/api',namespace:'mock'}));
  b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],loader:'ts',resolveDir:root}));
@@ -69,19 +72,23 @@ try{
  async function begin(){await page.evaluate(()=>window.__run());await page.getByRole('button',{name:'确认方案并继续',exact:true}).waitFor()}
  async function choose(){await page.getByRole('button',{name:'确认方案并继续',exact:true}).click();await page.locator('.opti-picker').waitFor({state:'detached'})}
  async function finishMessage(mode){if(mode==='view')await page.getByRole('button',{name:'知道了',exact:true}).click();await page.waitForFunction(()=>window.__done)}
- for(const mode of ['top','view']){
+ for(const height of [720,800])for(const mode of ['top','view']){
+  await page.setViewportSize({width:1280,height});
   await load(mode);await begin();
   const row=page.locator(mode==='top'?'.quick-opti-anticheat-actions':'.opti-picker-anticheat-actions');
   const boxes=await row.locator('button').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width}}));
   assert.equal(boxes.length,2);assert(Math.abs(boxes[0].y-boxes[1].y)<2);assert(boxes[1].x>boxes[0].x);
-  const shot=path.join(out,`${mode}-picker.png`);await page.screenshot({path:shot});screenshots.push(shot);
+  assert.equal(await page.getByRole('button',{name:'卸载并还原',exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'卸载并还原游戏文件',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'添加到 OPT',exact:true}).count(),0);
+  const shot=path.join(out,`${mode}-picker-1280x${height}.png`);await page.screenshot({path:shot});screenshots.push(shot);
   await page.getByRole('button',{name:'反作弊离线说明',exact:true}).click();await choose();
   await page.getByText('反作弊离线使用说明',{exact:true}).waitFor();await page.getByRole('button',{name:'知道了',exact:true}).click();await page.waitForFunction(()=>window.__done);
   assert.deepEqual(await page.evaluate(()=>({installs:window.__fixture.installs.length,closes:window.__fixture.closes,pickers:window.__fixture.filePickers})),{installs:0,closes:0,pickers:0});cases.push(`${mode}: parallel help/restore buttons; help is read-only`);
 
   await load(mode);await begin();await choose();await page.getByRole('button',{name:'我了解风险，仍然导入',exact:true}).waitFor();
   await page.waitForFunction(()=>document.activeElement?.textContent==='取消');
-  const warning=path.join(out,`${mode}-warning.png`);await page.screenshot({path:warning});screenshots.push(warning);
+  const warning=path.join(out,`${mode}-warning-1280x${height}.png`);await page.screenshot({path:warning});screenshots.push(warning);
   await page.getByRole('button',{name:'取消',exact:true}).click();await page.waitForFunction(()=>window.__done);
   assert.deepEqual(await page.evaluate(()=>({installs:window.__fixture.installs.length,closes:window.__fixture.closes})),{installs:0,closes:0});cases.push(`${mode}: risk defaults to cancel; cancellation never installs or closes game`);
 
@@ -98,7 +105,7 @@ try{
   await page.getByRole('button',{name:'启动游戏',exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.__fixture.installs[0].options.acknowledgeAntiCheatRisk),false);
   await page.getByRole('button',{name:'取消',exact:true}).click();await page.waitForFunction(()=>window.__done);cases.push(`${mode}: non-anticheat imports preserve optional launch flow`);
 
-  await load(mode);await begin();await page.getByRole('button',{name:'还原',exact:true}).click();await choose();await page.getByRole('button',{name:'结束游戏并继续',exact:true}).click();await finishMessage(mode);
+  await load(mode);await begin();await page.getByRole('button',{name:'卸载并还原',exact:true}).click();await choose();await page.getByRole('button',{name:'结束游戏并继续',exact:true}).click();await finishMessage(mode);
   assert.equal(await page.evaluate(()=>window.__fixture.installs[0].uninstall),true);assert.equal(await page.evaluate(()=>window.__fixture.scans.length),0);cases.push(`${mode}: restore works without requesting anti-cheat acknowledgement`);
 
   await load(mode,{scanComplete:false});await begin();await choose();

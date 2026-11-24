@@ -27,7 +27,12 @@ const startupIncludes={
 for(const [name,body] of Object.entries(startupIncludes))fs.writeFileSync(path.join(out,name),body);
 const idleDiscovery=section('static void discoverIdleGame(', 'static void run(');
 fs.writeFileSync(path.join(out,'runtime_idle_discovery.inc'),idleDiscovery);
-const baseIncludes=['runtime_wait.inc','runtime_directory.inc','runtime_observe.inc','runtime_link_retirement.inc','runtime_idle_discovery.inc',...Object.keys(startupIncludes)];
+const hintNotify=section('static void steamGameLinkNotify(bool windowHint){','static void steamGameLinkShutdown(){');
+const observationSubmit=section('static bool steamGameLinkSubmitObservation(', 'static void steamGameLinkStart(){');
+const observationDrain=section('static void drainObservation(', 'struct ObservationScope');
+const wakeIncludes={'runtime_hint_notify.inc':hintNotify,'runtime_observation_submit.inc':observationSubmit,'runtime_observation_drain.inc':observationDrain};
+for(const [name,body] of Object.entries(wakeIncludes))fs.writeFileSync(path.join(out,name),body);
+const baseIncludes=['runtime_wait.inc','runtime_directory.inc','runtime_observe.inc','runtime_link_retirement.inc','runtime_idle_discovery.inc',...Object.keys(startupIncludes),...Object.keys(wakeIncludes)];
 const vc='C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
 const tests=['steam_game_link_wait_policy_selftest'];
 if(!options.length)tests.push('steam_game_link_state_selftest');
@@ -80,7 +85,10 @@ const negativeIdleWindow=excerptControl('negative-immediate-idle-window','runtim
 const negativeIdleDiscovery=excerptControl('negative-ungated-idle-discovery','runtime_idle_discovery.inc',idleDiscovery,
     'qualifiedEmpty||!nativeValveReadCachedSelection(&targetHint)','qualifiedEmpty||(!nativeValveReadCachedSelection(&targetHint)&&false)',
     '--idle-discovery-only','no selected target skips Steam round trip without proving absence');
-const status=p.status===0&&negativeDetected&&droppedDetected&&negativeInitialScope.detected&&negativeInitialWatch.detected&&negativeIdleWindow.detected&&negativeIdleDiscovery.detected?0:1;
+const negativeHintRetry=excerptControl('negative-hint-no-retry','runtime_hint_notify.inc',hintNotify,
+    'if(!pending||!c->hintWakeSucceeded)','if(!pending)',
+    '--hint-wake-only','duplicate retries a failed wake');
+const status=p.status===0&&negativeDetected&&droppedDetected&&negativeInitialScope.detected&&negativeInitialWatch.detected&&negativeIdleWindow.detected&&negativeIdleDiscovery.detected&&negativeHintRetry.detected?0:1;
 const inputs=[file,'native/steam_game_link_state.h','native/steam_game_link_wait_policy.h','native/steam_game_link_log_watch.h',...tests.map(t=>'tools/'+t+'.cpp'),'tools/steam_game_link_wait_policy_selftest.mjs'].map(f=>({path:path.join(root,f),sha256:crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')}));
-fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({status,positiveStatus:p.status,tests,negativeConsoleUrgent:{status:negative.status,detected:negativeDetected},negativeDropSuccessor:{status:dropped.status,detected:droppedDetected},negativeInitialScope,negativeInitialWatch,negativeIdleWindow,negativeIdleDiscovery,inputs,method:'Production wait/directory/predicate/link retirement/startup enrollment and idle discovery excerpts; break converted to return at function boundary; virtual clock, mocked discovery and directory stamps, real Windows event handles. Negative controls restore prior behaviors individually. No application/Steam/game/sleep run.'},null,2));
+fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({status,positiveStatus:p.status,tests,negativeConsoleUrgent:{status:negative.status,detected:negativeDetected},negativeDropSuccessor:{status:dropped.status,detected:droppedDetected},negativeInitialScope,negativeInitialWatch,negativeIdleWindow,negativeIdleDiscovery,negativeHintRetry,inputs,method:'Production notify/observation queue/wait/directory/predicate/link retirement/startup enrollment and idle discovery excerpts; virtual clock and scripted interleaving, fault-injected SetEvent with real Windows event handles on success. No application/Steam/game/sleep run.'},null,2));
 console.log(p.stdout||'');console.error(p.stderr||'');console.log(negativeDetected?'PASS negative console-urgent control rejected by 10s interval assertion':negativeLog);console.log(droppedDetected?'PASS negative old link retirement loses discovery':droppedLog);process.exit(status);

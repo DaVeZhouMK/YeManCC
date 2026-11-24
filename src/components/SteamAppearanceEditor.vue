@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import SwitchControl from './SwitchControl.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import { STEAM_APPEARANCE_THEMES, STEAM_APPEARANCE_DEFAULT_ENABLED, type AppearanceSnapshot, type AppearanceThemeName } from '@/bridge/steamAppearance';
+import { STEAM_APPEARANCE_THEMES, STEAM_APPEARANCE_DEFAULT_ENABLED, type AppearanceThemeName } from '@/bridge/steamAppearance';
+import type { AppearanceDraftViewSnapshot } from '@/bridge/steamAppearanceDraft';
 import { focusGamepadElement } from '@/gamepad/focus';
-const props = defineProps<{ snapshot: AppearanceSnapshot | null; changes?: Partial<Record<AppearanceThemeName, boolean>>; busy: boolean; notice: string; pending?: boolean; saving?: boolean }>();
+const props = defineProps<{ snapshot: AppearanceDraftViewSnapshot | null; changes?: Readonly<Partial<Record<AppearanceThemeName, boolean>>>; busy: boolean; notice: string; pending?: boolean; saving?: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'change', name: AppearanceThemeName, enabled: boolean): void; (e: 'refresh'): void; (e: 'reset', mode: 'preset' | 'previous'): void }>();
 const panel = ref<HTMLElement | null>(null);
 const resetPrompt = ref(false), resetButton = ref<HTMLButtonElement | null>(null);

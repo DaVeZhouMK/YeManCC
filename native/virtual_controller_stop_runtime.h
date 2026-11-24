@@ -220,6 +220,22 @@ static void inputHostStopLocked(const char* reason) {
     const unsigned long long stopHostPid = g_inputHostProcess
         ? static_cast<unsigned long long>(GetProcessId(g_inputHostProcess)) : 0ULL;
     const char* stopReason = reason ? reason : "";
+    // A lost PREPARE reply leaves the old child as the only possible owner.
+    // Hand its exact handle to the existing quarantine continuation once the
+    // faulted channel is closed; an explicit OFF can probe that same owner.
+    const bool isolatedPrepareOwner =
+        hadProcess && g_inputHostHello && prepareCreationPossible && !hadPreparedTarget &&
+        !g_inputHostRunId.empty() && g_inputHostEpoch && !g_inputHostHostInstanceId.empty() &&
+        g_inputHostTransportFault && !g_inputHostServerPipe && !g_inputHostPipeConnected;
+    const bool firstIsolatedPrepareExit = isolatedPrepareOwner &&
+        std::strcmp(stopReason, "opening-failed") == 0 &&
+        !g_inputHostPipeRetired && g_inputHostReleaseDisposition == "opening-failed/release-unproven";
+    const bool recheckIsolatedPrepareExit = isolatedPrepareOwner && closingTicket &&
+        std::strcmp(stopReason, "virtual-target-disabled") == 0 && g_inputHostPipeRetired &&
+        g_inputHostReleaseQuarantined && g_inputHostStartBlocked &&
+        g_inputHostLifecycle == "release-pending" &&
+        g_inputHostReleaseDisposition == "release-unproven/host-exit-timeout";
+    const bool probeIsolatedPrepareExit = firstIsolatedPrepareExit || recheckIsolatedPrepareExit;
     // Read-only boundary evidence: capture modifier state before QUIESCE/
     // RELEASE/SHUTDOWN so a later stuck-key observation can be placed before
     // or inside the stop transaction. This never sends or repairs a key.
@@ -416,6 +432,12 @@ static void inputHostStopLocked(const char* reason) {
         // 硬杀，仅有 startup-orphan 快速清理）。
         const auto processRetirement = ymcc::inputHost::processRetirement::retire(
             g_inputHostProcess, [&](HANDLE process) {
+                if (probeIsolatedPrepareExit) {
+                    const auto currentExit = ymcc::inputHost::processRetirement::waitOnce(process, 0);
+                    if (currentExit.state == WAIT_TIMEOUT)
+                        g_inputHostReleaseDisposition = "release-unproven/host-exit-timeout";
+                    return currentExit;
+                }
                 DWORD wait = ymStartHostExitWait(process);
                 DWORD waitError = wait == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
                 if (wait == WAIT_TIMEOUT) {
@@ -446,6 +468,7 @@ static void inputHostStopLocked(const char* reason) {
         processHandleClosePending = processRetirement.closeAttempted && !processRetirement.handleClosed;
         appendNativeLifecycleLog("input-host-process-retirement", {
             {"runId",g_inputHostRunId},{"epoch",g_inputHostEpoch},
+            {"exitProbeOnly",probeIsolatedPrepareExit},
             {"waitState",processRetirement.waitState},{"waitError",processRetirement.waitError},
             {"hostExitConfirmed",hostExitConfirmed},{"closeAttempted",processRetirement.closeAttempted},
             {"handleClosed",processRetirement.handleClosed},{"closeError",processRetirement.closeError},

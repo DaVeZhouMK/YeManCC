@@ -103,6 +103,30 @@ export function emitNativeEvent(event: string, data: unknown = {}): void {
   }
 }
 
+const gyroTelemetryConsumers = new Set<object>();
+let gyroTelemetryContext: { generation: string; document: string } | undefined;
+
+export function bindGyroTelemetryDocument(generation: string, document: string | undefined): void {
+  if (!document || document === '0') return;
+  gyroTelemetryContext = { generation, document };
+  publishGyroTelemetryInterest();
+}
+
+function publishGyroTelemetryInterest(): void {
+  if (!gyroTelemetryContext) return;
+  emitNativeEvent('gyro.telemetry.interest', {
+    ...gyroTelemetryContext,
+    interested: gyroTelemetryConsumers.size > 0,
+  });
+}
+
+export function setGyroTelemetryInterest(consumer: object, interested: boolean): void {
+  const wasInterested = gyroTelemetryConsumers.size > 0;
+  if (interested) gyroTelemetryConsumers.add(consumer);
+  else gyroTelemetryConsumers.delete(consumer);
+  if (wasInterested !== (gyroTelemetryConsumers.size > 0)) publishGyroTelemetryInterest();
+}
+
 // ── 启动性能采样已按用户要求停用（不再写 startup_trace.txt）──
 
 export function rejectAllPending(reason = 'WebView2 is recovering'): void {

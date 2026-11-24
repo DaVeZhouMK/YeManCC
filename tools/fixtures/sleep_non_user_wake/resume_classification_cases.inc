@@ -14,9 +14,13 @@ void baseCycle(bool pid,bool nonUser){
  g_sleepPowerDispatch.~Dispatch();new (&g_sleepPowerDispatch) ymcc::sleeppower::Dispatch();
 #ifdef CURRENT_COORDINATOR
  g_sgResumeClassification.generation=0;g_sgResumeClassification.observedGeneration=0;
+ g_sgSleepDisplayEvidence={};
  g_sgWakeClassificationBlockedGeneration=0;softwareReadyNotices=0;
 #ifdef YMCC_FIXTURE_ACTUAL_SHARED_PUBLICATION
  g_sharedPowerPublicationRevision=0;g_sharedPowerProjectionPending=false;
+ classificationConsumePublicationPost(classificationPostReceipt);classificationPostReceipt=0;
+ g_sleepPowerRedeliveryArmed=false;classificationTimerAttempts=0;
+ classificationPostSucceeds=classificationTimerSucceeds=true;
  classificationPublicationPosts=classificationBatteryNotices=0;
  g_recoveryPowerBoundary.revocations=g_sharedPowerRevocations.revocations=0;
 #endif
@@ -103,10 +107,121 @@ void delayedWork(){
  baseCycle(true,false);const auto origin=nowFile;at(13000);originalEntry(origin);resumeAutomatic();resumeInteractive();handle506(1,origin);
  const auto exit=origin+3600*10000ULL;at(14000);g_sgLastKernel507EventFileTime=exit;handle507Native(32,exit);
  check(sgSleepRetryActive(),"fast retry was not admitted before delayed wake queue");
- actualWakeQueue.push_back({SgWork::WakeSuspend,generation});drainActualWake();
+ actualWakeQueue.push_back(fixtureWorkReceipt(SgWork::WakeSuspend,generation));drainActualWake();
  check(sgSleepRetryActive()&&frozen&&!requestCount,"old wake worker cleared admitted retry or exact lease");
  dispatch();check(requestCount==1,"late work prevented original dispatch");passed("delayed-common-worker-cannot-clear-new-retry");
 }
+bool displayExitEnded(const std::string& fields){
+ return ymcc::sleep_residency::sessionInProgressOnExit(
+     ymcc::sleep_residency::makeEvidence("<Event><EventData>"+fields+"</EventData></Event>"))==false;
+}
+void win5DisplayRelight(int control){
+ baseCycle(false,false);const auto original=nowFile,offGeneration=generation;
+ constexpr ULONGLONG continuedDelta=72370750146ULL,finalDelta=72375481187ULL;
+ const auto continued=original+continuedDelta,finalExit=original+finalDelta;
+ at(10015);sgObserveSleepSessionDisplay(control==3?-1:1,0);
+ if(control==4)sgObserveSleepSessionDisplay(0,2);
+ generation+=control==5?2:1;
+ const auto current=generation;
+ at(7247549);originalEntry(original);sgSleepTimeoutRecordKernel(506,1,original,offGeneration);
+ sgSleepTimeoutRecordKernel(507,55,continued,current,true);
+ sgSleepTimeoutRecordKernel(506,55,continued+13274,current);
+ const auto count=[](bool paired){return std::count_if(facts.begin(),facts.end(),[&](const auto& record){
+   return record.first=="s0-session-display-relit"&&record.second.at("kernelExitObserved")==paired&&
+       record.second.at("powerActionAuthorized")==false;});};
+ const std::string endedField="<Data Name='IsCsSessionInProgressOnExit'>false</Data>";
+ if(control==0||control==6||control==10){
+  const auto reason=control==6?1:32;
+  sgSleepTimeoutRecordKernel(507,reason,finalExit,current,false,displayExitEnded(endedField));
+  if(control==6)g_sgClosedSleepIntentFileTime=nowFile;
+ }
+ if(control==8||control==9||control==11){
+  const std::string fields=control==8?"":control==9?
+      "<Data Name='IsCsSessionInProgressOnExit'>unknown</Data>":endedField+endedField;
+  sgSleepTimeoutRecordKernel(507,32,finalExit,current,false,displayExitEnded(fields));
+ }
+ if(control==10)sgSleepTimeoutRecordKernel(507,-1,finalExit+100,current,false,true);
+ at(7247570);sgObserveSleepSessionDisplay(control==4?2:0,1);
+ if(control==1){
+  check(count(false)==1&&!count(true),"display callback borrowed continuing 507 as exit");
+  at(7248100);sgSleepTimeoutRecordKernel(507,32,finalExit,current,false,true);handle507Native(32,finalExit);
+ }
+ if(control==7){
+  at(7247800);g_sgLatestSleepEntryFileTime=nowFile;
+  sgSleepTimeoutRecordKernel(507,32,finalExit,current,false,true);handle507Native(32,finalExit);
+ }
+ sgObserveSleepSessionDisplay(1,1);sgReportSleepDisplayRelight();
+ const auto paired=control==0||control==1||control==6;
+ const auto initial=control==1||control==2||(control>=7&&control<=11);
+ check(count(true)==(paired?1:0)&&count(false)==(initial?1:0),"session display qualification, association or dedup failed");
+ check(!requestCount&&!sgSleepRetryActive(),"session display evidence authorized re-sleep");
+ passed(std::string("win5-session-display-relight/")+std::to_string(control));
+}
+void g3eDisplayRelight(int control){
+ baseCycle(false,false);const auto original=nowFile,offGeneration=generation;
+ constexpr ULONGLONG continuedDelta=72203920000ULL,successorDelta=72203930000ULL,finalDelta=72254760000ULL;
+ const auto continued=original+continuedDelta,successor=original+successorDelta,finalExit=original+finalDelta;
+ at(10016);sgObserveSleepSessionDisplay(1,0);
+ generation+=control==4?3:2;const auto current=generation;
+ at(7235476);originalEntry(original);sgSleepTimeoutRecordKernel(506,1,original,offGeneration+1);
+ if(control==3)sgSleepTimeoutRecordKernel(506,28,continued-50000000ULL,offGeneration+1);
+ sgSleepTimeoutRecordKernel(507,55,continued,offGeneration+1,true);
+ if(control!=2)g_sgKernelCycles.observeSleepExit({continued,offGeneration+1,55,7220392441ULL,true});
+ sgSleepTimeoutRecordKernel(506,55,successor,current);
+ if(control!=1)sgSleepTimeoutRecordKernel(507,32,finalExit,control==6?current-1:current,false,control!=5);
+ at(7235731);sgObserveSleepSessionDisplay(0,1);
+ const auto count=[](){return std::count_if(facts.begin(),facts.end(),[](const auto& record){
+   if(record.first!="s0-session-display-relit")return false;
+   check(record.second.at("kernelExitObserved")==true&&record.second.at("powerActionAuthorized")==false,
+         "G3E cross-generation light lacked a final exit or granted power authority");return true;
+ });};
+ if(control==1){
+  check(!count(),"G3E cross-generation light became evidence without final exit");
+  at(7236454);sgSleepTimeoutRecordKernel(507,32,finalExit,current,false,true);handle507Native(32,finalExit);
+ }
+ check(count()==(control<2?1:0),"G3E two-generation display correlation was lost or borrowed");
+ check(!requestCount&&!sgSleepRetryActive(),"G3E display-only evidence dispatched re-sleep");
+ passed(std::string("g3e-two-generation-display-relight/")+std::to_string(control));
+}
+#ifdef YMCC_FIXTURE_ENTRY_HANDOFF_ENABLE
+void win5ContinuingThenFinalExit(int control){
+ baseCycle(false,control!=1);const auto origin=nowFile,gen=generation;
+ constexpr ULONGLONG continuingDelta=72370750146ULL, reentryDelta=72370763420ULL, finalDelta=72375481187ULL;
+ const auto continuing=origin+continuingDelta,reentry=origin+reentryDelta,finalExit=origin+finalDelta;
+ at(7247090);originalEntry(origin);sgSleepTimeoutRecordKernel(506,1,origin,gen);
+ resumeAutomatic();resumeInteractive();drainActualWake();handle506(1,origin);
+ check(classificationTimerDue>nowTick,"Win5 delayed suspend did not hold resume classification");
+ sgSleepTimeoutRecordKernel(507,55,continuing,gen,true);
+ g_sgKernelCycles.observeSleepExit({continuing,gen,55,7237001006ULL,true});
+ sgSleepTimeoutRecordKernel(506,55,reentry,gen);g_sgLatestSleepEntryFileTime=reentry;
+ handle506(55,reentry);
+ check(!requestCount&&!sgSleepRetryActive(),"continuing session started wake repair");
+ check(sgSleepTimeoutSuccessAfter(origin),"Win5 entered session was lost after the successor 506");
+
+ sgSleepTimeoutRecordKernel(507,32,finalExit,gen);g_sgLastKernel507EventFileTime=finalExit;
+ // Force the actual operation-lock admission onto the existing handoff.
+ std::mutex sync;std::condition_variable cv;bool held=false,release=false;
+ std::thread worker([&]{std::lock_guard op(g_sgOpMtx);std::unique_lock lock(sync);held=true;cv.notify_one();cv.wait(lock,[&]{return release;});});
+ {std::unique_lock lock(sync);cv.wait(lock,[&]{return held;});}
+ std::exception_ptr failed;
+ try{handle507Native(32,finalExit);}catch(...){failed=std::current_exception();}
+ {std::lock_guard lock(sync);release=true;}cv.notify_one();worker.join();
+ if(failed)std::rethrow_exception(failed);
+ check(sgRetryAdmissionHeld(SgRetryKind::UnexpectedWake,gen,origin)==(control!=1),"Win5 final exit did not honor the non-user wake setting");
+ if(control==2){g_sgLastPowerButtonWakeEventFileTime=nowFile;g_sgOriginalPowerButtonWakeFileTime=nowFile;}
+ if(control==3)sgSleepTimeoutRecordSystemSuccess(nowFile);
+ if(control==4)g_sgLatestSleepEntryFileTime=nowFile;
+ at(classificationTimerDue);sgResumeClassificationTick();
+ if(control==5)g_sgLatestSleepEntryFileTime=nowFile;
+ sgResumeRetryAdmission();
+ if(control==0){
+  check(sgSleepRetryActive()&&g_sgTask.retryKind==SgRetryKind::UnexpectedWake,"earlier Windows sleep success erased the admitted Win5 re-sleep");
+  dispatch();check(requestCount==1,"Win5 final exit did not reach one bounded re-sleep");
+ }else check(!requestCount&&!sgSleepRetryActive(),"Win5 cancellation control admitted re-sleep");
+ sgCancelRetryAdmission(SgRetryKind::None);
+ passed(std::string("win5-continuing-then-final/")+std::to_string(control));
+}
+#endif
 void newerEntry(){
  baseCycle(true,false);const auto origin=nowFile;at(13000);originalEntry(origin);resumeAutomatic();drainActualWake();handle506(1,origin);
  const auto old=generation;at(15000);originalEntry(nowFile);handle506(1,nowFile);
@@ -167,10 +282,16 @@ void manualCallbackThenBroadcast(){
 }
 const char* retryEntryPublishAt=nullptr;
 void retryExitWithNewEntryDuringClassification(const char* publishAt){
- baseCycle(false,false);const auto original=nowFile;at(13000);originalEntry(original);resumeAutomatic();handle506(1,original);drainActualWake();
+ baseCycle(true,false);const auto original=nowFile,gen=generation;at(13000);originalEntry(original);resumeAutomatic();handle506(1,original);drainActualWake();
  at(14000);const auto firstExit=original+3600*10000ULL;g_sgLastKernel507EventFileTime=firstExit;handle507Native(32,firstExit);dispatch();
  check(requestCount==1&&sgSleepRetryActive()&&!timerDue,"first request was not issued and waiting");
  const auto marker=g_sgInternalSleepRequest.dispatchFileTime;
+ const auto spent=g_sgAutomaticSleepBudget.requests();
+ const auto resumes=resumeCount;
+ const auto unassigned=[&]{return std::count_if(facts.begin(),facts.end(),[](const auto& fact){
+  return fact.first=="sleep-retry-failure-attribution"&&fact.second.at("attribution")=="unknown"&&fact.second.at("retryAuthorized")==false;
+ });};
+ const auto priorUnassigned=unassigned();
  at(nowTick+100);const auto oldExit=nowFile;
  retryEntryPublishAt=publishAt;
  if(publishAt)fixtureSleepFactHook=[](const char* event){
@@ -181,17 +302,26 @@ void retryExitWithNewEntryDuringClassification(const char* publishAt){
   sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
  };
  handle507Native(7,oldExit);
+ check(!timerDue&&requestCount==1&&g_sgAutomaticSleepBudget.requests()==spent,"unattributed or superseded exit cannot authorize or refund another request");
+ check(frozen&&resumeCount==resumes&&generation==gen,"unattributed or superseded exit cannot return the exact game lease");
+ check(g_sgInternalSleepRequest.dispatchFileTime==marker,"unattributed or superseded exit replaced the accepted request marker");
  if(publishAt){
   check(!fixtureSleepFactHook,"new original entry was not published at the selected log");
-  check(!timerDue&&requestCount==1,"old wake kept another retry after a newer 506");
   if(strcmp(publishAt,"s0-wake-classified")==0){
-   check(g_sgInternalSleepRequest.dispatchFileTime==marker,"old wake retired the request after a newer 506");
-   passed("new-kernel-entry-during-wake-classification-vetoes-retry");
-  }else passed("new-kernel-entry-during-retry-schedule-cancels-timer");
+   check(unassigned()==priorUnassigned&&sgSleepRetryActive(),"old exit reached request attribution after a newer kernel entry");
+  }else{
+   check(unassigned()==priorUnassigned+1&&!sgSleepRetryActive(),"new entry during unknown attribution did not retire the superseded retry frame");
+  }
  }else{
-  check(timerDue&&requestCount==1,"uninterrupted short exit did not follow original retry policy");
-  passed("short-exit-without-new-entry-keeps-retry-policy");
+  check(unassigned()==priorUnassigned+1&&sgSleepRetryActive(),"unattributed short exit did not preserve the accepted retry owner");
  }
+ sgDispatchSameModeRetry();check(requestCount==1,"stale timer added another request");
+ at(nowTick+100);const auto manual=nowFile;
+ g_sgLastPowerButtonWakeEventFileTime=manual;g_sgOriginalPowerButtonWakeFileTime=manual;
+ handle507Native(1,manual);drainActualWake();handle507Native(1,manual);drainActualWake();
+ check(!frozen&&resumeCount==resumes+1&&!sgSleepRetryActive()&&!timerDue&&requestCount==1&&generation==gen,"valid later wake did not return the original game lease exactly once");
+ passed(!publishAt?"unattributed-short-exit-waits-for-valid-wake":strcmp(publishAt,"s0-wake-classified")==0?
+  "new-kernel-entry-during-wake-classification-vetoes-retry":"new-kernel-entry-during-unknown-attribution-retires-old-frame");
 }
 void repeatedAttempt(){
  baseCycle(false,false);const auto original=nowFile;at(13000);originalEntry(original);resumeAutomatic();handle506(1,original);drainActualWake();
@@ -226,13 +356,62 @@ void softwareGate(){
  check(!sharedSleepWakeClassified(gen),"exit software admission");
 #ifdef YMCC_FIXTURE_ACTUAL_SHARED_PUBLICATION
  const auto stopped=g_sharedPowerPublicationRevision.load();
- const auto battery=classificationBatteryNotices;
+ const auto battery=classificationBatteryNotices.load();
  publishSharedPowerLifecycle("fixture-after-exit");
  check(g_sharedPowerPublicationRevision.load()==stopped&&classificationBatteryNotices==battery&&classificationPublicationPosts==1,
   "actual publisher notified after exit");
 #endif
  passed("pure-software-classification-gate-and-same-generation-final-notice");
 }
+#ifdef YMCC_FIXTURE_ACTUAL_SHARED_PUBLICATION
+void publicationEndpointAdmission(){
+ g_exitRequested=false;
+ classificationConsumePublicationPost(classificationPostReceipt);
+ g_sharedPowerProjectionPending=false;g_sleepPowerRedeliveryArmed=false;
+ const auto posts=classificationPublicationPosts.load(),timers=classificationTimerAttempts.load();
+ const auto revision=g_sharedPowerPublicationRevision.load();
+ const auto gen=generation;
+ classificationPostSucceeds=classificationTimerSucceeds=false;
+ publishSharedPowerLifecycle("fixture-refused-post-and-timer");
+ check(classificationPublicationPosts==posts+1&&classificationTimerAttempts==timers+1&&
+       !g_sleepPowerRedeliveryArmed&&g_sharedPowerProjectionPending,
+       "both OS delivery endpoints must refuse while the projection remains due");
+ classificationPostSucceeds=classificationTimerSucceeds=true;
+ publishSharedPowerLifecycle("fixture-next-valid-publication");
+ check(classificationPublicationPosts==posts+2&&classificationTimerAttempts==timers+1&&
+       g_sharedPowerPublicationRevision.load()==revision+2&&generation==gen&&g_sharedPowerProjectionPending,
+       "next valid publication must retry after both OS delivery endpoints refuse");
+ // An untagged timer or sensor notification may take the debt while the
+ // publisher's accepted window message is still queued.
+ classificationConsumePublicationPost(0);g_sharedPowerProjectionPending=false;
+ publishSharedPowerLifecycle("fixture-untagged-delivery-does-not-retire-post");
+ check(classificationPublicationPosts==posts+2&&g_sharedPowerProjectionPending,
+       "untagged delivery must preserve the outstanding Post receipt");
+ classificationConsumePublicationPost(classificationPostReceipt);g_sharedPowerProjectionPending=false;
+ const auto savedWindow=g_hwnd;g_hwnd=nullptr;
+ publishSharedPowerLifecycle("fixture-window-not-yet-available");
+ check(classificationPublicationPosts==posts+2&&classificationTimerAttempts==timers+1&&g_sharedPowerProjectionPending,
+       "missing window must retain unscheduled projection debt");
+ g_hwnd=savedWindow;
+ publishSharedPowerLifecycle("fixture-window-now-available");
+ check(classificationPublicationPosts==posts+3&&g_sharedPowerPublicationRevision.load()==revision+5&&generation==gen,
+       "first publication after the window becomes available must post current facts");
+ classificationConsumePublicationPost(classificationPostReceipt);g_sharedPowerProjectionPending=false;
+ const auto priorPosts=classificationPublicationPosts.load(),priorTimers=classificationTimerAttempts.load();
+ const auto priorRevision=g_sharedPowerPublicationRevision.load();
+ ClassificationPublicationInterleave interleave{true,classificationBatteryNotices.load()+2};
+ classificationPublicationInterleave=&interleave;classificationTimerSucceeds=false;
+ std::thread first([]{publishSharedPowerLifecycle("fixture-in-flight-post-will-refuse");});
+ interleave.postEntered.wait();
+ std::thread second([]{publishSharedPowerLifecycle("fixture-competing-current-publication");});
+ interleave.secondPublication.wait();interleave.releasePost.count_down();
+ first.join();second.join();classificationPublicationInterleave=nullptr;classificationTimerSucceeds=true;
+ check(classificationPublicationPosts==priorPosts+2&&classificationTimerAttempts==priorTimers+1&&
+       g_sharedPowerPublicationRevision.load()==priorRevision+2&&g_sharedPowerProjectionPending&&!g_sleepPowerRedeliveryArmed,
+       "a competing current publication must not coalesce behind an unaccepted Post");
+ classificationConsumePublicationPost(classificationPostReceipt);g_sharedPowerProjectionPending=false;
+}
+#endif
 void wakeBeforeEntryGui(bool nonUser){
  baseCycle(false,nonUser);const auto original=nowFile,gen=generation;
  at(13000);originalEntry(original);resumeAutomatic();resumeInteractive();drainActualWake();
@@ -353,7 +532,11 @@ int main(int argc,char** argv){try{
 #endif
 
  if(argc!=1&&!(argc==2&&(strcmp(argv[1],"--classification-lifetime-only")==0||strcmp(argv[1],"--classification-edge-only")==0||strcmp(argv[1],"--classification-publication-only")==0||strcmp(argv[1],"--s3")==0||strcmp(argv[1],"--caps-unknown")==0)))throw std::runtime_error("unknown-resume-classification-selector");
- if(argc==2&&strcmp(argv[1],"--classification-publication-only")==0){softwareGate();}
+ if(argc==2&&strcmp(argv[1],"--classification-publication-only")==0){softwareGate();
+#ifdef YMCC_FIXTURE_ACTUAL_SHARED_PUBLICATION
+  publicationEndpointAdmission();
+#endif
+ }
  else if(argc==2&&strcmp(argv[1],"--classification-lifetime-only")==0){criticalDuringPending();missingKernelEvidence(true);missingKernelEvidence(false);actualSettingsCancellation();}
  else if(argc==2&&strcmp(argv[1],"--classification-edge-only")==0){wakeBeforeEntryGui(false);wakeBeforeEntryGui(true);}
  else
@@ -366,8 +549,13 @@ int main(int argc,char** argv){try{
   for(bool nonUser:{false,true})for(bool pid:{false,true})for(int order:{0,1,2})fieldScenario(nonUser,pid,order);
   noEvidence(false);noEvidence(true);displayEvidence();manualBeforeGui();manualDuringPending();
   windowsHandoff();delayedWork();newerEntry();timeoutIndependent();retiredLifetime(false);retiredLifetime(true);
+  for(int control:{0,1,2,3,4,5,6,7,8,9,10,11})win5DisplayRelight(control);
+  for(int control:{0,1,2,3,4,5,6})g3eDisplayRelight(control);
+#ifdef YMCC_FIXTURE_ENTRY_HANDOFF_ENABLE
+  for(int control:{0,1,2,3,4,5})win5ContinuingThenFinalExit(control);
+#endif
   lateReceipt();manualCallbackThenBroadcast();retryExitWithNewEntryDuringClassification(nullptr);
-  retryExitWithNewEntryDuringClassification("s0-wake-classified");retryExitWithNewEntryDuringClassification("sleep-retry-scheduled");
+  retryExitWithNewEntryDuringClassification("s0-wake-classified");retryExitWithNewEntryDuringClassification("sleep-retry-failure-attribution");
   repeatedAttempt();softwareGate();
   wakeBeforeEntryGui(false);wakeBeforeEntryGui(true);
   criticalDuringPending();missingKernelEvidence(true);missingKernelEvidence(false);actualSettingsCancellation();

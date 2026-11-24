@@ -128,7 +128,7 @@ export async function runFirstDocumentSourceFileCases(out,args=[],options={}){
  ];
  const set=(d,p,value)=>{const parts=p.split('/').slice(1);let node=d;for(const k of parts.slice(0,-1))node=node[k]??={};node[parts.at(-1)]=value;};
  const positive=[['current',()=>{}],['extension',d=>{d.extensions.peer={keep:true};}],['window',d=>{d.ui.windowPlacement='left';}],['radial',d=>{d.ui.radialTestingEnabled=true;}],['common-startup',d=>{d.startupDesired.networkAccelerationOnBoot=!d.startupDesired.networkAccelerationOnBoot;}],['domain-log',d=>{d.domainLogs={...d.domainLogs,fixture:true};}],['ack',d=>{Object.assign(d.input,{pendingConfigHash:'current-proof',hostAcknowledgedRevision:d.input.revision,hostAcknowledgedConfigHash:'current-proof',appliedRevision:d.input.revision,appliedConfigHash:'current-proof',applyStatus:'active'});}],['order',d=>{d.ui=Object.fromEntries(Object.entries(d.ui).reverse());}]];
- const scenarios=['global','xbox','steam','xbox-steam'].flatMap(mode=>[...changed.map(([name,path,make])=>({name,mutate:d=>set(d,path,make(d)),accept:['startup-fan','fan-preset'].includes(name),existing:false})),...positive.map(([name,mutate])=>({name,mutate,accept:true,existing:false})),{name:'existing-template',mutate:d=>{d.ui.backgroundOpacity=0.23;},accept:true,existing:true}].map(scenario=>({mode,scenario})));
+ const scenarios=['global','xbox','steam','xbox-steam'].flatMap(mode=>[...changed.map(([name,path,make])=>({name,mutate:d=>set(d,path,make(d)),accept:['startup-fan','fan-preset','sleep'].includes(name),existing:false})),...positive.map(([name,mutate])=>({name,mutate,accept:true,existing:false})),{name:'existing-template',mutate:d=>{d.ui.backgroundOpacity=0.23;},accept:true,existing:true}].map(scenario=>({mode,scenario})));
  const from=option('--first-document-source-from'),first=from?scenarios.findIndex(({mode,scenario})=>mode+'/'+scenario.name===from):0;
  assert(first>=0,'Unknown exact first-document continuation');
  const only=option('--first-document-source-only'),names=only?.split(',');assert(!(from&&only),'Choose exact first-document selection or continuation');
@@ -150,7 +150,7 @@ export async function runFirstDocumentSourceFileCases(out,args=[],options={}){
    fs.appendFileSync(observation,JSON.stringify(row)+'\n');
    assert.equal(reply.ok,scenario.accept,'final first-document ownership: '+mode+'/'+scenario.name);
    if(!scenario.accept){assert.equal(finalRaw,raw,'stale creation wrote user configuration');assert(!row.backup,'rejected creation rotated backup');}
-   else{assert.deepEqual(final.extensions.bootModes,wanted.extensions.bootModes);assert(row.backup);if(['startup-fan','fan-preset'].includes(scenario.name)){assert.deepEqual(final.startupDesired,newer.startupDesired);assert.deepEqual(final.fan,newer.fan);}}
+   else{assert.deepEqual(final.extensions.bootModes,wanted.extensions.bootModes);assert(row.backup);if(['startup-fan','fan-preset'].includes(scenario.name)){assert.deepEqual(final.startupDesired,newer.startupDesired);assert.deepEqual(final.fan,newer.fan);}if(scenario.name==='sleep')assert.deepEqual(final.sleep,newer.sleep);}
    rows.push({mode,name:scenario.name,accepted:reply.ok});
   }
   assert.equal(rows.length,selected.length);assert.equal(rows.filter(r=>!r.accepted).length,selected.filter(r=>!r.scenario.accept).length);
@@ -202,7 +202,7 @@ export async function runFirstEditorSourceCases(out,args=[],options={}){
   {name:'reordered',change:async()=>{const d=disk.read();d.ui=Object.fromEntries(Object.entries(d.ui).reverse());disk.writeRaw(d);await r.loadSettings();}},
  ];
  const scenarios=['global','xbox','steam','xbox-steam'].flatMap(mode=>['save','choose'].flatMap(action=>[
-  ...changes.map(c=>({mode,action,...c,accept:['fan-enabled','fan-preset'].includes(c.name)})),...positives.map(c=>({mode,action,...c,accept:true})),
+  ...changes.map(c=>({mode,action,...c,accept:['fan-enabled','fan-preset','sleep'].includes(c.name)})),...positives.map(c=>({mode,action,...c,accept:true})),
   {mode,action,name:'missing-token-clone',change:async()=>{},accept:false,missing:true},
   {mode,action,name:'foreign-token',change:async()=>{},accept:false,foreign:true},
   {mode,action,name:'automatic-source-reference',change:async()=>{},accept:true,direct:true},
@@ -338,6 +338,7 @@ export async function runOrdinarySourceParity(out,args=[],options={}){
    }else if(['contrary-legacy','atomic-failure','queued-immutable'].includes(s.kind)){expected=s.on;changed=true;}
    if(s.kind==='future-mode')expected=at(before,s.field);
    if(s.kind==='max-revision')expectedError=true;
+   if(s.field==='recovery'){expected=at(before,s.field);changed=false;expectedError=false;}
    if(s.kind==='queued-immutable'){
     const port=globalThis.__bootDiskPort,original=port.write;let entered,release,first=true;
     const ready=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
@@ -367,6 +368,7 @@ export async function runOrdinarySourceParity(out,args=[],options={}){
    if(s.kind==='legacy-ui'||s.kind==='sibling'||s.kind==='malformed-source')assert.equal(mode.revision,savedMode.revision,'Non-authoritative source advanced mode revision '+s.key);
    if(s.kind==='changed'&&s.origin!=='default')assert.deepEqual(mode,savedMode,'Scene/runtime source captured global '+s.key);
    if(s.kind==='future-mode')assert.deepEqual(mode,savedMode,'Future document overwritten '+s.key);
+   if(s.field==='recovery')assert.deepEqual(mode,savedMode,'Shared sleep save changed four-mode state '+s.key);
   }
   assert.equal(rows.length,selected.length);
   return {actualRows:rows.length,rows,scope:'Actual repository section/update/replace and original locked native file writer; ordinary canonical fields only',sources:inputs,nativeRecompiled:false};

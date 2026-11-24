@@ -202,6 +202,7 @@ QuarkCloudDrive.exe
 115chrome.exe
 Thunder.exe
 ThunderStart.exe
+DownloadSDKServer.exe
 
 # ---- Windows 镜像 / 磁盘 / 压缩 / 诊断工具 ----
 NTLite.exe

@@ -18,7 +18,7 @@ const settingsRoute=useRoute();
 import { tdpDiagnosticDeliveryFailures, tdpDiagnosticDeliveryEvidence } from '@/bridge/tdpStaticDiagnostics';
 import { frontendDiagnosticDeliveryFailures, frontendDiagnosticDeliveryEvidence } from '@/robust/frontendDiagnostics';
 import { getSharedPowerLifecycleDiagnostics } from '@/bridge/powerLifecycleState';
-import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
+import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, computed, watch } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import { radialTestingEnabled } from '@/radial/testingState';
 import { setRadialTestingPreference } from '@/radial/testing';
@@ -374,6 +374,22 @@ const updateAccel = ref<UpdateAccelState>({
   known: false,
 });
 const uaBusy = ref(false);
+const uaReading = ref(false);
+const settingsActive = ref(false);
+const settingsSection = ref('');
+
+// This native status read walks the process inventory. Only the Updates panel uses it.
+watch(() => settingsActive.value && settingsSection.value === 'updates', async (visible, _, onCleanup) => {
+  if (!visible || uaBusy.value) return;
+  let current = true;
+  onCleanup(() => { current = false; uaReading.value = false; });
+  uaReading.value = true;
+  const next = await updateAccelGet();
+  if (current) {
+    updateAccel.value = next;
+    uaReading.value = false;
+  }
+});
 const fanDiagnosticLoggingEnabled = ref(getFanFeatureSettings().diagnosticLoggingEnabled === true);
 const fanLogBusy = ref(false);
 const fanLogStatus = ref('');
@@ -535,11 +551,6 @@ async function load() {
     /* 保持默认值 */
   }
   await refreshMsiControllerShield();
-  try {
-    updateAccel.value = await updateAccelGet();
-  } catch {
-    /* 保持默认值 */
-  }
 }
 
 async function saveAutoClose(opts: { procsOnly?: boolean } = {}) {
@@ -618,6 +629,7 @@ async function onMsiControllerShieldToggle(enabled: boolean): Promise<void> {
 }
 
 async function onUpdateAccelToggle() {
+  if (uaBusy.value || uaReading.value) return;
   errMsg.value = '';
   uaBusy.value = true;
   try {
@@ -868,6 +880,7 @@ function syncAppearanceSettings(): void {
   videoBatteryPause.value=getUiSetting('videoBatteryPause');dynamicEnabled.value=getDynamicBackgroundConfig().enabled;
 }
 onMounted(async () => {
+  settingsActive.value = true;
   const fanSettings = await initializeFanFeature();
   await initializeInputDiagnosticsUi();
   await refreshNativeInputLogFiles();
@@ -892,6 +905,7 @@ onMounted(async () => {
 // KeepAlive 缓存下切回本页时主动刷新，避免「手柄设置/背景状态在其它页面变更后不刷新」
 // （2026-08-05 补充 onActivated）。
 onActivated(() => {
+  settingsActive.value = true;
   syncAppearanceSettings();
   void ensureUpdateManager();
   load();
@@ -899,6 +913,7 @@ onActivated(() => {
   void refreshNativeInputLogFiles();
   void loadBackgroundState();
 });
+onDeactivated(() => { settingsActive.value = false; });
 onBeforeUnmount(() => {
   window.removeEventListener('dynamic-background:progress', onDynamicProgress);
   window.removeEventListener('ui-settings:changed',syncAppearanceSettings);
@@ -907,7 +922,7 @@ onBeforeUnmount(() => {
 
 <template>
 <IntegratedPage title="设置" hide-heading><div class="page modern-settings-page settings-console-page settings-density-preview"><div v-if="errMsg" class="err-bar page-error" role="alert">{{errMsg}}</div>
-<SettingsSections :sections="settingsSections" :initial-section="settingsRoute.query.section === 'device' ? 'device' : undefined" label="设置" class="settings-layout settings-layout-b settings-console">
+<SettingsSections :sections="settingsSections" :initial-section="settingsRoute.query.section === 'device' ? 'device' : undefined" label="设置" class="settings-layout settings-layout-b settings-console" @section-change="settingsSection = $event">
 <template #appearance="{ active }"><div class="appearance-flow"><div class="setting-position">
 
  <section class="card window-position-settings"><h3 class="card-title"><InlineIcon name="target" />窗口位置</h3><div class="window-placement-options" role="group" aria-label="窗口位置"><button type="button" :class="{active:windowPlacement==='left'}" :aria-pressed="windowPlacement==='left'" @click="onWindowPlacementChange('left')">左侧</button><button type="button" :class="{active:windowPlacement==='right'}" :aria-pressed="windowPlacement==='right'" @click="onWindowPlacementChange('right')">右侧</button></div><Toggle :model-value="floatingSummonEnabled" label="悬浮呼出" description="使用原呼出键；关闭后，下次呼出使用独立窗口。" color="accent" :disabled="floatingSummonBusy" data-floating-summon-toggle @update:model-value="onFloatingSummonChange" /></section></div>
@@ -984,7 +999,7 @@ onBeforeUnmount(() => {
           <button
             class="action-btn outline update-accel-btn"
             :class="{ active: updateAccel.running }"
-            :disabled="uaBusy || !updateAccel.exists || updateAccel.known === false"
+            :disabled="uaReading || uaBusy || !updateAccel.exists || updateAccel.known === false"
             :title="updateAccel.known === false ? '加速器状态读取失败' : updateAccel.exists ? (updateAccel.running ? '关闭更新加速' : '开启更新加速') : '更新加速文件未找到'"
             @click="onUpdateAccelToggle"
           >
@@ -994,6 +1009,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="update-version-summary"><div><span>当前版本</span><strong>v{{appVersion}}</strong></div><span class="update-state-pill" :class="{ready:['latest','completed'].includes(updateSnapshot.phase)}">{{updateStatusText}}</span></div>
+      <p v-if="updateSnapshot.phase === 'interrupted' && updateSnapshot.stage === 'install' && updateSnapshot.error" class="muted body upd-notes update-recovery-error" role="status">{{ updateSnapshot.error }}</p>
       <div class="update-main-row">
         <button class="action-btn outline update-check-btn" :disabled="updateBusy" @click="checkForUpdate(appVersion)">
           <InlineIcon name="refresh" /> {{ updateSnapshot.phase === 'checking' ? '检查中' : '检查更新' }}
@@ -1038,6 +1054,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.update-recovery-error { overflow-wrap: anywhere; }
 .update-cache-maintenance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
 .update-cache-clear-btn { flex: 0 0 auto; }
 .page {

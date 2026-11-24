@@ -2,15 +2,223 @@
 # No periodic search, kill/restart fallback, Steam launch, or focus operation.
 $script:AppearanceProcessQueryProtocol=3
 $script:AppearanceListenerQueryProtocol=1
+$script:AppearanceBoundOwnerProbe=1
 function Initialize-ResidentAppearanceInterop {
     if('Ymcc.CssResidentProcess' -as [type]){return}
+    # The release packer fills this literal from the Add-Type source below.
+    $compiledInterop='' # YMCC staged interop
+    if($compiledInterop -and $ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'){
+        try{$null=[Reflection.Assembly]::Load([Convert]::FromBase64String($compiledInterop))}
+        catch [FormatException],[IO.FileLoadException],[BadImageFormatException],[NotSupportedException]{}
+        if('Ymcc.CssResidentProcess' -as [type]){return}
+    }
     Add-Type -TypeDefinition @"
 using System;
+using System.IO;
 using System.Text;
 using System.ComponentModel;
+using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 namespace Ymcc {
  public static class CssResidentProcess {
+  private static bool IsOrdinaryThemePath(string path,bool directory) {
+   var flags=File.GetAttributes(path);
+   return (flags&FileAttributes.ReparsePoint)==0 && ((flags&FileAttributes.Directory)!=0)==directory;
+  }
+  private static bool IsOrdinaryThemeInput(string path,string dir,string root) {
+   return IsOrdinaryThemePath(dir,true)&&IsOrdinaryThemePath(root,true)&&IsOrdinaryThemePath(path,false);
+  }
+  private static string ReadThemeRevisionDigest(string path,HashAlgorithm sha) {
+   using(var stream=File.OpenRead(path)) {
+    if(stream.Length>262144)return null;
+    return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-",String.Empty);
+   }
+  }
+  // Only ordinary, complete theme pairs qualify for the digest-only batch.
+  // The script retains its per-row behavior and diagnostics on any failure.
+  public static string[] ReadThemeRevisionDigests(string themeRoot,string[] names) {
+   if(names==null||names.Length==0||names.Length>32)return null;
+   string root=Path.GetFullPath(themeRoot).TrimEnd('\\');
+   string prefix=root+"\\";
+   var invalid=Path.GetInvalidFileNameChars();
+   var result=new string[2*names.Length];
+   using(var sha=SHA256.Create()) {
+    for(int i=0;i<names.Length;i++) {
+     string name=names[i];
+     if(String.IsNullOrEmpty(name)||name.IndexOfAny(invalid)>=0||name.EndsWith(".",StringComparison.Ordinal)||name.EndsWith(" ",StringComparison.Ordinal))return null;
+     string dir=Path.GetFullPath(Path.Combine(prefix,name));
+     string parent=Path.GetDirectoryName(dir);
+     if(parent==null||!String.Equals(parent.TrimEnd('\\'),root,StringComparison.OrdinalIgnoreCase))return null;
+     string manifest=Path.Combine(dir,"theme.json"),config=Path.Combine(dir,"config_USER.json");
+     if(!IsOrdinaryThemeInput(manifest,dir,parent)||!IsOrdinaryThemeInput(config,dir,parent))return null;
+     if((result[2*i]=ReadThemeRevisionDigest(config,sha))==null||(result[2*i+1]=ReadThemeRevisionDigest(manifest,sha))==null)return null;
+    }
+   }
+   return result;
+  }
+  public sealed class ThemeInputSnapshot {
+   public readonly string raw,hash;
+   internal ThemeInputSnapshot(string text,string digest){raw=text;hash=digest;}
+  }
+  private static ThemeInputSnapshot ReadThemeInput(string path,HashAlgorithm sha) {
+   using(var stream=File.OpenRead(path)) {
+    long size=stream.Length;
+    if(size>262144)return null;
+    var bytes=new byte[(int)size];
+    for(int offset=0;offset<bytes.Length;) {
+     int read=stream.Read(bytes,offset,bytes.Length-offset);
+     if(read==0)return null;
+     offset+=read;
+    }
+    if(stream.ReadByte()!=-1)return null;
+    string digest=BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-",String.Empty);
+    using(var buffer=new MemoryStream(bytes,false))
+    using(var reader=new StreamReader(buffer,Encoding.UTF8,true))
+     return new ThemeInputSnapshot(reader.ReadToEnd(),digest);
+   }
+  }
+  // Callers still validate schema and selections, and independently re-read
+  // revisions before accepting results. No file observation is kept here.
+  public static ThemeInputSnapshot[] ReadThemeInputSnapshots(string themeRoot,string[] names) {
+   if(names==null||names.Length==0||names.Length>32)return null;
+   string root=Path.GetFullPath(themeRoot).TrimEnd('\\');
+   string prefix=root+"\\";
+   var invalid=Path.GetInvalidFileNameChars();
+   var result=new ThemeInputSnapshot[2*names.Length];
+   using(var sha=SHA256.Create()) {
+    for(int i=0;i<names.Length;i++) {
+     string name=names[i];
+     if(String.IsNullOrEmpty(name)||name.IndexOfAny(invalid)>=0||name.EndsWith(".",StringComparison.Ordinal)||name.EndsWith(" ",StringComparison.Ordinal))return null;
+     string dir=Path.GetFullPath(Path.Combine(prefix,name));
+     string parent=Path.GetDirectoryName(dir);
+     if(parent==null||!String.Equals(parent.TrimEnd('\\'),root,StringComparison.OrdinalIgnoreCase))return null;
+     string manifest=Path.Combine(dir,"theme.json"),config=Path.Combine(dir,"config_USER.json");
+     if(!IsOrdinaryThemeInput(manifest,dir,parent)||!IsOrdinaryThemeInput(config,dir,parent))return null;
+     if((result[2*i]=ReadThemeInput(config,sha))==null||(result[2*i+1]=ReadThemeInput(manifest,sha))==null)return null;
+    }
+   }
+   return result;
+  }
+  public static bool MatchInstalledPreset(string themeRoot,string[] paths,string[] hashes) {
+   return InspectInstalledPreset(themeRoot,paths,hashes,true)==0;
+  }
+  public static int CountInstalledPresetDrift(string themeRoot,string[] paths,string[] hashes) {
+   return InspectInstalledPreset(themeRoot,paths,hashes,false);
+  }
+  // Count only stable, ordinary files. An incomplete batch has no result;
+  // the caller keeps the original per-file diagnostics in that case.
+  static int InspectInstalledPreset(string themeRoot,string[] paths,string[] hashes,bool stopOnMismatch) {
+   if(paths==null||hashes==null||paths.Length==0||paths.Length>256||paths.Length!=hashes.Length)return -1;
+   string root=Path.GetFullPath(themeRoot).TrimEnd('\\');
+   string prefix=root+"\\";
+   int drift=0;
+   using(var sha=SHA256.Create()) {
+    for(int i=0;i<paths.Length;i++) {
+     string relative=paths[i].Replace('/','\\');
+     if(String.Equals(Path.GetFileName(relative),"config_USER.json",StringComparison.OrdinalIgnoreCase))continue;
+     if(Path.IsPathRooted(relative)||relative.IndexOf(':')>=0||relative.IndexOf('\0')>=0)return -1;
+     foreach(string part in relative.Split('\\'))if(part.Length==0||part=="."||part=="..")return -1;
+     string path=Path.GetFullPath(Path.Combine(prefix,relative));
+     if(!path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))return -1;
+     for(string parent=Path.GetDirectoryName(path);parent!=null&&parent.Length>=root.Length;parent=Path.GetDirectoryName(parent)) {
+      if((File.GetAttributes(parent)&FileAttributes.ReparsePoint)!=0)return -1;
+     }
+     const FileAttributes denied=FileAttributes.Directory|FileAttributes.ReparsePoint;
+     if((File.GetAttributes(path)&denied)!=0)return -1;
+     var before=new FileInfo(path);
+     var attributes=before.Attributes;
+     if(attributes==(FileAttributes)(-1)||(attributes&denied)!=0)return -1;
+     long length=before.Length;
+     const int maximumBytes=16777216;
+     if(length>maximumBytes)return -1;
+     var written=before.LastWriteTimeUtc;
+     var created=before.CreationTimeUtc;
+     bool matches;
+     using(var stream=File.OpenRead(path)) {
+      if(stream.Length>maximumBytes)return -1;
+      string hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-",String.Empty);
+      matches=String.Equals(hash,hashes[i],StringComparison.OrdinalIgnoreCase);
+      if(stopOnMismatch&&!matches)return 1;
+     }
+     var after=new FileInfo(path);
+     after.Refresh();
+     if(!after.Exists||after.Attributes!=attributes||after.Length!=length||after.LastWriteTimeUtc!=written||after.CreationTimeUtc!=created)return -1;
+     if(!matches)drift++;
+    }
+   }
+   return drift;
+  }
+  public static bool MatchBundledPreset(string root,string[] paths,string[] hashes,bool[] schema,string[] text) {
+   if(paths.Length>256||paths.Length!=hashes.Length||paths.Length!=schema.Length||
+      (text!=null&&text.Length!=paths.Length))return false;
+   using(var sha=SHA256.Create()) {
+    for(int i=0;i<paths.Length;i++) {
+     // The caller accepts only checked, normalized manifest paths.
+     string path=Path.Combine(root,paths[i]);
+     var before=new FileInfo(path);
+     if(!before.Exists||(before.Attributes&FileAttributes.ReparsePoint)!=0)return false;
+     var attributes=before.Attributes;
+     long length=before.Length;
+     int limit=schema[i]?262144:16777216;
+     if(length>limit)return false;
+     var written=before.LastWriteTimeUtc;
+     var created=before.CreationTimeUtc;
+     byte[] digest;
+     using(var stream=File.OpenRead(path)) {
+      long size=stream.Length;
+      if(size>limit)return false;
+      if(schema[i]&&text!=null) {
+       using(var buffer=new MemoryStream((int)size)) {
+        stream.CopyTo(buffer,4096);
+        if(buffer.Length>limit)return false;
+        digest=sha.ComputeHash(buffer.GetBuffer(),0,(int)buffer.Length);
+        buffer.Position=0;
+        using(var reader=new StreamReader(buffer,Encoding.UTF8,true))text[i]=reader.ReadToEnd();
+       }
+      }else digest=sha.ComputeHash(stream);
+     }
+     if(!String.Equals(BitConverter.ToString(digest).Replace("-",String.Empty),hashes[i],StringComparison.OrdinalIgnoreCase))return false;
+     var after=new FileInfo(path);
+     after.Refresh();
+     if(!after.Exists||after.Attributes!=attributes||after.Length!=length||after.LastWriteTimeUtc!=written||after.CreationTimeUtc!=created)return false;
+    }
+   }
+   return true;
+  }
+  // This is a positive observation of one backup journal, not a cached proof.
+  public static bool MatchPresetBackup(string stateRoot,string themeRoot,string blobRoot,string[] targets,string[] blobs,string[] hashes) {
+   if(targets.Length>2048||targets.Length!=blobs.Length||targets.Length!=hashes.Length)return false;
+   long total=0;
+   using(var sha=SHA256.Create()) {
+    for(int i=0;i<targets.Length;i++) {
+     if(!CheckBackupPath(themeRoot,Path.Combine(themeRoot,targets[i]),false))return false;
+     if(blobs[i]==null)continue;
+     string blob=Path.Combine(blobRoot,blobs[i]);
+     if(!CheckBackupPath(stateRoot,blob,true))return false;
+     using(var stream=File.OpenRead(blob)) {
+      long length=stream.Length;
+      if(length>16777216)return false;
+      string hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-",String.Empty);
+      total+=length;
+      if(total>134217728||!String.Equals(hash,hashes[i],StringComparison.OrdinalIgnoreCase))return false;
+     }
+    }
+   }
+   return true;
+  }
+  static bool CheckBackupPath(string root,string path,bool requireFile) {
+   string full=Path.GetFullPath(path);
+   if(!full.StartsWith(root+"\\",StringComparison.OrdinalIgnoreCase))return false;
+   for(string current=full;current!=null&&current.Length>=root.Length;current=Path.GetDirectoryName(current)) {
+    FileAttributes attributes;
+    try{attributes=File.GetAttributes(current);}
+    catch(FileNotFoundException){if(requireFile&&current==full)return false;continue;}
+    catch(DirectoryNotFoundException){if(requireFile&&current==full)return false;continue;}
+    if((attributes&FileAttributes.ReparsePoint)!=0)return false;
+    if(requireFile&&current==full&&(attributes&FileAttributes.Directory)!=0)return false;
+   }
+   return true;
+  }
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
   struct Startup { public int cb; public string reserved, desktop, title; public int x,y,xsize,ysize,xchars,ychars,fill,flags; public short show,reserved2; public IntPtr reservedPtr,input,output,error; }
   [StructLayout(LayoutKind.Sequential)]
@@ -21,6 +229,68 @@ namespace Ymcc {
   [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint rights,bool inherit,uint pid);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process,uint flags,StringBuilder path,ref uint size);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out long birth,out long exit,out long kernel,out long user);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool ProcessIdToSessionId(uint pid,out uint session);
+  static IntPtr OpenObservedProcess(uint pid) {
+   if(pid==0)throw new ArgumentOutOfRangeException("pid");
+   var handle=OpenProcess(0x101000,false,pid); // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+   if(handle!=IntPtr.Zero)return handle;
+   int error=Marshal.GetLastWin32Error();
+   if(error==87)return IntPtr.Zero;
+   throw new Win32Exception(error);
+  }
+  static long ProcessBirth(IntPtr handle) {
+   long birth,exit,kernel,user;
+   if(!GetProcessTimes(handle,out birth,out exit,out kernel,out user))throw new Win32Exception(Marshal.GetLastWin32Error());
+   return birth;
+  }
+  static bool ProcessAlive(IntPtr handle) {
+   uint state=WaitForSingleObject(handle,0);
+   if(state==0||state==258)return state==258;
+   throw new InvalidOperationException("Appearance process liveness is unknown");
+  }
+  public sealed class Candidate {
+   readonly long birth;
+   public uint Id {get;private set;}
+   public uint SessionId {get;private set;}
+   public DateTime StartTime {get {return DateTime.FromFileTimeUtc(birth);}}
+   public string Path {get {return ReadPath(Id,birth);}}
+   public bool HasExited {get {
+    // This getter is used only to reject confirmation. Unknown also rejects.
+    IntPtr handle=IntPtr.Zero;
+    try {
+     handle=OpenObservedProcess(Id);
+     return handle==IntPtr.Zero||ProcessBirth(handle)!=birth||!ProcessAlive(handle);
+    }catch(Win32Exception){return true;}catch(InvalidOperationException){return true;}
+    finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
+   }}
+   internal Candidate(uint pid,uint session,long created){Id=pid;SessionId=session;birth=created;}
+  }
+  public static Candidate ObserveProcess(uint pid,long expectedBirth) {
+   var handle=OpenObservedProcess(pid);
+   if(handle==IntPtr.Zero)return null;
+   try {
+    long birth=ProcessBirth(handle);
+    if(expectedBirth!=0&&birth!=expectedBirth)throw new InvalidOperationException("YMCC candidate birth changed; state unknown");
+    if(!ProcessAlive(handle))return null;
+    uint session;
+    if(!ProcessIdToSessionId(pid,out session)){
+     int error=Marshal.GetLastWin32Error();
+     if(!ProcessAlive(handle))return null;
+     throw new Win32Exception(error);
+    }
+    return ProcessAlive(handle)?new Candidate(pid,session,birth):null;
+   }finally{CloseHandle(handle);}
+  }
+  static string ImagePath(IntPtr handle) {
+   uint size=512;var path=new StringBuilder((int)size);
+   if(QueryFullProcessImageName(handle,0,path,ref size))return path.ToString();
+   int error=Marshal.GetLastWin32Error();
+   if(error!=122)throw new Win32Exception(error);
+   // Long paths retry once on the same held process, with the original bound.
+   size=32768;path=new StringBuilder((int)size);
+   if(!QueryFullProcessImageName(handle,0,path,ref size))throw new Win32Exception(Marshal.GetLastWin32Error());
+   return path.ToString();
+  }
   public static string ReadPath(uint pid,long expectedBirth) {
    var handle=OpenProcess(0x1000,false,pid);
    if(handle==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error(),"Appearance process identity is unreadable");
@@ -28,9 +298,7 @@ namespace Ymcc {
     long birth,exit,kernel,user;
     if(!GetProcessTimes(handle,out birth,out exit,out kernel,out user))throw new Win32Exception(Marshal.GetLastWin32Error());
     if(birth!=expectedBirth)throw new InvalidOperationException("Appearance process birth changed");
-    uint size=32768;var path=new StringBuilder((int)size);
-    if(!QueryFullProcessImageName(handle,0,path,ref size))throw new Win32Exception(Marshal.GetLastWin32Error());
-    return path.ToString();
+    return ImagePath(handle);
    }finally{CloseHandle(handle);}
   }
   [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint rights,out IntPtr token);
@@ -38,6 +306,27 @@ namespace Ymcc {
   [StructLayout(LayoutKind.Sequential)] struct Basic { public IntPtr reserved,peb,reserved2,reserved3,pid,parent; }
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process,int kind,ref Basic basic,int size,out int returned);
   [DllImport("iphlpapi.dll")] static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool sort,int family,int kind,uint reserved);
+  public static string ReadBoundOwnerPath(Candidate expected,uint session,string sid) {
+   if(expected==null||expected.SessionId!=session)return null;
+   var handle=OpenObservedProcess(expected.Id);IntPtr token=IntPtr.Zero;
+   if(handle==IntPtr.Zero)return null;
+   try {
+    if(ProcessBirth(handle)!=expected.StartTime.ToFileTimeUtc()||!ProcessAlive(handle))return null;
+    uint currentSession;
+    if(!ProcessIdToSessionId(expected.Id,out currentSession)){
+     int error=Marshal.GetLastWin32Error();
+     if(!ProcessAlive(handle))return null;
+     throw new Win32Exception(error);
+    }
+    if(currentSession!=session)return null;
+    if(!OpenProcessToken(handle,8,out token))throw new Win32Exception(Marshal.GetLastWin32Error());
+    using(var identity=new System.Security.Principal.WindowsIdentity(token)){
+     if(!String.Equals(identity.User.Value,sid,StringComparison.Ordinal))return null;
+    }
+    var path=ImagePath(handle);
+    return ProcessAlive(handle)?path:null;
+   }finally{if(token!=IntPtr.Zero)CloseHandle(token);CloseHandle(handle);}
+  }
   public sealed class TcpListener {
    public string LocalAddress {get;private set;}
    public uint OwningProcess {get;private set;}
@@ -62,26 +351,43 @@ namespace Ymcc {
    }
    return rows.ToArray();
   }
-  static TcpListener[] ReadTcpListeners(int family,int port) {
-   int size=0;uint status=GetExtendedTcpTable(IntPtr.Zero,ref size,false,family,3,0);
-   if(status!=0&&status!=122)throw new Win32Exception((int)status,"Appearance listener query failed");
-   for(int attempt=0;attempt<3;attempt++) {
-    if(size<4||size>8388608)throw new InvalidOperationException("Appearance listener table size is invalid");
-    int allocated=size;var table=Marshal.AllocHGlobal(allocated);
-    try {
-     status=GetExtendedTcpTable(table,ref size,false,family,3,0);
-     if(status==122)continue;
-     if(status!=0)throw new Win32Exception((int)status,"Appearance listener query failed");
-     if(size>allocated)throw new InvalidOperationException("Appearance listener table grew unexpectedly");
-     return DecodeTcpListeners(table,size,family,port);
-    }finally{Marshal.FreeHGlobal(table);}
+  static TcpListener[] ReadTcpListeners(int family,int port,ref IntPtr table,ref int capacity) {
+   // Four attempts include the old size-probe allowance. Only the buffer, never the rows, is reused.
+   for(int attempt=0;attempt<4;attempt++) {
+    int size=capacity;
+    uint status=GetExtendedTcpTable(table,ref size,false,family,3,0);
+    if(status==122) {
+     if(size<=capacity||size>8388608)throw new InvalidOperationException("Appearance listener table size is invalid");
+     if(attempt==3)break;
+     table=Marshal.ReAllocHGlobal(table,new IntPtr(size));capacity=size;
+     continue;
+    }
+    if(status!=0)throw new Win32Exception((int)status,"Appearance listener query failed");
+    if(size>capacity)throw new InvalidOperationException("Appearance listener table grew unexpectedly");
+    return DecodeTcpListeners(table,size,family,port);
    }
    throw new InvalidOperationException("Appearance listener table changed repeatedly");
   }
   public static TcpListener[] Listeners(int port) {
+   return ReadListeners(port,false);
+  }
+  public static TcpListener[] ReadinessListeners(int port) {
+   return ReadListeners(port,true);
+  }
+  static TcpListener[] ReadListeners(int port,bool requireLoopback) {
    if(port<1||port>65535)throw new ArgumentOutOfRangeException("port");
-   var rows=new System.Collections.Generic.List<TcpListener>(ReadTcpListeners(2,port));
-   rows.AddRange(ReadTcpListeners(23,port));return rows.ToArray();
+   int capacity=4096;var table=Marshal.AllocHGlobal(capacity);
+   try {
+    var ipv4=ReadTcpListeners(2,port,ref table,ref capacity);
+    if(requireLoopback) {
+     // Absence can only defer readiness, not authorize a start or a write.
+     bool ready=false;
+     foreach(var row in ipv4)if(row.LocalAddress=="127.0.0.1"){ready=true;break;}
+     if(!ready)return new TcpListener[0];
+    }
+    var rows=new System.Collections.Generic.List<TcpListener>(ipv4);
+    rows.AddRange(ReadTcpListeners(23,port,ref table,ref capacity));return rows.ToArray();
+   }finally{Marshal.FreeHGlobal(table);}
   }
   public static string[] Identity(uint pid,long expectedBirth) {
    var handle=OpenProcess(0x101000,false,pid);IntPtr token=IntPtr.Zero;
@@ -89,14 +395,30 @@ namespace Ymcc {
    try {
     long birth,exit,kernel,user;
     if(!GetProcessTimes(handle,out birth,out exit,out kernel,out user)||birth!=expectedBirth||WaitForSingleObject(handle,0)!=258)throw new InvalidOperationException("Appearance process identity changed");
-    uint size=32768;var path=new StringBuilder((int)size);
-    if(!QueryFullProcessImageName(handle,0,path,ref size)||!OpenProcessToken(handle,8,out token))throw new Win32Exception(Marshal.GetLastWin32Error());
+    var path=ImagePath(handle);
+    if(!OpenProcessToken(handle,8,out token))throw new Win32Exception(Marshal.GetLastWin32Error());
     var basic=new Basic();int returned;
     if(NtQueryInformationProcess(handle,0,ref basic,Marshal.SizeOf(basic),out returned)!=0)throw new InvalidOperationException("Appearance process parent is unknown");
     string sid;using(var identity=new System.Security.Principal.WindowsIdentity(token)){sid=identity.User.Value;}
     if(WaitForSingleObject(handle,0)!=258)throw new InvalidOperationException("Appearance process exited");
-    return new string[]{path.ToString(),sid,basic.parent.ToInt64().ToString(),birth.ToString()};
+    return new string[]{path,sid,basic.parent.ToInt64().ToString(),birth.ToString()};
    }finally{if(token!=IntPtr.Zero)CloseHandle(token);CloseHandle(handle);}
+  }
+  static uint[] ReadReply(System.IO.MemoryMappedFiles.MemoryMappedViewAccessor view,uint serial,uint owner,long ownerBirth,bool inventory,out string response) {
+   const int headerWords=32,rowWords=5,capacity=128,outputOffset=68224;
+   response=null;
+   System.Threading.Thread.MemoryBarrier();
+   var result=new uint[headerWords];
+   if(view.ReadArray<uint>(0,result,0,headerWords)!=headerWords||result[3]!=serial||result[4]!=1||result[5]>capacity||result[12]>65536||result[14]!=owner||(((long)result[16]<<32)|result[15])!=ownerBirth)throw new InvalidOperationException("YMCC shared process state is unknown ("+result[9]+")");
+   // Document and identity clients only consume the JSON payload. Inventory
+   // clients need the declared rows, not the unused capacity of the mapping.
+   if(inventory&&result[5]!=0) {
+    int count=(int)result[5]*rowWords;
+    Array.Resize(ref result,headerWords+count);
+    if(view.ReadArray<uint>(headerWords*sizeof(uint),result,headerWords,count)!=count)throw new InvalidOperationException("YMCC shared process rows incomplete");
+   }
+   if(result[12]!=0){var output=new byte[result[12]];view.ReadArray<byte>(outputOffset,output,0,output.Length);response=new System.Text.UTF8Encoding(false,true).GetString(output);}
+   return result;
   }
   static uint[] Exchange(string name,string request,out string response) {
    response=null;
@@ -128,10 +450,7 @@ namespace Ymcc {
       while(watch.ElapsedMilliseconds<10000) {
        if(!reply.WaitOne((int)Math.Max(1,10000-watch.ElapsedMilliseconds)))break;
        if(view.ReadUInt32(12)!=serial)continue;
-       System.Threading.Thread.MemoryBarrier();var result=new uint[32+128*5];view.ReadArray<uint>(0,result,0,result.Length);
-       if(result[3]!=serial||result[4]!=1||result[5]>128||result[12]>65536||result[14]!=owner||(((long)result[16]<<32)|result[15])!=ownerBirth)throw new InvalidOperationException("YMCC shared process state is unknown ("+result[9]+")");
-       if(result[12]!=0){var output=new byte[result[12]];view.ReadArray<byte>(68224,output,0,output.Length);response=new System.Text.UTF8Encoding(false,true).GetString(output);}
-       return result;
+       return ReadReply(view,serial,owner,ownerBirth,request==null,out response);
       }
       if(view.ReadUInt32(8)==serial){view.Write(8,(serial%2147483646)+1);System.Threading.Thread.MemoryBarrier();}
       throw new InvalidOperationException("YMCC shared process request timed out");
@@ -177,20 +496,31 @@ function Start-ResidentAppearanceBackend {
 function Assert-SingleAppearanceBackend($Processes) {
     $list=@($Processes)
     if(!$list.Count -or $list.Count -gt 128){throw 'CSSLoader instance identity unconfirmed; no second instance started'}
-    $ids=@{};$roots=@{}
+    $ids=@{};$roots=@{};$parents=@{}
+    $expectedPath=[IO.Path]::GetFullPath($script:BackendExe)
+    $directedType='Ymcc.CssResidentProcess+Candidate' -as [type]
     foreach($process in $list){
-        if(!(Test-CurrentUserProcess $process)){throw 'CSSLoader owner changed'}
-        $image=Get-AppearanceProcessPath $process
-        if([IO.Path]::GetFullPath($image) -ine [IO.Path]::GetFullPath($script:BackendExe)){throw 'CSSLoader path changed'}
-        if($process.HasExited){throw 'CSSLoader process exited during verification'}
-        $ids[[uint32]$process.Id]=$process
+        $pidKey=[uint32]$process.Id
+        if($directedType -and $directedType.IsInstanceOfType($process)){
+            if($process.SessionId -ne $script:CurrentSessionId){throw 'CSSLoader owner changed'}
+            # Identity reads image, SID and parent on one birth-bound live handle.
+            $identity=[Ymcc.CssResidentProcess]::Identity($pidKey,$process.StartTime.ToFileTimeUtc())
+            if($identity[1] -ne $script:CurrentUserSid){throw 'CSSLoader owner changed'}
+            $image=$identity[0];$parents[$pidKey]=[uint32]$identity[2]
+        }else{
+            if(!(Test-CurrentUserProcess $process)){throw 'CSSLoader owner changed'}
+            $image=Get-AppearanceProcessPath $process
+            if($process.HasExited){throw 'CSSLoader process exited during verification'}
+        }
+        if([IO.Path]::GetFullPath($image) -ine $expectedPath){throw 'CSSLoader path changed'}
+        $ids[$pidKey]=$process
     }
     if($ids.Count -ne $list.Count){throw 'CSSLoader process identity changed'}
     # One bounded snapshot at the use boundary. PyInstaller's parent and child
     # are one instance; two independent roots are ambiguous and never replaced.
-    $parents=@{}
     foreach($process in $list){
-        $parents[[uint32]$process.Id]=Get-AppearanceParentId $process
+        $pidKey=[uint32]$process.Id
+        if(!$parents.ContainsKey($pidKey)){$parents[$pidKey]=Get-AppearanceParentId $process}
     }
     foreach($process in $list){
         $cursor=[uint32]$process.Id;$seen=@{}
@@ -246,29 +576,40 @@ function Invoke-AppearanceSharedSteam($Request) {
     if(!$result.ok){throw ('YMCC shared Steam observation unconfirmed: '+[string]$result.reason)}
     return $result
 }
+function Get-AppearancePid([uint32]$Id,[long]$ExpectedBirth=0) {
+    # Only a PID supplied by the shared inventory, a listener or this launch.
+    Initialize-ResidentAppearanceInterop
+    [Ymcc.CssResidentProcess]::ObserveProcess($Id,$ExpectedBirth)
+}
 function Get-AppearanceProcessCandidates([int]$Kind,[switch]$Refresh) {
     if($Refresh -or !$script:AppearanceProcessReceipt){$null=Update-AppearanceProcessInventory}
-    foreach($row in @($script:AppearanceProcessReceipt.rows|Where-Object kind -eq $Kind)){
-        $process=$null
-        try{$process=Get-Process -Id $row.pid -ErrorAction Stop}catch{
-            if($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*'){continue}
-            throw
-        }
-        if($process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString() -ne $row.birth){throw 'YMCC candidate birth changed; state unknown'}
-        if(!$process.HasExited){$process}
+    foreach($row in $script:AppearanceProcessReceipt.rows){
+        if($row.kind -ne $Kind){continue}
+        $birth=[long]$row.birth
+        if($birth -le 0){throw 'YMCC candidate birth is invalid; state unknown'}
+        $process=Get-AppearancePid -Id $row.pid -ExpectedBirth $birth
+        if($process){$process}
     }
 }
-function Get-AppearanceBackendCandidates {
+function Get-AppearanceBackendCandidates([switch]$RequireListener) {
+    if($RequireListener){
+        $listeners=@(Get-AppearanceTcpListeners -LocalPort 35821 -ReadinessOnly)
+        # This snapshot only filters readiness work. Ownership is checked afresh.
+        $hasLoopback=$false
+        foreach($listener in $listeners){if($listener.LocalAddress -eq '127.0.0.1'){$hasLoopback=$true;break}}
+        if(!$hasLoopback){return}
+    }
     $known=@{}
     foreach($process in @(Get-AppearanceProcessCandidates 1)){$known[[uint32]$process.Id]=$process}
     # A known CreateProcess result and the fixed port owner are directed PID
     # observations, including the PyInstaller child which appears after startup.
-    $pids=@()
-    if($script:AppearanceStartedPid){$pids+=,[uint32]$script:AppearanceStartedPid}
-    foreach($listener in @(Get-AppearanceTcpListeners -LocalPort 35821)){$pids+=,[uint32]$listener.OwningProcess}
-    foreach($processId in @($pids|Select-Object -Unique)){
-        if($known.ContainsKey($processId)){continue}
-        $process=Get-Process -Id $processId -ErrorAction SilentlyContinue
+    if(!$RequireListener){$listeners=@(Get-AppearanceTcpListeners -LocalPort 35821)}
+    $pids=@(if($script:AppearanceStartedPid){[uint32]$script:AppearanceStartedPid};foreach($listener in $listeners){[uint32]$listener.OwningProcess})
+    $observed=@{}
+    foreach($processId in $pids){
+        if($known.ContainsKey($processId) -or $observed.ContainsKey($processId)){continue}
+        $observed[$processId]=$true
+        $process=Get-AppearancePid -Id $processId
         if(!$process){continue}
         if([IO.Path]::GetFileName((Get-AppearanceProcessPath $process)) -ieq 'CssLoader-Standalone-Headless.exe'){$known[$processId]=$process}
     }

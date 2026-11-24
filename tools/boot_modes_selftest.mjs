@@ -290,22 +290,39 @@ const fresh=async()=>m.createBootModeDocument(await baseline());
 const stored=doc=>{p.settings.extensions.bootModes=structuredClone(doc);};
 const opNames=()=>p.calls.map(c=>c.op);
 const changes=()=>p.calls.filter(c=>c.op!=='settings.update'&&c.op!=='ipc.bootMode.startup.identity');
-await test('boot sleep restoration carries explicit origin through guard and plan writers in four modes',async()=>{
+await test('legacy sleep is discarded without applying it across all four modes',async()=>{
  if(process.argv.includes('--sleep-static-config')){assert(!process.argv.some(arg=>arg.startsWith('--sleep-guard-owner-')),'Choose static preference or guard owner scope');const {runSleepStaticBootPreferences}=await import('./boot_modes_fixture/sleepTimeouts.mjs');return await runSleepStaticBootPreferences(out,process.argv.slice(2),{native:globalThis.__bootFirstEditorNative});}
  if(process.argv.includes('--sleep-guard-owner-mutex-only')&&!process.argv.includes('--sleep-guard-owner-native'))throw Error('Sleep guard mutex-only requires native scope');
  if(process.argv.includes('--sleep-guard-owner-before')&&!process.argv.includes('--sleep-guard-owner-native'))throw Error('Sleep guard before control requires its native scope');
  if(process.argv.includes('--sleep-guard-owner-native')){const {runSleepGuardOwnerNative}=await import('./boot_modes_fixture/sleepGuardOwner.mjs');return await runSleepGuardOwnerNative(out,process.argv.slice(2));}
  const rows=[];
- for(const id of m.BOOT_MODE_IDS){
-  p.reset();const doc=await fresh();for(const scene of Object.values(doc.scenes))delete scene.overrides.sleep;
-  doc.global.sleep.config.pauseGameOnSleep=!p.settings.sleep.pauseGameOnSleep;
-  doc.global.sleep.timeouts={...doc.global.sleep.timeouts,acScreen:1};
-  doc.global.sleep.acButton=3;doc.global.sleep.dcButton=3;doc.global.sleep.hibernate=true;doc.global.sleep.hibernateSize=60;
-  doc.global.sleep.config.sleepPowerPlanOptimizationEnabled=!doc.global.sleep.config.sleepPowerPlanOptimizationEnabled;stored(doc);
-  await startMode(id,doc);
-  assert.deepEqual(p.state.sleepOrigins.map(row=>row.part).sort(),['button','button','guard','hibernate','plan','size','timeout']);
-  assert(p.state.sleepOrigins.every(row=>row.origin==='boot-mode'));
-  rows.push({mode:id,guardOrigin:'boot-mode',planOrigin:'boot-mode'});
+ for(const id of m.BOOT_MODE_IDS)for(const malformed of [false,true]){
+  p.reset();const doc=await fresh();const sleep=structuredClone(p.settings.sleep);
+  const old=malformed?{config:[],timeouts:'invalid'}:{config:{pauseGameOnSleep:!sleep.pauseGameOnSleep,sleepPowerPlanOptimizationEnabled:true,staticWakeAutoScanEnabled:true,wakePasswordEnabled:true},timeouts:{acScreen:1},acButton:3,dcButton:3,hibernate:true,hibernateSize:60,steamAutoRecovery:true};
+  doc.global.sleep=old;doc.activeSnapshot.sleep=null;doc.unresolvedGlobal=['sleep'];
+  for(const scene of Object.values(doc.scenes)){scene.overrides.sleep=old;scene.rememberedOverrides={sleep:old};}
+  for(const mode of m.BOOT_MODE_IDS)doc.presets[mode]={Legacy:{name:'Legacy',overrides:{sleep:old},rememberedOverrides:{sleep:old}}};
+  const assertRetired=value=>{
+   const scenes=[...Object.values(value.scenes),...Object.values(value.presets).flatMap(Object.values)];
+   for(const bank of [value.global,value.activeSnapshot,...scenes.flatMap(scene=>[scene.overrides,scene.rememberedOverrides])])assert(!Object.hasOwn(bank??{},'sleep'));
+   assert(!value.unresolvedGlobal?.includes('sleep'));
+  };
+  stored(doc);const editor=await b.loadBootModes({editorOnly:true});assertRetired(editor.document);
+  const saved=await b.saveBootModes(editor.document,editor.document.revision,editor.initialSource);assertRetired(saved);
+  stored(doc);const result=await startMode(id,doc);
+  assertRetired(result.document);assertRetired(p.settings.extensions.bootModes);
+  assertRetired((await b.loadBootModes({editorOnly:true})).document);
+  assert.equal(result.receipt.modules.sleep,undefined);assert(!opNames().some(op=>/^(sleep\.|hibernate\.|recovery\.|wakePassword\.)/.test(op)));
+  assert((p.state.preferenceOrigins??[]).every(row=>!['recovery','wake-password'].includes(row.part)));
+  assert.deepEqual(p.settings.sleep,sleep);
+  const cold=await runtimeBundle(out);cold.ports.settings.sleep=structuredClone(sleep);
+  cold.ports.settings.extensions.bootModes=structuredClone({...doc,boot:id,bootEnabled:true});
+  await cold.boot.restoreSelectedBootMode();
+  const coldMode=cold.ports.settings.extensions.bootModes;
+  assert.equal(coldMode.current,id);assert.equal(coldMode.revision,doc.revision+1);assertRetired(coldMode);
+  assert.deepEqual(cold.ports.settings.sleep,sleep);
+  assert(!cold.ports.calls.some(({op})=>/^(sleep\.|hibernate\.|recovery\.|wakePassword\.)/.test(op)));
+  rows.push({mode:id,malformed,legacyDiscarded:true,sharedSleepUnchanged:true,startupRestore:true});
  }
  return rows;
 });
@@ -383,7 +400,7 @@ await test('charge startup writes preserve ordinary global intent and distinguis
  const off=await startMode('global',untouched);assert.equal(off.receipt.modules.charge.state,'disabled');assert.equal(p.calls.filter(c=>c.op==='charge.set'||c.op==='charge.release').length,0);
  return {fourModes:rows,firmwareUsesFenced100:true,softwareUsesOwnedRelease:true,mismatchedOwnerAckNotActive:true,failedReadDoesNotInventOff:true};
 });
-await test('Decky and wake password startup writes retain boot origin and failed preference save stays visible',async()=>{
+await test('Decky startup keeps its boot origin without writing shared sleep preferences',async()=>{
  const automatic=process.argv.includes('--automatic-recovery-owner-native');
  if(process.argv.includes('--automatic-recovery-owner-transport-compile-only')&&!process.argv.includes('--automatic-recovery-owner-transport'))throw Error('Compile-only requires explicit transport scope');
  if(process.argv.some(arg=>arg==='--automatic-recovery-owner-worker'||arg==='--automatic-recovery-owner-transport')&&!automatic)throw Error('Automatic recovery worker/transport requires native scope');
@@ -396,17 +413,15 @@ await test('Decky and wake password startup writes retain boot origin and failed
  if(process.argv.includes('--wake-password-owner-native')){const {runWakePasswordOwnerNative}=await import('./boot_modes_fixture/wakePasswordOwner.mjs');return await runWakePasswordOwnerNative(out,process.argv.slice(2));}
  const rows=[];
  for(const id of m.BOOT_MODE_IDS){
-  p.reset();const doc=await fresh();for(const scene of Object.values(doc.scenes)){delete scene.overrides.sleep;delete scene.overrides.steamDecky;}
-  doc.global.sleep.config.wakePasswordEnabled=!doc.global.sleep.config.wakePasswordEnabled;doc.global.sleep.steamAutoRecovery=!doc.global.sleep.steamAutoRecovery;doc.global.steamDecky.enabled=true;stored(doc);
+  p.reset();const doc=await fresh();for(const scene of Object.values(doc.scenes))delete scene.overrides.steamDecky;
+  doc.global.sleep={config:{wakePasswordEnabled:true},steamAutoRecovery:true};doc.global.steamDecky.enabled=true;stored(doc);
   const applied=await startMode(id,doc);
-  assert.deepEqual(p.state.preferenceOrigins.map(row=>row.part).sort(),['decky','recovery','wake-password']);
+  assert.deepEqual(p.state.preferenceOrigins.map(row=>row.part),['decky']);
   assert(p.state.preferenceOrigins.every(row=>row.origin==='boot-mode'));
   assert(!applied.receipt.pending.some(row=>row.includes('唤醒密码')));
-  rows.push({mode:id,deckyOrigin:'boot-mode',wakePasswordOrigin:'boot-mode',recoveryOrigin:'boot-mode'});
+  rows.push({mode:id,deckyOrigin:'boot-mode',sharedSleepWrites:0});
  }
- p.reset();const doc=await fresh();doc.global.sleep.config.wakePasswordEnabled=!doc.global.sleep.config.wakePasswordEnabled;stored(doc);p.faults['wakePassword.save']=1;
- const failed=await startMode('global',doc);assert(failed.receipt.pending.some(row=>row.includes('唤醒密码')));assert.equal(failed.receipt.modules.sleep.state,'failed');
- return {origins:rows,hardwareAckAloneDoesNotProvePreferenceSaved:true};
+ return {origins:rows};
 });
 await test('module receipts separate saved input and disabled launch selections from confirmed output',async()=>{
  if(process.argv.includes('--empty-appearance-receipt')){const {runEmptyAppearanceReceipt}=await import('./boot_modes_fixture/preferenceOwner.mjs');return await runEmptyAppearanceReceipt(out,process.argv.slice(2),{runtimeBundle});}
@@ -589,37 +604,35 @@ await test('ordinary sleep timeouts follow global preferences across four modes 
  const {createSleepTimeoutOwnerFixture,createSleepTimeoutUiFixture}=await import('./boot_modes_fixture/sleepTimeouts.mjs');
  const code=await compileSettingsConsumer(process.cwd()),source=fs.readFileSync('src/bridge/yeman.ts','utf8'),rows=[];
  for(const mode of m.BOOT_MODE_IDS){
-  p.reset();const doc=await fresh();doc.boot=mode;doc.global.sleep.timeouts={acScreen:9,dcScreen:9,acSleep:9,dcSleep:9,acHibernate:9,dcHibernate:9};
+  p.reset();const doc=await fresh();doc.boot=mode;doc.global.sleep={timeouts:{acScreen:9,dcScreen:9,acSleep:9,dcSleep:9,acHibernate:9,dcHibernate:9}};
   if(mode!=='global')doc.scenes[mode].overrides.sleep={timeouts:{acScreen:29}};
   const f=createSettingsFixture(code,{extensions:{bootModes:doc}});await f.repo.loadSettings();
   const owner=createSleepTimeoutOwnerFixture(source,{updateSettings:f.repo.updateSettings});
   for(const [index,[field,ac]]of [['screen',true],['screen',false],['sleep',true],['sleep',false],['hibernate',true],['hibernate',false]].entries()){
-   const key=(ac?'ac':'dc')+field[0].toUpperCase()+field.slice(1),before=structuredClone(f.document().extensions.bootModes);
-   const result=await owner.api.setSleepTimeout(field,ac,index+1),saved=f.document().extensions.bootModes;
-   assert.equal(saved.global.sleep.timeouts[key],index+1,'ordinary timeout success did not update global startup preference');
-   assert.equal(result.saved,true);assert.equal(result.applied,true);assert.equal(result.preferenceSaved,true);assert.equal(saved.revision,before.revision+1);assert.deepEqual(saved.scenes,before.scenes);
-   for(const other of Object.keys(before.global.sleep.timeouts))if(other!==key)assert.equal(saved.global.sleep.timeouts[other],before.global.sleep.timeouts[other]);
-   const global=structuredClone(saved.global.sleep),revision=saved.revision;
-   await owner.api.setSleepTimeout(field,ac,17,{origin:'boot-mode'});await owner.api.setSleepTimeout(field,ac,18,{origin:'runtime'});
-   assert.deepEqual(f.document().extensions.bootModes.global.sleep,global);assert.equal(f.document().extensions.bootModes.revision,revision);
+   const before=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;
+   for(const options of [{},{origin:'boot-mode'},{origin:'runtime'}]){
+    assert.deepEqual({...await owner.api.setSleepTimeout(field,ac,index+1,options)},{saved:true,applied:true});
+    assert.equal(owner.stored(field,ac),60*(index+1));assert.equal(owner.live(field,ac),60*(index+1));
+   }
+   assert.deepEqual(f.document().extensions.bootModes,before);assert.equal(f.state.writes.length,writes);
   }
   for(const origin of ['invalid',null]){const count=owner.state.calls.length;await assert.rejects(()=>owner.api.setSleepTimeout('screen',true,8,{origin}));assert.equal(owner.state.calls.length,count);}
   const before=structuredClone(f.document().extensions.bootModes);f.state.writeFailure=true;
-  let result=await owner.api.setSleepTimeout('screen',true,7);assert.equal(result.saved,true);assert.equal(result.applied,true);assert.equal(result.preferenceSaved,false);assert.match(result.preferenceReason,/开机全局超时偏好未保存/);assert.deepEqual(f.document().extensions.bootModes,before);
-  const view=createSleepTimeoutUiFixture(owner);await view.functions.onSleepTimeout('screen',true,7);assert.equal(view.sleepTimeouts.acScreen,7);assert.match(view.msg.value,/开机全局超时偏好未保存/);assert.equal(view.busy.value,false);
-  f.state.writeFailure=false;await view.functions.onSleepTimeout('screen',true,7);assert.equal(view.msg.value,'');assert.equal(f.document().extensions.bootModes.global.sleep.timeouts.acScreen,7);
-  owner.state.activateExit=5;await assert.rejects(()=>owner.api.setSleepTimeout('screen',true,8),/已保存.*刷新未完成/);assert.equal(f.document().extensions.bootModes.global.sleep.timeouts.acScreen,8);owner.state.activateExit=0;
-  owner.state.active=owner.other;result=await owner.api.setSleepTimeout('screen',true,9);assert.equal(result.saved,true);assert.equal(result.applied,false);assert.equal(result.preferenceSaved,true);
+  let result=await owner.api.setSleepTimeout('screen',true,7);assert.equal(result.saved,true);assert.equal(result.applied,true);assert.deepEqual(f.document().extensions.bootModes,before);
+  const view=createSleepTimeoutUiFixture(owner);await view.functions.onSleepTimeout('screen',true,7);assert.equal(view.sleepTimeouts.acScreen,7);assert.equal(view.msg.value,'');assert.equal(view.busy.value,false);
+  f.state.writeFailure=false;
+  owner.state.activateExit=5;await assert.rejects(()=>owner.api.setSleepTimeout('screen',true,8),/已保存.*刷新未完成/);assert.equal(owner.stored('screen',true),480);owner.state.activateExit=0;
+  owner.state.active=owner.other;result=await owner.api.setSleepTimeout('screen',true,9);assert.equal(result.saved,true);assert.equal(result.applied,false);
   const stable=structuredClone(f.document().extensions.bootModes);owner.state.readbackWrong=true;await assert.rejects(()=>owner.api.setSleepTimeout('screen',true,10),/回读不一致/);owner.state.readbackWrong=false;assert.deepEqual(f.document().extensions.bootModes,stable);
   owner.state.writeExit=5;await assert.rejects(()=>owner.api.setSleepTimeout('screen',true,10),/写入失败/);owner.state.writeExit=0;assert.deepEqual(f.document().extensions.bootModes,stable);
   const origin={origin:'boot-mode'};owner.state.afterWrite=()=>{origin.origin='ordinary';};await owner.api.setSleepTimeout('screen',true,11,origin);owner.state.afterWrite=null;assert.deepEqual(f.document().extensions.bootModes,stable,'in-flight origin mutation captured runtime values as global');
-  owner.state.active=owner.api.PW.YEMAN;owner.state.beforeActivate=()=>{owner.state.active=owner.other;};result=await owner.api.setSleepTimeout('screen',true,12);owner.state.beforeActivate=null;assert.equal(result.applied,false);assert.equal(f.document().extensions.bootModes.global.sleep.timeouts.acScreen,12);
+  owner.state.active=owner.api.PW.YEMAN;owner.state.beforeActivate=()=>{owner.state.active=owner.other;};result=await owner.api.setSleepTimeout('screen',true,12);owner.state.beforeActivate=null;assert.equal(result.applied,false);assert.equal(owner.stored('screen',true),720);assert.deepEqual(f.document().extensions.bootModes,stable);
   let peer;owner.state.afterWrite=()=>{peer=f.repo.updateSettings(settings=>{settings.extensions.peerFuture={keep:true};settings.extensions.bootModes.scenes.steam.overrides.sleep={timeouts:{dcScreen:43}};settings.extensions.bootModes.revision++;});};await owner.api.setSleepTimeout('screen',true,13);await peer;owner.state.afterWrite=null;assert.equal(f.document().extensions.peerFuture.keep,true);assert.equal(f.document().extensions.bootModes.scenes.steam.overrides.sleep.timeouts.dcScreen,43);
   for(const kind of ['future','revision','sleep-null','timeouts-null','absent']){
    await f.repo.updateSettings(settings=>{if(kind==='absent')delete settings.extensions.bootModes;else{settings.extensions.bootModes=structuredClone(doc);if(kind==='future')settings.extensions.bootModes.schema=99;if(kind==='revision')settings.extensions.bootModes.revision=Number.MAX_SAFE_INTEGER;if(kind==='sleep-null')settings.extensions.bootModes.global.sleep=null;if(kind==='timeouts-null')settings.extensions.bootModes.global.sleep.timeouts=null;}});
-   const value=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;result=await owner.api.setSleepTimeout('screen',true,14);assert.equal(result.preferenceSaved,kind==='absent');assert.deepEqual(f.document().extensions.bootModes,value);assert.equal(f.state.writes.length,writes);
+   const value=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;result=await owner.api.setSleepTimeout('screen',true,14);assert.equal(result.saved,true);assert.deepEqual(f.document().extensions.bootModes,value);assert.equal(f.state.writes.length,writes);
   }
-  rows.push({mode,ordinaryFields:6,bootAndRuntimeOriginsIsolated:true,partialSaveShownWithoutReplay:true,inactivePlanSavedNotApplied:true});
+  rows.push({mode,ordinaryFields:6,bootAndRuntimeOriginsIsolated:true,modeRepositoryFailureDoesNotBlockGlobalPlan:true,inactivePlanSavedNotApplied:true});
  }
  return rows;
 });
@@ -629,7 +642,7 @@ await test('ordinary sleep power preferences follow global across four modes wit
  const {createSleepPowerOwnerFixture,createSleepPowerUiFixture}=await import('./boot_modes_fixture/sleepTimeouts.mjs');
  const code=await compileSettingsConsumer(process.cwd()),source=fs.readFileSync('src/bridge/yeman.ts','utf8'),rows=[];
  for(const mode of m.BOOT_MODE_IDS){
-  p.reset();const doc=await fresh();doc.boot=mode;Object.assign(doc.global.sleep,{acButton:2,dcButton:2,hibernate:true,hibernateSize:40});
+  p.reset();const doc=await fresh();doc.boot=mode;doc.global.sleep={acButton:2,dcButton:2,hibernate:true,hibernateSize:40};
   if(mode!=='global')doc.scenes[mode].overrides.sleep={acButton:1,hibernateSize:70};
   const f=createSettingsFixture(code,{extensions:{bootModes:doc}});await f.repo.loadSettings();const owner=createSleepPowerOwnerFixture(source,{updateSettings:f.repo.updateSettings});
   for(const [key,value,write]of [
@@ -638,14 +651,16 @@ await test('ordinary sleep power preferences follow global across four modes wit
    ['hibernate',false,options=>owner.api.setHibernate(false,options)],
    ['hibernateSize',60,options=>{owner.state.enabled=true;return owner.api.setHibernateSize(60,options);}]
   ]){
-   const before=structuredClone(f.document().extensions.bootModes);const result=await write();let saved=f.document().extensions.bootModes;
-   assert.equal(saved.global.sleep[key],value,'ordinary sleep power save did not update global startup preference');
-   assert.equal(result.saved,true);assert.equal(result.preferenceSaved,true);assert.deepEqual(saved.scenes,before.scenes);assert.equal(saved.revision,before.revision+1);
-   for(const other of Object.keys(before.global.sleep))if(other!==key)assert.deepEqual(saved.global.sleep[other],before.global.sleep[other]);
-   const stable=structuredClone(saved);await write({origin:'boot-mode'});await write({origin:'runtime'});assert.deepEqual(f.document().extensions.bootModes,stable);
+   const before=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;
+   for(const options of [{},{origin:'boot-mode'},{origin:'runtime'}]){
+    const result=await write(options);assert.equal(result.saved,true);
+    const actual=key==='acButton'?await owner.api.getPowerBtnIdx(true):key==='dcButton'?await owner.api.getPowerBtnIdx(false):key==='hibernate'?(await owner.api.readHibernateState()).enabled:await owner.api.readHibernateSize();
+    assert.equal(actual,value);
+   }
+   assert.deepEqual(f.document().extensions.bootModes,before);assert.equal(f.state.writes.length,writes);
   }
-  let before=structuredClone(f.document().extensions.bootModes);f.state.writeFailure=true;let result=await owner.api.setPowerBtnIdx(true,0);assert.equal(result.saved,true);assert.equal(result.preferenceSaved,false);assert.deepEqual(f.document().extensions.bootModes,before);
-  f.state.writeFailure=false;result=await owner.api.setPowerBtnIdx(true,0);assert.equal(result.preferenceSaved,true);assert.equal(f.document().extensions.bootModes.global.sleep.acButton,0);
+  let before=structuredClone(f.document().extensions.bootModes);f.state.writeFailure=true;
+  assert.equal((await owner.api.setPowerBtnIdx(true,0)).saved,true);assert.equal(await owner.api.getPowerBtnIdx(true),0);assert.deepEqual(f.document().extensions.bootModes,before);f.state.writeFailure=false;
   for(const origin of ['invalid',null])for(const write of [()=>owner.api.setPowerBtnIdx(true,1,{origin}),()=>owner.api.setHibernate(true,{origin}),()=>owner.api.setHibernateSize(55,{origin})]){const calls=owner.state.calls.length;await assert.rejects(write);assert.equal(owner.state.calls.length,calls);}
   for(const raw of [null,undefined,'',false,{},99]){owner.state.buttons.ac=raw;assert.equal(await owner.api.getPowerBtnIdx(true),null,'unknown button read became a default action');owner.state.buttons.dc=raw;assert.equal(await owner.api.getPowerBtnIdx(false),null,'unknown DC read borrowed the AC action');}
   owner.state.buttons.ac=0;owner.state.buttons.dc=null;assert.equal(await owner.api.getPowerBtnIdx(true),2);assert.equal(await owner.api.getPowerBtnIdx(false),null);
@@ -660,14 +675,14 @@ await test('ordinary sleep power preferences follow global across four modes wit
   const options={origin:'boot-mode'};owner.state.afterWrite=()=>{options.origin='ordinary';};await owner.api.setPowerBtnIdx(true,3,options);owner.state.afterWrite=null;assert.deepEqual(f.document().extensions.bootModes,before);
   const ui=createSleepPowerUiFixture(owner);owner.state.buttons.ac=1;owner.state.shellExit=5;await ui.functions.onPwrBtn(true,3);assert.equal(ui.acBtnIdx.value,0,'failed UI write did not reread the actual button');assert.match(ui.msg.value,/电源按钮设置失败/);owner.state.shellExit=0;
   owner.state.buttons.ac=null;owner.state.buttonMismatch=true;await ui.functions.onPwrBtn(true,3);assert.equal(ui.acBtnIdx.value,null);owner.state.buttonMismatch=false;
-  f.state.writeFailure=true;await ui.functions.onPwrBtn(true,2);assert.equal(ui.acBtnIdx.value,2);assert(ui.sleepPreferenceWarnings.acButton);f.state.writeFailure=false;
-  owner.state.enabled=false;ui.hibernateOn.value=false;ui.hibSize.value=null;const start=owner.state.calls.length;await ui.functions.onHibernate(true);assert.equal(ui.hibernateOn.value,true);assert.equal(ui.hibSize.value,owner.state.size);assert.equal(owner.state.calls.slice(start).filter(c=>c.kind==='shell'&&c.args[1]==='/size').length,0,'unknown hibernate size became an automatic 50% write');assert(ui.sleepPreferenceWarnings.acButton,'unrelated successful hibernate edit erased failed button preference');
-  await ui.functions.onPwrBtn(true,2);assert.equal(ui.sleepPreferenceWarnings.acButton,undefined);assert.equal(ui.msg.value,'');
+  f.state.writeFailure=true;await ui.functions.onPwrBtn(true,2);assert.equal(ui.acBtnIdx.value,2);assert.equal(ui.msg.value,'');f.state.writeFailure=false;
+  owner.state.enabled=false;ui.hibernateOn.value=false;ui.hibSize.value=null;const start=owner.state.calls.length;await ui.functions.onHibernate(true);assert.equal(ui.hibernateOn.value,true);assert.equal(ui.hibSize.value,owner.state.size);assert.equal(owner.state.calls.slice(start).filter(c=>c.kind==='shell'&&c.args[1]==='/size').length,0,'unknown hibernate size became an automatic 50% write');assert.equal(ui.msg.value,'');
+  await ui.functions.onPwrBtn(true,2);assert.equal(ui.msg.value,'');
   for(const kind of ['future','revision','sleep-null','absent']){
    await f.repo.updateSettings(settings=>{if(kind==='absent')delete settings.extensions.bootModes;else{settings.extensions.bootModes=structuredClone(doc);if(kind==='future')settings.extensions.bootModes.schema=99;if(kind==='revision')settings.extensions.bootModes.revision=Number.MAX_SAFE_INTEGER;if(kind==='sleep-null')settings.extensions.bootModes.global.sleep=null;}});
-   const stable=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;result=await owner.api.setPowerBtnIdx(true,3);assert.equal(result.preferenceSaved,kind==='absent');assert.deepEqual(f.document().extensions.bootModes,stable);assert.equal(f.state.writes.length,writes);
+   const stable=structuredClone(f.document().extensions.bootModes),writes=f.state.writes.length;assert.equal((await owner.api.setPowerBtnIdx(true,3)).saved,true);assert.deepEqual(f.document().extensions.bootModes,stable);assert.equal(f.state.writes.length,writes);
   }
-  rows.push({mode,ordinaryFields:4,unknownReadsStayUnknown:true,sceneAndRuntimeOriginsIsolated:true,partialPreferenceFailureHonest:true});
+  rows.push({mode,ordinaryFields:4,unknownReadsStayUnknown:true,sceneAndRuntimeOriginsIsolated:true,modeRepositoryFailureDoesNotBlockGlobalPlan:true});
  }
  return rows;
 });
@@ -820,9 +835,59 @@ await test('boot Steam appearance applies carry scene origin across all four mod
  for(const id of m.BOOT_MODE_IDS){
   p.reset();const doc=await fresh();doc.boot=id;doc.global.steamAppearance={states:{Round:false}};
   await startMode(id,doc);const calls=p.calls.filter(c=>c.op==='appearance.apply');
-  assert.equal(calls.length,1);assert.equal(calls[0].origin,'boot-mode');rows.push({mode:id,origin:calls[0].origin});
+  assert.equal(calls.length,1);assert.equal(calls[0].origin,'boot-mode');assert.equal(calls[0].scopedAppearanceRead,true);rows.push({mode:id,origin:calls[0].origin,scopedAppearanceRead:true});
  }
- return rows;
+ p.reset();const doc=await fresh();doc.boot='global';doc.global.steamAppearance={states:{Round:false}};
+ let release,heldReads=0;const blocked=new Promise(resolve=>release=resolve);
+ p.hooks.appearanceRead=()=>{if(p.settings.extensions.bootModes?.revision===doc.revision+1){heldReads++;return blocked;}};
+ try{
+  const {receipt}=await startMode('global',doc);
+  assert.equal(heldReads,1);
+  assert(receipt.pending.some(message=>message.includes('Steam 美化预设读取超时')));
+  assert.equal(p.calls.filter(c=>c.op==='appearance.apply').length,0);
+  release();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(p.calls.filter(c=>c.op==='appearance.apply').length,0);
+ }finally{release();}
+ return {rows,scopedTimeoutDispatchedNoWrite:true};
+});
+await test('startup normalization defers Steam appearance until the capture used for application',async()=>{
+ const rows=[];
+ for(const [id,kind] of [['global','matching'],['xbox','change'],['steam','change'],['xbox-steam','change'],['global','unconfigured']]){
+  const {boot,model,ports:q}=await runtimeBundle(out);
+  const snapshot=configured=>({themes:[{name:'Round',configured}]});
+  const doc=model.createBootModeDocument(await boot.captureBootModeSnapshot());
+  doc.boot=id;doc.bootEnabled=true;
+  const requested=kind==='unconfigured'?{}:{Round:kind==='matching'};
+  doc.global.steamAppearance={states:requested};
+  if(kind!=='unconfigured')q.settings.extensions.bootModes=structuredClone(doc);
+  const baseMouseReads=q.state.mouseReads,reads=[];
+  q.state.appearance=snapshot(false);
+  q.hooks.mouseRead=()=>{if(q.state.mouseReads===baseMouseReads+2)q.state.appearance=snapshot(true);};
+  q.hooks.appearanceRead=()=>{
+   const revision=q.settings.extensions.bootModes?.revision;
+   reads.push(revision===doc.revision?`capture-${q.state.mouseReads-baseMouseReads}`:'scene-apply');
+  };
+  await boot.restoreSelectedBootMode();
+  const changed=kind==='change';
+  assert.deepEqual(reads,changed?['capture-2','scene-apply']:['capture-2'],`${id}/${kind}`);
+  const saved=q.settings.extensions.bootModes;
+  assert.equal(saved.current,id);
+  assert.deepEqual(saved.global.steamAppearance.states,requested);
+  assert.deepEqual(saved.activeSnapshot.steamAppearance.states,{Round:!changed});
+  const writes=q.calls.filter(c=>c.op==='appearance.apply');
+  assert.equal(writes.length,Number(changed));
+  if(changed){assert.deepEqual(writes[0].value,requested);assert.equal(writes[0].scopedAppearanceRead,true);}
+  assert(!q.calls.some(c=>c.op.startsWith('steam.')));
+  const firstReads=[...reads];
+  await boot.restoreSelectedBootMode();
+  assert.deepEqual(reads,firstReads);
+  assert.equal(q.calls.filter(c=>c.op==='appearance.apply').length,Number(changed));
+  q.hooks.appearanceRead=()=>{reads.push('explicit');};
+  assert.deepEqual((await boot.captureBootModeSnapshot()).steamAppearance.states,{Round:true});
+  assert.equal(reads.at(-1),'explicit');
+  rows.push({mode:id,kind,reads:firstReads,writes:writes.length});
+ }
+ return {rows,sameBootReplayReads:0,explicitCaptureRetained:true};
 });
 await test('external priority global memory survives every boot mode and legacy snapshots',async()=>{
  const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
@@ -890,7 +955,7 @@ await test('touch summon relative defaults and migration across four boot modes'
  }
  return {bootModes:4,personaProfiles:4,oldAbsoluteAndOffMigrated:true,newPlayerEditsPreserved:true,runtime};
 });
-await test('sleep guard timeout config preserves legacy defaults, partial saves and boot snapshots',async()=>{
+await test('sleep guard timeout config preserves shared defaults and partial saves',async()=>{
  const {compileSettingsConsumer,createSettingsFixture}=await import('./fixtures/settings_baseline.mjs');
  const code=await compileSettingsConsumer(process.cwd());
  const saved={sleep:{pauseGameOnSleep:false,retryOnEntryFailure:false,retryOnNonUserWake:true}};
@@ -915,15 +980,16 @@ await test('sleep guard timeout config preserves legacy defaults, partial saves 
  await api.sleepGuardSetConfig({retryOnSleepTimeout:true});assert.deepEqual(calls.at(-1),{cmd:'sleepGuard.setConfig',value:{retryOnSleepTimeout:true}});
  for(const enabled of [false,true]){
   p.reset();p.settings.sleep={mode:'custom',pauseGameOnSleep:false,retryOnEntryFailure:false,retryOnNonUserWake:false,retryOnSleepTimeout:enabled};
-  const doc=await fresh();assert.equal(doc.global.sleep.config.retryOnSleepTimeout,enabled);
-  doc.scenes.steam.overrides.sleep={...structuredClone(doc.global.sleep),config:{...doc.global.sleep.config,retryOnSleepTimeout:!enabled}};
+  const doc=await fresh();assert.equal(doc.global.sleep,undefined);
+  doc.scenes.steam.overrides.sleep={config:{retryOnSleepTimeout:!enabled}};
   const initialSource=(await b.loadBootModes({editorOnly:true})).initialSource;const reopened=await b.saveBootModes(doc,doc.revision,initialSource);stored(reopened);
   const result=await startMode('steam',reopened);assert.equal(result.document.current,'steam');
-  assert.equal(p.calls.find(c=>c.op==='sleep.config')?.value.retryOnSleepTimeout,!enabled);
-  assert.equal(p.settings.extensions.bootModes.activeSnapshot.sleep.config.retryOnSleepTimeout,!enabled);
-  const bad=structuredClone(reopened);bad.global.sleep.config.retryOnSleepTimeout='true';assert.throws(()=>m.normalizeBootModeDocument(bad,doc.global),/retryOnSleepTimeout/);
+  assert(!p.calls.some(c=>c.op==='sleep.config'));
+  assert.equal(p.settings.sleep.retryOnSleepTimeout,enabled);
+  assert.equal(p.settings.extensions.bootModes.activeSnapshot.sleep,undefined);
+  const bad=structuredClone(reopened);bad.global.sleep={config:{retryOnSleepTimeout:'true'}};assert.equal(m.normalizeBootModeDocument(bad,doc.global).global.sleep,undefined);
  }
- return {currentDefaultRetryOnSleepTimeout:true,explicitChoicesPreserved:true,partialSaveAndReload:true,bootCaptureSaveApply:true,malformedBooleanRejected:true,nativeExecution:'NOT_RUN'};
+ return {currentDefaultRetryOnSleepTimeout:true,explicitChoicesPreserved:true,partialSaveAndReload:true,legacyModeOverrideIgnored:true,nativeExecution:'NOT_RUN'};
 });
 const startupOnly=c=>c.op.startsWith('startup.')||c.op==='ipc.bootMode.legacyStartup.retire'||c.op==='joy.startup'&&c.value===false||c.op==='fx.set'&&c.value===false||c.op==='addon.set'&&c.value.enabled===false||c.op==='legacy.desktop.remove'&&c.value==='桌面模式-开机设置为桌面模式'||c.op==='registry.read'&&c.value.hive==='HKCU'&&c.value.key===String.raw`Software\Microsoft\Windows\CurrentVersion\Run`&&c.value.name==='Joyxoff';
 
@@ -1186,8 +1252,8 @@ await test('first and partial overviews use saved settings without waiting for l
    assert.equal(full.document.global.background.ui.backgroundBlur,changedDuringCapture?13:9);
    assert.equal(full.document.global.background.ui.backgroundOpacity,0.42);assert.equal(full.document.global.background.ui.videoBatteryPause,false);
    assert.equal(full.document.global.steamWallpaper.enabled,false);assert.equal(full.document.global.steamWallpaper.download,false);assert.equal(full.document.global.steamWallpaper.cpuThreshold,24);
-   assert.equal(full.document.global.sleep.config.sleepPowerPlanOptimizationEnabled,true);assert.equal(full.document.global.sleep.config.staticWakeAutoScanEnabled,false);
-   assert.equal(full.document.global.sleep.config.pauseGameOnSleep,changedDuringCapture?!fan:fan);
+   assert.equal(full.document.global.sleep,undefined);
+   assert.equal(q.settings.sleep.pauseGameOnSleep,changedDuringCapture?!fan:fan);
    assert.equal(full.document.global.touch.profiles.disabled.transparency,47);assert.equal(full.document.global.touch.profiles.disabled.masterEnabled,false);
    if(changedDuringCapture)assert.equal(full.document.global.gyro.motion.gyroWeight,2.2);
    for(const module of ['input','gyro','background','steamWallpaper','monitor'])assert.deepEqual(full.document.global[module],same.document.global[module],module+' first-entry durable source mismatch');
@@ -1211,22 +1277,22 @@ await test('first and partial overviews use saved settings without waiting for l
    q.settings.ui.deckyEnabled=decky!==true;q.hooks.deckyGet=()=>{throw Error('saved overview must not query Decky')};
    q.hooks.recoveryRead=()=>{throw Error('saved overview must not query recovery')};
    const before=structuredClone(q.settings),calls=q.calls.length;
-   const expectedDecky=typeof decky==='boolean'?decky:null,expectedRecovery=typeof recovery==='boolean'?recovery:null;
+   const expectedDecky=typeof decky==='boolean'?decky:null;
    const shown=await a.boot.loadBootModes({overviewOnly:true});
    assert.equal(shown.document.global.steamDecky.enabled,expectedDecky,'saved native Decky intent must seed the first global document');
-   assert.equal(shown.document.global.sleep.steamAutoRecovery,expectedRecovery,'saved recovery intent must seed the first global document');
+   assert.equal(shown.document.global.sleep,undefined);
    assert.deepEqual(q.settings,before);assert.equal(q.calls.length,calls,'saved-only seed must not perform native writes');
    if(typeof decky==='boolean'&&typeof recovery==='boolean'){
     q.hooks.deckyGet=()=>({enabled:!decky,phase:'off'});q.state.recovery={ok:true,enabled:!recovery};
     const editor=await a.boot.loadBootModes();
     assert.equal(editor.baseline.steamDecky.enabled,decky,'durable first editor intent must outrank temporary native state');
-    assert.equal(editor.document.global.steamDecky.enabled,decky);assert.equal(editor.document.global.sleep.steamAutoRecovery,recovery);
+    assert.equal(editor.document.global.steamDecky.enabled,decky);assert.equal(editor.document.global.sleep,undefined);
     assert.deepEqual(q.settings,before,'full editor remains read only');
    }
-   const stored=structuredClone(shown.document);stored.global.steamDecky.enabled=null;stored.global.sleep.steamAutoRecovery=null;q.settings.extensions.bootModes=stored;
+   const stored=structuredClone(shown.document);stored.global.steamDecky.enabled=null;stored.global.sleep={steamAutoRecovery:null};q.settings.extensions.bootModes=stored;
    const existing=await a.boot.loadBootModes({overviewOnly:true});
-   assert.equal(existing.document.global.steamDecky.enabled,null,'existing unknown template remains authoritative');assert.equal(existing.document.global.sleep.steamAutoRecovery,null);
-   rows.push({decky,recovery,seededDecky:expectedDecky,seededRecovery:expectedRecovery,existingUnknownPreserved:true,nativeReads:0});
+   assert.equal(existing.document.global.steamDecky.enabled,null,'existing unknown template remains authoritative');assert.equal(existing.document.global.sleep,undefined);
+   rows.push({decky,recovery,seededDecky:expectedDecky,recoveryRemainedShared:true,existingUnknownPreserved:true,nativeReads:0});
   }
   return rows;
  }
@@ -1237,10 +1303,10 @@ await test('first and partial overviews use saved settings without waiting for l
   assert.equal(p.state.mouseReads,reads);assert.deepEqual(initial.support,{});assert.equal(initial.requiresCapture,true);
   assert.equal(initial.document.global.input.persona,'disabled');assert.equal(initial.document.global.input.mouse,'joyxoff');
   assert.equal(initial.document.global.charge.enabled,null);assert.equal(initial.document.global.steamDecky.enabled,null);assert.deepEqual(p.settings,before);
-  const malformed=structuredClone(initial.document);malformed.global.performance.controls.ac.tdpCeiling=49;delete malformed.global.sleep;stored(malformed);
-  const partial=await b.loadBootModes({overviewOnly:true});assert.equal(partial.requiresCapture,true);assert.equal(partial.document.global.performance.controls.ac.tdpCeiling,49);assert.equal(partial.document.global.sleep.hibernate,undefined);assert.equal(partial.baseline.sleep.hibernate,null);assert(partial.document.unresolvedGlobal.includes('sleep'));assert.equal(p.state.mouseReads,reads);
+  const malformed=structuredClone(initial.document);malformed.global.performance.controls.ac.tdpCeiling=49;delete malformed.global.charge;malformed.global.sleep={hibernate:'invalid'};stored(malformed);
+  const partial=await b.loadBootModes({overviewOnly:true});assert.equal(partial.requiresCapture,true);assert.equal(partial.document.global.performance.controls.ac.tdpCeiling,49);assert.equal(partial.document.global.sleep,undefined);assert.equal(partial.baseline.sleep,undefined);assert(partial.document.unresolvedGlobal.includes('charge'));assert.equal(p.state.mouseReads,reads);
  }finally{clearTimeout(timer);delete p.hooks.mouseRead;}
- const editor=await b.loadBootModes();assert(p.state.mouseReads>reads);assert(editor.support.performance);assert(editor.baseline.sleep);
+ const editor=await b.loadBootModes();assert(p.state.mouseReads>reads);assert(editor.support.performance);assert.equal(editor.baseline.sleep,undefined);
  return {firstAndPartialNoNativeProbe:true,unknownsStayUnknown:true,editStillRefreshes:true};
 });
 await test('full editor reads device support without importing ordinary-page changes into saved presets',async()=>{
@@ -1891,6 +1957,8 @@ await test('startup result parsing rejects stale boots, malformed metadata and i
 
  const valid={schema:1,boot:'boot-current',mode:'steam',sourceRevision:2,revision:3,status:'partial',applied:[],skipped:[],pending:['monitor pending']};assert(m.normalizeBootStartupResult(valid,'boot-current'));for(const patch of [{schema:2},{mode:'unknown'},{status:'running'},{sourceRevision:-1},{revision:1},{sourceRevision:2.5},{pending:['good',3]},{skipped:null}])assert.equal(m.normalizeBootStartupResult({...valid,...patch},'boot-current'),undefined);assert.equal(m.normalizeBootStartupResult(valid,'other-boot'),undefined);assert.equal(m.normalizeBootStartupResult(valid,null),undefined);const bounded=m.normalizeBootStartupResult({...valid,pending:Array.from({length:100},()=> 'x'.repeat(2000)),error:'e'.repeat(2000)},'boot-current');assert.equal(bounded.pending.length,64);assert.equal(bounded.pending[0].length,500);assert.equal(bounded.error.length,1000);assert.match(m.bootStartupStatus(bounded),/部分完成/);assert.equal(m.bootStartupStatus(undefined),'');
  const optionalSkipped=['Decky：连接状态尚未确认','小黄鸭联动：预设选择尚未确认'];
+ const retired=m.normalizeBootStartupResult({...valid,applied:['睡眠优化','监控'],skipped:['系统 S4 休眠：本机未确认支持'],pending:['睡眠优化：旧报错','monitor pending'],modules:{sleep:{state:'legacy-invalid'}}},'boot-current');
+ assert.deepEqual(retired.applied,['监控']);assert.deepEqual(retired.skipped,[]);assert.deepEqual(retired.pending,['monitor pending']);assert.deepEqual(retired.modules,{});
  for(const mode of m.BOOT_MODE_IDS){
   const optional=m.normalizeBootStartupResult({...valid,mode,pending:[],skipped:optionalSkipped},'boot-current'),original=structuredClone(optional);
   assert.match(m.bootStartupStatus(optional),/Decky/,'Diagnostic formatting retains the skipped detail');
@@ -2166,8 +2234,8 @@ await test('capture of a non-Steam global persona under a SteamDeck game overrid
 await test('unknown mouse state with allowed or unspecified provider gate still rejects mode entry',async()=>{
  for(const allowed of [true,undefined]){p.reset();const doc=await fresh();doc.scenes.steam.overrides.input={...structuredClone(doc.global.input),persona:'steamdeck',mouse:'steamdeck'};stored(doc);p.state.mouse.stateKnown=false;p.state.mouse.controlAllowed=allowed;p.state.mouse.on=false;p.state.mouse.mode='off';await assert.rejects(startMode('steam',doc));assert.equal(p.settings.extensions.bootModes.current,'global');}
 });
-await test('unsupported S4 suppresses all hibernation writes including file size and timeout',async()=>{
- const doc=await fresh();p.state.hibernate.supported=false;doc.scenes.steam.overrides.sleep={...structuredClone(doc.global.sleep),hibernate:true,hibernateSize:80,timeouts:{...doc.global.sleep.timeouts,acHibernate:10,dcHibernate:20}};stored(doc);const {receipt}=await startMode('steam',doc);assert(receipt.skipped.some(v=>v.includes('S4')));assert(!opNames().includes('hibernate.set'));assert(!opNames().includes('hibernate.size'));assert(!p.calls.some(c=>c.op==='sleep.timeout'&&c.value.kind==='hibernate'));
+await test('legacy hibernation fields are ignored even on a device without S4',async()=>{
+ const doc=await fresh();p.state.hibernate.supported=false;doc.scenes.steam.overrides.sleep={hibernate:true,hibernateSize:80,timeouts:{acHibernate:10,dcHibernate:20}};stored(doc);const {receipt}=await startMode('steam',doc);assert(!receipt.skipped.some(v=>v.includes('S4')));assert(!opNames().includes('hibernate.set'));assert(!opNames().includes('hibernate.size'));assert(!p.calls.some(c=>c.op==='sleep.timeout'&&c.value.kind==='hibernate'));
 });
 for(const boundary of ['startup','scene entry'])for(const terminal of ['disable','close'])await test('retired fan scene cannot undo common '+terminal+' at '+boundary,async()=>{
  const doc=await fresh();doc.scenes.steam.overrides.fan={enabled:true,preset:'soft'};stored(doc);
@@ -2211,7 +2279,7 @@ await test('legacy startup cleanup preserves a foreign application stored under 
  const doc=await fresh();stored(doc);p.state.joyStartup='C:\\Tools\\DifferentSoftware.exe';const before=p.state.joyStartup;await b.chooseBootMode('global',doc,false);assert.equal(p.state.joyStartup,before);assert(!opNames().includes('joy.startup'));assert(changes().every(startupOnly));
 });
 await test('native guard and shortcut-cache fixture contracts remain anchored to the actual native and bridge API sources',async()=>{
- const native=fs.readFileSync(path.join(import.meta.dirname,'../native/main.cpp'),'utf8');const body=name=>{const start=native.indexOf(name);assert(start>=0,'Missing native API '+name);const end=native.indexOf('\n}',start);assert(end>start);return native.slice(start,end);};const guard=body('static bool mouseModeSteamDeckBlocked() {');assert(guard.includes('inputShortcutRuntimeSnapshot()'));assert(guard.includes('g_inputHostBuildPersona == "steamdeck"'));assert(guard.includes('g_inputHostBoundPersona == "steamdeck"'));const receipt=body('static json mouseModeSteamDeckState(bool operation) {');for(const token of ['{"ok", !operation}','{"provider", "steam"}','{"on", false}','{"stateKnown", false}','{"controlAllowed", false}','steamdeck_managed'])assert(receipt.includes(token),'Native Steam guard receipt changed: '+token);
+ const native=fs.readFileSync(path.join(import.meta.dirname,'../native/main.cpp'),'utf8');const body=name=>{const start=native.indexOf(name);assert(start>=0,'Missing native API '+name);const end=native.indexOf('\n}',start);assert(end>start);return native.slice(start,end);};const guard=body('static bool mouseModeSteamDeckBlocked() {');assert(guard.includes('ymSettingsSection("input")'));assert(guard.includes('g_inputShortcutRuntime.steamDeckTargetEnabled(input, gameInputOwnerSession())'));assert(guard.includes('g_inputHostBuildPersona == "steamdeck"'));assert(guard.includes('g_inputHostBoundPersona == "steamdeck"'));const receipt=body('static json mouseModeSteamDeckState(bool operation) {');for(const token of ['{"ok", !operation}','{"provider", "steam"}','{"on", false}','{"stateKnown", false}','{"controlAllowed", false}','steamdeck_managed'])assert(receipt.includes(token),'Native Steam guard receipt changed: '+token);
  for(const name of ['static json mouseModeSetBackend(const std::string& backend','static json mousePolicySet(const std::string& mode'])assert(body(name).includes('mouseModeSteamDeckBlocked()'),'Native mutation guard changed: '+name);const summon=body('ipc_on("summon.set", [](const json& a) -> json {');for(const token of ['g_openKeyboard =','g_mouseToggle =','summonSave();','{"openKeyboard", g_openKeyboard}','{"mouseToggle", g_mouseToggle}'])assert(summon.includes(token),'Native shortcut owner contract changed: '+token);
  const steamContract=fs.readFileSync(path.join(import.meta.dirname,'../src/bridge/steamUi.ts'),'utf8');assert.match(steamContract,/subscribe\(handler: \(\) => void\): \(\) => void \{\s*return on\('steam\.uiStateChanged',/);const gameproc=fs.readFileSync(path.join(import.meta.dirname,'../src/bridge/gameproc.ts'),'utf8');for(const operation of ["'mouseMode.get'","'mouseMode.setBackend'","'mouseMode.set'","'mouseMode.setPolicy'"])assert(gameproc.includes(operation));const yeman=fs.readFileSync(path.join(import.meta.dirname,'../src/bridge/yeman.ts'),'utf8');assert(yeman.includes("'summon.set'"));const ipc=fs.readFileSync(path.join(import.meta.dirname,'../src/bridge/ipc.ts'),'utf8');assert(ipc.includes('export function on<'));return {nativeContractInputs,actualNativeHash:report.sourceHashes['native/main.cpp'],behavioralMouseAndCacheTests:'executed below against actual bootModes.ts'};
 });
@@ -2289,13 +2357,12 @@ await test('saved-only editor opens without touching stalled CPU, charge, mouse 
 await test('category support reads only that category and never changes presets',async()=>{
  let cpu=0,tdp=0,charge=0,hibernate=0;p.hooks.cpuArchitectureRead=()=>{cpu++;};p.hooks.tdpCapabilityRead=()=>{tdp++;};p.hooks.chargeRead=()=>{charge++;};p.hooks.hibernateRead=()=>{hibernate++;};const before=structuredClone(p.settings);
  const performance=await b.readBootModeSupport('performance');assert.deepEqual([cpu,tdp,charge,hibernate],[1,1,1,0]);assert('charge' in performance);assert(!('hibernate' in performance));
- const sleep=await b.readBootModeSupport('sleep');assert.deepEqual([cpu,tdp,charge,hibernate],[1,1,1,1]);assert.deepEqual(Object.keys(sleep),['hibernate']);
- const steam=await b.readBootModeSupport('steam');assert.deepEqual(steam,{});assert.deepEqual([cpu,tdp,charge,hibernate],[1,1,1,1]);assert.deepEqual(p.settings,before);
+ const steam=await b.readBootModeSupport('steam');assert.deepEqual(steam,{});assert.deepEqual([cpu,tdp,charge,hibernate],[1,1,1,0]);assert.deepEqual(p.settings,before);
  return {cpu,tdp,charge,hibernate,unrelatedReads:0};
 });
-await test('one complete capture shares charge and hibernate observations across the support branch',async()=>{
+await test('one complete capture shares charge observations without probing hibernation',async()=>{
  let charge=0,hibernate=0;p.hooks.chargeRead=()=>{charge++;};p.hooks.hibernateRead=()=>{hibernate++;};let release;const gate=new Promise(resolve=>release=resolve);p.hooks.settingsRead=()=>gate;
- const pending=b.loadBootModes();await new Promise(resolve=>setImmediate(resolve));release();await pending;assert.equal(charge,1);assert.equal(hibernate,1);
+ const pending=b.loadBootModes();await new Promise(resolve=>setImmediate(resolve));release();await pending;assert.equal(charge,1);assert.equal(hibernate,0);
  return {charge,hibernate,scope:'single capture; no retained device cache'};
 });
 await test('saved-only editor retains unapplied default OFF and capability failure remains unknown',async()=>{
@@ -2306,7 +2373,7 @@ await test('saved-only editor retains unapplied default OFF and capability failu
 });
 
 await test('malformed known module data is rejected before rendering, saving or preparing any of four modes',async()=>{
- const cases=[['performance',{controls:null}],['performance',{controls:{ac:{auto:[]}}}],['performance',{frames:{dc:42}}],['gyro',{motion:42}],['gyro',{motion:{presets:[]}}],['softwareLaunch',{paths:{bad:'path'}}],['softwareLaunch',{paths:[null,123]}],['monitor',{preferences:null}],['monitor',{preferences:{ymcc:[]}}],['touch',{profiles:{disabled:42}}],['input',{outputTarget:null}],['input',{persona:'invalid'}],['sleep',{config:[]}],['sleep',{timeouts:'bad'}],['steamAppearance',{states:['bad']}],['background',{ui:false}],['display',{brightness:'bright'}],['charge',{limit:'80'}],['audioOptimization',{enabled:{}}],['frameGeneration',{enabled:[]}],['steamWallpaper',{cpuThreshold:'fast'}],['steamDecky',{enabled:1}]];
+ const cases=[['performance',{controls:null}],['performance',{controls:{ac:{auto:[]}}}],['performance',{frames:{dc:42}}],['gyro',{motion:42}],['gyro',{motion:{presets:[]}}],['softwareLaunch',{paths:{bad:'path'}}],['softwareLaunch',{paths:[null,123]}],['monitor',{preferences:null}],['monitor',{preferences:{ymcc:[]}}],['touch',{profiles:{disabled:42}}],['input',{outputTarget:null}],['input',{persona:'invalid'}],['steamAppearance',{states:['bad']}],['background',{ui:false}],['display',{brightness:'bright'}],['charge',{limit:'80'}],['audioOptimization',{enabled:{}}],['frameGeneration',{enabled:[]}],['steamWallpaper',{cpuThreshold:'fast'}],['steamDecky',{enabled:1}]];
  let checked=0;for(const id of m.BOOT_MODE_IDS)for(const [module,value]of cases){
   p.reset();const doc=await fresh();if(id==='global')doc.global[module]=structuredClone(value);else doc.scenes[id].overrides[module]=structuredClone(value);stored(doc);const before=structuredClone(p.settings);
   for(const options of [{overviewOnly:true},{editorOnly:true}])await assert.rejects(b.loadBootModes(options),/开机模式数据格式异常/);

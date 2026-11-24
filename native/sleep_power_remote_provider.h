@@ -57,6 +57,7 @@ struct NativeTaskOwnerLifetime {std::mutex gate;NativeProvider* owner=nullptr;};
 class NativeScope final {
     friend class NativeProvider;
     friend class NativeOwnedTaskBorrow;
+    friend class NativeRemoteTransport;
     const DescriptorV1 binding_;
     const Reader reader_;
     const PurposeAdmission purposeAdmission_;
@@ -64,6 +65,7 @@ class NativeScope final {
     const std::shared_ptr<std::atomic<bool>> providerOpen_;
     ProcessHold consumer_;
     RevocationMirrors::Registration registration_;
+    std::shared_ptr<void> inheritedCancellation_; // Original source's one-way event link, not another power lease.
     std::atomic<bool> cancelled_{false},returned_{false};
     std::atomic<bool> remoteImportClaimed_{false};
     std::atomic<SettlementOutcome> settlement_{SettlementOutcome::Unknown};
@@ -93,6 +95,7 @@ class NativeScope final {
         return providerOpen_&&providerOpen_->load(std::memory_order_acquire)&&(!parent_||parent_->live())&&
             !cancelled_.load(std::memory_order_acquire)&&!returned_.load(std::memory_order_acquire)&&
             registration_&&!registration_.cancelled()&&
+            WaitForSingleObject(registration_.event(),0)==WAIT_TIMEOUT&&
             processIdentity(consumer_.get(),held)&&sameProcess(held,binding_.consumer);
     }
 public:
@@ -224,7 +227,7 @@ private:
                                            HANDLE nativeTaskJob=nullptr,std::shared_ptr<NativeScope>* nativeTaskOwner=nullptr) noexcept {
         try{
             if(!admissionOpen()||!reader_||!maximumOutstanding_||!nonzeroKey(request)||
-               (purpose!=Purpose::Observation&&purpose!=Purpose::FanResume&&purpose!=Purpose::FanWrite)||!admission)return {};
+               (purpose!=Purpose::Observation&&purpose!=Purpose::FanResume&&purpose!=Purpose::FanWrite&&!inputPurpose(purpose))||!admission)return {};
             DescriptorV1 binding;binding.provider=provider_;binding.request=request;binding.purpose=purpose;
             if(!processIdentity(heldConsumer,binding.consumer)||
                !capturePowerObservation(reader_,binding.captured)||(binding.captured.flags&kNotificationPending)||!admission(purpose)||
@@ -372,11 +375,15 @@ public:
            !sameProcess(receipt.consumer,scope->binding().consumer)||!scope->peerCurrent(authenticatedPeer)||
            (receipt.flags&~std::uint32_t(AllReturned)))return false;
         if(receipt.outcome!=SettlementOutcome::Unknown&&receipt.outcome!=SettlementOutcome::RetainedResources&&
-           receipt.outcome!=SettlementOutcome::Returned)return false;
+           !terminalSettlement(receipt.outcome))return false;
         if(receipt.outcome==SettlementOutcome::Returned&&receipt.flags!=AllReturned)return false;
+        // Input command ownership can finish while the original Host/tuple
+        // retains its controller. This never signs SDK/endpoint release.
+        if(receipt.outcome==SettlementOutcome::InputOperationReturned&&
+           (!inputPurpose(scope->binding().purpose)||receipt.flags!=InputOperationFinished))return false;
         try{std::lock_guard<std::mutex> lock(scope->settlementMutex_);
             if(scope->returned_.load(std::memory_order_acquire))return false;
-            if(receipt.outcome==SettlementOutcome::Returned){
+            if(terminalSettlement(receipt.outcome)){
                 std::lock_guard<std::mutex> childrenLock(scope->childrenMutex_);
                 for(const auto& weak:scope->children_)if(auto child=weak.lock())
                     if(!child->returned_.load(std::memory_order_acquire))return false;
@@ -384,7 +391,7 @@ public:
             }
             scope->settlement_.store(receipt.outcome,std::memory_order_release);
             scope->settlementFlags_=receipt.flags;
-            if(receipt.outcome!=SettlementOutcome::Returned)return true; // Honest debt remains registered.
+            if(!terminalSettlement(receipt.outcome))return true; // Honest debt remains registered.
         }catch(...){return false;}
         scope->cancel();
         try{std::lock_guard<std::mutex> lock(mutex_);const auto i=scopes_.find(receipt.scope.low);
@@ -429,6 +436,19 @@ public:
                 scope->cancel();
                 std::lock_guard<std::mutex> settlementLock(scope->settlementMutex_);
                 if(scope->returned_.load(std::memory_order_acquire))continue;
+                // Input offers grant no child work until the one import claim wins.
+                // After exact kernel exit, seal that same claim before withdrawing
+                // an offer no importer ever owned. This is not a Returned receipt.
+                // Claimed input and every ordinary/fan scope keep the original debt.
+                if(inputPurpose(scope->binding().purpose)){
+                    bool unclaimed=false;
+                    if(scope->remoteImportClaimed_.compare_exchange_strong(unclaimed,true,std::memory_order_acq_rel)){
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        const auto current=scopes_.find(scope->binding().scope.low);
+                        if(current!=scopes_.end()&&current->second==scope){scopes_.erase(current);++retired;}
+                        continue;
+                    }
+                }
                 ExitDebtRecord debt{scope->binding(),scope->settlement_.load(std::memory_order_acquire),scope->settlementFlags_,scope};
                 std::lock_guard<std::mutex> lock(mutex_);
                 const auto current=scopes_.find(scope->binding().scope.low);

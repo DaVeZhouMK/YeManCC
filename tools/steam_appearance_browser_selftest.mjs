@@ -17,15 +17,20 @@ const api=`const f=()=>window.__fixture;export const fs={exists:async()=>true};e
  hidden:async()=>{f().hiddenCalls++;if(f().changeTarget)f().snapshot.targetId='b'.repeat(16);if(f().hiddenFails)return {ok:false};if(f().hiddenBusy)f().busyReads=f().hiddenBusy;for(const row of f().snapshot.themes)row.backendEnabled=row.configured;f().snapshot.backendIdle=false;f().snapshot.backendReady=true;f().snapshot.backendProcessCount=2;f().snapshot.backendReloadRequired=false;f().snapshot.configuredMatchesBackend=true;return {ok:true}},
  run:async(program,args)=>{const action=args[args.indexOf('-Action')+1];f().calls.push({action,args});let result;
  if(action==='Status'){if(f().failRead){result={ok:false,message:'fixture status unavailable'};}else if(f().busyReads>0){f().busyReads--;result={ok:false,message:'Theme operation busy; retry after rereading'};}else result={ok:true,snapshot:structuredClone(f().snapshot)};}
- if(action==='Apply'){const request=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(args[args.indexOf('-Payload')+1]),c=>c.charCodeAt(0))));f().applyRequests.push(request);if(f().delayApply)await new Promise(r=>setTimeout(r,120));
+ if(action==='Apply'||action==='ScopedApply'){const request=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(args[args.indexOf('-Payload')+1]),c=>c.charCodeAt(0))));f().applyRequests.push(request);if(f().delayApply)await new Promise(r=>setTimeout(r,120));
+ if(action==='ScopedApply'&&request.targetId!==f().snapshot.targetId)throw Error('wrong scoped draft target');
  if(request.expectedRevision!==f().snapshot.revision)result={ok:false,message:'Theme settings changed; reread before applying'};
  else {for(const [name,value]of Object.entries(request.states)){const row=f().snapshot.themes.find(t=>t.name===name);row.configured=value;row.backendEnabled=f().snapshot.backendReady?value:null;f().configs[name].active=value;}f().snapshot.revision=(++f().revision).toString(16).padStart(64,'0');f().snapshot.configuredMatchesBackend=f().snapshot.backendReady;
- result={ok:!f().failApply,saved:true,message:f().failApply?'配置已保存，重新应用失败':'已重新提交外观；如画面未更新请重新应用',snapshot:structuredClone(f().snapshot)};}}
- if(action==='Prepare'||action==='Reset'||action==='Restore'){
+ result={ok:!f().failApply,saved:true,message:f().failApply?'配置已保存，重新应用失败':'已重新提交外观；如画面未更新请重新应用',snapshot:structuredClone(f().snapshot)};
+ if(action==='ScopedApply'&&result.ok)Object.assign(result,{renderConfirmed:true,renderContextsComplete:true,message:'配置已保存，各主题样式已确认'});}}
+ if(action==='Prepare'||action==='Reset'||action==='Restore'||action==='ScopedPreset'){
+  const request=action==='ScopedPreset'?JSON.parse(atob(args[args.indexOf('-Payload')+1])):null;
+  if(request&&request.targetId.toUpperCase()!==f().snapshot.targetId.toUpperCase())return {exitCode:1,stdout:JSON.stringify({ok:false,message:'主题目录已变化'}),stderr:''};
+  const restore=action==='Restore'||request?.mode==='previous';
   f().presets.push(action);if(action==='Prepare')f().previous=structuredClone(f().configs);
-  if(action==='Restore')f().configs=structuredClone(f().previous||f().defaults);else if(action==='Reset'||!f().snapshot.packOwned)f().configs=structuredClone(f().defaults);
+  if(restore)f().configs=structuredClone(f().previous||f().defaults);else if(action==='Reset'||action==='ScopedPreset'||!f().snapshot.packOwned)f().configs=structuredClone(f().defaults);
   for(const row of f().snapshot.themes){row.installed=true;row.configured=f().configs[row.name].active;row.backendEnabled=row.configured;}
-  Object.assign(f().snapshot,{packPrepared:action!=='Restore',packRepairRequired:false,backendReloadRequired:true,canRestore:action!=='Restore',foreignActiveCount:0,revision:(++f().revision).toString(16).padStart(64,'0')});
+  Object.assign(f().snapshot,{packPrepared:!restore,packRepairRequired:false,backendReloadRequired:true,canRestore:!restore,foreignActiveCount:0,revision:(++f().revision).toString(16).padStart(64,'0')});
   result={ok:true,saved:true,message:'已恢复预设',snapshot:structuredClone(f().snapshot)};
  }
  if(action==='Reload'){
@@ -37,6 +42,11 @@ const api=`const f=()=>window.__fixture;export const fs={exists:async()=>true};e
   result={ok:true,reloaded:true,previousRevision,snapshot:structuredClone(f().snapshot)};
  }
  if(action==='Refresh'){f().refreshes++;result={ok:!f().failRefresh,message:f().failRefresh?'重新应用失败':'已重新提交外观，无需重启 Steam',snapshot:structuredClone(f().snapshot)};if(f().refreshWithoutSnapshot){const row=f().snapshot.themes.find(r=>r.name==='Round');row.configured=false;f().configs.Round.active=false;f().snapshot.revision=(++f().revision).toString(16).padStart(64,'0');result={ok:false,message:'fixture unconfirmed refresh'};}}
+ if(action==='ScopedRefresh'){
+  const request=JSON.parse(atob(args[args.indexOf('-Payload')+1]));
+  if(request.targetId!==f().snapshot.targetId)result={ok:false,message:'主题目录已变化'};
+  else {f().refreshes++;result={ok:true,saved:true,renderConfirmed:true,renderContextsComplete:true,snapshot:structuredClone(f().snapshot),message:'已重新应用，各主题样式已确认'};}
+ }
  if(action==='Reconcile'){
   const payload=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(args[args.indexOf('-Payload')+1]),c=>c.charCodeAt(0))));
   if(payload.expectedRevision!==f().snapshot.revision||payload.targetId!==f().snapshot.targetId)throw Error('fixture reconciliation owner changed');
@@ -50,15 +60,18 @@ const mocks={
  '@/bridge/appearancePreferenceRepositoryFixture':`export async function loadSettings(){return structuredClone(window.__fixture.bootModesSettings||{extensions:{}});}export async function updateSettings(mutator){const f=window.__fixture;if(f.preferenceWriteFails)throw Error('fixture preference write denied');const draft=structuredClone(f.bootModesSettings||{extensions:{}});mutator(draft);f.bootModesSettings=draft;f.preferenceWrites=(f.preferenceWrites||0)+1;}`,
  '@/bridge/api':api,
  '@/bridge/idlePolicyFixture':`import {shell} from '@/bridge/api';export const invoke=async(method,args)=>{const f=window.__fixture;
- if(method==='steamAppearance.idlePolicy')return {supported:f.idleSupported!==false,version:3,manualObservationProtocol:1,sharedSteamReadProtocol:1,processQuery:'Local\\YMCC.CssInventory.'+'a'.repeat(32),pid:42,birth:'100'};
+ if(method==='steamAppearance.idlePolicy')return {supported:f.idleSupported!==false,version:3,manualObservationProtocol:1,sharedSteamReadProtocol:1,processQuery:'Local\\\\YMCC.CssInventory.'+'a'.repeat(32),pid:42,birth:'100'};
  if(method==='steamAppearance.beginUse')return {ok:true,token:String(f.useToken=(f.useToken||0)+1),pid:42,birth:'100',backendPath:'C:\\\\fixture\\\\CssLoader-Standalone-Headless.exe'};
- if(method==='steamAppearance.ensureUse')return shell.hidden('fixture',[]);
+ if(method==='steamAppearance.ensureUse'){
+  if(!f.ensureEvent)return shell.hidden('fixture',[]);
+  f.pendingEnsure=args.token;return {ok:true,completionEvent:1};
+ }
  if(method==='steamAppearance.endUse'){f.endUseCalls=(f.endUseCalls||0)+1;return {ok:true};}
  throw Error('unexpected native fixture '+method);};`,
- '@/bridge/yeman':`export const STEAM_ADDONS=[{key:'steamscale',name:'小黄鸭缩放插帧（Lossless Scaling）',exe:'scale.exe'},{key:'steamcheat',name:'游戏修改器合集',exe:'cheat.exe'}];export const steamAddonExists=async()=>false;export const steamAddonSet=async()=>{};export const steamExeExists=async()=>true;export const steamRunning=async()=>window.__fixture.snapshot.steamRunning;export const steamStop=async()=>{};export const launchSteam=async()=>{};export const steamCustomAddons=async()=>[];export const steamCustomAddonAdd=async()=>({});export const steamCustomAddonSet=async()=>{};export const steamCustomAddonRemove=async()=>{};export const oemKeysGet=async()=>({});export const setShortcutRecording=async()=>({ok:true});export const summonGet=async()=>({});export const summonSet=async value=>value;`,
+ '@/bridge/yeman':`export const STEAM_ADDONS=[{key:'steamscale',name:'小黄鸭缩放插帧（Lossless Scaling）',exe:'scale.exe'},{key:'steamcheat',name:'游戏修改器合集',exe:'cheat.exe'}];export const steamAddonExists=async()=>false;export const steamAddonSet=async()=>{};export const launchSteamAddon=async()=>{throw Error('unexpected add-on launch')};export const steamExeExists=async()=>true;export const steamRunning=async()=>window.__fixture.snapshot.steamRunning;export const steamStop=async()=>{};export const launchSteam=async()=>{};export const steamCustomAddons=async()=>[];export const steamCustomAddonAdd=async()=>({});export const steamCustomAddonSet=async()=>{};export const steamCustomAddonRemove=async()=>{};export const oemKeysGet=async()=>({});export const setShortcutRecording=async()=>({ok:true});export const summonGet=async()=>({});export const summonSet=async value=>value;`,
  '@/bridge/deckySidebar':`export const deckySidebar={subscribe:()=>()=>{},get:async()=>({revision:1,enabled:true,phase:'ready'}),setEnabled:async enabled=>({revision:2,enabled,phase:'ready'}),environment:async()=>null};export const deckySidebarDescription=()=>'';export const deckySidebarSetupFailure=()=>'';export const deckySidebarCanRepair=()=>false;export const deckyConnectionSummary=()=>({label:'已连接 YMCC',detail:'memory adapter',tone:'connected'});`,
  '@/bridge/customSteamLibrary':`export const launchCustomSteamLibrary=async()=>({ok:true});export const readCustomSteamLibrarySummary=async()=>({waiting:0,joined:32,needs:0,excluded:0});`,
- '@/bridge/uiLifecycle':`export const isUiVisible=()=>true;export const getUiVisibilityState=()=>({documentVisible:true,nativeWindowVisible:true,powerReady:true});export const onUiVisibilityChange=()=>()=>{};`,
+ '@/bridge/uiLifecycle':`export const isUiVisible=()=>true;export const isUiPowerReady=()=>true;export const getUiVisibilityState=()=>({documentVisible:true,nativeWindowVisible:true,powerReady:true});export const onUiVisibilityChange=()=>()=>{};`,
 };
 mocks['@/router']=`export const ROUTES=[{path:'/steam',title:'Steam 大屏'}];`;
 mocks['@/bridge/yeman']+='export const getShortcutRecordingState=async()=>({enabled:false});';
@@ -91,7 +104,50 @@ try{
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const page=await browser.newPage({viewport:{width:720,height:900}});activePage=page;page.on('pageerror',error=>pageErrors.push(error.message));await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>document.querySelector('.appearance-master')?.disabled===false);
  assert.equal(await page.locator('.appearance-theme-switch').count(),0);assert.equal(await page.locator('.appearance-count').textContent(),'7 / 7');assert.equal(await page.locator('.steam-appearance-card input[type=range]').count(),0);cases.push('Actual Steam page has one compact summary card and no inline parameter sliders or theme list');
  const cardShot=path.join(out,'steam-page-720.png');await page.screenshot({path:cardShot});screenshots.push(cardShot);
+ await page.waitForSelector('.appearance-status-dot.ready');
+ const statusStart=await page.evaluate(()=>{
+  const draft=window.__draft, getState=draft.getState, f=window.__fixture;
+  f.cardStateCopies=0;
+  draft.getState=()=>{f.cardStateCopies++;return getState();};
+  f.restoreCardGetState=()=>{draft.getState=getState;};
+  const start=f.calls.length;
+  f.snapshot.themes.find(row=>row.name==='Round').configured=false;
+  f.snapshot.themes.find(row=>row.name==='Round').backendEnabled=false;
+  window.dispatchEvent(new Event('global:refresh'));
+  return start;
+ });
+ await page.waitForFunction(()=>document.querySelector('.appearance-count')?.textContent==='6 / 7'&&!document.querySelector('.appearance-status-line')?.textContent.includes('检测中'));
+ const completedRead=await page.evaluate(start=>{
+  const f=window.__fixture;
+  f.restoreCardGetState();
+  return {calls:f.calls.slice(start).map(c=>c.action),copies:f.cardStateCopies};
+ },statusStart);
+ assert.deepEqual(completedRead,{calls:['Status'],copies:0});
+ assert.equal(await page.locator('.appearance-status-dot.ready').count(),1);
+ assert.equal(await page.getByRole('switch',{name:'全部外观效果',exact:true}).getAttribute('aria-checked'),'true');
+ await page.evaluate(()=>{
+  const round=window.__fixture.snapshot.themes.find(row=>row.name==='Round');
+  round.configured=round.backendEnabled=true;
+  window.dispatchEvent(new Event('global:refresh'));
+ });
+ await page.waitForFunction(()=>document.querySelector('.appearance-count')?.textContent==='7 / 7'&&!document.querySelector('.appearance-status-line')?.textContent.includes('检测中'));
+ cases.push('A completed card Status uses the delivered draft phase without cloning the snapshot again');
  const existingCss=await page.evaluate(async()=>{const before=window.__fixture.hiddenCalls;const snapshot=await window.__service.start();return {ready:snapshot.backendReady,unchanged:before===window.__fixture.hiddenCalls}});assert.equal(existingCss.ready,true);assert.equal(existingCss.unchanged,true);cases.push('CSS already started by BAT is detected and reused without issuing another hidden startup or reload request');
+ const notified=await page.evaluate(async()=>{
+  const f=window.__fixture;const before=f.calls.length;f.ensureEvent=true;
+  Object.assign(f.snapshot,{backendReady:false,backendProcessCount:0});
+  const observed=window.__service.start();
+  for(let i=0;!f.pendingEnsure&&i<20;i++)await new Promise(resolve=>setTimeout(resolve,0));
+  if(!f.pendingEnsure)throw Error('fixture Ensure did not start');
+  const notice=(token,state)=>window.dispatchEvent(new CustomEvent('ipc:steamAppearance.ensureFinished',{detail:{token,state}}));
+  notice('stale-token','canceled');notice(f.pendingEnsure,'unknown');
+  await new Promise(resolve=>setTimeout(resolve,30));const beforeValid=f.calls.slice(before).map(row=>row.action);
+  Object.assign(f.snapshot,{backendReady:true,backendProcessCount:2});
+  notice(f.pendingEnsure,'completed');notice(f.pendingEnsure,'completed');
+  const snapshot=await Promise.race([observed,new Promise((_,reject)=>setTimeout(()=>reject(Error('completion did not wake Status')),1000))]);
+  f.pendingEnsure=null;f.ensureEvent=false;
+  return {beforeValid,actions:f.calls.slice(before).map(row=>row.action),ready:snapshot.backendReady};
+ });assert.deepEqual(notified,{beforeValid:['Status'],actions:['Status','Status'],ready:true});cases.push('Only the matching Ensure event triggers an immediate fresh Status, even with duplicate IPC notices');
  const existingReload=await page.evaluate(async()=>{const before=window.__fixture.hiddenCalls,reloads=window.__fixture.reloads||0;const r=await window.__service.reset('preset');return {ok:r.ok,helperUnchanged:before===window.__fixture.hiddenCalls,reloads:(window.__fixture.reloads||0)-reloads,enabled:r.snapshot.themes.filter(t=>t.configured&&t.backendEnabled).length}});assert.equal(existingReload.ok,true);assert.equal(existingReload.helperUnchanged,true);assert.equal(existingReload.reloads,1);assert.equal(existingReload.enabled,7);cases.push('A resource upgrade reuses the running Desktop-owned loader with one reread, zero helper starts and confirmed 7/7');
  await page.getByRole('button',{name:'编辑外观'}).click();await page.waitForSelector('[data-gp-page-lock]');assert.equal(await page.locator('.appearance-editor').getByRole('switch').count(),7);assert.equal(await page.locator('.appearance-editor').evaluate(el=>Math.round(el.getBoundingClientRect().height)),900);cases.push('Editor is a genuine full-viewport modal retaining controller ownership');
  assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'首页布局');await page.evaluate(()=>window.__move(0,1));assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'焦点突出');assert.equal(await page.evaluate(()=>window.__fixture.applyRequests.length),0);cases.push('Exact production D-pad navigation focuses rows without toggling');
@@ -161,6 +217,48 @@ try{
   assert.equal(saved.global.steamAppearance.states.Round,false);assert.equal(saved.global.steamAppearance.states['Art Hero'],false);assert.equal(saved.scenes.steam.overrides.steamAppearance.states.Round,true);
   cases.push('1280x'+height+': ordinary partial preference warning remains visible, and explicit retry repairs only its saved global field without repeating theme application');
  }
+ await page.evaluate(async()=>{
+  const f=window.__fixture;Object.assign(f.snapshot,{targetId:'a'.repeat(16),presetScopeProtocol:1,canRestore:true,steamRunning:false,backendReady:false,backendProcessCount:0});
+  f.previous=structuredClone(f.defaults);f.previous.Round.active=false;await window.__draft.read();
+ });
+ for(const [label,mode,count] of [['恢复 YMCC 预设','preset','7 / 7'],['恢复接管前的外观','previous','6 / 7']]){
+  if(!await page.locator('.appearance-editor').count())await page.getByRole('button',{name:'编辑外观'}).click();
+  await page.getByRole('button',{name:'恢复预设',exact:true}).click();
+  const start=await page.evaluate(()=>window.__fixture.calls.length);
+  await page.getByRole('button',{name:label,exact:true}).click();
+  await page.waitForFunction(({start,count})=>window.__fixture.calls.length>start&&!window.__draft.getState().locked&&document.querySelector('.appearance-count')?.textContent===count,{start,count});
+  const calls=await page.evaluate(start=>window.__fixture.calls.slice(start),start);
+  assert.deepEqual(calls.map(call=>call.action),['ScopedPreset']);
+  const args=calls[0].args;assert.deepEqual(JSON.parse(Buffer.from(args[args.indexOf('-Payload')+1],'base64')),{profile:'ui-summary-v1',mode,targetId:'A'.repeat(16)});
+  cases.push('Actual Vue '+mode+' confirmation dispatches just one scoped preset helper and displays '+count);
+ }
+ await page.evaluate(async()=>{
+  const f=window.__fixture;Object.assign(f.snapshot,{targetId:'a'.repeat(16),refreshScopeProtocol:1,steamRunning:true,steamPid:42,steamBirth:'100',
+   backendReady:true,backendProcessCount:2,backendReloadRequired:false,packPrepared:true,packOwned:true,packRepairRequired:false,configuredMatchesBackend:true});
+  await window.__draft.read();
+ });
+ const dispatchStart=await page.evaluate(()=>window.__fixture.calls.length);
+ await page.locator('.appearance-editor').getByRole('button',{name:/重新应用外观/}).click();
+ await page.waitForFunction(start=>window.__fixture.calls.length>start&&!window.__draft.getState().saving,dispatchStart);
+ assert.deepEqual(await page.evaluate(start=>window.__fixture.calls.slice(start).map(c=>c.action),dispatchStart),['ScopedRefresh']);
+ assert.match(await page.locator('.appearance-editor').getByRole('status').innerText(),/各主题样式已确认/);
+ cases.push('Actual Vue manual refresh performs a single scoped helper call using the observed ready backend');
+ await page.evaluate(async()=>{window.__fixture.snapshot.applyScopeProtocol=1;await window.__draft.read();});
+ const scopedDraftStart=await page.evaluate(()=>window.__fixture.calls.length);
+ const roundSwitch=page.locator('.appearance-editor').getByRole('switch',{name:'界面圆角',exact:true});
+ const shownRound=await roundSwitch.getAttribute('aria-checked');
+ const confirmedRound=await page.evaluate(()=>window.__draft.getState().snapshot.themes.find(row=>row.name==='Round').configured);
+ await roundSwitch.click();
+ assert.notEqual(await roundSwitch.getAttribute('aria-checked'),shownRound);
+ assert.equal(await page.evaluate(()=>window.__fixture.calls.length),scopedDraftStart);
+ assert.equal(await page.evaluate(()=>window.__draft.getState().snapshot.themes.find(row=>row.name==='Round').configured),confirmedRound);
+ assert.equal(await page.locator('.appearance-status-dot.ready').count(),0);
+ assert.equal(await page.locator('.appearance-count').textContent(),confirmedRound?'6 / 7':'7 / 7');
+ assert.match(await page.locator('.appearance-editor').innerText(),/3 秒后自动应用/);
+ await page.waitForFunction(start=>window.__fixture.calls.length>start&&!window.__draft.getState().saving&&!window.__draft.getState().pendingCount,scopedDraftStart);
+ assert.deepEqual(await page.evaluate(start=>window.__fixture.calls.slice(start).map(c=>c.action),scopedDraftStart),['ScopedApply']);
+ assert.match(await page.locator('.appearance-editor').getByRole('status').innerText(),/各主题样式已确认/);
+ cases.push('Ready Vue switch changes immediately, waits for the debounce, then submits and confirms with one scoped helper');
  await page.evaluate(()=>window.__unmount());assert.equal(await page.locator('.appearance-editor').count(),0);assert.deepEqual(pageErrors,[]);cases.push('Unmount cleans up teleported editor and no runtime errors were emitted');
  const sourceChanges=Object.keys(sourceHashes).filter(file=>sourceHash(file)!==sourceHashes[file]);assert.deepEqual(sourceChanges,[]);
  fs.writeFileSync(path.join(out,'browser-result.json'),JSON.stringify({ok:true,scope:'Actual SteamView, Vue components, typed service, global preference helper and production spatial navigation; memory native/transaction adapter; no physical controller or live-Steam claim',cases,screenshots,pageErrors,sourceHashes,sourceChanges},null,2));console.log('PASS: '+cases.length+' browser/service/controller checks');console.log(screenshots.join('\n'));

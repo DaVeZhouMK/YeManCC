@@ -45,6 +45,10 @@ YMCC 启动 RTSS 时将已经解析的目录通过 -RtssDirectory 传给既有�
 
 模板切换通过 RTSS 中的桥调用官方 `PostOverlayMessage("Load", "", layout)`，等待完整 rebuild 后的完成应答，再保存 Layout；模板切换本身不重启 YMCC/RTSS。
 
+使用自定义监控或关闭监控时，YMCC 先关闭 `Profiles/Global` 的 `[OSD] EnableOSD` 和 `Profiles/Config` 的 `[Shared] Flags` 中的 OSD 显示位，再用 `Empty.ovl` 清理旧布局。RTSS 运行时通过现有插件和 SDK 切换显示位并读回；未启动时只在配置中改这一个位，不启动 RTSS。切回 RTSS 监控时，目标模板确认加载后才开启两层开关。RTSS 锁帧、游戏检测配置和 HWiNFO 采集不变。
+
+已经加载旧桥的 RTSS 不热替换；如果收到插件版本过旧提示，退出游戏后通过 YMCC 重新启动 RTSS，让启动脚本装入新桥。不需要手工复制整套 RTSS 配置。
+
 ## 构建与发布保障
 
 - `native\build_native.bat` 构建并保留主程序、配置助手和桥 DLL。

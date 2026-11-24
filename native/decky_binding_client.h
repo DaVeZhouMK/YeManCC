@@ -15,6 +15,11 @@ struct Packet {
     nlohmann::json value;
     std::string reason;
 };
+// Scalar CPU attribution facts from the verified transfer, not a new lease.
+struct DiagnosticContextProcess {
+    DWORD pid=0;ULONGLONG birth=0;
+    DWORD steamPid=0;ULONGLONG steamBirth=0,observedAt=0;
+};
 // Extends the existing Owner snapshot. Inherited counters are TOTALS; owner and
 // reader counters also remain separate so neither can conceal incomplete cleanup.
 struct ClientSnapshot : Snapshot {
@@ -632,7 +637,8 @@ public:
             return {Packet::message, std::move(value), {}};
         } catch (...) { return fail(*s, "binding-packet-invalid"); }
     }
-    HANDLE takeContextProcess() {
+    HANDLE takeContextProcess(DiagnosticContextProcess* diagnostic=nullptr) {
+        if(diagnostic)*diagnostic={};
         auto s = admit(); if (!s) return nullptr;
         Call call{*this, s};
         std::lock_guard<std::mutex> next(s->nextMutex);
@@ -673,6 +679,7 @@ public:
                 requestCancel(s); return nullptr;
             }
             if (WaitForSingleObject(steam.value, 0) != WAIT_TIMEOUT || WaitForSingleObject(context.value, 0) != WAIT_TIMEOUT) return nullptr;
+            if(diagnostic)*diagnostic={pid,birth,s->request.steam.pid,steamBirth,GetTickCount64()};
             const HANDLE transferred = context.value; context.value = nullptr; return transferred;
         } catch (...) { return nullptr; }
     }

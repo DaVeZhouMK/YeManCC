@@ -59,6 +59,27 @@ static void verifyProfileReload(const std::wstring& root){
 }
 int wmain(int argc,wchar_t**argv){
  try {
+    if(argc==3&&!std::wcscmp(argv[1],L"--osd-gates-only")){
+        const std::wstring root=argv[2];
+        const auto config=fspath::path(root)/L"Profiles/Config";
+        const auto global=fspath::path(root)/L"Profiles/Global";
+        const auto originalGlobal=sha256File(global.wstring());
+        const auto verify=[&](const wchar_t* expected){
+            wchar_t value[9]{};
+            GetPrivateProfileStringW(L"Shared",L"Flags",L"",value,9,config.c_str());
+            return std::wcscmp(value,expected)==0;
+        };
+        require(nativeRtssSetOsdVisible(root,false)["ok"],"RTSS-owned SDK confirms HideOsd");
+        require(verify(L"80000004"),"HideOsd clears only the OSD bit; limiter and upper bits survive");
+        auto expired=false;
+        try { nativeRtssSetOsdVisible(root,true,[]{return false;}); }
+        catch(const std::runtime_error& e){expired=std::string(e.what())=="BOOT_RTSS_REQUEST_EXPIRED";}
+        require(expired&&verify(L"80000004"),"expired native request cannot open OSD");
+        require(nativeRtssSetOsdVisible(root,true)["ok"],"RTSS-owned SDK confirms ShowOsd");
+        require(verify(L"80000005"),"ShowOsd sets only the OSD bit");
+        require(sha256File(global.wstring())==originalGlobal,"visibility IPC does not change FPS limit or any Global bytes");
+        return 0;
+    }
     if(argc==3&&!std::wcscmp(argv[1],L"--profile-reload-only")){
         const fspath::path root=argv[2];require(sameFinalPath(root.parent_path().wstring(),exe_dir()),"profile-only requires owned fixture beside client");
         verifyProfileReload(root.wstring());return 0;

@@ -328,7 +328,7 @@ function Update-InstalledDeckyReceipt([string]$DeckyHome, [string]$BackupRoot, $
   Write-Output 'DECKY_RECEIPT: canonical .ymcc-managed.receipt; verified legacy root archived; Loader settings preserved'
 }
 
-function Copy-InstalledPowerControlMainAssets([string]$SourceRoot, [string]$DestinationRoot) {
+function Copy-InstalledPowerControlMainAssets([string]$SourceRoot, [string]$DestinationRoot, [string]$PackagedAppearanceResident) {
   New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
   foreach ($item in Get-ChildItem -LiteralPath $SourceRoot -Recurse -Force) {
     $relative = Get-RelativePath $SourceRoot $item.FullName
@@ -338,7 +338,8 @@ function Copy-InstalledPowerControlMainAssets([string]$SourceRoot, [string]$Dest
       New-Item -ItemType Directory -Force -Path $target | Out-Null
     } else {
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-      Copy-Item -LiteralPath $item.FullName -Destination $target -Force
+      $source = if ($relative -ieq 'steam-appearance\resident.ps1' -and $PackagedAppearanceResident) { $PackagedAppearanceResident } else { $item.FullName }
+      Copy-Item -LiteralPath $source -Destination $target -Force
     }
   }
 }
@@ -518,6 +519,7 @@ $CustomSteamLibraryFiles = @(
   'workspace-ui\index.html',
   'workspace-ui\app.js',
   'workspace-ui\styles.css',
+  'workspace-ui\controller-keys.css',
   'CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md',
   'SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md',
   'CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md'
@@ -548,8 +550,8 @@ foreach ($required in @($WebBuild, (Join-Path $WebBuild 'index.html'), (Join-Pat
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
 $exportBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 # FastRelease has no local-test marker and does not claim formal acceptance.
-$testExportRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
-$testExportMarker = Join-Path $testExportRoot 'YeManCC\test-export.json'
+$completePackageRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
+$testExportMarker = Join-Path $completePackageRoot 'YeManCC\test-export.json'
 $deploymentAdmission = Get-InstalledExportAdmission $WorkspaceRoot $exportBuildIdentity
 if($SteamGuardSuccessorReceipt -and $deploymentAdmission -cne 'local-test'){throw 'EXPORT_GUARD_SUCCESSOR_ORDINARY_DEPLOY_REQUIRED'}
 if($exportGuardSuccessorContext){$completedPrerequisites=Assert-YmccGuardCompletedPrerequisites $exportGuardSuccessorContext $exportBuildIdentity}
@@ -558,8 +560,20 @@ if ($deploymentAdmission -in @('local-test','fast')) {
   Write-Output ($deploymentAdmission + '_DEPLOY: formal fixtures NOT_RUN; source, complete archive and payload identity verified.')
 } else {
   $env:YEMAN_TEST_EXPORT = '0'
+  Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $completePackageRoot -BuildIdentity $exportBuildIdentity | Out-Null
   & (Join-Path $SourceToolRoot 'decky_update_release_gate.ps1') -Stage Verify -WorkspaceRoot $WorkspaceRoot
 }
+# Use the interop image sealed by packaging, so installation neither recompiles it nor copies the raw script.
+$packageIdentity = Get-Content -LiteralPath (Join-Path $completePackageRoot 'YeManCC\export-identity.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$appearanceResidentRelative = 'PowerControl/steam-appearance/resident.ps1'
+$appearanceResidentEntry = @($packageIdentity.payload | Where-Object path -CEQ $appearanceResidentRelative)
+if ($appearanceResidentEntry.Count -ne 1) { throw 'Packaged Steam appearance resident identity is missing or repeated' }
+$packagedAppearanceResident = Join-Path $completePackageRoot $appearanceResidentRelative
+$appearanceInterop = @{
+  sourceSha256 = Get-SteamAppearanceFileHash (Join-Path $sourcePowerControl 'steam-appearance\resident.ps1')
+  stagedSha256 = [string]$appearanceResidentEntry[0].sha256
+}
+Assert-SteamAppearanceExport $sourcePowerControl (Join-Path $completePackageRoot 'PowerControl') $appearanceInterop | Out-Null
 Assert-MonitorHudWebExport $WebBuild | Out-Null
 Assert-MonitorHudDeckyExport $DeckyBuild | Out-Null
 & node (Join-Path $SourceToolRoot 'build-decky-sidebar-plugin.mjs') --out $DeckyBuild --check
@@ -685,6 +699,21 @@ if ([string]$customManifest.packageId -ne 'custom-steam-library' -or [string]$cu
 if ([string]$customManifest.packageVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
   throw "CustomSteamLibrary package version is invalid: $($customManifest.packageVersion)"
 }
+$packagedCustomManifest = Join-Path $completePackageRoot 'YeManCC\CustomSteamLibrary\package-manifest.json'
+if ((Get-ExportFileHash (Join-Path $CustomSteamLibrarySource 'package-manifest.json')) -cne (Get-ExportFileHash $packagedCustomManifest)) {
+  throw 'CustomSteamLibrary deployment manifest differs from the verified archive'
+}
+$customManifestPaths = @('package-manifest.json') + @($customManifest.fileIndex | ForEach-Object { ConvertTo-ExportRelativePath ([string]$_.path) })
+$customInstallPaths = @($CustomSteamLibraryFiles | ForEach-Object { ConvertTo-ExportRelativePath $_ })
+if ($customManifestPaths.Count -ne $customInstallPaths.Count -or (Compare-Object $customManifestPaths $customInstallPaths -CaseSensitive)) {
+  throw 'CustomSteamLibrary deployment allowlist differs from the verified archive'
+}
+foreach ($entry in $customManifest.fileIndex) {
+  $source = Join-Path $CustomSteamLibrarySource (ConvertTo-ExportRelativePath ([string]$entry.path))
+  if ((Get-Item -LiteralPath $source).Length -ne [long]$entry.bytes -or (Get-ExportFileHash $source) -ine [string]$entry.sha256) {
+    throw "CustomSteamLibrary deployment source differs from the verified archive: $($entry.path)"
+  }
+}
 if (-not (Test-Path -LiteralPath $InstallRoot -PathType Container)) {
   # A clean export is an allowed deployment starting point. The caller owns
   # the exact fixed target above; recreate only that directory after its
@@ -732,9 +761,8 @@ New-Item -ItemType Directory -Force -Path $installedPowerControl | Out-Null
 # formal release template policy, then the hash-locked third-party assets.
 # Preserve the ACTUAL previous installed plugin before ordinary assets can overwrite it.
 Move-MonitorHudDeckyBackup $installedPowerControl $BackupRoot
-Copy-InstalledPowerControlMainAssets $sourcePowerControl $installedPowerControl
-. (Join-Path $SourceToolRoot 'steam-appearance-export.ps1')
-Assert-SteamAppearanceExport $sourcePowerControl $installedPowerControl | Out-Null
+Copy-InstalledPowerControlMainAssets $sourcePowerControl $installedPowerControl $packagedAppearanceResident
+Assert-SteamAppearanceExport $sourcePowerControl $installedPowerControl $appearanceInterop | Out-Null
 # Source-tree dist is not authoritative: install the verified matching task build.
 Copy-MonitorHudDeckyExport $DeckyBuild $installedPowerControl
 # Record the exact identity also consumed by the normal whole-package updater.
@@ -905,7 +933,6 @@ foreach ($name in @('version.json', 'YeMan-Support.html')) {
 # Runtime repair consumes package-generated manifests, not the Web build tree.
 # Bind them and the generated prerequisite payload to the same verified ZIP;
 # stale installed manifests would otherwise restore an older Decky frontend.
-$completePackageRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
 Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $completePackageRoot -BuildIdentity $exportBuildIdentity | Out-Null
 # BEGIN TDP_RUNTIME_MANIFEST_INSTALLED_IDENTITY
 $installedTdpManifest = Join-Path $installedPowerControl 'pawnio\tdp-runtime-manifest.json'

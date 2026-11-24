@@ -22,13 +22,16 @@ import { onSharedPowerLifecycle } from './bridge/powerLifecycleState';
 export interface ScheduledTaskOptions {
   pauseWhenHidden?: boolean;
   runImmediately?: boolean;
+  /** Read-only work must discard its own result when the signal is aborted. */
+  releaseReadOnPowerChange?: boolean;
 }
 
 interface ScheduledTask {
   name: string;
   periodMs: number;
-  run: () => void | Promise<unknown>;
+  run: (signal?: AbortSignal) => void | Promise<unknown>;
   pauseWhenHidden: boolean;
+  releaseReadOnPowerChange: boolean;
   nextDueAt: number;
   busy: boolean;
 }
@@ -37,6 +40,7 @@ const tasks = new Map<string, ScheduledTask>();
 let timer: number | null = null;
 let pumping = false;
 let powerReady = false;
+let activeRead: AbortController | null = null;
 type LifecycleBinding = { stops: Array<() => void> };
 let lifecycleBinding: LifecycleBinding | null = null;
 
@@ -52,14 +56,20 @@ function ensureVisibilityBinding(): void {
     else stop();
   };
   try {
+  let generation: number | undefined;
+  let suspendSerial: number | undefined;
   bind(() => onSharedPowerLifecycle(state => {
     if (lifecycleBinding !== binding) return;
     const next = isUiPowerReady(state);
+    const scopeChanged = generation !== state.generation || suspendSerial !== state.suspendSerial;
+    generation = state.generation;
+    suspendSerial = state.suspendSerial;
+    if (scopeChanged || !next) activeRead?.abort();
     if (powerReady === next) return;
     powerReady = next;
     scheduleNext();
     if (powerReady) void runPump();
-  }));
+  }, { observeSuspendSerial: true }));
   if (lifecycleBinding !== binding) return;
   bind(() => onUiVisibilityChange(() => {
     if (lifecycleBinding === binding) onVisibilityChange();
@@ -139,7 +149,15 @@ async function runPump(): Promise<void> {
       task.nextDueAt = advanceDeadline(task.nextDueAt, task.periodMs, performance.now());
       task.busy = true;
       try {
-        await task.run();
+        if (task.releaseReadOnPowerChange) {
+          const owner = new AbortController();
+          activeRead = owner;
+          let retire!: () => void;
+          const retired = new Promise<void>(resolve => { retire = resolve; });
+          owner.signal.addEventListener('abort', retire, { once: true });
+          try { await Promise.race([retired, task.run(owner.signal)]); }
+          finally { owner.signal.removeEventListener('abort', retire); activeRead = null; }
+        } else await task.run();
       } catch {
         // 单项状态检查 best-effort：失败不产生未处理拒绝，下一槽照常重试。
       } finally {
@@ -182,7 +200,7 @@ function reconcileTimer(): void {
 export function registerScheduledTask(
   name: string,
   periodMs: number,
-  run: () => void | Promise<unknown>,
+  run: (signal?: AbortSignal) => void | Promise<unknown>,
   options: ScheduledTaskOptions = {},
 ): () => void {
   if (!name) throw new Error('scheduler task name is required');
@@ -197,6 +215,7 @@ export function registerScheduledTask(
     periodMs,
     run,
     pauseWhenHidden: options.pauseWhenHidden === true,
+    releaseReadOnPowerChange: options.releaseReadOnPowerChange === true,
     nextDueAt: performance.now() + periodMs,
     busy: false,
   };

@@ -52,10 +52,20 @@ static std::map<HANDLE,DWORD> processHandles;
 static std::map<DWORD,HANDLE> lifetimes;
 static std::map<DWORD,std::wstring> images;
 static bool deny = false;
-static HWINEVENTHOOK fixtureSetWinEventHook(DWORD,DWORD,HMODULE,WINEVENTPROC callback,DWORD,DWORD,DWORD) {
- eventCallback=callback;observerThread=GetCurrentThreadId();return reinterpret_cast<HWINEVENTHOOK>(1);
+static std::map<HWINEVENTHOOK,DWORD> nameHooks;
+static UINT_PTR nextWinHook=1;
+static std::atomic<DWORD> rejectNamePid{0};
+static bool includeHelperRow=false;
+static constexpr DWORD bootstrapHelper=4243, newHelper=4244, rejectedHelper=4245;
+static bool hasNameHook(DWORD pid){std::lock_guard lock(fixtureMutex);for(const auto& [h,p]:nameHooks)if(p==pid)return true;return false;}
+static HWINEVENTHOOK fixtureSetWinEventHook(DWORD low,DWORD,HMODULE,WINEVENTPROC callback,DWORD pid,DWORD,DWORD) {
+ eventCallback=callback;observerThread=GetCurrentThreadId();
+ if(low!=EVENT_OBJECT_NAMECHANGE)return reinterpret_cast<HWINEVENTHOOK>(1);
+ if(pid&&pid==rejectNamePid.load())return nullptr;
+ std::lock_guard lock(fixtureMutex);
+ const auto token=reinterpret_cast<HWINEVENTHOOK>(++nextWinHook);nameHooks.emplace(token,pid);return token;
 }
-static BOOL unhook(HWINEVENTHOOK){return TRUE;}
+static BOOL unhook(HWINEVENTHOOK hook){std::lock_guard lock(fixtureMutex);nameHooks.erase(hook);return TRUE;}
 // Keep inventory discovery inside the fixture-owned Toolhelp ports.
 static FARPROC fixtureGetProcAddress(HMODULE module,LPCSTR name){
  if(std::strcmp(name,"NtQuerySystemInformation")==0)return nullptr;
@@ -78,7 +88,10 @@ static BOOL firstProcess(HANDLE h,LPPROCESSENTRY32W pe){
  std::lock_guard lock(fixtureMutex);if(!snapshotHandles.count(h)){SetLastError(ERROR_NO_MORE_FILES);return FALSE;}
  pe->th32ProcessID=fixturePid;wcscpy_s(pe->szExeFile,L"steam.exe");return TRUE;
 }
-static BOOL nextProcess(HANDLE,LPPROCESSENTRY32W){SetLastError(ERROR_NO_MORE_FILES);return FALSE;}
+static BOOL nextProcess(HANDLE,LPPROCESSENTRY32W pe){
+ if(includeHelperRow&&pe->th32ProcessID==fixturePid){pe->th32ProcessID=bootstrapHelper;wcscpy_s(pe->szExeFile,L"steamwebhelper.exe");return TRUE;}
+ SetLastError(ERROR_NO_MORE_FILES);return FALSE;
+}
 static BOOL processTimes(HANDLE h,LPFILETIME birth,LPFILETIME exit,LPFILETIME kernel,LPFILETIME user){
  {std::lock_guard lock(fixtureMutex);if(const auto found=processHandles.find(h);found!=processHandles.end()){
    ++processTimeReads;if(refuseFixtureTimes)return FALSE;
@@ -174,6 +187,39 @@ static void lifetime(DWORD pid,const std::wstring& image) {
 }
 static ULONGLONG cpu() {FILETIME b{},e{},k{},u{};GetProcessTimes(GetCurrentProcess(),&b,&e,&k,&u);return (ULONGLONG(k.dwHighDateTime)<<32)+k.dwLowDateTime+(ULONGLONG(u.dwHighDateTime)<<32)+u.dwLowDateTime;}
 struct Registry {std::wstring path=L"Software\\YMCCWindowBudgetFixture-"+std::to_wstring(GetCurrentProcessId());~Registry(){RegDeleteTreeW(HKEY_CURRENT_USER,path.c_str());}};
+
+static int scopedNameCases(){
+ Registry reg; HKEY key=nullptr;
+ check(RegCreateKeyExW(HKEY_CURRENT_USER,reg.path.c_str(),0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS,"scoped-name registry");
+ const std::wstring root=L"X:\\scoped-name-fixture";
+ check(RegSetValueExW(key,L"SteamPath",0,REG_SZ,reinterpret_cast<const BYTE*>(root.c_str()),static_cast<DWORD>((root.size()+1)*sizeof(wchar_t)))==ERROR_SUCCESS,"scoped-name root");
+ RegCloseKey(key);
+ const auto helper=root+L"\\bin\\cef\\cef.win64\\steamwebhelper.exe";
+ lifetime(fixturePid,root+L"\\steam.exe");lifetime(bootstrapHelper,helper);lifetime(newHelper,helper);lifetime(rejectedHelper,helper);
+ includeHelperRow=true; snapshotEnabled=true;
+ std::atomic<bool> ready=false;Observer observer(reg.path);
+ check(observer.start([&](bool){ready=true;},[]{return false;},[]{++notifications;}),"scoped-name observer starts");
+ until([&]{return ready.load();});
+ check(!hasNameHook(0)&&hasNameHook(fixturePid)&&hasNameHook(bootstrapHelper),"qualified existing Steam and helper replace broad NAMECHANGE");
+ const auto waitNotification=[&](DWORD pid,DWORD event){const auto n=notifications.load();send(1,pid,event);until([&]{return notifications>n;});};
+ waitNotification(bootstrapHelper,EVENT_OBJECT_NAMECHANGE);
+ check(observer.diagnosticWindowSnapshot().uiWindow.pid==bootstrapHelper,"existing helper title updates the window hint");
+ waitNotification(newHelper,EVENT_OBJECT_SHOW);
+ check(!hasNameHook(0)&&hasNameHook(newHelper),"new helper is subscribed on its first SHOW");
+ waitNotification(newHelper,EVENT_OBJECT_NAMECHANGE);
+ check(observer.diagnosticWindowSnapshot().uiWindow.pid==newHelper,"dynamic helper title updates the window hint");
+ lifetime(newHelper,L"X:\\not-steam.exe");
+ const auto before=notifications.load(), count=dispatches.load();
+ send(1,newHelper,EVENT_OBJECT_NAMECHANGE);until([&]{return dispatches>count;});Sleep(240);
+ check(notifications==before,"same reused PID cannot publish a Steam hint");
+ rejectNamePid=rejectedHelper;
+ waitNotification(rejectedHelper,EVENT_OBJECT_CREATE);
+ check(hasNameHook(0)&&!hasNameHook(fixturePid)&&!hasNameHook(bootstrapHelper)&&!hasNameHook(newHelper),"failed scoped registration restores global coverage");
+ waitNotification(rejectedHelper,EVENT_OBJECT_NAMECHANGE);
+ observer.stop();
+ {std::lock_guard lock(fixtureMutex);check(nameHooks.empty()&&processHandles.empty(),"stop retires hook and process resources");for(const auto& [id,h]:lifetimes)CloseHandle(h);lifetimes.clear();}
+ return 0;
+}
 
 // Reuse the production observer, callback, classifier and existing fake ports.
 // This optional selection performs no cost/storm benchmark or real application IO.
@@ -352,6 +398,7 @@ static int coldImageCases(){
 }
 
 int wmain(int argc,wchar_t** argv){try{
+ if(argc==3&&std::wstring_view(argv[2])==L"--scoped-name-only")return scopedNameCases();
  if(argc==3&&std::wstring_view(argv[2])==L"--cold-image-only")return coldImageCases();
  if(argc==3&&std::wstring_view(argv[2])==L"--receipt-borrow-only"){const std::filesystem::path selectedOut(argv[1]);std::filesystem::create_directories(selectedOut);return receiptBorrowCases(selectedOut);}
  if(argc==3&&std::wstring_view(argv[2])==L"--exceptions-only"){const std::filesystem::path selectedOut(argv[1]);std::filesystem::create_directories(selectedOut);return exceptionCases(selectedOut);}
@@ -411,6 +458,7 @@ int wmain(int argc,wchar_t** argv){try{
  Sleep(20);const auto stopAt=GetTickCount64();observer.stop();const auto stopMs=GetTickCount64()-stopAt;flooding=false;flood.join();
 #ifndef YMCC_BASELINE_METRICS
  check(stopMs<1500,"observer stops during a continuous notification stream");
+ observer.finishFactReadsForExit(); // Release the unique source before starting the next observer.
 #endif
 
 #ifndef YMCC_BASELINE_METRICS
@@ -420,6 +468,14 @@ int wmain(int argc,wchar_t** argv){try{
  std::thread busy([&]{const auto end=GetTickCount64()+1400;while(generating&&GetTickCount64()<end){PostThreadMessageW(observerThread,hintMessage,EVENT_OBJECT_NAMECHANGE,fixturePid);SwitchToThread();}});
  const bool retryDelivered=[&]{const auto end=GetTickCount64()+1300;while(!retryCalls&&GetTickCount64()<end)Sleep(2);return retryCalls==1;}();
  generating=false;busy.join();fair.stop();check(retryDelivered,"bounded startup retry is not starved by continuous Windows messages");
+ ready=false;
+ const auto beforeRestartNotice=notifications.load();
+ check(fair.start([&](bool changed){if(changed)ready=true;},[]{return false;},[]{++notifications;}),"stopped observer restarts with the same owner");
+ until([&]{return ready.load();});
+ send(1,fixturePid,EVENT_OBJECT_NAMECHANGE);
+ until([&]{return notifications.load()>beforeRestartNotice;});
+ fair.stop();
+ check(notifications.load()==beforeRestartNotice+1,"restarted observer delivers a new bounded hint");
 #endif
  {std::lock_guard lock(fixtureMutex);check(processHandles.empty(),"stop releases all cached process handles");for(const auto& [pid,h]:lifetimes)CloseHandle(h);lifetimes.clear();}
  nlohmann::json report{{"ok",true},{"checks",checks},{"syntheticCreateHints",2000},{"processOpens",createOpens},{"imageQueries",createImages},{"fanoutNotifications",createNotifies},{"syntheticDeniedHints",2000},{"deniedProcessOpens",deniedOpens},{"hintCpuMs",createCpu/10000.0},{"idleSampleMs",700},{"idleCpuMs",idleCpu/10000.0},{"stopDuringStormMs",stopMs},{"retainedHandlePeakSample",retained},{"realSteamOperations",0},{"realCssOperations",0}};

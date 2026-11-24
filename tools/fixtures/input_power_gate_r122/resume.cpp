@@ -13,7 +13,7 @@
 #include <thread>
 #include <vector>
 #include "sleep_power_dispatch.h"
-#include "sleep_power_state.h"
+#include "sleep_power_observation.h"
 #include "sleep_wake_admission.h"
 using json=nlohmann::json;
 @@POWER_ENUM@@
@@ -68,7 +68,7 @@ static void boundary(const char* name,bool core){
  else if(edge=="unknown")sharedPowerKnown=false;
  else if(edge=="throw")throw std::runtime_error("accepted test leaf failed");
 }
-static bool gamepadRegisterRawInput(){boundary("raw");return rawResult;}
+static bool gamepadRegisterRawInput(bool gamepadOnly=false){boundary(gamepadOnly?"raw-retry":"raw",!gamepadOnly);return rawResult;}
 static bool sgShouldKeepInputDuringStandby(){return keepWriter;}
 static void gamepadResetNativeState(bool){boundary("reset");}
 static void gamepadReadState(){boundary("read");}
@@ -156,7 +156,10 @@ static struct {void sharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){+
 static std::atomic<bool> g_sensorSuspendCallbackActive{false};
 static void inputCaptureResumeSensorsForPower(){++projectionOtherCalls;}
 static bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPowerV1&){++projectionOtherCalls;return true;}
+static bool msiNativeForegroundSharedPowerBoundary(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool radialOverlaySharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static bool focusIsolationSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool cpuUvTrialPowerChanged(){return false;}
 static bool sharedSleepWakeClassified(uint64_t){return true;}
 static bool sgSleepRetryActive(){return false;}
 namespace SleepRecoveryAuto {static void powerReady(uint64_t){++projectionOtherCalls;}}
@@ -169,7 +172,13 @@ namespace ymcc::inputHost::msiPowerWork {static void readyDelivery(const ymcc::s
 enum class FanReadyDelivery { Idle, Settled, Deferred };
 [[maybe_unused]] static uint64_t currentFanPowerGeneration(){return currentPowerGeneration();}
 static FanReadyDelivery fanHostScheduleEmergencyResume(uint64_t){++projectionOtherCalls;return FanReadyDelivery::Settled;}
+static bool fanHostPhysicalWakeCurrent(){return false;}
+static FanReadyDelivery fanHostPublishPhysicalWake(uint64_t,bool){return FanReadyDelivery::Idle;}
 static void steamAppearancePublicReady(uint64_t){++projectionOtherCalls;}
+static bool nativeAyaLightingPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool projectPowerSourceRecovery(HWND,const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool deckySidebarRecheckPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool steamWallpaperForegroundSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static json sharedPowerLifecycleSnapshot(){
  if(projectionThrow)throw std::runtime_error("projection IO port");
  ymcc::sleeppower::SharedPowerV1 observed;
@@ -183,15 +192,13 @@ namespace ymcc::batterycharge {static void notifySystemPower(){}}
 namespace ymcc::sleeppower::task {static bool allowed(){return false;}}
 static void notifySharedMediaDownloadsPower(){}
 static void sgOfferStartupResume(const ymcc::sleeppower::SharedPowerV1&){}
+static void sgNotifyParkedWakeGameRecovery(){}
 
 struct DiagnosticQueuedMessage {UINT message;WPARAM w;LPARAM l;};
 static std::vector<DiagnosticQueuedMessage> diagnosticMessages;
 static unsigned diagnosticSuccessfulPosts=0;
-static void beginPowerSourceRecovery(HWND){}
 static void stopPowerResumeWatchdog(){}
 static bool steamAppearanceResumeCommitted(unsigned long long){return true;}
-static void deckySidebarResumeAfterIntent(unsigned long long,const char*){}
-static void nativeAyaLightingResume(){}
 static void ipc_emit(const char*,const json&){}
 static BOOL diagnosticPostMessage(HWND,UINT message,WPARAM w,LPARAM l){
  if(message!=WM_POWER_INPUT_RECOVER&&message!=kSharedPowerStateMessage)throw std::runtime_error("unexpected post outside original input/projection fanout");
@@ -203,12 +210,13 @@ static LRESULT diagnosticOriginalCommit(WPARAM w,LPARAM l){[[maybe_unused]] HWND
 }
 @@PUBLIC_PUBLISHER@@
 @@PUBLIC_PROJECTION@@
+@@PUBLIC_PROJECTION_WINDOW@@
 #undef PostMessageW
 static LRESULT repairTimer();
 static void diagnosticConsumeQueued(){
  if(diagnosticMessages.empty())throw std::runtime_error("no posted message to consume");
  const auto message=diagnosticMessages.front();diagnosticMessages.erase(diagnosticMessages.begin());
- if(message.message==kSharedPowerStateMessage){projectSharedPowerLifecycle(g_hwnd);return;}
+ if(message.message==kSharedPowerStateMessage){diagnosticProjectionWindow(g_hwnd,message.w);return;}
  if(message.message!=WM_POWER_INPUT_RECOVER||message.l!=0)throw std::runtime_error("queued input identity changed");
  recoverMessage(message.w);
 }
@@ -238,6 +246,7 @@ static void settle(){const auto r=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEN
 static void clearPending(){@@CLEAR_ROG_PENDING@@}
 static bool hasPending(){@@HAS_ROG_PENDING@@}
 static void reset(){
+ @@RESET_PUBLIC_PROJECTION@@
  observeReady=false;settle();fixturePowerGeneration+=10;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;g_inputReady.silent(true);
  keepWriter=false;interruptAt.clear();edge.clear();changed=false;calls.clear();allCalls.clear();publications=repairArms=focusArms=binds=0;rawResult=true;waitEntered=false;rogAttempts=0;
  sharedPowerKnown=true;sharedPowerGeneration=0;sharedPowerAllowed=true;rawReadCount=rawFailAt=0;rawFailDenied=unknownAfterSend=failNextRaw=false;diagnosticMessages.clear();diagnosticSuccessfulPosts=0;failRepairTimer=false;projectionMsiCalls=projectionOtherCalls=0;projectionThrow=false;projectionUnknownAtMsi=false;g_sharedPowerProjectionPending=false;keepDiagnostics.clear();stepFailures.clear();
@@ -274,7 +283,28 @@ int main(int argc,char** argv){
   reset();cases.push_back(name);body();
  };
  run("normal",[]{successor();});
- run("registration-failure",[]{rawResult=false;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration));require(!g_inputReady&&publications==1,"registration failure remains truthful");require(calls==std::vector<std::string>{"raw","rog","face","reset","read","stats"},"registration failure grants no Host rearm or rescan");successor();});
+ run("registration-failure",[]{rawResult=false;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration));if(g_sleepPowerRedeliveryArmed)repairTimer();require(!g_inputReady&&publications==1,"registration failure remains truthful");require(calls==std::vector<std::string>{"raw","rog","face","reset","read","stats"},"registration failure grants no Host rearm or rescan");for(unsigned i=0;i<20;++i)recoverMessage(static_cast<WPARAM>(fixturePowerGeneration));require(count("raw-retry")==1&&repairArms==1&&!g_sleepPowerRedeliveryArmed&&g_powerInputRecoverRedelivery==0,"persistent rejection spends exactly one deferred retry and retires debt");successor();});
+ run("registration-retry-current-generation",[]{
+  const auto generation=static_cast<WPARAM>(fixturePowerGeneration.load());rawResult=false;recoverMessage(generation);
+  require(!g_inputReady&&count("rearm")==0&&count("rescan")==0&&g_sleepPowerRedeliveryArmed&&g_powerInputRecoverRedelivery==generation,"explicit rejection parks full input recovery with the original timer and no Host permission");
+  rawResult=true;for(unsigned i=0;i<20;++i)recoverMessage(generation);
+  require(count("raw-retry")==0&&repairArms==1,"duplicate messages do not spend the retry early or renew its timer");
+  repairTimer();completeOnce(false);require(count("raw-retry")==1&&g_powerInputRecoverRedelivery==0&&!g_sleepPowerRedeliveryArmed,"same generation completes with one gamepad-only registration retry and retires debt");
+ });
+ run("registration-retry-suspend",[]{
+  const auto generation=static_cast<WPARAM>(fixturePowerGeneration.load());rawResult=false;recoverMessage(generation);rawResult=true;
+  const auto inProgress=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,++serial);repairTimer();
+  require(inProgress&&g_sleepPowerDispatch.pendingSuspend()&&!g_inputReady&&count("raw-retry")==0&&count("rearm")==0&&g_powerInputRecoverRedelivery==generation,"pending suspend prevents retry or Host work and retains the same-generation debt");
+  g_sleepPowerDispatch.complete(inProgress,++serial);settle();sleepPowerRedeliverCommitted(g_hwnd);completeOnce(false);require(count("raw-retry")==1,"accepted Ready after the query abort continues the parked retry");
+ });
+ run("registration-retry-retired",[]{
+  rawResult=false;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));++fixturePowerGeneration;rawResult=true;repairTimer();
+  require(count("raw-retry")==0&&count("rearm")==0&&g_powerInputRecoverRedelivery==0&&!g_sleepPowerRedeliveryArmed,"retired generation cannot retry on behalf of a newer owner");successor();
+ });
+ run("registration-retry-timer-failure",[]{
+  rawResult=false;failRepairTimer=true;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));
+  require(!g_inputReady&&count("raw-retry")==1&&count("rearm")==0&&repairArms==1&&!g_sleepPowerRedeliveryArmed&&g_powerInputRecoverRedelivery==0,"failed timer spends the one admitted retry inline and keeps persistent rejection closed");
+ });
  for(const std::string initial:{"generation","phase","exit"})run("initial-"+initial,[&]{const auto captured=fixturePowerGeneration.load();if(initial=="generation")++fixturePowerGeneration;if(initial=="phase")g_powerLifecycle=PowerLifecycle::Suspended;if(initial=="exit")g_exitRequested=true;recoverMessage(static_cast<WPARAM>(captured));require(calls.empty()&&publications==0,"invalid original message performs no recovery");successor();});
  const std::vector<std::string> stages={"raw","rog","face","reset","read","rearm","rescan","stats"};
  for(const auto& stage:stages)for(const std::string change:{"generation","phase","exit"})run(stage+"-"+change,[&]{

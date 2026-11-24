@@ -316,6 +316,9 @@ inline bool captureStopMembers(State& s) noexcept {
     size_t kept=0;
     for(DWORD i=0;i<members.count;++i){
         const auto pid=members.ids[i];if(!pid||pid>MAXDWORD)continue;
+        // A live root already has its creation handle and a separate wait in
+        // stop(). Reopening its PID can fail even when that proof is intact.
+        if(pid==s.pid&&s.process.value&&WaitForSingleObject(s.process.value,0)==WAIT_TIMEOUT)continue;
         Handle process(OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,static_cast<DWORD>(pid)));
         if(!process.value){const auto error=GetLastError();if(error!=ERROR_INVALID_PARAMETER){s.cleanupError=error;return false;}continue;}
         BOOL member=FALSE;

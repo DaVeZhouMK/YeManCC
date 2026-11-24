@@ -291,7 +291,7 @@ internal sealed class InProcessRuntime
     }
     // Called only under operationGate. Public revocation is checked directly by
     // Ready even while this consumer waits behind slow WMI; no OS Resume grants permission.
-    void ReconcileSystemPower()
+    void ReconcileSystemPower(bool fromPublication=false)
     {
         if(!useSharedSystemPower||stopped)return;
         var current=systemPowerReader.Read();
@@ -321,6 +321,7 @@ internal sealed class InProcessRuntime
         // Cleanup may have blocked. Never resume from its earlier snapshot.
         if(!Ready()){suspended=true;return;}
         if(resume)domains?.Resume();
+        else if(fromPublication)domains?.ContinueResumeAfterPowerAdmission();
         pauseCompleted=false;
     }
     internal bool SystemPowerWorkPending=>Volatile.Read(ref systemWorkQueued)!=0;
@@ -332,19 +333,35 @@ internal sealed class InProcessRuntime
     }
     void ScheduleSystemPower()
     {
+        int attemptedVersion;
         lock(systemWorkGate)
         {
             if(stopped||Volatile.Read(ref monitoring)==0||systemWorkQueued!=0)return;
+            attemptedVersion=Volatile.Read(ref systemWorkVersion);
             systemWorkQueued=1;systemWorkOutstanding++;
         }
-        try{queueSystemPower(DrainSystemPower);}
-        catch{lock(systemWorkGate){systemWorkQueued=0;systemWorkOutstanding--;Monitor.PulseAll(systemWorkGate);}} // Next public event/request/60s tick can reconcile; never block native delivery.
+        while(true)
+        {
+            try{queueSystemPower(DrainSystemPower);return;}
+            catch
+            {
+                lock(systemWorkGate)
+                {
+                    // A newer notification may have joined the failed submission.
+                    // Keep its reservation until it gets a submission of its own.
+                    int latest=Volatile.Read(ref systemWorkVersion);
+                    if(!stopped&&latest!=attemptedVersion){attemptedVersion=latest;continue;}
+                    systemWorkQueued=0;systemWorkOutstanding--;Monitor.PulseAll(systemWorkGate);
+                    return; // A later event, request or existing tick can reconcile.
+                }
+            }
+        }
     }
     void DrainSystemPower()
     {
         lock(systemWorkGate)systemWorkRunning++;
         int observed=Volatile.Read(ref systemWorkVersion);
-        try{lock(operationGate){if(!stopped)ReconcileSystemPower();}}
+        try{lock(operationGate){if(!stopped)ReconcileSystemPower(fromPublication:true);}}
         catch(Exception error){TraceLog.Error("in-process-system-power-error",error);}
         finally
         {

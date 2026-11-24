@@ -36,22 +36,39 @@ $hostCallbackBody = if ($hostCallbackStart -ge 0 -and $hostQueueStart -gt $hostC
   $hostSource.Substring($hostCallbackStart, $hostQueueStart - $hostCallbackStart)
 } else { '' }
 
+function Get-NativeFunction([string]$Signature) {
+  $matches = [regex]::Matches($native, $Signature, [Text.RegularExpressions.RegexOptions]::Multiline)
+  if ($matches.Count -ne 1) { return '' }
+  $start = $matches[0].Index
+  $end = $native.IndexOf("`n}", $start, [StringComparison]::Ordinal)
+  if ($end -lt 0) { return '' }
+  return $native.Substring($start, $end + 2 - $start)
+}
+$suspendScheduler = Get-NativeFunction '^static void fanHostScheduleEmergencySuspend\(const char\* reason,\s*unsigned long long sharedGeneration,\s*unsigned long long confirmedAt\)\s*\{'
+$closeQueue = Get-NativeFunction '^static void fanHostQueueSuspend\(const char\* reason,\s*unsigned long long generation,\s*bool resumeUnstarted\)\s*\{'
+$closeWorkerStart = $closeQueue.IndexOf('std::thread([reasonText=std::string(reason?reason:"unknown"),generation]')
+$closeWorker = if ($closeWorkerStart -ge 0) { $closeQueue.Substring($closeWorkerStart) } else { '' }
+
 $checks = [ordered]@{
   nativeBoundedHostOperation = $native.Contains('static bool fanHostEmergencyPost')
-  nativeAsyncScheduler = $native.Contains('static void fanHostScheduleEmergencySuspend') -and
-    $native.Contains('g_fanPhysicalWake.beginClose(generation)') -and
-    $native.Contains('next=g_fanPhysicalWake.completeClose(current)') -and
-    $native.Contains('std::thread([reasonText=std::string(reason?reason:"unknown"),generation]') -and
-    $native.Contains('}).detach();')
+  nativeAsyncScheduler = $suspendScheduler.Contains('g_fanPhysicalWake.confirmedSuspend(sharedGeneration,confirmedAt)') -and
+    $suspendScheduler.Contains('if(generation)fanHostQueueSuspend(reason,generation);') -and
+    $closeQueue.Contains('g_fanPhysicalWake.admitClose(generation,resumeUnstarted)') -and
+    $closeQueue.Contains('if(admission!=ymcc::fan_wake::Observation::CloseAdmission::StartWorker)return;') -and
+    $closeWorker.Contains('fanHostEmergencySuspend(reasonText.c_str(),current)') -and
+    $closeWorker.Contains('next=g_fanPhysicalWake.completeClose(current)') -and
+    $closeWorker.Contains('}).detach();') -and
+    -not $suspendScheduler.Contains('fanHostEmergencySuspend(') -and
+    $closeWorkerStart -ge 0 -and -not $closeQueue.Substring(0, $closeWorkerStart).Contains('fanHostEmergencySuspend(')
   nativeQueryBoundaryNeverCallsHost = -not ($queryBody.Contains('fanHostEmergencyPost') -or
     $queryBody.Contains('fanHostEmergencySuspend') -or
     $queryBody.Contains('fanHostScheduleEmergencySuspend'))
   nativeSuspendCallbackHasNoBlockingWait = -not ($suspendBody.Contains('fanHostEmergencyPost') -or
     $suspendBody.Contains('WinHttp') -or $suspendBody.Contains('Sleep(') -or
     $suspendBody.Contains('WaitFor'))
-  nativeSuspendBoundaryQueuesOnly = $native.Contains('fanHostScheduleEmergencySuspend("suspend-broadcast", generation)')
-  nativeConfirmedQueryBoundaryQueuesOnly = $native.Contains('fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration())')
-  nativeKernelPowerBoundaryQueuesOnly = $native.Contains('fanHostScheduleEmergencySuspend("kernel-power-506", generation)')
+  nativeSuspendBoundaryQueuesOnly = $suspendBody.Contains('fanHostScheduleEmergencySuspend("suspend-broadcast", generation,powerReceipt.fileTime100ns)')
+  nativeConfirmedQueryBoundaryQueuesOnly = $suspendBody.Contains('fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration(),powerReceipt.fileTime100ns)')
+  nativeKernelPowerBoundaryQueuesOnly = (Get-NativeFunction '^static void sgBeginModernStandbyIntent\(ULONGLONG eventFileTime\)\s*\{').Contains('fanHostScheduleEmergencySuspend("kernel-power-506", generation, eventFileTime)')
   safeCloseFallback = $native.Contains('fanHostEmergencyPost(L"/api/close", reason, 1)') -and
     $native.Contains('if (resultUnknown || (suspendStatus != 404 && suspendStatus != 405))') -and
     $native.Contains('no concurrent close fallback')

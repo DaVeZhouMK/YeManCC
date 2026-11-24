@@ -17,22 +17,25 @@ function createSharedAppFixture(ports: any = {}): any {
   let source: any, serial = 0, reads = 0;
   const handlers = new Map<string, Set<(value: any) => void>>(), timers = new Map<number, { fn: () => void; ms: number }>();
   const pending: any[] = [], observed: any[] = [];
-  const app = createActualAppResume({ ...ports, confirmReady: (listener:any) => source.requestSharedPowerLifecycleReadyConfirmation(listener), sharedSnapshot: () => { const state = source?.getSharedPowerLifecycle() ?? null; ports.sharedRead?.(state); return state; } });
+  const listen = (name: string, listener: (value: any) => void) => { let row = handlers.get(name); if (!row) handlers.set(name, row = new Set()); row.add(listener); return () => row!.delete(listener); };
+  const app = createActualAppResume({ ...ports, listen, confirmReady: (listener:any) => source.requestSharedPowerLifecycleReadyConfirmation(listener), sharedSnapshot: () => { const state = source?.getSharedPowerLifecycle() ?? null; ports.sharedRead?.(state); return state; } });
   source = createSharedPowerLifecycleSource({
     read: () => { reads++; return new Promise((resolve, reject) => pending.push({ resolve, reject })); },
-    listen: (name, listener) => { let row = handlers.get(name); if (!row) handlers.set(name, row = new Set()); row.add(listener); return () => row!.delete(listener); },
+    listen,
     clock: { setTimeout(fn, ms) { const id = ++serial; timers.set(id, { fn, ms }); return id; }, clearTimeout(id: any) { timers.delete(id); } },
   });
-  const off = source.onSharedPowerLifecycle((state: any) => { observed.push(structuredClone(state)); app.observe(state); });
+  const off = source.onSharedPowerLifecycle((state: any) => { observed.push(structuredClone(state)); app.observe(state); }, app.sharedOptions);
   const fact = (phase = 'ready', revision = 1, sequence = 1, extra: any = {}) => ({ generation: 2, phase, known: true,
-    publicationRevision: revision, observedNotificationSequence: sequence, notificationPending: false,
+    publicationRevision: revision, observedNotificationSequence: sequence, suspendSerial: 0, notificationPending: false,
     hardwareWritesAllowed: phase === 'ready', inputReady: phase === 'ready', ...extra });
-  const emit = (value: any) => { for (const listener of [...(handlers.get('power.lifecycleChanged') ?? [])]) listener(value); };
-  return { app, source, observed, pending, timers, handlers, fact, emit, get reads() { return reads; },
+  const wire = (name: string, value: any) => { for (const listener of [...(handlers.get(name) ?? [])]) listener(value); };
+  const emit = (value: any) => wire('power.lifecycleChanged', value);
+  return { app, source, observed, pending, timers, handlers, fact, emit, wire, get reads() { return reads; },
     async boot(publishReady = true) { await flushApp(); assert.equal(pending.length, 1); pending.shift().resolve(fact('resuming', 0, 1)); await flushApp(); app.ready(2); await flushApp();
       // A separate simulated Native current fact follows its successful commit.
       if (publishReady) { emit(fact('ready', 1, 1)); await flushApp(); } },
-    async stop(expectedPublicPeers = 0) { const beforeHandlers = [...handlers.values()].reduce((n, row) => n + row.size, 0); app.stop(); off(); assert.equal(timers.size, 0, 'shared source returns every timer');
+    async stop(expectedPublicPeers = 0) { const beforeHandlers = [...handlers].filter(([name]) => name !== 'fan.resume-ready').reduce((n, [, row]) => n + row.size, 0); app.stop(); off(); assert.equal(timers.size, 0, 'shared source returns every timer');
+      assert.equal(handlers.get('fan.resume-ready')?.size, 0, 'App returns the private Fan listener');
       if (!expectedPublicPeers) assert.equal([...handlers.values()].reduce((n, row) => n + row.size, 0), 0, 'shared source returns every listener');
       else { assert.equal(source.getSharedPowerLifecycleDiagnostics().subscriberCount, expectedPublicPeers); assert.equal([...handlers.values()].reduce((n, row) => n + row.size, 0), beforeHandlers, 'peer retains exactly the original public listeners'); }
       while (pending.length) pending.shift().resolve(fact('ready', 999, 999)); await flushApp(); },
@@ -91,7 +94,7 @@ await test('App fires FanHost F5 fire-and-forget on resume-ready, never gating t
   const nativeCommit = appSource.indexOf('completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta)', transactionStart);
   assert(resumeReadyStart >= 0 && resumeReadyBody.includes('onFanResumeReady(resumeGeneration)') &&
     resumeReadyBody.includes('scheduleResumeTransaction(resumeGeneration);') &&
-    fanReadyStart > resumeReadyStart && fanReadyBody.includes('void fanHostLifecycle.resume().catch(') &&
+    fanReadyStart > resumeReadyStart && fanReadyBody.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).then(') &&
     transactionStart >= 0 && nativeCommit > transactionStart &&
     !appSource.slice(transactionStart, transactionStart + 1200).includes('resumeFanBeforeCommit'),
   'App must start the FanHost F5 fire-and-forget from resume-ready and never gate the native Ready commit on it');
@@ -100,14 +103,22 @@ await test('App fires FanHost F5 fire-and-forget on resume-ready, never gating t
 await test('native commit does not wait for InputHost recovery', async () => {
   const nativeSource = readFileSync('native/main.cpp', 'utf8');
   const resumeComplete = nativeSource.indexOf('ipc_on("power.resumeComplete"');
-  const readyCommit = nativeSource.indexOf('g_powerLifecycle.store(PowerLifecycle::Ready', resumeComplete);
-  const inputRecover = nativeSource.indexOf('WM_POWER_INPUT_RECOVER');
+  const resumeCompleteEnd = nativeSource.indexOf('\n    });', resumeComplete);
+  const helper = nativeSource.indexOf('static bool commitPowerResume(unsigned long long generation, const char* source) {');
+  const helperEnd = nativeSource.indexOf('\n}', helper);
+  const inputDispatch = nativeSource.indexOf('case WM_POWER_RESUME_COMMIT:');
   const inputRecoverCase = nativeSource.indexOf('case WM_POWER_INPUT_RECOVER:');
-  assert(resumeComplete >= 0 && readyCommit > resumeComplete && inputRecover >= 0 && inputRecoverCase > readyCommit,
-    'native source must commit the power gate before post-commit InputHost recovery');
-  const preCommitBody = nativeSource.slice(resumeComplete, readyCommit);
-  assert(!preCommitBody.includes('gamepadRecoverAfterResume()'),
-    'power.resumeComplete must not synchronously wait for gamepad/InputHost recovery');
+  assert(resumeComplete >= 0 && resumeCompleteEnd > resumeComplete && helper > resumeCompleteEnd && helperEnd > helper &&
+    inputDispatch > helperEnd && inputRecoverCase > inputDispatch, 'actual IPC, commit helper and post-commit handlers must be present in order');
+  const receiver = nativeSource.slice(resumeComplete, resumeCompleteEnd);
+  const commit = nativeSource.slice(helper, helperEnd);
+  const ready = commit.indexOf('g_powerLifecycle.compare_exchange_strong(expected,PowerLifecycle::Ready');
+  const post = commit.indexOf('sleepPowerPostResumeCommit(g_hwnd,generation)');
+  assert(receiver.includes('commitPowerResume(current, "renderer.resumeComplete")') && ready >= 0 && post > ready &&
+    nativeSource.slice(inputDispatch, inputRecoverCase).includes('PostMessageW(h, WM_POWER_INPUT_RECOVER'),
+    'native source must commit the power gate before posting InputHost recovery');
+  assert(!/\b(?:gamepadRecoverAfterResume|inputHostRequestPowerRearm)\s*\(/.test(receiver + commit),
+    'power.resumeComplete and the shared commit helper must not synchronously run gamepad/InputHost recovery');
 });
 
 await test('native self-commits the wake gate on resume-ready (HC SystemReady parity, G8)', async () => {
@@ -148,14 +159,21 @@ await test('Fan manual wake is a Fan-only same-generation rescue and never opens
     'manual Fan wake must bind its requested Fan generation separately from the shared power generation');
   const sharedReadyMarker = body.indexOf('g_resumeReadyGeneration.store(sharedCurrent');
   const sharedCommit = body.indexOf('commitPowerResume(sharedCurrent, "fan.manual-control")');
-  const fanRecovery = body.indexOf('fanHostScheduleFanResume(current)');
+  const observation = body.indexOf('if (a.value("observedWakeOnly", false))');
+  const suspending = body.indexOf('if (phase == PowerLifecycle::Suspending)');
+  const observedRecovery = body.indexOf('fanHostScheduleFanResume(current)', observation);
+  const observationGate = body.indexOf('!fanHostPowerMayWrite()', observation);
+  const manualRecovery = body.indexOf('fanHostScheduleFanResume(current,true)', sharedReadyMarker);
   assert(body.includes('g_powerLifecycle.store(PowerLifecycle::Resuming') &&
     sharedReadyMarker >= 0 && sharedCommit > sharedReadyMarker &&
     !body.includes('g_resumeReadyGeneration.store(current') && !body.includes('commitPowerResume(current,'),
     'manual Fan wake must use the same shared generation for resume-ready and the single native commit');
-  assert(fanRecovery > body.indexOf('generation != current') &&
-    fanRecovery > body.indexOf('phase == PowerLifecycle::Suspending') &&
-    sharedCommit > fanRecovery && !body.includes('fanHostScheduleEmergencyResume(current)'),
+  assert(observation > body.indexOf('generation != current') && observationGate > observation &&
+    observedRecovery > observationGate && suspending > observedRecovery &&
+    !body.slice(observation, suspending).includes('commitPowerResume('),
+    'observed Fan wake may join only Native admission and must not promote the shared generation');
+  assert(suspending < sharedReadyMarker && manualRecovery > sharedReadyMarker &&
+    sharedCommit > manualRecovery && !body.includes('fanHostScheduleEmergencyResume(current)'),
     'manual Fan wake must reject stale/Suspending before Fan-generation recovery, then commit only the shared generation');
   assert(!body.includes('realBackend') && !body.includes('hardwareWrite'),
     'manual Fan wake must not write hardware directly or bypass Host admission');
@@ -171,7 +189,7 @@ await test('committed Ready compensates a missed resume-ready through the same q
     'shared Ready must compensate missed frontend work through the coalesced queue; Fan F5 stays independently owned');
   assert(appSource.includes('void resumeQueue.run(generation, async (ownsQueue) => {') &&
     appSource.includes('resumeWorkAllowed = state.known !== false && state.notificationPending !== true') &&
-    appSource.includes('scheduleResumeTransaction(committedGeneration);'),
+    appSource.includes('else if (!first || confirmedF5) onPowerResumed(event);'),
     'App must use the actual queue and current native admission for event and remount compensation');
 });
 
@@ -192,8 +210,9 @@ await test('a failed background FanHost F5 cannot block the native Ready commit'
   const fanEnd = appSource.indexOf('\nfunction ', fanStart + 1);
   const fanBlock = appSource.slice(fanStart, fanEnd > fanStart ? fanEnd : fanStart + 1800);
   assert(fanStart >= 0 &&
-    fanBlock.includes('void fanHostLifecycle.resume().catch(') &&
-    !fanBlock.includes('await fanHostLifecycle.resume()'),
+    fanBlock.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).then(') &&
+    fanBlock.includes("fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed'") &&
+    !/\bawait\s+fanHostLifecycle\.(?:resume|resumeAfterNativeReady)\(/.test(fanBlock),
   'the fan resume is fire-and-forget with error swallowing; a failure never returns into the commit path');
 });
 
@@ -346,11 +365,15 @@ await test('twenty interrupted cycles return ownership and reject late callbacks
 await test('actual App retains resume-ready before its first known Ready and leaves cold Ready idle', async () => {
   const cold = createActualAppResume(); cold.observe(sharedAppState(1)); await flushApp();
   assert.equal(cold.calls.filter((r: any) => r[0] === 'commit').length, 0); cold.stop();
-  const app = createActualAppResume(); app.ready(2); app.ready(2); await flushApp();
-  assert.equal(app.calls.filter((r: any) => r[0] === 'commit').length, 0, 'unknown authority holds the remembered request');
-  app.observe(sharedAppState(2)); await flushApp();
-  assert.deepEqual(app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]], 'first known Ready must consume the earlier resume-ready request');
-  assert.deepEqual(app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]); app.stop();
+  const f = createSharedAppFixture();
+  try {
+    f.wire('power.resume-ready', { generation: 2 }); f.wire('power.resume-ready', { generation: 2 }); await flushApp();
+    assert.equal(f.app.calls.length, 0, 'unknown authority holds the remembered request');
+    assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(f.fact('ready', 1, 1, { resumeReady: true })); await flushApp();
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]], 'first known Ready must consume the earlier resume-ready request');
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
+  } finally { await f.stop(); }
 });
 
 await test('actual App successor bypasses a pending ownership read and retires its old continuation', async () => {
@@ -550,6 +573,35 @@ await test('actual App shared source retains an admitted in-flight action throug
     assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]]);
     await f.stop(); f.emit(f.fact('ready', 5, 2)); f.app.ready(2); await flushApp(); assert.equal(applications, 1);
   } finally { release(); await f.stop(); }
+  for (const previous of ['retry-on-ready', 'unconfirmed'] as const) {
+    let releaseResult!: (value: string) => void;
+    let applications = 0, schemes = 0, firstAdmission: (() => boolean) | undefined;
+    const heldResult = new Promise<string>(resolve => { releaseResult = resolve; });
+    const fixture = createSharedAppFixture({
+      scheme: async () => { schemes++; return 'auto'; },
+      performance: (_mode: string, { ownsWake }: { ownsWake: () => boolean }) => {
+        assert.equal(ownsWake(), true);
+        if (++applications === 1) { firstAdmission = ownsWake; return heldResult; }
+        return 'settled';
+      },
+    });
+    try {
+      await fixture.boot();
+      assert.equal(applications, 1);
+      fixture.emit(fixture.fact('ready', 2, 2, { hardwareWritesAllowed: false }));
+      assert.equal(firstAdmission?.(), false);
+      fixture.emit(fixture.fact('ready', 3, 2));
+      await flushApp();
+      assert.equal(applications, 1, 'successor waits for the original receipt');
+      assert.equal(firstAdmission?.(), false, 'Ready cannot revive the retired attempt');
+      releaseResult(previous);
+      await flushApp();
+      assert.equal(applications, previous === 'retry-on-ready' ? 2 : 1, previous);
+      assert.equal(fixture.app.state().followup.completed, true);
+      assert.equal(schemes, 1);
+      assert.deepEqual(fixture.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]]);
+    } finally { releaseResult(previous); await fixture.stop(); }
+  }
 });
 
 
@@ -563,12 +615,14 @@ await test('actual App shared source admission correction resumes only retained 
     const before = { fan, plans, network: f.app.calls.filter((r: any) => r[0] === 'network').length };
     f.emit(f.fact('ready', 4, 2)); await flushApp();
     assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
-    assert.deepEqual({ fan, plans, network: f.app.calls.filter((r: any) => r[0] === 'network').length }, before, 'admission-only correction cannot replay the full wake broadcast');
+    assert.deepEqual({ fan, plans }, { fan: before.fan, plans: before.plans }, 'admission-only correction cannot replay the full wake broadcast');
+    assert.equal(f.app.calls.filter((r: any) => r[0] === 'network').length, before.network + 1,
+      'the independent network owner receives the restored admission');
     assert.equal(f.app.state().followup.completed, true);
     const all = structuredClone(f.app.calls);
     f.emit(f.fact('ready', 5, 2, { hardwareWritesAllowed: false })); f.emit(f.fact('ready', 6, 2)); f.app.ready(2); await flushApp();
-    assert.deepEqual(f.app.calls, all, 'settled admission toggles cannot replay wake or post-commit actions');
-    assert.deepEqual({ fan, plans, network: f.app.calls.filter((r: any) => r[0] === 'network').length }, before);
+    assert.deepEqual(f.app.calls, [...all, ['network', 2]], 'settled toggles notify only the independent network owner');
+    assert.deepEqual({ fan, plans }, { fan: before.fan, plans: before.plans });
   } finally { release('auto'); await f.stop(); }
 });
 
@@ -650,6 +704,108 @@ await test('actual App shared source first flight Ready at worker completion sti
   } finally { await f.stop(); }
 });
 
+
+await test('actual App shared source merged suspend retires an unfinished pre-commit read', async () => {
+  for (const phase of ['resuming', 'ready']) {
+    let release!: (owner: string) => void, reads = 0;
+    const held = new Promise<string>(resolve => { release = resolve; });
+    const f = createSharedAppFixture({ ownership: () => ++reads === 1 ? held : Promise.resolve('none') });
+    try {
+      await f.boot(false);
+      f.emit(f.fact('resuming', 0, 1, { resumeReady: true })); await flushApp();
+      assert.equal(reads, 1);
+      assert.equal(f.app.calls.filter((r: any) => r[0] === 'commit').length, 0);
+      f.emit(f.fact(phase, 0, 1, { resumeReady: true, suspendSerial: 1 })); await flushApp();
+      assert.equal(reads, 2, `current ${phase} must not wait for the previous suspend scope`);
+      assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]]);
+      release('auto'); await flushApp();
+      f.emit(f.fact('ready', 1, 1, { resumeReady: true, suspendSerial: 1 })); await flushApp();
+      assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]], 'late ownership read must not submit an old commit');
+      assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
+    } finally { release('auto'); await f.stop(); }
+  }
+});
+
+await test('actual App shared source raw F5 cannot advance the wake beyond confirmed Native state', async () => {
+  const f = createSharedAppFixture();
+  try {
+    await flushApp(); assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(f.fact('resuming', 1, 1, { resumeReady: false })); await flushApp();
+    f.wire('power.resume-ready', { generation: 200 }); await flushApp();
+    assert.equal(f.app.state().latest, 2, 'raw future F5 must not replace the current public generation');
+    assert.equal(f.app.calls.length, 0, 'unconfirmed hints cannot run recovery work');
+    f.emit(f.fact('resuming', 2, 1)); await flushApp();
+    assert.equal(f.app.calls.length, 0, 'a legacy snapshot without the F5 receipt must stay idle');
+    f.wire('power.resume-ready', { generation: 2 }); f.wire('power.resume-ready', { generation: 2 });
+    const [id, retry] = [...f.timers][0] as [number, {fn:()=>void}];
+    assert.equal(f.timers.size, 1, 'F5 hints preserve the one shared retry');
+    f.timers.delete(id); retry.fn(); await flushApp(); assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(f.fact('resuming', 3, 1, { resumeReady: true })); await flushApp();
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]], 'only the public F5 read can start the current transaction');
+    f.emit(f.fact('ready', 4, 1, { resumeReady: true })); await flushApp();
+    const calls = structuredClone(f.app.calls), reads = f.reads;
+    f.wire('power.resume-ready', { generation: 2 }); f.wire('power.resume-ready', { generation: 1 }); await flushApp();
+    assert.deepEqual(f.app.calls, calls); assert.equal(f.reads, reads, 'confirmed or old hints must not force another read');
+    assert.deepEqual(calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
+  } finally { await f.stop(); }
+});
+
+await test('actual App shared source private Fan Ready cannot supersede a delayed public Ready', async () => {
+  const fanReady: number[] = [];
+  const f = createSharedAppFixture({ fanReady: (g: number) => fanReady.push(g) });
+  try {
+    await flushApp(); assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(f.fact('resuming', 1, 1, { resumeReady: false })); await flushApp();
+    const publicGeneration = f.app.state().latest;
+    assert.equal(publicGeneration, 2);
+    f.wire('fan.resume-ready', { generation: 200, scope: 'fan-only', source: 'kernel-s4-wake' }); await flushApp();
+    assert.deepEqual(fanReady, [200], 'the Fan Host must still receive its own Ready');
+    assert.equal(f.app.state().latest, publicGeneration, 'a Fan-only generation cannot advance the public owner');
+    assert.equal(f.app.calls.length, 0, 'Fan Ready must not run public recovery');
+    f.emit(f.fact('resuming', 2, 1, { resumeReady: true })); await flushApp();
+    f.emit(f.fact('ready', 3, 1, { resumeReady: true })); await flushApp();
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', publicGeneration]]);
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', publicGeneration]]);
+  } finally { await f.stop(); }
+});
+
+await test('actual App shared source later notification sequence resumes a retained Fan Ready', async () => {
+  const attempts: number[] = [];
+  const f = createSharedAppFixture({ fanReady: (g: number) => { attempts.push(g); return attempts.length === 2; } });
+  try {
+    await flushApp(); assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(f.fact('ready', 1, 10)); await flushApp();
+    f.wire('fan.resume-ready', { generation: 200, scope: 'fan-only' }); await flushApp();
+    assert.deepEqual(attempts, [200], 'the first Fan observation refused admission');
+    f.emit(f.fact('ready', 2, 10)); await flushApp();
+    assert.deepEqual(attempts, [200], 'a publication revision alone need not wake the waiting Fan');
+    f.emit(f.fact('ready', 2, 11)); await flushApp();
+    assert.deepEqual(attempts, [200, 200], 'the current notification sequence must let Fan read again once');
+    f.emit(f.fact('ready', 2, 12)); await flushApp();
+    assert.deepEqual(attempts, [200, 200], 'the installed Fan recovery owner consumes the retry');
+    assert.deepEqual(f.app.calls, [], 'metadata delivery does not replay public work');
+  } finally { await f.stop(); }
+});
+
+await test('actual App shared source republished Fan Ready resumes its retained request once', async () => {
+  const attempts: number[] = [];
+  const f = createSharedAppFixture({ fanReady: (g: number) => { attempts.push(g); return false; } });
+  const ready = (revision: number) => f.fact('ready', revision, 10, { fanWakeGeneration: 200 });
+  try {
+    await flushApp(); assert.equal(f.pending.length, 1);
+    f.pending.shift().resolve(ready(10)); await flushApp();
+    f.wire('fan.resume-ready', { generation: 200, scope: 'fan-only' }); await flushApp();
+    assert.deepEqual(attempts, [200]);
+    f.emit(ready(10)); f.emit(ready(9)); await flushApp();
+    assert.deepEqual(attempts, [200], 'duplicate or stale publication may not consume the retry');
+    f.emit(ready(11)); await flushApp();
+    assert.deepEqual(attempts, [200, 200], 'the matching Fan Ready republication must reach its retained request');
+    f.emit(ready(12)); await flushApp();
+    assert.deepEqual(attempts, [200, 200], 'even a failed retry cannot refund the budget');
+    assert.deepEqual(f.app.calls, [], 'Fan republication does not replay the public transaction');
+    assert.equal(f.reads, 1, 'Fan republication does not request another public read');
+  } finally { await f.stop(); }
+});
 
 await test('actual App shared source first flight public queue returns slot before a later notification', async () => {
   const queue = createPowerResumeQueue(); let calls = 0, late: Promise<void> | null = null, oldCurrent: (() => boolean) | null = null;
@@ -777,6 +933,19 @@ await test('actual App sleep plan confirmation metadata-only ingress change heal
  let release!:()=>void;const hold=new Promise<void>(r=>release=r);const f=createSleepPlanFixture({plan:(n:number)=>n===1?hold:undefined});
  try{await f.cold();f.schedule();await flushApp();const calls=structuredClone(f.app.calls);f.emit(f.fact('ready',2,2));release();await f.settle();assert.equal(f.writes.length,0);assert.equal(f.pending.length,1,'retired metadata-only reader must request public continuation confirmation');assert.equal(confirmationCount(f),1);await resolvePowerRead(f,f.fact('ready',2,2));assert.equal(f.values.size,12);assert.equal(f.writes.length,12);assert.deepEqual(f.app.calls,calls);}
  finally{release();await f.stop();}
+});
+await test('actual App sleep plan confirmation a new suspend serial bypasses a held plan read',async()=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>release=r);
+ const f=createSleepPlanFixture({plan:(n:number)=>n===1?hold:undefined,write:(_n:number,p:any)=>{
+   assert.equal(p.admission.expectedPowerSuspendSerial,1,'only the current suspend serial may write');
+ }});
+ try {
+   await f.cold();f.schedule();await flushApp();assert.equal(f.planReads,1);
+   f.emit(f.fact('ready',2,1,{suspendSerial:1}));await f.settle();
+   assert.equal(f.values.size,12,'current Ready must finish before the held older read returns');
+   f.emit(f.fact('ready',1,1));release();await f.settle();
+   assert.equal(f.writes.length,12);assert.equal(f.app.sleepState().pending,false);
+ } finally {release();await f.stop();}
 });
 await test('actual App sleep plan confirmation unchanged Ready closes ordinary failure without automatic write retry',async()=>{
  const f=createSleepPlanFixture({write:(n:number)=>{if(n===1)throw Error('ordinary inert IPC failure');}});

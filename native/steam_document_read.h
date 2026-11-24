@@ -3,6 +3,7 @@
 // serialization and bounded sockets belong to the existing Steam layer.
 #include "steam_live_cdp.h"
 #include "decky_sidebar_async_http.h"
+#include <array>
 #include <memory>
 
 namespace ymcc::steamdocuments {
@@ -145,12 +146,42 @@ inline auto selectDocumentTargetEndpoint(const std::vector<steamlive::Endpoint>&
             return found;
         },std::forward<Rejected>(rejected));
 }
+namespace detail {
+inline std::string validatedExpression(const Properties& plan){
+    // Only JSON arrays of validated custom-property names enter the fixed reader.
+    // validateReceipt rejects loading documents; do not flush or scan their styles.
+    return "(()=>{const e=document.documentElement;if(!e)throw new Error('root missing');if(globalThis.origin!=='https://steamloopback.host')throw new Error('source unknown');if(document.readyState==='loading')return {protocol:4,ready:false};const s=getComputedStyle(e),nodes=document.querySelectorAll('style.css-loader-style');if(nodes.length>16384)throw new Error('style count');const keys="+
+        Json(plan.fileCounts).dump()+",counts=new Map(keys.map(k=>[k,0]));let size=0,tokens=0;for(const n of nodes){const t=n.textContent||'';size+=t.length;if(t.length>262144||size>4194304)throw new Error('style size');const re=/(--[A-Za-z0-9_-]+)\\s*:/g;let match;while((match=re.exec(t))!==null){if(++tokens>131072)throw new Error('style tokens');const k=match[1],prior=counts.get(k);if(prior!==undefined)counts.set(k,prior+1);}}return {documentKey:String(performance.timeOrigin),sourceOrigin:globalThis.origin,sourceHref:location.href,protocol:4,ready:document.readyState!=='loading',styles:nodes.length,values:"+
+        Json(plan.values).dump()+".map(k=>s.getPropertyValue(k).trim()),fileCounts:keys.map(k=>counts.get(k))};})()";
+}
+// The caller has validated all three plans. Cache code only, never a receipt.
+class RequestExpressions {
+    const StylePlan& plan_;
+    std::array<std::string,3> texts_;
+    std::array<std::size_t,3> source_{3,3,3};
+public:
+    explicit RequestExpressions(const StylePlan& plan):plan_(plan){}
+    const std::string& get(Kind kind){
+        const auto index=static_cast<std::size_t>(kind);
+        if(source_[index]!=3)return texts_[source_[index]];
+        const auto& input=fields(plan_,kind);
+        for(std::size_t i=0;i<texts_.size();++i){
+            if(texts_[i].empty())continue;
+            const auto& prior=fields(plan_,static_cast<Kind>(i));
+            if(input.values==prior.values&&input.fileCounts==prior.fileCounts){
+                source_[index]=i;
+                return texts_[i];
+            }
+        }
+        texts_[index]=validatedExpression(input);
+        source_[index]=index;
+        return texts_[index];
+    }
+};
+}
 inline std::string expression(const Properties& plan){
     validate(plan);
-    // Only JSON arrays of validated custom-property names enter the fixed reader.
-    return "(()=>{const e=document.documentElement;if(!e)throw new Error('root missing');if(globalThis.origin!=='https://steamloopback.host')throw new Error('source unknown');const s=getComputedStyle(e),nodes=document.querySelectorAll('style.css-loader-style');if(nodes.length>16384)throw new Error('style count');const keys="+
-        Json(plan.fileCounts).dump()+",counts=new Map(keys.map(k=>[k,0]));let size=0,tokens=0;for(const n of nodes){const t=n.textContent||'';size+=t.length;if(t.length>262144||size>4194304)throw new Error('style size');const re=/--[A-Za-z0-9_-]+\\s*:/g;for(const match of t.matchAll(re)){if(++tokens>131072)throw new Error('style tokens');const k=match[0].replace(/\\s*:$/,'');if(counts.has(k))counts.set(k,counts.get(k)+1);}}return {documentKey:String(performance.timeOrigin),sourceOrigin:globalThis.origin,sourceHref:location.href,protocol:4,ready:document.readyState!=='loading',styles:nodes.length,values:"+
-        Json(plan.values).dump()+".map(k=>s.getPropertyValue(k).trim()),fileCounts:keys.map(k=>counts.get(k))};})()";
+    return detail::validatedExpression(plan);
 }
 inline bool receiptSourceMatches(const Target& target,const std::string& href){
     if(href.empty()||href.size()>4096)return false;
@@ -176,6 +207,18 @@ inline bool replyIdMatches(const Json& packet,unsigned id)noexcept{
     const auto found=packet.find("id");
     return found!=packet.end()&&found->is_number_unsigned()&&found->get<Json::number_unsigned_t>()==id;
 }
+inline Json takeEvaluationValue(Json& packet,const std::function<bool()>& current){
+    auto result=packet.find("result");
+    if(packet.contains("error")||result==packet.end()||result->contains("exceptionDetails"))
+        throw std::runtime_error("document-evaluation-unconfirmed");
+    auto remote=result->find("result");
+    if(remote==result->end()||!remote->is_object())throw std::runtime_error("document-reply-invalid");
+    auto value=remote->find("value");
+    if(remote->value("type",std::string{})!="object"||value==remote->end()||!value->is_object())
+        throw std::runtime_error("document-reply-invalid");
+    if(!current())throw std::runtime_error("document-read-cancelled");
+    return std::move(*value);
+}
 inline Json evaluate(HINTERNET socket,const std::string& code,unsigned id,ULONGLONG deadline,const std::function<bool()>& current){
     if(!current()||GetTickCount64()>=deadline)throw std::runtime_error("document-read-cancelled");
     const auto message=Json{{"id",id},{"method","Runtime.evaluate"},{"params",{{"expression",code},{"returnByValue",true}}}}.dump();
@@ -188,12 +231,9 @@ inline Json evaluate(HINTERNET socket,const std::string& code,unsigned id,ULONGL
            (kind!=WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE&&kind!=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE))throw std::runtime_error("document-transport-unavailable");
         ++fragments;reply.append(bytes,count);if(reply.size()>65536)throw std::runtime_error("document-reply-invalid");
         if(kind!=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)continue;
-        const auto packet=Json::parse(reply);reply.clear();if(++messages>16)throw std::runtime_error("document-reply-invalid");
+        auto packet=Json::parse(reply);reply.clear();if(++messages>16)throw std::runtime_error("document-reply-invalid");
         if(!replyIdMatches(packet,id))continue;
-        if(packet.contains("error")||!packet.contains("result")||packet["result"].contains("exceptionDetails"))throw std::runtime_error("document-evaluation-unconfirmed");
-        const auto& remote=packet["result"]["result"];
-        if(remote.value("type",std::string{})!="object"||!remote.contains("value")||!remote["value"].is_object())throw std::runtime_error("document-reply-invalid");
-        if(!current())throw std::runtime_error("document-read-cancelled");return remote["value"];
+        return takeEvaluationValue(packet,current);
     }
     throw std::runtime_error("document-reply-invalid");
 }
@@ -240,6 +280,7 @@ inline Json readStyles(const steamsession::Session& supplied,const StylePlan& pl
             catch(...){if(!owned())throw std::runtime_error("document-read-cancelled");throw;}
         };
         auto connection=connect();
+        detail::RequestExpressions expressions(plan);
         struct Observation {Target target;std::unique_ptr<steamlive::BoundedSocket> socket;Json value;};
         std::vector<Observation> observations;
         for(const auto& target:selected){
@@ -250,9 +291,9 @@ inline Json readStyles(const steamsession::Session& supplied,const StylePlan& pl
             steamlive::requireStatus(upgrade.h,101);const auto socketBudget=remaining();
             steamlive::HttpHandle transferred(WinHttpWebSocketCompleteUpgrade(upgrade.h,0));
             auto socket=std::make_unique<steamlive::BoundedSocket>(transferred.h,socketBudget);transferred.h=nullptr;
-            const auto value=evaluate(socket->h,expression(fields(plan,target.kind)),1,deadline,owned);
+            auto value=evaluate(socket->h,expressions.get(target.kind),1,deadline,owned);
             validateReceipt(value,fields(plan,target.kind),target);
-            observations.push_back({target,std::move(socket),value});
+            observations.push_back({target,std::move(socket),std::move(value)});
         }
         // These are sequential reads, never an atomic screenshot. Recheck each
         // document and the target set so a replaced earlier page stays Unknown.
@@ -340,14 +381,9 @@ inline Json evaluate(ymcc::deckymirror::AsyncRequest& socket,const std::string& 
             throw std::runtime_error("document-transport-unavailable");
         ++fragments;reply.append(part.text);if(reply.size()>65536)throw std::runtime_error("document-reply-invalid");
         if(kind!=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)continue;
-        const auto packet=Json::parse(reply);reply.clear();if(++messages>16)throw std::runtime_error("document-reply-invalid");
+        auto packet=Json::parse(reply);reply.clear();if(++messages>16)throw std::runtime_error("document-reply-invalid");
         if(!replyIdMatches(packet,id))continue;
-        if(packet.contains("error")||!packet.contains("result")||packet["result"].contains("exceptionDetails"))
-            throw std::runtime_error("document-evaluation-unconfirmed");
-        const auto& remote=packet["result"]["result"];
-        if(remote.value("type",std::string{})!="object"||!remote.contains("value")||!remote["value"].is_object())
-            throw std::runtime_error("document-reply-invalid");
-        if(!current())throw std::runtime_error("document-read-cancelled");return remote["value"];
+        return takeEvaluationValue(packet,current);
     }
     throw std::runtime_error("document-reply-invalid");
 }
@@ -416,6 +452,7 @@ inline Json readStyles(const steamsession::Session& supplied,const StylePlan& pl
             catch(...){if(!owned())throw std::runtime_error("document-read-cancelled");throw;}
         };
         auto connection=connect();
+        detail::RequestExpressions expressions(plan);
         struct Observation {Target target;ymcc::deckymirror::AsyncRequest* socket;Json value;};
         std::vector<Observation> observations;
         for(const auto& target:selected){
@@ -424,9 +461,9 @@ inline Json readStyles(const steamsession::Session& supplied,const StylePlan& pl
             upgrade.handshake(true);if(upgrade.status()!=101)throw std::runtime_error("document-transport-unavailable");
             auto& socket=io.upgrade(upgrade,connection,deadline);
             if(!upgrade.retire(deadline).returned())throw std::runtime_error("document-cleanup-incomplete");
-            const auto value=evaluate(socket,expression(fields(plan,target.kind)),1,deadline,owned);
+            auto value=evaluate(socket,expressions.get(target.kind),1,deadline,owned);
             validateReceipt(value,fields(plan,target.kind),target);
-            observations.push_back({target,&socket,value});
+            observations.push_back({target,&socket,std::move(value)});
         }
         // These are sequential reads, never an atomic screenshot. Recheck each
         // document and the target set so a replaced earlier page stays Unknown.

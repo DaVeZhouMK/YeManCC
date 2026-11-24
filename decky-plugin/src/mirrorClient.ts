@@ -31,6 +31,8 @@ export interface MirrorSnapshot {
   steam?:SteamRunningObservation;
   gameSteam?:GameSteamContext;
 }
+type MirrorCommandExpectation = Pick<MirrorSnapshot,'runId'|'generation'|'revision'> & {game:Pick<NonNullable<MirrorSnapshot['game']>,'identity'>|null};
+export type MirrorPerformanceIntentView = MirrorCommandExpectation & Pick<MirrorSnapshot,'performance'> & {actions?:{performance?:boolean}};
 export interface Bootstrap { revoked?: boolean; endpoint: string; token: string; runId: string; hudProtocol?: number; wallpaperProtocol?: number; wallpaperPrefetchProtocol?: number; updaterProtocol?:number; frontendBuildId?: string; }
 function validBootstrap(value: Bootstrap | undefined): value is Bootstrap {
   const port=typeof value?.endpoint==='string'?/^ws:\/\/127\.0\.0\.1:(\d{1,5})\/mirror$/.exec(value.endpoint)?.[1]:undefined;
@@ -39,13 +41,17 @@ function validBootstrap(value: Bootstrap | undefined): value is Bootstrap {
 }
 export interface ConnectionTestResult { pid:number;revision:number;elapsedMs:number; }
 export interface ClientState { connected: boolean; snapshot: MirrorSnapshot | null; notice: string; busy: boolean; connectionTest?:{pending:boolean;notice:string;elapsedMs?:number}; }
+// Optional log metadata only; it does not participate in read or recovery decisions.
+type SnapshotRequestSource = 'socket-open' | 'socket-open-probe' | 'demand-start' | 'demand-stop' |
+  'connection-probe' | 'hud-peer-ready' | 'hidden-snapshot' | 'operation-timeout';
 // Fixed local teardown provenance only. No message, URL, credential or identity.
 export type DisconnectSource = 'unknown' | 'bootstrap-revoked' | 'bootstrap-changed' | 'demand-ended' | 'plugin-disposed' | 'plugin-pagehide' | 'plugin-initialization-failed' |
-  'socket-closed' | 'socket-error' | 'connect-deadline' | 'snapshot-deadline' | 'wallpaper-deadline' | 'message-invalid' | 'send-failed' | 'run-changed';
+  'socket-closing' | 'socket-closed' | 'socket-error' | 'connect-deadline' | 'snapshot-deadline' | 'wallpaper-deadline' | 'message-invalid' | 'send-failed' | 'run-changed';
 export interface DisconnectFacts { source:DisconnectSource; readyStateKnown:boolean;readyState:number;connected:boolean;operationPending:boolean;probePending:boolean;snapshotPending:boolean; }
 type TdpOutcome = 'write-ack'|'saved-unconfirmed'|'owner-unconfirmed'|'unknown-receipt'|'reply-timeout'|'transport-ended';
-interface TdpActionFacts { generation:number;elapsedMs:number|null;outcome:TdpOutcome; }
-interface PendingTdp { generation:number;started:number|null; }
+type NativeSnapshotFacts = {generation:number;ready:boolean;connectedAgeMs:number|null};
+interface TdpActionFacts { generation:number;elapsedMs:number|null;outcome:TdpOutcome;connectedAgeAtSendMs:number|null; }
+interface PendingTdp { generation:number;started:number|null;connectedAgeAtSendMs:number|null; }
 export interface ClientDeps {
   bootstrap: () => Bootstrap | undefined;
   socket: (url: string) => WebSocket;
@@ -55,6 +61,7 @@ export interface ClientDeps {
   now?: () => number;
   connectionCheckCompleted?: () => void;
   transportDisconnected?: (facts:DisconnectFacts) => void;
+  nativeSnapshotObserved?: (facts:NativeSnapshotFacts) => void;
   tdpActionSettled?: (facts:TdpActionFacts) => void;
   buildId?: string;
   steam?:() => SteamRunningObservation;
@@ -81,20 +88,24 @@ function validSnapshot(value: any, runId: string): value is MirrorSnapshot {
   if(value.performance!==undefined&&!validPerformanceMirror(value.performance))return false;
   if(value.monitor!==undefined&&(!value.monitor||typeof value.monitor.enabled!=='boolean'))return false;
   if(value.audioOptimization!==undefined&&(!value.audioOptimization||['known','installed','running','enabled','selected'].some(key=>typeof value.audioOptimization[key]!=='boolean')||['preset','output','reason'].some(key=>typeof value.audioOptimization[key]!=='string')))return false;
-  if(value.losslessProgram!==undefined&&(!value.losslessProgram||typeof value.losslessProgram.known!=='boolean'||typeof value.losslessProgram.running!=='boolean'||!value.losslessProgram.known&&value.losslessProgram.running||Object.keys(value.losslessProgram).some(key=>!['known','running'].includes(key))))return false;
+  if(value.losslessProgram!==undefined&&!validLosslessProgram(value.losslessProgram))return false;
   if (value.actions !== undefined && (!value.actions || typeof value.actions.fan !== 'boolean' || typeof value.actions.game !== 'boolean' || value.actions.audioOptimization!==undefined&&typeof value.actions.audioOptimization!=='boolean' || value.actions.frames!==undefined&&typeof value.actions.frames!=='boolean' || value.actions.touchpads!==undefined&&typeof value.actions.touchpads!=='boolean' || value.actions.global!==undefined&&typeof value.actions.global!=='boolean' || value.actions.monitor!==undefined&&typeof value.actions.monitor!=='boolean' || value.actions.performance!==undefined&&typeof value.actions.performance!=='boolean')) return false;
   if (value.fan.canToggle !== undefined && typeof value.fan.canToggle !== 'boolean') return false;
   if(value.fan.pending!==undefined&&typeof value.fan.pending!=='boolean'||value.fan.notice!==undefined&&typeof value.fan.notice!=='string')return false;
   return value.notice === undefined || typeof value.notice === 'string';
 }
+function validLosslessProgram(value: any): value is LosslessProgramState {
+  return !!value&&typeof value.known==='boolean'&&typeof value.running==='boolean'&&
+    (value.known||!value.running)&&Object.keys(value).every(key=>key==='known'||key==='running');
+}
 // Optional gameSteam is display metadata. A stale/new DTO must not reject
 // the authenticated core snapshot or cancel an accepted user intent.
-function validSnapshotGameSteam(value: MirrorSnapshot): boolean {
-  if(value.gameSteam !== undefined && !validGameSteamContext(value.gameSteam)) return false;
-  if(value.gameSteam?.game){
+function validSnapshotGameSteam(value: MirrorSnapshot,gameSteam:MirrorSnapshot['gameSteam']): boolean {
+  if(gameSteam !== undefined && !validGameSteamContext(gameSteam)) return false;
+  if(gameSteam?.game){
     let identity: unknown;
     try { identity=JSON.parse(value.game?.identity??''); } catch { return false; }
-    const game=value.gameSteam.game;
+    const game=gameSteam.game;
     if(!Array.isArray(identity)||identity.length!==5||identity[1]!==game.path||identity[2]!==game.pid||
        identity[3]!==game.processCreated||identity[4]!==game.identityGeneration||
        game.powerGeneration!==undefined&&game.powerGeneration!==String(value.generation))return false;
@@ -132,6 +143,7 @@ export class MirrorClient {
   // At most16 fixed signatures per client; no healthy work, timer or IO.
   private readonly disconnectFacts=new Set<string>();
   private connectedAt: number | null = null;
+  private nativeSnapshotDiagnosticLevel=0;
   private failedOpeningRun: string | null = null;
   private openingProbe: {runId:string|undefined;acknowledged:boolean;preparing:boolean;started:number|null} | null = null;
   private sequence = 0;
@@ -144,24 +156,52 @@ export class MirrorClient {
   private connectDeadline: {timer:ReturnType<typeof setTimeout>} | null = null;
   private snapshotDeadline: {timer:ReturnType<typeof setTimeout>} | null = null;
   private wallpaperDeadline: null | {socket:WebSocket;runId:string;seq:number;appId?:string;timer:ReturnType<typeof setTimeout>} = null;
-  private pending: null | { id: string; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void; tdp?:PendingTdp } = null;
+  private pending: null | { id: string; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void; performanceGeneration?:number; tdp?:PendingTdp } = null;
   private probe: null | {id:string;started:number;awaitingNative?:boolean;timer:ReturnType<typeof setTimeout>;resolve:(value:ConnectionTestResult)=>void;reject:(error:Error)=>void} = null;
   private operationError: null | { notice:string;runId:string;generation:number;identity:string } = null;
-  private listeners = new Set<(state: ClientState) => void>();
+  private listeners = new Map<(state: ClientState) => void, {when?: () => boolean; skipDisplayRefresh?: boolean}>();
+  private performanceIntentListeners = new Map<(view: MirrorPerformanceIntentView | null) => void, () => boolean>();
   private connectionListeners = new Set<(state: ClientState) => void>();
   private state: ClientState = { connected: false, snapshot: null, notice: '等待 YMCC 镜像连接', busy: false };
   constructor(private deps: ClientDeps) {}
   // HUD consumers only need link transitions; keep complete snapshots private to control subscribers.
-  subscribe(listener: (state: ClientState) => void, options: { connectionOnly?: boolean } = {}) {
-    const listeners = options.connectionOnly ? this.connectionListeners : this.listeners;
-    listeners.add(listener);
+  subscribe(listener: (state: ClientState) => void, options: { connectionOnly: true } | { connectionOnly?: false; when?: () => boolean; skipDisplayRefresh?: boolean } = {}) {
     // Initial display notification has the same fault isolation as later updates.
     // Always return ownership so a failed renderer can still unsubscribe.
-    try { listener(options.connectionOnly ? this.connectionState() : this.snapshot()); } catch {}
-    return () => { listeners.delete(listener); };
+    if(options.connectionOnly){
+      this.connectionListeners.add(listener);
+      try{listener(this.connectionState());}catch{}
+      return ()=>{this.connectionListeners.delete(listener);};
+    }
+    const when='when' in options ? options.when : undefined;
+    const skipDisplayRefresh='skipDisplayRefresh' in options && options.skipDisplayRefresh;
+    this.listeners.set(listener,{when,skipDisplayRefresh});
+    this.notifySnapshot(listener,when);
+    return ()=>{this.listeners.delete(listener);};
+  }
+  private notifySnapshot(listener: (state: ClientState) => void, when?: () => boolean) {
+    try{if(!when||when())listener(this.snapshot());}catch{}
+  }
+  subscribePerformanceIntent(listener: (view: MirrorPerformanceIntentView | null) => void, when: () => boolean) {
+    this.performanceIntentListeners.set(listener,when);
+    this.notifyPerformanceIntent(listener,when);
+    return ()=>{this.performanceIntentListeners.delete(listener);};
+  }
+  private notifyPerformanceIntent(listener: (view: MirrorPerformanceIntentView | null) => void, when: () => boolean) {
+    try{if(when())listener(this.performanceIntentSnapshot());}catch{}
   }
   private connectionState(): ClientState { return { connected: this.state.connected, snapshot: null, notice: '', busy: false }; }
   snapshot(): ClientState { return structuredClone(this.state); }
+  // Slider previews recheck live state on every step. Copy only the controls
+  // and identity needed by the performance queue, never the whole sidebar.
+  performanceIntentSnapshot(): MirrorPerformanceIntentView | null {
+    const {connected,snapshot}=this.state;
+    if(!connected||!snapshot?.ready)return null;
+    const {runId,generation,revision,game,performance,actions}=snapshot;
+    return {runId,generation,revision,game:game?{identity:game.identity}:null,
+      performance:performance?structuredClone(performance):undefined,actions:{performance:actions?.performance}};
+  }
+  isBusy(): boolean { return this.state.busy; }
   // Read only: native recovery must see the browser client, not just its TCP peer.
   // No snapshot clone, request, timer or mutation; hidden passive transport counts.
   // Keep the established transport fact during an opening probe for older native
@@ -199,10 +239,10 @@ export class MirrorClient {
   // retained page whose visibility provider stopped delivering opens. Reuse the
   // original fresh snapshot probe; it never sends/replays a settings operation.
   async checkConnectionOnOpen(): Promise<boolean> {
-    if(this.disposed||this.probe||this.pending||this.openingProbe)return false;
-    const owner={},runId=this.deps.bootstrap()?.runId,opening={runId,acknowledged:false,preparing:true,started:null as number|null};
+    if(this.disposed||this.probe||this.pending||this.openingProbe||this.keepQueuedTransportRetry())return false;
+    const runId=this.deps.bootstrap()?.runId,opening={runId,acknowledged:false,preparing:true,started:null as number|null};
     this.openingProbe=opening;
-    try { this.setVisible(true,owner);opening.preparing=false;await this.testConnection(); } catch {} finally {
+    try { this.setVisible(true,opening);opening.preparing=false;await this.testConnection(); } catch {} finally {
       // Only a correlated current-native reply certifies the link. A valid
       // ready:false reply proves connection while business controls still wait.
       // Timeout/missing reply stays unavailable even if TCP remains OPEN.
@@ -211,7 +251,7 @@ export class MirrorClient {
         if(!this.disposed&&runId&&this.binding?.runId===runId)this.failedOpeningRun=opening.acknowledged?null:runId;
         this.openingProbe=null;
       }
-      this.setVisible(false,owner);
+      this.setVisible(false,opening);
       if(current)this.notifyConnectionCheckCompleted();
     }
     return true;
@@ -219,11 +259,15 @@ export class MirrorClient {
   private notifyConnectionCheckCompleted():void {
     if(!this.disposed){try{this.deps.connectionCheckCompleted?.();}catch{}}
   }
-  private publish(patch: Partial<ClientState>) {
+  private publish(patch: Partial<ClientState>, displayOnly = false) {
     if (!(Object.keys(patch) as (keyof ClientState)[]).some(key => !Object.is(this.state[key], patch[key]))) return;
     const connected = this.state.connected;
     this.state = { ...this.state, ...patch };
-    for (const listener of this.listeners) { try { listener(this.snapshot()); } catch {} }
+    // Repaints keep the same control data and receipt. Intent subscribers
+    // only need ordinary state publication, including disconnect/revocation.
+    if(!displayOnly)for (const [listener,when] of this.performanceIntentListeners) this.notifyPerformanceIntent(listener,when);
+    for (const [listener,{when,skipDisplayRefresh}] of this.listeners)
+      if(!displayOnly||!skipDisplayRefresh)this.notifySnapshot(listener,when);
     if (connected !== this.state.connected) for (const listener of this.connectionListeners) { try { listener(this.connectionState()); } catch {} }
   }
   subscribeExtra(listener:(message:unknown)=>void){this.extraListeners.add(listener);return()=>{this.extraListeners.delete(listener);};}
@@ -281,7 +325,7 @@ export class MirrorClient {
   private sendPassive(message:Record<string,unknown>,beforeSend?:(socket:WebSocket)=>void):boolean {
     const socket=this.socket;if(!socket)return false;
     let payload:string;try{payload=JSON.stringify(message);}catch{return false;}
-    try{beforeSend?.(socket);socket.send(payload);return true;}catch{
+    try{if(!this.canSend(socket))return false;beforeSend?.(socket);socket.send(payload);return true;}catch{
       if(this.socket===socket){this.disconnect('镜像发送失败；正在重新连接',undefined,undefined,'send-failed');this.recoverConnection();}
       return false;
     }
@@ -313,14 +357,17 @@ export class MirrorClient {
     if(!this.passiveConsumers.has('wallpaper')||!this.state.connected||!this.socket||this.binding?.wallpaperProtocol!==1)return false;
     if(command==='wallpaper.neighbors'&&this.binding?.wallpaperPrefetchProtocol!==1)return false;
     const runId=this.binding.runId,seq=data.contextSeq,visible=data.visible,appId=typeof data.appId==='string'?data.appId:undefined;
-    const waiting=this.wallpaperDeadline;
-    if(command==='wallpaper.context'&&visible===false&&waiting&&typeof seq==='number'&&Number.isSafeInteger(seq)&&seq>=waiting.seq)
-      this.clearWallpaperDeadline();
+    // The wallpaper host discards invalid selections without a reply. They
+    // must not start or supersede the shared transport's unanswered lease.
+    if(command==='wallpaper.context'&&(typeof seq!=='number'||!Number.isSafeInteger(seq)||seq<0||
+       !appId||!/^\d{1,20}$/.test(appId)||!/[1-9]/.test(appId)||
+       (appId.length===20&&appId>'18446744073709551615')))return false;
     // Serialize first, then arm before send so local JSON failures stay local
     // and an immediate correlated reply can cancel without leaving a timer.
     return this.sendPassive({...data,command,runId},socket=>{
-      if(command==='wallpaper.context'&&visible===true&&typeof seq==='number'&&Number.isSafeInteger(seq)&&seq>=0)
-        this.waitForWallpaperResponse(socket,runId,seq,appId);
+      if(command!=='wallpaper.context'||typeof seq!=='number')return;
+      if(visible===true)this.waitForWallpaperResponse(socket,runId,seq,appId);
+      else if(visible===false&&this.wallpaperDeadline&&seq>=this.wallpaperDeadline.seq)this.clearWallpaperDeadline();
     });
   }
   sendUpdater(command:'updater.status'|'updater.request',data:Record<string,unknown>):boolean {
@@ -353,11 +400,20 @@ export class MirrorClient {
     const wanted=this.snapshotWanted();
     if(wanted===wasWanted)return;
     if(wanted){
-      this.attempt=0;
-      if(this.socket&&this.state.connected&&this.binding)this.requestSnapshot(this.socket,this.binding.runId);
-      else this.connect();
+      if(this.socket&&this.state.connected&&this.binding)this.requestSnapshot(this.socket,this.binding.runId,'demand-start');
+      else if(!this.keepQueuedTransportRetry()){
+        if(!this.socket)this.attempt=0;
+        this.connect();
+      }
     }else if(!this.passive){this.disconnect('侧栏已隐藏',undefined,undefined,'demand-ended');if(this.bootstrapWaiters.size)this.recoverConnection();}
-    else {this.pauseSnapshotDemand();this.publish({snapshot:null});}
+    else {this.pauseSnapshotDemand('demand-stop');this.publish({snapshot:null});}
+  }
+  private keepQueuedTransportRetry():boolean {
+    if(!this.passive||this.socket||this.retry===null)return false;
+    // Display demand and automatic QAM checks cannot restart an outage's
+    // backoff. A missed new native binding or OFF still takes effect now.
+    this.bootstrapChanged();
+    return true;
   }
   setVisible(visible: boolean, owner: object = this.defaultVisibilityOwner) {
     if(this.disposed)return;
@@ -394,15 +450,29 @@ export class MirrorClient {
     try{
       const now=this.startupClock(),started=pending.started;
       this.deps.tdpActionSettled?.({generation:pending.generation,outcome,
-        elapsedMs:now!==null&&started!==null&&now>=started?Math.min(3600000,Math.round(now-started)):null});
+        elapsedMs:now!==null&&started!==null&&now>=started?Math.min(3600000,Math.round(now-started)):null,
+        connectedAgeAtSendMs:pending.connectedAgeAtSendMs});
     }catch{} // Receipt diagnostics do not own the write or its lifecycle.
   }
   private endConnectionHealth():void {
     this.verifiedRun=null;
+    this.nativeSnapshotDiagnosticLevel=0;
     // Use the same existing stable-connection threshold for close, failed send
     // and response deadline. Brief flaps must retain their capped backoff.
     if(this.connectedAt!==null&&this.now()-this.connectedAt>=30000)this.attempt=0;
     this.connectedAt=null;
+  }
+  private noteNativeSnapshot(snapshot:MirrorSnapshot):void {
+    // Record the browser's own receipt, not a later native mode sample. A
+    // transport can report verification and then business readiness once each.
+    const report=this.deps.nativeSnapshotObserved,level=snapshot.ready?2:1;
+    if(!report||level<=this.nativeSnapshotDiagnosticLevel||snapshot.provenance?.kind!=='ymcc-native')return;
+    try{
+      if(!this.connectionVerified(snapshot.runId))return;
+      this.nativeSnapshotDiagnosticLevel=level;
+      const age=this.connectedAt===null?null:this.now()-this.connectedAt;
+      report({generation:snapshot.generation,ready:snapshot.ready,connectedAgeMs:age!==null&&Number.isFinite(age)&&age>=0?Math.min(3600000,Math.round(age)):null});
+    }catch{} // Diagnostics cannot affect the receipt or recovery.
   }
   private captureDisconnect(source:DisconnectSource,socket:WebSocket|null):DisconnectFacts|null {
     try{
@@ -425,12 +495,13 @@ export class MirrorClient {
     // Retire the complete old transport before notifying render subscribers.
     // They may synchronously reconnect and submit a NEW explicit intent. Only
     // captured promises/socket belong to this teardown; never clear new work.
-    const probe=this.probe,pending=this.pending,old=this.socket;
+    const probe=this.probe,pending=this.pending,old=this.socket,opening=this.openingProbe;
     const diagnostic=this.captureDisconnect(source,old);
     this.probe=null;this.pending=null;this.socket=null;
-    // A cancelled opening returns its own visible lease in finally, but cannot
-    // poison or report completion for a replacement using the same native run.
+    // Return the retired probe's visibility before subscribers can reconnect.
+    // Its later finally cannot pause a replacement or clear a real page owner.
     this.openingProbe=null;
+    if(opening&&this.visibleOwners.delete(opening))this.visible=this.visibleOwners.size>0;
     this.operationError=null;this.endConnectionHealth();
     ++this.epoch;
     this.clearRetry();
@@ -440,10 +511,9 @@ export class MirrorClient {
     if(pending)this.deps.cancel(pending.timer);
     this.publish({connected:false,snapshot:null,busy:false,notice:reason,
       ...(probe?{connectionTest:{pending:false,elapsedMs:Math.max(0,this.now()-probe.started),notice:reason}}:{})});
-    // YMCC application close code4001 identifies ONLY the existing snapshot
-    // response deadline in native peerClose facts. No text/token is sent and
-    // this observation never changes retry budgets or grants recovery authority.
-    try { if(closeCause==='snapshot-timeout')old?.close(4001);else old?.close(); } catch {}
+    // Native peerClose records numeric deadlines: 4001 for snapshot, 4002
+    // for wallpaper. Do not send a reason string or use the code for recovery.
+    try { if(closeCause==='snapshot-timeout')old?.close(4001);else if(source==='wallpaper-deadline')old?.close(4002);else old?.close(); } catch {}
     if(pending)pending.reject(new Error(pendingReason));
     if(probe)probe.reject(new Error(reason));
     if(pending?.tdp)this.noteTdp(pending.tdp,'transport-ended');
@@ -452,6 +522,15 @@ export class MirrorClient {
   private clearRetry():void {
     const timer=this.retry;this.retry=null;this.retryLease=null;
     if(timer!==null)this.deps.cancel(timer);
+  }
+  private canSend(socket:WebSocket,pendingReason='连接中断；不自动重放设置操作'):boolean {
+    if(this.socket!==socket)return false;
+    // CLOSING and CLOSED can silently discard sends before the close event.
+    const ready=socket.readyState;
+    if(ready!==2&&ready!==3)return true;
+    this.disconnect('连接已中断',pendingReason,undefined,ready===2?'socket-closing':'socket-closed');
+    this.recoverConnection();
+    return false;
   }
   private recoverConnection() {
     if(!this.wanted()||this.disposed||(this.socket&&!this.bootstrapWaiters.size)||this.retry!==null)return;
@@ -470,11 +549,13 @@ export class MirrorClient {
     this.publish({notice:!this.transportWanted()?'等待 YMCC 提供镜像连接':background?'HUD 后台连接中断，正在自动重连':'侧栏连接中断，正在自动重连'});
   }
   private finishProbe(snapshot?:MirrorSnapshot,error?:string):void {
-    if(snapshot?.ready&&snapshot.provenance?.kind==='ymcc-native'&&snapshot.runId===this.binding?.runId)this.failedOpeningRun=null;
     const probe=this.probe;if(!probe)return;
-    if(!error&&snapshot?.provenance?.kind==='ymcc-native'&&snapshot.runId===this.binding?.runId)this.verifiedRun=snapshot.runId;
-    if(!error&&snapshot?.provenance?.kind==='ymcc-native'&&snapshot.runId===this.binding?.runId&&this.openingProbe?.runId===snapshot.runId)
-      this.openingProbe.acknowledged=true;
+    if(!error&&snapshot?.provenance?.kind==='ymcc-native'&&snapshot.runId===this.binding?.runId){
+      // The current probe proved the transport even if the controls still wait.
+      this.failedOpeningRun=null;
+      this.verifiedRun=snapshot.runId;
+      if(this.openingProbe?.runId===snapshot.runId)this.openingProbe.acknowledged=true;
+    }
     this.probe=null;this.deps.cancel(probe.timer);
     const elapsedMs=Math.max(0,this.now()-probe.started);
     if(!error&&snapshot?.ready&&snapshot.provenance?.kind==='ymcc-native') {
@@ -504,16 +585,18 @@ export class MirrorClient {
       // A cancelled caller must not borrow the replacement's probe or demand.
       if(this.disposed||this.probe!==probe)return;
       try {
+        const socket=this.socket;
+        if(socket&&!this.canSend(socket))return;
         // OPEN may precede the first snapshot. Send this existing correlated
         // read now; waiting for another open event can strand its proof.
-        if(this.socket&&(this.state.connected||this.socket.readyState===1)&&this.binding)this.requestSnapshot(this.socket,this.binding.runId);
-        else if(!this.socket)this.connect();
+        if(socket&&(this.state.connected||socket.readyState===1)&&this.binding)this.requestSnapshot(socket,this.binding.runId,'connection-probe');
+        else if(!socket)this.connect();
       }catch {if(this.probe===probe)this.finishProbe(undefined,'连接实测请求发送失败');}
     });
   }
 
   private clearSnapshotDeadline(){if(this.snapshotDeadline!==null){this.deps.cancel(this.snapshotDeadline.timer);this.snapshotDeadline=null;}}
-  private pauseSnapshotDemand(){
+  private pauseSnapshotDemand(requestSource:SnapshotRequestSource){
     this.clearSnapshotDeadline();
     const socket=this.socket;
     // CONNECTING has not sent demand. Let the open handler use current demand
@@ -521,10 +604,10 @@ export class MirrorClient {
     if(!socket||socket.readyState===0||!this.binding)return;
     // A failed pause also invalidates the shared passive transport.
     // Use its existing owner/backoff; never replay a business operation.
-    this.sendPassive({command:'snapshot',runId:this.binding.runId,subscribe:false});
+    this.sendPassive({command:'snapshot',runId:this.binding.runId,subscribe:false,requestSource});
   }
   private openingSnapshotSocket: WebSocket | null = null;
-  private requestSnapshot(socket:WebSocket,runId:string) {
+  private requestSnapshot(socket:WebSocket,runId:string,source:SnapshotRequestSource) {
     // The open handler sends the current demand and any probe nonce after
     // both synchronous subscribers and first-proof setup have finished.
     if(this.openingSnapshotSocket===socket)return;
@@ -532,6 +615,7 @@ export class MirrorClient {
     // visibility must not send an ordinary read that this same probe discards.
     // Only this synchronous handoff is coalesced; all later requests stay fresh.
     if(this.openingProbe?.preparing)return;
+    if(this.binding?.runId!==runId||!this.canSend(socket))return;
     // A requested state must eventually answer even when the socket remains OPEN.
     // Arm before send so a synchronous reply can cancel it; repeated demand never
     // postpones this deadline. There is no periodic healthy-state probe.
@@ -551,7 +635,11 @@ export class MirrorClient {
     let observation:SteamRunningObservation|undefined;
     if(this.deps.steam){try{const value=this.deps.steam();observation=validSteamObservation(value)?value:{availability:'unavailable'};}catch{observation={availability:'unavailable'};}}
     const startup=this.startupRecord();
-    try { socket.send(JSON.stringify({command:'snapshot',runId,clientId:this.deps.clientId,...(typeof this.deps.buildId==='string'&&/^[a-f0-9]{64}$/.test(this.deps.buildId)?{buildId:this.deps.buildId}:{}),...(this.probe?{probeId:this.probe.id}:{}),...(observation?{steam:observation}:{}),...(startup?{clientStartup:startup}:{})}));
+    const requestSource=source==='socket-open'&&this.probe?'socket-open-probe':source;
+    try {
+      const payload=JSON.stringify({command:'snapshot',runId,requestSource,clientId:this.deps.clientId,...(typeof this.deps.buildId==='string'&&/^[a-f0-9]{64}$/.test(this.deps.buildId)?{buildId:this.deps.buildId}:{}),...(this.probe?{probeId:this.probe.id}:{}),...(observation?{steam:observation}:{}),...(startup?{clientStartup:startup}:{})});
+      if(this.binding?.runId!==runId||!this.canSend(socket))return;
+      socket.send(payload);
       if(startup){this.startupReported=true;this.startup=null;}
     }
     catch {
@@ -623,7 +711,7 @@ export class MirrorClient {
         const visibleRetry=this.visible&&this.failedOpeningRun===boot.runId&&!this.probe&&!this.pending&&!this.openingProbe;
         if(visibleRetry||(!this.snapshotWanted()&&this.passiveConsumers.has('connection')))void this.checkConnectionOnOpen();
       }finally{this.openingSnapshotSocket=previousOpening;}
-      if(epoch===this.epoch&&this.snapshotWanted())this.requestSnapshot(socket,boot.runId);
+      if(epoch===this.epoch&&this.snapshotWanted())this.requestSnapshot(socket,boot.runId,'socket-open');
     });
     socket.addEventListener('message', (event: MessageEvent) => {
       if (epoch !== this.epoch || !this.wanted() || typeof event.data !== 'string') return;
@@ -633,13 +721,29 @@ export class MirrorClient {
       if (!message || typeof message !== 'object' || Array.isArray(message)) { this.disconnect('镜像消息格式错误',undefined,undefined,'message-invalid'); this.recoverConnection(); return; }
       if (message.runId !== boot.runId) { this.disconnect('YMCC 会话已变更，请重新打开侧栏',undefined,undefined,'run-changed'); this.recoverConnection(); return; }
       if (message.type === 'snapshot') {
+        if(message.displayOnly===true){
+          // Update only the two display fields on the accepted view. No ready
+          // proof, deadline cancellation, permission change or hidden pause.
+          const current=this.state.snapshot,display=message.snapshot as MirrorSnapshot|undefined;
+          if(!this.visible||!current?.ready||!display||display.runId!==current.runId||
+             display.revision!==current.revision||display.generation!==current.generation)return;
+          const gameSteam=display.gameSteam,program=display.losslessProgram;
+          const gameChanged=gameSteam!==current.gameSteam&&validSnapshotGameSteam(current,gameSteam)&&
+            JSON.stringify(gameSteam)!==JSON.stringify(current.gameSteam);
+          const programChanged=validLosslessProgram(program)&&
+            (program.known!==current.losslessProgram?.known||program.running!==current.losslessProgram?.running);
+          if(!gameChanged&&!programChanged)return;
+          this.publish({snapshot:{...current,gameSteam:gameChanged?gameSteam:current.gameSteam,
+            losslessProgram:programChanged?program:current.losslessProgram}},true);
+          return;
+        }
         // A restored YMCC renderer can briefly resume its prior demand. A hidden
         // sidebar explicitly pauses that business stream while the HUD stays linked.
-        if(!this.snapshotWanted()){this.pauseSnapshotDemand();return;}
+        if(!this.snapshotWanted()){this.pauseSnapshotDemand('hidden-snapshot');return;}
         let snap = message.snapshot as MirrorSnapshot;
         if (!validSnapshot(snap, boot.runId)) { this.disconnect('镜像身份无效',undefined,undefined,'message-invalid'); this.recoverConnection(); return; }
         if (this.state.snapshot && snap.revision < this.state.snapshot.revision) return;
-        if(!validSnapshotGameSteam(snap)){snap={...snap};delete snap.gameSteam;}
+        if(!validSnapshotGameSteam(snap,snap.gameSteam)){snap={...snap};delete snap.gameSteam;}
         // Connection proof and business readiness have different owners. A
         // native ready:false reply still proves this authenticated connection;
         // controls keep using snapshot.ready and never gain write authority here.
@@ -654,26 +758,40 @@ export class MirrorClient {
         // another read on this same socket. Only the probe present when this
         // message arrived may consume it; an old stack cannot certify new work.
         const probe=this.probe;
-        this.publish({ connected: true, snapshot: snap, notice: this.pending && this.state.busy ? this.state.notice : this.operationError?.notice ?? snap.notice ?? '' });
+        const pendingGeneration=this.pending?.performanceGeneration;
+        this.publish({ connected: true, snapshot: snap, notice: this.pending && this.state.busy && (pendingGeneration===undefined||pendingGeneration===snap.generation) ? this.state.notice : this.operationError?.notice ?? snap.notice ?? '' });
         if(this.disposed||epoch!==this.epoch||this.socket!==socket)return;
+        const hadFailedOpening=this.failedOpeningRun===snap.runId;
         // Deferred replies can be followed by an untagged native push. An
         // explicit different nonce still belongs to a different request.
         if(probe&&this.probe===probe&&(message.probeId===probe.id||
            (probe.awaitingNative&&message.probeId===undefined&&snap.provenance?.kind==='ymcc-native'))){
-          // Wake/source churn may answer the nonce with a deferred, unproven
-          // ready:false view. Keep this SAME read lease and original deadline;
-          // the relay can finish on its existing recovery, without another open.
-          if(!snap.ready&&snap.provenance?.kind!=='ymcc-native')probe.awaitingNative=true;
+          // The renderer may finish reading settings before native attach
+          // confirms their origin. Hold the same lease and deadline so the
+          // confirmation can still reach us, even when those settings are ready.
+          const provenance=snap.provenance?.kind;
+          if(provenance==='unconfirmed'||(!snap.ready&&provenance!=='ymcc-native'))probe.awaitingNative=true;
           else this.finishProbe(snap);
         }
-        // Reuse the existing result notification to retire cached failure facts.
-        // A live opening emits once from finally; passive native push emits once.
-        if(!this.disposed&&epoch===this.epoch&&this.socket===socket&&firstNativeReply&&!this.openingProbe&&!this.probe)this.notifyConnectionCheckCompleted();
+        // A live opening notifies in finally. Outside it, only a new or
+        // recovered proof wakes the existing native observer, not a late push.
+        if(!this.disposed&&epoch===this.epoch&&this.socket===socket&&(firstNativeReply||hadFailedOpening)&&
+           !this.openingProbe&&!this.probe&&this.connectionVerified(snap.runId))this.notifyConnectionCheckCompleted();
+        if(!this.disposed&&epoch===this.epoch&&this.socket===socket&&this.state.snapshot===snap)this.noteNativeSnapshot(snap);
       } else if((message.type==='hud'||message.type==='hud-ready')&&this.passiveConsumers.has('hud')&&boot.hudProtocol===1){
-        if(message.type==='hud-ready'){if(this.snapshotWanted())this.requestSnapshot(socket,boot.runId);else this.pauseSnapshotDemand();}
+        // A HUD-only preference notification still rehydrates HUD status, but
+        // only peer attachment (including older unmarked hellos) refreshes demand.
+        if(message.type==='hud-ready'&&!(message.protocol===1&&message.snapshotRefresh===false)){
+          if(this.snapshotWanted())this.requestSnapshot(socket,boot.runId,'hud-peer-ready');else this.pauseSnapshotDemand('hud-peer-ready');
+        }
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
-      } else if((message.type==='wallpaper'||message.type==='wallpaper-ready')&&this.passiveConsumers.has('wallpaper')&&boot.wallpaperProtocol===1){
+      } else if((message.type==='wallpaper-context-accepted'||message.type==='wallpaper'||message.type==='wallpaper-ready')&&this.passiveConsumers.has('wallpaper')&&boot.wallpaperProtocol===1){
         const pending=this.wallpaperDeadline;
+        if(message.type==='wallpaper-context-accepted'){
+          // A transport receipt is neither a readiness update nor a frame.
+          if(pending?.socket===socket&&pending.runId===boot.runId&&message.contextSeq===pending.seq&&message.appId===pending.appId)this.clearWallpaperDeadline();
+          return;
+        }
         if(pending?.socket===socket&&pending.runId===boot.runId&&message.contextSeq===pending.seq&&typeof message.enabled==='boolean'&&
            (message.appId===undefined||message.appId===pending.appId))this.clearWallpaperDeadline();
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
@@ -686,8 +804,12 @@ export class MirrorClient {
             (message.error != null && typeof message.error !== 'string')) { this.disconnect('镜像操作回执格式错误；结果未确认，不自动重放',undefined,undefined,'message-invalid'); this.recoverConnection(); return; }
         const pending = this.pending; this.pending = null; this.deps.cancel(pending.timer);
         const error=message.ok?null:(message.error??'操作失败');
-        this.operationError=error&&this.state.snapshot?{notice:error,runId:boot.runId,generation:this.state.snapshot.generation,identity:this.state.snapshot.game?.identity??''}:null;
-        this.publish({ busy: false, notice: message.ok ? (message.notice ?? '') : error });
+        const snapshot=this.state.snapshot;
+        // The same socket can already show a new power generation. Retain the
+        // actual outcome for the caller, but do not apply its feedback to that view.
+        const current=pending.performanceGeneration===undefined||pending.performanceGeneration===snapshot?.generation;
+        this.operationError=current&&error&&snapshot?{notice:error,runId:boot.runId,generation:snapshot.generation,identity:snapshot.game?.identity??''}:null;
+        this.publish(current?{busy:false,notice:message.ok?(message.notice??''):error}:{busy:false});
         if (message.ok) pending.resolve(message.result); else pending.reject(new Error(message.error ?? '操作失败'));
         if(pending.tdp){
           const result=message.result;
@@ -721,7 +843,7 @@ export class MirrorClient {
       closed();
     }, 10000);
   }
-  mutate(command: MirrorCommand, args: Record<string, unknown>, expected?: MirrorSnapshot): Promise<unknown> {
+  mutate(command: MirrorCommand, args: Record<string, unknown>, expected?: MirrorCommandExpectation): Promise<unknown> {
     const snap = this.state.snapshot;
     const independentFan = (command === 'fan.setEnabled' || command === 'fan.setPreset' || command === 'fan.setChoice')
       && snap?.actions?.fan === true && snap.fan.canToggle === true;
@@ -740,8 +862,10 @@ export class MirrorClient {
     if(command==='performance.setControls'&&(!snap.performance||!snap.actions?.performance||Object.keys(args).length!==1||!performancePatchAllowed(args.patch as Record<string,unknown>,snap.performance)))return Promise.reject(new Error('性能调度当前不可修改'));
     if((command==='game.setField'||command==='global.setField')&&['padPersona','gyroEnabled','gyroPreset'].includes(String(args.field))&&snap.virtualController?.locked)return Promise.reject(new Error('手柄切换处理中，请稍候'));
     const speedRequest = command === 'game.setField' && args.field === 'speedFactor';
-    this.operationError=null;
     const transport=this.socket,transportEpoch=this.epoch,transportBinding=this.binding;
+    const unsent='连接已中断；本次操作未发送，请重连后重试';
+    if(!this.canSend(transport,unsent))return Promise.reject(new Error(unsent));
+    this.operationError=null;
     const ownsTransport=()=>!this.disposed&&this.socket===transport&&this.epoch===transportEpoch&&this.binding===transportBinding;
     const sequence = ++this.sequence;
     const id = `${this.deps.clientId}:${sequence}`;
@@ -750,31 +874,49 @@ export class MirrorClient {
     return new Promise((resolve, reject) => {
       const timer = this.deps.schedule(() => {
         if (this.pending?.id !== id) return;
-        const expiredTdp=this.pending.tdp;
+        const expired=this.pending,current=this.state.snapshot;
         this.pending = null;
-        const retained=command==='game.setField'&&args.field==='losslessScaling'?structuredClone(this.state.snapshot):null;
-        if(retained?.game?.fields.losslessScaling)retained.game.fields.losslessScaling={...retained.game.fields.losslessScaling,value:'unknown',supported:false};
-        this.publish({ busy: false, snapshot:retained, notice: speedRequest ? '游戏变速结果未确认（等待已达 2 秒）；正在重新读取状态，不自动重试' : '结果未确认；正在重新读取状态，不重发操作' });
-        try { if(ownsTransport()&&this.snapshotWanted()&&this.pending===null)this.requestSnapshot(transport,snap.runId); } catch {}
+        // A newer native Ready view does not settle this old write. Keep the
+        // view, though: the host already refreshes current demand on owner settlement.
+        if(expired.performanceGeneration!==undefined&&current?.ready&&current.generation>expired.performanceGeneration&&current.provenance?.kind==='ymcc-native'){
+          this.publish({busy:false});
+        }else{
+          const retained=command==='game.setField'&&args.field==='losslessScaling'?structuredClone(current):null;
+          if(retained?.game?.fields.losslessScaling)retained.game.fields.losslessScaling={...retained.game.fields.losslessScaling,value:'unknown',supported:false};
+          this.publish({ busy: false, snapshot:retained, notice: speedRequest ? '游戏变速结果未确认（等待已达 2 秒）；正在重新读取状态，不自动重试' : '结果未确认；正在重新读取状态，不重发操作' });
+          try { if(ownsTransport()&&this.snapshotWanted()&&this.pending===null)this.requestSnapshot(transport,snap.runId,'operation-timeout'); } catch {}
+        }
         reject(new Error('操作结果未确认'));
-        if(expiredTdp)this.noteTdp(expiredTdp,'reply-timeout');
+        if(expired.tdp)this.noteTdp(expired.tdp,'reply-timeout');
         this.syncSnapshotDemand(true);
       }, command==='audioOptimization.setEnabled'?40000:speedRequest ? 2000 : (command === 'game.setField' && args.field === 'losslessScaling' || command === 'monitor.setEnabled') ? (command === 'monitor.setEnabled' ? 30000 : 18000) : (command==='performance.setControls'||command==='game.setField'&&args.field==='profile')?15000:4000);
-      const ownedPending:NonNullable<MirrorClient['pending']>={id,timer,resolve,reject}; this.pending=ownedPending; this.publish({ busy: true, notice:speedRequest?'游戏变速正在处理，等待执行结果（最多 2 秒）':command==='game.setField'&&args.field==='losslessScaling'?'LosslessScaling 正在处理；等待配置与程序状态确认，最长 15 秒，不自动重复操作':this.state.notice });
+      const ownedPending:NonNullable<MirrorClient['pending']>={id,timer,resolve,reject,performanceGeneration:command==='performance.setControls'?snap.generation:undefined}; this.pending=ownedPending; this.publish({ busy: true, notice:speedRequest?'游戏变速正在处理，等待执行结果（最多 2 秒）':command==='game.setField'&&args.field==='losslessScaling'?'LosslessScaling 正在处理；等待配置与程序状态确认，最长 15 秒，不自动重复操作':this.state.notice });
       // Busy listeners may synchronously hide Content or replace the broker.
       // Fence both the first send and later failure/timeout work to this lease.
       if(this.pending!==ownedPending||!ownsTransport()){
         if(this.pending===ownedPending)this.rejectPending('连接已变化，本次操作未发送');
         return;
       }
-      if(this.deps.tdpActionSettled&&command==='performance.setControls'&&Object.prototype.hasOwnProperty.call(request.args.patch,'tdp'))
-        ownedPending.tdp={generation:snap.generation,started:this.startupClock()};
-      try { transport.send(JSON.stringify(request)); }
+      let tdp:PendingTdp|undefined;
+      if(this.deps.tdpActionSettled&&command==='performance.setControls'&&Object.prototype.hasOwnProperty.call(request.args.patch,'tdp')){
+        // Capture the current connection's age before sending; a disconnect
+        // or later connection cannot change the terminal diagnostic.
+        const started=this.startupClock();
+        const age=started!==null&&this.connectedAt!==null?started-this.connectedAt:NaN;
+        tdp={generation:snap.generation,started,
+          connectedAgeAtSendMs:Number.isFinite(age)&&age>=0?Math.min(3600000,Math.round(age)):null};
+      }
+      try {
+        const payload=JSON.stringify(request);
+        if(this.pending!==ownedPending||!ownsTransport()||!this.canSend(transport,unsent))return;
+        if(tdp)ownedPending.tdp=tdp;
+        transport.send(payload);
+      }
       catch {
         if(this.pending!==ownedPending||!ownsTransport())return;
         this.disconnect('发送失败，结果未确认；正在重新连接',undefined,undefined,'send-failed'); this.recoverConnection();
       }
     });
   }
-  dispose(source:'plugin-disposed'|'plugin-pagehide'|'plugin-initialization-failed'='plugin-disposed') { this.disposed = true; for(const waiter of this.bootstrapWaiters.values())waiter.active=false;this.bootstrapWaiters.clear(); this.visibleOwners.clear(); this.intentOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载',undefined,undefined,source); this.listeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
+  dispose(source:'plugin-disposed'|'plugin-pagehide'|'plugin-initialization-failed'='plugin-disposed') { this.disposed = true; for(const waiter of this.bootstrapWaiters.values())waiter.active=false;this.bootstrapWaiters.clear(); this.visibleOwners.clear(); this.intentOwners.clear(); this.visible = false; this.passive = false; this.passiveConsumers.clear(); this.disconnect('插件已卸载',undefined,undefined,source); this.listeners.clear(); this.performanceIntentListeners.clear(); this.connectionListeners.clear(); this.extraListeners.clear(); }
 }

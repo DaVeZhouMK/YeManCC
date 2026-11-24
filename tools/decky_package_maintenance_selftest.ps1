@@ -33,6 +33,7 @@ if ($body.Contains('function Enter-YmccModuleMaintenance')) {
   $executionBody=$body.Replace($productMutexName,$fixtureMutexName)
   $fixtureMutexRemapped=$true
 }
+$PSDefaultParameterValues['Get-YmccDeckyPlan:BackendPort']=0
 $cases=New-Object 'System.Collections.Generic.List[object]'
 
 $taskProgressFile=Join-Path $EvidenceDir 'case-progress.jsonl'
@@ -496,6 +497,24 @@ Check 'backend port lease refuses an active watcher and is returned on failure' 
     Need ([string](Snapshot $c.target) -eq '') 'Busy backend allowed partial install'
     Need ($foreign.LocalEndpoint.Port -eq $port) 'Foreign backend was stopped'
     Reject { $unexpected=Open-YmccDeckyBackendLease $port; $unexpected.Stop() } 'BACKEND_IN_USE_OR_UNAVAILABLE'
+    foreach($kind in @('damaged-receipt','readonly-loader')){
+      $old=New-Case ('backend-watch-'+$kind);Seed $old|Out-Null
+      $loader=Put $old.target 'PluginLoader_noconsole.exe' 'previous loader'
+      if($kind -eq 'damaged-receipt'){
+        Put $old.target '.ymcc-managed.receipt' '{invalid'|Out-Null
+      }else{
+        [IO.File]::SetAttributes($loader,([IO.File]::GetAttributes($loader) -bor [IO.FileAttributes]::ReadOnly))
+      }
+      $before=Snapshot $old.target;$attrs=[IO.File]::GetAttributes($loader)
+      $prepared=$null
+      try{
+        Reject { Get-YmccDeckyPlan $old.source $old.target $old.manifest -BackendPort $port -PreparationLease ([ref]$prepared) } 'BACKEND_IN_USE_OR_UNAVAILABLE'
+        Need (!$prepared -and (Snapshot $old.target) -ceq $before -and [IO.File]::GetAttributes($loader) -eq $attrs) 'Busy backend allowed a planning write'
+      }finally{
+        if($prepared){$prepared.Stop()}
+        [IO.File]::SetAttributes($loader,($attrs -band (-bnot [IO.FileAttributes]::ReadOnly)))
+      }
+    }
   } finally { $foreign.Stop() }
   $t=Install-YmccDeckyPackage $p (Join-Path $c.home 'unoccupied-backup') -BackendPort $port
   $probe=Open-YmccDeckyBackendLease $port;$probe.Stop()
@@ -503,13 +522,16 @@ Check 'backend port lease refuses an active watcher and is returned on failure' 
   $probe=Open-YmccDeckyBackendLease $port;$probe.Stop()
   Need ([string](Snapshot $c.target) -eq '') 'Rollback after reservation lost data'
 }
-# Parse the actual emitted command without executing any updater operation.
-function Get-TaskNativeUpdaterCommand([string]$Native,[string]$Name) {
-  $pattern='(?m)^\s*f << "\s*(?<command>'+[regex]::Escape($Name)+' \$powerControlSource [^"\r\n]*)\\n";\s*$'
+# Read one actual updater emission, failing on missing or ambiguous matches.
+function Get-TaskNativeUpdaterLine([string]$Native,[string]$Prefix) {
+  $pattern='(?m)^[ \t]*f << "[ \t]*(?<line>'+[regex]::Escape($Prefix)+'(?:[^"\\\r\n]|\\.)*)\\n";[ \t]*\r?$'
   $found=[regex]::Matches($Native,$pattern)
-  Need ($found.Count -eq 1) ('Native updater command count changed: '+$Name)
+  Need ($found.Count -eq 1) ('Native updater line count changed: '+$Prefix)
+  return @{Index=$found[0].Index;Text=(ConvertFrom-Json ('{"line":"'+$found[0].Groups['line'].Value+'"}')).line}
+}
+function Get-TaskNativeUpdaterCommand([string]$Text,[string]$Name) {
   $tokens=$null;$errors=$null
-  $parsed=[Management.Automation.Language.Parser]::ParseInput($found[0].Groups['command'].Value,[ref]$tokens,[ref]$errors)
+  $parsed=[Management.Automation.Language.Parser]::ParseInput($Text,[ref]$tokens,[ref]$errors)
   Need ($errors.Count -eq 0 -and $parsed.EndBlock.Statements.Count -eq 1) ('Native updater command is not a single parsed statement: '+$Name)
   $statement=$parsed.EndBlock.Statements[0]
   Need ($statement -is [Management.Automation.Language.PipelineAst] -and $statement.PipelineElements.Count -eq 1) ('Native updater command pipeline changed: '+$Name)
@@ -519,23 +541,64 @@ function Get-TaskNativeUpdaterCommand([string]$Native,[string]$Name) {
 }
 Check 'native updater includes production transaction and excludes generic merge/rollback' {
   $native=Get-Content -LiteralPath (Join-Path $root 'native/main.cpp') -Raw -Encoding UTF8
-  Need ($native.Contains('f << ymcc::deckypackage::maintenanceScript()')) 'Native updater does not embed actual consumer'
-  Need ($native.Contains('$deckyPlan = Get-YmccDeckyPlan') -and $native.Contains('$deckyTransaction = Install-YmccDeckyPackage')) 'Native updater lacks plan/commit'
-  Need ($native.Contains('Restore-YmccDeckyPackage $deckyTransaction')) 'Outer updater lacks Decky rollback'
-  $rollback=Get-TaskNativeUpdaterCommand $native 'Register-TreeForRollback'
-  Need ($rollback.CommandElements.Count -eq 5 -and $rollback.CommandElements[1].Extent.Text -ceq '$powerControlSource' -and $rollback.CommandElements[2].Extent.Text -ceq '$pcDir' -and $rollback.CommandElements[3].SafeGetValue() -ceq 'PowerControl') 'Generic rollback source/target changed'
-  $excluded=@($rollback.CommandElements[4].SafeGetValue())
-  Need (@('pawnio','fan-host-v2','decky'|Where-Object { $excluded -cnotcontains $_ }).Count -eq 0) 'Generic rollback still includes Decky'
-  $copy=Get-TaskNativeUpdaterCommand $native 'Copy-TreeChecked'
-  Need ($copy.CommandElements.Count -eq 4 -and $copy.CommandElements[1].Extent.Text -ceq '$powerControlSource' -and $copy.CommandElements[2].Extent.Text -ceq '$pcDir' -and $copy.CommandElements[3] -is [Management.Automation.Language.ArrayExpressionAst]) 'Generic copy source/target/exclusion array changed'
-  $copyExclusions=$copy.CommandElements[3]
-  $xd=@($copyExclusions.FindAll({param($node) $node -is [Management.Automation.Language.StringConstantExpressionAst] -and $node.Value -ceq '/XD'},$true))
-  Need ($xd.Count -eq 1) 'Generic copy exclusion switch missing'
-  foreach($ownedName in @('fan-host','decky')){
-    $joins=@($copyExclusions.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Join-Path'},$true)|Where-Object {$_.CommandElements.Count -eq 3 -and $_.CommandElements[1].Extent.Text -ceq '$powerControlSource' -and $_.CommandElements[2].SafeGetValue() -ceq $ownedName})
-    Need ($joins.Count -eq 1) ('Generic copy still overwrites owned directory '+$ownedName)
+  Need ($native.Contains('f << ymcc::deckypackage::maintenanceScript()') -and $native.Contains('f << ymcc::updaterecovery::script()')) 'Native updater does not embed the Decky and ordinary transaction consumers'
+  $manifest=Get-TaskNativeUpdaterLine $native 'Assert-YmccDeckyManifest $deckyManaged'
+  $ordinary=Get-TaskNativeUpdaterLine $native 'Copy-YmccManagedTree $powerControlSource '
+  $plan=Get-TaskNativeUpdaterLine $native '$deckyPlan = Get-YmccDeckyPlan '
+  $install=Get-TaskNativeUpdaterLine $native '$deckyTransaction = Install-YmccDeckyPackage $deckyPlan '
+  $start=Get-TaskNativeUpdaterLine $native '$newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList '
+  $deckyRestore=Get-TaskNativeUpdaterLine $native 'try { Restore-YmccDeckyPackage $deckyTransaction }'
+  $ordinaryRestore=Get-TaskNativeUpdaterLine $native 'try { Restore-OrdinaryFiles }'
+  Need ($manifest.Index -lt $ordinary.Index) 'Decky manifest validation no longer precedes ordinary writes'
+  Need ($plan.Index -lt $install.Index -and $install.Index -lt $start.Index) 'Decky plan/install/start order changed'
+  $guard='f << "  if ($rollbackChildExitConfirmed -and !$updateCommitted) {\n";'
+  $gate=$native.LastIndexOf($guard,$deckyRestore.Index,[StringComparison]::Ordinal)
+  $end=$native.IndexOf('f << "  }\n";',$deckyRestore.Index,[StringComparison]::Ordinal)
+  Need ($gate -gt $start.Index -and $end -gt $ordinaryRestore.Index -and $deckyRestore.Index -lt $ordinaryRestore.Index) 'Decky and ordinary rollback no longer share the post-exit uncommitted guard'
+  Need (!$native.Contains('  Copy-TreeChecked $powerControlSource ') -and !$native.Contains('  Register-TreeForRollback $powerControlSource ')) 'A second generic PowerControl copy/rollback lane is present'
+
+  $assignment=Get-TaskNativeUpdaterLine $native '$powerControlExclusions=@('
+  Need ($assignment.Index -lt $ordinary.Index) 'Managed directory exclusions are defined after ordinary copy'
+  $excludedArg=Get-TaskNativeUpdaterCommand ($assignment.Text.Replace('$powerControlExclusions=','Write-Output ')) 'Write-Output'
+  Need ($excludedArg.CommandElements.Count -eq 2 -and $excludedArg.CommandElements[1] -is [Management.Automation.Language.ArrayExpressionAst]) 'Managed directory exclusions must be a constant array'
+  $powerControlExclusions=@($excludedArg.CommandElements[1].SafeGetValue())
+  Need (@('pawnio','fan-host','fan-host-v2','decky'|Where-Object { $powerControlExclusions -notcontains $_ }).Count -eq 0) 'Generic copy/rollback no longer excludes Decky and other owned directories'
+  $copy=Get-TaskNativeUpdaterCommand $ordinary.Text 'Copy-YmccManagedTree'
+  Need ($copy.CommandElements.Count -eq 5 -and $copy.CommandElements[1].Extent.Text -ceq '$powerControlSource' -and $copy.CommandElements[2].Extent.Text -ceq '$pcDir' -and $copy.CommandElements[3].SafeGetValue() -ceq 'PowerControl' -and $copy.CommandElements[4].Extent.Text -ceq '$powerControlExclusions') 'Ordinary PowerControl copy does not consume the owned directory exclusions'
+
+  # The same ledger written by ordinary copy is consumed by ordinary rollback.
+  $recoveryHeader=Get-Content -LiteralPath (Join-Path $root 'native/update_install_recovery_script.h') -Raw -Encoding UTF8
+  $recoverySource=(Get-Content -LiteralPath (Join-Path $root 'native/update_install_recovery.ps1') -Raw -Encoding UTF8).Replace("`r`n","`n")
+  $recoveryBody=(@([regex]::Matches($recoveryHeader,'(?s)R"YMCCRECOVERY\((.*?)\)YMCCRECOVERY"') | ForEach-Object { $_.Groups[1].Value }) -join '')
+  Need ($recoveryBody -and $recoveryBody -ceq $recoverySource) 'Embedded ordinary rollback source differs'
+  $tokens=$null;$errors=$null
+  $ast=[Management.Automation.Language.Parser]::ParseInput($recoveryBody,[ref]$tokens,[ref]$errors)
+  Need ($errors.Count -eq 0) 'Embedded ordinary rollback source does not parse'
+  foreach($name in @('Add-YmccInstallIssue','Clear-YmccManagedReadOnly','Copy-YmccManagedFile','Copy-YmccManagedTree','Restore-OrdinaryFiles')){
+    $functions=@($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $name })
+    Need ($functions.Count -eq 1) ('Embedded ordinary consumer function count changed: '+$name)
+    . ([scriptblock]::Create($functions[0].Extent.Text))
   }
-  Need ($native.IndexOf('$deckyPlan = Get-YmccDeckyPlan') -lt $native.IndexOf('  Register-TreeForRollback $programSource')) 'Decky validation occurs after mutations'
+  $caseRoot=Join-Path $EvidenceDir ('owner-tree-'+[guid]::NewGuid().ToString('N'))
+  $powerControlSource=Join-Path $caseRoot 'incoming'; $pcDir=Join-Path $caseRoot 'installed'
+  $rollbackFiles=Join-Path $caseRoot 'rollback'
+  $ordinaryFileLedger=[Collections.Generic.List[object]]::new()
+  $ordinaryTarget=Put $pcDir 'ordinary/probe.txt' 'old ordinary'
+  Put $powerControlSource 'ordinary/probe.txt' 'new ordinary' | Out-Null
+  foreach($name in @('pawnio','fan-host','fan-host-v2','decky')){
+    Put $pcDir "$name/nested/owned.txt" 'old owned' | Out-Null
+    Put $powerControlSource "$name/nested/owned.txt" 'new owned' | Out-Null
+    Put $powerControlSource "$name/new.txt" 'no new ordinary copy' | Out-Null
+  }
+  $before=Snapshot $pcDir
+  & ([scriptblock]::Create($ordinary.Text))
+  Need ($ordinaryFileLedger.Count -eq 1 -and $ordinaryFileLedger[0].relative -ceq 'ordinary/probe.txt' -and $ordinaryFileLedger[0].written -and [IO.File]::ReadAllText($ordinaryTarget) -ceq 'new ordinary') 'An owned path entered the live ordinary copy/rollback ledger or the ordinary positive control did not copy'
+  # Any unintended owned-file write must still be detectable before rollback.
+  foreach($name in @('pawnio','fan-host','fan-host-v2','decky')){
+    Need ([IO.File]::ReadAllText((Join-Path $pcDir "$name/nested/owned.txt")) -ceq 'old owned' -and ![IO.File]::Exists((Join-Path $pcDir "$name/new.txt"))) ('Ordinary copy wrote owned files: '+$name)
+  }
+  Restore-OrdinaryFiles
+  Need ((Snapshot $pcDir) -ceq $before) 'Actual ordinary rollback did not preserve Decky and restore the original ordinary preimage'
 }
 
 # Configuration storms stay on the original embedded transaction consumer.

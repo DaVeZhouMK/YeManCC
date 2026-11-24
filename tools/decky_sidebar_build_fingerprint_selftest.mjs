@@ -23,25 +23,32 @@ for(const name of ['controller-xbox','controller-native','controller-sd','mouse-
 }
 const builder=fs.readFileSync(path.join(root,'tools/build-decky-sidebar-plugin.mjs'),'utf8');assert(builder.includes("const template=await build(options),buildId=hash(withFrontendVersion(template.outputFiles[0].contents,'0'.repeat(64)))"));
 const cpp=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8'),begin=cpp.indexOf('static std::string deckySidebarStartMirrorBroker()'),end=cpp.indexOf('// YMCC Decky sidebar:',begin);assert(begin>=0&&end>begin,'Current original broker entry is required');const callback=cpp.slice(begin,end);
-assert(callback.includes('[buildReceipt=std::string{}]'));assert(callback.includes('if(build!=buildReceipt)'));assert(callback.includes('ymcc::deckydiag::validBuildId'));
+assert(callback.includes('[buildReceipt=std::string{},startupRecorded=false]'));assert(callback.includes('if(build!=buildReceipt)'));assert(callback.includes('ymcc::deckydiag::validBuildId'));
 const fixture=`#define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 #include <iostream>
 #include <stdexcept>
 #include "decky_sidebar_diagnostics.h"
 using json=nlohmann::json;
-struct FakeBroker {struct Config{std::function<void(const std::string&,const json&)> request;std::function<void(const std::string&,const std::string&,bool)> peer;};Config config;bool start(Config c){config=std::move(c);return true;}void stop(){}json status(){return {{"connection","1"},{"runId",std::string(32,'a')},{"revision",0}};}bool reply(const std::string&,const json&){return true;}}g_deckyMirrorBroker;
+struct FakeBroker {struct Config{std::function<void(const std::string&,const json&)> request;std::function<void(const std::string&,const std::string&,bool)> peer;};
+ struct Stamp{std::string runId;unsigned long long revision,connectionRevision;};
+ Config config;json lastReply;unsigned statusReads=0;bool start(Config c){config=std::move(c);return true;}
+ void stop(){}json status(){++statusReads;return {{"connection","1"},{"runId",std::string(32,'a')},{"revision",9},{"connectionRevision",12}};}
+ std::optional<Stamp> requestStamp(const std::string& c){if(c!="1")return std::nullopt;return Stamp{std::string(32,'a'),9,12};}
+ bool reply(const std::string&,const json& reply){lastReply=reply;return true;}}g_deckyMirrorBroker;
 // Only external callback ports are inert; the original broker body is unchanged.
 struct InertCostContext {void request(const json&,unsigned long long){}void peer(bool,unsigned long long){}}g_deckyCostContext;
 struct InertRuntime {bool requestConnectionCheck(){return true;}}g_deckySidebarRuntime;
 std::vector<json> logs;
 static void deckySidebarDiagnostic(const char* event,const json& detail,bool=false){logs.push_back(ymcc::deckydiag::record(event,detail));}
-static bool deckySidebarPost(const char*,const json&){return true;}
+static json lastPost;static unsigned postCount=0;static bool postAccepted=true;
+static bool deckySidebarPost(const char* name,const json& packet){if(std::string(name)=="deckySidebar.mirrorRequest"){lastPost=packet;++postCount;}return postAccepted;}
 static std::string deckySidebarInjectBinding(){return {};}
 `+callback+`
 static size_t builds(){return std::count_if(logs.begin(),logs.end(),[](const auto& r){return r.value("event",std::string{})=="plugin-build";});}
@@ -53,11 +60,15 @@ int main(){try{
  if(builds()!=1)throw std::runtime_error("1000 snapshots must produce one build record");
  g_deckyMirrorBroker.config.request("1",packet(b));if(builds()!=2)throw std::runtime_error("replacement build not recorded");
  deckySidebarStartMirrorBroker();g_deckyMirrorBroker.config.request("1",packet(b));if(builds()!=3)throw std::runtime_error("new broker lifecycle must record even the same build");
- g_deckyMirrorBroker.config.request("2",packet(a));if(builds()!=3)throw std::runtime_error("stale peer recorded");
+ const auto posted=postCount;g_deckyMirrorBroker.config.request("2",packet(a));if(builds()!=3||postCount!=posted)throw std::runtime_error("stale peer recorded or posted");
  g_deckyMirrorBroker.config.request("1",packet("private-path"));if(builds()!=3)throw std::runtime_error("arbitrary build label recorded");
  g_deckyMirrorBroker.config.request("1",json{{"command","snapshot"},{"subscribe",false}});
  if(logs.back().value("subscribe",true))throw std::runtime_error("pause direction lost");
- std::cout<<"NATIVE_BUILD_RECEIPT_OK passed=6 realSteam=0 realPorts=0"<<std::endl;return 0;
+ if(lastPost.at("connection")!="1"||lastPost.at("runId").get_ref<const std::string&>()!=std::string(32,'a')||lastPost.at("revision")!=9u||lastPost.at("connectionRevision")!=12u||lastPost.at("request").at("subscribe")!=false)throw std::runtime_error("ingress fields changed");
+ postAccepted=false;g_deckyMirrorBroker.config.request("1",json{{"command","snapshot"},{"id","test"},{"subscribe",false}});
+ if(g_deckyMirrorBroker.lastReply.at("ok")!=false||g_deckyMirrorBroker.lastReply.at("id")!="test"||g_deckyMirrorBroker.lastReply.at("runId").get_ref<const std::string&>()!=std::string(32,'a'))throw std::runtime_error("same-owner queue-full reply changed");
+ if(g_deckyMirrorBroker.statusReads!=0)throw std::runtime_error("ingress still constructs full diagnostic status");
+ std::cout<<"NATIVE_BUILD_RECEIPT_OK passed=9 realSteam=0 realPorts=0"<<std::endl;return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}}
 `;
 fs.writeFileSync(path.join(validation,'native-build-receipt-fixture.cpp'),fixture);

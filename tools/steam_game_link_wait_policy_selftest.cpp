@@ -5,9 +5,12 @@
 #include "../native/steam_game_link_log_watch.h"
 #include <array>
 #include <atomic>
+#include <deque>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -18,13 +21,26 @@ static ULONGLONG clockTick=0;
 static DWORD lastTimeout=0,lastCount=0;
 static unsigned hints=0,checks=0,stampReads=0;
 static bool kernelWait=false;
+static bool kernelClock=false;
+static unsigned predicatePolls=0;
+static unsigned signalAttempts=0,signalFailures=0;
+static std::function<void()> afterKernelWait,afterSignal;
+static BOOL testSetEvent(HANDLE event){
+    ++signalAttempts;
+    if(signalFailures){--signalFailures;return FALSE;}
+    const auto result=::SetEvent(event);
+    if(afterSignal){auto hook=std::move(afterSignal);afterSignal=nullptr;hook();}
+    return result;
+}
 static void expect(bool b,const char* text){++checks;if(!b)throw std::runtime_error(text);}
 static void steamOriginalRecoveryObserveHint(){++hints;}
-static ULONGLONG testTick(){return clockTick;}
+static ULONGLONG testTick(){return kernelClock?::GetTickCount64():clockTick;}
+[[maybe_unused]] static DWORD predicateWait(HANDLE handle,DWORD timeout){++predicatePolls;return ::WaitForSingleObject(handle,timeout);}
 static DWORD consumerWait(DWORD count,const HANDLE* handles,BOOL all,DWORD timeout){
     lastTimeout=timeout;lastCount=count;
     if(kernelWait)return ::WaitForMultipleObjects(count,handles,all,timeout);
     const auto signalled=::WaitForMultipleObjects(count,handles,all,0);
+    if(afterKernelWait){auto hook=std::move(afterKernelWait);afterKernelWait=nullptr;hook();}
     if(signalled!=WAIT_TIMEOUT)return signalled;
     if(timeout!=INFINITE)clockTick+=timeout;
     return WAIT_TIMEOUT;
@@ -42,10 +58,26 @@ struct Handle {
 struct Control {
     HANDLE stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr),pokeEvent=CreateEventW(nullptr,FALSE,FALSE,nullptr);
     std::atomic<unsigned> hintsPending{0};
+    bool hintWakeSucceeded=false;
+    std::mutex observationMx;
+    std::deque<std::function<void()>> observationJobs;
+    std::atomic<bool> stop{false},observationsClosed{false};
     unsigned directoryNotices=0;
     ULONGLONG lastDirectoryTick=0;
     ~Control(){CloseHandle(stopEvent);CloseHandle(pokeEvent);}
 };
+namespace SteamGameLink {
+using ::Control;
+static std::mutex lifecycleMx;
+static std::shared_ptr<Control> control;
+static constexpr std::size_t observationQueueLimit=4;
+#include "runtime_observation_drain.inc"
+}
+static std::atomic<bool> g_exitRequested{false};
+#define SetEvent testSetEvent
+#include "runtime_hint_notify.inc"
+#include "runtime_observation_submit.inc"
+#undef SetEvent
 static void noteStartupDirectory(const std::shared_ptr<Control>& c,ULONGLONG tick){++c->directoryNotices;c->lastDirectoryTick=tick;}
 struct Revoked {int game;Handle handle;};
 struct NativeGameNoGameReceipt {};
@@ -72,14 +104,17 @@ struct Consumer {
     std::string stamp(const std::wstring& file){++stampReads;if(file.find(L"gameprocess")!=std::wstring::npos)return gameValue;if(file.find(L"console")!=std::wstring::npos)return consoleValue;return connectionValue;}
     void closeDirectory(){directory.value=nullptr;waitPolicy.directoryChecked();startupCapturePending=true;}
     bool nativeValveCaptureNoGame(NativeGameNoGameReceipt*) const {return qualifiedNoGame;}
-    void hint(unsigned kind){c->hintsPending.fetch_or(kind,std::memory_order_release);SetEvent(c->pokeEvent);}
-    void normalHint(){hint(waitpolicy::Immediate);}
-    void windowHint(){hint(waitpolicy::Window);}
+    Consumer(){SteamGameLink::control=c;}
+    ~Consumer(){SteamGameLink::control.reset();}
+    void normalHint(){steamGameLinkNotify(false);}
+    void windowHint(){steamGameLinkNotify(true);}
     void directoryCheck(){const auto now=clockTick;
 #include "runtime_directory.inc"
     }
     bool observeDue(){const auto now=clockTick,epoch=configEpoch;
+#define WaitForSingleObject predicateWait
 #include "runtime_observe.inc"
+#undef WaitForSingleObject
     }
     bool waitOnce(){
 #define GetTickCount64 testTick
@@ -104,11 +139,13 @@ static void linkRetirementCases(){
     for(bool steam:{false,true}){
         Consumer x;clockTick=0;x.healthy();clockTick=125;
         x.normalHint();SetEvent(steam?x.clientHandle.value:x.gameHandle.value);
-        x.waitOnce();expect(!x.c->hintsPending&&x.forceObserve,"successor hint is consumed while old link is active");
+        const auto beforeHints=hints;
+        x.waitOnce();expect(x.forceObserve,"a ready exit or successor hint schedules a read");
         x.sample();expect(!x.state.active()&&x.state.snapshot().terminal,"old link seals before fresh discovery");
         expect(!x.game&&!x.currentRecordPre&&!x.gameHandle.value&&!x.clientHandle.value,"old game and record authority discarded");
         expect(x.pending&&x.idleDue==clockTick,"retirement must preserve one discovery without another hint");
         x.waitOnce();expect(lastTimeout==0,"pending discovery bypasses the former healthy cadence");
+        expect(!x.c->hintsPending&&hints>beforeHints,"successor hint is delivered by the one pending discovery");
         x.pending=false; // The real idle-discovery branch consumes the pending bit before reading.
         x.waitOnce();expect(lastTimeout==INFINITE,"no successor and no new hint do not cause a polling loop");
     }
@@ -236,7 +273,101 @@ static void run(){
     std::cout<<"unqualified_idle_windows=50 Steam_reads=0 selected_and_loss_paths=3\n";
 }
 }
+static void hintWakeCases(){
+    {Consumer x;clockTick=0;x.healthy();clockTick=200;
+        const auto attempts=signalAttempts,h=hints;
+        for(unsigned i=0;i<200;++i)x.windowHint();
+        std::cout<<"window_burst notifications=200 SetEvent_calls="<<signalAttempts-attempts<<'\n';
+        expect(signalAttempts==attempts+1,"a pending window burst sends one kernel signal");
+        x.waitOnce();expect(hints==h+1&&!x.forceObserve,"burst delivers one quiet window hint");
+        x.waitOnce();expect(lastTimeout==9800&&clockTick==10000,"coalescing adds no extra wait before the watchdog");}
+    {Consumer x;clockTick=0;x.healthy();clockTick=200;
+        const auto attempts=signalAttempts,h=hints;
+        x.windowHint();
+        afterKernelWait=[&]{x.normalHint();};
+        x.waitOnce();expect(hints==h+1&&x.forceObserve&&x.observeDue(),"urgency upgrade after auto-reset still reaches the current exchange");
+        expect(signalAttempts==attempts+1,"upgrade before exchange uses the outstanding wake");
+        x.sample();x.normalHint();x.waitOnce();
+        expect(signalAttempts==attempts+2&&hints==h+2&&x.forceObserve,"next hint after exchange sends a new wake");}
+    {Consumer x;clockTick=0;const auto attempts=signalAttempts,h=hints;
+        afterSignal=[&]{x.waitOnce();}; // Consumer exchanges before the producer records successful SetEvent.
+        x.windowHint();x.normalHint();x.waitOnce();
+        expect(signalAttempts==attempts+2&&hints==h+2&&x.forceObserve,"success recorded after exchange cannot suppress the next batch");}
+    {Consumer x;clockTick=0;const auto attempts=signalAttempts,h=hints;
+        signalFailures=2;x.windowHint();x.windowHint();
+        expect(signalAttempts==attempts+2,"duplicate retries a failed wake");
+        x.waitOnce();expect(lastTimeout==INFINITE&&!x.pending&&hints==h,"failed wakes leave idle consumer waiting");
+        x.normalHint();x.windowHint();x.waitOnce();
+        expect(signalAttempts==attempts+3&&hints==h+1&&x.pending&&x.forceObserve,"successful retry delivers retained hint and urgency");}
+    {Consumer x;clockTick=0;x.healthy();clockTick=200;
+        const auto attempts=signalAttempts,h=hints;unsigned jobs=0;
+        x.windowHint();signalFailures=1;
+        expect(!steamGameLinkSubmitObservation([&]{++jobs;}),"failed job wake does not borrow the hint wake");
+        SteamGameLink::drainObservation(x.c);expect(jobs==0,"failed job signal removes its job");
+        expect(steamGameLinkSubmitObservation([&]{++jobs;}),"job can use the same event with a pending hint");
+        x.waitOnce();SteamGameLink::drainObservation(x.c);
+        expect(signalAttempts==attempts+3&&hints==h+1&&jobs==1&&!x.forceObserve,"shared wake delivers both job and quiet hint");
+        expect(steamGameLinkSubmitObservation([&]{++jobs;}),"mailbox alone submits after hints drain");
+        x.waitOnce();SteamGameLink::drainObservation(x.c);
+        expect(hints==h+1&&jobs==2&&!x.forceObserve,"ordinary mailbox wake does not invent a hint");
+        x.normalHint();expect(steamGameLinkSubmitObservation([&]{++jobs;}),"job pending before stop");
+        x.c->stop.store(true,std::memory_order_release);SetEvent(x.c->stopEvent);
+        expect(!x.waitOnce()&&hints==h+1,"stop wins over the signalled shared event");
+        SteamGameLink::drainObservation(x.c);expect(jobs==2,"stop does not let a pending job run");}
+}
+static void exitPriorityCases(){
+    for(bool steam:{false,true}){
+        Consumer x;clockTick=0;x.healthy();clockTick=200;
+        x.windowHint();SetEvent(x.directory);SetEvent(steam?x.clientHandle.value:x.gameHandle.value);
+        expect(x.waitOnce()&&x.forceObserve,"held exit outranks noisy window and directory handles");
+        expect(x.c->hintsPending==waitpolicy::Window,"exit does not discard a queued hint");
+        x.sample();expect(x.state.snapshot().reason==(steam?"steam-exited":"game-exited"),"held process exit seals the exact link");
+        expect(x.pending&&x.idleDue==clockTick,"exit schedules one immediate successor discovery");
+        x.waitOnce();expect(!x.c->hintsPending&&x.pending&&lastTimeout==0,"queued hint folds into successor discovery");
+    }
+    Consumer x;clockTick=0;x.healthy();SetEvent(x.gameHandle.value);x.normalHint();SetEvent(x.c->stopEvent);
+    expect(!x.waitOnce()&&!x.forceObserve,"stop outranks process exits and hints");
+}
+static unsigned exitWaitCount(){
+    Consumer x;clockTick=0;x.healthy();const auto before=predicatePolls;
+    for(unsigned i=1;i<=200;++i){clockTick=i;x.windowHint();expect(x.waitOnce()&&!x.observeDue(),"quiet window wake leaves the observation deadline unchanged");}
+    expect(x.state.snapshot().dueTick==10000,"healthy deadline survives quiet wakes");
+    const auto polls=predicatePolls-before;
+    std::cout<<"quiet_window_wakes=200 predicate_zero_waits="<<polls<<'\n';
+    return polls;
+}
+static void kernelFallbackCase(){
+    Consumer x;kernelWait=true;kernelClock=true;clockTick=::GetTickCount64();x.healthy();
+    const auto started=clockTick,deadline=x.state.snapshot().dueTick;
+    const auto attempts=signalAttempts,h=hints;
+    signalFailures=1;x.normalHint();
+    expect(x.c->hintsPending==waitpolicy::Immediate,"failed signal retains the pending notification");
+    x.primaryValue=PrimaryStatus::Different;
+    expect(x.waitOnce(),"watchdog wakes without a delivered notification");
+    clockTick=::GetTickCount64();const auto degradedAt=clockTick;
+    expect(clockTick>=deadline&&x.observeDue(),"real healthy deadline schedules a fresh read");
+    expect(!x.forceObserve&&hints==h&&signalAttempts==attempts+1&&x.c->hintsPending==waitpolicy::Immediate,"no wake or hint was delivered before fallback");
+    x.sample();expect(!x.state.linked()&&x.state.active()&&x.state.snapshot().reason=="native-primary-different","watchdog observes changed association");
+    const auto retry=x.state.snapshot().dueTick;x.primaryValue=PrimaryStatus::Exact;
+    expect(x.waitOnce(),"degraded link wakes for the existing retry");
+    clockTick=::GetTickCount64();expect(clockTick>=retry&&x.observeDue(),"real degraded deadline schedules a fresh read");
+    x.sample();expect(x.state.linked()&&hints==h,"successful retry restores the same link with no delivered hint");
+    kernelWait=false;kernelClock=false;
+    std::cout<<"healthy_wait_ms="<<degradedAt-started<<" retry_wait_ms="<<clockTick-degradedAt<<" delivered_hints=0\n";
+}
 int main(int argc,char** argv){try{
+    if(argc==2&&std::string_view(argv[1])=="--exit-wait-count"){
+        exitWaitCount();return 0;
+    }
+    if(argc==2&&std::string_view(argv[1])=="--exit-priority-only"){
+        exitPriorityCases();std::cout<<"PASS exit priority: "<<checks<<" checks\n";return 0;
+    }
+    if(argc==2&&std::string_view(argv[1])=="--kernel-fallback-only"){
+        kernelFallbackCase();std::cout<<"PASS kernel fallback: "<<checks<<" checks\n";return 0;
+    }
+    if(argc==2&&std::string_view(argv[1])=="--hint-wake-only"){
+        hintWakeCases();std::cout<<"PASS hint wake: "<<checks<<" checks\n";return 0;
+    }
     if(argc==2&&std::string_view(argv[1])=="--idle-discovery-only"){
         idleDiscoveryFixture::run();std::cout<<"PASS idle discovery: "<<checks<<" checks\n";return 0;
     }
@@ -332,5 +463,8 @@ int main(int argc,char** argv){try{
     startupEnrollmentCases();
     idleWindowCases();
     idleDiscoveryFixture::run();
+    hintWakeCases();
+    exitPriorityCases();
+    expect(exitWaitCount()==0,"quiet window wakes must not probe the held processes");
     std::cout<<"PASS production wait/directory/predicate consumer + policy: "<<checks<<" checks; hints="<<hints<<"; no real timed waits or target processes\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

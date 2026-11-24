@@ -42,15 +42,20 @@ export function installWallpaperRouteFallback({host,react:React,reactDom,ui,rout
         if(dead)return;dead=true;observer.disconnect();scopes=[];
         try{unlisten?.();}catch{}unlisten=undefined;
         doc.removeEventListener('focusin',check,true);doc.removeEventListener('visibilitychange',check);
-        view.removeEventListener('focus',check);view.removeEventListener('pageshow',check);
+        view.removeEventListener('focus',check);view.removeEventListener('pageshow',check);view.removeEventListener('pagehide',retire);
         cleanups.delete(clear);if(clearPortal)publish(null);
       }
+      // The global may still be waiting for Home when its document is replaced.
+      function retire(event:PageTransitionEvent){if(event.isTrusted&&event.persisted===false)clear(false);}
       function check(){
         if(dead)return;if(disposed()){clear();return;}
         let pathname:any;
         try{pathname=ui.Router?.WindowStore?.GamepadUIMainWindowInstance?.m_locationPathname;}catch{}
         const home=pathname==='/library/home';
         if(typeof pathname==='string'&&pathname.length>0&&!home){publish(null);bind([],false);return;}
+        // The surface handles playback visibility. Rediscover the current Home
+        // on visibilitychange instead of scanning its hidden document.
+        if(doc.visibilityState==='hidden'){bind([],false);return;}
         let eligible=false;try{eligible=ui.findSP()?.document===doc;}catch{}
         if(!eligible){publish(null);bind([],false);return;}
         if(!home&&unknownDiscovered){
@@ -69,7 +74,7 @@ export function installWallpaperRouteFallback({host,react:React,reactDom,ui,rout
       }
       cleanups.add(clear);
       doc.addEventListener('focusin',check,true);doc.addEventListener('visibilitychange',check);
-      view.addEventListener('focus',check);view.addEventListener('pageshow',check);
+      view.addEventListener('focus',check);view.addEventListener('pageshow',check);view.addEventListener('pagehide',retire);
       try{
         const history=ui.Router?.WindowStore?.GamepadUIMainWindowInstance?.m_history;
         if(typeof history?.listen==='function'){

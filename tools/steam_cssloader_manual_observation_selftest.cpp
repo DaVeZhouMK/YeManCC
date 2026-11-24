@@ -59,36 +59,44 @@ static void deckySidebarDiagnostic(const std::string&,const json&,bool){}static 
 #include "production-css-manual.h"
 static const char*helper=R"PS(param([string]$Action,[uint32]$SessionPid,[string]$SessionBirth,[string]$BackendPath,[string]$ReadyEvent,[string]$IdleEvent,[int]$GateTimeoutMs,[switch]$StartBackend,[switch]$VerifyOnly)
 $ErrorActionPreference='Stop'
-# SharedProcessQueryProtocol=1 SharedSteamReadProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1
+# SharedProcessQueryProtocol=1 SharedSteamReadProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1 AutomaticInitializeGateProtocol=1
 $elevated=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if($Action -eq 'Ensure'){
- if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'permit-initialize'))){throw 'unexpected initialization'}
- [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'token-order.txt'),('Ensure:'+([int]$elevated))+[Environment]::NewLine)
- Start-Sleep -Milliseconds 700
- if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail-initialize')){exit 1}
- [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'token-order.txt'),'EnsureComplete'+[Environment]::NewLine);exit 0
-}
-if($Action -ne 'Automatic' -or $StartBackend){throw 'owned helper must not start a backend'}
-[IO.File]::AppendAllText((Join-Path $PSScriptRoot 'token-order.txt'),('Automatic:'+([int]$elevated))+[Environment]::NewLine)
-[IO.File]::AppendAllText((Join-Path $PSScriptRoot 'helper-calls.txt'),([int][bool]$VerifyOnly).ToString()+[Environment]::NewLine)
+if($Action -ne 'Automatic' -or ($StartBackend -and $VerifyOnly)){throw 'unexpected helper action'}
+$order=Join-Path $PSScriptRoot 'token-order.txt'
 $base=$ReadyEvent.Substring(0,$ReadyEvent.Length-6)
 $ready=[Threading.EventWaitHandle]::OpenExisting($ReadyEvent);$idle=[Threading.EventWaitHandle]::OpenExisting($IdleEvent)
 $map=[IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($base+'.result');$view=$map.CreateViewAccessor(0,32)
+function Write-FixtureResult([int[]]$Values){
+ $view.Write(0,[int]0)
+ for($n=1;$n -lt 8;$n++){$view.Write($n*4,$Values[$n])}
+ $view.Write(0,$Values[0]);$view.Flush()
+}
 try{
+ if($StartBackend){
+  if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'permit-initialize'))){throw 'unexpected initialization'}
+  [IO.File]::AppendAllText($order,('Ensure:'+([int]$elevated))+[Environment]::NewLine)
+  Start-Sleep -Milliseconds 700
+  if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail-initialize')){exit 1}
+  [IO.File]::AppendAllText($order,'EnsureComplete'+[Environment]::NewLine)
+  Write-FixtureResult @(0x594D4353,2,1,0,0,0,0,0)
+  if(!$ready.Set() -or !$idle.WaitOne(5000) -or !$idle.Reset()){throw 'owned initialization gate failed'}
+ }
+ [IO.File]::AppendAllText($order,('Automatic:'+([int]$elevated))+[Environment]::NewLine)
+ [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'helper-calls.txt'),([int][bool]$VerifyOnly).ToString()+[Environment]::NewLine)
  if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'slow')){Start-Sleep -Milliseconds 500}
  $ready.Set()|Out-Null
  if(!$idle.WaitOne(5000)){throw 'owned idle gate timeout'}
  if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'slow')){Start-Sleep -Milliseconds 1700}
  $bad=Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')
  $values=@(0x594D4353,2,8,0,31,1,0,0);if($bad){$values=@(0x594D4353,2,5,6,3,1,0,0)}
- for($n=1;$n -lt 8;$n++){$view.Write($n*4,[int]$values[$n])};$view.Write(0,[int]$values[0]);$view.Flush()
+ Write-FixtureResult $values
  if($bad){exit 1}
 }finally{$view.Dispose();$map.Dispose();$idle.Dispose();$ready.Dispose()}
 )PS";
 static void write(const std::filesystem::path&p,const std::string&s){std::ofstream(p,std::ios::binary)<<s;}
 struct Scene{
  std::filesystem::path dir,link,entry;Session session;Child steam,css;steamcssuse::Runtime use;steamcss::Runtime guard;deckylaunch::Handle lastCompletion;
- std::atomic<unsigned>helpers=0,manualEnds=0,readonly=0,ensures=0,initialUses=0,rebinds=0,readySignals=0;
+ std::atomic<unsigned>helpers=0,manualEnds=0,readonly=0,ensures=0,initialUses=0,rebinds=0,readySignals=0,initializationAdmissions=0;
  std::atomic<bool>editor=false,blocked=false,permitConfirmation=true;std::atomic<steamcss::UiMode>mode=steamcss::UiMode::BigPicture;
  std::atomic<unsigned>epoch=1;bool guardStarted=false;
  Scene(const std::filesystem::path&root,const wchar_t*name,DWORD lifetime=5000,DWORD minimumHold=0):dir(root/name),link(dir/L"steam-appearance/backend.path"),entry(dir/L"steam-appearance.ps1"),use(false,1,[this]{return editor?steamcsseditor::State::Active:steamcsseditor::State::Absent;}){
@@ -97,7 +105,7 @@ struct Scene{
   g_steamSettingsObserver.value=session;g_cssPower=1;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;g_aiFanMockSession.isolated=false;
   g_steamCssGuard.port=[this](const auto&s,auto g){++manualEnds;return guardStarted?guard.requestReadOnlyRebind(s,g):true;};
   g_steamCssUse.port=[this](const auto&s){++readonly;auto h=permitConfirmation?use.confirmExisting(s):nullptr;if(h){if(lastCompletion.value)CloseHandle(lastCompletion.value);lastCompletion.value=nullptr;if(!DuplicateHandle(GetCurrentProcess(),h,GetCurrentProcess(),&lastCompletion.value,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("owned completion duplicate");}return h;};
-  check(use.initialize(entry.wstring(),link.wstring(),lifetime,0,[this](const auto&stage,const auto&s,const auto&b,const auto&r){if(stage=="automatic-helper-start")++helpers;if(stage=="automatic-helper-ready")++readySignals;productionManualChanged(stage,s,b,r);},minimumHold,[]{return !g_exitRequested&&g_powerLifecycle==PowerLifecycle::Ready;},[]{return g_cssPower.load();}),"owned use runtime initializes");use.observeSteam(session);
+  check(use.initialize(entry.wstring(),link.wstring(),lifetime,0,[this](const auto&stage,const auto&s,const auto&b,const auto&r){if(stage=="automatic-helper-start")++helpers;if(stage=="automatic-helper-ready")++readySignals;if(stage=="automatic-initialization-admitted")++initializationAdmissions;productionManualChanged(stage,s,b,r);},minimumHold,[]{return !g_exitRequested&&g_powerLifecycle==PowerLifecycle::Ready;},[]{return g_cssPower.load();}),"owned use runtime initializes");use.observeSteam(session);
  }
  ~Scene(){guard.shutdown();guardStarted=false;g_steamCssGuard.port={};g_steamCssUse.port={};use.shutdown();}
  steamcss::ModeSample sample(){return{mode.load(),"doc/owned:mode/"+std::to_string(epoch.load())};}
@@ -164,16 +172,16 @@ int wmain(int argc,wchar_t**argv){try{
  }
  {
   Scene s(out,L"initialization-order");write(s.dir/L"permit-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event!=nullptr,"missing-backend request has one bounded completion");
-  check(until([&]{return std::filesystem::exists(s.dir/L"token-order.txt");}),"owned initialization is running");check(s.helpers==0,"automatic resource and DOM work waits for initialization completion");
+  check(until([&]{return std::filesystem::exists(s.dir/L"token-order.txt");}),"owned initialization is running");check(s.helpers==1&&s.initializationAdmissions==0&&s.readySignals==0&&!std::filesystem::exists(s.dir/L"helper-calls.txt"),"automatic resource and DOM work waits for initialization completion");
   check(WaitForSingleObject(event,4000)==WAIT_OBJECT_0&&s.use.residentConfirmed(s.session),"successful initialization continues into exactly one verified automatic helper");CloseHandle(event);
   std::ifstream file(s.dir/L"token-order.txt");std::string text((std::istreambuf_iterator<char>(file)),{});deckylaunch::Handle token;TOKEN_ELEVATION own{};DWORD size=0;check(OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token.value)&&GetTokenInformation(token.value,TokenElevation,&own,sizeof(own),&size),"test host token is readable");
-  check(text.find(std::string("Ensure:")+(own.TokenIsElevated?"1":"0"))!=std::string::npos&&text.find("EnsureComplete")<text.find("Automatic:")&&text.find(std::string("Automatic:")+(own.TokenIsElevated?"1":"0"))!=std::string::npos,"Ensure and later trusted automatic work retain the verified host token");check(s.helpers==1&&live(s.css.p),"initialization sequence retains the sole owned backend");
+  check(text.find(std::string("Ensure:")+(own.TokenIsElevated?"1":"0"))!=std::string::npos&&text.find("EnsureComplete")<text.find("Automatic:")&&text.find(std::string("Automatic:")+(own.TokenIsElevated?"1":"0"))!=std::string::npos,"Ensure and later trusted automatic work retain the verified host token");check(s.helpers==1&&s.initializationAdmissions==1&&s.readySignals==1&&live(s.css.p),"initialization sequence retains the sole owned backend and helper");
  }
  {
-  Scene s(out,L"initialization-failure");write(s.dir/L"permit-initialize","");write(s.dir/L"fail-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event&&WaitForSingleObject(event,4000)==WAIT_OBJECT_0,"failed initialization closes its finite request");CloseHandle(event);check(s.helpers==0&&!s.use.residentConfirmed(s.session)&&live(s.css.p),"failed initialization never falls through to confirmation or stops CSS");
+  Scene s(out,L"initialization-failure");write(s.dir/L"permit-initialize","");write(s.dir/L"fail-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event&&WaitForSingleObject(event,4000)==WAIT_OBJECT_0,"failed initialization closes its finite request");CloseHandle(event);check(s.helpers==1&&s.initializationAdmissions==0&&s.readySignals==0&&!std::filesystem::exists(s.dir/L"helper-calls.txt")&&!s.use.residentConfirmed(s.session)&&live(s.css.p),"failed initialization never falls through to confirmation or stops CSS");
  }
  {
-  Scene s(out,L"initialization-manual-takeover");write(s.dir/L"permit-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event&&until([&]{return std::filesystem::exists(s.dir/L"token-order.txt");}),"initialization is in flight before a manual takeover");auto ticket=s.use.begin(s.session);check(WaitForSingleObject(event,1000)==WAIT_OBJECT_0,"manual takeover retires the previous automatic completion");CloseHandle(event);s.use.release(ticket.token);Sleep(800);check(s.helpers==0&&live(s.css.p),"cancelled initialization cannot later launch an automatic helper");
+  Scene s(out,L"initialization-manual-takeover");write(s.dir/L"permit-initialize","");auto event=s.use.confirmAndIdle(s.session,true);check(event&&until([&]{return std::filesystem::exists(s.dir/L"token-order.txt");}),"initialization is in flight before a manual takeover");auto ticket=s.use.begin(s.session);check(WaitForSingleObject(event,1000)==WAIT_OBJECT_0,"manual takeover retires the previous automatic completion");CloseHandle(event);s.use.release(ticket.token);Sleep(800);check(s.helpers==1&&s.initializationAdmissions==0&&s.readySignals==0&&!std::filesystem::exists(s.dir/L"helper-calls.txt")&&live(s.css.p),"cancelled initialization cannot continue or launch another automatic helper");
  }
  {
   Scene s(out,L"power-bound-receipt");s.startGuard();

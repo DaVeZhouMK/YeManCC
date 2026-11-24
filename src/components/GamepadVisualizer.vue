@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, shallowRef, onMounted, onBeforeUnmount, onActivated, onDeactivated, onBeforeUpdate, onUpdated, computed, watch } from 'vue';
 import { on as onIpc } from '@/bridge/ipc';
-import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
+import { isUiPowerReady, isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { createGamepadPresenter, EMPTY_GAMEPAD_PRESENTATION } from '@/bridge/gamepadPresentation';
 import { createPressFeedback } from '@/bridge/controllerPressFeedback';
 import { createControllerPreviewTrace } from '@/robust/controllerPreviewTrace';
@@ -94,8 +95,7 @@ let testBHeld = false;
 // The native stream remains authoritative. Only display work pauses when hidden.
 const baseImageRevision = ref(0);
 let baseImageRetryTimer: number | null = null;
-let stopResumeReady: (() => void) | null = null;
-let stopResumed: (() => void) | null = null;
+let stopPower: (() => void) | null = null;
 let imageRefreshPending = false;
 let imageFailures = 0;
 const IMAGE_RETRY_LIMIT = 3;
@@ -212,8 +212,23 @@ onMounted(() => {
     oemEdgeFeedback.accept(keys);
     oemEdgeFeedback.accept([]); // Visual receipt only; never synthesize held input.
   });
-  stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
-  stopResumed = onIpc('power.resumed', refreshBaseImage);
+  let readyGeneration: number | null = null;
+  let readySuspendSerial: number | undefined;
+  let observedSleep = false;
+  stopPower = onSharedPowerLifecycle(state => {
+    if (!isUiPowerReady(state)) {
+      if (state.known !== false && state.phase !== 'ready') observedSleep = true;
+      return;
+    }
+    // Only a current presentation wake needs to reload the artwork. A cold
+    // Ready, a duplicate publication, or input readiness alone does not.
+    const woke = observedSleep || (readyGeneration !== null &&
+      (readyGeneration !== state.generation || readySuspendSerial !== state.suspendSerial));
+    readyGeneration = state.generation;
+    readySuspendSerial = state.suspendSerial;
+    observedSleep = false;
+    if (woke) refreshBaseImage();
+  }, { observeSuspendSerial: true });
 });
 onActivated(() => { viewActive = true; syncPresentationVisibility(); });
 onDeactivated(() => { viewActive = false; syncPresentationVisibility(); });
@@ -230,10 +245,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('ipc:gamepad.testmode', onTestModeEvent);
   stopState?.();
   stopState = null;
-  stopResumeReady?.();
-  stopResumeReady = null;
-  stopResumed?.();
-  stopResumed = null;
+  stopPower?.();
+  stopPower = null;
   if (testBTimer !== null) window.clearTimeout(testBTimer);
   testBTimer = null;
   setTestMode(false);

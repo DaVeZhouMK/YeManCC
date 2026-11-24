@@ -280,10 +280,13 @@ async function main(){
 async function sharedSleepMain(){
  await settle();
  const originalResponder=(globalThis as any).__mockIpcResponder;
- let lifecycleFails=false,lifecycleUnknown=false;
+ let lifecycleFails=false,lifecycleUnknown=false,lifecycleScope:Record<string,unknown>|undefined;
+ let heldLifecycle:Promise<unknown>|null=null,settleOld:(value:unknown)=>void=()=>{};
  (globalThis as any).__mockIpcResponder=(command:string,args:any)=>{
   if(command==='power.lifecycle'&&lifecycleFails)throw Error('fixture-current-power-reader-unavailable');
   if(command==='power.lifecycle'&&lifecycleUnknown)return {known:false,phase:'ready',generation:powerGeneration,hardwareWritesAllowed:false,inputReady:false};
+  if(command==='power.lifecycle'&&heldLifecycle)return heldLifecycle;
+  if(command==='power.lifecycle'&&lifecycleScope)return {...originalResponder(command,args),...lifecycleScope};
   return originalResponder(command,args);
  };
  const sentControl=()=>calls.some(c=>c.cmd==='shell.run'||c.cmd==='tdpMsi.set'||c.cmd==='tdpDaemon.request'&&c.args.op==='set');
@@ -297,7 +300,31 @@ async function sharedSleepMain(){
   check('shared-sleep-healed-new-requests-retain-cached-power-read',applied&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length===10&&!calls.some(c=>c.cmd==='power.lifecycle'||c.cmd==='power.sourceSnapshot'));
   await reset('daemon-shared-explicit-unknown');lifecycleUnknown=true;calls=[];error='';try{await setTdp('ac',31,{apply:true,save:false,source:'ui'});}catch(e){error=String(e);}await settle();
   check('shared-sleep-explicit-unknown-remains-blocked',!!error&&!sentControl());
- }finally{lifecycleFails=lifecycleUnknown=false;(globalThis as any).__mockIpcResponder=originalResponder;await stopTdpDaemon();}
+  lifecycleUnknown=false;await reset('daemon-shared-same-generation');
+  const publish=(revision:number,suspendSerial:number,notificationPending:boolean)=>{
+   lifecycleScope={publicationRevision:revision,observedNotificationSequence:revision,suspendSerial,notificationPending};
+   emitMockIpcEvent('power.lifecycleChanged',{...originalResponder('power.lifecycle',{}),...lifecycleScope});
+  };
+  publish(100,1,false);await settle();calls=[];
+  publish(101,1,true);const pending=await reconcileTdpPowerSession();error='';
+  try{await setTdp('ac',31,{apply:true,save:false,source:'ui'});}catch(e){error=String(e);}
+  check('shared-sleep-pending-notification-revokes-ready-before-tdp-dispatch',!pending&&!!error&&!sentControl());
+  publish(102,1,false);await settle();
+  heldLifecycle=new Promise(resolve=>{settleOld=resolve;});
+  const oldRead=reconcileTdpPowerSession();await settle();heldLifecycle=null;
+  publish(103,2,false);await settle();
+  const sameGenerationHealed=await reconcileTdpPowerSession();
+  settleOld({known:true,phase:'ready',generation:powerGeneration,suspendSerial:1,hardwareWritesAllowed:true,inputReady:true});
+  check('shared-sleep-new-suspend-serial-releases-old-read-without-replaying-watts',sameGenerationHealed&&!await oldRead&&!sentControl());
+  scenario='daemon-held-set';calls=[];
+  const committed=setTdp('ac',32,{apply:true,save:false,source:'ui'});await settle();
+  const finishWrite=holdSet as unknown as ((value:any)=>void);
+  if(!finishWrite)throw Error('fixture did not hold committed set');
+  try{publish(104,3,false);await settle();}
+  finally{finishWrite({ok:true,rc:0});}
+  check('shared-sleep-late-committed-write-settles-without-publishing-or-repeating',!await committed&&
+    calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length===1&&tdpRuntimeStore.get().status!=='applied');
+ }finally{settleOld(null);lifecycleFails=lifecycleUnknown=false;(globalThis as any).__mockIpcResponder=originalResponder;await stopTdpDaemon();}
  const report={checks,failures:checks.filter(c=>!c.pass).length,selection:'shared-sleep-only',scope:'REAL_FRONTEND_UNIFIED_ENTRY_WITH_OFFLINE_IPC_NO_PRODUCT_OR_HARDWARE',realHardwareExecuted:false};writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));process.exitCode=report.failures?1:0;
 }
 

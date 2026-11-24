@@ -7,6 +7,7 @@
 #include <functional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -55,8 +56,8 @@ struct Ports {
     std::function<bool(SoftwareSnapshotFailure&)> softwareSnapshotFailure;
 };
 // Bounded observations, with no timer, worker or state shared across operations.
-// Values and failures may be reused for at most 64 items / 1000ms. The caller
-// must still obtain a fresh read before any write and refresh after every write.
+// By default, values and failures may be reused for up to 64 items / 1000ms.
+// The caller must still obtain a fresh read before and after every write.
 // Kept here so the injected mock and native ports consume the same cache code.
 template<class T> class ObservationCache {
     T value_{};
@@ -75,8 +76,9 @@ public:
         if(!ok_&&error_.empty())error_="observation-snapshot-unavailable";
         error=ok_?std::string{}:error_;return ok_;
     }
-    template<class Load> bool observe(std::uint64_t now,Load load,std::string& error) {
-        if(!present_||now<sampledAt_||now-sampledAt_>=maxAgeMs||uses_>=maxUses)return refresh(now,std::move(load),error);
+    template<class Load> bool observe(std::uint64_t now,Load load,std::string& error,
+        std::uint64_t ageMs=maxAgeMs,unsigned limit=maxUses) {
+        if(!present_||now<sampledAt_||now-sampledAt_>=ageMs||uses_>=limit)return refresh(now,std::move(load),error);
         ++uses_;error=ok_?std::string{}:error_;return ok_;
     }
     const T& value() const {return value_;}
@@ -310,14 +312,23 @@ public:
         if(!save(std::move(next)))return result();
         planSoftware(items);
         if(!reconcileAbsentOwnedDevices(items))return result();
+        // Persist replaces the JSON document. Keep owned keys and stable array
+        // positions for retained entries; seen already excludes newly added keys.
+        std::unordered_map<std::string,std::size_t> retainedEntries;
+        const auto& entries=j_["entries"];
+        retainedEntries.reserve(entries.size());
+        for(std::size_t i=0;i<entries.size();++i)
+            retainedEntries.emplace(entries[i]["key"].get_ref<const std::string&>(),i);
         std::set<std::string> seen;
         for(const auto& item:items) {
             if(storageFault_)break;
             if(!time()){scanError("scan-canceled-or-deadline");break;}
-            if(!itemValid(item)||!seen.insert(item.value("key",std::string{})).second){scanError("invalid-or-duplicate-candidate");continue;}
+            if(!itemValid(item)){scanError("invalid-or-duplicate-candidate");continue;}
+            const auto& key=item["key"].get_ref<const std::string&>();
+            if(!seen.insert(key).second){scanError("invalid-or-duplicate-candidate");continue;}
             if(item["kind"]=="software") {if(softwareStopped_)continue;++softwareVisited_;}
-            std::size_t i=0;
-            for(;i<j_["entries"].size();++i)if(j_["entries"][i]["key"]==item["key"])break;
+            const auto retained=retainedEntries.find(key);
+            const auto i=retained==retainedEntries.end()?j_["entries"].size():retained->second;
             Json current;
             const bool observed=p_.observe?p_.observe(item,current,e):p_.read(item,current,e);
             if(!observed||!valueValid(item,current)) {

@@ -2,7 +2,7 @@ import {createServer} from 'node:http';import {execFile} from 'node:child_proces
 const root=process.argv[2],run=promisify(execFile),rows=[],sockets=new Set();let requestCounts={},receivedFormalHeaders=[];
 const requestLifetimeOnly=process.argv[3]==='--request-lifetime-only',lifetimeCase=requestLifetimeOnly?(process.argv[4]??null):null;
 if(requestLifetimeOnly&&process.argv.length===5&&!process.argv[4])throw Error('empty exact Fan business case');
-const lifetimeCases=['business-terminal','business-awaiting-old-superseded','business-unknown','business-other-request','business-running-global-ready','business-duplicate-key'];
+const lifetimeCases=['business-scheduler-zero-action','business-terminal','business-awaiting-old-superseded','business-unknown','business-other-request','business-running-global-ready','business-duplicate-key'];
 const lifetimeSelection=lifetimeCase?lifetimeCase.split(','):null;
 assert(!lifetimeSelection||requestLifetimeOnly&&lifetimeSelection.length>0&&lifetimeSelection.every(x=>lifetimeCases.includes(x))&&new Set(lifetimeSelection).size===lifetimeSelection.length,'exact F5 request lifetime selector');
 const expectedLifetime=lifetimeSelection?lifetimeCases.filter(x=>lifetimeSelection.includes(x)):lifetimeCases;
@@ -83,6 +83,12 @@ try{
   verify(r.receivedFormalHeaders.length===2&&r.captures.length===2,'only initial original and explicitly new manual business send formal POST');
   const first=r.captures[0],last=r.captures[1];verify(first.consumerPid===r.providerPid&&last.consumerPid===r.childPid&&first.requestLow!==last.requestLow&&r.manualToken===1,'different real process identities require different Native business');
   verify(r.settlements.length===2&&r.settlements.every(x=>x.accepted)&&r.settlements.at(-1).remaining===0,'empty fixture returns each exact consumer scope without borrowing another process ACK');
+ }));
+ await attempt('business-scheduler-zero-action',()=>test('business-scheduler-zero-action','business',r=>{
+  verify(r.constructed===2&&r.created===1&&r.returned===1&&r.gateClosed,'a refused creation continues once and the actual replacement worker returns');
+  const [first,retry]=r.tickets;
+  verify(retry.run!==first.run&&retry.request===first.request&&retry.started===first.started&&retry.deadline===first.deadline&&retry.low===first.low&&retry.high===first.high&&retry.attempts===0,'original business, deadline and unspent Host slots survive the zero-action failure');
+  verify(r.requests['/api/resume']===1&&r.leaseArms===1&&r.captures.length===1&&r.settlements.length===1&&r.settlements[0].accepted&&r.settlements[0].remaining===0,'actual WinHTTP sends a single recovery and the test scope returns');
  }));
  for(const name of ["business-terminal","business-awaiting-old-superseded","business-unknown","business-other-request","business-running-global-ready","business-duplicate-key"])await attempt(name,()=>test(name,'business',r=>{
   verify(r.created===r.returned&&r.gateClosed,'all original business workers returned');

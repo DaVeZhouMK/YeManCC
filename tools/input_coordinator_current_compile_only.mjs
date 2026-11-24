@@ -1,3 +1,5 @@
+import {materializeNativePowerPeerFixture,observeNativePowerPeerFixture,observeNativePowerPeerTuple,nativePowerPeerInertPorts,nativePowerPeerSourceFiles} from './fixtures/input_coordinator_lifecycle/native_power_peer.mjs';
+import {materializeSharedInputPowerOwners,observeSharedInputPowerOwners,sharedInputOwnerObservationSources} from './fixtures/input_coordinator_lifecycle/public_power_ownership.mjs';
 import {assertManagedManifestBinding} from './fixtures/input_coordinator_lifecycle/managed_manifest_binding.mjs';
 import {observeCurrent105Progress} from './fixtures/input_coordinator_lifecycle/check_progress.mjs';
 import {observeFinalStages} from './fixtures/input_coordinator_lifecycle/final_stages.mjs';
@@ -13,6 +15,20 @@ import {terminal26NativeSourceProfileFiles,reviewedTerminal26ProductSourceSucces
 import {pairMsiJointPsWake} from './fixtures/input_coordinator_lifecycle/msi_joint_source.mjs';
 // Copy only bare, repository-owned tool headers named by the reviewed fixture.
 // observeCurrent105Fixture still requires its exact approved SHA before compile.
+function adaptTypedLifecycleQueue(text, kind){
+ const [before,after,count]=kind==='fixture'?
+  ['cases.back()["queueAfterFailure"]=g_inputHostLifecycleWorkQueue;',
+   'cases.back()["queueAfterFailure"]=fixtureLifecycleQueueReasons();',2]:
+  ['queue=g_inputHostLifecycleWorkQueue;', 'queue=fixtureLifecycleQueueReasons();',1];
+ if(text.split(before).length!==count+1)throw Error('TYPED_LIFECYCLE_QUEUE_REPORT_ANCHOR:'+kind);
+ const anchor='static std::string_view fixtureLifecycleWorkReason(const auto& work) noexcept {return std::string_view{work};}';
+ const helper='\nstatic json fixtureLifecycleQueueReasons(){auto reasons=json::array();for(const auto& work:g_inputHostLifecycleWorkQueue)reasons.push_back(std::string(fixtureLifecycleWorkReason(work)));return reasons;}';
+ let result=text.replaceAll(before,()=>after);
+ if(kind==='fixture')result=replaceUniqueSourceText(result,anchor,anchor+helper);
+ if(result.replace(helper,'').replaceAll(after,()=>before)!==text)throw Error('TYPED_LIFECYCLE_QUEUE_REPORT_INVERSE:'+kind);
+ return result;
+}
+
 export function currentFixtureToolHeaders(repo){
  const fixture=path.join(repo,'tools/fixtures/input_coordinator_lifecycle/fixture.cpp');
  const text=fs.readFileSync(fixture,'utf8');
@@ -38,8 +54,11 @@ export function currentFixtureCaseIncludes(repo){
  const fixtureRoot=path.join(repo,'tools/fixtures/input_coordinator_lifecycle');
  const root=fs.realpathSync(fixtureRoot),text=fs.readFileSync(path.join(fixtureRoot,'fixture.cpp'),'utf8');
  if(Buffer.byteLength(text)>4*1024*1024)throw Error('CURRENT_FIXTURE_CASE_INPUT_TOO_LARGE');
+ // This compile recipe does not define YMCC_PREPARE_REJECTION_COLD_CASE.
+ // Its generated edge include belongs to the separate directed producer.
+ const active=text.replace(/^#ifdef YMCC_PREPARE_REJECTION_COLD_CASE\r?\n#include "prepare_rejection_on_edge\.inc"\r?\n#include "prepare_rejection_cases\.inc"\r?\n#endif\r?$/m,'');
  const result=[],seen=new Set();
- for(const match of text.matchAll(/^\s*#\s*include\s*"([^\"]+)"/gm)){
+ for(const match of active.matchAll(/^\s*#\s*include\s*"([^\"]+)"/gm)){
   const name=match[1];if(!/\.inc$/i.test(name))continue;
   if(name!==path.basename(name)||!/^[-A-Za-z0-9_.]+$/.test(name))throw Error('CURRENT_FIXTURE_CASE_PATH_REFUSED');
   const candidate=path.join(fixtureRoot,name),stat=fs.lstatSync(candidate);
@@ -57,7 +76,7 @@ export function currentFixtureCaseIncludes(repo){
 // captured source frame. This parses one quoted data literal and executes no JS.
 export function currentLifecycleLogBoundary(repo,{managedInputContract,nativeSourceProfile}={}){
  const profile=currentCompileSourceDataProfile({sourceRoot:repo,managedInputContract,nativeSourceProfile});
- const producerRelative=(managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1')?profile.producerData?.relative:profile.producer?.relative;
+ const producerRelative=(managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1'||managedInputContract==='current105-terminal29-shared-input-power-v1')?profile.producerData?.relative:profile.producer?.relative;
  if(producerRelative!==LIFECYCLE_LOG_PRODUCER)throw Error('CURRENT_LOG_PRODUCER_PROFILE_REQUIRED');
  return readLifecycleLogData(repo,profile.producerData).body;
 }
@@ -67,7 +86,7 @@ export const currentCompileCoreSymbols=Object.freeze(['inputHostTargetReturnAcce
 // native ordinary switch scene. No ownership, return or recovery algorithm is
 // replaced. Earlier contracts do not reference the new fixture scope at all.
 export function bindCurrentOrdinarySwitchFixturePorts(source,{managedInputContract}={}){
- if(managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1')return {source,substitutions:[]};
+ if(managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1'&&managedInputContract!=='current105-terminal29-shared-input-power-v1')return {source,substitutions:[]};
  let text=source;const substitutions=[];
  const prefix=(symbol,body)=>{
   const old=extract(text,symbol).code,brace=old.indexOf('{');
@@ -99,9 +118,11 @@ export function bindCurrentOrdinarySwitchFixturePorts(source,{managedInputContra
   scope:'Existing native ordinary switch fixture physical/CLI I/O port only; explicit scope required, production owner/queue/return and budget decisions unchanged',inverseVerified:true}))};
 }
 export function bindCurrentOrdinarySwitchTopology(source,header,{managedInputContract,productPolicySuccessor}={}){
- if(managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1')return {source,substitution:null};
+ if(managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1'&&managedInputContract!=='current105-terminal29-shared-input-power-v1')return {source,substitution:null};
  const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
- if(productPolicySuccessor!==undefined)admitTerminal26MsiPolicyTopology(header,productPolicySuccessor);
+ if(managedInputContract==='current105-terminal29-shared-input-power-v1'){
+  if(productPolicySuccessor!==undefined||hash(header)!=='36c79886fec9c48f1aa98faa3af01c6c5b9085d0517d1224bcc384f867e05655')throw Error('CURRENT_SWITCH_TERMINAL29_TOPOLOGY_PIN_CHANGED');
+ }else if(productPolicySuccessor!==undefined)admitTerminal26MsiPolicyTopology(header,productPolicySuccessor);
  else if(hash(header)!=='bd7f452113f16779c38793f1207976e268ee370ae7c94ff4184143bbb7e1aeb5')throw Error('CURRENT_SWITCH_TOPOLOGY_HEADER_PIN_CHANGED');
  const original=extract(header,'externalPriorityUsbPortKind').code,brace=original.indexOf('{');
  const changed=original.slice(0,brace+1)+'\n if(fixtureOrdinarySwitchCliScope)return fixtureRogDeferredUsbPortKind(root);\n'+original.slice(brace+1);
@@ -158,9 +179,9 @@ export function prefixCurrentTargetReturnWireObserver(original){
 }
 // The controller fixture excludes the native touchpad input surface. Keep its
 // newly referenced creation leaf denied; never synthesize a successful channel.
-export function bindCurrentTouchpadInputFixturePort(source,{nativeSourceProfile}={}){
- if(nativeSourceProfile===undefined)return {source,substitutions:[]};
- terminal26NativeSourceProfileFiles(nativeSourceProfile);
+export function bindCurrentTouchpadInputFixturePort(source,{nativeSourceProfile,sharedInputPower=false}={}){
+ if(nativeSourceProfile===undefined&&!sharedInputPower)return {source,substitutions:[]};
+ if(nativeSourceProfile!==undefined)terminal26NativeSourceProfileFiles(nativeSourceProfile);
  const anchor='#include "screen_touchpads.h"';
  if(source.split(anchor).length!==2)throw Error('CURRENT_TOUCHPAD_INPUT_INCLUDE_REQUIRED');
  const prefix=[
@@ -181,15 +202,21 @@ export function bindCurrentTouchpadInputFixturePort(source,{nativeSourceProfile}
   rejectOnly:true,sourceCaptureModified:false,scope:'Native touchpad input surface is excluded in this controller fixture; any channel creation increments forbiddenIo and throws before hardware or thread work.'}]};
 }
 export function validateCurrentNativeSourceSelection({managedInputContract,nativeSourceProfile,productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy}={}){
- if(runtimeReusePolicy!==undefined&&(runtimeReusePolicy!=='owned-direct-child-v1'||nativeSourceProfile!=='current105-terminal26-current-capture-20261117a'||managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1'||[productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout].some(value=>value!==undefined)))throw Error('CURRENT26_EXACT_PUBLIC_RUNTIME_POLICY_REQUIRED');
+ if(runtimeReusePolicy!==undefined&&(runtimeReusePolicy!=='owned-direct-child-v1'||nativeSourceProfile===undefined||managedInputContract!=='current105-terminal26-sdk-lifetime-compact-v1'||[productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout].some(value=>value!==undefined)))throw Error('CURRENT26_EXACT_PUBLIC_RUNTIME_POLICY_REQUIRED');
  if(nativeSourceProfile===undefined)return;
  terminal26NativeSourceProfileFiles(nativeSourceProfile);
  if(!managedCompileContract(managedInputContract).signalEvidence)throw Error('CURRENT26_NATIVE_SOURCE_PROFILE_CONTRACT_REQUIRED');
  if([productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout].some(value=>value!==undefined))throw Error('CURRENT26_NATIVE_SOURCE_PROFILE_PRIVATE_SUCCESSOR_CONFLICT');
 }
-export function preflightCurrentCompileSources({sourceRoot,managedInputContract,runtimeRoot,checkProgress=false,finalStages=false,productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy,nativeSourceProfile}={}){
+export function preflightCurrentCompileSources(options={}){
+ if(options.managedInputContract!=='current105-terminal29-shared-input-power-v1')return preflightPriorCompileSources(options);
+ if(['productSourceSuccessor','productHeaderSuccessor','productPolicySuccessor','fixtureInputSuccessor','runtimeParameterLayout','runtimeReusePolicy','nativeSourceProfile'].some(key=>options[key]!==undefined))throw Error('TERMINAL29_LEGACY_SOURCE_ROUTE_REJECTED');
+ return preflightSharedPowerCompileSources(options);
+}
+function preflightPriorCompileSources({sourceRoot,managedInputContract,runtimeRoot,checkProgress=false,finalStages=false,productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy,nativeSourceProfile}={}){
  validateCurrentNativeSourceSelection({managedInputContract,nativeSourceProfile,productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy});
  if(!managedCompileContract(managedInputContract).signalEvidence)throw Error('CURRENT26_PREFLIGHT_EXPLICIT_CONTRACT_REQUIRED');
+ currentFixtureCaseIncludes(sourceRoot);
  for(const relative of currentNativeSourceRoots)if(!fs.lstatSync(path.join(sourceRoot,relative)).isDirectory())throw Error('NATIVE_SOURCE_ROOT_REQUIRED:'+relative);
  for(const relative of ['deps/adlx-sdk/ADLX.h','deps/adlx-sdk/I3DSettings3.h'])if(!fs.lstatSync(path.join(sourceRoot,relative)).isFile())throw Error('NATIVE_ADLX_DECLARED_HEADER_REQUIRED:'+relative);
  const expanded=readVirtualControllerSource(path.join(sourceRoot,'native/main.cpp'));
@@ -230,6 +257,37 @@ export function preflightCurrentCompileSources({sourceRoot,managedInputContract,
  const stages=finalStages?observeFinalStages(progress?.text??policyFixture.text):null;
  return {status:'STATIC_GENERATION_PREFLIGHT_NOT_COMPILE_AUTHORITY',...(runtimeReusePolicy===undefined?{}:{runtimeReusePolicy}),...(nativeSourceProfile===undefined?{}:{nativeSourceProfile,nativeGuardProvenance:guarded.nativeGuardProvenance,touchpadInputPort:touchpadInputPort.substitutions}),productSourceSuccessor:productSourceSuccessorProvenance,productPolicySuccessor:policy.provenance,policyFixture:policyFixture.provenance,ordinarySwitchPorts:ordinarySwitchPorts.substitutions,ordinarySwitchTopology:ordinarySwitchTopology.substitution,productHeaderSuccessor:msiCleanup.productHeaderSuccessor,coreMembers:core.length,core,psReturnApis,psLocateControlledLeafSha256:psLocate.sha256,defaultLoggerUtf8Bytes:Buffer.byteLength(data),fixtureSha256:crypto.createHash('sha256').update(stages?.text??progress?.text??policyFixture.text).digest('hex'),nativeEventHelloEndpointSha256:crypto.createHash('sha256').update(helloEndpoint).digest('hex'),runtimeRecoveryTransport,tupleFixtureRepair,checkProgress,finalStages,lifecycleFixtureInputRepair:observed.lifecycleFixtureInputRepair,sourceApprovalGranted:false,publicRuntimeAccepted:false,compilerCalls:0};
 }
+function preflightSharedPowerCompileSources({sourceRoot,managedInputContract,runtimeRoot,checkProgress=false,finalStages=false,mutation=null}={}){
+ if(!managedCompileContract(managedInputContract).signalEvidence)throw Error('CURRENT26_PREFLIGHT_EXPLICIT_CONTRACT_REQUIRED');
+ for(const relative of currentNativeSourceRoots)if(!fs.lstatSync(path.join(sourceRoot,relative)).isDirectory())throw Error('NATIVE_SOURCE_ROOT_REQUIRED:'+relative);
+ for(const relative of ['deps/adlx-sdk/ADLX.h','deps/adlx-sdk/I3DSettings3.h'])if(!fs.lstatSync(path.join(sourceRoot,relative)).isFile())throw Error('NATIVE_ADLX_DECLARED_HEADER_REQUIRED:'+relative);
+ const {source}=readVirtualControllerSource(path.join(sourceRoot,'native/main.cpp'));
+ const core=currentCompileCoreSymbols.map(symbol=>{const row=extract(source,symbol);return {symbol,sha256:row.sha256};});
+ extract(source,'ColdEnvironment','struct');
+ const serialOwner=extract(source,'gamepadSerialExitOwnershipReleased');
+ if(!serialOwner.code.startsWith('static bool gamepadSerialExitOwnershipReleased() noexcept'))throw Error('ACTUAL_SERIAL_EXIT_OWNER_SIGNATURE_REQUIRED');
+ const psHeader=fs.readFileSync(path.join(sourceRoot,'native/ps_endpoint_return_runtime.h'),'utf8');
+ const psReturnApis=[...new Set([...psHeader.matchAll(/\b(SetupDi\w+|CM_\w+)\s*\(/g)].map(row=>row[1]))];
+ if(psReturnApis.some(name=>!Object.hasOwn(currentPsReturnDevicePorts,name)))throw Error('UNADMITTED_PS_RETURN_DEVICE_API:'+psReturnApis.join(','));
+ const psLocate=extract(fs.readFileSync(path.join(sourceRoot,'tools/fixtures/input_coordinator_lifecycle/ps_wake_cases.inc'),'utf8'),'fixturePsLocate');
+ const guarded=guardCurrentSteam(source,{sourceRoot,managedInputContract});
+ if(!guarded.nativeGuardProvenance||guarded.substitutions.length!==3)throw Error('CURRENT26_THREE_THROW_ONLY_GUARDS_REQUIRED');
+ const data=currentLifecycleLogBoundary(sourceRoot,{managedInputContract});
+ const observed=observeCurrent105Fixture(fs.readFileSync(path.join(sourceRoot,'tools/fixtures/input_coordinator_lifecycle/fixture.cpp'),'utf8'),{sourceRoot,managedInputContract});
+ const isolated=isolateCurrentFixtureSettingsMutex(observed.text,{runtimeRoot,moduleMaintenance:true,...(managedInputContract==='current105-terminal29-shared-input-power-v1'?{lifecycleMutation:mutation}:{})});
+ const progress=checkProgress?observeCurrent105Progress(isolated.text):null;
+ const stages=finalStages?observeFinalStages(progress?.text??isolated.text):null;
+ const ordinary=stages?.text??progress?.text??isolated.text,owners=managedInputContract==='current105-terminal29-shared-input-power-v1'?observeSharedInputPowerOwners({fixture:adaptTypedLifecycleQueue(ordinary,'fixture'),headers:sharedInputOwnerObservationSources().map(relative=>({relative,bytes:fs.readFileSync(path.join(sourceRoot,relative))})),managedInputContract}):null;
+ const nativePeerObservation=managedInputContract==='current105-terminal29-shared-input-power-v1'?observeNativePowerPeerFixture({fixture:owners?.fixture??ordinary,sourceRoot,managedInputContract,extract}):null;
+ const generatedOverrides=['pipe_cases.inc','prepare_ack_cases.inc'].map(name=>{
+  const relative='tools/fixtures/input_coordinator_lifecycle/'+name;
+  let bytes=currentFixtureSourceOverride(relative,fs.readFileSync(path.join(sourceRoot,relative)),{sourceRoot,managedInputContract});
+  if(name==='pipe_cases.inc')bytes=adaptTypedLifecycleQueue(bytes.toString('utf8'),'pipe');
+  return {relative,sha256:crypto.createHash('sha256').update(bytes).digest('hex')};
+ });
+ const nativePeerTuple=managedInputContract==='current105-terminal29-shared-input-power-v1'?observeNativePowerPeerTuple(currentFixtureSourceOverride('tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc',fs.readFileSync(path.join(sourceRoot,'tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc')),{sourceRoot,managedInputContract}),{managedInputContract}):null;
+ return {status:'STATIC_GENERATION_PREFLIGHT_NOT_COMPILE_AUTHORITY',generatedOverrides,coreMembers:core.length,core,psReturnApis,psLocateControlledLeafSha256:psLocate.sha256,defaultLoggerUtf8Bytes:Buffer.byteLength(data),fixtureSha256:crypto.createHash('sha256').update(nativePeerObservation?.fixture??owners?.fixture??ordinary).digest('hex'),...(observed.radialFixturePower?{radialFixturePower:observed.radialFixturePower}:{}),...(owners?{publicPowerOwnerObservation:owners.receipt}:{}),...(nativePeerObservation?{nativePeerObservation:nativePeerObservation.receipt}:{}),...(nativePeerTuple?{nativePeerTupleSha256:crypto.createHash('sha256').update(nativePeerTuple).digest('hex')}:{}),checkProgress,finalStages,sourceApprovalGranted:false,publicRuntimeAccepted:false,compilerCalls:0};
+}
 export function buildCurrentCompileOnly({argv=[],batchAuthority,runtimeRoot,checkProgress=false,finalStages=false,nativeOptimization='O2',productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy,nativeSourceProfile}={}){
  if(typeof checkProgress!=='boolean')throw Error('BOOLEAN_CHECK_PROGRESS_REQUIRED');
  if(typeof finalStages!=='boolean')throw Error('BOOLEAN_FINAL_STAGES_REQUIRED');
@@ -241,6 +299,10 @@ const sourceAt=argv.indexOf('--source-root');const suppliedRoot=sourceAt<0?null:
 
 const layout=requireCurrentCompileBatch(batchAuthority,{output:argv[1]}),managedContract=managedCompileContract(layout.managedInputContract);validateCurrentNativeSourceSelection({managedInputContract:layout.managedInputContract,nativeSourceProfile,productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy});if(finalStages&&!managedContract.terminalCleanup)throw Error('FINAL_STAGES_TERMINAL22_ONLY');const repo=layout.sourceRoot;const args=[...argv];if(suppliedRoot&&path.resolve(suppliedRoot)!==path.resolve(repo))throw Error('Explicit current sourceRoot differs from authority');if(![2,4,6,8,10].includes(args.length)||args[0]!=="--out")throw Error("Use --out ABS_NEW_ROOT [--mutation ID] [--managed-dll SDK_FREE_DLL] [--suite all|persona-lifecycle]");
 let mutation=null,managedDll=null,suite=null,coldRecord=null;const seen=new Set();for(let i=2;i<args.length;i+=2){const key=args[i];if(!["--mutation","--managed-dll","--suite","--cold-record"].includes(key)||seen.has(key)||!args[i+1])throw Error("Invalid or repeated option");seen.add(key);if(key==="--mutation")mutation=args[i+1];else if(key==="--managed-dll")managedDll=path.resolve(args[i+1]);else if(key==="--cold-record")coldRecord=path.resolve(args[i+1]);else{if(!["all","persona-lifecycle","cold-archive"].includes(args[i+1]))throw Error("Unknown suite");suite=args[i+1];}}
+ if(managedContract.sharedInputPower){
+  if(!managedDll||runtimeRoot===undefined||nativeOptimization!=='O2'||[productSourceSuccessor,productHeaderSuccessor,productPolicySuccessor,fixtureInputSuccessor,runtimeParameterLayout,runtimeReusePolicy,nativeSourceProfile].some(value=>value!==undefined))throw Error('TERMINAL29_EXACT_COMPILE_ROUTE_REQUIRED');
+  privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{lifecycleMutation:mutation});
+ }
 if(suite&&(!managedDll||mutation))throw Error("All suites require an owned managed DLL and no directed mutation");
 if(mutation&&!["bypass-admission","rollback-recovery-inheritance","rollback-cancellation-guards","rollback-request-ownership","rollback-ps-endpoint-ownership","rollback-ps-binding-revision","rollback-switch-return-rearm","rollback-switch-fault-owner","rollback-pipe-stage-budget","rollback-initial-start-budget","rollback-wake-return-continuation","rollback-wake-retirement-identity","rollback-wake-start-budget","rollback-queued-player-binding","rollback-stale-off-direction","rollback-off-return-debt","rollback-off-start-blocked","rollback-prepare-claim","rollback-unsent-prepare-claim","rollback-live-explicit-restore","rollback-ps-return-xinput","rollback-ps-return-pin","rollback-ps-return-physical","rollback-ps-return-family","rollback-exit-final-sweep","rollback-target-reservation","rollback-target-pin-store","rollback-target-settlement"].includes(mutation))throw Error("Unknown mutation");
 if(["rollback-cancellation-guards","rollback-request-ownership","rollback-ps-endpoint-ownership","rollback-ps-binding-revision","rollback-pipe-stage-budget","rollback-initial-start-budget","rollback-wake-return-continuation","rollback-wake-retirement-identity","rollback-wake-start-budget","rollback-queued-player-binding","rollback-stale-off-direction","rollback-off-return-debt","rollback-off-start-blocked","rollback-prepare-claim","rollback-unsent-prepare-claim","rollback-live-explicit-restore","rollback-ps-return-xinput","rollback-ps-return-pin","rollback-ps-return-physical","rollback-ps-return-family","rollback-exit-final-sweep","rollback-target-reservation","rollback-target-pin-store","rollback-target-settlement"].includes(mutation)&&!managedDll||managedDll&&mutation&&!["bypass-admission","rollback-recovery-inheritance","rollback-switch-return-rearm","rollback-switch-fault-owner"].includes(mutation)&&!["rollback-cancellation-guards","rollback-request-ownership","rollback-ps-endpoint-ownership","rollback-ps-binding-revision","rollback-pipe-stage-budget","rollback-initial-start-budget","rollback-wake-return-continuation","rollback-wake-retirement-identity","rollback-wake-start-budget","rollback-queued-player-binding","rollback-stale-off-direction","rollback-off-return-debt","rollback-off-start-blocked","rollback-prepare-claim","rollback-unsent-prepare-claim","rollback-live-explicit-restore","rollback-ps-return-xinput","rollback-ps-return-pin","rollback-ps-return-physical","rollback-ps-return-family","rollback-exit-final-sweep","rollback-target-reservation","rollback-target-pin-store","rollback-target-settlement"].includes(mutation))throw Error("Cancellation negative requires managed DLL; other negatives remain native-only");
@@ -251,7 +313,7 @@ const out=path.resolve(args[1]);if(fs.existsSync(out))throw Error('Fresh out req
 }
 function copy(dir,rel){for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(e.isSymbolicLink())throw Error('source link');const file=path.join(dir,e.name),next=path.join(rel,e.name);if(e.isDirectory())copy(file,next);else if(/\.(?:h|hpp|hxx|c|cc|cpp|inc|inl)$/i.test(e.name)){const target=path.join(snapshot,next);fs.mkdirSync(path.dirname(target),{recursive:true});const bytes=fs.readFileSync(file);fs.writeFileSync(target,bytes);records.push({path:next.replaceAll('\\','/'),original:file,snapshot:target,sha256:sha(bytes)});}}}
 for(const rel of currentNativeSourceRoots)copy(path.join(repo,rel),rel);
-const fixtureToolHeaders=[...currentFixtureToolHeaders(repo),...currentFixtureCaseIncludes(repo)];
+const fixtureToolHeaders=[...currentFixtureToolHeaders(repo),...currentFixtureCaseIncludes(repo),...(managedContract.sharedInputPower?nativePowerPeerSourceFiles():[])];
 for(const rel of new Set([...fixtureToolHeaders,...(finalStages?['tools/fixtures/input_coordinator_lifecycle/final_stages.mjs']:[]),'tools/fixtures/input_coordinator_lifecycle/fixture.cpp','tools/fixtures/input_coordinator_lifecycle/cold_archive_cases.inc','tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc','tools/fixtures/input_coordinator_lifecycle/persona_lifecycle_cases.inc','tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc','tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc','tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc','tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc','tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc','tools/fixtures/input_coordinator_lifecycle/ps_wake_cases.inc','tools/input_coordinator_lifecycle_selftest.mjs','tools/virtual_controller_runtime_source.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/fixtures/input_coordinator_lifecycle/compiler_inputs.mjs','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_controller_motion_fixture.mjs'])){const target=path.join(snapshot,rel);fs.mkdirSync(path.dirname(target),{recursive:true});const bytes=fs.readFileSync(path.join(repo,rel));fs.writeFileSync(target,bytes);records.push({path:rel,original:path.join(repo,rel),snapshot:target,sha256:sha(bytes)});}
 const expanded=readVirtualControllerSource(path.join(snapshot,'native/main.cpp'));
 const expansionInputs=expanded.inputs.map(input=>{const row=records.find(r=>path.resolve(r.snapshot)===input.file);if(!row||row.sha256!==input.sha256)throw Error('UNBOUND_RUNTIME_EXPANSION_INPUT:'+input.file);return row.path;});
@@ -306,7 +368,7 @@ for(const[name,body]of [
  ['appendNativeLifecycleLog',currentLifecycleLogBoundary(repo,{managedInputContract:managedContract.id,nativeSourceProfile})]]){
  const old=extract(source,name).code,start=old.indexOf('{'),replacement=old.slice(0,start+1)+'\n'+body+'\n}';if(inert.split(old).length!==2)throw Error('nonunique boundary '+name);inert=inert.replace(old,replacement);substitutions.push({symbol:name,beforeSha256:sha(old),afterSha256:sha(replacement),scope:'Explicit external device/discovery/process/log boundary only'});
 }
-{const safety=guardCurrentSteam(inert,{sourceRoot:repo,managedInputContract:layout.managedInputContract,nativeSourceProfile});inert=safety.inert;selectedNativeGuardProvenance=safety.nativeGuardProvenance;substitutions.push(...safety.substitutions);const touchpadInputPort=bindCurrentTouchpadInputFixturePort(inert,{nativeSourceProfile});inert=touchpadInputPort.source;substitutions.push(...touchpadInputPort.substitutions);}
+{const safety=guardCurrentSteam(inert,{sourceRoot:repo,managedInputContract:layout.managedInputContract,nativeSourceProfile});inert=safety.inert;selectedNativeGuardProvenance=safety.nativeGuardProvenance;substitutions.push(...safety.substitutions);const touchpadInputPort=bindCurrentTouchpadInputFixturePort(inert,{nativeSourceProfile,sharedInputPower:managedContract.sharedInputPower});inert=touchpadInputPort.source;substitutions.push(...touchpadInputPort.substitutions);}
 // Conditional adapters are fixture-only process/transport/hide/diagnostic endpoints. Actual
 // inputHostStart/Stop/queue/clear/request/Win32 pipe implementations stay unchanged.
 for(const [name,body]of [['ymStartPipeSeamServe','if(fixtureFullPipe)return false;if(fixtureFrameFirstAck && command && std::string(command)=="SUBMIT_FRAME"){if(responseOut)*responseOut=json{{"status",expectedStatus?expectedStatus:""},{"detail",""},{"firstFrame",true}};return true;}if(fixtureStartupTransportError && command && std::string(command)==g_startEntrySeam.pipeFailCommand)g_inputHostSwitchRecoveryTransportError=fixtureStartupTransportError;'],['ymStartHostExitWait','if(fixtureFullPipe)return WaitForSingleObject(process,5000);'],['ymStartCreateProcessW','if(fixtureFullPipe)return fixtureCreateManagedProcess(si,pi);'],['hidHideRefreshPhysicalHide','if(fixtureWakeScenario){++fixtureWakeHideCalls;auto beforeReturn=std::move(fixtureWakeBeforeHideReturn);fixtureWakeBeforeHideReturn={};if(beforeReturn)beforeReturn();return fixtureWakeHideResult;}'],['inputCaptureLogVisibilitySnapshotGated','if(fixtureWakeScenario){++fixtureWakeVisibilityExclusions;return;}']]){const original=extract(source,name).code;const brace=original.indexOf('{');const changed=original.slice(0,brace+1)+'\n'+body+'\n'+original.slice(brace+1);if(inert.split(original).length!==2)throw Error('adapter source not unique');inert=inert.replace(original,changed);substitutions.push({symbol:name,scope:'Explicit conditional fixture process/pipe/hide/diagnostic ends; existing behavior unchanged when scenario flags are off',beforeSha256:sha(original),afterSha256:sha(changed)});}
@@ -320,6 +382,7 @@ for(const [name,body]of [['ymStartPipeSeamServe','if(fixtureFullPipe)return fals
  inert=inert.replace(original,changed);
  substitutions.push({symbol:'ymStartPipeSeamServe',scope:'Native-only event-backed synthetic Host identity after successful HELLO only; not an OS process/receipt or cold-restart proof; real pipe and production owner validators unchanged',beforeSha256:sha(original),afterSha256:sha(changed)});
 }
+if(managedContract.sharedInputPower)for(const [name,body,point]of nativePowerPeerInertPorts()){const original=extract(inert,name).code,brace=original.indexOf("{");let changed;if(point){if(original.split(point).length!==2)throw Error("EXACT_NATIVE_PEER_AFTER_CAPTURE_POINT_REQUIRED:"+name);changed=original.replace(point,()=>point+"\n"+body);}else changed=original.slice(0,brace+1)+"\n"+body+"\n"+original.slice(brace+1);if(inert.split(original).length!==2)throw Error("FINITE_NATIVE_PEER_EXACT_FUNCTION_REQUIRED:"+name);const prior=inert;inert=inert.replace(original,()=>changed);if(inert.replace(changed,()=>original)!==prior)throw Error("FINITE_NATIVE_PEER_FUNCTION_INVERSE:"+name);substitutions.push({symbol:name,scope:"Fixture-only finite real process/control OS input",beforeSha256:sha(original),afterSha256:sha(changed)});}
 {const ordinary=bindCurrentOrdinarySwitchFixturePorts(inert,{managedInputContract:managedContract.id});inert=ordinary.source;substitutions.push(...ordinary.substitutions);}
 if(managedContract.signalEvidence){
  const relative='native/external_controller_priority_runtime.h',header=(policy.products.get(relative)??fs.readFileSync(path.join(snapshot,relative))).toString('utf8');
@@ -405,7 +468,9 @@ if(mutation==='rollback-recovery-inheritance'){
 }
 if(mutation==='rollback-cancellation-guards'){
  const removeRange=(symbol,from,to)=>{const original=extract(inert,symbol).code;const a=original.indexOf(from),b=original.indexOf(to,a);if(a<0||b<=a)throw Error('Cancellation negative anchor drift:'+symbol);const altered=original.slice(0,a)+original.slice(b);if(inert.split(original).length!==2)throw Error('Cancellation symbol not unique');inert=inert.replace(original,altered);};
- removeRange('inputHostPerformPsWakeRearm','    // A complete read is still only an observation.','    const bool rebuiltAlready =');
+ // Terminal29 split the original probe-return check into owner and pause checks.
+ // Keep their helpers for the independent lock and final-write checks below.
+ removeRange('inputHostPerformPsWakeRearm',managedContract.sharedInputPower?'    if (!probeOwnerCurrent()) {':'    // A complete read is still only an observation.','    const bool rebuiltAlready =');
  const original=extract(inert,'inputHostRecreatePreparedTarget').code,a=original.indexOf('        // The intent/power/exit may change'),b=original.indexOf('            earlyOut = true;',a);if(a<0||b<=a)throw Error('Cancellation recreate anchor');const altered=original.slice(0,a)+'        if (!g_inputHostProcess || !g_inputHostHello || g_inputHostTransportFault) {'+(original.includes('\r\n')?'\r\n':'\n')+original.slice(b);inert=inert.replace(original,altered);
  removeRange('inputHostSubmitPad','    // OFF revokes normal BUS publication immediately,','    const bool powerAdmitted =');
  const actual=extract(inert,'inputHostFrameSubmissionCurrent').code;const newline=actual.includes('\r\n')?'\r\n':'\n';const old='    const bool ready=g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&'+newline+'        g_inputHostRequestedPersonaMatchesBound.load(std::memory_order_acquire) &&'+newline+'        g_inputReady.load';if(actual.split(old).length!==2)throw Error('Cancellation frame-ready anchor');inert=inert.replace(actual,actual.replace(old,'    const bool ready=g_inputReady.load'));
@@ -536,7 +601,7 @@ if(policy.supportProducts?.size){
  discoveryBytes='{\n'+originalReadContext+discoveryCode+'\n'+maskCode+'\n}\n';
 }
 fs.writeFileSync(discoveryFile,discoveryBytes);const fragments=[{symbol:'gamepadReadStateUnlocked/complete-four-slot-discovery',source:'native/main.cpp',sha256:sha(discoveryCode),file:discoveryFile,fileSha256:sha(discoveryBytes),exact:true,scope:'Actual discovery loop, per-slot identity classification and completed-boundary publication. Only XInput/identity API leaves stay inert; no source-admission flag is forged.'},{symbol:'gamepadReadStateUnlocked/selected-source-publication-mask',source:'native/main.cpp',sha256:sha(maskCode),file:discoveryFile,fileSha256:sha(discoveryBytes),exact:true,scope:'Actual physical/external/selected-source mask decision and publication. Drop/reconfirm remainder and whole BUS are not executed or claimed.'},...(originalReadContext?[{symbol:'gamepadReadStateUnlocked/original-read-context',source:'native/main.cpp',sha256:sha(originalReadContext),file:discoveryFile,fileSha256:sha(discoveryBytes),exact:true,scope:'Original context declarations, block scope only; not a full physical-return snapshot publication.'}]:[])];
-const settingsMutexIsolation=isolateCurrentFixtureSettingsMutex(repairCurrent105LifecycleFixtureInputs(observeCurrent105Fixture(fs.readFileSync(path.join(snapshot,'tools/fixtures/input_coordinator_lifecycle/fixture.cpp'),'utf8'),{sourceRoot:repo,managedInputContract:managedContract.id,nativeSourceProfile}),{sourceRoot:repo,managedInputContract:managedContract.id,nativeSourceProfile}).text,{runtimeRoot,moduleMaintenance:managedContract.terminalCleanup,managedInputContract:managedContract.id,runtimeParameterLayout,runtimeReusePolicy});
+const settingsMutexIsolation=isolateCurrentFixtureSettingsMutex(repairCurrent105LifecycleFixtureInputs(observeCurrent105Fixture(fs.readFileSync(path.join(snapshot,'tools/fixtures/input_coordinator_lifecycle/fixture.cpp'),'utf8'),{sourceRoot:repo,managedInputContract:managedContract.id,nativeSourceProfile}),{sourceRoot:repo,managedInputContract:managedContract.id,nativeSourceProfile}).text,{runtimeRoot,moduleMaintenance:managedContract.terminalCleanup,...(managedContract.sharedInputPower?{lifecycleMutation:mutation}:{managedInputContract:managedContract.id,runtimeParameterLayout,runtimeReusePolicy})});
 if(runtimeReusePolicy!==undefined&&!settingsMutexIsolation.runtimeEntryAdmissionEnforced)throw Error('COMPLETE_CURRENT26_RUNTIME_ENTRY_ADMISSION_REQUIRED');
 const policyFixture=pairTerminal26MsiPolicyFixture(settingsMutexIsolation.text,{productPolicySuccessor,fixtureInputSuccessor,productSource:source});
 const progressObservation=checkProgress?observeCurrent105Progress(policyFixture.text):null;
@@ -581,6 +646,9 @@ if(productPolicySuccessor!==undefined){
   for(const [name,bytes] of io.jointSupport??[]){if(copiedSupport.has(name))continue;fs.writeFileSync(path.join(out,name),bytes,{flag:'wx'});policyGeneratedFiles.push(name);}
   policyIoProvenance={adapter:io.adapter,profile:io.profile,insertionProof:io.insertionProof,reverseProof:io.reverseProof,visibilityBinding:io.visibilityBinding,...(io.jointProvenance?{joint:io.jointProvenance}:{}),sourceOnly:true};
 }
+ const publicPowerOwnerObservation=managedContract.sharedInputPower?materializeSharedInputPowerOwners({fixture:adaptTypedLifecycleQueue(fixture,'fixture'),records,snapshotRoot:snapshot,managedInputContract:managedContract.id}):null;
+ const nativePeerObservation=managedContract.sharedInputPower?materializeNativePowerPeerFixture({fixture:publicPowerOwnerObservation.fixture,sourceRoot:repo,outputRoot:out,managedInputContract:managedContract.id,extract}):null;
+ if(nativePeerObservation)fixture=nativePeerObservation.fixture;
 fs.writeFileSync(path.join(snapshot,'native/main.inert.cpp'),inert);fs.writeFileSync(path.join(out,'fixture.cpp'),fixture);
 fs.writeFileSync(path.join(out,'source-manifest.json'),JSON.stringify({records,sourceExpansion,...(nativeSourceProfile===undefined?{}:{nativeSourceProfile,nativeGuardProvenance:selectedNativeGuardProvenance}),productSourceSuccessor:productSourceSuccessorProvenance,productHeaderSuccessor:null,productPolicySuccessor:policy.provenance,policyFixture:policyFixture.provenance,policyIoProvenance,core,structCore,compilerHeaderBindings,substitutions,fragments},null,2));
 // Directed header negatives compile a changed private header. Raw production
@@ -638,11 +706,15 @@ for(const relative of fixtureGeneratedInputs){const original=fs.readFileSync(pat
  if(policyFixture.provenance?.jointSource&&relative==='tools/fixtures/input_coordinator_lifecycle/ps_wake_cases.inc'){
   const paired=pairMsiJointPsWake(bytes);bytes=paired.bytes;policyIoProvenance.joint.returnedPath=paired.provenance;
  }
+  if(managedContract.sharedInputPower){
+   if(path.basename(relative)==='pipe_cases.inc')bytes=adaptTypedLifecycleQueue(bytes.toString('utf8'),'pipe');
+   if(path.basename(relative)==='tuple_recovery_cases.inc')bytes=observeNativePowerPeerTuple(bytes,{managedInputContract:managedContract.id});
+  }
  fs.writeFileSync(path.join(out,path.basename(relative)),bytes);}
-const compiledGenerated=[...new Set([...fixtureToolHeaders.map(relative=>path.basename(relative)),'fixture.cpp','cold_archive_cases.inc','target_return_cases.inc','persona_lifecycle_cases.inc','pipe_cases.inc','off_lifecycle_cases.inc','prepare_ack_cases.inc','ps_return_cases.inc','tuple_recovery_cases.inc','ps_wake_cases.inc','xinput_discovery.inc','source/native/main.inert.cpp',...mutatedHeaderFiles,...policyGeneratedFiles])].map(rel=>{const p=path.join(out,rel);return{path:p,sha256:sha(fs.readFileSync(p))};});
+const compiledGenerated=[...new Set([...fixtureToolHeaders.map(relative=>path.basename(relative)),'fixture.cpp','cold_archive_cases.inc','target_return_cases.inc','persona_lifecycle_cases.inc','pipe_cases.inc','off_lifecycle_cases.inc','prepare_ack_cases.inc','ps_return_cases.inc','tuple_recovery_cases.inc','ps_wake_cases.inc','xinput_discovery.inc','source/native/main.inert.cpp',...(publicPowerOwnerObservation?.generatedFiles??[]).map(file=>path.relative(out,file)),...mutatedHeaderFiles,...policyGeneratedFiles])].map(rel=>{const p=path.join(out,rel);return{path:p,sha256:sha(fs.readFileSync(p))};});
 const vc='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';const native=path.join(snapshot,'native'),json=path.join(snapshot,'deps/json'),webview=path.join(snapshot,'deps/webview2/build/native/include');
 const build=calibrationToolchainPreamble(vc)+'chcp 65001 >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /'+nativeOptimization+' /showIncludes /bigobj /DNDEBUG /DUNICODE /D_UNICODE /c "'+path.join(out,'fixture.cpp')+'" /I"'+native+'" /I"'+json+'" /I"'+webview+'" /Fo"'+path.join(out,'fixture.obj')+'"\r\nif errorlevel 1 exit /b %errorlevel%\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /'+nativeOptimization+' /showIncludes /DNDEBUG /DUNICODE /D_UNICODE /c "'+path.join(native,'dsu_server.cpp')+'" /Fo"'+path.join(out,'dsu.obj')+'"\r\nif errorlevel 1 exit /b %errorlevel%\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /'+nativeOptimization+' /showIncludes /bigobj /DNDEBUG /DUNICODE /D_UNICODE /c "'+path.join(native,'steam_original_recovery_engine.cpp')+'" /I"'+json+'" /Fo"'+path.join(out,'steam-original-recovery.obj')+'"\r\nif errorlevel 1 exit /b %errorlevel%\r\ncl /nologo "'+path.join(out,'fixture.obj')+'" "'+path.join(out,'dsu.obj')+'" "'+path.join(out,'steam-original-recovery.obj')+'" /Fe"'+path.join(out,'CoordinatorFixture.exe')+'" /link /SUBSYSTEM:CONSOLE /MACHINE:x64 "'+path.join(repo,'deps/webview2/build/native/x64/WebView2LoaderStatic.lib')+'" "%WindowsSdkDir%Lib\\%WindowsSDKVersion%um\\x64\\WindowsApp.lib" user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib uuid.lib dwmapi.lib winhttp.lib advapi32.lib shcore.lib version.lib psapi.lib PowrProf.lib ws2_32.lib\r\nexit /b %errorlevel%\r\n';fs.writeFileSync(path.join(out,'build.cmd'),build);const compilerEnvironment=currentCompilePrivateEnvironment(out);fs.mkdirSync(compilerEnvironment.temporary,{recursive:true});const compilerStartedAtUtc=new Date().toISOString(),compilerStarted=performance.now();const p=spawnSync('cmd.exe',['/d','/c',path.join(out,'build.cmd')],{cwd:out,env:compilerEnvironment.environment,windowsHide:true,encoding:'utf8',timeout:300000,maxBuffer:4*1024*1024});fs.writeFileSync(path.join(out,'build.log'),(p.stdout??'')+(p.stderr??''));fs.writeFileSync(path.join(out,'build-process.json'),JSON.stringify({executable:'cmd.exe',args:['/d','/c',path.join(out,'build.cmd')],cwd:out,nativeOptimization,compilerTemporaryDirectory:compilerEnvironment.temporary,timeoutMs:300000,startedAtUtc:compilerStartedAtUtc,finishedAtUtc:new Date().toISOString(),elapsedMs:performance.now()-compilerStarted,exitCode:p.status,signal:p.signal??null,error:p.error?.message??null,errorCode:p.error?.code??null,timedOut:p.error?.code==='ETIMEDOUT'},null,2)+'\n',{flag:'wx'});if(p.error||p.status!==0)throw Error('full native fixture compile failed '+p.status+' '+path.join(out,'build.log'));
-const closure=nativeCompilerInputClosure({records,buildLog:(p.stdout??'')+(p.stderr??''),snapshotRoot:snapshot,generatedFiles:compiledGenerated.map(r=>r.path),requiredSources:[...expansionInputs,...mutatedHeaderInputs,...(productPolicySuccessor===undefined?[]:['native/virtual_start_protection.h']),'native/dsu_server.cpp','native/steam_original_recovery_engine.cpp',...records.filter(r=>r.path.startsWith('tools/')).map(r=>r.path)]});
+const closure=nativeCompilerInputClosure({records,buildLog:(p.stdout??'')+(p.stderr??''),snapshotRoot:snapshot,generatedFiles:compiledGenerated.map(r=>r.path),requiredSources:[...expansionInputs,...mutatedHeaderInputs,...(publicPowerOwnerObservation?.receipt.bindings??[]).map(row=>row.source),...(productPolicySuccessor===undefined?[]:['native/virtual_start_protection.h']),'native/dsu_server.cpp','native/steam_original_recovery_engine.cpp',...records.filter(r=>r.path.startsWith('tools/')).map(r=>r.path)]});
 for(const r of compiledGenerated)if(sha(fs.readFileSync(r.path))!==r.sha256)throw Error('GENERATED_INPUT_CHANGED_DURING_COMPILE:'+r.path);
 
 for(const binding of policyGeneratedBindings){if(!closure.observedIncludePaths.includes(path.resolve(binding.path).toLowerCase()))throw Error('MSI_POLICY_GENERATED_HEADER_NOT_OBSERVED:'+binding.path);if(sha(fs.readFileSync(binding.path))!==binding.sha256)throw Error('MSI_POLICY_GENERATED_HEADER_CHANGED');}
@@ -651,7 +723,7 @@ for(const binding of compilerHeaderBindings){
  if(!closure.observedIncludePaths.includes(file))throw Error('REQUIRED_REAL_COMPILER_HEADER_NOT_OBSERVED:'+binding.source);
  if(sha(fs.readFileSync(file))!==binding.sha256)throw Error('REQUIRED_REAL_COMPILER_HEADER_CHANGED:'+binding.source);
 }
-const snapshotCopies=[...records];records.splice(0,records.length,...closure.records.map(row=>row.path===LIFECYCLE_LOG_PRODUCER?{...row,inputRole:LIFECYCLE_LOG_DATA_ROLE}:row));fs.writeFileSync(path.join(out,'source-manifest.json'),JSON.stringify({records,sourceExpansion,...(nativeSourceProfile===undefined?{}:{nativeSourceProfile,nativeGuardProvenance:selectedNativeGuardProvenance}),productSourceSuccessor:productSourceSuccessorProvenance,productHeaderSuccessor:productHeaderSuccessorProvenance,productPolicySuccessor:policy.provenance,policyFixture:policyFixture.provenance,policyIoProvenance,policyGeneratedBindings,core,structCore,compilerHeaderBindings,substitutions,fragments,settingsMutexIsolation,...(progressObservation?{progressObservation}:{}),...(stageObservation?{stageObservation}:{}),compiledGenerated,snapshotCopies,copiedButUncompiled:closure.copiedButUncompiled,observedIncludePaths:closure.observedIncludePaths,sourceClosureMeaning:closure.meaning+' Expanded raw runtime sources are pinned primary transformation inputs; sourceExpansion binds them to main.expanded.cpp and compiledGenerated binds the executed main.inert.cpp.'},null,2));
+const snapshotCopies=[...records];records.splice(0,records.length,...closure.records.map(row=>row.path===LIFECYCLE_LOG_PRODUCER?{...row,inputRole:LIFECYCLE_LOG_DATA_ROLE}:row));fs.writeFileSync(path.join(out,'source-manifest.json'),JSON.stringify({records,sourceExpansion,...(nativeSourceProfile===undefined?{}:{nativeSourceProfile,nativeGuardProvenance:selectedNativeGuardProvenance}),productSourceSuccessor:productSourceSuccessorProvenance,productHeaderSuccessor:productHeaderSuccessorProvenance,productPolicySuccessor:policy.provenance,policyFixture:policyFixture.provenance,policyIoProvenance,policyGeneratedBindings,core,structCore,compilerHeaderBindings,substitutions,fragments,settingsMutexIsolation,...(progressObservation?{progressObservation}:{}),...(stageObservation?{stageObservation}:{}),...(publicPowerOwnerObservation?{publicPowerOwnerObservation:publicPowerOwnerObservation.receipt}:{}),...(nativePeerObservation?{nativePeerObservation:nativePeerObservation.receipt}:{}),compiledGenerated,snapshotCopies,copiedButUncompiled:closure.copiedButUncompiled,observedIncludePaths:closure.observedIncludePaths,sourceClosureMeaning:closure.meaning+' Expanded raw runtime sources are pinned primary transformation inputs; sourceExpansion binds them to main.expanded.cpp and compiledGenerated binds the executed main.inert.cpp.'},null,2));
 
 const changed=records.filter(row=>sha(fs.readFileSync(row.original))!==row.sha256||sha(fs.readFileSync(row.snapshot))!==row.sha256).map(row=>row.path);if(changed.length)throw Error('Compile inputs changed');if(managedProof&&(sha(fs.readFileSync(managedDll))!==managedProof.dll.sha256||sha(fs.readFileSync(managedProof.manifest))!==managedProof.manifestSha256))throw Error('Managed prerequisite changed');
 const identity=file=>({path:path.resolve(file),sha256:sha(fs.readFileSync(file))});const result={status:'COMPILED_NOT_EXECUTED',...(runtimeReusePolicy===undefined?{}:{runtimeReusePolicy}),...(nativeSourceProfile===undefined?{}:{nativeSourceProfile,nativeGuardProvenance:selectedNativeGuardProvenance}),compileOnly:true,productSourceSuccessor:productSourceSuccessorProvenance,productHeaderSuccessor:productHeaderSuccessorProvenance,productPolicySuccessor:policy.provenance,...(managedContract.signalEvidence?{runtimeLayout:terminal26RuntimeLayout(runtimeRoot,{runtimeParameterLayout,runtimeReusePolicy})}:{}),nativeOptimization,sourceFullTranslationUnit:true,mutation,compilerExitCode:p.status,compilerSignal:p.signal??null,compilerError:p.error?.message??null,compilerProcess:identity(path.join(out,'build-process.json')),buildScript:identity(path.join(out,'build.cmd')),sourceManifest:identity(path.join(out,'source-manifest.json')),exe:identity(path.join(out,'CoordinatorFixture.exe')),managedProof,changed,fixtureExecuted:false,nativeExecuted:false,normalProductMainExecuted:false,realDeviceIo:false,results:[],runBranchReached:false};fs.writeFileSync(path.join(out,'COMPILE-ONLY.json'),JSON.stringify(result,null,2));return result;

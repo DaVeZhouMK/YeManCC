@@ -49,12 +49,14 @@ export function performanceMirrorPatch(patch:Record<string,PerformanceScalar>,vi
 }
 import type {RelayMutationContext} from './deckyMirrorRelay';
 import type {ContinuousPerformanceIdentity} from './performanceControls';
-export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<ContinuousPerformanceSnapshot>;update:(identity:ContinuousPerformanceIdentity,patch:ContinuousSidePatch,admit?:()=>boolean)=>Promise<ContinuousPerformanceSnapshot>;power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;acquire:(label:string)=>(()=>void)|null}) {
+type TdpOwnerSettlement={generation:number;requestedW:number;outcome:'write-ack'|'saved-unconfirmed'};
+export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<ContinuousPerformanceSnapshot>;update:(identity:ContinuousPerformanceIdentity,patch:ContinuousSidePatch,admit?:()=>boolean)=>Promise<ContinuousPerformanceSnapshot>;power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;acquire:(label:string)=>(()=>void)|null;reportTdpSettled?:(detail:TdpOwnerSettlement)=>Promise<unknown>}) {
  return {async execute(args:Record<string,unknown>,context:RelayMutationContext){
   if(Object.keys(args).length!==1||!args.patch||typeof args.patch!=='object'||Array.isArray(args.patch))throw Error('PERFORMANCE_MIRROR_INVALID_REQUEST');
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed())throw Error('PERFORMANCE_MIRROR_NOT_READY');};
   const gate=async()=>{checkpoint();const p=await deps.power();checkpoint();if(p.phase!=='ready'||!p.hardwareWritesAllowed||p.generation!==context.generation)throw Error('PERFORMANCE_MIRROR_POWER_NOT_READY');};
   await gate();const release=deps.acquire('Decky 性能调度');if(!release)throw Error('PERFORMANCE_MIRROR_BUSY');
+  let tdpSettlement:TdpOwnerSettlement|undefined;
   try{const current=await deps.read();checkpoint();
    if(typeof context.controlAdmission?.performance!=='string'||performanceMirrorSource(current)!==context.controlAdmission.performance)throw Error('PERFORMANCE_MIRROR_SOURCE_CHANGED');
    const patch=performanceMirrorPatch(args.patch as Record<string,PerformanceScalar>,performanceMirrorView(current,'admitted'));
@@ -63,10 +65,15 @@ export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()
     const proof=updated.tdpWriteReceipt;
     const confirmed=proof?.ok===true&&proof.proof==='write-ack'&&proof.requested===patch.tdp&&proof.accepted===patch.tdp;
     const acknowledged=proof?.ok===true&&proof.proof==='write-ack'&&proof.requested===patch.tdp&&typeof proof.accepted==='number'&&Number.isFinite(proof.accepted);
+    tdpSettlement={generation:context.generation,requestedW:patch.tdp,outcome:confirmed?'write-ack':'saved-unconfirmed'};
     return {saved:true,applied:confirmed,pending:!confirmed,notice:confirmed?`TDP 已确认写入 ${patch.tdp} W`:acknowledged?`TDP 目标 ${patch.tdp} W 已保存；本次写入回执为 ${proof!.accepted} W`:'TDP 目标已保存；本次硬件写入尚未确认'};
    }
    return {saved:true,applied:true,notice:'性能调度已记忆并提交 YMCC'};
-  }finally{release();}
+  }finally{
+   release();
+   // Owner settlement is not delivery to Steam or physical readback.
+   if(tdpSettlement)try{void deps.reportTdpSettled?.(tdpSettlement).catch(()=>{});}catch{}
+  }
  }};
 }
 

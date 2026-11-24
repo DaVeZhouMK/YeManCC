@@ -1,7 +1,7 @@
 import vm from 'node:vm';import crypto from 'node:crypto';
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 async function runUpdaterHostPowerCases({root,out,selection='all'}){
- const names=['read-sequence','native-sequence','handoff-sequence','denied-return','generation-change','metadata-only','healthy','legacy','stop'];
+ const names=['read-sequence','native-sequence','handoff-sequence','denied-return','generation-change','metadata-only','healthy','legacy','stop','read-suspend-serial','native-suspend-serial','handoff-suspend-serial'];
  assert(selection==='all'||names.includes(selection),'Unknown updater host power case');
  fs.mkdirSync(out,{recursive:true});assert(!fs.existsSync(path.join(out,'HOST-POWER-RESULT.json')),'Raw result already exists');
  const req=createRequire(path.join(root,'package.json')),{build}=req('esbuild'),ports={
@@ -14,11 +14,11 @@ async function runUpdaterHostPowerCases({root,out,selection='all'}){
  const loaded=[],built=await build({stdin:{contents:"export {startDeckyUpdaterHost} from './src/bridge/deckyUpdaterHost';export {onSharedPowerLifecycle,getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';",resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',target:'es2022',tsconfig:path.join(root,'tsconfig.json'),plugins:[{name:'explicit-updater-host-leaves',setup(b){b.onLoad({filter:/\.(?:ts|tsx|js|mjs)$/},a=>{const rel=path.relative(root,a.path).replaceAll('\\','/');const content=ports[rel]??fs.readFileSync(a.path,'utf8');loaded.push({path:a.path,relative:rel,kind:ports[rel]?'inert-leaf':'actual',sha256:crypto.createHash('sha256').update(content).digest('hex'),...(ports[rel]?{contents:content}:{bytes:Buffer.byteLength(content)})});return{contents:content,loader:a.path.endsWith('.tsx')?'tsx':a.path.endsWith('.ts')?'ts':'js',resolveDir:path.dirname(a.path)}})}}]});
  fs.writeFileSync(path.join(out,'HOST-POWER.cjs'),built.outputFiles[0].contents,{flag:'wx'});fs.writeFileSync(path.join(out,'HOST-POWER-GRAPH.json'),JSON.stringify({loaded,metafile:built.metafile},null,2)+'\n',{flag:'wx'});
  const flush=async()=>{for(let i=0;i<50;i++)await Promise.resolve();},defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}};
- const fact=(seq=10,revision=1,extra={})=>({known:true,generation:7,phase:'ready',inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:revision,...(seq===undefined?{}:{observedNotificationSequence:seq}),...extra});
+ const fact=(seq=10,revision=1,extra={})=>({known:true,generation:7,phase:'ready',inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:revision,suspendSerial:0,...(seq===undefined?{}:{observedNotificationSequence:seq}),...extra});
  const results=[];
  for(const name of names.filter(n=>selection==='all'||n===selection)){
   const events=new Map(),timers=new Map(),gameListeners=new Set(),gameGate=defer(),nativeGate=defer(),messages=[],observations=[];let serial=0,powerReads=0,gameReads=0,installs=0,nativeSettled=false,host=null,release=null,m=null,error=null;
-  let current=name==='legacy'?fact(10,1):fact();if(name==='legacy')delete current.observedNotificationSequence;
+  let current=fact();if(name==='legacy'){delete current.observedNotificationSequence;delete current.suspendSerial;}
   const h={extension:null,game:null,gameListeners,on(event,fn){let set=events.get(event);if(!set)events.set(event,set=new Set());set.add(fn);return()=>set.delete(fn)},emit(event,value){for(const fn of [...events.get(event)??[]])fn(value)},readGame(){gameReads++;return gameGate.promise},install(){installs++;return Promise.resolve()},invoke(command,args){
    if(command==='power.lifecycle'){powerReads++;return powerReads===1||nativeSettled?Promise.resolve({...current}):nativeGate.promise;}
    if(command==='deckySidebar.mirrorReply'){messages.push(structuredClone(args.message));return Promise.resolve(true)}throw Error('Unexpected command '+command)}
@@ -33,21 +33,24 @@ async function runUpdaterHostPowerCases({root,out,selection='all'}){
    host=m.startDeckyUpdaterHost(()=>true);h.extension.connected(peer);h.extension.request({...peer,request:{command:'updater.status',runId:peer.runId}});await flush();
    send(1);await flush();assert.equal(gameReads,1,'Actual Host must enter game read');
    if(name==='read-sequence')emit(fact(11,2));
+   if(name==='read-suspend-serial')emit(fact(10,2,{suspendSerial:1}));
    if(name==='denied-return'){emit(fact(11,2,{known:false,hardwareWritesAllowed:false}));emit(fact(11,3));}
    if(name==='generation-change')emit(fact(11,2,{generation:8}));
    if(name==='metadata-only')emit(fact(10,2));
    if(name==='stop'){host.stop();host=null;}
    gameGate.resolve(null);await flush();
    if(name==='native-sequence')emit(fact(11,2));
-   if(name==='handoff-sequence'){
-    nativeSettled=true;nativeGate.resolve({...current});let ticks=0;const inject=()=>{const source=m.getSharedPowerLifecycleDiagnostics();if(source.subscriberCount===2){observations.push({stage:'after-validation-release-before-service-continuation',source,ticks,installsAtNotification:installs});emit(fact(11,2));}else if(++ticks<16)queueMicrotask(inject);else observations.push({stage:'handoff-injection-missed',source,ticks});};queueMicrotask(inject);
-   }else nativeSettled=true;nativeGate.resolve({...current});
+   const handoff=name==='handoff-sequence'||name==='handoff-suspend-serial';
+   if(handoff){
+    nativeSettled=true;nativeGate.resolve({...current});let ticks=0;const inject=()=>{const source=m.getSharedPowerLifecycleDiagnostics();if(source.subscriberCount===2){observations.push({stage:'after-validation-release-before-service-continuation',source,ticks,installsAtNotification:installs});emit(name==='handoff-sequence'?fact(11,2):fact(10,2,{suspendSerial:1}));}else if(++ticks<16)queueMicrotask(inject);else observations.push({stage:'handoff-injection-missed',source,ticks});};queueMicrotask(inject);
+   }else {nativeSettled=true;nativeGate.resolve(name==='native-suspend-serial'?fact(10,2,{suspendSerial:1}):{...current});}
    await flush();
-   if(name==='handoff-sequence'){const edge=observations.find(o=>o.stage==='after-validation-release-before-service-continuation');assert(edge,'Actual validation subscription must have retired before the handoff event');assert.equal(edge.source.subscriberCount,2);assert.equal(edge.installsAtNotification,0,'Event must precede first install write');}
+   if(handoff){const edge=observations.find(o=>o.stage==='after-validation-release-before-service-continuation');assert(edge,'Actual validation subscription must have retired before the handoff event');assert.equal(edge.source.subscriberCount,2);assert.equal(edge.installsAtNotification,0,'Event must precede first install write');}
    const expected=['metadata-only','healthy','legacy'].includes(name)?1:0;
    observations.push({stage:'settled-old-request',installs,expected,gameReads,powerReads,source:m.getSharedPowerLifecycleDiagnostics(),message:messages.filter(x=>x.type==='ymcc-updater').at(-1)?.view?.message});
    assert.equal(installs,expected,'Old explicit install must retire when its public notification scope changes: '+name);
-   if(name==='read-sequence'||name==='native-sequence'||name==='handoff-sequence'){
+   if(name.endsWith('-sequence')||name.endsWith('-suspend-serial')){
+    if(name==='native-suspend-serial')emit(fact(10,2,{suspendSerial:1}));
     send(2);await flush();assert.equal(installs,1,'A fresh explicit request may use the new admitted scope');assert.equal(gameReads,2);
    }
   }catch(e){error={message:e.message,stack:e.stack};}

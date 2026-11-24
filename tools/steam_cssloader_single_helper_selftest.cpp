@@ -54,6 +54,11 @@ struct OwnedFixtureCleanup {
 } ownedFixtureCleanup;
 static unsigned checks=0;
 static void check(bool yes,const char* text){if(!yes)throw std::runtime_error(text);++checks;std::cout<<"PASS "<<text<<std::endl;}
+template<class Runtime>
+static std::optional<ULONGLONG> applyRevision(Runtime& runtime,const steamsession::Session& session){
+ if constexpr(requires{runtime.readPolicy(session).automaticAppliedRevision;})return runtime.readPolicy(session).automaticAppliedRevision;
+ return std::nullopt; // The launch regression can also compile a pre-receipt header.
+}
 static std::wstring self(){wchar_t f[32768]{};GetModuleFileNameW(nullptr,f,32768);return f;}
 static std::string text(const std::filesystem::path&p){std::ifstream f(p,std::ios::binary);return {std::istreambuf_iterator<char>(f),{}};}
 static void write(const std::filesystem::path&p,const std::string&s){std::ofstream f(p,std::ios::binary);f<<s;}
@@ -85,6 +90,15 @@ function Get-CimInstance {
  foreach($p in $children){[pscustomobject]@{ProcessId=$p.Id;ParentProcessId=$(if($p.Id -eq $child -and $parent.Count){$parent[0].Id}else{0})}}
 }
 function Invoke-OwnedPresetResourceUpdate($Current){
+ $fixtureRoot=Split-Path -Parent $script:BackendExe
+ if(Test-Path -LiteralPath (Join-Path $fixtureRoot 'gate-manual')){
+  [IO.File]::WriteAllText((Join-Path $fixtureRoot 'manual-waiting'),'1')
+  $stopwatch=[Diagnostics.Stopwatch]::StartNew()
+  while(!(Test-Path -LiteralPath (Join-Path $fixtureRoot 'allow-manual'))){
+   if($stopwatch.ElapsedMilliseconds -ge 8000){throw 'ISOLATED_MANUAL_GATE_TIMEOUT'}
+   Start-Sleep -Milliseconds 25
+  }
+ }
  if(Test-Path -LiteralPath (Join-Path (Split-Path -Parent $script:BackendExe) 'fail-initialization')){throw 'ISOLATED_INITIALIZATION_FAILURE'}
  $Current
 }
@@ -129,7 +143,9 @@ int wmain(int argc,wchar_t**argv){std::cout<<std::unitbuf;try{
  if(argc==2&&std::wstring(argv[1])==L"--dummy"){Sleep(INFINITE);return 0;}
  if(argc!=3&&argc!=4)throw std::runtime_error("evidence root, repository and optional exact case required");
  const std::wstring selected=argc==4?argv[3]:L"all";
- if(selected!=L"all"&&selected!=L"cold-single"&&selected!=L"cold-cost"&&selected!=L"cold-editor"&&selected!=L"cold-power"&&selected!=L"cold-request"&&selected!=L"cold-identity"&&selected!=L"cold-initial-failure"&&selected!=L"cold-bad-init"&&selected!=L"cold-missing-protocol"&&selected!=L"cold-public-serial"&&selected!=L"cold-public-notification"&&selected!=L"cold-public-unknown"&&selected!=L"cold-public-revision"&&selected!=L"cold-public-cache")throw std::runtime_error("unknown exact cold case");
+ const bool manualEvent=selected==L"manual-ensure-event";
+ const bool applyRevisionCase=selected==L"cold-apply-revision";
+ if(!manualEvent&&!applyRevisionCase&&selected!=L"all"&&selected!=L"cold-single"&&selected!=L"cold-cost"&&selected!=L"cold-editor"&&selected!=L"cold-power"&&selected!=L"cold-request"&&selected!=L"cold-identity"&&selected!=L"cold-initial-failure"&&selected!=L"cold-bad-init"&&selected!=L"cold-missing-protocol"&&selected!=L"cold-public-serial"&&selected!=L"cold-public-notification"&&selected!=L"cold-public-unknown"&&selected!=L"cold-public-revision"&&selected!=L"cold-public-cache")throw std::runtime_error("unknown exact case");
  const auto out=std::filesystem::absolute(argv[1]),repo=std::filesystem::absolute(argv[2]);std::filesystem::create_directories(out);ownedOutput=out;
  const auto steamExe=out/L"steam.exe";std::filesystem::copy_file(self(),steamExe);Child steam;steam.value=launch(steamExe.wstring(),L"--dummy");
  const steamsession::Session session{out.wstring(),GetProcessId(steam.value),0,birth(steam.value)};
@@ -154,11 +170,16 @@ int wmain(int argc,wchar_t**argv){std::cout<<std::unitbuf;try{
    actualHelpers=0;std::atomic<bool>admit=true,identityValid=true;std::atomic<ULONGLONG>power=1;
    auto identity=std::make_shared<steamsession::IdentitySnapshot>();identity->session=session;identity->presence=1;identity->processEpoch=1;identity->rootReadError=ERROR_SUCCESS;identity->windowsSessionKnown=true;
    auto dir=fixture(kind);if(std::wstring(kind)==L"initial-dom-failure")write(dir/L"fail-dom","1");std::atomic<unsigned>ready=0,completed=0,known=0;std::atomic<DWORD>reason=0,lastPhase=0,lastFlags=0;std::atomic<bool>editor=false;
+   std::atomic<uint64_t> ensureCompletion=0,ensureCancellation=0;
+   std::atomic<unsigned> ensureExits=0;
    if(selected==L"cold-initial-failure")write(dir/L"fail-initialization","1");
    if(selected==L"cold-bad-init")write(dir/L"steam-appearance.ps1",replace(text(dir/L"steam-appearance.ps1"),"Write-AppearanceHelperResult $true","Write-AppearanceHelperResult $false"));
    if(selected==L"cold-missing-protocol")write(dir/L"steam-appearance.ps1",replace(text(dir/L"steam-appearance.ps1"),"AutomaticInitializeGateProtocol=1","AutomaticInitializeGateProtocol=0"));
    steamcssuse::Runtime runtime(false,35821,[&]{return editor?steamcsseditor::State::Active:steamcsseditor::State::Absent;});
-   const auto changed=[&](const auto&stage,const auto&,const auto&,const auto&r){std::ofstream(dir/L"native-events.jsonl",std::ios::app)<<json({{"stage",stage},{"error",r.error},{"phase",r.helperPhase},{"reason",r.helperFailureCode},{"exit",r.helperExitCode}}).dump()<<"\n";if(stage=="automatic-initialization-ready"){
+   const auto changed=[&](const auto&stage,const auto&,const auto&,const auto&r){std::ofstream(dir/L"native-events.jsonl",std::ios::app)<<json({{"stage",stage},{"error",r.error},{"phase",r.helperPhase},{"reason",r.helperFailureCode},{"exit",r.helperExitCode},{"useGeneration",r.useGeneration}}).dump()<<"\n";
+   if(stage=="ensure-helper-complete"&&r.helperExitKnown){ensureCompletion=r.useGeneration;++ensureExits;}
+   if(stage=="ensure-helper-canceled")ensureCancellation=r.useGeneration;
+   if(stage=="automatic-initialization-ready"){
  if(selected==L"cold-editor")editor=true;
  if(selected==L"cold-power")++power;
  if(selected==L"cold-request")admit=false;
@@ -173,6 +194,24 @@ int wmain(int argc,wchar_t**argv){std::cout<<std::unitbuf;try{
     }else{return target.initialize((dir/L"steam-appearance.ps1").wstring(),(dir/L"link.txt").wstring(),std::wstring(kind)==L"timeout"?5000:std::wstring(kind)==L"initial-dom-failure"?40000:15000,100,changed,700,[&]{return admit.load();},[&]{return power.load();},[&]{return identity;},[&](const auto& expected){return identityValid&&expected==identity;},steamcssinventory::Bridge::SharedRead{},CssSourceFixture::defaultRead);}
    };
    check(initializeUse(runtime),"owned use initializes with its supported public power port");
+   if(manualEvent){
+     write(dir/L"gate-manual","1");
+     const auto first=runtime.begin(session);
+     check(runtime.ensure(first.token)&&until([&]{return std::filesystem::exists(dir/L"manual-waiting");}),"manual Ensure reaches the real helper before any exit notice");
+     check(ensureExits==0&&actualHelpers==1,"no completion before the helper exits");
+     const auto second=runtime.begin(session);
+     check(second.token!=first.token&&ensureCancellation==first.token,"manual takeover cancels only the displaced completion token");
+     check(runtime.ensure(second.token)&&actualHelpers==1,"new manual request reuses the same in-flight helper");
+     write(dir/L"allow-manual","1");
+     check(until([&]{return ensureExits==1;})&&ensureCompletion==second.token,"native helper exit wakes only the current manual token");
+     Child parent,child;pin(dir,parent,child);
+     const auto boot=runtime.begin(session,[]{return true;});
+     check(runtime.ensure(boot.token,[]{return true;})&&until([&]{return ensureExits==2;})&&ensureCompletion==0,"boot-context Ensure keeps its prior notification contract");
+     check(ready==0&&completed==0&&!std::filesystem::exists(dir/L"dom-started"),"Ensure completion is never automatic DOM confirmation");
+     runtime.shutdown();check(live(parent.value)&&live(child.value),"manual completion and shutdown preserve the resident family");
+     scenarios.push_back({{"case","manual-ensure-event"},{"helpers",actualHelpers.load()},{"manualCompletions",1},{"displacedToken",first.token},{"completedToken",second.token}});
+     continue;
+   }
    const auto started=GetTickCount64();
    deckylaunch::Handle lease;lease.value=runtime.confirmAndIdle(session,true);
    if(selected==L"cold-missing-protocol"){
@@ -182,6 +221,7 @@ int wmain(int argc,wchar_t**argv){std::cout<<std::unitbuf;try{
    if(selected==L"cold-initial-failure"){
      check(lease.value&&WaitForSingleObject(lease.value,15000)==WAIT_OBJECT_0,"failed Ensure actually ends its bounded helper use");
      check(actualHelpers==1&&ready==0&&completed==0&&known>=1&&reason!=0&&!std::filesystem::exists(dir/L"child.pid")&&!std::filesystem::exists(dir/L"dom-started"),"initialization failure cannot signal ready, create another helper or enter DOM confirmation");
+     if(const auto revision=applyRevision(runtime,session);revision.has_value())check(revision==0,"failed initialization cannot advance the automatic application stamp");
      runtime.shutdown();scenarios.push_back({{"case",u8(selected)},{"helpers",actualHelpers.load()},{"reason",reason.load()},{"ready",ready.load()}});continue;
    }
    if(selected==L"cold-editor"||selected==L"cold-power"||selected==L"cold-request"||selected==L"cold-identity"||selected==L"cold-bad-init"||selected==L"cold-public-serial"||selected==L"cold-public-notification"||selected==L"cold-public-unknown"){
@@ -202,11 +242,24 @@ int wmain(int argc,wchar_t**argv){std::cout<<std::unitbuf;try{
      scenarios.push_back({{"case",u8(kind)},{"ready",ready.load()},{"known",known.load()},{"reason",reason.load()},{"phase",lastPhase.load()},{"flags",lastFlags.load()},{"residentParentSurvives",true},{"residentChildSurvives",true}});continue;
    }
    check(lease.value&&until([&]{return ready==1;}),"one automatic helper initialized CSS and signaled ready");Child parent,child,helper;pin(dir,parent,child);
-   if(selected==L"cold-single")check(actualHelpers==1,"cold initialization creates exactly one temporary helper");
-   if(selected==L"cold-cost"||selected==L"cold-single"||selected==L"cold-public-revision"||selected==L"cold-public-cache"){
+   if(selected==L"cold-single"||applyRevisionCase)check(actualHelpers==1,"cold initialization creates exactly one temporary helper");
+   if(selected==L"cold-cost"||selected==L"cold-single"||selected==L"cold-public-revision"||selected==L"cold-public-cache"||applyRevisionCase){
      check(WaitForSingleObject(lease.value,15000)==WAIT_OBJECT_0&&completed==1&&known>=1&&reason==0,"complete cold confirmation retains the original result contract");
      const auto elapsed=GetTickCount64()-started;
      check(lastFlags==31&&runtime.residentConfirmed(session),"complete cold path confirms all five backend/config/DOM/singleton/resident flags");
+     const auto applied=applyRevision(runtime,session);auto previous=session;++previous.created;
+     if(applied.has_value()||applyRevisionCase){
+      check(applied==1,"accepted automatic completion advances the stamp even after its helper exits");
+      check(applyRevision(runtime,previous)==0,"the stamp cannot cross a Steam birth boundary");
+     }
+     if(applyRevisionCase){
+      deckylaunch::Handle verify;verify.value=runtime.confirmExisting(session);
+      check(verify.value&&WaitForSingleObject(verify.value,15000)==WAIT_OBJECT_0&&completed==2&&lastFlags==31&&runtime.residentConfirmed(session),"read-only helper fully confirms the same resident backend");
+      check(applyRevision(runtime,session)==1,"successful VerifyOnly does not claim a new automatic apply");
+      deckylaunch::Handle apply;apply.value=runtime.confirmAndIdle(session,false,true);
+      check(apply.value&&WaitForSingleObject(apply.value,15000)==WAIT_OBJECT_0&&completed==3&&applyRevision(runtime,session)==2,"the next accepted automatic apply advances the same-session stamp again");
+      check(countImage(dir/L"CssLoader-Standalone-Headless.exe")==2,"the three temporary uses retain exactly one resident packaged backend family");
+     }
      if(selected==L"cold-public-cache"){
       const auto helperCount=actualHelpers.load();powerChange(selected);
       const bool retained=runtime.residentConfirmed(session);

@@ -320,7 +320,7 @@ Snapshot read(){++fake::reads;fake::error=888;if(fake::throwRead)throw std::runt
 json toJson(const Snapshot& s){return {{"asyncDownMask",s.mask},{"foregroundPidBefore",s.pid},{"foregroundPidAfter",s.pid},{"captureBeginTick",1000},{"captureEndTick",1000},{"sourceAttribution","unobserved"}};}
 }
 namespace ymcc {
-struct ShortcutWindowVisibility {};
+struct ShortcutWindowVisibility {bool restoreMaximized=false;};
 static bool summonPressHides(bool,bool,bool,bool,bool){fake::controls.push_back("summon-policy");return fake::hide;}
 static bool summonPressHides(const ShortcutWindowVisibility&,bool,bool){return summonPressHides(true,true,false,false,false);}
 }
@@ -509,7 +509,7 @@ Snapshot read(){++fake::reads;fake::error=888;if(fake::throwRead)throw std::runt
 json toJson(const Snapshot& s){return {{"asyncDownMask",s.mask},{"foregroundPidBefore",s.pid},{"foregroundPidAfter",s.pid},{"captureBeginTick",1000},{"captureEndTick",1000},{"sourceAttribution","unobserved"}};}
 }
 namespace ymcc {
-struct ShortcutWindowVisibility {};
+struct ShortcutWindowVisibility {bool restoreMaximized=false;};
 static bool summonPressHides(bool,bool,bool,bool,bool){fake::controls.push_back("summon-policy");return fake::hide;}
 static bool summonPressHides(const ShortcutWindowVisibility&,bool,bool){return summonPressHides(true,true,false,false,false);}
 }
@@ -560,9 +560,14 @@ struct OrdinaryOverlayPort {
 };
 static OrdinaryOverlayPort g_gameOverlay;
 enum class GameOverlayAttempt {Ordinary,Begun,Refused};
-static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot&){return GameOverlayAttempt::Ordinary;}
+static GameOverlayAttempt gameOverlayTryBegin(const FocusTargetSnapshot&,bool){return GameOverlayAttempt::Ordinary;}
+static bool shortcutSummonRenderBusy(){return false;}
+static bool shortcutSummonWaitForRender(const FocusTargetSnapshot&,bool){return false;}
+static void shortcutSummonClearRenderWait(){}
 static bool gameOverlayInputEligible(){return false;}
 static bool gameOverlayOutputOwns(){return false;}
+static bool fixtureUiProbeCanIdle=true;
+static bool steamLightGamepadUiProbeCanIdle(){return fixtureUiProbeCanIdle;}
 static void gameOverlayStop(const char*){}
 static HWND mainUiPresentationWindow(){return g_hwnd;}
 static void controllerFseWakeReconnectRefresh(const json&){}
@@ -1544,6 +1549,24 @@ static void isolationSharedPowerOrder(){
  }
 }
 static void lightNoDemandPowerRead(){
+ reset();
+ const auto noProofReads=fake::uiGateReads;
+ for(unsigned i=0;i<1024;++i) actualSteamLightGamepadUiChanged();
+ fake::check(fake::uiGateReads==noProofReads&&!g_steamLightGamepadIntent.load()&&fake::steamLeaseJobs.empty(),
+  "idle legacy lease queried output or queued work");
+ fixtureUiProbeCanIdle=false;
+ actualSteamLightGamepadUiChanged();
+ fixtureUiProbeCanIdle=true;
+ fake::check(fake::uiGateReads==noProofReads+1,"handoff cleanup was skipped");
+ auto release=std::make_shared<SteamLightGamepadIntent>();
+ release->serial=++g_steamLightGamepadSerial;release->session=g_focusSessionSequence;
+ g_steamLightGamepadIntent.store(release);
+ g_steamLightGamepadSettledSerial.store(release->serial);
+ actualSteamLightGamepadUiChanged();
+ fake::check(fake::uiGateReads==noProofReads+1&&g_steamLightGamepadIntent.load()==release,"settled OFF delivery was queried or republished");
+ g_steamLightGamepadSettledSerial.store(0);
+ actualSteamLightGamepadUiChanged();
+ fake::check(fake::uiGateReads==noProofReads+2,"unsettled OFF delivery skipped the original probe");
  startLight();fake::exerciseSteamLease=true;focusLightRecheckOnUi();
  const auto lease=g_steamLightGamepadLeaseState.load();
  fake::check(lease&&steamLightGamepadAttemptActive(),"light attempt not active with current foreground");

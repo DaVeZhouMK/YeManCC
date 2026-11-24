@@ -15,6 +15,23 @@ function hubHarness(){let now=100000,read=async()=>publication(now,battery(now))
 await test('bad push cannot poison lifecycle high-water before collectedAt validation',()=>{const h=hubHarness();assert(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()))));assert.equal(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()),{seq:9000,collectedAt:0})),undefined);assert(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()),{seq:2})));});
 await test('bad request reply cannot poison later valid reads',async()=>{const h=hubHarness();assert(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()))));h.setRead(async()=>publication(h.now(),battery(h.now()),{seq:9000,collectedAt:0}));assert.equal(await h.hub.read(),null);h.setRead(async()=>publication(h.now(),battery(h.now()),{seq:2}));assert(await h.hub.read());});
 await test('late read from superseded session cannot roll session back',async()=>{const h=hubHarness();assert(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()))));let resolve;h.setRead(()=>new Promise(r=>resolve=r));const p=h.hub.read();await flush();assert(h.hub.admitDisplayPublication(publication(h.now(),battery(h.now()),{session:2,seq:1})));resolve(publication(h.now(),battery(h.now()),{session:1,seq:20}));await p;assert.equal(h.hub.session(),2);});
+await test('retired power scope releases a shared monitor read and ignores its late lifecycle receipt',async()=>{
+ const h=hubHarness();let settleOld,settleNew;
+ h.setRead(()=>new Promise(resolve=>settleOld=resolve));
+ const old=h.hub.read(),borrowed=h.hub.read();
+ try{
+  assert.equal(h.calls.filter(cmd=>cmd==='monitor.snapshot').length,1);
+  h.hub.retireReads();
+  h.setRead(()=>new Promise(resolve=>settleNew=resolve));
+  const current=h.hub.read();assert.equal(h.calls.filter(cmd=>cmd==='monitor.snapshot').length,2);
+  settleOld(publication(h.now(),battery(h.now()),{session:9,seq:9000}));
+  assert.equal(await old,null);assert.equal(await borrowed,null);assert.equal(h.hub.session(),null);
+  const joined=h.hub.read();assert.equal(h.calls.filter(cmd=>cmd==='monitor.snapshot').length,2);
+  settleNew(publication(h.now(),battery(h.now()),{session:2,seq:1}));
+  assert.equal((await current).session,2);assert.equal((await joined).session,2);
+  assert.equal(h.hub.pendingReads(),0);
+ }finally{settleOld?.(null);settleNew?.(null);}
+});
 await test('stop floor preserves new Windows channels when old HW timestamp precedes stop',async()=>{const h=hubHarness(),stop=h.hub.acquire('audit',{top:true});await flush();stop();await flush();h.setNow(h.now()+1000);const view=h.hub.admitDisplayPublication(publication(h.now(),battery(h.now(),{ts:h.now()-10000,hwDown:true}),{seq:2,hwDown:true}));assert(view?.top);const data=m.hudFromUniformSnapshot(view,h.now());assert.equal(m.hudValue(data,'batteryPower'),'≈-24.0');assert.equal(data.coreUsage.length,2);assert.equal(m.hudValue(data,'cpuPower'),'—');});
 await test('new HW cannot revive old Windows power/status/runtime/core after stop',async()=>{const h=hubHarness(),stop=h.hub.acquire('audit',{top:true});await flush();stop();await flush();const old=h.now()-1;h.setNow(h.now()+1000);const view=h.hub.admitDisplayPublication(publication(h.now(),battery(h.now(),{batteryStatusTs:old,batteryPowerTs:old,batteryTimeTs:old,coreUsageTs:old}),{seq:2}));assert(view);const d=m.hudFromUniformSnapshot(view,h.now());for(const id of ['batteryPercent','batteryPower','batteryTime'])assert.equal(m.hudValue(d,id),'—',id);assert.equal(d.coreUsage.length,0);assert.equal(m.hudValue(d,'cpuPower'),'20.0');});
 await test('legacy file display key includes independent Windows battery timestamps and values',()=>{const now=100000,s={source:'files',generation:0,seq:0,hwDown:true,top:battery(now,{ts:1,hwDown:true}),fps:null};assert.notEqual(m.monitorSnapshotDisplayKey(s),m.monitorSnapshotDisplayKey({...s,top:{...s.top,batteryPowerTs:now+1000,chargeW:-30}}));});

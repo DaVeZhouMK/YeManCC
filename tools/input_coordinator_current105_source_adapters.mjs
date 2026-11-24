@@ -1,7 +1,9 @@
+import {terminal29CompileSourceProfile,repairTerminal29Observation,repairTerminal29Tuple} from './input_coordinator_terminal29_source_profile.mjs';
 import {terminal26CompileSourceProfile} from './input_coordinator_terminal26_source_profile.mjs';
 import {terminal22SteamCompileSpec,terminal23CompileSourceProfile} from './input_coordinator_terminal22_source_adapters.mjs';
 import fs from'node:fs';import assert from'node:assert/strict';import{createHash}from'node:crypto';import{extract}from'./fixtures/legion_motion_consumer/extract_main.mjs';
 import {fileURLToPath} from 'node:url';
+const explicit29='current105-terminal29-shared-input-power-v1';
 const explicit26='current105-terminal26-sdk-lifetime-compact-v1';
 function requireNativeSourceProfileContract(managedInputContract,nativeSourceProfile){
  if(nativeSourceProfile!==undefined)assert.equal(managedInputContract,explicit26,'NATIVE_SOURCE_PROFILE_REQUIRES_EXPLICIT26');
@@ -11,15 +13,16 @@ const sha=b=>createHash('sha256').update(b).digest('hex'),repo=fileURLToPath(new
 
 export function currentCompileSourceDataProfile({sourceRoot,managedInputContract,nativeSourceProfile}={}){
  requireNativeSourceProfileContract(managedInputContract,nativeSourceProfile);
- assert(managedInputContract===undefined||managedInputContract==='current105-exact21-v1'||managedInputContract==='current105-terminal22-v1'||managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26,'UNKNOWN_COMPILE_SOURCE_CONTRACT');
+ assert(managedInputContract===undefined||managedInputContract==='current105-exact21-v1'||managedInputContract==='current105-terminal22-v1'||managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26||managedInputContract===explicit29,'UNKNOWN_COMPILE_SOURCE_CONTRACT');
+ if(managedInputContract===explicit29)return terminal29CompileSourceProfile(sourceRoot);
  if(managedInputContract===explicit26)return terminal26CompileSourceProfile(sourceRoot,{nativeSourceProfile});
  return managedInputContract==='current105-terminal23-sd-decoder-v1'?terminal23CompileSourceProfile(sourceRoot):spec;
 }
 export function guardCurrentSteam(original,{sourceRoot,managedInputContract,nativeSourceProfile}={}){
  requireNativeSourceProfileContract(managedInputContract,nativeSourceProfile);
- assert(managedInputContract===undefined||managedInputContract==='current105-exact21-v1'||managedInputContract==='current105-terminal22-v1'||managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26,'UNKNOWN_COMPILE_SOURCE_CONTRACT');
- const current23=managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26;
- const guardSpec=managedInputContract===explicit26?terminal26CompileSourceProfile(sourceRoot,{nativeSourceProfile}):current23?terminal23CompileSourceProfile(sourceRoot):managedInputContract==='current105-terminal22-v1'?terminal22SteamCompileSpec(sourceRoot):spec;
+ assert(managedInputContract===undefined||managedInputContract==='current105-exact21-v1'||managedInputContract==='current105-terminal22-v1'||managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26||managedInputContract===explicit29,'UNKNOWN_COMPILE_SOURCE_CONTRACT');
+ const current23=managedInputContract==='current105-terminal23-sd-decoder-v1'||managedInputContract===explicit26||managedInputContract===explicit29;
+ const guardSpec=managedInputContract===explicit29?terminal29CompileSourceProfile(sourceRoot):managedInputContract===explicit26?terminal26CompileSourceProfile(sourceRoot,{nativeSourceProfile}):current23?terminal23CompileSourceProfile(sourceRoot):managedInputContract==='current105-terminal22-v1'?terminal22SteamCompileSpec(sourceRoot):spec;
  let inert=original;const header='#include "steam_original_recovery_runtime.h"';assert.equal(inert.split(header).length,2);
  assert.equal(sha(fs.readFileSync(guardSpec.steamRecovery.runtimeHeader.path)),guardSpec.steamRecovery.runtimeHeader.sha256);
  const actualHeader=fs.readFileSync(guardSpec.steamRecovery.runtimeHeader.path,'utf8');assert.equal(sha(extract(actualHeader,'steamOriginalRecoveryStart').code),guardSpec.steamRecovery.startSha256);
@@ -42,10 +45,11 @@ export function guardCurrentSteam(original,{sourceRoot,managedInputContract,nati
 // Unknown files, changed old inputs, or drifted reviewed outputs are refused.
 export function currentFixtureSourceOverride(relative,original,options={}){
  requireNativeSourceProfileContract(options.managedInputContract,options.nativeSourceProfile);
- assert(options.managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',explicit26].includes(options.managedInputContract),'UNKNOWN_COMPILE_SOURCE_CONTRACT');
+ assert(options.managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',explicit26,explicit29].includes(options.managedInputContract),'UNKNOWN_COMPILE_SOURCE_CONTRACT');
  assert(Buffer.isBuffer(original),'FIXTURE_OVERRIDE_BYTES_REQUIRED');
- if(options.managedInputContract!==explicit26)return original;
- if(relative==='tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc')return repairCurrent105TupleFixtureInputs(original,options);
+ if(options.managedInputContract===explicit29&&relative==='tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc')return repairTerminal29Tuple(original,options);
+ if(options.managedInputContract!==explicit26&&options.managedInputContract!==explicit29)return original;
+ if(options.managedInputContract===explicit26&&relative==='tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc')return repairCurrent105TupleFixtureInputs(original,options);
  const profile=currentCompileSourceDataProfile(options),row=profile.fixtureSourceOverrides.find(row=>row.relative===relative);assert(row,'UNKNOWN_REVIEWED_FIXTURE_OVERRIDE');
  assert.equal(original.length,row.before.bytes);assert.equal(sha(original),row.before.sha256,'FIXTURE_OVERRIDE_ORIGINAL_CHANGED');
  let text=original.toString('utf8');
@@ -55,7 +59,7 @@ export function currentFixtureSourceOverride(relative,original,options={}){
  return bytes;
 }
 
-export function observeCurrent105Fixture(original,options={}){const observationSpec=currentCompileSourceDataProfile(options);assert.equal(sha(original),observationSpec.fixture.sha256,'Exact captured current fixture');const review={changes:observationSpec.fixtureObservationChanges};let text=original;const applied=[];for(const row of review.changes){const lfBefore=row.before.replaceAll('\r\n','\n'),lfAfter=row.after.replaceAll('\r\n','\n'),beforeCandidates=[...new Set([lfBefore,lfBefore.replaceAll('\n','\r\n')])],hits=beforeCandidates.flatMap(before=>Array.from({length:text.split(before).length-1},()=>before));assert.equal(hits.length,row.count,'Actual unchanged observation anchor '+row.label);for(const before of hits){const after=before.includes('\r\n')?lfAfter.replaceAll('\n','\r\n'):lfAfter;text=text.replace(before,()=>after);applied.push({before,after});}}let inverse=text;for(const row of [...applied].reverse())inverse=inverse.replace(row.after,()=>row.before);assert.equal(inverse,original);if(observationSpec.nativeSourceProfile){assert.equal(Buffer.byteLength(text),observationSpec.fixtureObservedOutput.bytes,'CURRENT_CAPTURE_OBSERVATION_OUTPUT_SIZE_REQUIRED');assert.equal(sha(text),observationSpec.fixtureObservedOutput.sha256,'CURRENT_CAPTURE_OBSERVATION_OUTPUT_PIN_REQUIRED');}return {text,originalSha256:sha(original),observedSha256:sha(text),originalBusinessChecksChanged:false,...(observationSpec.nativeSourceProfile?{nativeSourceProfile:observationSpec.nativeSourceProfile}:{})};}
+export function observeCurrent105Fixture(original,options={}){const observationSpec=currentCompileSourceDataProfile(options);assert.equal(sha(original),observationSpec.fixture.sha256,'Exact captured current fixture');const review={changes:observationSpec.fixtureObservationChanges};let text=original;const applied=[];for(const row of review.changes){const lfBefore=row.before.replaceAll('\r\n','\n'),lfAfter=row.after.replaceAll('\r\n','\n'),beforeCandidates=[...new Set([lfBefore,lfBefore.replaceAll('\n','\r\n')])],hits=beforeCandidates.flatMap(before=>Array.from({length:text.split(before).length-1},()=>before));assert.equal(hits.length,row.count,'Actual unchanged observation anchor '+row.label);for(const before of hits){const after=before.includes('\r\n')?lfAfter.replaceAll('\n','\r\n'):lfAfter;text=text.replace(before,()=>after);applied.push({before,after});}}let inverse=text;for(const row of [...applied].reverse())inverse=inverse.replace(row.after,()=>row.before);assert.equal(inverse,original);if(observationSpec.nativeSourceProfile){assert.equal(Buffer.byteLength(text),observationSpec.fixtureObservedOutput.bytes,'CURRENT_CAPTURE_OBSERVATION_OUTPUT_SIZE_REQUIRED');assert.equal(sha(text),observationSpec.fixtureObservedOutput.sha256,'CURRENT_CAPTURE_OBSERVATION_OUTPUT_PIN_REQUIRED');}const result={text,originalSha256:sha(original),observedSha256:sha(text),originalBusinessChecksChanged:false,...(observationSpec.nativeSourceProfile?{nativeSourceProfile:observationSpec.nativeSourceProfile}:{})};return options.managedInputContract===explicit29?repairTerminal29Observation(result,options):result;}
 
 // Exact fixture input repairs applied after the immutable V2 observation.
 // No current mainline fixture is imported and no captured/source profile pin changes.

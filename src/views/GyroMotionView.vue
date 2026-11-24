@@ -20,7 +20,7 @@ import Dropdown from '@/components/Dropdown.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { type InputSettingsSnapshot } from '@/bridge/settingsRepository';
 import { normalizeGyroTelemetry } from '@/bridge/inputContracts';
-import { invoke, on } from '@/bridge/ipc';
+import { invoke, on, setGyroTelemetryInterest } from '@/bridge/ipc';
 import { readGameInputEditor, onGameInputEditorChanged, type GameInputEditor } from '@/bridge/gameInputEditor';
 import {saveGyroEditorPatch} from '@/bridge/gyroPresetSave';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
@@ -1061,6 +1061,7 @@ onMounted(() => {
     void load().catch(() => undefined);
   });
   window.addEventListener('input:motion-telemetry', telemetry);
+  setGyroTelemetryInterest(telemetry, true);
   // 抖动根因 A 配套：拖拽检测（冻结页面级 XYZ 刷新；气泡照常）
   window.addEventListener('pointerdown', onGyroPreviewPointerDown, { capture: true });
   window.addEventListener('pointerup', onGyroPreviewPointerUp, { capture: true });
@@ -1073,11 +1074,13 @@ onMounted(() => {
   void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
 });
 onActivated(() => {
+  setGyroTelemetryInterest(telemetry, true);
   gyroPresentation.setActive(true);
   if (busy.value || saveRequested || saveTimer) return;
   void load().catch(() => undefined);
 });
 onDeactivated(() => {
+  setGyroTelemetryInterest(telemetry, false);
   simulationSettings.value=null;simulationOpen.value=false;
   ++sourceProbePollToken;
   sourceProbeRunning.value = false;
@@ -1085,6 +1088,7 @@ onDeactivated(() => {
   gyroPresentation.setActive(false);
 });
 onBeforeUnmount(() => {
+  setGyroTelemetryInterest(telemetry, false);
   ++sourceProbePollToken;
   gyroPresentation.dispose();
   stopGyroVisibility?.();

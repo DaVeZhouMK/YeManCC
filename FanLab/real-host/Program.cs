@@ -2234,6 +2234,8 @@ internal sealed class HostState
     public long PowerOperationGeneration { get; set; }
     public string? PowerOperationStatus { get; set; }
     public string? PowerOperationOutcome { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ResumeAwaitingPublicGrant { get; set; }
     public int PowerOperationAttempt { get; set; }
     // FAN-943: these are effective software capability evidence, not physical control proof.
     public bool? FanCapabilitySupported { get; set; }
@@ -9356,7 +9358,13 @@ internal sealed partial class RealHcBackend : IDisposable
                     deviceType = assembly!.GetType("HandheldCompanion.Devices.IDevice", throwOnError: true), Diagnostic);
             if (device is null)
             {
-                if (string.IsNullOrWhiteSpace(options.HcDeviceType))
+                var board = assembly!.GetType("HandheldCompanion.MotherboardInfo", true)!;
+                object? BoardValue(string name) => board.GetProperty(name, BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                var manufacturer = BoardValue("Manufacturer") as string;
+                var product = BoardValue("Product") as string;
+                var aliasedFactory = SelectLegacyFanFactoryAlias(manufacturer, product, options.HcDeviceType);
+                var factory = aliasedFactory ?? options.HcDeviceType;
+                if (string.IsNullOrWhiteSpace(factory))
                 {
                     RunHcInitializationStage("device.get-current", () =>
                         device = deviceType!.GetMethod("GetCurrent", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null)
@@ -9366,17 +9374,29 @@ internal sealed partial class RealHcBackend : IDisposable
                 {
                     RunHcInitializationStage("device.construct", () =>
                     {
-                        // §18 诊断/无硬件联调：开发机不是 ROG 掌机，GetCurrent 不会返回 ROGAlly。
-                        // 按类型名构造候选设备实例，其余初始化步骤与生产一致。
-                        var requestedType = assembly!.GetType(options.HcDeviceType, throwOnError: true)
-                            ?? throw new InvalidOperationException($"HC device type not found: {options.HcDeviceType}");
+                        // Internal DMI aliases and diagnostic overrides use the same type guard.
+                        var requestedType = assembly!.GetType(factory, throwOnError: true)
+                            ?? throw new InvalidOperationException($"HC device type not found: {factory}");
                         // This fixed headless profile admits only the audited HC device class set.
                         if (requestedType.Assembly != assembly || requestedType.IsAbstract ||
                             !deviceType!.IsAssignableFrom(requestedType) ||
                             requestedType.Namespace != "HandheldCompanion.Devices")
-                            throw new InvalidOperationException($"HC diagnostic type is outside the approved device profile: {options.HcDeviceType}");
-                        device = Activator.CreateInstance(requestedType)
-                            ?? throw new InvalidOperationException($"HC device type could not be constructed: {options.HcDeviceType}");
+                            throw new InvalidOperationException($"HC type is outside the approved device profile: {factory}");
+                        var selected = Activator.CreateInstance(requestedType)
+                            ?? throw new InvalidOperationException($"HC device type could not be constructed: {factory}");
+                        if (aliasedFactory is not null)
+                        {
+                            // Mirror GetCurrent's identity population, retaining the actual board SKU.
+                            void Set(string name, object? value) => deviceType!.GetField(name)!.SetValue(selected, value);
+                            Set("ManufacturerName", manufacturer!.ToUpperInvariant());
+                            Set("ProductName", product);
+                            Set("SystemName", BoardValue("SystemName"));
+                            Set("SystemModel", BoardValue("SystemModel"));
+                            Set("Version", BoardValue("Version"));
+                            Set("Processor", BoardValue("ProcessorName"));
+                            Set("NumberOfCores", BoardValue("NumberOfCores"));
+                        }
+                        device = selected;
                     }, Diagnostic);
                 }
             }
@@ -9404,6 +9424,15 @@ internal sealed partial class RealHcBackend : IDisposable
         {
             lock (hardwareGate) hcInitializationInFlight = false;
         }
+    }
+
+    internal static string? SelectLegacyFanFactoryAlias(string? manufacturer, string? product, string? diagnosticFactory)
+    {
+        var factory = YeManFanBackend.Capabilities.FanCapabilityCatalog.MatchLegacyFanFactoryAlias(manufacturer, product)?.FactoryType;
+        if (factory is not null && !string.IsNullOrWhiteSpace(diagnosticFactory) &&
+            !string.Equals(factory, diagnosticFactory, StringComparison.Ordinal))
+            throw new InvalidOperationException("LEGACY_FAN_ALIAS_DIAGNOSTIC_IDENTITY_MISMATCH");
+        return factory;
     }
 
     private void RequireHcInitializationOwner()
@@ -14425,6 +14454,7 @@ internal sealed partial class FanHostEngine : IDisposable
         snapshot.ResumePhaseGeneration = snapshot.PowerOperationGeneration;
         snapshot.ResumeRetryAfterMs = HostState.ResumePollRetryAfterMs;
         snapshot.ControlAccepting = IsControlAccepting(snapshot);
+        snapshot.ResumeAwaitingPublicGrant = ResumeAwaitingPublicGrant(snapshot);
         snapshot.LastControlWriteEvidence = realBackend?.LastControlWriteEvidence ?? "none";
         snapshot.SourceModelClass = realBackend?.SourceModelClass;
         snapshot.SourceCommit = realBackend?.SourceCommit;

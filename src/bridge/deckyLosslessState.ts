@@ -17,6 +17,10 @@ export class DeckyLosslessObservation<T> {
     if(this.task)clearTimeout(this.task.timer);
     this.task=null;this.document=null;this.notice='';this.refresh();
   }
+  peek(key:string) {
+    if(this.ended||this.key!==key)return null;
+    return {document:this.document,pending:!!this.task,notice:this.notice,needsRead:this.dirty&&!this.task};
+  }
   view(key:string,read:()=>Promise<T>):{document:T|null;pending:boolean;notice:string} {
     if(this.ended)return {document:null,pending:false,notice:''};
     if(key!==this.key){this.key=key;this.reset();}

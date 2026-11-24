@@ -16,6 +16,7 @@ class WindowHintWindow {
     bool pending_ = false;
 public:
     void request(ULONGLONG now) { if (!pending_) { pending_ = true; due_ = now + 200; } }
+    bool pending() const noexcept { return pending_; }
     DWORD timeout(ULONGLONG now) const {
         return !pending_ ? INFINITE : now >= due_ ? 0 : static_cast<DWORD>(due_ - now);
     }

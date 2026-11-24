@@ -96,9 +96,35 @@ function Write-YmccRecoveryFile([string]$Path,[byte[]]$Bytes) {
 }
 # Diagnostics only. The protected directory scopes this bounded snapshot to
 # the installed executable; it is never read for recovery or authorization.
+function Get-YmccDeckyInstallIssueKind($Failure) {
+    $exception=$Failure.Exception
+    for ($depth=0; $exception -and $depth -lt 8; $depth++) {
+        switch -CaseSensitive -Regex ([string]$exception.Message) {
+            '^DECKY_BACKEND_IN_USE_OR_UNAVAILABLE:' { return 'backend-unavailable' }
+            '^DECKY_PREPARATION_LEASE_INVALID(?:;|$)' { return 'preparation-lease-invalid' }
+            '^MODULE_MAINTENANCE_BUSY:' { return 'maintenance-busy' }
+            '^DECKY_(?:PACKAGE_HASH_MISMATCH |PACKAGE_FILE_MISSING |(?:MANIFEST_INVALID|MANAGED_FILE_INVALID|LOADER_IDENTITY_INVALID|PACKAGE_FILESET_INVALID|PLUGIN_IDENTITY_INVALID)(?:;|$))' { return 'package-invalid' }
+            '^DECKY_TARGET_CHANGED_(?:BEFORE|DURING)_INSTALL(?:;|$)' { return 'target-changed' }
+            '^DECKY_(?:REPARSE_POINT_REFUSED|PATH_NOT_ABSOLUTE|PATH_IS_VOLUME_ROOT|PATH_INVALID|PATH_ESCAPES_HOME|SOURCE_TARGET_OVERLAP)(?:;|$)' { return 'path-refused' }
+            '^DECKY_(?:STAGED|COMMIT|FINAL|BACKUP)_HASH_MISMATCH(?:;|$)' { return 'write-verification-failed' }
+        }
+        if ($exception.HResult -in @(-2147024864,-2147024863) -or
+            ($exception -is [ComponentModel.Win32Exception] -and $exception.NativeErrorCode -in @(32,33))) { return 'file-busy' }
+        if ($exception -is [UnauthorizedAccessException] -or $exception.HResult -eq -2147024891 -or
+            ($exception -is [ComponentModel.Win32Exception] -and $exception.NativeErrorCode -eq 5)) { return 'access-denied' }
+        $exception=$exception.InnerException
+    }
+    return 'unclassified'
+}
 function Add-YmccInstallIssue([string]$Step, $Failure, [switch]$Core) {
     if (!$script:ymccInstallIssues) { $script:ymccInstallIssues=[ordered]@{} }
     $script:ymccInstallIssues[$Step]=1+[int]$script:ymccInstallIssues[$Step]
+    if ($Step -cin @('plan-decky','apply-decky')) {
+        try {
+            if ($null -eq $script:ymccDeckyIssueKinds) { $script:ymccDeckyIssueKinds=[ordered]@{} }
+            if (!$script:ymccDeckyIssueKinds.Contains($Step)) { $script:ymccDeckyIssueKinds[$Step]=Get-YmccDeckyInstallIssueKind $Failure }
+        } catch { } # Classification cannot change the install outcome.
+    }
     if ($Core) { $script:ymccCoreWriteFailures++ }
     Write-Warning ('UPDATE_CONTINUED ['+$Step+']: '+$Failure.Exception.Message) -WarningAction Continue
 }
@@ -206,6 +232,7 @@ function Write-YmccInstallTrace([string]$Outcome='running', $Failure=$null,
             updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
         if ($parentExitMode -cin @('already-exited','graceful','forced-owned-parent')) { $row.parentExit=$parentExitMode }
         if ($script:ymccInstallIssues) { $row.issues=$script:ymccInstallIssues }
+        if ($script:ymccDeckyIssueKinds) { $row.deckyIssueKinds=$script:ymccDeckyIssueKinds }
         if ($Outcome -eq 'failed') {
             $row.errorKind=switch ($script:ymccInstallStep) {
                 'launch-new' { 'startup-launch' }

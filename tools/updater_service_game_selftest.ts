@@ -11,12 +11,14 @@ const realSet=globalThis.setTimeout,realClear=globalThis.clearTimeout,realNow=Da
 Object.defineProperty(globalThis,'navigator',{value:{onLine:true},configurable:true});
 class FixtureEvent extends Event{detail:unknown;constructor(type:string,init:{detail?:unknown}){super(type);this.detail=init.detail;}}
 (globalThis as any).CustomEvent=FixtureEvent;
+Object.assign(globalThis,{document:Object.assign(new EventTarget(),{visibilityState:'visible',createElement:()=>({content:{}})})});
 let rejectActivity=false;
 let pending:any=null,native:any={phase:'idle',downloadActive:false},gate=false;
 const policy={enabled:true,bootId:'fixture-boot',lastNotifiedBoot:'',failureCount:0,nextCheckAt:0};
 const win=new EventTarget() as any;win.chrome={webview:{addEventListener(_name:string,fn:typeof receive){receive=fn;},postMessage(req:any){if(typeof req.id!=='number')return;calls.push(req);queueMicrotask(()=>{
  const result=(value:any)=>receive({data:{id:req.id,result:value}}),error=(text:string)=>receive({data:{id:req.id,error:text}});
- if(req.cmd==='app.updatePredownloadActivity'){gate=!rejectActivity&&req.args.known&&req.args.idle;result(!rejectActivity);}
+ if(req.cmd==='power.lifecycle')result({phase:'ready',generation:1,known:true,hardwareWritesAllowed:true});
+ else if(req.cmd==='app.updatePredownloadActivity'){gate=!rejectActivity&&req.args.known&&req.args.idle;result(!rejectActivity);}
  else if(req.cmd==='app.updatePredownloadSet'){policy.enabled=req.args.enabled;result({...policy});}
  else if(req.cmd==='app.updatePredownloadRead')result({...policy});
  else if(req.cmd==='app.updatePredownloadSchedule'){Object.assign(policy,req.args);result(true);}

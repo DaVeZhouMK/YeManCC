@@ -55,6 +55,53 @@ $expected=$own.MainModule.FileName;$born=$own.StartTime.ToUniversalTime().ToFile
 $limited=[pscustomobject]@{Id=$own.Id;StartTime=$own.StartTime;Path=$null}
 $actual=Get-AppearanceProcessPath $limited
 Assert ([IO.Path]::GetFullPath($actual) -ieq [IO.Path]::GetFullPath($expected)) 'Empty .NET Path resolves through the exact production limited-query function'
+$directed=Get-AppearancePid -Id $own.Id -ExpectedBirth $born
+Assert ($directed.Id -eq $own.Id -and $directed.SessionId -eq $own.SessionId -and $directed.StartTime.ToFileTimeUtc() -eq $born -and !$directed.HasExited) 'Directed observation binds real PID, session, precise birth and liveness'
+Assert ((Get-AppearanceProcessPath $directed) -ieq $expected) 'The directed observation returns the birth-bound image path'
+& {
+ $savedExe=$script:BackendExe
+ $savedSid=$script:CurrentUserSid
+ $savedSession=$script:CurrentSessionId
+ $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+ try{
+  $script:BackendExe=$expected
+  $script:CurrentUserSid=$identity.User.Value
+  $script:CurrentSessionId=$own.SessionId
+  function Get-AppearanceProcessPath {throw 'Unexpected separate image lookup'}
+  function Test-CurrentUserProcess {throw 'Unexpected separate user lookup'}
+  function Get-AppearanceParentId {throw 'Unexpected separate parent lookup'}
+  Assert (!(Reject {Assert-SingleAppearanceBackend @($directed)})) 'A real directed observation confirms the family without separate image, SID or parent calls'
+  Assert (Reject {Assert-SingleAppearanceBackend @($directed,$directed)}) 'A duplicate directed PID cannot confirm a family'
+  $script:CurrentSessionId=$own.SessionId+1
+  Assert (Reject {Assert-SingleAppearanceBackend @($directed)}) 'Family confirmation still requires the same Windows session'
+  $script:CurrentSessionId=$own.SessionId
+  $script:CurrentUserSid='S-1-5-18-invalid-fixture'
+  Assert (Reject {Assert-SingleAppearanceBackend @($directed)}) 'The birth-bound identity rejects an unexpected user SID'
+  $script:CurrentUserSid=$identity.User.Value
+  $script:BackendExe=Join-Path $Out 'other.exe'
+  Assert (Reject {Assert-SingleAppearanceBackend @($directed)}) 'The birth-bound identity rejects an unexpected executable path'
+ }finally{
+  $identity.Dispose()
+  $script:BackendExe=$savedExe
+  $script:CurrentUserSid=$savedSid
+  $script:CurrentSessionId=$savedSession
+ }
+}
+Assert (Reject {Get-AppearancePid -Id $own.Id -ExpectedBirth ($born+1)}) 'The directed reader rejects an inventory PID with a different birth'
+Assert (Reject {Get-AppearancePid -Id 0}) 'An invalid zero PID does not become a successful absence observation'
+Assert ($null -eq (Get-AppearancePid -Id ([uint32]::MaxValue))) 'A missing observation returns no candidate'
+$startInfo=[Diagnostics.ProcessStartInfo]::new((Join-Path $env:SystemRoot 'System32\cmd.exe'),'/d /q /c set /p YMCC_IDENTITY_FIXTURE=')
+$startInfo.UseShellExecute=$false;$startInfo.CreateNoWindow=$true;$startInfo.RedirectStandardInput=$true
+$child=[Diagnostics.Process]::Start($startInfo)
+$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+ $observed=Get-AppearancePid -Id $child.Id
+ Assert ($observed -and !$observed.HasExited) 'A live owned child can be observed without listing processes'
+ Assert ([Ymcc.CssResidentProcess]::ReadBoundOwnerPath($observed,$own.SessionId,$identity.User.Value) -ieq $startInfo.FileName) 'The combined bound probe resolves a live child on a fresh handle'
+ $child.StandardInput.WriteLine('done');$child.StandardInput.Close()
+ Assert ($child.WaitForExit(4000) -and $observed.HasExited -and $null -eq (Get-AppearancePid -Id $child.Id)) 'An exited process cannot be accepted through the previously returned record or a new lookup'
+ Assert ([string]::IsNullOrEmpty([Ymcc.CssResidentProcess]::ReadBoundOwnerPath($observed,$own.SessionId,$identity.User.Value))) 'The combined bound probe cannot accept an exited child'
+}finally{$identity.Dispose();if(!$child.HasExited){$child.Kill();$null=$child.WaitForExit(4000)};$child.Dispose()}
 $denied=New-Object PSObject -Property @{Id=$own.Id;StartTime=$own.StartTime}
 $denied|Add-Member -MemberType ScriptProperty -Name Path -Value {throw 'fixture MainModule access denied'}
 Assert ((Get-AppearanceProcessPath $denied) -ieq $actual) 'A throwing MainModule/Path getter uses the same limited-query fallback'
@@ -63,10 +110,16 @@ Assert ((Get-AppearanceProcessPath $fast) -ieq $expected) 'Readable paths need n
 Assert (Reject {[Ymcc.CssResidentProcess]::ReadPath([uint32]$own.Id,([long]$born+1))}) 'Reused PID or changed process birth is refused on the pinned query handle'
 Assert (Reject {[Ymcc.CssResidentProcess]::ReadPath([uint32]0,[long]$born)}) 'Inaccessible or absent process is refused without a fallback launch'
 Assert (Reject {Get-AppearanceProcessPath $null}) 'Missing process cannot yield a fabricated path'
-$before=$own.HandleCount
+$own.Refresh();$before=$own.HandleCount
 for($iteration=0;$iteration -lt 100;$iteration++){$null=Get-AppearanceProcessPath $limited}
 $own.Refresh();$after=$own.HandleCount
 Assert ($after -le $before+2) 'One hundred path fallbacks close every native observation handle'
+$null=Get-AppearanceProcessPath $directed;$null=$directed.HasExited
+$own.Refresh();$directedBefore=$own.HandleCount
+for($iteration=0;$iteration -lt 100;$iteration++){
+ $process=Get-AppearancePid -Id $own.Id -ExpectedBirth $born;$null=$process.HasExited;$null=Get-AppearanceProcessPath $process
+}
+$own.Refresh();Assert ($own.HandleCount -le $directedBefore+2) 'One hundred directed lookups and readbacks close their observation handles'
 $source=[IO.File]::ReadAllText((Join-Path $repo 'PowerControl\steam-appearance\resident.ps1'))
 Assert ($source -match 'OpenProcess\(0x1000,false,pid\)' -and $source -match 'birth!=expectedBirth') 'Query path requires limited read rights and compares creation time before reading the image'
 
@@ -79,8 +132,12 @@ try {
  $listeners4=@([Ymcc.CssResidentProcess]::Listeners($port4));$listeners6=@([Ymcc.CssResidentProcess]::Listeners($port6))
  Assert (@($listeners4|Where-Object {$_.LocalAddress -eq '127.0.0.1' -and $_.OwningProcess -eq $own.Id -and $_.LocalPort -eq $port4}).Count -eq 1) 'IPv4 native listener lookup returns the exact owned ephemeral socket and PID'
  Assert (@($listeners6|Where-Object {$_.LocalAddress -eq '::1' -and $_.OwningProcess -eq $own.Id -and $_.LocalPort -eq $port6}).Count -eq 1) 'IPv6 native listener lookup preserves the address and exact PID'
+ Assert (@([Ymcc.CssResidentProcess]::ReadinessListeners($port4)|Where-Object {$_.LocalAddress -eq '127.0.0.1' -and $_.OwningProcess -eq $own.Id}).Count -eq 1) 'Readiness sees the exact current IPv4 loopback owner'
+ $readiness6=@([Ymcc.CssResidentProcess]::ReadinessListeners($port6))
+ Assert ($port4 -eq $port6 -or !$readiness6.Count) 'An IPv6-only socket does not make a backend ready'
  $tcp4.Stop()
  Assert (@([Ymcc.CssResidentProcess]::Listeners($port4)|Where-Object OwningProcess -eq $own.Id).Count -eq 0) 'A closed socket disappears on the next query without a cached absence or owner'
+ Assert (@([Ymcc.CssResidentProcess]::ReadinessListeners($port4)|Where-Object {$_.LocalAddress -eq '127.0.0.1' -and $_.OwningProcess -eq $own.Id}).Count -eq 0) 'Readiness does not cache a closed IPv4 listener'
  Assert (Reject {[Ymcc.CssResidentProcess]::Listeners(0)}) 'Invalid listener ports fail instead of returning an empty successful observation'
 }finally{$tcp4.Stop();$tcp6.Stop()}
 $decode=[Ymcc.CssResidentProcess].GetMethod('DecodeTcpListeners',[Reflection.BindingFlags]'NonPublic,Static')
@@ -118,10 +175,26 @@ foreach($name in @('Get-BackendProcesses','Test-BackendOwner')){
 }
 $script:BackendExe=$expected
 function Get-AppearanceBackendCandidates {$limited}
-function Get-Process {param($Name,$Id) if($Name -or !$Id){throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'};$limited}
+function Get-Process {throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'}
 function Test-CurrentUserProcess($Process){$Process.Id -eq $own.Id}
 function Get-AppearanceTcpListeners {param($LocalPort) [pscustomobject]@{LocalAddress='127.0.0.1';OwningProcess=$own.Id}}
 Assert (@(Get-BackendProcesses).Count -eq 1) 'Controller backend enumeration recognizes a verified existing process with empty .NET Path'
-Assert (Test-BackendOwner) 'Controller listener ownership resolves the same limited-query image without rejecting empty Path'
+Assert (Test-BackendOwner) 'Controller listener ownership resolves a fresh directed PID without the process provider'
+& {
+ $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+ $script:CurrentSessionId=$own.SessionId;$script:CurrentUserSid=$identity.User.Value
+ try {
+  function Get-AppearancePid {throw 'Unexpected separate PID lookup'}
+  function Test-CurrentUserProcess {throw 'Unexpected separate SID lookup'}
+  function Get-AppearanceProcessPath {throw 'Unexpected separate path lookup'}
+  Assert (Test-BackendOwner -ExpectedFamily @($directed)) 'The bound owner uses the combined live probe without separate PID, SID or image lookups'
+  $script:CurrentUserSid='S-1-0-0'
+  Assert (!(Test-BackendOwner -ExpectedFamily @($directed))) 'An unexpected SID cannot confirm a bound listener even if the old candidate still matches'
+  $script:CurrentUserSid=$identity.User.Value
+  $construct=$directed.GetType().GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $previous=$construct.Invoke([object[]]@([uint32]$own.Id,[uint32]$own.SessionId,[long]($born-1)))
+  Assert (!(Test-BackendOwner -ExpectedFamily @($previous))) 'The live listener cannot inherit a stale same-PID birth'
+ }finally{$identity.Dispose()}
+}
 [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);host64Bit=[Environment]::Is64BitProcess;powerShell=$PSVersionTable.PSVersion.ToString();handleDelta=($after-$before);realCssOperations=0;realSteamOperations=0;testedProcess='own PowerShell process only'}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) limited process identity checks"

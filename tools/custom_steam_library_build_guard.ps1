@@ -51,6 +51,7 @@ function Get-CustomSteamLibrarySourceIndex {
       'native/worker_thread_name.h','native/steam_listener_executor.h','native/steam_source_owner.h','native/steam_startup_capture_diagnostic.h',
       'native/steam_process_discovery.h','native/process_inventory.h','native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h','native/power_source_channel.h',
       'native/shared_game_media_download_queue.h','native/shared_game_media_download_worker.h','native/shared_game_media_download_resources.h',
+      'native/shared_game_media_frame_probe.h','native/shared_game_media_hardware_video.h','native/shared_game_media_playback30_job.h','native/shared_game_media_playback30_deadline.h',
       'native/sleep_power_native_task.h','native/sleep_power_remote_client.h','native/sleep_power_remote_contract.h',
       'native/sleep_power_remote_provider.h','native/sleep_power_remote_transport.h','native/sleep_power_state.h',
       'native/sleep_power_observation.h','native/sleep_power_revocation.h',
@@ -61,7 +62,7 @@ function Get-CustomSteamLibrarySourceIndex {
       'deps/webview2/build/native/include/WebView2EnvironmentOptions.h',
       'deps/webview2/build/native/x64/WebView2LoaderStatic.lib')
   } else {
-    $paths += @('native/game_rule_file_guard.h','native/steamdeck_mouse_vdf.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h')
+    $paths += @('native/game_rule_file_guard.h','native/steamdeck_mouse_vdf.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/shared_game_media_frame_probe.h','native/power_source_state.h')
   }
   foreach ($relative in @($paths | Sort-Object -Unique)) {
     $path = Join-Path $ProjectRoot $relative
@@ -115,6 +116,7 @@ function Assert-CustomSteamLibrarySourceFreshness {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([int]$manifest.backgroundSteamSourceProtocol -ne 1 -or [int]$manifest.backgroundMediaProtocol -ne 1 -or [int]$manifest.backgroundCatalogProtocol -ne 1 -or [int]$manifest.backgroundIdentityProtocol -ne 1 -or [int]$manifest.backgroundVideoQualityPolicy -lt 3 -or [int]$manifest.backgroundManualProtocol -ne 1 -or [int]$manifest.backgroundVideoSelectionProtocol -ne 1) { throw 'Child download/catalog/shortcut-identity capability is missing; rebuild the current library host before export' }
   if ([int]$manifest.backgroundSharedSleepProtocol -ne 1) { throw 'Child shared sleep capability is missing or incompatible; rebuild the current library host before export' }
+  if ([int]$manifest.backgroundPlayback30Protocol -ne 1) { throw 'Child 720p30 playback capability is missing or incompatible; rebuild the current library host before export' }
   $version = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$manifest.packageVersion -ne [string]$version.version) { throw 'Child package version differs from current mainline' }
   foreach ($kind in @('host','worker')) {
@@ -252,6 +254,7 @@ function Get-CslWorkerManifestInvariant($Manifest) {
   $copy.PSObject.Properties.Remove('generatedAt')
   # The fresh Host publishes this capability. Freshness checks its exact value.
   $copy.PSObject.Properties.Remove('backgroundSharedSleepProtocol')
+  $copy.PSObject.Properties.Remove('backgroundPlayback30Protocol')
   $copy.sourceBuild.PSObject.Properties.Remove('host');$copy.sourceBuild.PSObject.Properties.Remove('hostSources')
   $hostEntry[0].PSObject.Properties.Remove('bytes');$hostEntry[0].PSObject.Properties.Remove('sha256')
   return Get-ExportTextHash (ConvertTo-CslCanonicalManifestJson $copy)

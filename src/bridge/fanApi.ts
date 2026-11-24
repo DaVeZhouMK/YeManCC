@@ -89,6 +89,8 @@ export interface FanState {
   sourceCommit?: string | null;
   state: string;
   powerState?: string;
+  /** Host retains the same interrupted recovery; this grants no write access. */
+  resumeAwaitingPublicGrant?: boolean;
   /** Protocol-2 Hosts attest the full HC lifecycle in each state snapshot. */
   protocolVersion?: string | number;
   hardwareWrites: boolean;
@@ -183,7 +185,7 @@ const FAN_DIAGNOSTIC_STATE_KEYS = [
     'fanRouteWriteReady', 'openCalled', 'openEventsCalled',
     'fanCapabilitySupported', 'fanControlCapabilityDeclared', 'fanCapabilityEvidence',
     'resumePhase', 'resumePhaseGeneration', 'controlAccepting', 'retryAfterMs',
-    'powerOperationGeneration', 'powerOperationAttempt', 'powerOperationStatus',
+    'powerOperationGeneration', 'powerOperationAttempt', 'powerOperationStatus', 'powerOperationOutcome', 'resumeAwaitingPublicGrant',
     'hcManagerFactoryStarted', 'hcManagerFactoryIsolated', 'hcOpenEventsInvoked',
     'hcManagerStatuses',
     'hcEventMode', 'leaseGeneration', 'lastTemperatureC', 'currentDutyPercent',

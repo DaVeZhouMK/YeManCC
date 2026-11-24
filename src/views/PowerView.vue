@@ -9,7 +9,7 @@ import {taskExists,toggleTask,searchState,openSearchFolder,readBootMirrorState,t
 import {shell} from '@/bridge/api';
 import {isUiVisible,onUiVisibilityChange} from '@/bridge/uiLifecycle';
 import {DESKTOP_MODE_BOOT_TASK,DESKTOP_MODE_BOOT_CHANGED_EVENT,setDesktopModeStartup} from '@/bridge/desktopModeStartup';
-import {NETWORK_ACCELERATION_BOOT_TASK,NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,setNetworkAccelerationStartup} from '@/bridge/networkAccelerationStartup';
+import {NETWORK_ACCELERATION_BOOT_CHANGED_EVENT,readNetworkAccelerationStartup,setNetworkAccelerationStartup} from '@/bridge/networkAccelerationStartup';
 import {readSettingsSection,saveSettingsSection} from '@/bridge/settingsRepository';
 import {readGameBarControllerEnabled,setGameBarControllerEnabled,GAME_BAR_CONTROLLER_CHANGED_EVENT} from '@/bridge/gameBarControllerStartup';
 const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false);
@@ -21,7 +21,6 @@ const gpuScheduleDescription=computed(()=>{
  return state+'通常建议开启，AMD Ryzen AI Max 385 / Max+ 388、395 建议关闭';
 });
 const tasks=reactive({energyStar:false,cleanMem:false});type TaskKey=keyof typeof tasks;
-const STEAMCOMMUNITY_TASK=NETWORK_ACCELERATION_BOOT_TASK;
 const searchSt=ref<'hidden'|'trimmed'|'full'>('full');
 const busy=ref(false),errMsg=ref(''),taskToolsBusy=ref(false),taskToolsMsg=ref('');
 let fanBootSettingRevision=0,desktopBootSettingRevision=0,networkBootSettingRevision=0,steamOverlayBootRevision=0,gameBarControllerRevision=0,refreshRevision=0;
@@ -62,7 +61,7 @@ watch(busy,value=>{
 },{flush:'sync'});
 async function readRefresh(){
  const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision,networkRevision=networkBootSettingRevision,overlayRevision=steamOverlayBootRevision,gameBarRevision=gameBarControllerRevision;
- const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),safeExists(STEAMCOMMUNITY_TASK),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean;steamOverlayOnBoot?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK),readGameBarControllerEnabled()]);
+ const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),readNetworkAccelerationStartup(),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean;steamOverlayOnBoot?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK),readGameBarControllerEnabled()]);
  if(revision!==refreshRevision||!canRefresh()||busy.value)return;
  const [energy,memory,community,search,boot,rtss,fan,gpu,desktop,gameBar]=results;
  if(energy.status==='fulfilled')tasks.energyStar=energy.value;if(memory.status==='fulfilled')tasks.cleanMem=memory.value;

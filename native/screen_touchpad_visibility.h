@@ -92,17 +92,21 @@ inline void CALLBACK screenVisibilityObserved(HWINEVENTHOOK,DWORD event,HWND h,L
         if(h!=foreground&&(!foreground||h!=GetAncestor(foreground,GA_ROOT)))return;
     }
     ++ownerVisibilityEvents;
+    const bool transition=event==EVENT_SYSTEM_FOREGROUND||event==EVENT_OBJECT_SHOW||event==EVENT_SYSTEM_MINIMIZEEND;
     if(ownerVisibilityQueued){
         // The posted check reads the live stack. A reorder adds neither a
         // flag nor a timer; a same-root location event cannot extend its burst.
         if(event==EVENT_OBJECT_REORDER)return;
         const auto& r=ownerVisibilityRecheck;
-        if(event==EVENT_OBJECT_LOCATIONCHANGE&&r.timer&&r.epoch==ownerVisibilityEpoch){
+        // A transition already queued for this burst needs no more work. A
+        // refresh-only request still needs to record the transition source.
+        const bool transitionQueued=transition&&(ownerVisibilityQueuedForceSources&
+            static_cast<unsigned>(OwnerVisibilityForceSource::WindowTransition));
+        if((event==EVENT_OBJECT_LOCATIONCHANGE||transitionQueued)&&r.timer&&r.epoch==ownerVisibilityEpoch){
             const HWND foreground=GetForegroundWindow();
             if(foreground&&GetAncestor(foreground,GA_ROOT)==r.foreground)return;
         }
     }
-    const bool transition=event==EVENT_SYSTEM_FOREGROUND||event==EVENT_OBJECT_SHOW||event==EVENT_SYSTEM_MINIMIZEEND;
     if(queueOwnerVisibility(transition,false,OwnerVisibilityForceSource::WindowTransition)&&(transition||event==EVENT_OBJECT_LOCATIONCHANGE))beginOwnerVisibilityRechecks();
 }
 inline void syncOwnerVisibility(){

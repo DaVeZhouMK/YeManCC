@@ -63,6 +63,66 @@ internal static partial class Program
             ownedReleaseEvidence = Receipt
         };
 
+
+#if YMCC_FIXTURE_SHARED_INPUT_POWER
+        // Fixture-only read of original owners; never maintenance/import/return.
+        // Exact field identities belong to the pinned HostInputPowerBinding source.
+        public object ManagedPowerOwnershipAtTerminal()
+        {
+            lock (_lifecycleGate)
+            lock (_closeRefreshGate)
+            {
+                var owner = _powerBindings;
+                if (owner is null) return new { bound = false };
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var type = typeof(HostInputPowerBinding);
+                object? Read(string name) => (type.GetField(name, flags) ??
+                    throw new InvalidDataException("power-owner-field-missing:" + name)).GetValue(owner);
+                var gate = Read("gate") ?? throw new InvalidDataException("power-owner-gate-null");
+                lock (gate)
+                {
+                    var current = Read("current") as Dictionary<YeManCC.SharedSleepPower.RemotePowerPurpose, HostInputPowerBinding.Slot>
+                        ?? throw new InvalidDataException("power-owner-current-type");
+                    var retired = Read("retired") as List<HostInputPowerBinding.Slot>
+                        ?? throw new InvalidDataException("power-owner-retired-type");
+                    var failures = owner.CleanupFailures;
+                    var delivery = owner.SettlementFailures;
+                    return new
+                    {
+                        bound = true,
+                        terminal = Read("terminal") is bool terminal ? terminal : throw new InvalidDataException("power-owner-terminal-type"),
+                        currentSlots = current.Count,
+                        retiredSlots = retired.Count,
+                        importInFlight = Read("importing") is not null,
+                        currentBorrowers = current.Values.Sum(slot => slot.Borrowers),
+                        retiredBorrowers = retired.Sum(slot => slot.Borrowers),
+                        commandBorrower = _commandPower is not null,
+                        closeRefreshBorrower = _closeRefreshPowerBorrower is not null,
+                        originalHasBorrowers = owner.HasBorrowers,
+                        originalLocalReturnPending = owner.HasUnreturnedLocalOwnership,
+                        pendingLocalReturns = owner.PendingLocalReturns,
+                        cancelFailures = failures.Cancel,
+                        settlementExceptions = failures.Settlement,
+                        localReturnFailures = failures.LocalReturn,
+                        admissionFailures = failures.Admission,
+                        settlementUnknown = delivery.Unknown,
+                        settlementRejected = delivery.Rejected,
+                        scope = "read-only actual original power owners before child exit; not SDK or endpoint return"
+                    };
+                }
+            }
+        }
+
+#endif
+        public bool ReleaseFixtureLocal(out string detail)
+        {
+#if YMCC_FIXTURE_SHARED_INPUT_POWER
+            return ReleaseLocal(out detail, terminal: true);
+#else
+            return ReleaseLocal(out detail);
+#endif
+        }
+
         // Timing is disabled in the reused fixture. No CPU collector is added.
         public bool CostEnabledForRead => false;
         public void RecordCostPipeRead(long microseconds) { }
@@ -316,6 +376,9 @@ internal static partial class Program
         var session = _managedSession;
         object? stateAfterLoop = null;
         object? stateAfterFinalCleanup = null;
+#if YMCC_FIXTURE_SHARED_INPUT_POWER
+        object? powerOwnershipAfterFinalCleanup = null;
+#endif
         object? startupBindings = null;
         object? finalBindings = null;
         JsonElement? inputManifest = null;
@@ -376,7 +439,7 @@ internal static partial class Program
                 return loop;
             }, (out string detail) => {
                 var before = session.ManagedSnapshot();
-                var ok = session.ReleaseLocal(out detail);
+                var ok = session.ReleaseFixtureLocal(out detail);
                 _managedTerminalReleaseAttempts.Add(new { ok, detail, before, after = session.ManagedSnapshot() });
                 return ok;
             }, LogFatalExit).ConfigureAwait(false);
@@ -395,13 +458,16 @@ internal static partial class Program
             // failed terminal receipt into success through a second no-op.
             if (_managedTerminalReceipt is null) {
                 _managedTerminalReceipt = HostTerminalCleanup.Settle(
-                    new HostTerminalCleanup.LoopResult(requestedExitCode, "fixture-before-loop"), (out string detail) => session.ReleaseLocal(out detail));
+                    new HostTerminalCleanup.LoopResult(requestedExitCode, "fixture-before-loop"), session.ReleaseFixtureLocal);
                 requestedExitCode = _managedTerminalReceipt.ExitCode;
             }
             finalCleanupAttempted = _managedTerminalReceipt.ReleaseAttempts > 0;
             finalCleanupOk = _managedTerminalReceipt.ManagedReleaseComplete;
             finalCleanupDetail = _managedTerminalReceipt.FinalDetail;
             stateAfterFinalCleanup = session.ManagedSnapshot();
+#if YMCC_FIXTURE_SHARED_INPUT_POWER
+            powerOwnershipAfterFinalCleanup = session.ManagedPowerOwnershipAtTerminal();
+#endif
             _msiHostStageEvidence = null;
             try
             {
@@ -448,6 +514,9 @@ internal static partial class Program
                 failure,
                 stateAfterLoop,
                 stateAfterFinalCleanup,
+#if YMCC_FIXTURE_SHARED_INPUT_POWER
+                powerOwnershipAfterFinalCleanup,
+#endif
                 hasController = session.HasController,
                 hasContext = session.HasContext,
                 phase = session.PhaseName,

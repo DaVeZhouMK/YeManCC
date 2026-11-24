@@ -1,5 +1,10 @@
 // Actual editor rebind -> save -> reload. All device/settings ports are memory-only.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {buildEditorPreview} from './controller_shortcut_editor_preview.mjs';
+if (process.argv[3] === '--press-default' && process.argv.length === 4) {
+  await checkRebindPressDefault(path.resolve(process.argv[2]));
+  process.exit(0);
+}
+if (process.argv.length > 3) throw Error('Unknown summon rebind selection');
 const root=process.cwd(),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Build/Tasks/ControllerSummonRebind-20261031/editor');fs.mkdirSync(out,{recursive:true});const settingsPath=path.join(out,'memory-settings.json');fs.writeFileSync(settingsPath,JSON.stringify({input:{},gamepad:{enabled:true,bDoubleMinimize:true,tdpShortcut:true,fpsShortcut:true,killGame:true,openKeyboard:true,returnDesktop:true,mouseToggle:true},quickApps:{apps:[]}}));await buildEditorPreview({root,settingsPath,out:path.join(out,'actual-editor')});
 const{chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_summon.cjs')('playwright'),browser=await chromium.launch({channel:'msedge',headless:true}),checks=[],errors=[],exports=[];const check=(ok,name)=>{assert(ok,name);checks.push(name)};
 try{const page=await browser.newPage({viewport:{width:1280,height:720}});page.on('pageerror',e=>errors.push(String(e)));await page.goto(pathToFileURL(path.join(out,'actual-editor/editor.html')).href);await page.locator('.rule-row').first().waitFor();
@@ -13,3 +18,110 @@ await findSummon().click();await page.locator('.action-delete').click();await ap
 await page.locator('.new-action').click();await page.locator('.creation-record-entry').click();await page.evaluate(()=>{const p=window.__editorPreview,inputs=[{source:'oem',code:'legionr'}];p.emit('shortcut.recording.gamepad',{inputs,released:false});p.emit('shortcut.recording.gamepad',{inputs,released:true})});await page.locator('.action-trigger-bubble .seg-btn').filter({hasText:'按下'}).click();await page.locator('.creation-next').click();await page.locator('.output-summary').click();await page.locator('.output-choice').filter({hasText:'呼出 YMCC'}).click();await page.locator('.creation-finish').click();await apply();await reopen();saved=await page.evaluate(()=>structuredClone(window.__editorPreview.settings));summon=saved.input.buttonMapping.rules.shortcutRules.filter(rule=>rule.actionId==='window.summon');check(summon.length===1&&summon[0].origin==='custom'&&!summon[0].defaultKey,'new replacement keeps its custom identity without hidden template');check(summon[0].inputs.length===1&&summon[0].inputs[0].code==='legionr','custom L4 survives saved reload');check(await findSummon().locator('small').innerText()==='L4','custom replacement remains the displayed summon binding');exports.push({name:'custom-replacement-L4',input:saved.input});
 check(errors.length===0,'no editor browser exceptions');fs.writeFileSync(path.join(out,'SAVED-INPUTS.json'),JSON.stringify(exports,null,2));fs.writeFileSync(path.join(out,'ACCEPTANCE.json'),JSON.stringify({pass:true,checks,errors,memorySettings:true,nativeInputInjected:false,sourceManifest:JSON.parse(fs.readFileSync(path.join(out,'actual-editor/source-manifest.json'),'utf8'))},null,2));console.log('PASS '+checks.length+' actual editor summon rebind/save/reload checks');
 }catch(e){throw e}finally{await browser.close()}
+
+async function checkRebindPressDefault(out) {
+  fs.mkdirSync(out);
+  const settingsPath = path.join(out, 'memory-settings.json');
+  const preview = path.join(out, 'actual-editor');
+  fs.writeFileSync(settingsPath, JSON.stringify({ input: {}, gamepad: { enabled: true }, quickApps: { apps: [] } }), { flag: 'wx' });
+  await buildEditorPreview({ settingsPath, out: preview, withGamepadEngine: true });
+  const { chromium } = createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_summon.cjs')('playwright');
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const checks = [], errors = [];
+  const equal = (actual, expected, name) => { checks.push({ name, actual, expected }); assert.deepEqual(actual, expected, name); };
+  let failure = null;
+  try {
+    for (const height of [720, 800]) {
+      const page = await browser.newPage({ viewport: { width: 1280, height } });
+      page.setDefaultTimeout(7000);
+      page.on('pageerror', error => errors.push(String(error)));
+      await page.goto(pathToFileURL(path.join(preview, 'editor.html')).href);
+      const summon = page.locator('.rule-row').filter({ hasText: '呼出 YMCC' });
+      const trigger = label => page.locator('.action-trigger-bubble').getByRole('button', { name: label, exact: true });
+      const selected = () => page.locator('.action-trigger-bubble .seg-btn.active .seg-main').innerText();
+      const apply = page.locator('[data-editor-action=apply]');
+      const arm = async () => {
+        await page.locator('.record-action').click();
+        await page.waitForFunction(() => window.__editorPreview.recording && document.querySelector('[data-recording=true]'));
+      };
+      const finish = () => page.waitForFunction(() => !window.__editorPreview.recording && document.querySelector('[data-recording=false]'));
+      const record = async (...codes) => {
+        await arm();
+        await page.evaluate(codes => {
+          const inputs = codes.map(code => ({ source: 'controller', code }));
+          const p = window.__editorPreview;
+          p.emit('shortcut.recording.gamepad', { inputs, released: false });
+          p.emit('shortcut.recording.gamepad', { inputs, released: true });
+        }, codes);
+        await finish();
+      };
+      const confirmWithPad = async control => {
+        await control.focus();
+        await page.evaluate(() => window.__editorPreview.controllerAction('confirm'));
+      };
+      const save = async () => {
+        const writes = await page.evaluate(() => window.__editorPreview.writes);
+        await confirmWithPad(apply);
+        await page.waitForFunction(writes => window.__editorPreview.writes === writes + 1 && document.querySelector('[data-editor-action=apply]')?.disabled, writes, { timeout: 7000 });
+        return page.evaluate(() => structuredClone(window.__editorPreview.settings.input.buttonMapping.rules.shortcutRules.filter(rule => rule.actionId === 'window.summon')));
+      };
+      const reopen = async () => {
+        await page.evaluate(() => window.__editorPreview.setCatalog('four'));
+        await summon.waitFor();
+      };
+      await reopen();
+      equal(await selected(), '长按', `${height}: factory summon still holds`);
+      await record('rb', 'lb');
+      equal(await selected(), '长按', `${height}: same chord in reverse order keeps hold`);
+      let expected;
+      if (height === 720) {
+        await record('a', 'rb');
+        equal(await selected(), '按下', '720: changed gamepad chord defaults to press');
+        await trigger('长按').click();
+        await arm();
+        await page.keyboard.press('F10');
+        await finish();
+        expected = [{ source: 'keyboard', code: 'F10' }];
+        equal(await selected(), '按下', '720: changed keyboard input defaults to press');
+      } else {
+        await trigger('双击').click();
+        await page.getByRole('button', { name: '专用键 / 背键', exact: true }).click();
+        const backButton = page.locator('[data-oem-picker] [data-oem-key=legionr]');
+        await backButton.click();
+        equal(await selected(), '双击', '800: unconfirmed OEM selection leaves trigger alone');
+        await page.getByRole('button', { name: '取消选择', exact: true }).click();
+        equal(await selected(), '双击', '800: cancelled OEM selection keeps trigger');
+        await backButton.click();
+        await confirmWithPad(page.locator('.confirm-oem-input'));
+        expected = [{ source: 'oem', code: 'legionr' }];
+        equal(await selected(), '按下', '800: confirmed back button defaults to press');
+      }
+      const rules = await save();
+      equal(rules.map(({ defaultKey, origin, inputs, trigger }) => ({ defaultKey, origin, inputs, trigger })),
+        [{ defaultKey: 'enabled', origin: 'native-default', inputs: expected, trigger: 'press' }], `${height}: saves one edited default with press`);
+      await reopen();
+      equal(await selected(), '按下', `${height}: reopened rule keeps press`);
+      await trigger('长按').click();
+      equal((await save())[0].trigger, 'hold', `${height}: explicit hold can still be saved`);
+      await reopen();
+      equal(await selected(), '长按', `${height}: explicit hold persists after reopen`);
+      await page.locator('[data-editor-action=restore]').click();
+      const restored = await save();
+      equal(restored.map(({ inputs, trigger }) => ({ inputs, trigger })),
+        [{ inputs: [{ source: 'controller', code: 'lb' }, { source: 'controller', code: 'rb' }], trigger: 'hold' }], `${height}: restore reinstates factory chord and hold`);
+      await page.close();
+    }
+    equal(errors, [], 'no browser exceptions');
+  } catch (error) {
+    failure = String(error.stack || error);
+    throw error;
+  } finally {
+    await browser.close();
+    fs.writeFileSync(path.join(out, 'PRESS-DEFAULT.json'), JSON.stringify({
+      pass: failure === null, selection: 'press-default', checks, errors, failure,
+      memorySettings: true, nativeInputInjected: false,
+      sourceManifest: JSON.parse(fs.readFileSync(path.join(preview, 'source-manifest.json'), 'utf8')),
+    }, null, 2), { flag: 'wx' });
+  }
+  console.log(`PASS ${checks.length} actual editor press-default checks`);
+}

@@ -7,10 +7,10 @@
 import { createApp, nextTick } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
-import { router, preloadStartupRoutes } from './router';
+import { router } from './router';
 import { initialPageWork, settleStartup } from './robust/startupReadiness';
 import { useDebugStore } from './stores/debug';
-import { invoke, isNativeRuntime } from './bridge/ipc';
+import { bindGyroTelemetryDocument, invoke, isNativeRuntime } from './bridge/ipc';
 import { reportFrontendError } from './robust/frontendDiagnostics';
 import { clearRouteFallback, showRouteFallback } from './robust/routeFallback';
 import { APP_VERSION } from './version';
@@ -146,9 +146,6 @@ async function signalInitialRenderReady(): Promise<void> {
       const [routeReady, appReady] = await Promise.all([
         initialRouteReady,
         appStartupReady,
-        // Editor popups are not a second main application.
-        router.isReady().then(() => ['button-mapping-shortcuts', 'monitor-hud-preview'].includes(String(router.currentRoute.value.name))
-          ? undefined : preloadStartupRoutes()),
       ]);
       await nextTick();
       const pageReady = await initialPageWork.settle();
@@ -170,7 +167,7 @@ async function signalInitialRenderReady(): Promise<void> {
       await nextTick();
       await waitForRenderFrame();
     }
-    const context = await invoke<{ generation?: string; navigationId?: string }>(
+    const context = await invoke<{ generation?: string; navigationId?: string; gyroTelemetryDocument?: string }>(
       'window.renderContext', {}, { timeoutMs: 1500 },
     );
     if (!context?.generation || !context?.navigationId || context.navigationId === '0') return;
@@ -184,6 +181,7 @@ async function signalInitialRenderReady(): Promise<void> {
     };
     (window as Window & { __YMCC_STARTUP_READY__?: typeof receipt }).__YMCC_STARTUP_READY__ = receipt;
     await invoke('window.renderReady', receipt, { timeoutMs: 1500 });
+    bindGyroTelemetryDocument(context.generation, context.gyroTelemetryDocument);
   } catch (error) {
     console.warn('[YeManCC] initial render-ready handshake failed', error);
     reportError('startup.handshake', error);

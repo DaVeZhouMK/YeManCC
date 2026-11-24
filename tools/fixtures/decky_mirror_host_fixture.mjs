@@ -10,7 +10,6 @@ const inputPersonaModule=load('const sessionId="fixture-session";\n'+functions('
 const gameModule=load(fs.readFileSync(path.join(root,'src/bridge/deckyGameActions.ts'),'utf8'),{'./gamePolicyHysteresis':keyModule});
 const profileModule=load(fs.readFileSync(path.join(root,'src/bridge/deckyProfileActions.ts'),'utf8'),{'./deckyGameActions':gameModule,'./gamePolicyHysteresis':keyModule,'./gameCustomProfileTarget':load(fs.readFileSync(path.join(root,'src/bridge/gameCustomProfileTarget.ts'),'utf8'),{'./gamePolicyHysteresis':keyModule})});
 const trainerModule=load(fs.readFileSync(path.join(root,'src/bridge/deckyTrainerActions.ts'),'utf8'),{'./deckyGameActions':gameModule});
-const speedModule=load(fs.readFileSync(path.join(root,'src/bridge/deckySpeedActions.ts'),'utf8'),{'./deckyGameActions':gameModule});
 const frameModel=load(fs.readFileSync(path.join(root,'src/bridge/frameRateModel.ts'),'utf8'));
 const screenModule=load(fs.readFileSync(path.join(root,'src/bridge/screenTouchpads.ts'),'utf8'),{
  './ipc':{isNativeRuntime:false},
@@ -73,6 +72,7 @@ export async function createMirrorHostFixture({initial={version:1,entries:{},rts
  const sharedPowerTimers=new Map();let sharedPowerTimerId=0;
  const sharedPowerClock={setTimeout:(fn,delay)=>{const id=++sharedPowerTimerId;sharedPowerTimers.set(id,{fn,at:clock.now+delay});return id;},clearTimeout:id=>sharedPowerTimers.delete(id)};
  const powerModule=load(fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8'),{'./ipc':{invoke:()=>{throw Error('Use the explicit memory power fact port');},on}},controllerClock);
+ const speedModule=load(fs.readFileSync(path.join(root,'src/bridge/deckySpeedActions.ts'),'utf8'),{'./deckyGameActions':gameModule,'./powerLifecycleState':powerModule});
  const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>{counts.sharedPowerReads=(counts.sharedPowerReads??0)+1;await readHooks.sharedPower?.();return structuredClone({known:true,...state.power});},listen:on,clock:sharedPowerClock});
  const advanceClock=ms=>{clock.now+=ms;for(const timers of [controllerTimers,sharedPowerTimers])for(const [id,t] of [...timers])if(t.at<=clock.now){timers.delete(id);t.fn();}};;
  const emit=eventSource?.emit??((event,message)=>{for(const callback of [...events.get(event)??[]])callback(message);});
@@ -92,7 +92,10 @@ export async function createMirrorHostFixture({initial={version:1,entries:{},rts
    await readHooks.performanceUpdate?.(expected,patch);const controls=current.controls;controls[expected.side]=performanceControlsModule.patchContinuousBank(controls[expected.side],patch,expected.side);
    if(expected.scope==='dedicated'){const cfg=await memory.store.loadGameCustomConfig();const entry=cfg.entries[expected.exe];await memory.store.saveGameCustomConfig({...cfg,entries:{...cfg.entries,[expected.exe]:{...entry,controls,...(patch.hyperThreadMode?{hyperThreadPolicy:patch.hyperThreadMode,hyperThreadPolicyEnabled:patch.hyperThreadMode!=='default'}:{})}}});}
    else{state.schedule.controls=controls;for(const cb of [...scheduleListeners])cb(structuredClone(state.schedule));}
-   counts.performanceUpdates=(counts.performanceUpdates??0)+1;return readPerformance();
+   counts.performanceUpdates=(counts.performanceUpdates??0)+1;
+   const updated=await readPerformance();
+   if(readHooks.performanceReceipt)updated.tdpWriteReceipt=readHooks.performanceReceipt(patch);
+   return updated;
  };
  const modules={
  './gameSteamContext':{gameSteamContext:contextOwner??{read:async()=>({schemaVersion:1,game:null,steam:{status:'unknown',processValidated:false,currentSource:false}}),refresh:async()=>({schemaVersion:1,game:null,steam:{status:'unknown',processValidated:false,currentSource:false}})}},
@@ -124,14 +127,23 @@ export async function createMirrorHostFixture({initial={version:1,entries:{},rts
  './speedhack':speedOwner?{...speedOwner,applyGameSpeed:async(...args)=>{counts.speedApply++;return speedOwner.applyGameSpeed(...args);},clearGameSpeed:async(...args)=>{counts.speedClear++;return speedOwner.clearGameSpeed(...args);}}:{SPEED_PRESETS:[0.5,0.8,1,1.2,1.5,2,4,8],isMinecraftTarget:game=>/minecraft|java/i.test(game.name),getGameSpeedState:()=>state.speed?structuredClone(state.speed):null,onGameSpeedStateChanged:()=>()=>{},applyGameSpeed:async(pid,factor,target)=>{counts.speedApply++;if(state.speedResult)return state.speedResult;state.speed={pid,processCreated:target.processCreated,factor,enabled:true};return {ok:true,msgs:[]};},clearGameSpeed:async()=>{counts.speedClear++;if(state.speedResult)return state.speedResult;state.speed=null;return {ok:true,msgs:[]};}},
  './deckyGyroDefaults':{readGameMirrorGyroDefaults:async()=>structuredClone(state.gyroDefaults)},
  './powerSource':{powerSourceMode:{get value(){return state.powerSource;}},refreshPowerSourceSnapshot:async()=>{await readHooks.powerSource?.();}},
- 'vue':{watch:(source,callback)=>{const stop=vue?.watch(source,callback);if(!vue)source();counts.watchers++;return()=>{stop?.();counts.watchers--;};}},'./ipc':{on,invoke,getLastGamepadState:()=>state.gamepadState},'./api':{powerLifecycle:{get:async()=>{counts.power++;const result=await readHooks.power?.();return structuredClone(result??state.power);}}},'./powerLifecycleState':{onSharedPowerLifecycle:sharedPower.onSharedPowerLifecycle},
+ 'vue':{watch:(source,callback)=>{const stop=vue?.watch(source,callback);if(!vue)source();counts.watchers++;return()=>{stop?.();counts.watchers--;};}},'./ipc':{on,invoke,getLastGamepadState:()=>state.gamepadState},'./api':{powerLifecycle:{get:async()=>{counts.power++;const result=await readHooks.power?.();return structuredClone(result??state.power);}}},'./powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},
  './gamePolicyTarget':{getPolicyGame:()=>state.game,refreshPolicyGameStrict:async()=>{counts.gameReconciles=(counts.gameReconciles||0)+1;if(policyRefresh)return policyRefresh();return state.game;},gamePolicyKey,subscribePolicyGameStatus:callback=>{gameListeners.add(callback);callback(state.game);return()=>gameListeners.delete(callback);}},
  './gamedetect':{detectedGameName,isGameStatusCurrent:()=>policyReadiness?policyReadiness.isGameStatusCurrent():state.gameCurrent,subscribeGameTargetReadiness:subscribeReadiness},'./quickActionLock':speedOwner?{...memory.lock,tryAcquireQuickAction:label=>{const release=memory.lock.tryAcquireQuickAction(label);return release&&label==='decky-game-speed'?()=>{counts.speedLockReleases=(counts.speedLockReleases??0)+1;release();}:release;}}:memory.lock,'./gameproc':{closeJoyxoffIfRunning:async()=>{counts.joyxoff++;return false;}},
  './performanceSchedule':{importGameCustomProfile:async(...args)=>{counts.profileImports=(counts.profileImports??0)+1;return memory.store.importGameCustomProfile(...args);},removeGameCustomProfile:async(...args)=>{counts.profileRemovals=(counts.profileRemovals??0)+1;return memory.store.removeGameCustomProfile(...args);},restorePerformanceScheduleIfConfigured:async()=>{counts.profileRestores=(counts.profileRestores??0)+1;if(state.profileRestoreError)throw Error('injected restore error');return memory.store.getGameCustomConfig().entries[gamePolicyKey(state.game)]?.enabled===true?'dedicated':'global';},getContinuousPerformanceSnapshot:readPerformance,updateContinuousPerformanceControls:updatePerformance,getGameCustomConfig:memory.store.getGameCustomConfig,loadGameCustomConfig:memory.store.loadGameCustomConfig,saveGameCustomConfig:async(config,verify)=>{counts.saves++;await memory.store.saveGameCustomConfig(config,verify);},resolveGameCustomProfiles:memory.store.resolveGameCustomProfiles,applyPerformanceSchedule:async(side,mode)=>{counts.globalPowerApplies++;state.schedule.active[side]=mode;for(const callback of [...scheduleListeners])callback(structuredClone(state.schedule));return true;},loadPerformanceSchedule:async()=>{counts.schedule++;return structuredClone(state.schedule);},onGameCustomConfigChanged:memory.store.onGameCustomConfigChanged,onPerformanceScheduleChanged:callback=>{scheduleListeners.add(callback);return()=>scheduleListeners.delete(callback);}},
- './gameCorePolicy':{detectGameCorePolicy:async()=>{counts.capabilities++;return state.caps?structuredClone(state.caps):null;}},'./deckyGameActions':gameModule,'./deckyFanActions':fanModule,'./deckyMirrorRelay':load(fs.readFileSync(path.join(root,'src/bridge/deckyMirrorRelay.ts'),'utf8'),{'../../decky-plugin/src/steamRunningContext':steamModule},controllerClock),
+ './gameCorePolicy':{detectGameCorePolicy:async()=>{counts.capabilities++;return state.caps?structuredClone(state.caps):null;}},'./deckyGameActions':gameModule,'./deckyFanActions':fanModule,'./deckyMirrorRelay':load(fs.readFileSync(path.join(root,'src/bridge/deckyMirrorRelay.ts'),'utf8'),{'../../decky-plugin/src/steamRunningContext':steamModule},readHooks.relayClone?{...controllerClock,structuredClone:readHooks.relayClone}:controllerClock),
  './deckyFanDisplay':{observeFanMirrorDisplay:value=>{fanDisplay=structuredClone(value);for(const cb of displayListeners)cb(value);},getFanMirrorDisplay:()=>fanDisplay,onFanMirrorDisplay:cb=>{displayListeners.add(cb);return()=>displayListeners.delete(cb);},isFanMirrorUiBusy:()=>false,onFanMirrorUiGate:callback=>{fanListeners.add(callback);return()=>fanListeners.delete(callback);}},
  './fanFeature':{FAN_IMPORT_ENABLED:true,FAN_FORCE_PREVIEW:false,fanFeatureEnabled:{get value(){return state.fan.featureEnabled??true;}},fanControlActive:{get value(){return state.fan.enabled;}},getFanFeatureSettings:()=>{counts.fanSettingsSnapshots++;return {preset:state.fan.preset};},getFanSelectedPreset:()=>{counts.fanPresetReads++;return state.fan.preset;},getFanPresetCurve:()=>[{tempC:0,dutyPercent:0},{tempC:100,dutyPercent:100}],saveFanCurve:async()=>{counts.fanSaves++;throw new Error('Game host fixture must not save Fan');},setFanControlActive:()=>{throw new Error('Game host fixture must not write Fan');},setFanNavigationDuty:()=>{},recordFanHandshake:async()=>{}},
  './fanHost':{fanHostLifecycle:{get controlReady(){return state.fan.controlReady??true;}}},
+ };
+ modules['./performanceSchedule'].gameCustomDisplayMatches=memory.store.gameCustomDisplayMatches;
+ if(readHooks.profileRevisionObserved)modules['./deckyProfileActions']={...profileModule,gameProfileRevision:(...args)=>{
+  readHooks.profileRevisionObserved();return profileModule.gameProfileRevision(...args);
+ }};
+ if(readHooks.profileReturn)modules['./performanceSchedule'].loadGameCustomConfig=async(access,options)=>{
+  const result=await memory.store.loadGameCustomConfig(access,options);
+  if(access==='read-only'&&options?.displayCurrent)await readHooks.profileReturn();
+  return result;
  };
  // Optional real schedule owner keeps policy/persistence in production code.
  // Its filesystem/device boundaries must be supplied by the memory fixture.
@@ -156,10 +168,15 @@ export async function createMirrorHostFixture({initial={version:1,entries:{},rts
  modules['./fxSound']=load(fs.readFileSync(path.join(root,'src/bridge/fxSound.ts'),'utf8'),{'./ipc':{invoke}},fxClock);
  modules['./powerLifecycleState'].isSharedPowerLifecycleAdmitted=powerModule.isSharedPowerLifecycleAdmitted;
  const source=hostSource??fs.readFileSync(process.env.YMCC_FAN_MIRROR_HOST_SOURCE_OVERRIDE||path.join(root,'src/bridge/deckyMirrorHost.ts'),'utf8');
- const start=()=>{if(handle)throw new Error('Already running host fixture');handle=load(source,modules,controllerClock).startDeckyMirrorHost();return handle;};
+ const hostGlobals=readHooks.hostStringify?{...controllerClock,JSON:{parse:JSON.parse,stringify:readHooks.hostStringify}}:controllerClock;
+ const start=()=>{if(handle)throw new Error('Already running host fixture');handle=load(source,modules,hostGlobals).startDeckyMirrorHost();return handle;};
  const stop=()=>{handle?.stop();handle=null;};
  const result={registerExtension:modules['./deckyMirrorExtensions'].registerDeckyMirrorExtension,memory,state,counts,setGameReadiness,readinessSubscriberCount:()=>readinessListeners.size,fxTimerCount:()=>fxTimers.size,advanceFx:()=>{for(const [id,t] of [...fxTimers]){fxTimers.delete(id);t.fn();}},replies,diagnostics,emit,start,stop,controllerTimerCount:()=>controllerTimers.size,advanceController:advanceClock,advanceSharedPower:advanceClock,sharedPowerTimerCount:()=>sharedPowerTimers.size,sharedPowerDiagnostics:sharedPower.getSharedPowerLifecycleDiagnostics,ownerStats:()=>{const f=fanOwner?.stats();return {fan:f?{active:f.active,preset:f.preset,saveCount:f.saveCount,calls:f.calls,leasePresent:!!f.lease,physicalHardwareWrites:0}:undefined,lossless:losslessOwner?.stats()};},closeOwners:async()=>{await fanOwner?.close();},ready:()=>{if(!handle)throw new Error('No host');handle.ready();},startupPhase:stage=>{if(!handle)throw new Error('No host');handle.startupPhase(stage);},
-  gameChanged:()=>{for(const callback of [...gameListeners])callback(state.game);},scheduleChanged:()=>{for(const callback of [...scheduleListeners])callback(structuredClone(state.schedule));},powerChanged:(pending=false)=>emit(pending?'power.pending':'power.resumed',structuredClone(state.power)),
+  gameChanged:()=>{for(const callback of [...gameListeners])callback(state.game);},scheduleChanged:()=>{for(const callback of [...scheduleListeners])callback(structuredClone(state.schedule));},powerChanged:(pending=false)=>{
+   const current=structuredClone(state.power);
+   emit('power.lifecycleChanged',{known:true,...current,phase:current.phase==='pending'?'resuming':current.phase});
+   emit(pending?'power.pending':'power.resumed',current);
+  },
   monitorChanged:()=>emit('test.monitorChanged',structuredClone(state.monitor)),
   trainerChanged:()=>emit('test.trainerChanged'),
   observerStats:()=>({ipc:[...events.values()].reduce((n,set)=>n+set.size,0),game:gameListeners.size,schedule:scheduleListeners.size,fan:fanListeners.size,watchers:counts.watchers})};
@@ -169,18 +186,22 @@ export async function createMirrorHostFixture({initial={version:1,entries:{},rts
 // Original speed owner + original API. Only the declared file/game/native ports
 // are inert. The native wait/possible effect are modeled, never Win32 acceptance.
 export function createMirrorSpeedMemoryOwner({game,power,peer,afterDispatch=async()=>{},beforeLogWrite=async()=>{}}){
- const documents=new Map(),requests=[],gameObservers=new Set(),wakeObservers=new Set();let dispatches=0;
+ const documents=new Map(),requests=[],gameObservers=new Set(),wakeObservers=new Map();let dispatches=0;
+ const loadSource=(name,deps)=>load(fs.readFileSync(path.join(root,'src/bridge',name+'.ts'),'utf8'),deps);
+ const powerModule=loadSource('powerLifecycleState',{'./ipc':{invoke:()=>{throw Error('Use the speed fixture power port');}}});
+ const powerSource=powerModule.createSharedPowerLifecycleSource({read:async()=>structuredClone(power()),listen:()=>()=>{},clock:{setTimeout:()=>{throw Error('Unexpected power retry in finish-only fixture');},clearTimeout:()=>{}}});
  const nativeState=()=>{const p=power(),q=peer();return {...q,active:q.active===true,connected:q.connected===true,powerGeneration:p.generation,hardwareWritesAllowed:p.phase==='ready'&&p.hardwareWritesAllowed===true,owner:'YMCC-native',pid:777};};
- const api=load(fs.readFileSync(path.join(root,'src/bridge/api.ts'),'utf8'),{'./ipc':{invoke:async(command,args)=>{
+ const api=loadSource('api',{'./steamInstallationFacts':loadSource('steamInstallationFacts'),'./bootModeGlobalPreferences':{captureBootPreferenceWrite:()=>{throw Error('Unexpected speed fixture preference write');}},'./ipc':{invoke:async(command,args)=>{
+  if(command==='power.lifecycle')return structuredClone(power());
   if(command==='fs.exists')return documents.has(args.path)||args.path.toLowerCase().includes('\\openspeedy\\');
   if(command==='fs.readTextFile'){if(!documents.has(args.path))throw Error('Undeclared speed fixture read');return documents.get(args.path);}
   if(command==='fs.writeTextFile'){if(!args.path.toLowerCase().endsWith('\\speedhack.log'))throw Error('Unexpected speed fixture file write');documents.set(args.path,args.content);await beforeLogWrite(args.content);return true;}
   if(command!=='shell.run'||args.program!=='powershell')throw Error('Unexpected original speed IPC: '+command);
   const p=power(),q=peer(),expected=args.expectedMirrorPeer;
-  if(args.expectedPowerGeneration!==p.generation||!p.hardwareWritesAllowed||p.phase!=='ready'||!expected||!q.active||!q.connected||expected.connection!==q.connection||expected.runId!==q.runId||expected.connectionRevision!==q.connectionRevision)throw Error('Inert original native admission refused');
+  if(args.expectedPowerGeneration!==p.generation||args.expectedPowerNotificationSequence!==p.observedNotificationSequence||args.expectedPowerSuspendSerial!==p.suspendSerial||!powerModule.isSharedPowerLifecycleAdmitted(p)||!expected||!q.active||!q.connected||expected.connection!==q.connection||expected.runId!==q.runId||expected.connectionRevision!==q.connectionRevision)throw Error('Inert original native admission refused');
   requests.push({expectedPowerGeneration:args.expectedPowerGeneration,expectedMirrorPeer:structuredClone(expected)});dispatches++;
   await afterDispatch();return {exitCode:0,stdout:'RESULT:ok',stderr:''};
  }}});
- const owner=load(fs.readFileSync(path.join(root,'src/bridge/speedhack.ts'),'utf8'),{'./api':api,'./ipc':{on:(event,callback)=>{if(event!=='power.resumed')throw Error('Unexpected speed lifecycle event: '+event);wakeObservers.add(callback);return()=>wakeObservers.delete(callback);}},'./gamedetect':{detectGame:async()=>structuredClone(game()),subscribeGameStatus:callback=>{gameObservers.add(callback);return()=>gameObservers.delete(callback);}}});
- return {owner,nativeState,disposeExternalPorts:()=>{gameObservers.clear();wakeObservers.clear();},stats:()=>({dispatches,requests:structuredClone(requests),activeGameObservers:gameObservers.size,activeWakeObservers:wakeObservers.size,realFileWrites:0,realShellExecutions:0,realInjection:0})};
+ const owner=loadSource('speedhack',{'./api':api,'./powerLifecycleState':{...powerSource,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle:(callback,options)=>{const stop=powerSource.onSharedPowerLifecycle(callback,options);wakeObservers.set(callback,stop);return()=>{stop();wakeObservers.delete(callback);};}},'./gamedetect':{detectGame:async()=>structuredClone(game()),getCurrentGame:()=>game(),isGameStatusCurrent:()=>true,subscribeGameTargetReadiness:()=>()=>{},subscribeGameStatus:callback=>{gameObservers.add(callback);return()=>gameObservers.delete(callback);}}});
+ return {owner,nativeState,disposeExternalPorts:()=>{gameObservers.clear();for(const stop of wakeObservers.values())stop();wakeObservers.clear();},stats:()=>({dispatches,requests:structuredClone(requests),activeGameObservers:gameObservers.size,activeWakeObservers:wakeObservers.size,realFileWrites:0,realShellExecutions:0,realInjection:0})};
 }

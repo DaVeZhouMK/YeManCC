@@ -18,6 +18,7 @@
 #include <streambuf>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 #include <windows.h>
 #include "json.hpp"
 #include "log_jsonl_boundary.h"
@@ -209,6 +210,64 @@ public:
     }
 };
 
+// Validate all of each row, but build JSON only for the root uniqueKey value.
+class JournalHistoryKeySax final : public nlohmann::json_sax<Json> {
+    Json value_;
+    std::vector<Json*> containers_;
+    Json* objectSlot_=nullptr;
+    size_t depth_=0;
+    bool rootObject_=false,retain_=false,found_=false;
+
+    template<class T> Json* store(T&& value) {
+        if(containers_.empty()){
+            value_=std::forward<T>(value);found_=true;return &value_;
+        }
+        auto& parent=*containers_.back();
+        if(parent.is_array()){
+            parent.emplace_back(std::forward<T>(value));return &parent.back();
+        }
+        *objectSlot_=std::forward<T>(value);return objectSlot_;
+    }
+    template<class T> bool scalar(T&& value) {
+        if(retain_)store(std::forward<T>(value));
+        return true;
+    }
+    bool start(Json::value_t type) {
+        if(!depth_)rootObject_=type==Json::value_t::object;
+        if(retain_)containers_.push_back(store(Json(type)));
+        ++depth_;return true;
+    }
+    bool end() {
+        --depth_;
+        if(!containers_.empty())containers_.pop_back();
+        return true;
+    }
+public:
+    bool read(std::string_view line,std::string& signature) {
+        containers_.clear();objectSlot_=nullptr;depth_=0;
+        rootObject_=retain_=found_=false;value_=nullptr;
+        if(!Json::sax_parse(line.begin(),line.end(),this)||!found_)return false;
+        signature=value_.dump();return true;
+    }
+    bool null() override {return scalar(nullptr);}
+    bool boolean(bool value) override {return scalar(value);}
+    bool number_integer(number_integer_t value) override {return scalar(value);}
+    bool number_unsigned(number_unsigned_t value) override {return scalar(value);}
+    bool number_float(number_float_t value,const string_t&) override {return scalar(value);}
+    bool string(string_t& value) override {return scalar(value);}
+    bool binary(binary_t& value) override {return retain_?scalar(Json::binary(value)):true;}
+    bool start_object(size_t) override {return start(Json::value_t::object);}
+    bool start_array(size_t) override {return start(Json::value_t::array);}
+    bool end_object() override {return end();}
+    bool end_array() override {return end();}
+    bool key(string_t& name) override {
+        if(depth_==1)retain_=rootObject_&&name=="uniqueKey";
+        else if(retain_)objectSlot_=&(*containers_.back())[name];
+        return true;
+    }
+    bool parse_error(size_t,const std::string&,const nlohmann::detail::exception&) override {return false;}
+};
+
 class Journal {
     std::mutex mx_;
     JournalFailureEvidence failureEvidence_;
@@ -282,16 +341,23 @@ public:
             if(!cacheKnown_||cachePath_!=path||cacheBytes_!=bytes_||cacheModified_!=modified){
                 cacheKnown_=false;keys_.clear();rows_=0;invalid_=0;
                 if(exists){++readScans_;std::ifstream in(path,std::ios::binary);if(!in){failureEvidence_.observe(JournalFailureEvidence::Stage::readOpen);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
-                    unsigned long long readBytes=0;
-                    for(std::string line;std::getline(in,line);){
-                        readBytes+=static_cast<unsigned long long>(line.size());if(!in.eof())++readBytes;
-                        if(line.empty())continue;auto old=Json::parse(line,nullptr,false);
-                        if(old.is_discarded()||!old.is_object()||!old.contains("uniqueKey")){++invalid_;continue;}
-                        ++rows_;keys_.insert(old["uniqueKey"].dump());
+                    if(bytes_>static_cast<unsigned long long>((std::numeric_limits<std::streamsize>::max)()) ||
+                        bytes_>std::string{}.max_size()){failureEvidence_.observe(JournalFailureEvidence::Stage::read);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
+                    std::string buffer(static_cast<size_t>(bytes_),'\0');
+                    in.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));
+                    if(!in||in.peek()!=std::char_traits<char>::eof()||in.bad()){
+                        failureEvidence_.observe(JournalFailureEvidence::Stage::read);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
+                    std::string_view remaining(buffer);
+                    JournalHistoryKeySax historyKey;
+                    while(!remaining.empty()){
+                        const auto newline=remaining.find('\n');
+                        const auto line=remaining.substr(0,newline);
+                        remaining.remove_prefix(line.size()+(newline!=std::string_view::npos));
+                        if(line.empty())continue;
+                        std::string historySignature;
+                        if(!historyKey.read(line,historySignature)){++invalid_;continue;}
+                        ++rows_;keys_.insert(std::move(historySignature));
                     }
-                    // A failed CRT read can look like EOF without badbit.
-                    // Count physical bytes,including delimiters,before caching keys.
-                    if(in.bad()||readBytes!=bytes_){failureEvidence_.observe(JournalFailureEvidence::Stage::read);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
                 }
                 cachePath_=path;cacheBytes_=bytes_;cacheModified_=modified;cacheKnown_=true;
             }

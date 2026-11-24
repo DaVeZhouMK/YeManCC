@@ -15,9 +15,9 @@ const mocks={
  'frontendDiagnostics.ts': `export const reportFrontendError=(where,error)=>globalThis.fx.errors.push({where,error:String(error)});`,
  'uiSettings.ts': `export const getUiSetting=()=>globalThis.fx.autoEnabled;export const loadUiSettings=async()=>{};`,
 };
-export async function createTrainerRecoveryFixture({ownerSource=null,recoverySource=null,powerSource=null,lifecycleSource=null,realGameDetection=false,separatePowerClock=false}={}) {
+export async function createTrainerRecoveryFixture({ownerSource=null,recoverySource=null,powerSource=null,lifecycleSource=null,realGameDetection=false,separatePowerClock=false,storage=new Map()}={}) {
  const bundle=await build({stdin:{contents:`export * as trainer from './src/bridge/gameTrainer';export * as recovery from './src/bridge/gameTrainerRecovery';export * as lifecycle from './src/bridge/trainerLifecycle';export * as auto from './src/bridge/gameTrainerAuto';export * as sharedPower from './src/bridge/powerLifecycleState';${realGameDetection?"export * as detector from './src/bridge/gamedetect';export * as policy from './src/bridge/gamePolicyTarget';":''}`,resolveDir:root,loader:'ts'},bundle:true,format:'cjs',platform:'node',write:false,metafile:true,plugins:[{name:'inert-trainer-recovery',setup(b){b.onLoad({filter:/[\\/](api|gamedetect|gamePolicyTarget|settingsRepository|frontendDiagnostics|uiSettings)\.ts$/},a=>{const name=path.basename(a.path);if(realGameDetection&&(name==='gamedetect.ts'||name==='gamePolicyTarget.ts'))return;return {contents:mocks[name],loader:'ts'};});
- b.onLoad({filter:/[\\/]ipc\.ts$/},()=>({contents:'export const invoke=(...args)=>globalThis.fx.invoke(...args);export const on=(name,listener)=>{const f=globalThis.fx,key="ipc:"+name,fn=e=>listener(e.detail);if(!f.events.has(key))f.events.set(key,new Set());f.events.get(key).add(fn);return()=>f.events.get(key)?.delete(fn);};',loader:'ts'}));
+ b.onLoad({filter:/[\\/]ipc\.ts$/},()=>({contents:'export class IpcRemoteError extends Error {}\nexport const invoke=(...args)=>globalThis.fx.invoke(...args);export const on=(name,listener)=>{const f=globalThis.fx,key="ipc:"+name,fn=e=>listener(e.detail);if(!f.events.has(key))f.events.set(key,new Set());f.events.get(key).add(fn);return()=>f.events.get(key)?.delete(fn);};',loader:'ts'}));
  b.onLoad({filter:/[\\/]powerLifecycleState\.ts$/},args=>{
   if(powerSource===null&&!separatePowerClock)return;
   let contents=powerSource??fs.readFileSync(args.path,'utf8');
@@ -56,7 +56,8 @@ export async function createTrainerRecoveryFixture({ownerSource=null,recoverySou
  fx.advance=async ms=>{fx.now+=ms;for(const task of [...fx.scheduled.values()])if(task.next<=fx.now){task.next=fx.now+task.interval;void task.run();}await flush();const maps=separatePowerClock?[fx.timers,fx.sharedTimers]:[fx.timers];const due=maps.flatMap(timers=>[...timers].filter(([,t])=>t.at<=fx.now).map(([id,t])=>({timers,id,t}))).sort((a,b)=>a.id-b.id);for(const{timers,id,t}of due){if(!timers.delete(id))continue;t.fn();}await flush();};
  class Clock extends Date{static now(){return fx.now;}}
  const module={exports:{}};
- vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,fx,Date:Clock,performance:{now:()=>fx.now},console,queueMicrotask,structuredClone,AbortController,setTimeout:(fn,ms)=>{const id=++fx.nextTimer;fx.timers.set(id,{fn,at:fx.now+ms});if(traceTimers)timerTrace.push({operation:'create',id,ms,at:fx.now+ms,stack:new Error().stack,callback:String(fn)});return id;},clearTimeout:id=>{if(traceTimers)timerTrace.push({operation:'clear',id,existed:fx.timers.has(id)});fx.timers.delete(id);},window:{addEventListener:(name,cb)=>{if(!fx.events.has(name))fx.events.set(name,new Set());fx.events.get(name).add(cb);},removeEventListener:(name,cb)=>fx.events.get(name)?.delete(cb)}});
+ const localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)};
+ vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,fx,Date:Clock,performance:{now:()=>fx.now},console,queueMicrotask,structuredClone,AbortController,localStorage,setTimeout:(fn,ms)=>{const id=++fx.nextTimer;fx.timers.set(id,{fn,at:fx.now+ms});if(traceTimers)timerTrace.push({operation:'create',id,ms,at:fx.now+ms,stack:new Error().stack,callback:String(fn)});return id;},clearTimeout:id=>{if(traceTimers)timerTrace.push({operation:'clear',id,existed:fx.timers.has(id)});fx.timers.delete(id);},window:{addEventListener:(name,cb)=>{if(!fx.events.has(name))fx.events.set(name,new Set());fx.events.get(name).add(cb);},removeEventListener:(name,cb)=>fx.events.get(name)?.delete(cb)}});
  const observeRaw=async(snapshot,preferredPid=0)=>{if(!realGameDetection)throw Error('Real detector mode required');fx.nativeSnapshot=structuredClone(snapshot);let selected=null,error=null;try{selected=await module.exports.detector.refreshGameStatusStrict(preferredPid);}catch(e){error=String(e);}await flush();fx.game=module.exports.detector.getCurrentGame();return {selected,error,current:module.exports.detector.isGameStatusCurrent()};};
  return {...module.exports,fx,observeRaw};
 }
@@ -68,7 +69,7 @@ export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) 
  assert(caseOnly===null||kinds.includes(caseOnly),'Unknown trainer notification case');
  for(const kind of caseOnly?[caseOnly]:kinds)await test('trainer notification: '+kind,async()=>{
   const f=await createTrainerRecoveryFixture(),events=[];
-  const ready={known:true,phase:'ready',generation:8,publicationRevision:10,observedNotificationSequence:21,inputReady:false,hardwareWritesAllowed:true,notificationPending:false};
+  const ready={known:true,phase:'ready',generation:8,publicationRevision:10,observedNotificationSequence:21,suspendSerial:4,inputReady:false,hardwareWritesAllowed:true,notificationPending:false};
   f.fx.power={...ready};const stop=f.lifecycle.subscribeTrainerLifecycle(event=>events.push(event));await flush();
   const emit=async state=>{f.fx.power={...state};for(const cb of [...(f.fx.events.get('ipc:power.lifecycleChanged')||[])])cb({type:'ipc:power.lifecycleChanged',detail:{...state}});await flush();};
   let release,stopRecovery,pending;
@@ -82,6 +83,17 @@ export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) 
     await assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/);
     assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
     const after=f.lifecycle.getTrainerLifecycleEpoch();for(let i=0;i<100;i++)await emit({...f.fx.power});assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),after);
+    const mergedReady={...f.fx.power,publicationRevision:13,suspendSerial:5};
+    f.fx.power=mergedReady;
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(after,8),/电源|取消/,'a fresh read with a newer suspend serial cannot admit an old trainer ticket');
+    assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),after,'a direct read cannot impersonate a public lifecycle event');
+    await emit(mergedReady);
+    const current=f.lifecycle.getTrainerLifecycleEpoch();assert.equal(current,after+1,'same-generation Ready with only a new suspend serial must retire the old scope');
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(after,8),/电源|取消/);
+    assert.equal(await f.lifecycle.assertTrainerPowerReady(current,8),8);
+    await emit({...mergedReady,publicationRevision:14,suspendSerial:4});
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().suspendSerial,5);
+    assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),current,'a late old suspend scope cannot retire the current ticket');
    }else if(kind==='read-newer'||kind==='read-missing'){
     const read={...ready,publicationRevision:11,observedNotificationSequence:22};if(kind==='read-missing')delete read.observedNotificationSequence;
     f.fx.power=read;
@@ -157,25 +169,29 @@ export async function runTrainerPowerHardeningCases({test,lifecycleSource=null})
  await test('hardening trainer: earlier recovery reply cannot resume its successor; dispose cancels confirmation',async()=>{
   const x=await fixture(),{f}=x;
   try{
+   const catalogDueAt=f.fx.now+30000;
+   assert([...f.fx.timers.values()].some(t=>t.at===catalogDueAt),'original Auto catalog deadline exists');
    f.fx.emit('ipc:webview.recovering');await flush();
    f.fx.emit('ipc:webview.recovering');await flush();
    await x.reply({...ready});assert.equal(f.fx.timers.size,1,'superseded read only leaves the shared retry');
    assert.equal([...f.fx.timers.values()][0].at-f.fx.now,1000);
    await f.fx.advance(1000);await x.reply({...ready});
-   assert([...f.fx.timers.values()].some(t=>t.at-f.fx.now===30000));
+   assert([...f.fx.timers.values()].some(t=>t.at===catalogDueAt),'recovery preserves the original catalog deadline');
    f.fx.emit('ipc:webview.recovering');await flush();
   }finally{await x.cleanup();}
  });
  await test('hardening trainer: a Ready publication during recovery cannot substitute for this read',async()=>{
   const x=await fixture(),{f}=x;
   try{
+   const catalogDueAt=f.fx.now+30000;
+   assert([...f.fx.timers.values()].some(t=>t.at===catalogDueAt),'original Auto catalog deadline exists');
    f.fx.emit('ipc:webview.recovering');await flush();
    const state={...ready,publicationRevision:2,inputReady:false};
    for(const cb of [...f.fx.events.get('ipc:power.lifecycleChanged')])cb({type:'ipc:power.lifecycleChanged',detail:state});await flush();
    assert.equal(f.fx.timers.size,0,'publication cannot resume Auto before authoritative read');
    await x.reply({...ready});assert.equal(f.fx.timers.size,1);
    await f.fx.advance(1000);await x.reply(state);
-   assert([...f.fx.timers.values()].some(t=>t.at-f.fx.now===30000));
+   assert([...f.fx.timers.values()].some(t=>t.at===catalogDueAt),'recovery preserves the original catalog deadline');
   }finally{await x.cleanup();}
  });
  return {actualAuto:true,actualRecovery:true,actualLifecycle:true,cases:3};

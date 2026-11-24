@@ -5,7 +5,7 @@ import {onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,type SharedPowerLi
 import {SteamWallpaperDelivery} from './steamWallpaperDelivery';
 import {registerDeckyMirrorExtension} from './deckyMirrorExtensions';
 import type {MirrorPeer} from './deckyMirrorRelay';
-import {sharedGameMedia,steamWallpaperEnabled,gameMediaPairComplete,type GameMediaEntry,type SharedGameMedia,type SteamMediaDemand,wallpaperTargetKey} from './sharedGameMedia';
+import {sharedGameMedia,steamWallpaperEnabled,gameMediaPairComplete,hasWallpaperBinding,type GameMediaEntry,type SharedGameMedia,type SteamMediaDemand,wallpaperTargetKey} from './sharedGameMedia';
 import type {WallpaperTarget} from './steamMediaSource';
 import {getBackgroundOpacity,getBackgroundBlur} from './background';
 
@@ -27,7 +27,7 @@ export function steamWallpaperForegroundProof(raw:any):SteamWallpaperForegroundP
 export function steamWallpaperForegroundAllowed(raw:any){const value=steamWallpaperForegroundProof(raw);return !!value&&value.known&&value.foreground&&value.current&&value.mode==='bigpicture'&&value.pid>0&&/^[1-9][0-9]{0,19}$/.test(value.birth)&&/^[1-9][0-9]{0,19}$/.test(value.window)&&BigInt(value.window)<=18446744073709551615n&&BigInt(value.birth)<=18446744073709551615n;}
 interface WallpaperHostPorts {
   invoke:typeof invoke;
-  media:Pick<SharedGameMedia,'lookup'|'ensure'|'subscribe'|'playbackFailed'>&Partial<Pick<SharedGameMedia,'selectSteamTarget'|'prewarm'|'retryWhen'>>;
+  media:Pick<SharedGameMedia,'lookup'|'ensure'|'subscribe'|'playbackFailed'>&Partial<Pick<SharedGameMedia,'selectSteamTarget'|'prewarm'|'retryWhen'|'automaticPreparationEnabled'>>;
   enabled:()=>boolean;
   register:typeof registerDeckyMirrorExtension;
   appearance:()=>{opacity:number;blur:number};
@@ -46,21 +46,23 @@ function selectedWallpaperRead(target:WallpaperTarget){
   return {...local,currentGameWallpaper:true as const};
 }
 export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}){
-  const port:WallpaperHostPorts={now:Date.now,schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:()=>steamWallpaperEnabled()&&!wallpaperPowerBlocked(),register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),readForeground:()=>invoke('gameMedia.steamForeground',{}, {timeoutMs:5000}),onForeground:handler=>typeof window==='undefined'?()=>{}:on('gameMedia.steamForegroundChanged',handler),onResume:handler=>typeof window==='undefined'?()=>{}:subscribeGameMediaResume(handler,on),onPower:onSharedPowerLifecycle,...overrides};
+  const port:WallpaperHostPorts={now:Date.now,schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:()=>steamWallpaperEnabled()&&!wallpaperPowerBlocked(),register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),readForeground:()=>invoke('gameMedia.steamForeground',{}, {timeoutMs:5000}),onForeground:handler=>typeof window==='undefined'?()=>{}:on('gameMedia.steamForegroundChanged',handler),onResume:handler=>typeof window==='undefined'?()=>{}:subscribeGameMediaResume(handler,on),onPower:handler=>onSharedPowerLifecycle(handler,{observeSuspendSerial:true}),...overrides};
   // Existing Ready-only integrations retain their callback. Production
   // consumes the public current facts, including same-generation revocation.
   const legacyResume=!!overrides.onResume&&!overrides.onPower;
-  let powerAdmitted=legacyResume,powerSeen=false,powerGeneration=0;
+  let powerAdmitted=legacyResume,powerSeen=false,powerGeneration=0,powerSuspendSerial=0;
   const playbackEnabled=()=>powerAdmitted&&port.enabled();
   // Scopes local ordering only; peer/runId continue to own transport identity.
   const stateOwner=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
-  let peer:MirrorPeer|null=null,ended=false,ready=false,epoch=0,announced:boolean|undefined,lastFrame='',settingsStamp='',resumeGeneration=0,inventoryVisible=false,stateRevision=0;
-  let context:{seq:number;appId:string;name:string;visible:boolean;key?:string;target?:Promise<WallpaperTarget|null>}|null=null;
+  let peer:MirrorPeer|null=null,ended=false,ready=false,epoch=0,announced:boolean|undefined,resumeGeneration=0,inventoryVisible=false,stateRevision=0;
+  let lastFrame:{signature:string;message:Record<string,unknown>}|null=null;
+  let settingsView:{ready:boolean;enabled:boolean;opacity:number;blur:number}|null=null;
+  let context:{seq:number;appId:string;name:string;visible:boolean;key?:string;target?:Promise<WallpaperTarget|null>;fallback?:{assetId:string;bindingRevision:number}}|null=null;
   // One selected publication owns lookup and ensure until they settle. Dirty
   // notifications invalidate its result and retain one fresh trailing read.
   let publication:{selection:NonNullable<typeof context>;dirty:boolean}|null=null;
   const cancelPublication=()=>{++epoch;publication=null;};
-  let delivered:{key:string;assetId:string;bindingRevision:number;kind?:string;seq:number}|null=null;
+  let delivered:{key:string;assetId:string;bindingRevision:number;kind?:string;seq:number;reducedPlayback?:true}|null=null;
   type FailureHandoff={selection:NonNullable<typeof context>;failed:NonNullable<typeof delivered>;demand:SteamMediaDemand;attempt:number};
   let failureHandoff:FailureHandoff|null=null,failureTimer:ReturnType<typeof setTimeout>|null=null,failureVersion=0;
   const cancelFailureHandoff=()=>{++failureVersion;if(failureTimer!==null)port.cancel(failureTimer);failureTimer=null;failureHandoff=null;};
@@ -73,45 +75,87 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
     if(selectionRetry!==null||ended||current!==context||!current.visible||!foregroundTicket||!playbackEnabled()||!peer)return;
     selectionRetry=port.schedule(()=>{selectionRetry=null;if(!ended&&current===context&&current.visible&&playbackEnabled()&&peer)void publish();},20000);
   };
-  const reply=(message:Record<string,unknown>,force=false)=>{if(!peer||ended)return;delivery.put(message.type==='wallpaper-ready'?'ready':'frame',{...message,foreground:!!foregroundTicket,stateOwner,stateRevision},force);};
+  const wire=(message:Record<string,unknown>)=>({...message,foreground:!!foregroundTicket,stateOwner,stateRevision});
+  const reply=(message:Record<string,unknown>,force=false)=>{if(!peer||ended)return;delivery.put(message.type==='wallpaper-ready'?'ready':'frame',wire(message),force);};
   const announce=(force=false,contextSeq?:number,requestContext=false)=>{if(!peer||ended)return;const enabled=ready&&playbackEnabled();if(!force&&enabled===announced)return;if(enabled!==announced)++stateRevision;announced=enabled;reply({type:'wallpaper-ready',enabled,...(contextSeq!==undefined?{contextSeq}:{}),...(requestContext?{requestContext:true}:{})},force);};
-  const output=(message:Record<string,unknown>)=>{const signature=JSON.stringify(message);if(signature===lastFrame)return;lastFrame=signature;reply(message);};
+  const output=(message:Record<string,unknown>)=>{
+    if(!peer||ended)return;
+    const packet=wire(message),signature=JSON.stringify(packet);
+    if(signature===lastFrame?.signature)return;
+    lastFrame={signature,message};
+    delivery.put('frame',packet,false,signature);
+  };
   let foregroundTicket:SteamMediaDemand|null=null,foregroundKnown=false,foregroundVersion=0;
   let nativeEpoch='',nativeRevision=-1;
+  let refusedRevision=-1,refusalRecheckUsed=false;
   const retiredNativeEpochs=new Set<string>();
-  let foregroundRead:{version:number;peer:MirrorPeer;selection:NonNullable<typeof context>}|null=null;
+  let foregroundRead:{version:number;peer:MirrorPeer}|null=null;
   let foregroundRetryTimer:ReturnType<typeof setTimeout>|null=null,foregroundRetries=0,foregroundRetryExhausted=false;
-  const cancelForegroundRetry=()=>{if(foregroundRetryTimer!==null)port.cancel(foregroundRetryTimer);foregroundRetryTimer=null;foregroundRetries=0;foregroundRetryExhausted=false;};
+  const transportUnavailable='foreground-transport-unavailable',changedDuringRead='foreground-changed-during-read';
+  let foregroundRetryStatus:typeof transportUnavailable|typeof changedDuringRead|null=null;
+  const cancelForegroundRetry=()=>{if(foregroundRetryTimer!==null)port.cancel(foregroundRetryTimer);foregroundRetryTimer=null;foregroundRetries=0;foregroundRetryExhausted=false;foregroundRetryStatus=null;};
   const clearForeground=()=>{cancelForegroundRetry();const hadTicket=foregroundTicket!==null;++foregroundVersion;foregroundRead=null;foregroundKnown=false;foregroundTicket=null;cancelFailureHandoff();cancelSelectionRetry();cancelPublication();delivered=null;inventoryVisible=false;if(hadTicket)port.media.selectSteamTarget?.(null);if(context)context.target=undefined;};
   const selectedDemand=(selection:NonNullable<typeof context>):SteamMediaDemand=>{const ticket=foregroundTicket!;return {...ticket,current:()=>foregroundTicket===ticket&&!ended&&ready&&!!peer&&playbackEnabled()&&context===selection&&selection.visible};};
-  const acceptForeground=(raw:unknown)=>{
-    if(ended||!ready||!peer||!playbackEnabled()||!context?.visible)return;
-    const proof=steamWallpaperForegroundProof(raw);
-    if(proof){
-      if(retiredNativeEpochs.has(proof.ownerEpoch)||proof.revision<nativeRevision||nativeEpoch!==''&&proof.ownerEpoch!==nativeEpoch&&proof.revision===nativeRevision)return;
-      if(nativeEpoch&&nativeEpoch!==proof.ownerEpoch){retiredNativeEpochs.add(nativeEpoch);if(retiredNativeEpochs.size>16)retiredNativeEpochs.delete(retiredNativeEpochs.values().next().value!);}
-      nativeEpoch=proof.ownerEpoch;nativeRevision=proof.revision;
-    }
-    const allowed=steamWallpaperForegroundAllowed(proof);
-    if(foregroundKnown&&allowed===(foregroundTicket!==null)&&(!allowed||foregroundTicket!.demandEpoch===proof!.ownerEpoch&&foregroundTicket!.demandRevision===proof!.revision))return;
+  const foregroundReadRaced=(proof:SteamWallpaperForegroundProof|null)=>
+    !!proof&&proof.reason===changedDuringRead&&!proof.known&&!proof.foreground&&!proof.current&&proof.mode==='unknown'&&proof.pid===0&&proof.birth==='0'&&proof.window==='0';
+  const rememberForegroundRevision=(proof:SteamWallpaperForegroundProof)=>{
+    if(retiredNativeEpochs.has(proof.ownerEpoch)||proof.revision<nativeRevision||nativeEpoch!==''&&proof.ownerEpoch!==nativeEpoch&&proof.revision===nativeRevision)return false;
+    if(nativeEpoch&&nativeEpoch!==proof.ownerEpoch){retiredNativeEpochs.add(nativeEpoch);if(retiredNativeEpochs.size>16)retiredNativeEpochs.delete(retiredNativeEpochs.values().next().value!);}
+    nativeEpoch=proof.ownerEpoch;nativeRevision=proof.revision;return true;
+  };
+  const acceptForeground=(proof:SteamWallpaperForegroundProof|null)=>{
+    if(ended||!ready||!peer||!playbackEnabled()||!context?.visible||proof&&!rememberForegroundRevision(proof))return false;
+    const allowed=!!proof&&proof.revision>refusedRevision&&steamWallpaperForegroundAllowed(proof);
+    if(foregroundKnown&&allowed===(foregroundTicket!==null)&&(!allowed||foregroundTicket!.demandEpoch===proof!.ownerEpoch&&foregroundTicket!.demandRevision===proof!.revision))return true;
     clearForeground();foregroundKnown=true;
     if(allowed)foregroundTicket={demandConsumer:'steam',demandEpoch:proof!.ownerEpoch,demandRevision:proof!.revision};
-    ++stateRevision;lastFrame='';announce(true,context.seq);void publish();
+    ++stateRevision;lastFrame=null;announce(true,context.seq);void publish();return true;
   };
-  const requestForeground=()=>{
+  const reportForegroundUnavailable=(selection:NonNullable<typeof context>)=>{
+    if(foregroundRetryStatus)output({type:'wallpaper',enabled:true,contextSeq:selection.seq,appId:selection.appId,entry:null,status:foregroundRetryStatus});
+  };
+  const requestForeground=(afterRefusal=false)=>{
     if(foregroundRead||foregroundRetryTimer!==null||foregroundRetryExhausted||ended||!ready||!peer||!playbackEnabled()||!context?.visible)return;
-    const work={version:foregroundVersion,peer,selection:context};foregroundRead=work;
-    const owns=()=>!ended&&ready&&foregroundVersion===work.version&&peer===work.peer&&context===work.selection&&work.selection.visible&&playbackEnabled();
-    void port.readForeground().then(value=>{if(foregroundRead!==work||!owns())return;foregroundRead=null;acceptForeground(value);}).catch(()=>{
-      if(foregroundRead!==work||!owns())return;foregroundRead=null;
-      // Transport failure carries no native veto. Keep playback denied, but
-      // repair this visible demand with a finite budget, never an idle poll.
-      foregroundKnown=false;
-      output({type:'wallpaper',enabled:true,contextSeq:work.selection.seq,appId:work.selection.appId,entry:null,status:'foreground-transport-unavailable'});
+    // The proof and its retry budget belong to this visible Steam window,
+    // not an AppID. Card changes only replace the eventual media selection.
+    const work={version:foregroundVersion,peer};foregroundRead=work;
+    const currentSelection=()=>!ended&&ready&&foregroundVersion===work.version&&peer===work.peer&&context?.visible&&playbackEnabled()?context:null;
+    const unavailable=(status:typeof foregroundRetryStatus)=>{
+      const selection=currentSelection();if(foregroundRead!==work||!selection)return;foregroundRead=null;
+      if(afterRefusal)return; // The native veto already acknowledged this context.
+      // Neither transport loss nor a superseded read certifies a native veto.
+      // Keep playback denied and use this visible demand's finite retry budget.
+      foregroundKnown=false;foregroundRetryStatus=status;
+      reportForegroundUnavailable(selection);
       const delay=[1000,5000,20000][foregroundRetries++];
       if(delay===undefined){foregroundRetryExhausted=true;return;}
-      const timer=port.schedule(()=>{if(foregroundRetryTimer!==timer||!owns())return;foregroundRetryTimer=null;requestForeground();},delay);foregroundRetryTimer=timer;
-    });
+      const timer=port.schedule(()=>{if(foregroundRetryTimer!==timer||!currentSelection())return;foregroundRetryTimer=null;requestForeground();},delay);foregroundRetryTimer=timer;
+    };
+    void port.readForeground().then(value=>{
+      if(foregroundRead!==work||!currentSelection())return;
+      const proof=steamWallpaperForegroundProof(value);
+      if(foregroundReadRaced(proof)||!acceptForeground(proof)){unavailable(changedDuringRead);return;}
+      if(foregroundRead===work)foregroundRead=null;
+    }).catch(()=>unavailable(transportUnavailable));
+  };
+  const onForegroundNotice=(raw:unknown)=>{
+    const proof=steamWallpaperForegroundProof(raw);
+    if(!proof||!foregroundReadRaced(proof)){acceptForeground(proof);return;}
+    if(ended||!ready||!peer||!playbackEnabled()||!context?.visible||proof.revision<=refusedRevision||
+      foregroundKnown&&proof.revision<=nativeRevision||!rememberForegroundRevision(proof))return;
+    // This notice says the observation lost a revision race, not that Steam blurred.
+    // Keep an existing read or retry, but don't play a frame from a superseded proof.
+    if(foregroundKnown){clearForeground();++stateRevision;lastFrame=null;}
+    foregroundRetryStatus=changedDuringRead;reportForegroundUnavailable(context);requestForeground();
+  };
+  const refuseForeground=(entry:GameMediaEntry&{reason?:unknown},demand:SteamMediaDemand)=>{
+    // Native resolve checks the ticket independently of the last pushed proof.
+    // If it rejects that proof, only a newer fact can read media again. Spend
+    // one direct read per visible interval to cover a missed native notice.
+    const nativeRefusal=entry.reason==='media-steam-foreground-inactive';
+    if(nativeRefusal)refusedRevision=Math.max(refusedRevision,demand.demandRevision);
+    acceptForeground(null);
+    if(nativeRefusal&&!refusalRecheckUsed){refusalRecheckUsed=true;requestForeground(true);}
   };
   const retryFailure=(value:FailureHandoff)=>{
     if(!ownsFailure(value)||failureTimer!==null||value.attempt>=3)return;
@@ -166,10 +210,12 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
       if(at!==epoch||ended||current!==context||!playbackEnabled()||!demand.current?.())return;
       port.media.selectSteamTarget?.(target);
       let cacheUnavailable=false;
-      const cached=target?await port.media.lookup(selectedWallpaperRead(target),demand).catch(()=>{cacheUnavailable=true;return null;}):null;
+      const readTarget=target?selectedWallpaperRead(target):null;
+      const cached=readTarget?await port.media.lookup(current.fallback?{...readTarget,wallpaperPlaybackFallback:current.fallback}:readTarget,demand).catch(()=>{cacheUnavailable=true;return null;}):null;
       if(at!==epoch||ended||current!==context||!playbackEnabled()||!demand.current?.())return;
-      if(cached?.status==='consumer-inactive'){acceptForeground(null);return;}
+      if(cached?.status==='consumer-inactive'){refuseForeground(cached,demand);return;}
       if(cacheUnavailable)retrySelection(current);else if(target)cancelSelectionRetry();
+      if(current.fallback&&cached&&cached.bindingRevision!==current.fallback.bindingRevision)current.fallback=undefined;
       current.key=cached?.key||(target?wallpaperTargetKey(target):undefined);
       const failed=failureHandoff;if(failed&&cached&&!sameFailedAsset(cached,failed))cancelFailureHandoff();
       const send=(entry:GameMediaEntry|null)=>{
@@ -177,18 +223,27 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
         if(entry?.key)current.key=entry.key;
         // A superseded binding can still say ready after the HTTP server has refused its URL.
         const frame=entry?.ready===true&&!entry.deleted&&entry.asset&&typeof entry.url==='string'&&entry.url.trim()
-          ? {assetId:entry.asset.id,revision:entry.asset.revision,url:entry.url,kind:entry.asset.kind,playback:entry.playback,bindingRevision:entry.bindingRevision}
+          ? {assetId:entry.asset.id,revision:entry.asset.revision,url:entry.url,kind:entry.asset.kind,playback:entry.playback,bindingRevision:entry.bindingRevision,...(entry.asset.reducedPlayback===true?{reducedPlayback:true,recoverOriginal:true} as const:{})}
           : null;
-        delivered=frame&&entry?{key:entry.key,assetId:frame.assetId,bindingRevision:frame.bindingRevision,kind:frame.kind,seq:current.seq}:null;
+        delivered=frame&&entry?{key:entry.key,assetId:frame.assetId,bindingRevision:frame.bindingRevision,kind:frame.kind,seq:current.seq,reducedPlayback:frame.reducedPlayback}:null;
         output({type:'wallpaper',enabled:true,contextSeq:current.seq,appId:current.appId,entry:frame,...port.appearance(),status:!frame&&entry?.ready?'media-url-unavailable':entry?.status??'missing'});
       };
       send(cached);
+      if(current.fallback)return;
       if(cached&&failureHandoff&&sameFailedAsset(cached,failureHandoff))return;
-      if(!cacheUnavailable&&target&&(target.appId>0||target.executable)&&!cached?.deleted&&!cached?.currentGameWallpaperFallback&&!(cached?.ready&&!cached.refreshRequested&&gameMediaPairComplete(cached,Date.now()))){
+      if(!cacheUnavailable&&target&&(target.appId>0||target.executable)&&!cached?.deleted&&!cached?.currentGameWallpaperFallback&&!(cached&&hasWallpaperBinding(cached)&&!cached.refreshRequested&&gameMediaPairComplete(cached,Date.now()))){
         const deadline=Number(cached?.status==='pending'?cached.leaseUntil:cached?.retryAt)||0;
         if(deadline>port.now()){port.media.retryWhen?.(deadline);return;}
+        // With preparation disabled, ensure would only repeat the local read.
+        // An unresolved shortcut has a different display projection; keep its exact read.
+        if(readTarget===target&&port.media.automaticPreparationEnabled?.()===false)return;
         const result=await port.media.ensure(target,'steam',true,true,demand).catch(()=>null);
-        if(at===epoch&&!ended&&current===context&&playbackEnabled()&&demand.current?.())send(result);
+        // A failed complement read says nothing about the cache already sent.
+        // Only a resolved result can replace or explicitly revoke that frame.
+        if(result&&at===epoch&&!ended&&current===context&&playbackEnabled()&&demand.current?.()){
+          if(result.status==='consumer-inactive'){refuseForeground(result,demand);return;}
+          send(result);
+        }
       }
     }finally{
       // A revoked chain cannot clear or delay its replacement. Do not reuse
@@ -199,13 +254,23 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
       }
     }
   }
-  const off=port.register({prefix:'wallpaper.',connected(value){clearForeground();nativeEpoch='';nativeRevision=-1;retiredNativeEpochs.clear();cancelFailureHandoff();port.media.selectSteamTarget?.(null);peer=value.connected===false?null:value;delivery.reset(peer);cancelSelectionRetry();inventoryVisible=false;context=null;delivered=null;announced=undefined;lastFrame='';cancelPublication();if(peer)announce();},request(event){
+  const off=port.register({prefix:'wallpaper.',connected(value){
+    // Native attach can confirm the same live transport after App readiness.
+    if(value.connected!==false&&peer&&value.connection===peer.connection&&value.runId===peer.runId&&value.connectionRevision===peer.connectionRevision)return;
+    clearForeground();nativeEpoch='';nativeRevision=-1;refusedRevision=-1;refusalRecheckUsed=false;retiredNativeEpochs.clear();cancelFailureHandoff();port.media.selectSteamTarget?.(null);peer=value.connected===false?null:value;delivery.reset(peer);cancelSelectionRetry();inventoryVisible=false;context=null;delivered=null;announced=undefined;lastFrame=null;cancelPublication();if(peer)announce();
+  },request(event){
     if(!peer||event.connection!==peer.connection||event.runId!==peer.runId)return;
     const request=event.request;
     // Old frontend neighbor messages are intentionally ignored: no speculative I/O.
     if(request.command==='wallpaper.status'){
       // Legacy renderers can report image load errors. Only our delivered video can invalidate shared media.
-      if(!foregroundTicket||!playbackEnabled()||request.status!=='playback-failed'||!delivered||delivered.kind!=='video'||request.contextSeq!==delivered.seq||request.appId!==context?.appId||request.assetId!==delivered.assetId||request.bindingRevision!==delivered.bindingRevision)return;
+      const temporary=request.status==='playback-interrupted';
+      if(!foregroundTicket||!playbackEnabled()||!context?.visible||(!temporary&&request.status!=='playback-failed')||!delivered||delivered.kind!=='video'||request.contextSeq!==delivered.seq||request.appId!==context.appId||request.assetId!==delivered.assetId||request.bindingRevision!==delivered.bindingRevision)return;
+      if(temporary){
+        if(!delivered.reducedPlayback||context.fallback)return;
+        context.fallback={assetId:delivered.assetId,bindingRevision:delivered.bindingRevision};
+        delivered=null;cancelPublication();void publish();return;
+      }
       const failed=delivered;delivered=null;cancelFailureHandoff();
       const value:FailureHandoff={selection:context!,failed,demand:selectedDemand(context!),attempt:0};failureHandoff=value;
       output({type:'wallpaper',enabled:true,contextSeq:value.selection.seq,appId:value.selection.appId,entry:null,...port.appearance(),status:'playback-failed'});
@@ -214,33 +279,57 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
     if(request.command!=='wallpaper.context')return;
     const seq=Number(request.contextSeq),id=String(request.appId??'');
     if(!Number.isSafeInteger(seq)||seq<0||(context&&seq<=context.seq)||!/^\d{1,20}$/.test(id)||BigInt(id)<=0n||BigInt(id)>18446744073709551615n)return;
-    if(request.visible!==true||context?.visible===false||!foregroundKnown&&(foregroundRead!==null||foregroundRetryTimer!==null||foregroundRetryExhausted))clearForeground();
+    if(request.visible!==true||context?.visible===false){refusalRecheckUsed=false;clearForeground();}
     if(request.requestReady===true)announce(true,seq);
     cancelFailureHandoff();cancelSelectionRetry();port.media.selectSteamTarget?.(null);
-    context={seq,appId:id,name:typeof request.name==='string'?request.name.slice(0,512):'',visible:request.visible===true&&powerAdmitted};void publish();
+    context={seq,appId:id,name:typeof request.name==='string'?request.name.slice(0,512):'',visible:request.visible===true&&powerAdmitted};
+    // Settings startup, foreground proof and media reads may all outlive the
+    // transport check. This receipt never admits playback or a media read.
+    if(request.requestReady!==true&&request.visible===true&&
+       (!ready||playbackEnabled()&&context.visible&&(foregroundTicket||!foregroundKnown&&!foregroundRetryStatus)))
+      reply({type:'wallpaper-context-accepted',contextSeq:seq,appId:id});
+    // Renew the response for the new selection, not the failed proof's retry
+    // budget. Silence here would time out the otherwise live shared socket.
+    if(ready&&playbackEnabled()&&context.visible&&!foregroundKnown)reportForegroundUnavailable(context);
+    void publish();
   }});
   const changed=(reason='asset',key?:string)=>{
     if(ended||reason==='inventory'||reason==='demand'||reason==='policy')return;
     if(reason==='retry'){if(context?.visible&&foregroundTicket&&playbackEnabled())void publish();return;}
-    if(reason==='asset'&&!context?.visible)return;
-    if(reason==='asset'&&key&&context?.key&&key!==context.key)return;
-    if(reason==='settings'){const stamp=JSON.stringify({ready,enabled:playbackEnabled(),...port.appearance()});if(stamp===settingsStamp)return;settingsStamp=stamp;}
-    if(!playbackEnabled())clearForeground();
+    if(reason==='asset'||reason==='wallpaper-playback'){
+      if(!context?.visible||key&&context.key&&key!==context.key)return;
+      if(reason==='wallpaper-playback'&&delivered?.seq===context.seq&&delivered.kind==='video')return;
+    }
+    if(reason==='settings'){
+      const appearance=port.appearance(),enabled=playbackEnabled(),previous=settingsView;
+      settingsView={ready,enabled,...appearance};
+      if(previous?.ready===ready&&previous.enabled===enabled){
+        if(previous.opacity===appearance.opacity&&previous.blur===appearance.blur)return;
+        // Repaint only a current frame. Pending media reads will pick up the
+        // latest appearance themselves; style changes never invalidate them.
+        if(ready&&enabled&&foregroundTicket&&context?.visible&&delivered?.seq===context.seq&&lastFrame?.message.entry)
+          output({...lastFrame.message,...appearance});
+        return;
+      }
+    }
+    if(!playbackEnabled()){refusalRecheckUsed=false;clearForeground();}
     announce();void publish();
   };
   // Use the committed native wake edge, not a timer or sidebar snapshot health.
   // Announce a decoder reset, but wait for a fresh frontend visibility proof.
   const retirePower=()=>{
-    clearForeground();delivery.reset(peer);++stateRevision;lastFrame='';
+    refusalRecheckUsed=false;clearForeground();delivery.reset(peer);++stateRevision;lastFrame=null;
     if(context){context.target=undefined;context.visible=false;}
   };
   const offPower=legacyResume?()=>{}:port.onPower(state=>{
     if(ended)return;
     const generation=Number(state.generation);
+    const suspendSerial=state.suspendSerial??powerSuspendSerial;
     const admitted=Number.isSafeInteger(generation)&&generation>0&&isSharedPowerLifecycleAdmitted(state);
     if(Number.isSafeInteger(generation)&&generation>0&&generation<powerGeneration)return;
-    if(powerSeen&&powerAdmitted===admitted&&powerGeneration===generation)return;
-    powerSeen=true;powerAdmitted=admitted;
+    if(suspendSerial<powerSuspendSerial)return;
+    if(powerSeen&&powerAdmitted===admitted&&powerGeneration===generation&&powerSuspendSerial===suspendSerial)return;
+    powerSeen=true;powerAdmitted=admitted;powerSuspendSerial=suspendSerial;
     if(Number.isSafeInteger(generation)&&generation>0)powerGeneration=generation;
     retirePower();
     if(!ready||!peer||!port.enabled())return;
@@ -257,7 +346,7 @@ export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}
     reply({type:'wallpaper-ready',enabled:true,foreground:false,resumeGeneration:generation});
     void publish();
   });
-  const offForeground=port.onForeground(acceptForeground);
+  const offForeground=port.onForeground(onForegroundNotice);
   const unsubscribe=port.media.subscribe(changed);
   return {ready(){ready=true;changed('settings');},stop(){ended=true;clearForeground();offForeground();cancelFailureHandoff();cancelSelectionRetry();delivery.stop();cancelPublication();offPower();offResume();unsubscribe();off();peer=null;context=null;delivered=null;}};
 }
