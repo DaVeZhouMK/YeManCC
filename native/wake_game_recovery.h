@@ -356,9 +356,9 @@ static void sgWakeRecoveryDiscoverFallback() {
     const auto topology = ymcc::processInventory::read();
     if (topology->status != ymcc::processInventory::Status::Complete) return;
     unsigned admitted = 0;
-    for (const auto& process : topology->rows) {
-        const DWORD pid = process.pid;
-        const std::wstring name = sgBaseName(process.name);
+    for (const auto& row : topology->rows) {
+        const DWORD pid = row.pid;
+        const std::wstring name = sgBaseName(row.name);
         // Blacklist ALWAYS wins in broad recovery, including contradictory
         // whitelist/custom rules. Respect system and user lists together.
         if (nativeMonitorExcluded(name) || sgNameExcludedBy(name, excludes)) continue;
